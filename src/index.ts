@@ -90,6 +90,14 @@ export { SemanticMemoryRetrievalService } from "./infrastructure/memory/semantic
 export { LocalTaskSyncRepository } from "./infrastructure/memory/local-task-sync-repository.js";
 export { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
 export { LocalAuditRepository } from "./infrastructure/observability/local-audit-repository.js";
+export { openSqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
+export type { SqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
+export { SqliteAuditRepository } from "./infrastructure/sqlite/sqlite-audit-repository.js";
+export { SqliteGroupAssistantSettingsRepository } from "./infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
+export { SqliteLiveMessageBufferRepository } from "./infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
+export { SqliteMemoryRecordRepository } from "./infrastructure/sqlite/sqlite-memory-record-repository.js";
+export { SqliteTaskRepository } from "./infrastructure/sqlite/sqlite-task-repository.js";
+export { SqliteTaskSyncRepository } from "./infrastructure/sqlite/sqlite-task-sync-repository.js";
 export { TelegramUpdateMapper } from "./infrastructure/messaging/telegram/telegram-update-mapper.js";
 export type { TelegramUpdate } from "./infrastructure/messaging/telegram/telegram-update-mapper.js";
 export { NotionMcpTaskProvider } from "./infrastructure/tasks/notion-mcp-task-provider.js";

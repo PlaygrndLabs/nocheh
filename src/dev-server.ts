@@ -6,18 +6,18 @@ import { ProcessIncomingMessageUseCase } from "./application/use-cases/process-i
 import type { Task } from "./domain/tasks/task.js";
 import { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
-import { LocalGroupAssistantSettingsRepository } from "./infrastructure/assistant/local-group-assistant-settings-repository.js";
-import { LocalLiveMessageBufferRepository } from "./infrastructure/assistant/local-live-message-buffer-repository.js";
-import { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-file-store.js";
-import { LocalAuditRepository } from "./infrastructure/observability/local-audit-repository.js";
-import { LocalMemoryRecordRepository } from "./infrastructure/memory/local-memory-record-repository.js";
-import { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
-import { LocalTaskSyncRepository } from "./infrastructure/memory/local-task-sync-repository.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
 import { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 import { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
 import { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 import { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
+import { openSqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
+import { SqliteAuditRepository } from "./infrastructure/sqlite/sqlite-audit-repository.js";
+import { SqliteGroupAssistantSettingsRepository } from "./infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
+import { SqliteLiveMessageBufferRepository } from "./infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
+import { SqliteMemoryRecordRepository } from "./infrastructure/sqlite/sqlite-memory-record-repository.js";
+import { SqliteTaskRepository } from "./infrastructure/sqlite/sqlite-task-repository.js";
+import { SqliteTaskSyncRepository } from "./infrastructure/sqlite/sqlite-task-sync-repository.js";
 import { StdioMcpClient } from "./infrastructure/tasks/stdio-mcp-client.js";
 import { NotionMcpTaskProvider } from "./infrastructure/tasks/notion-mcp-task-provider.js";
 import { createDeveloperDashboardHandler } from "./interfaces/dashboard/create-developer-dashboard-handler.js";
@@ -33,29 +33,19 @@ const logger = new ConsoleLogger();
 const port = Number(process.env.PORT ?? "3000");
 const host = process.env.HOST ?? "127.0.0.1";
 const dataDir = process.env.DATA_DIR ?? join(process.cwd(), "data");
+const databasePath = process.env.DATABASE_PATH ?? join(dataDir, "nocheh.sqlite");
 const encryptionSecret = process.env.LOCAL_ENCRYPTION_SECRET ?? "local-development-secret-change-me";
 const encryption = new AesGcmEncryption(encryptionSecret);
+const database = openSqliteDatabase(databasePath);
 const metrics = new InMemoryMetricsCollector();
 const secretDetector = new RegexSecretDetector();
 
-const taskRepository = new LocalTaskRepository(
-  new EncryptedJsonFileStore(join(dataDir, "tasks.enc.json"), encryption, []),
-);
-const memoryRepository = new LocalMemoryRecordRepository(
-  new EncryptedJsonFileStore(join(dataDir, "memory.enc.json"), encryption, []),
-);
-const syncRepository = new LocalTaskSyncRepository(
-  new EncryptedJsonFileStore(join(dataDir, "task-sync.enc.json"), encryption, []),
-);
-const auditRepository = new LocalAuditRepository(
-  new EncryptedJsonFileStore(join(dataDir, "audit.enc.json"), encryption, []),
-);
-const settingsRepository = new LocalGroupAssistantSettingsRepository(
-  new EncryptedJsonFileStore(join(dataDir, "group-settings.enc.json"), encryption, []),
-);
-const liveBufferRepository = new LocalLiveMessageBufferRepository(
-  new EncryptedJsonFileStore(join(dataDir, "live-message-buffer.enc.json"), encryption, []),
-);
+const taskRepository = new SqliteTaskRepository(database, encryption);
+const memoryRepository = new SqliteMemoryRecordRepository(database, encryption);
+const syncRepository = new SqliteTaskSyncRepository(database, encryption);
+const auditRepository = new SqliteAuditRepository(database, encryption);
+const settingsRepository = new SqliteGroupAssistantSettingsRepository(database);
+const liveBufferRepository = new SqliteLiveMessageBufferRepository(database, encryption);
 
 const taskProvider = createTaskProvider();
 const useCase = new ProcessIncomingMessageUseCase(

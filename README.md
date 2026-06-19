@@ -14,7 +14,7 @@ AI Telegram assistant, currently at **Phase 2: Structured Memory**.
 - Task-to-project linking when project context is detected
 - Semantic-style local memory retrieval
 - Task validation and audit trail
-- Encrypted local task/memory/audit store
+- SQLite task/memory/audit store with encrypted payload fields
 - Notion MCP task sync adapter
 - Internal dashboard and metrics
 
@@ -104,6 +104,7 @@ Optional:
 ```bash
 PORT=3000
 DATA_DIR=./data
+DATABASE_PATH=./data/nocheh.sqlite
 LOCAL_ENCRYPTION_SECRET=change-this-secret
 MESSAGE_ANALYSIS_MODE=batch
 LIVE_ANALYSIS_INTERVAL_SECONDS=300
@@ -126,6 +127,36 @@ NOTION_MCP_UPDATE_TOOL=notion_update_task
 ```
 
 If Notion env is missing, local tasks still persist and the audit trail shows sync failure.
+
+## VPS Docker
+
+The production path is a persistent Docker Compose service with SQLite on a mounted data directory and Cloudflare Tunnel for ingress.
+
+```bash
+cp .env.example .env
+# edit LOCAL_ENCRYPTION_SECRET and CLOUDFLARE_TUNNEL_TOKEN
+docker compose up -d --build
+```
+
+The app listens inside Docker on:
+
+```text
+http://nocheh:3000
+```
+
+Configure the Cloudflare Tunnel public hostname to route to:
+
+```text
+http://nocheh:3000
+```
+
+Then set the Telegram webhook to:
+
+```text
+https://<your-tunnel-hostname>/telegram/webhook
+```
+
+SQLite is stored at `./data/nocheh.sqlite` on the VPS. Back up the `data` directory, and keep `LOCAL_ENCRYPTION_SECRET` stable; encrypted payloads cannot be read if that secret changes.
 
 ## Structure
 
