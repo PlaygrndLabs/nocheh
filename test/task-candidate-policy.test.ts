@@ -6,9 +6,9 @@ test("filters low-confidence and invalid task candidates", () => {
   const policy = new TaskCandidatePolicy(0.7);
 
   const actionable = policy.actionable([
-    { title: "Ship webhook", confidence: 0.9 },
-    { title: "No", confidence: 0.9 },
-    { title: "Maybe update docs", confidence: 0.4 },
+    { title: "Ship webhook", confidence: 0.9, extractionReason: "test" },
+    { title: "No", confidence: 0.9, extractionReason: "test" },
+    { title: "Maybe update docs", confidence: 0.4, extractionReason: "test" },
   ]);
 
   assert.deepEqual(actionable.map((candidate) => candidate.title), ["Ship webhook"]);

@@ -32,6 +32,9 @@ export class RuleBasedTaskExtractor implements TaskExtractorPort {
       ...(dueAt === undefined ? {} : { dueAt }),
       priority,
       confidence: explicit === null ? 0.72 : 0.9,
+      extractionReason: explicit === null
+        ? "Matched conversational assignment phrase."
+        : "Matched explicit task marker.",
     };
   }
 

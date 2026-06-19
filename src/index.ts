@@ -1,10 +1,14 @@
 export type { IncomingMessage } from "./application/dto/incoming-message.js";
+export type { AuditRepositoryPort } from "./application/ports/audit-repository.js";
+export { NoopAuditRepository } from "./application/ports/audit-repository.js";
 export type { ClockPort } from "./application/ports/clock.js";
 export { SystemClock } from "./application/ports/clock.js";
 export type { EncryptionPort } from "./application/ports/encryption.js";
 export type { LoggerPort } from "./application/ports/logger.js";
 export { NoopLogger } from "./application/ports/logger.js";
 export type { MemoryRecordRepositoryPort } from "./application/ports/memory-record-repository.js";
+export type { MetricsCollectorPort, MetricsSnapshot } from "./application/ports/metrics.js";
+export { NoopMetricsCollector } from "./application/ports/metrics.js";
 export type { SecretDetectorPort } from "./application/ports/secret-detector.js";
 export type { TaskExtractorPort } from "./application/ports/task-extractor.js";
 export type { ExternalTask, TaskProviderPort } from "./application/ports/task-provider.js";
@@ -13,11 +17,20 @@ export type { TaskSyncRepositoryPort } from "./application/ports/task-sync-repos
 export { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 export type { ProcessIncomingMessageResult } from "./application/use-cases/process-incoming-message.js";
 export type { MemoryRecord, MemoryRecordKind } from "./domain/memory/memory-record.js";
+export type {
+  AuditedExtractedTask,
+  ProcessingAuditRecord,
+  ProcessingAuditStep,
+  ProcessingStepName,
+  ProcessingStepStatus,
+} from "./domain/observability/audit.js";
 export type { RedactedContent, SensitiveFinding, SensitiveFindingKind } from "./domain/security/redaction.js";
 export { Task } from "./domain/tasks/task.js";
 export type { CreateTaskInput, SourceReference, TaskId, TaskPriority, TaskSnapshot, TaskStatus } from "./domain/tasks/task.js";
 export { TaskCandidatePolicy } from "./domain/tasks/task-extraction.js";
 export type { ExtractedTaskCandidate } from "./domain/tasks/task-extraction.js";
+export { TaskValidationService, normalizeTaskTitle } from "./domain/tasks/task-validation.js";
+export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarningCode } from "./domain/tasks/task-validation.js";
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
 export { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
@@ -25,6 +38,8 @@ export { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-f
 export { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
 export { LocalMemoryRecordRepository } from "./infrastructure/memory/local-memory-record-repository.js";
 export { LocalTaskSyncRepository } from "./infrastructure/memory/local-task-sync-repository.js";
+export { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
+export { LocalAuditRepository } from "./infrastructure/observability/local-audit-repository.js";
 export { TelegramUpdateMapper } from "./infrastructure/messaging/telegram/telegram-update-mapper.js";
 export type { TelegramUpdate } from "./infrastructure/messaging/telegram/telegram-update-mapper.js";
 export { NotionMcpTaskProvider } from "./infrastructure/tasks/notion-mcp-task-provider.js";
@@ -33,3 +48,4 @@ export { StdioMcpClient } from "./infrastructure/tasks/stdio-mcp-client.js";
 export type { JsonValue, McpClient } from "./infrastructure/tasks/mcp-client.js";
 export { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 export { createTelegramWebhookHandler } from "./interfaces/telegram-webhook/create-telegram-webhook-handler.js";
+export { createDeveloperDashboardHandler } from "./interfaces/dashboard/create-developer-dashboard-handler.js";

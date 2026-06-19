@@ -3,6 +3,7 @@ import type { CreateTaskInput } from "./task.js";
 /** Candidate task produced by extraction before domain validation. */
 export interface ExtractedTaskCandidate extends Omit<CreateTaskInput, "source"> {
   readonly confidence: number;
+  readonly extractionReason: string;
 }
 
 /** Domain service that filters extraction output before task creation. */
