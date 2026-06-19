@@ -1,9 +1,14 @@
 export type { IncomingMessage } from "./application/dto/incoming-message.js";
+export type { AssistantAiAnalysis, AssistantAiPort } from "./application/ports/assistant-ai.js";
+export { NoopAssistantAi } from "./application/ports/assistant-ai.js";
 export type { AuditRepositoryPort } from "./application/ports/audit-repository.js";
 export { NoopAuditRepository } from "./application/ports/audit-repository.js";
 export type { ClockPort } from "./application/ports/clock.js";
 export { SystemClock } from "./application/ports/clock.js";
 export type { EncryptionPort } from "./application/ports/encryption.js";
+export type { GroupAssistantSettingsRepositoryPort } from "./application/ports/group-assistant-settings-repository.js";
+export type { IncomingMessageProcessorPort } from "./application/ports/incoming-message-processor.js";
+export type { LiveMessageBufferRepositoryPort } from "./application/ports/live-message-buffer-repository.js";
 export type { LoggerPort } from "./application/ports/logger.js";
 export { NoopLogger } from "./application/ports/logger.js";
 export type {
@@ -27,9 +32,26 @@ export type { TaskRepositoryPort } from "./application/ports/task-repository.js"
 export type { TaskSyncRepositoryPort } from "./application/ports/task-sync-repository.js";
 export { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 export type { ProcessIncomingMessageResult } from "./application/use-cases/process-incoming-message.js";
+export { AssistantContextBuilder } from "./application/services/assistant-context-builder.js";
+export type { AssistantContext } from "./application/services/assistant-context-builder.js";
+export { HistoryImportService } from "./application/services/history-import-service.js";
+export type { HistoryImportMessage, HistoryImportOptions, HistoryImportResult } from "./application/services/history-import-service.js";
+export { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
+export type { LiveMessageBufferResult } from "./application/services/live-message-buffer-service.js";
 export { MemoryQueryService } from "./application/services/memory-query-service.js";
 export { ConversationSummaryService } from "./domain/memory/conversation-summary.js";
 export type { CreateConversationSummaryInput } from "./domain/memory/conversation-summary.js";
+export type { BufferedMessage } from "./domain/assistant/buffered-message.js";
+export {
+  DEFAULT_GROUP_ASSISTANT_SETTINGS,
+  createGroupAssistantSettings,
+} from "./domain/assistant/group-assistant-settings.js";
+export type {
+  AssistantReplyMode,
+  CreateGroupAssistantSettingsInput,
+  GroupAssistantSettings,
+  MessageAnalysisMode,
+} from "./domain/assistant/group-assistant-settings.js";
 export { memoryRecordText, projectIdFromName } from "./domain/memory/memory-record.js";
 export type {
   BlockerMemory,
@@ -75,5 +97,7 @@ export type { NotionMcpTaskProviderConfig } from "./infrastructure/tasks/notion-
 export { StdioMcpClient } from "./infrastructure/tasks/stdio-mcp-client.js";
 export type { JsonValue, McpClient } from "./infrastructure/tasks/mcp-client.js";
 export { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
+export { LocalGroupAssistantSettingsRepository } from "./infrastructure/assistant/local-group-assistant-settings-repository.js";
+export { LocalLiveMessageBufferRepository } from "./infrastructure/assistant/local-live-message-buffer-repository.js";
 export { createTelegramWebhookHandler } from "./interfaces/telegram-webhook/create-telegram-webhook-handler.js";
 export { createDeveloperDashboardHandler } from "./interfaces/dashboard/create-developer-dashboard-handler.js";

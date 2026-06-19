@@ -4,13 +4,17 @@ import type { ExternalTask, TaskProviderPort } from "./application/ports/task-pr
 import { SystemClock } from "./application/ports/clock.js";
 import { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 import type { Task } from "./domain/tasks/task.js";
+import { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
+import { LocalGroupAssistantSettingsRepository } from "./infrastructure/assistant/local-group-assistant-settings-repository.js";
+import { LocalLiveMessageBufferRepository } from "./infrastructure/assistant/local-live-message-buffer-repository.js";
 import { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-file-store.js";
 import { LocalAuditRepository } from "./infrastructure/observability/local-audit-repository.js";
 import { LocalMemoryRecordRepository } from "./infrastructure/memory/local-memory-record-repository.js";
 import { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
 import { LocalTaskSyncRepository } from "./infrastructure/memory/local-task-sync-repository.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
+import { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 import { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
 import { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 import { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
@@ -32,6 +36,7 @@ const dataDir = process.env.DATA_DIR ?? join(process.cwd(), "data");
 const encryptionSecret = process.env.LOCAL_ENCRYPTION_SECRET ?? "local-development-secret-change-me";
 const encryption = new AesGcmEncryption(encryptionSecret);
 const metrics = new InMemoryMetricsCollector();
+const secretDetector = new RegexSecretDetector();
 
 const taskRepository = new LocalTaskRepository(
   new EncryptedJsonFileStore(join(dataDir, "tasks.enc.json"), encryption, []),
@@ -45,10 +50,16 @@ const syncRepository = new LocalTaskSyncRepository(
 const auditRepository = new LocalAuditRepository(
   new EncryptedJsonFileStore(join(dataDir, "audit.enc.json"), encryption, []),
 );
+const settingsRepository = new LocalGroupAssistantSettingsRepository(
+  new EncryptedJsonFileStore(join(dataDir, "group-settings.enc.json"), encryption, []),
+);
+const liveBufferRepository = new LocalLiveMessageBufferRepository(
+  new EncryptedJsonFileStore(join(dataDir, "live-message-buffer.enc.json"), encryption, []),
+);
 
 const taskProvider = createTaskProvider();
 const useCase = new ProcessIncomingMessageUseCase(
-  new RegexSecretDetector(),
+  secretDetector,
   new RuleBasedTaskExtractor(),
   taskRepository,
   memoryRepository,
@@ -58,9 +69,29 @@ const useCase = new ProcessIncomingMessageUseCase(
   logger,
   auditRepository,
   metrics,
+  new RuleBasedMemoryExtractor(),
 );
 
-const telegramWebhook = createTelegramWebhookHandler(useCase, logger);
+const liveProcessor = new LiveMessageBufferService(
+  liveBufferRepository,
+  settingsRepository,
+  useCase,
+  secretDetector,
+  new SystemClock(),
+  logger,
+  {
+    analysisMode: envAnalysisMode(),
+    analysisIntervalSeconds: numberEnv("LIVE_ANALYSIS_INTERVAL_SECONDS", 300),
+    maxMessagesPerBatch: numberEnv("LIVE_MAX_MESSAGES_PER_BATCH", 50),
+    maxAiContextTokens: numberEnv("MAX_AI_CONTEXT_TOKENS", 4000),
+    maxRetrievedMemories: numberEnv("MAX_RETRIEVED_MEMORIES", 12),
+    maxRecentMessages: numberEnv("MAX_RECENT_MESSAGES", 30),
+    summaryEveryMessages: numberEnv("SUMMARY_EVERY_MESSAGES", 100),
+    summaryEveryMinutes: numberEnv("SUMMARY_EVERY_MINUTES", 60),
+  },
+);
+
+const telegramWebhook = createTelegramWebhookHandler(liveProcessor, logger);
 const dashboard = createDeveloperDashboardHandler(auditRepository, metrics);
 
 const server = createServer(async (request, response) => {
@@ -113,4 +144,13 @@ function createTaskProvider(): TaskProviderPort {
 
 function splitArgs(value: string): readonly string[] {
   return value.trim().length === 0 ? [] : value.trim().split(/\s+/);
+}
+
+function numberEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function envAnalysisMode(): "immediate" | "batch" {
+  return process.env.MESSAGE_ANALYSIS_MODE === "immediate" ? "immediate" : "batch";
 }

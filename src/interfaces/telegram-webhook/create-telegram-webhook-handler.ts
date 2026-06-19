@@ -1,12 +1,12 @@
 import { Buffer } from "node:buffer";
 import type { IncomingMessage as HttpIncomingMessage, ServerResponse } from "node:http";
-import type { ProcessIncomingMessageUseCase } from "../../application/use-cases/process-incoming-message.js";
+import type { IncomingMessageProcessorPort } from "../../application/ports/incoming-message-processor.js";
 import { TelegramUpdateMapper, type TelegramUpdate } from "../../infrastructure/messaging/telegram/telegram-update-mapper.js";
 import type { LoggerPort } from "../../application/ports/logger.js";
 
 /** HTTP handler for Telegram webhook requests. */
 export function createTelegramWebhookHandler(
-  useCase: ProcessIncomingMessageUseCase,
+  processor: IncomingMessageProcessorPort,
   logger: LoggerPort,
 ): (request: HttpIncomingMessage, response: ServerResponse) => Promise<void> {
   const mapper = new TelegramUpdateMapper();
@@ -21,7 +21,7 @@ export function createTelegramWebhookHandler(
       const update = JSON.parse(await readBody(request)) as TelegramUpdate;
       const message = mapper.toIncomingMessage(update);
       if (message !== undefined) {
-        await useCase.execute(message);
+        await processor.execute(message);
       }
 
       response.writeHead(200, { "content-type": "application/json" });
