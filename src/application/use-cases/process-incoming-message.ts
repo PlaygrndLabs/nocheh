@@ -4,6 +4,8 @@ import type { AuditRepositoryPort } from "../ports/audit-repository.js";
 import { NoopAuditRepository } from "../ports/audit-repository.js";
 import type { ClockPort } from "../ports/clock.js";
 import type { LoggerPort } from "../ports/logger.js";
+import type { ExtractedMemoryCandidate, MemoryExtractorPort } from "../ports/memory-extractor.js";
+import { NoopMemoryExtractor } from "../ports/memory-extractor.js";
 import type { MemoryRecordRepositoryPort } from "../ports/memory-record-repository.js";
 import type { MetricsCollectorPort } from "../ports/metrics.js";
 import { NoopMetricsCollector } from "../ports/metrics.js";
@@ -13,12 +15,14 @@ import type { TaskProviderPort } from "../ports/task-provider.js";
 import type { TaskRepositoryPort } from "../ports/task-repository.js";
 import type { TaskSyncRepositoryPort } from "../ports/task-sync-repository.js";
 import { Task } from "../../domain/tasks/task.js";
+import type { MemoryRecord } from "../../domain/memory/memory-record.js";
 import type { AuditedExtractedTask, ProcessingAuditStep, ProcessingStepName, ProcessingStepStatus } from "../../domain/observability/audit.js";
 import { TaskValidationService } from "../../domain/tasks/task-validation.js";
 
 /** Result of processing one incoming message through the Phase 1 pipeline. */
 export interface ProcessIncomingMessageResult {
   readonly createdTaskIds: readonly string[];
+  readonly createdMemoryRecordIds: readonly string[];
   readonly redactedFindingCount: number;
   readonly validationWarningCount: number;
   readonly failedSyncCount: number;
@@ -39,6 +43,7 @@ export class ProcessIncomingMessageUseCase {
     private readonly logger: LoggerPort,
     private readonly auditRepository: AuditRepositoryPort = new NoopAuditRepository(),
     private readonly metrics: MetricsCollectorPort = new NoopMetricsCollector(),
+    private readonly memoryExtractor: MemoryExtractorPort = new NoopMemoryExtractor(),
   ) {}
 
   /** Processes a platform-neutral message without persisting raw message text. */
@@ -48,6 +53,7 @@ export class ProcessIncomingMessageUseCase {
     const errorLogs: string[] = [];
     const extractedTasks: AuditedExtractedTask[] = [];
     const createdTaskIds: string[] = [];
+    const createdMemoryRecordIds: string[] = [];
     let failedSyncCount = 0;
 
     steps.push(step("telegram_message", "succeeded", startedAt, this.clock.now(), {
@@ -71,6 +77,22 @@ export class ProcessIncomingMessageUseCase {
       ...message,
       text: redacted.text,
     };
+
+    const memoryExtractionStartedAt = this.clock.now();
+    const memoryCandidates = await this.memoryExtractor.extractMemory(sanitizedMessage);
+    steps.push(step("memory_extraction", "succeeded", memoryExtractionStartedAt, this.clock.now(), {
+      candidateCount: memoryCandidates.length,
+    }));
+
+    const persistenceStartedAt = this.clock.now();
+    for (const candidate of memoryCandidates) {
+      const record = this.createMemoryRecord(candidate, sanitizedMessage);
+      await this.memoryRecordRepository.save(record);
+      createdMemoryRecordIds.push(record.id);
+    }
+    steps.push(step("memory_persistence", "succeeded", persistenceStartedAt, this.clock.now(), {
+      recordCount: memoryCandidates.length,
+    }));
 
     const extractionStartedAt = this.clock.now();
     const candidates = await this.taskExtractor.extractTasks(sanitizedMessage);
@@ -122,13 +144,18 @@ export class ProcessIncomingMessageUseCase {
 
       const persistenceStartedAt = this.clock.now();
       await this.taskRepository.save(task);
-      await this.memoryRecordRepository.save({
+      const project = primaryProject(memoryCandidates);
+      const taskMemoryRecord: MemoryRecord = {
         id: randomUUID(),
-        kind: "task",
+        type: "Task",
+        source: task.source,
+        timestamp: this.clock.now(),
+        confidence: candidate.confidence,
+        ...(project === undefined ? {} : { project }),
         task,
-        createdAt: this.clock.now(),
-        updatedAt: this.clock.now(),
-      });
+      };
+      await this.memoryRecordRepository.save(taskMemoryRecord);
+      createdMemoryRecordIds.push(taskMemoryRecord.id);
       steps.push(step("persistence", "succeeded", persistenceStartedAt, this.clock.now(), {
         taskId: task.id,
       }));
@@ -227,10 +254,51 @@ export class ProcessIncomingMessageUseCase {
 
     return {
       createdTaskIds,
+      createdMemoryRecordIds,
       redactedFindingCount: redacted.findings.length,
       validationWarningCount: validationWarnings.length,
       failedSyncCount,
     };
+  }
+
+  private createMemoryRecord(candidate: ExtractedMemoryCandidate, message: IncomingMessage): MemoryRecord {
+    return {
+      id: randomUUID(),
+      type: candidate.type,
+      source: sourceFrom(message),
+      timestamp: this.clock.now(),
+      confidence: candidate.confidence,
+      ...(candidate.project === undefined ? {} : { project: candidate.project }),
+      ...memoryPayload(candidate),
+    };
+  }
+}
+
+function primaryProject(candidates: readonly ExtractedMemoryCandidate[]) {
+  return candidates.find((candidate) => candidate.project !== undefined)?.project;
+}
+
+function sourceFrom(message: IncomingMessage) {
+  return {
+    platform: message.platform,
+    conversationId: message.conversationId,
+    messageId: message.messageId,
+    occurredAt: message.occurredAt,
+  };
+}
+
+function memoryPayload(candidate: ExtractedMemoryCandidate) {
+  switch (candidate.type) {
+    case "Decision":
+      return { decision: candidate.decision };
+    case "Project":
+      return { projectMemory: candidate.projectMemory };
+    case "Deadline":
+      return { deadline: candidate.deadline };
+    case "Blocker":
+      return { blocker: candidate.blocker };
+    case "Summary":
+      return { summary: candidate.summary };
   }
 }
 

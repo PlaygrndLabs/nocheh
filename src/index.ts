@@ -6,7 +6,18 @@ export { SystemClock } from "./application/ports/clock.js";
 export type { EncryptionPort } from "./application/ports/encryption.js";
 export type { LoggerPort } from "./application/ports/logger.js";
 export { NoopLogger } from "./application/ports/logger.js";
+export type {
+  ExtractedBlockerCandidate,
+  ExtractedDeadlineCandidate,
+  ExtractedDecisionCandidate,
+  ExtractedMemoryCandidate,
+  ExtractedProjectCandidate,
+  ExtractedSummaryCandidate,
+  MemoryExtractorPort,
+} from "./application/ports/memory-extractor.js";
+export { NoopMemoryExtractor } from "./application/ports/memory-extractor.js";
 export type { MemoryRecordRepositoryPort } from "./application/ports/memory-record-repository.js";
+export type { MemoryQuery, MemoryRetrievalPort, MemorySearchResult } from "./application/ports/memory-retrieval.js";
 export type { MetricsCollectorPort, MetricsSnapshot } from "./application/ports/metrics.js";
 export { NoopMetricsCollector } from "./application/ports/metrics.js";
 export type { SecretDetectorPort } from "./application/ports/secret-detector.js";
@@ -16,7 +27,22 @@ export type { TaskRepositoryPort } from "./application/ports/task-repository.js"
 export type { TaskSyncRepositoryPort } from "./application/ports/task-sync-repository.js";
 export { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 export type { ProcessIncomingMessageResult } from "./application/use-cases/process-incoming-message.js";
-export type { MemoryRecord, MemoryRecordKind } from "./domain/memory/memory-record.js";
+export { MemoryQueryService } from "./application/services/memory-query-service.js";
+export { ConversationSummaryService } from "./domain/memory/conversation-summary.js";
+export type { CreateConversationSummaryInput } from "./domain/memory/conversation-summary.js";
+export { memoryRecordText, projectIdFromName } from "./domain/memory/memory-record.js";
+export type {
+  BlockerMemory,
+  DeadlineMemory,
+  DecisionMemory,
+  MemoryRecord,
+  MemoryRecordKind,
+  MemoryRecordType,
+  MemorySource,
+  ProjectMemory,
+  ProjectReference,
+  SummaryMemory,
+} from "./domain/memory/memory-record.js";
 export type {
   AuditedExtractedTask,
   ProcessingAuditRecord,
@@ -33,10 +59,12 @@ export { TaskValidationService, normalizeTaskTitle } from "./domain/tasks/task-v
 export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarningCode } from "./domain/tasks/task-validation.js";
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
 export { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
+export { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 export { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-file-store.js";
 export { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
 export { LocalMemoryRecordRepository } from "./infrastructure/memory/local-memory-record-repository.js";
+export { SemanticMemoryRetrievalService } from "./infrastructure/memory/semantic-memory-retrieval-service.js";
 export { LocalTaskSyncRepository } from "./infrastructure/memory/local-task-sync-repository.js";
 export { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
 export { LocalAuditRepository } from "./infrastructure/observability/local-audit-repository.js";

@@ -10,13 +10,14 @@ import type { TaskExtractorPort } from "../src/application/ports/task-extractor.
 import type { ExternalTask, TaskProviderPort } from "../src/application/ports/task-provider.js";
 import type { TaskRepositoryPort } from "../src/application/ports/task-repository.js";
 import type { TaskSyncRepositoryPort } from "../src/application/ports/task-sync-repository.js";
-import type { MemoryRecord } from "../src/domain/memory/memory-record.js";
+import type { MemoryRecord, MemoryRecordType } from "../src/domain/memory/memory-record.js";
 import type { ProcessingAuditRecord } from "../src/domain/observability/audit.js";
 import type { ExtractedTaskCandidate } from "../src/domain/tasks/task-extraction.js";
 import type { Task, TaskId } from "../src/domain/tasks/task.js";
 import { RegexSecretDetector } from "../src/infrastructure/security/regex-secret-detector.js";
 import { ProcessIncomingMessageUseCase } from "../src/application/use-cases/process-incoming-message.js";
 import { InMemoryMetricsCollector } from "../src/infrastructure/observability/in-memory-metrics-collector.js";
+import { RuleBasedMemoryExtractor } from "../src/infrastructure/reasoning/rule-based-memory-extractor.js";
 
 class FixedClock implements ClockPort {
   public now(): Date {
@@ -55,6 +56,14 @@ class InMemoryMemoryRepository implements MemoryRecordRepositoryPort {
 
   public async findAll(): Promise<readonly MemoryRecord[]> {
     return this.records;
+  }
+
+  public async findByType(type: MemoryRecordType): Promise<readonly MemoryRecord[]> {
+    return this.records.filter((record) => record.type === type);
+  }
+
+  public async findByProjectId(projectId: string): Promise<readonly MemoryRecord[]> {
+    return this.records.filter((record) => record.project?.id === projectId);
   }
 }
 
@@ -152,6 +161,9 @@ test("processes sanitized messages into tasks, memory records, and provider sync
   assert.doesNotMatch(extractor.seenText, /sk_live/);
   assert.equal(taskRepository.tasks.size, 1);
   assert.equal(memoryRepository.records.length, 1);
+  assert.equal(memoryRepository.records[0]?.type, "Task");
+  assert.equal(memoryRepository.records[0]?.source.messageId, "42");
+  assert.equal(memoryRepository.records[0]?.confidence, 0.95);
   assert.equal(syncRepository.records.size, 1);
   assert.equal(provider.synced[0]?.title, "Rotate production secret");
   assert.equal(auditRepository.records.length, 1);
@@ -160,6 +172,53 @@ test("processes sanitized messages into tasks, memory records, and provider sync
   assert.match(auditRepository.records[0]?.redactedContentPreview ?? "", /\[REDACTED:api_key\]/);
   assert.equal(metrics.snapshot().messagesProcessed, 1);
   assert.equal(metrics.snapshot().syncSuccessRate, 1);
+});
+
+test("extracts structured memory after redaction and links task memory to project context", async () => {
+  const taskRepository = new InMemoryTaskRepository();
+  const memoryRepository = new InMemoryMemoryRepository();
+  const syncRepository = new InMemorySyncRepository();
+  const useCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(),
+    new RecordingExtractor(),
+    taskRepository,
+    memoryRepository,
+    syncRepository,
+    new RecordingTaskProvider(),
+    new FixedClock(),
+    new SilentLogger(),
+    new InMemoryAuditRepository(),
+    new InMemoryMetricsCollector(),
+    new RuleBasedMemoryExtractor(),
+  );
+
+  const result = await useCase.execute({
+    platform: "telegram",
+    conversationId: "chat-1",
+    messageId: "44",
+    senderId: "7",
+    text: [
+      "Project: Atlas - migration launch",
+      "Decision: use Cloudflare Workers for the API sk_live_abcdefghijklmnopqrstuvwxyz",
+      "Blocker: waiting on legal review",
+      "Deadline: launch by 2026-07-01",
+      "Task: rotate production secret",
+    ].join("\n"),
+    occurredAt: new Date("2026-06-19T11:59:00.000Z"),
+  });
+
+  assert.equal(result.createdTaskIds.length, 1);
+  assert.equal(result.createdMemoryRecordIds.length, 5);
+  assert.equal(memoryRepository.records.some((record) => record.type === "Project"), true);
+  assert.equal(memoryRepository.records.some((record) => record.type === "Decision"), true);
+  assert.equal(memoryRepository.records.some((record) => record.type === "Blocker"), true);
+  assert.equal(memoryRepository.records.some((record) => record.type === "Deadline"), true);
+  assert.equal(memoryRepository.records.every((record) => record.source.messageId === "44"), true);
+  assert.equal(memoryRepository.records.every((record) => record.timestamp.toISOString() === "2026-06-19T12:00:00.000Z"), true);
+  assert.equal(memoryRepository.records.every((record) => record.confidence > 0), true);
+  assert.equal(memoryRepository.records.find((record) => record.type === "Task")?.project?.name, "Atlas");
+  assert.doesNotMatch(JSON.stringify(memoryRepository.records), /sk_live/);
+  assert.match(JSON.stringify(memoryRepository.records), /\[REDACTED:api_key\]/);
 });
 
 test("records failed Notion syncs without rolling back local persistence", async () => {

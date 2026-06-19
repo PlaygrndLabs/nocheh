@@ -1,18 +1,44 @@
 # My Nocheh
 
-AI Telegram assistant, currently at **Phase 1.5: Validation & Observability**.
+AI Telegram assistant, currently at **Phase 2: Structured Memory**.
 
 ## What Works
 
 - Telegram webhook ingestion
 - Secret detection and redaction
 - Rule-based task extraction
+- Structured memory extraction for projects, decisions, blockers, deadlines, and summaries
+- Task-to-project linking when project context is detected
+- Semantic-style local memory retrieval
 - Task validation and audit trail
 - Encrypted local task/memory/audit store
 - Notion MCP task sync adapter
 - Internal dashboard and metrics
 
-Not included yet: personality learning, long-term memory graph, autonomous agent behavior.
+Not included yet: personality learning, autonomous replies, embedding-backed vector search.
+
+## Memory Policy
+
+Long-term memory stores structured knowledge only. It does not store raw Telegram messages.
+
+Every memory record includes:
+
+- `id`
+- `type`
+- `source`
+- `timestamp`
+- `confidence`
+
+Supported memory types:
+
+- `Task`
+- `Decision`
+- `Project`
+- `Deadline`
+- `Blocker`
+- `Summary`
+
+Redaction runs before memory extraction. Secrets, passwords, API keys, access tokens, private keys, seed phrases, and connection strings must not be persisted.
 
 ## Run
 
@@ -69,13 +95,20 @@ If Notion env is missing, local tasks still persist and the audit trail shows sy
 ## Structure
 
 ```text
-src/domain          Core entities, validation, audit types
-src/application     Use cases and ports
-src/infrastructure  Telegram, storage, security, metrics, Notion MCP adapters
+src/domain          Core entities, validation, memory, audit types
+src/application     Use cases, query services, and ports
+src/infrastructure  Telegram, storage, security, reasoning, metrics, Notion MCP adapters
 src/interfaces      HTTP webhook and internal dashboard handlers
 test                Unit tests
 docs                Short architecture notes and ADRs
 ```
+
+## Docs
+
+- [ADR 0001: Phase 1 Core Processing](docs/adr/0001-phase-1-core-processing.md)
+- [Phase 1.5 Observability](docs/observability-architecture.md)
+- [ADR 0002: Phase 1.5 Validation and Observability](docs/adr/0002-phase-1-5-validation-observability.md)
+- [ADR 0003: Phase 2 Structured Memory](docs/adr/0003-phase-2-structured-memory.md)
 
 ## Commands
 

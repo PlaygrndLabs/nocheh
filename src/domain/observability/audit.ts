@@ -5,6 +5,8 @@ export type ProcessingStepName =
   | "telegram_message"
   | "secret_detection"
   | "redaction"
+  | "memory_extraction"
+  | "memory_persistence"
   | "task_extraction"
   | "validation"
   | "persistence"
