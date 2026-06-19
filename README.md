@@ -176,6 +176,7 @@ docs                Short architecture notes and ADRs
 - [ADR 0002: Phase 1.5 Validation and Observability](docs/adr/0002-phase-1-5-validation-observability.md)
 - [ADR 0003: Phase 2 Structured Memory](docs/adr/0003-phase-2-structured-memory.md)
 - [ADR 0004: Live Buffering, History Import, and AI Context](docs/adr/0004-live-buffering-history-import-ai-context.md)
+- [ADR 0005: SQLite VPS Persistence](docs/adr/0005-sqlite-vps-persistence.md)
 
 ## Commands
 
