@@ -4,6 +4,7 @@ import type { ExternalTask, TaskProviderPort } from "./application/ports/task-pr
 import { SystemClock } from "./application/ports/clock.js";
 import { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 import type { Task } from "./domain/tasks/task.js";
+import { HistoryImportService } from "./application/services/history-import-service.js";
 import { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
@@ -22,6 +23,11 @@ import { StdioMcpClient } from "./infrastructure/tasks/stdio-mcp-client.js";
 import { NotionMcpTaskProvider } from "./infrastructure/tasks/notion-mcp-task-provider.js";
 import { createDeveloperDashboardHandler } from "./interfaces/dashboard/create-developer-dashboard-handler.js";
 import { createTelegramWebhookHandler } from "./interfaces/telegram-webhook/create-telegram-webhook-handler.js";
+import { DotenvFileStore } from "./infrastructure/config/dotenv-file-store.js";
+import { TelegramHttpClient } from "./infrastructure/messaging/telegram/telegram-http-client.js";
+import { Router } from "./interfaces/http/router.js";
+import { createStaticHandler } from "./interfaces/http/create-static-handler.js";
+import { registerApiRoutes } from "./interfaces/http/api/register-api-routes.js";
 
 class UnconfiguredNotionProvider implements TaskProviderPort {
   public async upsertTask(_task: Task): Promise<ExternalTask> {
@@ -39,6 +45,9 @@ const encryption = new AesGcmEncryption(encryptionSecret);
 const database = openSqliteDatabase(databasePath);
 const metrics = new InMemoryMetricsCollector();
 const secretDetector = new RegexSecretDetector();
+const clock = new SystemClock();
+const envStore = new DotenvFileStore(join(process.cwd(), ".env"));
+const telegramClient = new TelegramHttpClient();
 
 const taskRepository = new SqliteTaskRepository(database, encryption);
 const memoryRepository = new SqliteMemoryRecordRepository(database, encryption);
@@ -55,7 +64,7 @@ const useCase = new ProcessIncomingMessageUseCase(
   memoryRepository,
   syncRepository,
   taskProvider,
-  new SystemClock(),
+  clock,
   logger,
   auditRepository,
   metrics,
@@ -67,7 +76,7 @@ const liveProcessor = new LiveMessageBufferService(
   settingsRepository,
   useCase,
   secretDetector,
-  new SystemClock(),
+  clock,
   logger,
   {
     analysisMode: envAnalysisMode(),
@@ -81,23 +90,49 @@ const liveProcessor = new LiveMessageBufferService(
   },
 );
 
+const historyImportService = new HistoryImportService(liveProcessor, secretDetector, clock, logger);
+
 const telegramWebhook = createTelegramWebhookHandler(liveProcessor, logger);
 const dashboard = createDeveloperDashboardHandler(auditRepository, metrics);
 
+const apiRouter = registerApiRoutes(new Router(), {
+  envStore,
+  telegramClient,
+  historyImportService,
+  liveProcessor,
+  settingsRepository,
+  auditRepository,
+  metrics,
+  clock,
+});
+
+const webDistDir = process.env.WEB_DIST_DIR ?? join(process.cwd(), "web", "dist");
+const staticHandler = createStaticHandler(webDistDir);
+
 const server = createServer(async (request, response) => {
-  if (request.url === "/health") {
+  const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+
+  if (pathname === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ ok: true }));
     return;
   }
 
-  if (request.url === "/dashboard") {
+  if (pathname === "/dashboard") {
     await dashboard(request, response);
     return;
   }
 
-  if (request.url === "/telegram/webhook") {
+  if (pathname === "/telegram/webhook") {
     await telegramWebhook(request, response);
+    return;
+  }
+
+  if (await apiRouter.handle(request, response)) {
+    return;
+  }
+
+  if (await staticHandler(request, response)) {
     return;
   }
 
@@ -109,6 +144,7 @@ server.listen(port, host, () => {
   logger.info("Dev server listening", {
     host,
     port,
+    setupDashboard: `http://${host}:${port}/app`,
     dashboard: `http://${host}:${port}/dashboard`,
     webhook: `http://${host}:${port}/telegram/webhook`,
   });

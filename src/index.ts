@@ -109,3 +109,17 @@ export { LocalGroupAssistantSettingsRepository } from "./infrastructure/assistan
 export { LocalLiveMessageBufferRepository } from "./infrastructure/assistant/local-live-message-buffer-repository.js";
 export { createTelegramWebhookHandler } from "./interfaces/telegram-webhook/create-telegram-webhook-handler.js";
 export { createDeveloperDashboardHandler } from "./interfaces/dashboard/create-developer-dashboard-handler.js";
+export type { EnvStorePort } from "./application/ports/env-store.js";
+export { DotenvFileStore } from "./infrastructure/config/dotenv-file-store.js";
+export type {
+  TelegramBotInfo,
+  TelegramClientPort,
+  TelegramWebhookInfo,
+} from "./application/ports/telegram-client.js";
+export { TelegramHttpClient } from "./infrastructure/messaging/telegram/telegram-http-client.js";
+export { Router } from "./interfaces/http/router.js";
+export type { JsonHandler, JsonResult, RequestContext } from "./interfaces/http/router.js";
+export { createStaticHandler } from "./interfaces/http/create-static-handler.js";
+export { registerApiRoutes } from "./interfaces/http/api/register-api-routes.js";
+export type { ApiDependencies } from "./interfaces/http/api/register-api-routes.js";
+export { parseTelegramExport } from "./interfaces/http/api/create-history-routes.js";

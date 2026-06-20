@@ -2,6 +2,11 @@ services:
   nocheh:
     build: .
     restart: unless-stopped
+    # Publish the dashboard to the host for local use. On a VPS fronted by the
+    # Cloudflare Tunnel this is optional; bind to localhost so it is not exposed
+    # publicly. Override with HOST_PORT if 3000 is taken.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
     environment:
       HOST: 0.0.0.0
       PORT: 3000
@@ -24,9 +29,13 @@ services:
       timeout: 5s
       retries: 3
 
+  # Ingress for VPS deployments. Started only with the "tunnel" profile so it
+  # does not crash-loop locally when CLOUDFLARE_TUNNEL_TOKEN is unset:
+  #   docker compose --profile tunnel up -d --build
   cloudflared:
     image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
     restart: unless-stopped
     depends_on:
       - nocheh
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}

@@ -17,6 +17,7 @@ AI Telegram assistant, currently at **Phase 2: Structured Memory**.
 - SQLite task/memory/audit store with encrypted payload fields
 - Notion MCP task sync adapter
 - Internal dashboard and metrics
+- React setup dashboard at `/app` for configuration, bot connection, history import, mock testing, and chat-flow visualization
 
 Not included yet: concrete AI provider calls, personality learning, autonomous replies, embedding-backed vector search.
 
@@ -97,6 +98,39 @@ curl -X POST http://127.0.0.1:3000/telegram/webhook \
 
 Then refresh `/dashboard`.
 
+## Setup Dashboard
+
+A React dashboard at `/app` bootstraps the assistant: add the AI key, connect a
+Telegram bot (validate + register webhook), import history, configure group
+settings, inject mock messages, and visualize the processing flow. Secrets are
+written to a gitignored `.env` and never read back through the API.
+
+Build it once, then it is served by the same backend:
+
+```bash
+npm run build:all   # backend + web/dist
+npm run dev
+# open http://127.0.0.1:3000/app
+```
+
+For active UI development with hot reload, run the backend and the Vite dev
+server (it proxies `/api` to the backend, so there is no CORS to configure):
+
+```bash
+npm run dev          # backend on :3000
+npm run dev:web      # Vite on :5173, proxying /api -> :3000
+```
+
+Frontend tests:
+
+```bash
+npm run test:web
+```
+
+Note: most environment variables are read once at startup, so values saved
+through the dashboard require a restart to take effect. The Telegram token is
+used immediately when connecting the bot.
+
 ## Env
 
 Optional:
@@ -128,14 +162,55 @@ NOTION_MCP_UPDATE_TOOL=notion_update_task
 
 If Notion env is missing, local tasks still persist and the audit trail shows sync failure.
 
-## VPS Docker
+## Docker
 
-The production path is a persistent Docker Compose service with SQLite on a mounted data directory and Cloudflare Tunnel for ingress.
+### Dev (live reload)
+
+Keep a stack running that rebuilds on every code change:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+# UI (Vite HMR):     http://127.0.0.1:5173/app
+# Backend API/SPA:   http://127.0.0.1:3000
+```
+
+- **Frontend** runs under Vite with hot module replacement — edit anything in
+  `web/src` and the browser updates instantly.
+- **Backend** runs `tsc --watch` + `node --watch` — edit anything in `src` and it
+  recompiles and restarts automatically.
+- Source is bind-mounted; `node_modules` live in named volumes so the container's
+  native `better-sqlite3` build is preserved. Run detached with `-d`; follow logs
+  with `docker compose -f docker-compose.dev.yml logs -f`. Override ports with
+  `HOST_PORT` (backend) and `WEB_PORT` (Vite).
+
+Develop against the Vite URL (`:5173/app`) for instant UI updates; it proxies
+`/api` to the backend container.
+
+### Local (built image)
+
+```bash
+docker compose up -d --build
+# open http://127.0.0.1:3000/app
+```
+
+This starts only the `nocheh` app container and publishes it to
+`127.0.0.1:3000`. The `cloudflared` tunnel is behind a `tunnel` profile, so it is
+not started locally (it would crash-loop without a token). Set `HOST_PORT` to use
+a different host port:
+
+```bash
+HOST_PORT=8080 docker compose up -d --build   # http://127.0.0.1:8080/app
+```
+
+### VPS (Cloudflare Tunnel ingress)
+
+The production path adds the Cloudflare Tunnel for ingress with SQLite on a
+mounted data directory.
 
 ```bash
 cp .env.example .env
 # edit LOCAL_ENCRYPTION_SECRET and CLOUDFLARE_TUNNEL_TOKEN
-docker compose up -d --build
+docker compose --profile tunnel up -d --build
 ```
 
 The app listens inside Docker on:
@@ -164,8 +239,9 @@ SQLite is stored at `./data/nocheh.sqlite` on the VPS. Back up the `data` direct
 src/domain          Core entities, validation, memory, audit types
 src/application     Use cases, query services, and ports
 src/infrastructure  Telegram, storage, security, reasoning, metrics, Notion MCP adapters
-src/interfaces      HTTP webhook and internal dashboard handlers
+src/interfaces      HTTP webhook, JSON API router, static handler, dashboard handlers
 test                Unit tests
+web                 React setup dashboard (Vite, served at /app)
 docs                Short architecture notes and ADRs
 ```
 
@@ -177,6 +253,7 @@ docs                Short architecture notes and ADRs
 - [ADR 0003: Phase 2 Structured Memory](docs/adr/0003-phase-2-structured-memory.md)
 - [ADR 0004: Live Buffering, History Import, and AI Context](docs/adr/0004-live-buffering-history-import-ai-context.md)
 - [ADR 0005: SQLite VPS Persistence](docs/adr/0005-sqlite-vps-persistence.md)
+- [ADR 0006: Setup Dashboard and Chat-Flow Visualization](docs/adr/0006-setup-dashboard.md)
 
 ## Commands
 
