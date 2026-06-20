@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, type SetupStatus } from "../api/client.js";
+import { Card, Notice, PageHeader, StatusFlag, type NoticeMessage } from "../components/ui.js";
 
 export function Setup(): JSX.Element {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [aiKey, setAiKey] = useState("");
-  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<NoticeMessage | null>(null);
   const [saving, setSaving] = useState(false);
 
   const refresh = (): void => {
@@ -30,26 +31,26 @@ export function Setup(): JSX.Element {
 
   return (
     <div>
-      <h2>Setup</h2>
-      <p className="subtitle">Bootstrap the assistant. Secrets are written to a gitignored .env and never read back.</p>
+      <PageHeader
+        title="Setup"
+        subtitle="Bootstrap the assistant. Secrets are written to a gitignored .env and never read back."
+      />
 
-      <div className="card">
-        <h3>Configuration status</h3>
+      <Card title="Configuration status">
         {status === null ? (
           <p className="muted">Loading…</p>
         ) : (
           <>
-            <p className="status-line">AI key: {flag(status.hasAiKey)}</p>
-            <p className="status-line">Bot token: {flag(status.hasBotToken)}</p>
-            <p className="status-line">Bot connected: {flag(status.botConnected)}</p>
-            <p className="status-line">Encryption secret: {flag(status.encryptionConfigured)}</p>
+            <p className="status-line">AI key: <StatusFlag active={status.hasAiKey} /></p>
+            <p className="status-line">Bot token: <StatusFlag active={status.hasBotToken} /></p>
+            <p className="status-line">Bot connected: <StatusFlag active={status.botConnected} /></p>
+            <p className="status-line">Encryption secret: <StatusFlag active={status.encryptionConfigured} /></p>
             {status.webhookUrl !== undefined && <p className="status-line muted">Webhook: {status.webhookUrl}</p>}
           </>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>AI API key</h3>
+      <Card title="AI API key">
         <label htmlFor="ai-key">AI_API_KEY</label>
         <input
           id="ai-key"
@@ -61,12 +62,8 @@ export function Setup(): JSX.Element {
         <button className="action" disabled={saving || aiKey.length === 0} onClick={() => void saveKey()}>
           {saving ? "Saving…" : "Save key"}
         </button>
-        {message !== null && <div className={`notice ${message.kind}`}>{message.text}</div>}
-      </div>
+        <Notice message={message} />
+      </Card>
     </div>
   );
-}
-
-function flag(value: boolean): JSX.Element {
-  return <span className={value ? "ok" : "warn"}>{value ? "set" : "not set"}</span>;
 }

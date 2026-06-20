@@ -68,7 +68,7 @@ Positive:
 
 Tradeoffs:
 
-- Batched mode means a single live message may not appear in the dashboard until the interval or batch threshold is reached.
+- Batched mode means a single live message may not appear in the client until the interval or batch threshold is reached.
 - Buffered messages are stored temporarily, even though redacted.
 - History import currently expects messages to be supplied by an external importer/export parser.
 - The AI port is defined, but no concrete AI provider adapter is implemented yet.

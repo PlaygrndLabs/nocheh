@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type BotInfo } from "../api/client.js";
+import { Card, Notice, PageHeader, StatusFlag, type NoticeMessage } from "../components/ui.js";
 
 export function Bot(): JSX.Element {
   const [token, setToken] = useState("");
@@ -7,7 +8,7 @@ export function Bot(): JSX.Element {
   const [bot, setBot] = useState<BotInfo | null>(null);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<NoticeMessage | null>(null);
 
   useEffect(() => {
     api
@@ -37,18 +38,16 @@ export function Bot(): JSX.Element {
 
   return (
     <div>
-      <h2>Connect bot</h2>
-      <p className="subtitle">Validates the token with getMe, then registers the webhook with Telegram.</p>
+      <PageHeader title="Connect bot" subtitle="Validates the token with getMe, then registers the webhook with Telegram." />
 
-      <div className="card">
-        <h3>Current status</h3>
+      <Card title="Current status">
         <p className="status-line">
-          {connected ? <span className="ok">connected</span> : <span className="warn">not connected</span>}
+          <StatusFlag active={connected} activeLabel="connected" inactiveLabel="not connected" />
           {bot !== null && ` · @${bot.username ?? bot.firstName} (#${bot.id})`}
         </p>
-      </div>
+      </Card>
 
-      <div className="card">
+      <Card>
         <label htmlFor="token">TELEGRAM_BOT_TOKEN</label>
         <input id="token" type="password" value={token} placeholder="123456:ABC-…" onChange={(e) => setToken(e.target.value)} />
         <label htmlFor="webhook">Webhook URL</label>
@@ -62,8 +61,8 @@ export function Bot(): JSX.Element {
         <button className="action" disabled={busy || token.length === 0 || webhookUrl.length === 0} onClick={() => void connect()}>
           {busy ? "Connecting…" : "Validate & connect"}
         </button>
-        {message !== null && <div className={`notice ${message.kind}`}>{message.text}</div>}
-      </div>
+        <Notice message={message} />
+      </Card>
     </div>
   );
 }

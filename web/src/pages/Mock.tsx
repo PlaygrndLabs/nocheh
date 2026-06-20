@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type AuditRecord, type GroupSettings } from "../api/client.js";
 import { GroupChat } from "../components/GroupChat.js";
 import { SystemGraph } from "../components/SystemGraph.js";
+import { Card, Notice, PageHeader, type NoticeMessage } from "../components/ui.js";
 import { buildTimeline } from "../sim/pipeline.js";
 import { usePlayback } from "../sim/usePlayback.js";
 import { useSimulation } from "../state/useSimulation.js";
@@ -12,7 +13,7 @@ const POLL_MAX_TRIES = 6;
 export function Mock(): JSX.Element {
   const [conversationId, setConversationId] = useState("mock-chat-1");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [notice, setNotice] = useState<NoticeMessage | null>(null);
   const [settings, setSettings] = useState<GroupSettings | null>(null);
 
   const sim = useSimulation(conversationId);
@@ -126,16 +127,18 @@ export function Mock(): JSX.Element {
 
   return (
     <div>
-      <h2>Simulator</h2>
-      <p className="subtitle">A mock Telegram group. Send as any member; watch the message flow through the system graph. AI and bot reply are simulated.</p>
+      <PageHeader
+        title="Simulator"
+        subtitle="A mock Telegram group. Send as any member; watch the message flow through the system graph. AI and bot reply are simulated."
+      />
 
-      <div className="card">
-        <div className="row">
+      <Card>
+        <div className="control-grid">
           <div>
             <label htmlFor="conv">Group (conversation ID)</label>
             <input id="conv" value={conversationId} onChange={(e) => setConversationId(e.target.value)} />
           </div>
-          <div className="row">
+          <div className="action-row">
             <button className="action" disabled={busy} onClick={() => void flush()}>Flush buffer</button>
             <button className="action" disabled={busy} onClick={() => void clear()}>Clear simulation</button>
             {settings !== null && (
@@ -148,16 +151,14 @@ export function Mock(): JSX.Element {
             )}
           </div>
         </div>
-        {notice !== null && <div className={`notice ${notice.kind}`}>{notice.text}</div>}
-      </div>
+        <Notice message={notice} />
+      </Card>
 
-      <div className="card">
-        <h3>System design · live flow</h3>
+      <Card title="System design · live flow">
         <SystemGraph frames={frames} activeIndex={playback.activeIndex} />
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>Group chat</h3>
+      <Card title="Group chat">
         <GroupChat
           entries={sim.entries}
           members={sim.members}
@@ -168,7 +169,7 @@ export function Mock(): JSX.Element {
           onRemoveMember={sim.removeMember}
           onSend={(text) => void send(text)}
         />
-      </div>
+      </Card>
     </div>
   );
 }

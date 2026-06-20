@@ -16,8 +16,7 @@ AI Telegram assistant, currently at **Phase 2: Structured Memory**.
 - Task validation and audit trail
 - SQLite task/memory/audit store with encrypted payload fields
 - Notion MCP task sync adapter
-- Internal dashboard and metrics
-- React setup dashboard at `/app` for configuration, bot connection, history import, mock testing, and chat-flow visualization
+- React client at `/app` for configuration, bot connection, history import, mock testing, metrics, conversations, and chat-flow visualization
 
 Not included yet: concrete AI provider calls, personality learning, autonomous replies, embedding-backed vector search.
 
@@ -79,7 +78,7 @@ MESSAGE_ANALYSIS_MODE=immediate npm run dev
 Open:
 
 ```text
-http://127.0.0.1:3000/dashboard
+http://127.0.0.1:3000/app
 ```
 
 Health check:
@@ -96,11 +95,11 @@ curl -X POST http://127.0.0.1:3000/telegram/webhook \
   -d '{"update_id":1,"message":{"message_id":101,"date":1781870400,"chat":{"id":"dev-chat"},"from":{"id":7,"first_name":"Dev"},"text":"Task: prepare release notes by 2026-06-20 urgent"}}'
 ```
 
-Then refresh `/dashboard`.
+Then refresh `/app`.
 
-## Setup Dashboard
+## Client UI
 
-A React dashboard at `/app` bootstraps the assistant: add the AI key, connect a
+A React client at `/app` bootstraps the assistant: add the AI key, connect a
 Telegram bot (validate + register webhook), import history, configure group
 settings, inject mock messages, and visualize the processing flow. Secrets are
 written to a gitignored `.env` and never read back through the API.
@@ -128,7 +127,7 @@ npm run test:web
 ```
 
 Note: most environment variables are read once at startup, so values saved
-through the dashboard require a restart to take effect. The Telegram token is
+through the client require a restart to take effect. The Telegram token is
 used immediately when connecting the bot.
 
 ## Env
@@ -239,9 +238,9 @@ SQLite is stored at `./data/nocheh.sqlite` on the VPS. Back up the `data` direct
 src/domain          Core entities, validation, memory, audit types
 src/application     Use cases, query services, and ports
 src/infrastructure  Telegram, storage, security, reasoning, metrics, Notion MCP adapters
-src/interfaces      HTTP webhook, JSON API router, static handler, dashboard handlers
+src/interfaces      HTTP webhook, JSON API router, and static handler
 test                Unit tests
-web                 React setup dashboard (Vite, served at /app)
+web                 React client (Vite, served at /app)
 docs                Short architecture notes and ADRs
 ```
 
@@ -253,7 +252,7 @@ docs                Short architecture notes and ADRs
 - [ADR 0003: Phase 2 Structured Memory](docs/adr/0003-phase-2-structured-memory.md)
 - [ADR 0004: Live Buffering, History Import, and AI Context](docs/adr/0004-live-buffering-history-import-ai-context.md)
 - [ADR 0005: SQLite VPS Persistence](docs/adr/0005-sqlite-vps-persistence.md)
-- [ADR 0006: Setup Dashboard and Chat-Flow Visualization](docs/adr/0006-setup-dashboard.md)
+- [ADR 0006: Client UI and Chat-Flow Visualization](docs/adr/0006-setup-dashboard.md)
 
 ## Commands
 

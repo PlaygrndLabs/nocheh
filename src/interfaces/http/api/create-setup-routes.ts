@@ -1,7 +1,7 @@
 import type { EnvStorePort } from "../../../application/ports/env-store.js";
 import type { JsonHandler } from "../router.js";
 
-/** Environment keys the dashboard is allowed to write. */
+/** Environment keys the client is allowed to write. */
 export const WRITABLE_ENV_KEYS = [
   "AI_API_KEY",
   "TELEGRAM_BOT_TOKEN",

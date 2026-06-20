@@ -57,6 +57,7 @@ h2 { margin: 0 0 6px; font-size: 28px; }
   padding: 18px 20px;
   margin-bottom: 18px;
 }
+.section-card { margin-top: 18px; }
 
 label { display: block; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 12px 0 4px; }
 
@@ -79,6 +80,10 @@ button.action {
   cursor: pointer;
 }
 button.action:disabled { opacity: .5; cursor: default; }
+
+.control-grid { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px 18px; align-items: end; }
+.action-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.action-row .action { margin-top: 0; }
 
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .metric { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--accent); padding: 12px 14px; }

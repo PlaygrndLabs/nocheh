@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { api, type GroupSettings } from "../api/client.js";
+import { Card, Notice, NumericField, PageHeader, type NoticeMessage } from "../components/ui.js";
 
 export function Settings(): JSX.Element {
   const [conversationId, setConversationId] = useState("mock-chat-1");
   const [settings, setSettings] = useState<GroupSettings | null>(null);
-  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<NoticeMessage | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = async (): Promise<void> => {
@@ -40,17 +41,16 @@ export function Settings(): JSX.Element {
 
   return (
     <div>
-      <h2>Group settings</h2>
-      <p className="subtitle">Per-conversation analysis and reply behavior.</p>
+      <PageHeader title="Group settings" subtitle="Per-conversation analysis and reply behavior." />
 
-      <div className="card">
+      <Card>
         <label htmlFor="conv">Conversation ID</label>
         <input id="conv" value={conversationId} onChange={(e) => setConversationId(e.target.value)} />
         <button className="action" onClick={() => void load()}>Load</button>
-      </div>
+      </Card>
 
       {settings !== null && (
-        <div className="card">
+        <Card>
           <label>Analysis mode</label>
           <select value={settings.analysisMode} onChange={(e) => patch({ analysisMode: e.target.value as GroupSettings["analysisMode"] })}>
             <option value="batch">batch</option>
@@ -65,26 +65,17 @@ export function Settings(): JSX.Element {
             <option value="digest">digest</option>
           </select>
 
-          {numericField("Analysis interval (s)", settings.analysisIntervalSeconds, (v) => patch({ analysisIntervalSeconds: v }))}
-          {numericField("Max messages per batch", settings.maxMessagesPerBatch, (v) => patch({ maxMessagesPerBatch: v }))}
-          {numericField("Max AI context tokens", settings.maxAiContextTokens, (v) => patch({ maxAiContextTokens: v }))}
-          {numericField("Max retrieved memories", settings.maxRetrievedMemories, (v) => patch({ maxRetrievedMemories: v }))}
-          {numericField("Max recent messages", settings.maxRecentMessages, (v) => patch({ maxRecentMessages: v }))}
+          <NumericField label="Analysis interval (s)" value={settings.analysisIntervalSeconds} onChange={(v) => patch({ analysisIntervalSeconds: v })} />
+          <NumericField label="Max messages per batch" value={settings.maxMessagesPerBatch} onChange={(v) => patch({ maxMessagesPerBatch: v })} />
+          <NumericField label="Max AI context tokens" value={settings.maxAiContextTokens} onChange={(v) => patch({ maxAiContextTokens: v })} />
+          <NumericField label="Max retrieved memories" value={settings.maxRetrievedMemories} onChange={(v) => patch({ maxRetrievedMemories: v })} />
+          <NumericField label="Max recent messages" value={settings.maxRecentMessages} onChange={(v) => patch({ maxRecentMessages: v })} />
 
           <button className="action" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save settings"}</button>
-        </div>
+        </Card>
       )}
 
-      {message !== null && <div className={`notice ${message.kind}`}>{message.text}</div>}
+      <Notice message={message} />
     </div>
-  );
-}
-
-function numericField(label: string, value: number, onChange: (value: number) => void): JSX.Element {
-  return (
-    <>
-      <label>{label}</label>
-      <input type="number" value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </>
   );
 }

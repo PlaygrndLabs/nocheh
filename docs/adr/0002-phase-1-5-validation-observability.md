@@ -8,11 +8,11 @@ Accepted
 
 Phase 1 can ingest Telegram messages, redact secrets, extract tasks, persist local structured memory, and synchronize tasks to Notion through MCP. The next risk is correctness: operators need to see how a message moved through the pipeline, why tasks were accepted or rejected, and whether external sync succeeded.
 
-The system must remain cleanly layered. Observability must not couple domain logic to Telegram, Notion, or dashboard concerns.
+The system must remain cleanly layered. Observability must not couple domain logic to Telegram, Notion, or client UI concerns.
 
 ## Decision
 
-Add a processing audit trail, task validation service, metrics collector port, and internal dashboard.
+Add a processing audit trail, task validation service, metrics collector port, and internal observability UI.
 
 Each message produces one `ProcessingAuditRecord` with step-level metadata for:
 
@@ -30,7 +30,7 @@ Validation is handled by a domain service, `TaskValidationService`, which flags 
 
 Metrics are collected through `MetricsCollectorPort`. The current implementation is in-process for Phase 1.5. It can be replaced later by Prometheus, OpenTelemetry, or hosted metrics without changing domain or use-case code.
 
-The developer dashboard is an internal HTTP handler that reads only audit records and metrics snapshots. It does not read raw Telegram messages and does not write business state.
+The observability UI reads only audit records and metrics snapshots. It does not read raw Telegram messages and does not write business state.
 
 ## Consequences
 
@@ -40,18 +40,18 @@ Positive:
 - Validation decisions are explicit and testable.
 - Sync failures are visible and recoverable without losing local task state.
 - Metrics provide an immediate quality baseline for extraction and sync.
-- Dashboard code remains outside domain and application business rules.
+- Client UI code remains outside domain and application business rules.
 
 Tradeoffs:
 
 - Audit records increase local storage volume.
 - In-process metrics reset on restart until a production metrics backend is added.
-- The dashboard is intentionally lightweight and should remain internal-only.
+- The observability UI is intentionally lightweight and should remain internal-only.
 
 ## Guardrails
 
 - Do not store raw messages in audit records.
 - Redacted previews are capped and must pass through the redaction stage first.
 - Do not use audit state as long-term memory.
-- Do not let dashboard requirements shape domain entities.
+- Do not let client UI requirements shape domain entities.
 - Do not block local persistence because Notion sync failed.

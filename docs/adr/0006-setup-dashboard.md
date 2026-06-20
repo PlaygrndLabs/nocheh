@@ -1,4 +1,4 @@
-# ADR-0006: Setup Dashboard and Chat-Flow Visualization
+# ADR-0006: Client UI and Chat-Flow Visualization
 
 ## Status
 
@@ -11,10 +11,10 @@ The assistant has matured through Phase 1 (core processing), Phase 1.5
 by hand: an operator must edit environment variables, register the Telegram
 webhook with a manual API call, and supply history exports through code. There
 is no way to dry-run the pipeline without sending real Telegram traffic, and the
-only visibility into processing is the read-only inline-HTML console at
-`GET /dashboard`.
+only visibility into processing was a read-only inline-HTML console, which has
+since been removed and merged into the React client.
 
-We need an operator-facing dashboard that makes the app self-serviceable:
+We need one operator-facing client that makes the app self-serviceable:
 
 - add the AI API key,
 - connect a Telegram bot (validate the token, register the webhook),
@@ -28,9 +28,9 @@ framework, and without weakening the security policy in AGENT.md.
 
 ## Decision
 
-Add a React single-page application served at a new `/app` route, backed by a
-small JSON API mounted on the existing raw Node.js `http` server. The current
-`GET /dashboard` observability page is left untouched.
+Add a React single-page application served at `/app`, backed by a small JSON API
+mounted on the existing raw Node.js `http` server. Observability is part of this
+client; there is no separate server-rendered UI.
 
 Backend (inbound adapters only, no business logic added):
 
@@ -74,12 +74,12 @@ Positive:
 
 - The app can be bootstrapped, configured and dry-run entirely from a UI.
 - Mock injection reuses the exact processor path the Telegram webhook uses, so
-  the dashboard exercises real pipeline behavior.
+  the client exercises real pipeline behavior.
 - The chat-flow visualization is built from existing audit records, requiring no
   new persistence and no change to the domain or application layers.
 - Frontend tooling is isolated in `web/`; the backend runtime image stays free
   of React/Vite.
-- The existing `/dashboard`, webhook, and processing pipeline are unchanged.
+- The webhook and processing pipeline are unchanged.
 
 Tradeoffs:
 
@@ -88,7 +88,7 @@ Tradeoffs:
 - Serving an SPA from the raw `http` server requires a hand-rolled static
   handler, including a path-traversal guard.
 - Most environment variables are read once at boot, so changes saved through the
-  dashboard require a restart to take effect (the Telegram token used for the
+  client require a restart to take effect (the Telegram token used for the
   immediate connect call is the exception).
 - The conversations view is reconstructed from a bounded window of redacted
   audit records, not a full chat scrollback.

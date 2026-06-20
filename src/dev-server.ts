@@ -21,7 +21,6 @@ import { SqliteTaskRepository } from "./infrastructure/sqlite/sqlite-task-reposi
 import { SqliteTaskSyncRepository } from "./infrastructure/sqlite/sqlite-task-sync-repository.js";
 import { StdioMcpClient } from "./infrastructure/tasks/stdio-mcp-client.js";
 import { NotionMcpTaskProvider } from "./infrastructure/tasks/notion-mcp-task-provider.js";
-import { createDeveloperDashboardHandler } from "./interfaces/dashboard/create-developer-dashboard-handler.js";
 import { createTelegramWebhookHandler } from "./interfaces/telegram-webhook/create-telegram-webhook-handler.js";
 import { DotenvFileStore } from "./infrastructure/config/dotenv-file-store.js";
 import { TelegramHttpClient } from "./infrastructure/messaging/telegram/telegram-http-client.js";
@@ -93,7 +92,6 @@ const liveProcessor = new LiveMessageBufferService(
 const historyImportService = new HistoryImportService(liveProcessor, secretDetector, clock, logger);
 
 const telegramWebhook = createTelegramWebhookHandler(liveProcessor, logger);
-const dashboard = createDeveloperDashboardHandler(auditRepository, metrics);
 
 const apiRouter = registerApiRoutes(new Router(), {
   envStore,
@@ -118,11 +116,6 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (pathname === "/dashboard") {
-    await dashboard(request, response);
-    return;
-  }
-
   if (pathname === "/telegram/webhook") {
     await telegramWebhook(request, response);
     return;
@@ -141,12 +134,12 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
+  const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
   logger.info("Dev server listening", {
     host,
     port,
-    setupDashboard: `http://${host}:${port}/app`,
-    dashboard: `http://${host}:${port}/dashboard`,
-    webhook: `http://${host}:${port}/telegram/webhook`,
+    client: `http://${displayHost}:${port}/app`,
+    webhook: `http://${displayHost}:${port}/telegram/webhook`,
   });
 });
 

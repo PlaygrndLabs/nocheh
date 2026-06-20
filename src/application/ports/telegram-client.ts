@@ -12,7 +12,7 @@ export interface TelegramWebhookInfo {
   readonly lastErrorMessage?: string;
 }
 
-/** Outbound boundary for the Telegram Bot API calls the dashboard needs. */
+/** Outbound boundary for the Telegram Bot API calls the client needs. */
 export interface TelegramClientPort {
   /** Validates a token and returns the bot identity. Throws on an invalid token. */
   getMe(token: string): Promise<TelegramBotInfo>;

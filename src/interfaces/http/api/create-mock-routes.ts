@@ -19,7 +19,7 @@ interface MockMessageInput {
 
 /**
  * Routes that feed synthetic messages through the exact processor path the
- * Telegram webhook uses, so the dashboard can dry-run the pipeline.
+ * Telegram webhook uses, so the client can dry-run the pipeline.
  */
 export function createMockRoutes(processor: LiveMessageBufferService, clock: ClockPort): MockRoutes {
   return {

@@ -14,7 +14,7 @@ import { createSettingsRoutes } from "./create-settings-routes.js";
 import { createSetupRoutes } from "./create-setup-routes.js";
 import { createTelegramRoutes } from "./create-telegram-routes.js";
 
-/** Dependencies the dashboard API needs, supplied from the composition root. */
+/** Dependencies the UI API needs, supplied from the composition root. */
 export interface ApiDependencies {
   readonly envStore: EnvStorePort;
   readonly telegramClient: TelegramClientPort;

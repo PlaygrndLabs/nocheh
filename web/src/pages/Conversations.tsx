@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type AuditRecord, type ConversationSummary, type MetricsSnapshot } from "../api/client.js";
 import { MetricsCards } from "../components/MetricsCards.js";
 import { PipelineTrace } from "../components/PipelineTrace.js";
+import { Card, PageHeader } from "../components/ui.js";
 
 export function Conversations(): JSX.Element {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -33,16 +34,17 @@ export function Conversations(): JSX.Element {
 
   return (
     <div>
-      <h2>Conversations</h2>
-      <p className="subtitle">Reconstructed from redacted audit records (not raw chat history). Select a conversation to see its processing flow.</p>
+      <PageHeader
+        title="Conversations"
+        subtitle="Reconstructed from redacted audit records (not raw chat history). Select a conversation to see its processing flow."
+      />
 
       {metrics !== null && <MetricsCards metrics={metrics} />}
       {error !== null && <div className="notice error">{error}</div>}
 
       <button className="action" onClick={refresh}>Refresh</button>
 
-      <div className="card" style={{ marginTop: 18 }}>
-        <h3>Conversations ({conversations.length})</h3>
+      <Card title={`Conversations (${conversations.length})`} className="section-card">
         <div className="conversation-list">
           {conversations.length === 0 && <p className="muted">No processed conversations yet. Inject a mock message to get started.</p>}
           {conversations.map((conversation) => (
@@ -54,13 +56,12 @@ export function Conversations(): JSX.Element {
             </button>
           ))}
         </div>
-      </div>
+      </Card>
 
       {selected !== null && (
-        <div className="card">
-          <h3>Pipeline flow · {selected}</h3>
+        <Card title={`Pipeline flow · ${selected}`}>
           <PipelineTrace records={records} />
-        </div>
+        </Card>
       )}
     </div>
   );

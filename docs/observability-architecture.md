@@ -56,8 +56,8 @@ This metadata is diagnostic and should not become long-term memory.
 
 The Phase 1.5 implementation is `InMemoryMetricsCollector`. It can be replaced with an OpenTelemetry or Prometheus adapter later.
 
-## Developer Dashboard
+## Client Observability
 
-`createDeveloperDashboardHandler` renders an internal HTML dashboard from `AuditRepositoryPort` and `MetricsCollectorPort`.
+The React client under `/app` reads redacted audit records and metrics through the JSON API.
 
-The dashboard is read-only and must remain operator-facing. It does not mutate tasks, memory, sync state, or message data.
+The observability views are read-only and must remain operator-facing. They do not mutate tasks, memory, sync state, or message data.

@@ -108,7 +108,6 @@ export { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 export { LocalGroupAssistantSettingsRepository } from "./infrastructure/assistant/local-group-assistant-settings-repository.js";
 export { LocalLiveMessageBufferRepository } from "./infrastructure/assistant/local-live-message-buffer-repository.js";
 export { createTelegramWebhookHandler } from "./interfaces/telegram-webhook/create-telegram-webhook-handler.js";
-export { createDeveloperDashboardHandler } from "./interfaces/dashboard/create-developer-dashboard-handler.js";
 export type { EnvStorePort } from "./application/ports/env-store.js";
 export { DotenvFileStore } from "./infrastructure/config/dotenv-file-store.js";
 export type {

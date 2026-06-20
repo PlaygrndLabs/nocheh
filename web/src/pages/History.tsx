@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { api } from "../api/client.js";
+import { Card, Notice, PageHeader, type NoticeMessage } from "../components/ui.js";
 
 export function History(): JSX.Element {
   const [raw, setRaw] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<NoticeMessage | null>(null);
 
   const importHistory = async (): Promise<void> => {
     setBusy(true);
@@ -25,17 +26,19 @@ export function History(): JSX.Element {
 
   return (
     <div>
-      <h2>Import history</h2>
-      <p className="subtitle">Paste a Telegram Desktop export (single chat JSON). Messages are redacted, chunked, and fed through the pipeline.</p>
+      <PageHeader
+        title="Import history"
+        subtitle="Paste a Telegram Desktop export (single chat JSON). Messages are redacted, chunked, and fed through the pipeline."
+      />
 
-      <div className="card">
+      <Card>
         <label htmlFor="export">Telegram export JSON</label>
         <textarea id="export" value={raw} placeholder='{ "id": 123, "name": "Chat", "messages": [ … ] }' onChange={(e) => setRaw(e.target.value)} />
         <button className="action" disabled={busy || raw.trim().length === 0} onClick={() => void importHistory()}>
           {busy ? "Importing…" : "Import"}
         </button>
-        {message !== null && <div className={`notice ${message.kind}`}>{message.text}</div>}
-      </div>
+        <Notice message={message} />
+      </Card>
     </div>
   );
 }
