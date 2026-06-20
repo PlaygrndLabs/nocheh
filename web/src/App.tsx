@@ -49,7 +49,7 @@ export function App(): JSX.Element {
           <span className="brand-mark">
             <Sparkles size={20} aria-hidden="true" />
           </span>
-          <h1>Nocheh</h1>
+          <h1>Nocheh Brain</h1>
         </div>
         {(Object.keys(PAGES) as PageKey[]).map((key) => {
           const Icon = PAGE_ICONS[key];

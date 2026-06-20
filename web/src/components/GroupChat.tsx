@@ -66,7 +66,7 @@ export function GroupChat({
 
       <div className="transcript">
         {entries.length === 0 ? (
-          <p className="muted">No messages yet. Pick a member and send one to run it through the pipeline.</p>
+          <p className="muted">No messages yet. Pick a member and send one through the brain flow.</p>
         ) : (
           entries.map((entry, index) => <Bubble key={index} entry={entry} />)
         )}
@@ -105,7 +105,7 @@ function Bubble({ entry }: { entry: SimEntry }): JSX.Element {
   if (entry.kind === "bot") {
     return (
       <div className="bubble bot">
-        <span className="who">Nocheh bot · simulated</span>
+        <span className="who">Nocheh suggestion · simulated</span>
         {entry.text}
       </div>
     );
@@ -114,7 +114,7 @@ function Bubble({ entry }: { entry: SimEntry }): JSX.Element {
   const { record } = entry;
   return (
     <div className="bubble assistant">
-      <span className="who">pipeline · trace</span>
+      <span className="who">brain flow · trace</span>
       <div>{summarize(record.extractedTasks.length)}</div>
       {record.extractedTasks.length > 0 && (
         <ul className="tasks-out">
@@ -134,5 +134,5 @@ function Bubble({ entry }: { entry: SimEntry }): JSX.Element {
 }
 
 function summarize(taskCount: number): string {
-  return taskCount === 0 ? "Processed — no tasks extracted." : `Extracted ${taskCount} task${taskCount === 1 ? "" : "s"}.`;
+  return taskCount === 0 ? "Analyzed — no tasks extracted." : `Extracted ${taskCount} task${taskCount === 1 ? "" : "s"}.`;
 }

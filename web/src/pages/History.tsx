@@ -29,7 +29,7 @@ export function History(): JSX.Element {
     <div>
       <PageHeader
         title="Import history"
-        subtitle="Paste a Telegram Desktop export (single chat JSON). Messages are redacted, chunked, and fed through the pipeline."
+        subtitle="Paste a Telegram Desktop export (single chat JSON). Messages are redacted, chunked, and fed into structured memory."
       />
 
       <Card>

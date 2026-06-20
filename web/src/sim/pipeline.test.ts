@@ -40,7 +40,7 @@ test("STEP_TO_NODE maps all nine canonical pipeline steps", () => {
   }
 });
 
-test("buildTimeline maps steps to nodes and appends audit + simulated ai + bot_reply frames", () => {
+test("buildTimeline maps steps to nodes and appends audit + simulated ai + suggestion frames", () => {
   const frames = buildTimeline(record());
 
   // Real steps -> nodes
@@ -62,7 +62,7 @@ test("buildTimeline derives data labels from extracted tasks and redactions", ()
   expect(labels.some((l) => l?.includes("accepted"))).toBe(true);
 });
 
-test("botReplyText summarizes accepted tasks, or says nothing actionable", () => {
-  expect(botReplyText(record())).toMatch(/Logged 1 task: ship it/);
+test("botReplyText summarizes accepted tasks as a suggestion, or says nothing actionable", () => {
+  expect(botReplyText(record())).toMatch(/Suggestion: log 1 task: ship it/);
   expect(botReplyText(record({ extractedTasks: [] }))).toMatch(/nothing actionable/);
 });

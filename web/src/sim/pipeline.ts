@@ -42,8 +42,8 @@ export const GRAPH_NODES: readonly GraphNode[] = [
   { id: "notion_mcp", label: "Notion MCP", kind: "process", x: 860, y: 320 },
   { id: "notion", label: "Notion", kind: "external", x: 960, y: 320 },
   { id: "audit", label: "Audit + metrics", kind: "store", x: 600, y: 360 },
-  { id: "ai", label: "AI (simulated)", kind: "sim", x: 600, y: 460 },
-  { id: "bot_reply", label: "Bot reply (simulated)", kind: "sim", x: 320, y: 460 },
+  { id: "ai", label: "AI brain (simulated)", kind: "sim", x: 600, y: 460 },
+  { id: "bot_reply", label: "Suggestion (simulated)", kind: "sim", x: 320, y: 460 },
 ] as const;
 
 export const GRAPH_EDGES: readonly GraphEdge[] = [
@@ -80,7 +80,7 @@ export const STEP_TO_NODE: Record<string, string> = {
 
 /**
  * Turns a processed message's audit record into an ordered animation timeline,
- * then appends the two client-simulated stages (AI + bot reply) so the graph
+ * then appends the two client-simulated stages (AI brain + suggestion) so the graph
  * reads end-to-end.
  */
 export function buildTimeline(record: AuditRecord): TimelineFrame[] {
@@ -107,14 +107,14 @@ export function buildTimeline(record: AuditRecord): TimelineFrame[] {
   return frames;
 }
 
-/** Short summary the simulated bot "replies" with. */
+/** Short summary the simulated assistant suggests. */
 export function botReplyText(record: AuditRecord): string {
   const accepted = record.extractedTasks.filter((task) => task.accepted);
   if (accepted.length === 0) {
-    return "Got it — nothing actionable spotted.";
+    return "Suggestion: nothing actionable spotted.";
   }
   const titles = accepted.map((task) => task.title || "untitled").join(", ");
-  return `Logged ${accepted.length} task${accepted.length === 1 ? "" : "s"}: ${titles}.`;
+  return `Suggestion: log ${accepted.length} task${accepted.length === 1 ? "" : "s"}: ${titles}.`;
 }
 
 function byStartOrder(left: AuditStep, right: AuditStep): number {

@@ -2,9 +2,40 @@
 
 ## Mission
 
-Build an AI-powered Telegram assistant that acts as a personal Chief of Staff.
+Build Nocheh as a personal AI brain: a multi-conversation assistant that reads
+incoming chats, understands context, builds structured long-term memory, and
+helps Sam think, decide, remember, communicate, set goals, and generate new
+ideas. It should also help Sam improve routines and repeated behaviors over
+time.
 
-The assistant observes conversations, extracts actionable information, maintains project memory, manages tasks, and communicates in the user's style.
+Telegram is the first input and output channel. The core product is not a
+Telegram bot; it is a platform-neutral personal memory and analysis system that
+can later connect to more groups, DMs, email, calendar, and other tools.
+
+The long-term direction is a Sam-like assistant that can draft, reason, and
+suggest actions in Sam's style. It must not impersonate Sam or act externally
+without approval.
+
+---
+
+## Product Model
+
+```text
+Input channels
+  -> normalized incoming messages
+  -> redaction and safety checks
+  -> bounded AI/rule analysis
+  -> structured personal memory
+  -> knowledge graph updates
+  -> retrieval and context building
+  -> goals, ideas, answers, and actions for Sam approval
+```
+
+Nocheh should understand both:
+
+* Local context: what happened in one conversation or group.
+* Global context: what Sam knows across all connected conversations and future
+  platforms.
 
 ---
 
@@ -12,50 +43,114 @@ The assistant observes conversations, extracts actionable information, maintains
 
 ### Conversation Intelligence
 
-* Monitor configured Telegram groups.
-* Analyze conversations and understand context.
-* Detect tasks, decisions, deadlines, blockers, and project updates.
-* Continuously update knowledge as new messages arrive.
+* Monitor configured Telegram groups first, then support more sources through
+  the same normalized message model.
+* Analyze conversations for meaning, commitments, decisions, risks, questions,
+  blockers, deadlines, people, preferences, goals, ideas, opportunities, and
+  project movement.
+* Preserve source references so memory can explain where knowledge came from.
+* Keep context bounded by recent messages, retrieved memory, summaries, and
+  explicit token budgets.
 
-### Task Management
+### Strategic Thinking
 
-* Extract tasks from conversations.
-* Track task lifecycle and status changes.
-* Prioritize tasks by urgency and importance.
-* Synchronize tasks with Notion via MCP.
-* Maintain a clear list of open and completed work.
+* Turn scattered chat context into possible goals, priorities, and next moves.
+* Notice weak signals, repeated problems, opportunities, and open loops.
+* Generate original ideas for products, workflows, content, technical direction,
+  business development, and personal improvement.
+* Suggest routine improvements from observed patterns, missed commitments,
+  recurring blockers, energy signals, and explicit feedback.
+* Separate facts from suggestions: the assistant can propose goals or ideas, but
+  Sam decides what becomes real.
+* Track idea lifecycle: captured, explored, accepted, rejected, archived, or
+  converted into a project/task.
 
-### Memory
+### Routine Improvement
 
-Maintain structured project memory:
+* Identify routines Sam already follows across work, communication, planning,
+  health, learning, and personal operations.
+* Detect repeated friction: delays, context switching, forgotten follow-ups,
+  overloaded days, unclear priorities, and avoidable rework.
+* Propose small routine experiments with a clear trigger, action, review cadence,
+  and success signal.
+* Track whether a routine is active, paused, rejected, or needs adjustment.
+* Avoid moralizing or nagging. Routine advice should be practical, specific, and
+  easy to accept, edit, or reject.
+
+### Second-Brain Memory
+
+Maintain structured long-term memory and a knowledge graph for:
 
 * Projects
 * Tasks
 * Decisions
 * Deadlines
 * Blockers
-* Important discussions
+* Summaries
+* People and roles
+* Preferences
+* Communication style
+* Personal rules
+* Learned skills
+* Goals
+* Ideas
+* Opportunities
+* Insights
+* Routines
+* Routine experiments
 
-The system should store knowledge, not chat history.
+The system stores knowledge, not raw chat history. Raw or near-raw messages are
+temporary working data only.
 
-### Communication
+### Knowledge Graph
 
-* Generate summaries and status updates.
-* Explain project decisions when requested.
-* Help users communicate progress.
-* Reply in a style consistent with the user's communication patterns.
+* Represent important entities as memory nodes: Sam, people, projects,
+  conversations, tasks, decisions, goals, ideas, routines, areas, resources, and
+  skills.
+* Represent relationships as typed edges with source references, confidence,
+  and valid/invalid timestamps.
+* Use the graph to answer cross-context questions such as who is connected to a
+  project, which routines affect a goal, what is blocking an outcome, and which
+  ideas came from which conversations.
+* Keep graph facts structured and auditable. Do not store raw chat text inside
+  graph nodes or edges.
 
-### Personality Learning
+### Task and Commitment Management
 
-Build a user profile from conversations:
+* Extract tasks and promises from conversations.
+* Track ownership, status, due dates, project links, and source references.
+* Prioritize by urgency, importance, blockers, and Sam's current context.
+* Synchronize approved task updates with external tools such as Notion through
+  adapters.
 
-* Tone
-* Writing style
-* Technical depth
-* Communication patterns
-* Frequently used terminology
+### Communication and Clone Layer
 
-Use the profile to guide responses without impersonating the user or inventing opinions.
+* Generate summaries, status updates, and reply drafts.
+* Learn Sam's tone, language mix, technical depth, wording patterns, and
+  decision habits as structured style rules.
+* Draft in Sam's style when asked, while keeping human approval in the loop.
+* Never invent Sam's opinions or send messages as Sam without explicit approval.
+
+### Human Approval and Control
+
+* The assistant may suggest goals, ideas, routine experiments, replies, task
+  updates, reminders, or next actions.
+* External actions must be pending by default.
+* Sam must approve, edit, or reject any outgoing reply or external action.
+* Strategic suggestions must be clearly labeled as suggestions, not remembered
+  as facts unless Sam accepts them.
+* Routine suggestions must stay optional and reviewable; the assistant should
+  not pressure Sam or treat failed routines as personal failure.
+* Autonomous behavior can only be added later behind explicit, narrow settings.
+
+### Cost Management
+
+* Prefer batching over per-message AI calls for noisy group chats.
+* Use structured memory retrieval instead of sending full history.
+* Keep max messages, max retrieved memories, and max AI context tokens
+  configurable.
+* Track AI token usage when a provider adapter is implemented.
+* Support rule-based or dry-run operation where AI calls are disabled.
 
 ---
 
@@ -66,40 +161,44 @@ Use the profile to guide responses without impersonating the user or inventing o
 Never store or expose:
 
 * Passwords
-* API Keys
-* Access Tokens
-* Private Keys
-* Seed Phrases
-* Connection Secrets
+* API keys
+* Access tokens
+* Private keys
+* Seed phrases
+* Connection secrets
 
-Sensitive information must be detected and redacted before processing.
+Sensitive information must be detected and redacted before buffering,
+analysis, memory extraction, persistence, logs, context building, or external
+sync.
 
 ### Memory Policy
 
 Store:
 
-* Tasks
-* Decisions
-* Summaries
-* Structured knowledge
+* Structured tasks, decisions, summaries, people, preferences, style rules,
+  personal rules, and learned skills.
+* Knowledge graph nodes and relationship facts with source references.
+* Source references and confidence scores.
+* Sanitized summaries derived from memory.
 
-Do not store raw messages unless explicitly required.
+Do not store raw chat history as long-term memory.
 
 ### Data Retention
 
 * Raw messages should be temporary.
 * Long-term storage should contain only structured knowledge.
-* All persisted data must be encrypted at rest.
+* Persisted sensitive payloads must be encrypted at rest.
+* History import must chunk and sanitize data before analysis.
 
 ---
 
 ## Principles
 
-* Minimize manual task tracking.
-* Preserve important context and decisions.
+* Build the brain, not just the bot.
+* Telegram is an adapter; memory and reasoning are the product.
 * Prefer structured memory over chat history.
-* Reduce cognitive load.
-* Be transparent and explainable.
-* Security first.
-* Human remains the final decision maker.
-
+* Keep AI provider details behind application ports.
+* Preserve explainability through source references and audit records.
+* Reduce Sam's cognitive load without removing Sam's control.
+* Security and cost control are product requirements, not add-ons.
+* Human approval is required before acting externally.

@@ -46,15 +46,15 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-test("sending runs the pipeline and posts a simulated bot reply with the graph mounted", async () => {
+test("sending runs the brain flow and posts a simulated suggestion with the graph mounted", async () => {
   getConversation.mockResolvedValue({ ok: true, conversationId: "mock-chat-1", records: [record("a")] });
 
   const { container } = render(<Mock />);
   fireEvent.click(screen.getByText("Send"));
 
   await waitFor(() => expect(injectMock).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(screen.getByText(/Nocheh bot · simulated/)).toBeTruthy());
-  expect(screen.getByText(/Logged 1 task: ship it/)).toBeTruthy();
+  await waitFor(() => expect(screen.getByText(/Nocheh suggestion · simulated/)).toBeTruthy());
+  expect(screen.getByText(/Suggestion: log 1 task: ship it/)).toBeTruthy();
   // System graph is present.
   expect(container.querySelectorAll(".graph-node").length).toBeGreaterThan(0);
 });
@@ -65,7 +65,7 @@ test("clear empties the transcript and flushes the buffer", async () => {
 
   render(<Mock />);
   fireEvent.click(screen.getByText("Send"));
-  await waitFor(() => expect(screen.getByText(/Nocheh bot · simulated/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/Nocheh suggestion · simulated/)).toBeTruthy());
 
   fireEvent.click(screen.getByText("Clear simulation"));
   await waitFor(() => expect(flushMock).toHaveBeenCalled());

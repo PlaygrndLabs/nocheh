@@ -72,7 +72,7 @@ export function Mock(): JSX.Element {
           kind: "success",
           text: settings?.analysisMode === "batch"
             ? "Buffered (batch mode). Press Flush to process now, or switch to immediate."
-            : "Sent. No pipeline output appeared yet — try Flush.",
+            : "Sent. No brain-flow output appeared yet — try Flush.",
         });
       }
     } catch (error) {
@@ -130,7 +130,7 @@ export function Mock(): JSX.Element {
     <div>
       <PageHeader
         title="Simulator"
-        subtitle="A mock Telegram group. Send as any member; watch the message flow through the system graph. AI and bot reply are simulated."
+        subtitle="A mock Telegram group. Send as any member; watch the message become structured memory, tasks, and a simulated suggestion."
       />
 
       <Card>
@@ -156,11 +156,11 @@ export function Mock(): JSX.Element {
       </Card>
 
       <div className="sim-split">
-        <Card title="System design · live flow">
+        <Card title="Brain flow · live trace">
           <SystemGraph frames={frames} activeIndex={playback.activeIndex} />
         </Card>
 
-        <Card title="Group chat">
+        <Card title="Group conversation">
           <GroupChat
             entries={sim.entries}
             members={sim.members}

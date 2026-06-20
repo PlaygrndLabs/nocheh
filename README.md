@@ -1,6 +1,14 @@
 # My Nocheh
 
-AI Telegram assistant, currently at **Phase 2: Structured Memory**.
+Nocheh is being built as a **personal AI brain**: a multi-conversation
+assistant that reads incoming chats, analyzes what matters, builds structured
+long-term memory, and helps Sam remember, decide, communicate, set goals, and
+generate new ideas. It should also help Sam improve routines and repeated
+behaviors over time.
+
+The current implementation is at **Phase 2: Structured Memory**. Telegram is
+the first channel, but the product direction is platform-neutral: Telegram
+groups now, more conversations and tools later.
 
 ## What Works
 
@@ -18,9 +26,70 @@ AI Telegram assistant, currently at **Phase 2: Structured Memory**.
 - Notion MCP task sync adapter
 - React client at `/app` for configuration, bot connection, history import, mock testing, metrics, conversations, and chat-flow visualization
 
-Not included yet: concrete AI provider calls, personality learning, autonomous replies, embedding-backed vector search.
+Not included yet: concrete AI provider calls, personal profile/style memory,
+approval workflow for suggested replies/actions, embedding-backed vector search,
+or additional platform adapters beyond Telegram/mock/history import.
 
-## Assistant Model
+## Product Direction
+
+Nocheh should become a second brain, not just a task extractor:
+
+```text
+Telegram groups / future sources
+  -> normalized messages
+  -> redaction and safety checks
+  -> bounded AI/rule analysis
+  -> structured personal memory
+  -> knowledge graph updates
+  -> retrieval and context building
+  -> goals, ideas, routine experiments, drafts, and actions for Sam approval
+```
+
+The assistant should understand:
+
+- local context inside one conversation
+- global context across all connected conversations
+- tasks, decisions, deadlines, blockers, projects, people, preferences, style,
+  goals, ideas, opportunities, insights, routines, and learned personal rules
+- graph relationships between people, projects, goals, tasks, routines, and
+  ideas
+- what Sam is likely to forget or need next
+- recurring patterns that could become better routines
+
+Any outgoing reply or external action must require Sam approval. The system may
+draft, suggest, and generate ideas; it must not impersonate Sam or auto-act by
+default. Strategic suggestions should stay separate from facts until Sam accepts
+them. Routine suggestions should be optional experiments, not pressure.
+
+## Roadmap
+
+1. **Docs and product alignment**
+   Reframe the app as Nocheh Brain in agent docs, README, ADRs, and UI wording.
+2. **Multi-group Telegram foundation**
+   Make conversation identity, settings, retrieval, history import, and views
+   clearly support many Telegram groups.
+3. **AI analysis contract**
+   Define provider-neutral schemas for tasks, memories, people, preferences,
+   style signals, risks, goals, ideas, opportunities, routine improvements,
+   suggested replies, and suggested actions.
+4. **Structured personal memory**
+   Extend memory with people, preferences, style rules, personal rules, goals,
+   ideas, opportunities, insights, routines, routine experiments, and learned
+   skills while continuing to avoid raw long-term chat storage.
+5. **Knowledge graph memory**
+   Add graph nodes for entities and typed relationship facts with source,
+   confidence, and temporal validity.
+6. **Cost-managed AI processing**
+   Add explicit AI budgets, token usage tracking, dry-run mode, and controls for
+   batch size, interval, retrieved memories, and context size.
+7. **Human approval layer**
+   Persist suggested replies/actions as pending until Sam approves, edits, or
+   rejects them.
+8. **Future platform expansion**
+   Add email, calendar, or other chat sources after Telegram multi-group memory
+   works well.
+
+## Current Assistant Model
 
 Telegram bots receive new updates after they can see a chat; they do not automatically fetch old group history. Nocheh handles this with two paths:
 
@@ -36,7 +105,8 @@ The AI context should be built from:
 - relevant structured memories
 - summaries/tasks/blockers
 
-It should not receive full chat history.
+It should not receive full chat history. Future AI provider adapters must remain
+behind the existing provider-neutral application port.
 
 ## Memory Policy
 
@@ -58,6 +128,27 @@ Supported memory types:
 - `Deadline`
 - `Blocker`
 - `Summary`
+
+Planned memory types:
+
+- `Person`
+- `Preference`
+- `StyleRule`
+- `PersonalRule`
+- `Skill`
+- `Goal`
+- `Idea`
+- `Opportunity`
+- `Insight`
+- `Routine`
+- `RoutineExperiment`
+
+Planned graph records:
+
+- `MemoryNode`
+- `MemoryEdge`
+- typed relations such as `PERSON_WORKS_ON_PROJECT`, `GOAL_HAS_ROUTINE`,
+  `IDEA_SUPPORTS_GOAL`, `TASK_BLOCKED_BY_PERSON`, and `PROJECT_HAS_DECISION`
 
 Redaction runs before memory extraction. Secrets, passwords, API keys, access tokens, private keys, seed phrases, and connection strings must not be persisted.
 
@@ -253,6 +344,8 @@ docs                Short architecture notes and ADRs
 - [ADR 0004: Live Buffering, History Import, and AI Context](docs/adr/0004-live-buffering-history-import-ai-context.md)
 - [ADR 0005: SQLite VPS Persistence](docs/adr/0005-sqlite-vps-persistence.md)
 - [ADR 0006: Client UI and Chat-Flow Visualization](docs/adr/0006-setup-dashboard.md)
+- [ADR 0007: Personal AI Brain Roadmap](docs/adr/0007-personal-ai-brain-roadmap.md)
+- [Research 0001: Second-Brain and Agent Memory Patterns](docs/research/0001-second-brain-and-agent-memory.md)
 
 ## Commands
 
