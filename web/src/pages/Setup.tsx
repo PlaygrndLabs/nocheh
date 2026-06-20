@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Save } from "lucide-react";
 import { api, type SetupStatus } from "../api/client.js";
 import { Card, Notice, PageHeader, StatusFlag, type NoticeMessage } from "../components/ui.js";
 
@@ -60,6 +61,7 @@ export function Setup(): JSX.Element {
           onChange={(event) => setAiKey(event.target.value)}
         />
         <button className="action" disabled={saving || aiKey.length === 0} onClick={() => void saveKey()}>
+          <Save size={15} aria-hidden="true" />
           {saving ? "Saving…" : "Save key"}
         </button>
         <Notice message={message} />

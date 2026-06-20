@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 
 export type NoticeKind = "success" | "error";
 
@@ -23,21 +24,36 @@ export function PageHeader({ title, subtitle }: PageHeaderProps): JSX.Element {
 
 interface CardProps {
   readonly title?: string;
+  readonly icon?: ReactNode;
   readonly children: ReactNode;
   readonly className?: string;
 }
 
-export function Card({ title, children, className = "" }: CardProps): JSX.Element {
+export function Card({ title, icon, children, className = "" }: CardProps): JSX.Element {
   return (
     <div className={["card", className].filter(Boolean).join(" ")}>
-      {title !== undefined && <h3>{title}</h3>}
+      {title !== undefined && (
+        <h3>
+          {icon}
+          {title}
+        </h3>
+      )}
       {children}
     </div>
   );
 }
 
 export function Notice({ message }: { readonly message: NoticeMessage | null }): JSX.Element | null {
-  return message === null ? null : <div className={`notice ${message.kind}`}>{message.text}</div>;
+  if (message === null) {
+    return null;
+  }
+  const Icon = message.kind === "success" ? CheckCircle2 : XCircle;
+  return (
+    <div className={`notice ${message.kind}`}>
+      <Icon className="notice-icon" size={16} aria-hidden="true" />
+      <span>{message.text}</span>
+    </div>
+  );
 }
 
 interface StatusFlagProps {
@@ -47,7 +63,12 @@ interface StatusFlagProps {
 }
 
 export function StatusFlag({ active, activeLabel = "set", inactiveLabel = "not set" }: StatusFlagProps): JSX.Element {
-  return <span className={active ? "ok" : "warn"}>{active ? activeLabel : inactiveLabel}</span>;
+  return (
+    <span className={active ? "ok" : "warn"}>
+      {active ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}
+      {active ? activeLabel : inactiveLabel}
+    </span>
+  );
 }
 
 interface NumericFieldProps {

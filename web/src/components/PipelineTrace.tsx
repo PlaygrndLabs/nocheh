@@ -1,4 +1,18 @@
-import type { AuditRecord } from "../api/client.js";
+import { CheckCircle2, CircleDashed, MinusCircle, XCircle } from "lucide-react";
+import type { AuditRecord, AuditStep } from "../api/client.js";
+
+function StatusIcon({ status }: { readonly status: AuditStep["status"] }): JSX.Element {
+  if (status === "succeeded") {
+    return <CheckCircle2 size={12} aria-hidden="true" />;
+  }
+  if (status === "failed") {
+    return <XCircle size={12} aria-hidden="true" />;
+  }
+  if (status === "skipped") {
+    return <MinusCircle size={12} aria-hidden="true" />;
+  }
+  return <CircleDashed size={12} aria-hidden="true" />;
+}
 
 /** Renders the step-by-step processing flow for a set of audit records. */
 export function PipelineTrace({ records }: { records: AuditRecord[] }): JSX.Element {
@@ -18,7 +32,10 @@ export function PipelineTrace({ records }: { records: AuditRecord[] }): JSX.Elem
           {record.steps.map((step, index) => (
             <div className="step" key={`${record.id}-${step.name}-${index}`}>
               <span>{step.name}</span>
-              <span className={`pill ${step.status}`}>{step.status}</span>
+              <span className={`pill ${step.status}`}>
+                <StatusIcon status={step.status} />
+                {step.status}
+              </span>
               <span>{step.durationMs.toFixed(0)} ms</span>
               <code>
                 {JSON.stringify(step.metadata)}

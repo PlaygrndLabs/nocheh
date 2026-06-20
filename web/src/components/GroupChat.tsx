@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Send, X } from "lucide-react";
 import type { Member, SimEntry } from "../state/useSimulation.js";
 
 interface GroupChatProps {
@@ -42,7 +43,9 @@ export function GroupChat({
           <span key={member.id} className={`member-chip${member.id === activeMemberId ? " active" : ""}`}>
             <button className="member-pick" onClick={() => onSetActiveMember(member.id)}>{member.name}</button>
             {members.length > 1 && (
-              <button className="member-remove" title="Remove member" onClick={() => onRemoveMember(member.id)}>×</button>
+              <button className="member-remove" title="Remove member" aria-label={`Remove ${member.name}`} onClick={() => onRemoveMember(member.id)}>
+                <X size={13} aria-hidden="true" />
+              </button>
             )}
           </span>
         ))}
@@ -81,6 +84,7 @@ export function GroupChat({
           placeholder="Message the group…"
         />
         <button className="action" disabled={busy} onClick={send}>
+          <Send size={15} aria-hidden="true" />
           {busy ? "Sending…" : "Send"}
         </button>
       </div>

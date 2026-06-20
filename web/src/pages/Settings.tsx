@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Download, Save } from "lucide-react";
 import { api, type GroupSettings } from "../api/client.js";
 import { Card, Notice, NumericField, PageHeader, type NoticeMessage } from "../components/ui.js";
 
@@ -46,7 +47,7 @@ export function Settings(): JSX.Element {
       <Card>
         <label htmlFor="conv">Conversation ID</label>
         <input id="conv" value={conversationId} onChange={(e) => setConversationId(e.target.value)} />
-        <button className="action" onClick={() => void load()}>Load</button>
+        <button className="action" onClick={() => void load()}><Download size={15} aria-hidden="true" />Load</button>
       </Card>
 
       {settings !== null && (
@@ -71,7 +72,7 @@ export function Settings(): JSX.Element {
           <NumericField label="Max retrieved memories" value={settings.maxRetrievedMemories} onChange={(v) => patch({ maxRetrievedMemories: v })} />
           <NumericField label="Max recent messages" value={settings.maxRecentMessages} onChange={(v) => patch({ maxRecentMessages: v })} />
 
-          <button className="action" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save settings"}</button>
+          <button className="action" disabled={busy} onClick={() => void save()}><Save size={15} aria-hidden="true" />{busy ? "Saving…" : "Save settings"}</button>
         </Card>
       )}
 

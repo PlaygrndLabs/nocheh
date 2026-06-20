@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { api, type AuditRecord, type ConversationSummary, type MetricsSnapshot } from "../api/client.js";
 import { MetricsCards } from "../components/MetricsCards.js";
 import { PipelineTrace } from "../components/PipelineTrace.js";
@@ -42,7 +43,7 @@ export function Conversations(): JSX.Element {
       {metrics !== null && <MetricsCards metrics={metrics} />}
       {error !== null && <div className="notice error">{error}</div>}
 
-      <button className="action" onClick={refresh}>Refresh</button>
+      <button className="action" onClick={refresh}><RefreshCw size={15} aria-hidden="true" />Refresh</button>
 
       <Card title={`Conversations (${conversations.length})`} className="section-card">
         <div className="conversation-list">

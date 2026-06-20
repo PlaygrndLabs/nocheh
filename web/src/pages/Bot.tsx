@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PlugZap } from "lucide-react";
 import { api, type BotInfo } from "../api/client.js";
 import { Card, Notice, PageHeader, StatusFlag, type NoticeMessage } from "../components/ui.js";
 
@@ -59,6 +60,7 @@ export function Bot(): JSX.Element {
           onChange={(e) => setWebhookUrl(e.target.value)}
         />
         <button className="action" disabled={busy || token.length === 0 || webhookUrl.length === 0} onClick={() => void connect()}>
+          <PlugZap size={15} aria-hidden="true" />
           {busy ? "Connecting…" : "Validate & connect"}
         </button>
         <Notice message={message} />

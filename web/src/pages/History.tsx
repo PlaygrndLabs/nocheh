@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Upload } from "lucide-react";
 import { api } from "../api/client.js";
 import { Card, Notice, PageHeader, type NoticeMessage } from "../components/ui.js";
 
@@ -35,6 +36,7 @@ export function History(): JSX.Element {
         <label htmlFor="export">Telegram export JSON</label>
         <textarea id="export" value={raw} placeholder='{ "id": 123, "name": "Chat", "messages": [ … ] }' onChange={(e) => setRaw(e.target.value)} />
         <button className="action" disabled={busy || raw.trim().length === 0} onClick={() => void importHistory()}>
+          <Upload size={15} aria-hidden="true" />
           {busy ? "Importing…" : "Import"}
         </button>
         <Notice message={message} />

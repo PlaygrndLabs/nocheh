@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { api, type AuditRecord, type GroupSettings } from "../api/client.js";
 import { GroupChat } from "../components/GroupChat.js";
 import { SystemGraph } from "../components/SystemGraph.js";
@@ -139,8 +140,8 @@ export function Mock(): JSX.Element {
             <input id="conv" value={conversationId} onChange={(e) => setConversationId(e.target.value)} />
           </div>
           <div className="action-row">
-            <button className="action" disabled={busy} onClick={() => void flush()}>Flush buffer</button>
-            <button className="action" disabled={busy} onClick={() => void clear()}>Clear simulation</button>
+            <button className="action" disabled={busy} onClick={() => void flush()}><RefreshCw size={15} aria-hidden="true" />Flush buffer</button>
+            <button className="action" disabled={busy} onClick={() => void clear()}><Trash2 size={15} aria-hidden="true" />Clear simulation</button>
             {settings !== null && (
               <span className="status-line muted">
                 mode: <b className={settings.analysisMode === "immediate" ? "ok" : "warn"}>{settings.analysisMode}</b>
@@ -154,22 +155,24 @@ export function Mock(): JSX.Element {
         <Notice message={notice} />
       </Card>
 
-      <Card title="System design · live flow">
-        <SystemGraph frames={frames} activeIndex={playback.activeIndex} />
-      </Card>
+      <div className="sim-split">
+        <Card title="System design · live flow">
+          <SystemGraph frames={frames} activeIndex={playback.activeIndex} />
+        </Card>
 
-      <Card title="Group chat">
-        <GroupChat
-          entries={sim.entries}
-          members={sim.members}
-          activeMemberId={sim.activeMemberId}
-          busy={busy}
-          onSetActiveMember={sim.setActiveMember}
-          onAddMember={sim.addMember}
-          onRemoveMember={sim.removeMember}
-          onSend={(text) => void send(text)}
-        />
-      </Card>
+        <Card title="Group chat">
+          <GroupChat
+            entries={sim.entries}
+            members={sim.members}
+            activeMemberId={sim.activeMemberId}
+            busy={busy}
+            onSetActiveMember={sim.setActiveMember}
+            onAddMember={sim.addMember}
+            onRemoveMember={sim.removeMember}
+            onSend={(text) => void send(text)}
+          />
+        </Card>
+      </div>
     </div>
   );
 }
