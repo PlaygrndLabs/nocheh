@@ -1,15 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Trash2 } from "lucide-react";
+import { BrainCircuit, CheckCircle2, Database, Gauge, GitBranch, Lightbulb, Lock, Play, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { api, type AuditRecord, type GroupSettings } from "../api/client.js";
 import { GroupChat } from "../components/GroupChat.js";
 import { SystemGraph } from "../components/SystemGraph.js";
 import { Card, Notice, PageHeader, type NoticeMessage } from "../components/ui.js";
+import { buildBrainPreview, type BrainPreview, type PreviewGuardrail, type PreviewMemory, type PreviewSuggestion } from "../sim/brain-preview.js";
 import { buildTimeline } from "../sim/pipeline.js";
 import { usePlayback } from "../sim/usePlayback.js";
 import { useSimulation } from "../state/useSimulation.js";
 
 const POLL_INTERVAL_MS = 500;
 const POLL_MAX_TRIES = 6;
+
+const SCENARIOS = [
+  {
+    label: "Startup",
+    text: "We need a decision with my startup partner: who owns sales, what risks block launch, and what should be our next goal?",
+  },
+  {
+    label: "Routine",
+    text: "I keep missing my weekly review. Idea: create a Sunday routine for planning, English practice, X posts, and freelance follow-ups.",
+  },
+  {
+    label: "Content",
+    text: "I want to grow on X. Need three content ideas from my current startup lessons and a posting routine.",
+  },
+  {
+    label: "Trading",
+    text: "Crypto note: BTC looks interesting but do not trade. Build a thesis, risk rule, and journal reminder before any action.",
+  },
+] as const;
 
 export function Mock(): JSX.Element {
   const [conversationId, setConversationId] = useState("mock-chat-1");
@@ -25,6 +45,7 @@ export function Mock(): JSX.Element {
     () => (sim.lastAssistant === undefined ? [] : buildTimeline(sim.lastAssistant.record)),
     [sim.lastAssistant],
   );
+  const brainPreview = useMemo(() => buildBrainPreview(sim.entries), [sim.entries]);
   const playback = usePlayback(frames);
   // Animate the graph whenever a new processed record becomes the latest.
   const playRef = useRef(playback.play);
@@ -82,6 +103,10 @@ export function Mock(): JSX.Element {
     }
   }, [conversationId, pollForResults, settings, sim]);
 
+  const runScenario = useCallback(async (message: string): Promise<void> => {
+    await send(message);
+  }, [send]);
+
   const flush = useCallback(async (): Promise<void> => {
     setBusy(true);
     setNotice(null);
@@ -130,7 +155,7 @@ export function Mock(): JSX.Element {
     <div>
       <PageHeader
         title="Simulator"
-        subtitle="A mock Telegram group. Send as any member; watch the message become structured memory, tasks, and a simulated suggestion."
+        subtitle="Preview the full Nocheh Brain loop before real deployment: intake, memory, graph links, suggestions, approval, safety, and cost."
       />
 
       <Card>
@@ -154,6 +179,19 @@ export function Mock(): JSX.Element {
         </div>
         <Notice message={notice} />
       </Card>
+
+      <Card title="Run a complete scenario" icon={<Play size={16} aria-hidden="true" />}>
+        <div className="scenario-grid">
+          {SCENARIOS.map((scenario) => (
+            <button key={scenario.label} className="scenario-button" disabled={busy} onClick={() => void runScenario(scenario.text)}>
+              <b>{scenario.label}</b>
+              <span>{scenario.text}</span>
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <BrainConsole preview={brainPreview} />
 
       <div className="sim-split">
         <Card title="Brain flow · live trace">
@@ -179,4 +217,126 @@ export function Mock(): JSX.Element {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function BrainConsole({ preview }: { readonly preview: BrainPreview }): JSX.Element {
+  return (
+    <section className="brain-console" aria-label="Nocheh brain simulator">
+      <div className="brain-metrics">
+        <Metric icon={<BrainCircuit size={15} aria-hidden="true" />} label="Messages" value={preview.metrics.messages} />
+        <Metric icon={<Database size={15} aria-hidden="true" />} label="Memories" value={preview.metrics.memories} />
+        <Metric icon={<GitBranch size={15} aria-hidden="true" />} label="Graph edges" value={preview.metrics.edges} />
+        <Metric icon={<Lightbulb size={15} aria-hidden="true" />} label="Suggestions" value={preview.metrics.suggestions} />
+        <Metric icon={<Lock size={15} aria-hidden="true" />} label="Blocked" value={preview.metrics.blocked} />
+        <Metric icon={<Gauge size={15} aria-hidden="true" />} label="Est. tokens" value={preview.metrics.estimatedTokens} />
+      </div>
+
+      <div className="brain-stage-strip">
+        {preview.stages.map((stage, index) => (
+          <div key={stage.label} className={`brain-stage ${stage.status}`}>
+            <span className="stage-index">{index + 1}</span>
+            <b>{stage.label}</b>
+            <span>{stage.detail}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="brain-grid">
+        <section className="brain-panel memory-panel">
+          <PanelTitle icon={<Database size={15} aria-hidden="true" />} title="Structured memory" />
+          <div className="memory-list">
+            {preview.memories.map((memory) => <MemoryRow key={`${memory.type}-${memory.title}`} memory={memory} />)}
+          </div>
+        </section>
+
+        <section className="brain-panel graph-panel">
+          <PanelTitle icon={<GitBranch size={15} aria-hidden="true" />} title="Knowledge graph" />
+          <div className="edge-list">
+            {preview.edges.map((edge) => (
+              <div key={`${edge.from}-${edge.relation}-${edge.to}`} className="edge-row">
+                <span>{edge.from}</span>
+                <code>{edge.relation}</code>
+                <span>{edge.to}</span>
+                <b>{Math.round(edge.confidence * 100)}%</b>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="brain-panel suggestion-panel">
+          <PanelTitle icon={<Lightbulb size={15} aria-hidden="true" />} title="Suggestions awaiting Mak" />
+          <div className="suggestion-list">
+            {preview.suggestions.map((suggestion) => <SuggestionRow key={`${suggestion.kind}-${suggestion.title}`} suggestion={suggestion} />)}
+          </div>
+        </section>
+
+        <section className="brain-panel guardrail-panel">
+          <PanelTitle icon={<ShieldCheck size={15} aria-hidden="true" />} title="Safety and cost guardrails" />
+          <div className="guardrail-list">
+            {preview.guardrails.map((guardrail) => <GuardrailRow key={guardrail.label} guardrail={guardrail} />)}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function Metric({ icon, label, value }: { readonly icon: JSX.Element; readonly label: string; readonly value: number }): JSX.Element {
+  return (
+    <div className="brain-metric">
+      <span>{icon}{label}</span>
+      <b>{value.toLocaleString()}</b>
+    </div>
+  );
+}
+
+function PanelTitle({ icon, title }: { readonly icon: JSX.Element; readonly title: string }): JSX.Element {
+  return (
+    <div className="panel-title">
+      {icon}
+      <b>{title}</b>
+    </div>
+  );
+}
+
+function MemoryRow({ memory }: { readonly memory: PreviewMemory }): JSX.Element {
+  return (
+    <article className="memory-row">
+      <div>
+        <span className="memory-type">{memory.type}</span>
+        <b>{memory.title}</b>
+        <p>{memory.detail}</p>
+      </div>
+      <span className={`mini-status ${memory.status}`}>{memory.status}</span>
+    </article>
+  );
+}
+
+function SuggestionRow({ suggestion }: { readonly suggestion: PreviewSuggestion }): JSX.Element {
+  return (
+    <article className={`suggestion-row ${suggestion.status}`}>
+      <div>
+        <span className="memory-type">{suggestion.kind}</span>
+        <b>{suggestion.title}</b>
+        <p>{suggestion.rationale}</p>
+      </div>
+      <div className="suggestion-meta">
+        <span>impact {suggestion.impact}</span>
+        <span>risk {suggestion.risk}</span>
+      </div>
+    </article>
+  );
+}
+
+function GuardrailRow({ guardrail }: { readonly guardrail: PreviewGuardrail }): JSX.Element {
+  const Icon = guardrail.status === "ok" ? CheckCircle2 : guardrail.status === "blocked" ? Lock : ShieldCheck;
+  return (
+    <article className={`guardrail-row guardrail-${guardrail.status}`}>
+      <Icon size={14} aria-hidden="true" />
+      <div>
+        <b>{guardrail.label}</b>
+        <p>{guardrail.detail}</p>
+      </div>
+    </article>
+  );
 }
