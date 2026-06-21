@@ -65,6 +65,28 @@ export type {
   ProjectReference,
   SummaryMemory,
 } from "./domain/memory/memory-record.js";
+export {
+  createMemoryEdge,
+  createMemoryNode,
+  normalizeGraphId,
+  normalizeGraphLabel,
+  validateConfidence,
+  validateTemporalRange,
+} from "./domain/memory/memory-graph.js";
+export type {
+  CreateMemoryEdgeInput,
+  CreateMemoryNodeInput,
+  MemoryEdge,
+  MemoryEdgeId,
+  MemoryGraphPayload,
+  MemoryGraphScope,
+  MemoryGraphSource,
+  MemoryGraphStatus,
+  MemoryNode,
+  MemoryNodeId,
+  MemoryNodeKind,
+  MemoryRelation,
+} from "./domain/memory/memory-graph.js";
 export type {
   AuditedExtractedTask,
   ProcessingAuditRecord,

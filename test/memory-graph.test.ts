@@ -1,0 +1,106 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  createMemoryEdge,
+  createMemoryNode,
+  normalizeGraphId,
+  normalizeGraphLabel,
+  validateConfidence,
+  validateTemporalRange,
+  type MemoryGraphSource,
+} from "../src/domain/memory/memory-graph.js";
+
+const source: MemoryGraphSource = {
+  platform: "telegram",
+  conversationId: "chat-1",
+  messageId: "message-1",
+  occurredAt: new Date("2026-06-21T00:00:00.000Z"),
+};
+
+test("creates a memory node with normalized label, aliases, and defaults", () => {
+  const now = new Date("2026-06-21T10:00:00.000Z");
+  const node = createMemoryNode({
+    id: "node:mak",
+    kind: "person",
+    label: "  Mak   ",
+    scope: "user",
+    source,
+    confidence: 0.92,
+    aliases: [" Mak ", "mak", "M. "],
+    payload: { role: "owner" },
+    now,
+  });
+
+  assert.equal(node.id, "node:mak");
+  assert.equal(node.kind, "person");
+  assert.equal(node.label, "Mak");
+  assert.equal(node.status, "active");
+  assert.deepEqual(node.aliases, ["Mak", "M."]);
+  assert.deepEqual(node.payload, { role: "owner" });
+  assert.equal(node.createdAt, now);
+  assert.equal(node.updatedAt, now);
+});
+
+test("creates a memory edge with temporal validity and normalized fact", () => {
+  const validFrom = new Date("2026-06-01T00:00:00.000Z");
+  const validUntil = new Date("2026-07-01T00:00:00.000Z");
+  const edge = createMemoryEdge({
+    id: "edge:1",
+    fromNodeId: "person:mak",
+    toNodeId: "goal:english",
+    relation: "GOAL_HAS_ROUTINE",
+    fact: "  English goal has a daily practice routine  ",
+    source,
+    confidence: 0.81,
+    validFrom,
+    validUntil,
+  });
+
+  assert.equal(edge.id, "edge:1");
+  assert.equal(edge.fromNodeId, "person:mak");
+  assert.equal(edge.toNodeId, "goal:english");
+  assert.equal(edge.relation, "GOAL_HAS_ROUTINE");
+  assert.equal(edge.fact, "English goal has a daily practice routine");
+  assert.equal(edge.status, "active");
+  assert.equal(edge.validFrom, validFrom);
+  assert.equal(edge.validUntil, validUntil);
+});
+
+test("validates confidence, graph ids, labels, and temporal ranges", () => {
+  assert.equal(validateConfidence(0), 0);
+  assert.equal(validateConfidence(1), 1);
+  assert.throws(() => validateConfidence(-0.01), /between 0 and 1/);
+  assert.throws(() => validateConfidence(1.01), /between 0 and 1/);
+  assert.throws(() => validateConfidence(Number.NaN), /between 0 and 1/);
+
+  assert.equal(normalizeGraphId(" node:1 "), "node:1");
+  assert.throws(() => normalizeGraphId("ab"), /at least 3/);
+  assert.throws(() => normalizeGraphId("node 1"), /whitespace/);
+
+  assert.equal(normalizeGraphLabel("  goal   name "), "goal name");
+  assert.throws(() => normalizeGraphLabel("x"), /at least 2/);
+
+  assert.doesNotThrow(() => validateTemporalRange(new Date("2026-01-01"), new Date("2026-01-02")));
+  assert.throws(() => validateTemporalRange(new Date("bad"), undefined), /validFrom/);
+  assert.throws(() => validateTemporalRange(undefined, new Date("bad")), /validUntil/);
+  assert.throws(() => validateTemporalRange(new Date("2026-01-02"), new Date("2026-01-01")), /after validFrom/);
+});
+
+test("rejects invalid source references", () => {
+  assert.throws(() => createMemoryNode({
+    kind: "project",
+    label: "Nocheh",
+    scope: "project",
+    source: { ...source, messageId: "" },
+    confidence: 0.7,
+  }), /source messageId/);
+
+  assert.throws(() => createMemoryEdge({
+    fromNodeId: "node:a",
+    toNodeId: "node:b",
+    relation: "IDEA_SUPPORTS_GOAL",
+    fact: "idea supports goal",
+    source: { ...source, occurredAt: new Date("bad") },
+    confidence: 0.7,
+  }), /occurredAt/);
+});
