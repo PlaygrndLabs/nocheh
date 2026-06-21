@@ -3,6 +3,7 @@
 export interface SetupStatus {
   ok: boolean;
   hasAiKey: boolean;
+  aiProvider?: string;
   hasBotToken: boolean;
   botConnected: boolean;
   webhookUrl?: string;
@@ -47,6 +48,14 @@ export interface AuditTask {
   warnings: { code: string }[];
 }
 
+export interface AiTokenUsage {
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 export interface AuditRecord {
   id: string;
   platform: string;
@@ -59,6 +68,7 @@ export interface AuditRecord {
   extractedTasks: AuditTask[];
   errorLogs: string[];
   totalLatencyMs: number;
+  aiTokenUsage?: AiTokenUsage;
 }
 
 export interface ConversationSummary {

@@ -331,6 +331,11 @@ button.action:disabled { opacity: 0.5; cursor: default; }
 /* inline status text with a leading icon */
 .ok, .fail, .warn { display: inline-flex; align-items: center; gap: 4px; }
 .status-line.ok, .status-line.fail, .status-line.warn { display: block; }
+.token-usage {
+  color: var(--accent);
+  border-left: 2px solid var(--accent);
+  padding-left: var(--sp-2);
+}
 
 .notice {
   display: flex;

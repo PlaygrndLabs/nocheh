@@ -115,6 +115,9 @@ export class ProcessIncomingMessageUseCase {
       edgeCount: graphAnalysis.edges.length,
       suggestionCount: graphAnalysis.suggestions.length,
       warningCount: graphAnalysis.warnings.length,
+      inputTokens: graphAnalysis.tokenUsage?.inputTokens ?? 0,
+      outputTokens: graphAnalysis.tokenUsage?.outputTokens ?? 0,
+      totalTokens: graphAnalysis.tokenUsage?.totalTokens ?? 0,
     }));
 
     if (this.memoryGraphRepository !== undefined) {
@@ -302,6 +305,7 @@ export class ProcessIncomingMessageUseCase {
       extractedTasks,
       errorLogs,
       totalLatencyMs: latencyMs,
+      ...(graphAnalysis.tokenUsage === undefined ? {} : { aiTokenUsage: graphAnalysis.tokenUsage }),
     });
 
     this.logger.info("Processed incoming message", {

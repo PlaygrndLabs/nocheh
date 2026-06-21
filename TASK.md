@@ -9,8 +9,8 @@ requires Mak approval before external actions.
 
 ## Current Phase
 
-Foundation is documented. Next phase is implementation of memory graph domain,
-SQLite persistence, and query services.
+Memory graph foundation and live rule-based pipeline are implemented. Current
+phase is model/provider selection research before enabling a paid AI provider.
 
 ## Task Plan
 
@@ -92,7 +92,7 @@ SQLite persistence, and query services.
 - [x] Add pending suggestions view.
 - [x] Add approve/edit/reject controls.
 - [x] Add graph/suggestion audit records.
-- [ ] Expose AI token usage once provider calls exist.
+- [x] Add token usage fields and UI display for future provider calls.
 
 ### 10. Safety Guardrails
 
@@ -108,6 +108,14 @@ SQLite persistence, and query services.
 - [x] Add project-scoped Codex Graphify integration.
 - [x] Generate initial codebase graph.
 - [x] Ignore generated `graphify-out/`.
+
+## Model Selection Research
+
+- [ ] Compare candidate models for reasoning quality, structured JSON reliability, privacy, latency, and real cost.
+- [ ] Estimate monthly cost from Nocheh's expected message volume and token budget.
+- [ ] Run a local eval set for memory extraction, graph extraction, suggestions, and safety refusals.
+- [ ] Select provider/model only after eval results and budget review.
+- [ ] Keep provider disabled by default until explicitly selected.
 
 ## Verification Commands
 

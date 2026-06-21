@@ -8,6 +8,7 @@ import { HistoryImportService } from "./application/services/history-import-serv
 import { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
+import { BedrockMemoryGraphAnalyzer } from "./infrastructure/reasoning/bedrock-memory-graph-analyzer.js";
 import { RuleBasedMemoryGraphAnalyzer } from "./infrastructure/reasoning/rule-based-memory-graph-analyzer.js";
 import { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 import { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
@@ -73,7 +74,7 @@ const useCase = new ProcessIncomingMessageUseCase(
   auditRepository,
   metrics,
   new RuleBasedMemoryExtractor(),
-  new RuleBasedMemoryGraphAnalyzer(),
+  createMemoryGraphAnalyzer(),
   memoryGraphRepository,
   suggestionRepository,
 );
@@ -169,6 +170,31 @@ function createTaskProvider(): TaskProviderPort {
       databaseId,
     },
   );
+}
+
+function createMemoryGraphAnalyzer() {
+  if (process.env.AI_PROVIDER !== "bedrock") {
+    return new RuleBasedMemoryGraphAnalyzer();
+  }
+
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const modelId = process.env.AWS_BEDROCK_MODEL_ID;
+  if (
+    accessKeyId === undefined || accessKeyId.trim().length === 0
+    || secretAccessKey === undefined || secretAccessKey.trim().length === 0
+    || modelId === undefined || modelId.trim().length === 0
+  ) {
+    return new RuleBasedMemoryGraphAnalyzer();
+  }
+
+  return new BedrockMemoryGraphAnalyzer({
+    accessKeyId,
+    secretAccessKey,
+    ...(process.env.AWS_SESSION_TOKEN === undefined ? {} : { sessionToken: process.env.AWS_SESSION_TOKEN }),
+    ...(process.env.AWS_BEDROCK_REGION === undefined ? {} : { region: process.env.AWS_BEDROCK_REGION }),
+    modelId,
+  });
 }
 
 function splitArgs(value: string): readonly string[] {
