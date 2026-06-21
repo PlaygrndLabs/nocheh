@@ -3,6 +3,7 @@ import type {
   MemoryEdge,
   MemoryNode,
 } from "../../domain/memory/memory-graph.js";
+import type { AiTokenUsage } from "../../domain/observability/audit.js";
 import type { Suggestion } from "../../domain/memory/strategic-suggestion.js";
 
 export interface MemoryGraphAnalysis {
@@ -10,11 +11,13 @@ export interface MemoryGraphAnalysis {
   readonly edges: readonly MemoryEdge[];
   readonly suggestions: readonly Suggestion[];
   readonly warnings: readonly string[];
+  readonly tokenUsage?: AiTokenUsage;
 }
 
 export interface MemoryGraphAnalyzerPort {
   analyze(message: IncomingMessage): Promise<MemoryGraphAnalysis>;
 }
+
 
 export class NoopMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   public async analyze(): Promise<MemoryGraphAnalysis> {

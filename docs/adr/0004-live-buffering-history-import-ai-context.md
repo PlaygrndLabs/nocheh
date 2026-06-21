@@ -46,7 +46,9 @@ Add `AssistantContextBuilder` for future AI calls. It builds context from:
 - relevant structured memory records
 - configured token budget
 
-Add `AssistantAiPort` as the provider-agnostic AI boundary. Concrete OpenAI, Anthropic, local model, or other adapters can implement it later without changing Telegram ingestion or memory storage.
+Add `AssistantAiPort` as the provider-agnostic AI boundary. Concrete hosted,
+local, or self-hosted model adapters can implement it later without changing
+Telegram ingestion or memory storage.
 
 Add encrypted local repositories for:
 

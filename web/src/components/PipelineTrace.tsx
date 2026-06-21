@@ -29,6 +29,14 @@ export function PipelineTrace({ records }: { records: AuditRecord[] }): JSX.Elem
             {record.totalLatencyMs.toFixed(0)} ms
           </code>
           <div className="preview">{record.redactedContentPreview}</div>
+          {record.aiTokenUsage !== undefined && (
+            <p className="status-line token-usage">
+              AI tokens: {record.aiTokenUsage.totalTokens.toLocaleString()} total ·{" "}
+              {record.aiTokenUsage.inputTokens.toLocaleString()} in ·{" "}
+              {record.aiTokenUsage.outputTokens.toLocaleString()} out ·{" "}
+              {record.aiTokenUsage.provider}/{record.aiTokenUsage.model}
+            </p>
+          )}
           {record.steps.map((step, index) => (
             <div className="step" key={`${record.id}-${step.name}-${index}`}>
               <span>{step.name}</span>

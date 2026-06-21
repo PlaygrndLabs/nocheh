@@ -5,7 +5,9 @@ import { Card, Notice, PageHeader, StatusFlag, type NoticeMessage } from "../com
 
 export function Setup(): JSX.Element {
   const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [aiKey, setAiKey] = useState("");
+  const [accessKeyId, setAccessKeyId] = useState("");
+  const [secretAccessKey, setSecretAccessKey] = useState("");
+  const [modelId, setModelId] = useState("");
   const [message, setMessage] = useState<NoticeMessage | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -19,9 +21,16 @@ export function Setup(): JSX.Element {
     setSaving(true);
     setMessage(null);
     try {
-      await api.putEnv({ AI_API_KEY: aiKey });
-      setAiKey("");
-      setMessage({ kind: "success", text: "AI API key saved to .env. Restart the server for it to take effect." });
+      await api.putEnv({
+        AI_PROVIDER: "bedrock",
+        AWS_ACCESS_KEY_ID: accessKeyId,
+        AWS_SECRET_ACCESS_KEY: secretAccessKey,
+        AWS_BEDROCK_MODEL_ID: modelId,
+      });
+      setAccessKeyId("");
+      setSecretAccessKey("");
+      setModelId("");
+      setMessage({ kind: "success", text: "Bedrock provider config saved to .env. Restart the server for it to take effect." });
       refresh();
     } catch (error) {
       setMessage({ kind: "error", text: (error as Error).message });
@@ -42,7 +51,8 @@ export function Setup(): JSX.Element {
           <p className="muted">Loading…</p>
         ) : (
           <>
-            <p className="status-line">AI key: <StatusFlag active={status.hasAiKey} /></p>
+            <p className="status-line">AI provider: <b>{status.aiProvider ?? "none"}</b></p>
+            <p className="status-line">Provider ready: <StatusFlag active={status.hasAiKey} /></p>
             <p className="status-line">Bot token: <StatusFlag active={status.hasBotToken} /></p>
             <p className="status-line">Bot connected: <StatusFlag active={status.botConnected} /></p>
             <p className="status-line">Encryption secret: <StatusFlag active={status.encryptionConfigured} /></p>
@@ -51,16 +61,31 @@ export function Setup(): JSX.Element {
         )}
       </Card>
 
-      <Card title="AI API key">
-        <label htmlFor="ai-key">AI_API_KEY</label>
+      <Card title="Optional provider config">
+        <p className="muted">Leave this empty while model research is in progress. Rule-based analysis remains active.</p>
+        <label htmlFor="aws-access-key">AWS_ACCESS_KEY_ID</label>
         <input
-          id="ai-key"
-          type="password"
-          value={aiKey}
-          placeholder="sk-…"
-          onChange={(event) => setAiKey(event.target.value)}
+          id="aws-access-key"
+          value={accessKeyId}
+          placeholder="AKIA..."
+          onChange={(event) => setAccessKeyId(event.target.value)}
         />
-        <button className="action" disabled={saving || aiKey.length === 0} onClick={() => void saveKey()}>
+        <label htmlFor="aws-secret-key">AWS_SECRET_ACCESS_KEY</label>
+        <input
+          id="aws-secret-key"
+          type="password"
+          value={secretAccessKey}
+          placeholder="AWS secret access key"
+          onChange={(event) => setSecretAccessKey(event.target.value)}
+        />
+        <label htmlFor="bedrock-model">AWS_BEDROCK_MODEL_ID</label>
+        <input
+          id="bedrock-model"
+          value={modelId}
+          placeholder="Set only after model selection research"
+          onChange={(event) => setModelId(event.target.value)}
+        />
+        <button className="action" disabled={saving || accessKeyId.length === 0 || secretAccessKey.length === 0 || modelId.length === 0} onClick={() => void saveKey()}>
           <Save size={15} aria-hidden="true" />
           {saving ? "Saving…" : "Save key"}
         </button>

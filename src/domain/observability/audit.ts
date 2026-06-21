@@ -1,5 +1,13 @@
 import type { TaskValidationWarning } from "../tasks/task-validation.js";
 
+export interface AiTokenUsage {
+  readonly provider: string;
+  readonly model: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+}
+
 /** Pipeline step names tracked for each processed message. */
 export type ProcessingStepName =
   | "telegram_message"
@@ -58,4 +66,5 @@ export interface ProcessingAuditRecord {
   readonly extractedTasks: readonly AuditedExtractedTask[];
   readonly errorLogs: readonly string[];
   readonly totalLatencyMs: number;
+  readonly aiTokenUsage?: AiTokenUsage;
 }
