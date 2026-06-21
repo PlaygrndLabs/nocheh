@@ -7,6 +7,11 @@ const injectMock = vi.fn();
 const flushMock = vi.fn();
 const getSettings = vi.fn();
 const putSettings = vi.fn();
+const getBrainGraph = vi.fn();
+const getBrainSuggestions = vi.fn();
+const approveBrainSuggestion = vi.fn();
+const rejectBrainSuggestion = vi.fn();
+const archiveBrainSuggestion = vi.fn();
 
 vi.mock("../api/client.js", () => ({
   api: {
@@ -15,6 +20,11 @@ vi.mock("../api/client.js", () => ({
     flushMock: (...args: unknown[]) => flushMock(...args),
     getSettings: (...args: unknown[]) => getSettings(...args),
     putSettings: (...args: unknown[]) => putSettings(...args),
+    getBrainGraph: (...args: unknown[]) => getBrainGraph(...args),
+    getBrainSuggestions: (...args: unknown[]) => getBrainSuggestions(...args),
+    approveBrainSuggestion: (...args: unknown[]) => approveBrainSuggestion(...args),
+    rejectBrainSuggestion: (...args: unknown[]) => rejectBrainSuggestion(...args),
+    archiveBrainSuggestion: (...args: unknown[]) => archiveBrainSuggestion(...args),
   },
 }));
 
@@ -42,6 +52,11 @@ beforeEach(() => {
   getSettings.mockResolvedValue({ ok: true, settings: { conversationId: "mock-chat-1", analysisMode: "immediate" }, isDefault: false });
   injectMock.mockResolvedValue({ ok: true, results: [] });
   flushMock.mockResolvedValue({ ok: true, flushedMessageCount: 0 });
+  getBrainGraph.mockResolvedValue({ nodes: [], edges: [] });
+  getBrainSuggestions.mockResolvedValue({ suggestions: [] });
+  approveBrainSuggestion.mockResolvedValue({ suggestion: {} });
+  rejectBrainSuggestion.mockResolvedValue({ suggestion: {} });
+  archiveBrainSuggestion.mockResolvedValue({ suggestion: {} });
 });
 
 afterEach(cleanup);
@@ -55,6 +70,7 @@ test("sending runs the brain flow and posts a simulated suggestion with the grap
   await waitFor(() => expect(injectMock).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(screen.getByText(/Nocheh suggestion · simulated/)).toBeTruthy());
   expect(screen.getByText(/Suggestion: log 1 task: ship it/)).toBeTruthy();
+  expect(screen.getByText(/SQLite graph/)).toBeTruthy();
   // System graph is present.
   expect(container.querySelectorAll(".graph-node").length).toBeGreaterThan(0);
 });

@@ -6,7 +6,10 @@ import type { MetricsCollectorPort } from "../../../application/ports/metrics.js
 import type { TelegramClientPort } from "../../../application/ports/telegram-client.js";
 import type { HistoryImportService } from "../../../application/services/history-import-service.js";
 import type { LiveMessageBufferService } from "../../../application/services/live-message-buffer-service.js";
+import type { MemoryGraphRepositoryPort } from "../../../application/ports/memory-graph-repository.js";
 import type { Router } from "../router.js";
+import type { SuggestionRepositoryPort } from "../../../application/ports/suggestion-repository.js";
+import { createBrainRoutes } from "./create-brain-routes.js";
 import { createHistoryRoutes } from "./create-history-routes.js";
 import { createMockRoutes } from "./create-mock-routes.js";
 import { createObservabilityRoutes } from "./create-observability-routes.js";
@@ -22,6 +25,8 @@ export interface ApiDependencies {
   readonly liveProcessor: LiveMessageBufferService;
   readonly settingsRepository: GroupAssistantSettingsRepositoryPort;
   readonly auditRepository: AuditRepositoryPort;
+  readonly memoryGraphRepository: MemoryGraphRepositoryPort;
+  readonly suggestionRepository: SuggestionRepositoryPort;
   readonly metrics: MetricsCollectorPort;
   readonly clock: ClockPort;
 }
@@ -34,6 +39,7 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
   const mock = createMockRoutes(deps.liveProcessor, deps.clock);
   const settings = createSettingsRoutes(deps.settingsRepository, deps.clock);
   const observability = createObservabilityRoutes(deps.auditRepository, deps.metrics);
+  const brain = createBrainRoutes(deps.memoryGraphRepository, deps.suggestionRepository);
 
   router
     .get("/api/setup/status", setup.getStatus)
@@ -49,7 +55,13 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
     .get("/api/metrics", observability.metrics)
     .get("/api/audit", observability.audit)
     .get("/api/conversations", observability.conversations)
-    .get("/api/conversations/:conversationId", observability.conversation);
+    .get("/api/conversations/:conversationId", observability.conversation)
+    .get("/api/brain/graph", brain.graph)
+    .get("/api/brain/suggestions", brain.suggestions)
+    .post("/api/brain/suggestions/:id/approve", brain.approveSuggestion)
+    .post("/api/brain/suggestions/:id/reject", brain.rejectSuggestion)
+    .post("/api/brain/suggestions/:id/archive", brain.archiveSuggestion)
+    .put("/api/brain/suggestions/:id", brain.editSuggestion);
 
   return router;
 }

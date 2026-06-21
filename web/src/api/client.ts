@@ -82,6 +82,35 @@ export interface GroupSettings {
   replyMode: "silent" | "mention" | "active" | "digest";
 }
 
+export interface BrainGraphNode {
+  id: string;
+  kind: string;
+  label: string;
+  status: string;
+  confidence: number;
+}
+
+export interface BrainGraphEdge {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  relation: string;
+  status: string;
+  confidence: number;
+  fact: string;
+}
+
+export interface BrainSuggestion {
+  id: string;
+  type: "strategic" | "action";
+  kind: string;
+  title: string;
+  rationale: string;
+  status: "pending" | "accepted" | "rejected" | "archived" | "converted";
+  riskLevel: "low" | "medium" | "high";
+  confidence: number;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
@@ -124,4 +153,16 @@ export const api = {
       "GET",
       `/api/conversations/${encodeURIComponent(conversationId)}`,
     ),
+  getBrainGraph: () =>
+    request<{ nodes: BrainGraphNode[]; edges: BrainGraphEdge[] }>("GET", "/api/brain/graph"),
+  getBrainSuggestions: (status = "pending") =>
+    request<{ suggestions: BrainSuggestion[] }>("GET", `/api/brain/suggestions?status=${encodeURIComponent(status)}`),
+  approveBrainSuggestion: (id: string) =>
+    request<{ suggestion: BrainSuggestion }>("POST", `/api/brain/suggestions/${encodeURIComponent(id)}/approve`),
+  rejectBrainSuggestion: (id: string) =>
+    request<{ suggestion: BrainSuggestion }>("POST", `/api/brain/suggestions/${encodeURIComponent(id)}/reject`),
+  archiveBrainSuggestion: (id: string) =>
+    request<{ suggestion: BrainSuggestion }>("POST", `/api/brain/suggestions/${encodeURIComponent(id)}/archive`),
+  editBrainSuggestion: (id: string, patch: Partial<Pick<BrainSuggestion, "title" | "rationale" | "riskLevel">>) =>
+    request<{ suggestion: BrainSuggestion }>("PUT", `/api/brain/suggestions/${encodeURIComponent(id)}`, patch),
 };

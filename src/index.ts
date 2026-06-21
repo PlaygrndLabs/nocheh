@@ -11,6 +11,8 @@ export type { IncomingMessageProcessorPort } from "./application/ports/incoming-
 export type { LiveMessageBufferRepositoryPort } from "./application/ports/live-message-buffer-repository.js";
 export type { LoggerPort } from "./application/ports/logger.js";
 export { NoopLogger } from "./application/ports/logger.js";
+export type { MemoryGraphAnalysis, MemoryGraphAnalyzerPort } from "./application/ports/memory-graph-analyzer.js";
+export { NoopMemoryGraphAnalyzer } from "./application/ports/memory-graph-analyzer.js";
 export type {
   ExtractedBlockerCandidate,
   ExtractedDeadlineCandidate,
@@ -157,6 +159,7 @@ export { TaskValidationService, normalizeTaskTitle } from "./domain/tasks/task-v
 export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarningCode } from "./domain/tasks/task-validation.js";
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
 export { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
+export { RuleBasedMemoryGraphAnalyzer } from "./infrastructure/reasoning/rule-based-memory-graph-analyzer.js";
 export { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 export { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-file-store.js";
@@ -200,3 +203,4 @@ export { createStaticHandler } from "./interfaces/http/create-static-handler.js"
 export { registerApiRoutes } from "./interfaces/http/api/register-api-routes.js";
 export type { ApiDependencies } from "./interfaces/http/api/register-api-routes.js";
 export { parseTelegramExport } from "./interfaces/http/api/create-history-routes.js";
+export { createBrainRoutes } from "./interfaces/http/api/create-brain-routes.js";

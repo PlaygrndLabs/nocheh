@@ -4,17 +4,22 @@ import type { AuditRepositoryPort } from "../ports/audit-repository.js";
 import { NoopAuditRepository } from "../ports/audit-repository.js";
 import type { ClockPort } from "../ports/clock.js";
 import type { LoggerPort } from "../ports/logger.js";
+import type { MemoryGraphAnalyzerPort } from "../ports/memory-graph-analyzer.js";
+import { NoopMemoryGraphAnalyzer } from "../ports/memory-graph-analyzer.js";
+import type { MemoryGraphRepositoryPort } from "../ports/memory-graph-repository.js";
 import type { ExtractedMemoryCandidate, MemoryExtractorPort } from "../ports/memory-extractor.js";
 import { NoopMemoryExtractor } from "../ports/memory-extractor.js";
 import type { MemoryRecordRepositoryPort } from "../ports/memory-record-repository.js";
 import type { MetricsCollectorPort } from "../ports/metrics.js";
 import { NoopMetricsCollector } from "../ports/metrics.js";
 import type { SecretDetectorPort } from "../ports/secret-detector.js";
+import type { SuggestionRepositoryPort } from "../ports/suggestion-repository.js";
 import type { TaskExtractorPort } from "../ports/task-extractor.js";
 import type { TaskProviderPort } from "../ports/task-provider.js";
 import type { TaskRepositoryPort } from "../ports/task-repository.js";
 import type { TaskSyncRepositoryPort } from "../ports/task-sync-repository.js";
 import { Task } from "../../domain/tasks/task.js";
+import { createMemoryEdge, createMemoryNode } from "../../domain/memory/memory-graph.js";
 import type { MemoryRecord } from "../../domain/memory/memory-record.js";
 import type { AuditedExtractedTask, ProcessingAuditStep, ProcessingStepName, ProcessingStepStatus } from "../../domain/observability/audit.js";
 import { TaskValidationService } from "../../domain/tasks/task-validation.js";
@@ -26,6 +31,9 @@ export interface ProcessIncomingMessageResult {
   readonly redactedFindingCount: number;
   readonly validationWarningCount: number;
   readonly failedSyncCount: number;
+  readonly createdMemoryGraphNodeIds: readonly string[];
+  readonly createdMemoryGraphEdgeIds: readonly string[];
+  readonly createdSuggestionIds: readonly string[];
 }
 
 /** Coordinates redaction, extraction, local persistence, and basic task sync. */
@@ -44,6 +52,9 @@ export class ProcessIncomingMessageUseCase {
     private readonly auditRepository: AuditRepositoryPort = new NoopAuditRepository(),
     private readonly metrics: MetricsCollectorPort = new NoopMetricsCollector(),
     private readonly memoryExtractor: MemoryExtractorPort = new NoopMemoryExtractor(),
+    private readonly memoryGraphAnalyzer: MemoryGraphAnalyzerPort = new NoopMemoryGraphAnalyzer(),
+    private readonly memoryGraphRepository?: MemoryGraphRepositoryPort,
+    private readonly suggestionRepository?: SuggestionRepositoryPort,
   ) {}
 
   /** Processes a platform-neutral message without persisting raw message text. */
@@ -54,6 +65,9 @@ export class ProcessIncomingMessageUseCase {
     const extractedTasks: AuditedExtractedTask[] = [];
     const createdTaskIds: string[] = [];
     const createdMemoryRecordIds: string[] = [];
+    const createdMemoryGraphNodeIds: string[] = [];
+    const createdMemoryGraphEdgeIds: string[] = [];
+    const createdSuggestionIds: string[] = [];
     let failedSyncCount = 0;
 
     steps.push(step("telegram_message", "succeeded", startedAt, this.clock.now(), {
@@ -93,6 +107,51 @@ export class ProcessIncomingMessageUseCase {
     steps.push(step("memory_persistence", "succeeded", persistenceStartedAt, this.clock.now(), {
       recordCount: memoryCandidates.length,
     }));
+
+    const graphAnalysisStartedAt = this.clock.now();
+    const graphAnalysis = await this.memoryGraphAnalyzer.analyze(sanitizedMessage);
+    steps.push(step("graph_analysis", "succeeded", graphAnalysisStartedAt, this.clock.now(), {
+      nodeCount: graphAnalysis.nodes.length,
+      edgeCount: graphAnalysis.edges.length,
+      suggestionCount: graphAnalysis.suggestions.length,
+      warningCount: graphAnalysis.warnings.length,
+    }));
+
+    if (this.memoryGraphRepository !== undefined) {
+      const graphPersistenceStartedAt = this.clock.now();
+      for (const node of graphAnalysis.nodes) {
+        await this.memoryGraphRepository.saveNode(node);
+        createdMemoryGraphNodeIds.push(node.id);
+      }
+      for (const edge of graphAnalysis.edges) {
+        await this.memoryGraphRepository.saveEdge(edge);
+        createdMemoryGraphEdgeIds.push(edge.id);
+      }
+      steps.push(step("graph_persistence", "succeeded", graphPersistenceStartedAt, this.clock.now(), {
+        nodeCount: graphAnalysis.nodes.length,
+        edgeCount: graphAnalysis.edges.length,
+      }));
+    } else {
+      steps.push(step("graph_persistence", "skipped", this.clock.now(), this.clock.now(), {
+        nodeCount: graphAnalysis.nodes.length,
+        edgeCount: graphAnalysis.edges.length,
+      }));
+    }
+
+    if (this.suggestionRepository !== undefined) {
+      const suggestionPersistenceStartedAt = this.clock.now();
+      for (const suggestion of graphAnalysis.suggestions) {
+        await this.suggestionRepository.save(suggestion);
+        createdSuggestionIds.push(suggestion.id);
+      }
+      steps.push(step("suggestion_persistence", "succeeded", suggestionPersistenceStartedAt, this.clock.now(), {
+        suggestionCount: graphAnalysis.suggestions.length,
+      }));
+    } else {
+      steps.push(step("suggestion_persistence", "skipped", this.clock.now(), this.clock.now(), {
+        suggestionCount: graphAnalysis.suggestions.length,
+      }));
+    }
 
     const extractionStartedAt = this.clock.now();
     const candidates = await this.taskExtractor.extractTasks(sanitizedMessage);
@@ -156,6 +215,9 @@ export class ProcessIncomingMessageUseCase {
       };
       await this.memoryRecordRepository.save(taskMemoryRecord);
       createdMemoryRecordIds.push(taskMemoryRecord.id);
+      const taskGraph = await this.persistTaskGraph(task, candidate.confidence);
+      createdMemoryGraphNodeIds.push(...taskGraph.nodeIds);
+      createdMemoryGraphEdgeIds.push(...taskGraph.edgeIds);
       steps.push(step("persistence", "succeeded", persistenceStartedAt, this.clock.now(), {
         taskId: task.id,
       }));
@@ -255,6 +317,9 @@ export class ProcessIncomingMessageUseCase {
     return {
       createdTaskIds,
       createdMemoryRecordIds,
+      createdMemoryGraphNodeIds,
+      createdMemoryGraphEdgeIds,
+      createdSuggestionIds,
       redactedFindingCount: redacted.findings.length,
       validationWarningCount: validationWarnings.length,
       failedSyncCount,
@@ -271,6 +336,53 @@ export class ProcessIncomingMessageUseCase {
       ...(candidate.project === undefined ? {} : { project: candidate.project }),
       ...memoryPayload(candidate),
     };
+  }
+
+  private async persistTaskGraph(task: Task, confidence: number): Promise<{ readonly nodeIds: readonly string[]; readonly edgeIds: readonly string[] }> {
+    if (this.memoryGraphRepository === undefined) {
+      return { nodeIds: [], edgeIds: [] };
+    }
+
+    const now = this.clock.now();
+    const makNode = createMemoryNode({
+      id: "person:mak",
+      kind: "person",
+      label: "Mak",
+      scope: "user",
+      source: task.source,
+      confidence: 1,
+      payload: { payloadKind: "person", role: "owner" },
+      now,
+    });
+    const taskNode = createMemoryNode({
+      id: `task:${task.id}`,
+      kind: "task",
+      label: task.title,
+      scope: "conversation",
+      source: task.source,
+      confidence,
+      payload: {
+        status: task.status,
+        priority: task.priority,
+        ...(task.description === undefined ? {} : { description: task.description }),
+      },
+      now,
+    });
+    const taskEdge = createMemoryEdge({
+      id: `edge:mak-task:${task.id}`,
+      fromNodeId: makNode.id,
+      toNodeId: taskNode.id,
+      relation: "PERSON_OWNS_TASK",
+      fact: `Mak owns task: ${task.title}`,
+      source: task.source,
+      confidence,
+      now,
+    });
+
+    await this.memoryGraphRepository.saveNode(makNode);
+    await this.memoryGraphRepository.saveNode(taskNode);
+    await this.memoryGraphRepository.saveEdge(taskEdge);
+    return { nodeIds: [makNode.id, taskNode.id], edgeIds: [taskEdge.id] };
   }
 }
 

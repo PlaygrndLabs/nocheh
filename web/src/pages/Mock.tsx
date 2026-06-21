@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrainCircuit, Check, CheckCircle2, Database, Gauge, GitBranch, Lightbulb, ListChecks, Lock, Pencil, Play, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
-import { api, type AuditRecord, type GroupSettings } from "../api/client.js";
+import { api, type AuditRecord, type BrainGraphEdge, type BrainGraphNode, type BrainSuggestion, type GroupSettings } from "../api/client.js";
 import { GroupChat } from "../components/GroupChat.js";
 import { SystemGraph } from "../components/SystemGraph.js";
 import { Card, Notice, PageHeader, type NoticeMessage } from "../components/ui.js";
@@ -31,11 +31,18 @@ const SCENARIOS = [
   },
 ] as const;
 
+interface LiveBrainState {
+  readonly nodes: readonly BrainGraphNode[];
+  readonly edges: readonly BrainGraphEdge[];
+  readonly suggestions: readonly BrainSuggestion[];
+}
+
 export function Mock(): JSX.Element {
   const [conversationId, setConversationId] = useState("mock-chat-1");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<NoticeMessage | null>(null);
   const [settings, setSettings] = useState<GroupSettings | null>(null);
+  const [liveBrain, setLiveBrain] = useState<LiveBrainState>({ nodes: [], edges: [], suggestions: [] });
 
   const sim = useSimulation(conversationId);
   const ingestRef = useRef(sim.ingestRecords);
@@ -64,6 +71,21 @@ export function Mock(): JSX.Element {
 
   useEffect(loadSettings, [loadSettings]);
 
+  const loadBrain = useCallback((): void => {
+    Promise.all([
+      api.getBrainGraph(),
+      api.getBrainSuggestions("pending"),
+    ])
+      .then(([graph, suggestions]) => setLiveBrain({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        suggestions: suggestions.suggestions,
+      }))
+      .catch(() => setLiveBrain({ nodes: [], edges: [], suggestions: [] }));
+  }, []);
+
+  useEffect(loadBrain, [loadBrain]);
+
   const pollForResults = useCallback(async (): Promise<number> => {
     for (let attempt = 0; attempt < POLL_MAX_TRIES; attempt += 1) {
       await delay(POLL_INTERVAL_MS);
@@ -88,6 +110,7 @@ export function Mock(): JSX.Element {
     try {
       await api.injectMock([{ conversationId, text: message, senderDisplayName: sim.activeMemberName }]);
       const added = await pollForResults();
+      loadBrain();
       if (added === 0) {
         setNotice({
           kind: "success",
@@ -101,7 +124,7 @@ export function Mock(): JSX.Element {
     } finally {
       setBusy(false);
     }
-  }, [conversationId, pollForResults, settings, sim]);
+  }, [conversationId, loadBrain, pollForResults, settings, sim]);
 
   const runScenario = useCallback(async (message: string): Promise<void> => {
     await send(message);
@@ -113,12 +136,13 @@ export function Mock(): JSX.Element {
     try {
       await api.flushMock(conversationId);
       await pollForResults();
+      loadBrain();
     } catch (error) {
       setNotice({ kind: "error", text: (error as Error).message });
     } finally {
       setBusy(false);
     }
-  }, [conversationId, pollForResults]);
+  }, [conversationId, loadBrain, pollForResults]);
 
   const setImmediate = useCallback(async (): Promise<void> => {
     setBusy(true);
@@ -191,7 +215,7 @@ export function Mock(): JSX.Element {
         </div>
       </Card>
 
-      <BrainConsole preview={brainPreview} />
+      <BrainConsole preview={brainPreview} live={liveBrain} onSuggestionAction={loadBrain} />
 
       <div className="sim-split">
         <Card title="Brain flow · live trace">
@@ -219,7 +243,15 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function BrainConsole({ preview }: { readonly preview: BrainPreview }): JSX.Element {
+function BrainConsole({
+  preview,
+  live,
+  onSuggestionAction,
+}: {
+  readonly preview: BrainPreview;
+  readonly live: LiveBrainState;
+  readonly onSuggestionAction: () => void;
+}): JSX.Element {
   return (
     <section className="brain-console" aria-label="Nocheh brain simulator">
       <div className="brain-metrics">
@@ -229,6 +261,13 @@ function BrainConsole({ preview }: { readonly preview: BrainPreview }): JSX.Elem
         <Metric icon={<Lightbulb size={15} aria-hidden="true" />} label="Suggestions" value={preview.metrics.suggestions} />
         <Metric icon={<Lock size={15} aria-hidden="true" />} label="Blocked" value={preview.metrics.blocked} />
         <Metric icon={<Gauge size={15} aria-hidden="true" />} label="Est. tokens" value={preview.metrics.estimatedTokens} />
+      </div>
+
+      <div className="live-brain-strip" aria-label="Persisted brain store">
+        <span><Database size={14} aria-hidden="true" /> SQLite graph</span>
+        <b>{live.nodes.length.toLocaleString()} nodes</b>
+        <b>{live.edges.length.toLocaleString()} edges</b>
+        <b>{live.suggestions.length.toLocaleString()} pending</b>
       </div>
 
       <div className="brain-stage-strip">
@@ -276,7 +315,14 @@ function BrainConsole({ preview }: { readonly preview: BrainPreview }): JSX.Elem
         <section className="brain-panel suggestion-panel">
           <PanelTitle icon={<Lightbulb size={15} aria-hidden="true" />} title="Pending suggestions approval" />
           <div className="suggestion-list">
-            {preview.suggestions.map((suggestion) => <SuggestionRow key={`${suggestion.kind}-${suggestion.title}`} suggestion={suggestion} />)}
+            {preview.suggestions.map((suggestion) => (
+              <SuggestionRow
+                key={`${suggestion.kind}-${suggestion.title}`}
+                suggestion={suggestion}
+                liveSuggestion={matchLiveSuggestion(live.suggestions, suggestion)}
+                onAction={onSuggestionAction}
+              />
+            ))}
           </div>
         </section>
 
@@ -329,7 +375,27 @@ function MemoryRow({ memory }: { readonly memory: PreviewMemory }): JSX.Element 
   );
 }
 
-function SuggestionRow({ suggestion }: { readonly suggestion: PreviewSuggestion }): JSX.Element {
+function SuggestionRow({
+  suggestion,
+  liveSuggestion,
+  onAction,
+}: {
+  readonly suggestion: PreviewSuggestion;
+  readonly liveSuggestion: BrainSuggestion | undefined;
+  readonly onAction: () => void;
+}): JSX.Element {
+  const act = (action: "approve" | "reject" | "archive"): void => {
+    if (liveSuggestion === undefined) {
+      return;
+    }
+    const request = action === "approve"
+      ? api.approveBrainSuggestion(liveSuggestion.id)
+      : action === "reject"
+        ? api.rejectBrainSuggestion(liveSuggestion.id)
+        : api.archiveBrainSuggestion(liveSuggestion.id);
+    request.then(onAction).catch(() => undefined);
+  };
+
   return (
     <article className={`suggestion-row ${suggestion.status}`}>
       <div>
@@ -344,18 +410,26 @@ function SuggestionRow({ suggestion }: { readonly suggestion: PreviewSuggestion 
         <span>risk {suggestion.risk}</span>
       </div>
       <div className="approval-actions" aria-label={`Approval controls for ${suggestion.title}`}>
-        <button type="button" title="Approve suggestion" disabled={suggestion.status === "blocked"}>
+        <button type="button" title="Approve suggestion" disabled={suggestion.status === "blocked" || liveSuggestion === undefined} onClick={() => act("approve")}>
           <Check size={13} aria-hidden="true" />
         </button>
         <button type="button" title="Edit suggestion">
           <Pencil size={13} aria-hidden="true" />
         </button>
-        <button type="button" title="Reject suggestion">
+        <button type="button" title="Reject suggestion" disabled={liveSuggestion === undefined} onClick={() => act("reject")}>
           <X size={13} aria-hidden="true" />
         </button>
       </div>
     </article>
   );
+}
+
+function matchLiveSuggestion(
+  suggestions: readonly BrainSuggestion[],
+  previewSuggestion: PreviewSuggestion,
+): BrainSuggestion | undefined {
+  const previewTitle = previewSuggestion.title.toLowerCase();
+  return suggestions.find((suggestion) => suggestion.title.toLowerCase() === previewTitle);
 }
 
 function GuardrailRow({ guardrail }: { readonly guardrail: PreviewGuardrail }): JSX.Element {
