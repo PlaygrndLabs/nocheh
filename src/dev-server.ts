@@ -8,6 +8,7 @@ import { HistoryImportService } from "./application/services/history-import-serv
 import { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
+import { RuleBasedMemoryGraphAnalyzer } from "./infrastructure/reasoning/rule-based-memory-graph-analyzer.js";
 import { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 import { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
 import { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
@@ -16,7 +17,9 @@ import { openSqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
 import { SqliteAuditRepository } from "./infrastructure/sqlite/sqlite-audit-repository.js";
 import { SqliteGroupAssistantSettingsRepository } from "./infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
 import { SqliteLiveMessageBufferRepository } from "./infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
+import { SqliteMemoryGraphRepository } from "./infrastructure/sqlite/sqlite-memory-graph-repository.js";
 import { SqliteMemoryRecordRepository } from "./infrastructure/sqlite/sqlite-memory-record-repository.js";
+import { SqliteSuggestionRepository } from "./infrastructure/sqlite/sqlite-suggestion-repository.js";
 import { SqliteTaskRepository } from "./infrastructure/sqlite/sqlite-task-repository.js";
 import { SqliteTaskSyncRepository } from "./infrastructure/sqlite/sqlite-task-sync-repository.js";
 import { StdioMcpClient } from "./infrastructure/tasks/stdio-mcp-client.js";
@@ -50,6 +53,8 @@ const telegramClient = new TelegramHttpClient();
 
 const taskRepository = new SqliteTaskRepository(database, encryption);
 const memoryRepository = new SqliteMemoryRecordRepository(database, encryption);
+const memoryGraphRepository = new SqliteMemoryGraphRepository(database, encryption);
+const suggestionRepository = new SqliteSuggestionRepository(database, encryption);
 const syncRepository = new SqliteTaskSyncRepository(database, encryption);
 const auditRepository = new SqliteAuditRepository(database, encryption);
 const settingsRepository = new SqliteGroupAssistantSettingsRepository(database);
@@ -68,6 +73,9 @@ const useCase = new ProcessIncomingMessageUseCase(
   auditRepository,
   metrics,
   new RuleBasedMemoryExtractor(),
+  new RuleBasedMemoryGraphAnalyzer(),
+  memoryGraphRepository,
+  suggestionRepository,
 );
 
 const liveProcessor = new LiveMessageBufferService(
@@ -100,6 +108,8 @@ const apiRouter = registerApiRoutes(new Router(), {
   liveProcessor,
   settingsRepository,
   auditRepository,
+  memoryGraphRepository,
+  suggestionRepository,
   metrics,
   clock,
 });
