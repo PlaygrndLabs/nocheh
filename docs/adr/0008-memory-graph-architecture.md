@@ -17,6 +17,9 @@ first graph implementation in SQLite preserves the current deployment model and
 avoids adding graph database operations before the product proves that it needs
 them.
 
+This phase can create the graph schema from scratch. Do not spend effort on
+backward-compatible graph migrations until the graph model is proven.
+
 ## Decision
 
 Add explicit memory graph records:
@@ -140,8 +143,8 @@ Tradeoffs:
   need a dedicated graph or vector/graph hybrid store.
 - Encrypted payloads limit deep SQL filtering, so frequently queried fields must
   be promoted to indexed columns deliberately.
-- The graph model adds schema and migration complexity before the AI analyzer is
-  fully implemented.
+- The graph model adds schema complexity before the AI analyzer is fully
+  implemented.
 
 ## Guardrails
 

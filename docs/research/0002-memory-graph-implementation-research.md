@@ -67,6 +67,11 @@ Use this split:
 If a payload field must be searched often, promote it to a normal indexed column
 instead of relying on ad hoc JSON queries.
 
+For the first graph implementation, create the SQLite graph schema from scratch.
+Do not design a compatibility migration layer yet. The graph tables are new, and
+the current priority is a clean model that is easy to change while the product
+shape is still settling.
+
 ### Provider-Neutral AI Output Validation
 
 Use JSON Schema as the provider-neutral contract for AI analysis output. JSON
