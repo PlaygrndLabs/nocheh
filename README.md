@@ -362,6 +362,8 @@ docs                Short architecture notes and ADRs
 
 ## Docs
 
+- [Task Plan](TASK.md)
+- [Development Tooling](docs/development-tooling.md)
 - [ADR 0001: Phase 1 Core Processing](docs/adr/0001-phase-1-core-processing.md)
 - [Phase 1.5 Observability](docs/observability-architecture.md)
 - [ADR 0002: Phase 1.5 Validation and Observability](docs/adr/0002-phase-1-5-validation-observability.md)
