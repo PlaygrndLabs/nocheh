@@ -17,8 +17,10 @@ test("buildBrainPreview creates domain memories, graph edges, and blocked tradin
   expect(preview.metrics.messages).toBe(1);
   expect(preview.memories.some((memory) => memory.type === "LearningPlan")).toBe(true);
   expect(preview.memories.some((memory) => memory.type === "ContentPlan")).toBe(true);
+  expect(preview.nodes.some((node) => node.kind === "LearningPlan")).toBe(true);
   expect(preview.edges.some((edge) => edge.relation === "GOAL_HAS_ROUTINE")).toBe(true);
   expect(preview.suggestions.some((suggestion) => suggestion.status === "blocked")).toBe(true);
+  expect(preview.auditEvents.some((event) => event.status === "blocked")).toBe(true);
   expect(preview.guardrails.some((guardrail) => guardrail.label === "Trading boundary" && guardrail.status === "blocked")).toBe(true);
 });
 

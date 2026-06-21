@@ -13,6 +13,7 @@ export function openSqliteDatabase(databasePath: string): SqliteDatabase {
   database.pragma("journal_mode = WAL");
   database.pragma("foreign_keys = ON");
   applyMigrations(database);
+  applyMemoryGraphSchema(database);
   return database;
 }
 
@@ -105,4 +106,69 @@ function applyMigrations(database: SqliteDatabase): void {
   });
 
   migrate();
+}
+
+function applyMemoryGraphSchema(database: SqliteDatabase): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS memory_nodes (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      status TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      source TEXT NOT NULL,
+      aliases TEXT NOT NULL,
+      summary TEXT,
+      payload TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_nodes_kind_scope_status
+      ON memory_nodes(kind, scope, status);
+
+    CREATE TABLE IF NOT EXISTS memory_edges (
+      id TEXT PRIMARY KEY,
+      from_node_id TEXT NOT NULL,
+      to_node_id TEXT NOT NULL,
+      relation TEXT NOT NULL,
+      status TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      valid_from TEXT,
+      valid_until TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      source TEXT NOT NULL,
+      fact TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      FOREIGN KEY(from_node_id) REFERENCES memory_nodes(id) ON DELETE CASCADE,
+      FOREIGN KEY(to_node_id) REFERENCES memory_nodes(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_edges_relation_status
+      ON memory_edges(relation, status);
+    CREATE INDEX IF NOT EXISTS idx_memory_edges_from_status
+      ON memory_edges(from_node_id, status);
+    CREATE INDEX IF NOT EXISTS idx_memory_edges_to_status
+      ON memory_edges(to_node_id, status);
+
+    CREATE TABLE IF NOT EXISTS suggestions (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL,
+      risk_level TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      source TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_suggestions_status_updated
+      ON suggestions(status, updated_at);
+  `);
 }

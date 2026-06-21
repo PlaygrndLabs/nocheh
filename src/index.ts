@@ -22,10 +22,12 @@ export type {
 } from "./application/ports/memory-extractor.js";
 export { NoopMemoryExtractor } from "./application/ports/memory-extractor.js";
 export type { MemoryRecordRepositoryPort } from "./application/ports/memory-record-repository.js";
+export type { MemoryGraphRepositoryPort } from "./application/ports/memory-graph-repository.js";
 export type { MemoryQuery, MemoryRetrievalPort, MemorySearchResult } from "./application/ports/memory-retrieval.js";
 export type { MetricsCollectorPort, MetricsSnapshot } from "./application/ports/metrics.js";
 export { NoopMetricsCollector } from "./application/ports/metrics.js";
 export type { SecretDetectorPort } from "./application/ports/secret-detector.js";
+export type { SuggestionRepositoryPort } from "./application/ports/suggestion-repository.js";
 export type { TaskExtractorPort } from "./application/ports/task-extractor.js";
 export type { ExternalTask, TaskProviderPort } from "./application/ports/task-provider.js";
 export type { TaskRepositoryPort } from "./application/ports/task-repository.js";
@@ -38,7 +40,17 @@ export { HistoryImportService } from "./application/services/history-import-serv
 export type { HistoryImportMessage, HistoryImportOptions, HistoryImportResult } from "./application/services/history-import-service.js";
 export { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 export type { LiveMessageBufferResult } from "./application/services/live-message-buffer-service.js";
+export { MemoryGraphQueryService } from "./application/services/memory-graph-query-service.js";
+export type { MemoryGraphNeighborhood } from "./application/services/memory-graph-query-service.js";
 export { MemoryQueryService } from "./application/services/memory-query-service.js";
+export { SuggestionService } from "./application/services/suggestion-service.js";
+export { validateAiAnalysisOutput } from "./application/services/ai-analysis-contract.js";
+export type {
+  AiAnalysisItemEnvelope,
+  AiAnalysisValidationOptions,
+  AiAnalysisWarning,
+  ProviderNeutralAiAnalysisOutput,
+} from "./application/services/ai-analysis-contract.js";
 export { ConversationSummaryService } from "./domain/memory/conversation-summary.js";
 export type { CreateConversationSummaryInput } from "./domain/memory/conversation-summary.js";
 export type { BufferedMessage } from "./domain/assistant/buffered-message.js";
@@ -76,6 +88,17 @@ export {
 export type {
   CreateMemoryEdgeInput,
   CreateMemoryNodeInput,
+  AssetMemoryPayload,
+  ContentPlanMemoryPayload,
+  ExpandedMemoryPayload,
+  GoalMemoryPayload,
+  GoalStatus,
+  IdeaMemoryPayload,
+  IdeaStatus,
+  InsightMemoryPayload,
+  InvestmentThesisMemoryPayload,
+  LearningPlanMemoryPayload,
+  MemoryPayloadKind,
   MemoryEdge,
   MemoryEdgeId,
   MemoryGraphPayload,
@@ -86,7 +109,38 @@ export type {
   MemoryNodeId,
   MemoryNodeKind,
   MemoryRelation,
+  OpportunityMemoryPayload,
+  PersonMemoryPayload,
+  PersonalRuleMemoryPayload,
+  PreferenceMemoryPayload,
+  RiskLevel,
+  RiskMemoryPayload,
+  RoutineCadence,
+  RoutineExperimentMemoryPayload,
+  RoutineMemoryPayload,
+  SkillMemoryPayload,
+  StyleRuleMemoryPayload,
 } from "./domain/memory/memory-graph.js";
+export {
+  acceptSuggestion,
+  archiveSuggestion,
+  convertSuggestion,
+  createActionSuggestion,
+  createStrategicSuggestion,
+  rejectSuggestion,
+} from "./domain/memory/strategic-suggestion.js";
+export type {
+  ActionSuggestion,
+  CreateActionSuggestionInput,
+  CreateStrategicSuggestionInput,
+  ExternalActionKind,
+  StrategicSuggestion,
+  StrategicSuggestionKind,
+  Suggestion,
+  SuggestionId,
+  SuggestionRiskLevel,
+  SuggestionStatus,
+} from "./domain/memory/strategic-suggestion.js";
 export type {
   AuditedExtractedTask,
   ProcessingAuditRecord,
@@ -117,7 +171,9 @@ export type { SqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js"
 export { SqliteAuditRepository } from "./infrastructure/sqlite/sqlite-audit-repository.js";
 export { SqliteGroupAssistantSettingsRepository } from "./infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
 export { SqliteLiveMessageBufferRepository } from "./infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
+export { SqliteMemoryGraphRepository } from "./infrastructure/sqlite/sqlite-memory-graph-repository.js";
 export { SqliteMemoryRecordRepository } from "./infrastructure/sqlite/sqlite-memory-record-repository.js";
+export { SqliteSuggestionRepository } from "./infrastructure/sqlite/sqlite-suggestion-repository.js";
 export { SqliteTaskRepository } from "./infrastructure/sqlite/sqlite-task-repository.js";
 export { SqliteTaskSyncRepository } from "./infrastructure/sqlite/sqlite-task-sync-repository.js";
 export { TelegramUpdateMapper } from "./infrastructure/messaging/telegram/telegram-update-mapper.js";

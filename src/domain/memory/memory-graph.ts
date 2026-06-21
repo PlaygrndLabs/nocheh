@@ -51,6 +51,156 @@ export type MemoryRelation =
 
 export type MemoryGraphPayload = Readonly<Record<string, unknown>>;
 
+export type MemoryPayloadKind =
+  | "person"
+  | "preference"
+  | "style_rule"
+  | "personal_rule"
+  | "skill"
+  | "goal"
+  | "idea"
+  | "opportunity"
+  | "insight"
+  | "routine"
+  | "routine_experiment"
+  | "asset"
+  | "risk"
+  | "content_plan"
+  | "learning_plan"
+  | "investment_thesis";
+
+export type GoalStatus = "suggested" | "active" | "paused" | "completed" | "dropped";
+export type IdeaStatus = "suggested" | "exploring" | "accepted" | "rejected" | "converted";
+export type RoutineCadence = "daily" | "weekly" | "monthly" | "custom";
+export type RiskLevel = "low" | "medium" | "high";
+
+export interface PersonMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "person";
+  readonly role?: string;
+  readonly relationship?: string;
+  readonly timezone?: string;
+  readonly communicationNotes?: readonly string[];
+}
+
+export interface PreferenceMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "preference";
+  readonly area: string;
+  readonly preference: string;
+}
+
+export interface StyleRuleMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "style_rule";
+  readonly rule: string;
+  readonly examples?: readonly string[];
+}
+
+export interface PersonalRuleMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "personal_rule";
+  readonly rule: string;
+  readonly reason?: string;
+}
+
+export interface SkillMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "skill";
+  readonly level?: "learning" | "working" | "strong";
+  readonly evidence?: readonly string[];
+  readonly targetLevel?: string;
+}
+
+export interface GoalMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "goal";
+  readonly status: GoalStatus;
+  readonly desiredOutcome: string;
+  readonly horizon?: string;
+  readonly successMetric?: string;
+}
+
+export interface IdeaMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "idea";
+  readonly status: IdeaStatus;
+  readonly hypothesis: string;
+  readonly nextStep?: string;
+}
+
+export interface OpportunityMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "opportunity";
+  readonly opportunity: string;
+  readonly upside?: string;
+  readonly constraints?: readonly string[];
+}
+
+export interface InsightMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "insight";
+  readonly insight: string;
+  readonly implication?: string;
+}
+
+export interface RoutineMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "routine";
+  readonly cadence: RoutineCadence;
+  readonly habit: string;
+  readonly target?: string;
+}
+
+export interface RoutineExperimentMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "routine_experiment";
+  readonly hypothesis: string;
+  readonly durationDays: number;
+  readonly measurement: string;
+}
+
+export interface AssetMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "asset";
+  readonly assetType: "cash" | "crypto" | "equity" | "domain" | "content" | "other";
+  readonly description: string;
+}
+
+export interface RiskMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "risk";
+  readonly level: RiskLevel;
+  readonly risk: string;
+  readonly mitigation?: string;
+}
+
+export interface ContentPlanMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "content_plan";
+  readonly platform: "x" | "linkedin" | "blog" | "newsletter" | "other";
+  readonly audience: string;
+  readonly angle: string;
+}
+
+export interface LearningPlanMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "learning_plan";
+  readonly topic: string;
+  readonly currentLevel?: string;
+  readonly targetOutcome: string;
+}
+
+export interface InvestmentThesisMemoryPayload extends MemoryGraphPayload {
+  readonly payloadKind: "investment_thesis";
+  readonly market: "crypto" | "equity" | "startup" | "other";
+  readonly thesis: string;
+  readonly invalidationSignal?: string;
+}
+
+export type ExpandedMemoryPayload =
+  | PersonMemoryPayload
+  | PreferenceMemoryPayload
+  | StyleRuleMemoryPayload
+  | PersonalRuleMemoryPayload
+  | SkillMemoryPayload
+  | GoalMemoryPayload
+  | IdeaMemoryPayload
+  | OpportunityMemoryPayload
+  | InsightMemoryPayload
+  | RoutineMemoryPayload
+  | RoutineExperimentMemoryPayload
+  | AssetMemoryPayload
+  | RiskMemoryPayload
+  | ContentPlanMemoryPayload
+  | LearningPlanMemoryPayload
+  | InvestmentThesisMemoryPayload;
+
 /** Source reference for graph facts; raw chat text is intentionally excluded. */
 export interface MemoryGraphSource extends SourceReference {
   readonly recordId?: string;
