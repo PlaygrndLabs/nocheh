@@ -65,6 +65,26 @@ Nocheh should understand both:
 * Track idea lifecycle: captured, explored, accepted, rejected, archived, or
   converted into a project/task.
 
+### Life and Business Operating Domains
+
+Nocheh should support Sam across personal and business domains, including:
+
+* Startups, startup partners, equity/role context, risks, opportunities, and
+  strategic decisions.
+* Freelance projects, clients, deliverables, invoices, deadlines, and follow-ups.
+* Coaching Sam toward better decisions, stronger routines, and clearer goals.
+* Project and task management across work, personal life, and learning.
+* English learning goals, practice routines, vocabulary, writing feedback, and
+  communication improvement.
+* X/Twitter growth: content ideas, drafts, posting routines, audience insights,
+  experiments, and performance notes.
+* Asset tracking: domains, projects, tools, subscriptions, accounts,
+  investments, wallets, and other owned resources.
+* Crypto trading support: thesis, risk rules, watchlists, trade journal,
+  lessons, and decision support. Nocheh must not auto-trade.
+* Personal and business advice grounded in Sam's goals, memory, relationships,
+  routines, constraints, and accepted rules.
+
 ### Routine Improvement
 
 * Identify routines Sam already follows across work, communication, planning,
@@ -98,6 +118,11 @@ Maintain structured long-term memory and a knowledge graph for:
 * Insights
 * Routines
 * Routine experiments
+* Assets
+* Risks
+* Content plans
+* Learning plans
+* Investment theses
 
 The system stores knowledge, not raw chat history. Raw or near-raw messages are
 temporary working data only.

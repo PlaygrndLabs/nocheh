@@ -18,6 +18,11 @@ new ideas from accumulated context. It should help improve routines and repeated
 behaviors through small, reviewable experiments. Telegram is the first adapter,
 not the product boundary.
 
+The product must cover Sam's real operating domains: startups and partners,
+freelance work, coaching and personal growth, projects and tasks, English
+learning, X/Twitter growth, asset management, crypto trading decision support,
+and personal/business advice.
+
 The assistant must avoid two failure modes:
 
 - becoming a raw chat archive that stores too much sensitive data
@@ -102,7 +107,8 @@ implemented.
      and `Summary`.
    - Add planned memory categories for `Person`, `Preference`, `StyleRule`,
      `PersonalRule`, `Skill`, `Goal`, `Idea`, `Opportunity`, `Insight`,
-     `Routine`, and `RoutineExperiment`.
+     `Routine`, `RoutineExperiment`, `Asset`, `Risk`, `ContentPlan`,
+     `LearningPlan`, and `InvestmentThesis`.
    - Continue storing source references and confidence scores without raw
      long-term message text.
 
@@ -142,6 +148,9 @@ Positive:
   experiments instead of only managing one-off work.
 - Graph memory gives Nocheh a way to reason over relationships, not just search
   isolated records.
+- The architecture can support startups, freelance work, learning, content,
+  assets, trading decision support, and personal growth without becoming a set
+  of disconnected mini-apps.
 - Telegram remains useful without locking core logic to Telegram.
 - Structured memory protects privacy better than raw history storage.
 - Human approval prevents accidental impersonation or unintended action.
@@ -171,6 +180,8 @@ Tradeoffs:
 - Do not auto-send replies or auto-execute external actions without Sam approval.
 - Do not treat generated ideas, hypotheses, or proposed goals as accepted facts.
 - Do not treat routine suggestions as obligations unless Sam accepts them.
+- Do not auto-trade, make financial decisions, or present trading support as
+  guaranteed financial advice.
 - Do not claim clone/personality behavior is implemented before style memory,
   approval, and provider-backed analysis exist.
 - Keep cost controls configurable and visible.

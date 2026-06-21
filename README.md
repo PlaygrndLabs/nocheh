@@ -61,6 +61,26 @@ draft, suggest, and generate ideas; it must not impersonate Sam or auto-act by
 default. Strategic suggestions should stay separate from facts until Sam accepts
 them. Routine suggestions should be optional experiments, not pressure.
 
+## Operating Domains
+
+Nocheh should eventually help across Sam's personal and business operating
+system:
+
+- startups, startup partners, roles, risks, strategic decisions, and
+  opportunities
+- freelance projects, clients, deliverables, invoices, deadlines, and follow-ups
+- coaching, personal growth, better decisions, and routine improvement
+- project and task management across business, personal life, and learning
+- English learning goals, practice routines, vocabulary, and writing feedback
+- X/Twitter growth: content ideas, drafts, posting routines, audience insights,
+  experiments, and performance notes
+- asset tracking: domains, projects, tools, subscriptions, accounts,
+  investments, wallets, and owned resources
+- crypto trading support: thesis, risk rules, watchlists, trade journal,
+  lessons, and decision support, without auto-trading
+- personal and business advice grounded in memory, goals, relationships,
+  routines, constraints, and accepted rules
+
 ## Roadmap
 
 1. **Docs and product alignment**
@@ -142,6 +162,11 @@ Planned memory types:
 - `Insight`
 - `Routine`
 - `RoutineExperiment`
+- `Asset`
+- `Risk`
+- `ContentPlan`
+- `LearningPlan`
+- `InvestmentThesis`
 
 Planned graph records:
 

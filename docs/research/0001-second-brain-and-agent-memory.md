@@ -67,6 +67,10 @@ ideas, decisions, blockers, routines, preferences, areas, resources, and skills.
 Graph edges should be typed facts with source, confidence, and temporal
 validity.
 
+The graph must be broad enough for Sam's real operating domains: startups,
+partners, freelance work, coaching, routines, English learning, X/Twitter
+growth, assets, crypto trading decision support, and personal/business advice.
+
 ### Retrieval
 
 Best pattern:
@@ -155,7 +159,8 @@ Use four durable memory layers:
    - durable structured facts
    - includes tasks, decisions, deadlines, blockers, summaries, people,
      preferences, projects, areas, resources, goals, ideas, opportunities,
-     insights, routines, routine experiments, and skills
+     insights, routines, routine experiments, skills, assets, risks, content
+     plans, learning plans, and investment theses
    - no raw message text
 
 3. `RelationshipMemory`
@@ -199,7 +204,8 @@ Graph node records should have:
 
 - `id`
 - `kind`: `person`, `project`, `conversation`, `task`, `decision`, `goal`,
-  `idea`, `routine`, `area`, `resource`, `skill`, or `concept`
+  `idea`, `routine`, `area`, `resource`, `skill`, `asset`, `risk`,
+  `content_plan`, `learning_plan`, `investment_thesis`, or `concept`
 - `label`
 - `summary`
 - `aliases`
@@ -239,6 +245,13 @@ Initial relation names should be explicit and queryable:
 - `ROUTINE_SUPPORTS_AREA`
 - `PREFERENCE_GUIDES_STYLE`
 - `SKILL_SUPPORTS_TASK`
+- `PARTNER_WORKS_ON_STARTUP`
+- `CLIENT_OWNS_PROJECT`
+- `CONTENT_PLAN_SUPPORTS_GOAL`
+- `LEARNING_PLAN_BUILDS_SKILL`
+- `ASSET_BELONGS_TO_PROJECT`
+- `INVESTMENT_THESIS_HAS_RISK`
+- `RISK_AFFECTS_GOAL`
 
 Strategic suggestion records should have:
 
@@ -286,7 +299,8 @@ Routine experiment records should have:
 1. Add an ADR for memory architecture based on this research.
 2. Extend the domain model with `Person`, `Preference`, `StyleRule`,
    `PersonalRule`, `Skill`, `Goal`, `Idea`, `Opportunity`, `Insight`, and
-   `Routine`, `RoutineExperiment`, and relationship records.
+   `Routine`, `RoutineExperiment`, `Asset`, `Risk`, `ContentPlan`,
+   `LearningPlan`, `InvestmentThesis`, and relationship records.
 3. Add `MemoryNode` and `MemoryEdge` records for graph memory.
 4. Add repository methods for scoped/type-filtered and graph-neighborhood
    retrieval before adding
