@@ -16,13 +16,13 @@ SQLite persistence, and query services.
 
 ### 1. Memory Graph Domain
 
-- [ ] Add `MemoryNode` domain type.
-- [ ] Add `MemoryEdge` domain type.
-- [ ] Add `MemoryNodeKind` union.
-- [ ] Add `MemoryRelation` union.
-- [ ] Add shared memory graph source/reference type.
-- [ ] Add status lifecycle types: `active`, `superseded`, `archived`, `deleted`.
-- [ ] Add validation helpers for confidence, ids, labels, and temporal fields.
+- [x] Add `MemoryNode` domain type.
+- [x] Add `MemoryEdge` domain type.
+- [x] Add `MemoryNodeKind` union.
+- [x] Add `MemoryRelation` union.
+- [x] Add shared memory graph source/reference type.
+- [x] Add status lifecycle types: `active`, `superseded`, `archived`, `deleted`.
+- [x] Add validation helpers for confidence, ids, labels, and temporal fields.
 
 ### 2. Expanded Memory Types
 
