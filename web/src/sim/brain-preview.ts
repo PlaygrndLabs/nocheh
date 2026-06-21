@@ -18,10 +18,20 @@ export interface PreviewEdge {
   readonly confidence: number;
 }
 
+export interface PreviewNode {
+  readonly id: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly status: PreviewStatus;
+  readonly confidence: number;
+}
+
 export interface PreviewSuggestion {
   readonly kind: string;
   readonly title: string;
   readonly rationale: string;
+  readonly sourceLabel: string;
+  readonly confidence: number;
   readonly impact: "low" | "medium" | "high";
   readonly risk: "low" | "medium" | "high";
   readonly status: PreviewStatus;
@@ -31,6 +41,12 @@ export interface PreviewGuardrail {
   readonly label: string;
   readonly detail: string;
   readonly status: "ok" | "warn" | "blocked";
+}
+
+export interface PreviewAuditEvent {
+  readonly label: string;
+  readonly detail: string;
+  readonly status: "recorded" | "pending" | "blocked";
 }
 
 export interface PreviewStage {
@@ -49,9 +65,11 @@ export interface BrainPreview {
     readonly estimatedTokens: number;
   };
   readonly memories: readonly PreviewMemory[];
+  readonly nodes: readonly PreviewNode[];
   readonly edges: readonly PreviewEdge[];
   readonly suggestions: readonly PreviewSuggestion[];
   readonly guardrails: readonly PreviewGuardrail[];
+  readonly auditEvents: readonly PreviewAuditEvent[];
   readonly stages: readonly PreviewStage[];
 }
 
@@ -86,6 +104,7 @@ export function buildBrainPreview(entries: readonly SimEntry[]): BrainPreview {
     ...domainMemories(normalized),
     ...fallbackMemories(userEntries),
   ]);
+  const nodes = buildNodes(memories);
   const edges = dedupeEdges([...domainEdges(normalized), ...taskEdges(records)]);
   const suggestions = dedupeSuggestions(domainSuggestions(normalized, records));
   const guardrails = buildGuardrails(normalized);
@@ -103,9 +122,11 @@ export function buildBrainPreview(entries: readonly SimEntry[]): BrainPreview {
       estimatedTokens,
     },
     memories,
+    nodes,
     edges,
     suggestions,
     guardrails,
+    auditEvents: buildAuditEvents(suggestions, guardrails),
     stages: buildStages(userEntries.length, memories.length, edges.length, suggestions.length, blocked),
   };
 }
@@ -205,6 +226,16 @@ function taskEdges(records: readonly AuditRecord[]): PreviewEdge[] {
   ));
 }
 
+function buildNodes(memories: readonly PreviewMemory[]): readonly PreviewNode[] {
+  return memories.map((memoryItem) => ({
+    id: `${memoryItem.type.toLowerCase()}:${slug(memoryItem.title)}`,
+    kind: memoryItem.type,
+    label: memoryItem.title,
+    status: memoryItem.status,
+    confidence: memoryItem.confidence,
+  }));
+}
+
 function domainSuggestions(text: string, records: readonly AuditRecord[]): PreviewSuggestion[] {
   const suggestions: PreviewSuggestion[] = [];
   const taskCount = records.reduce((count, record) => count + record.extractedTasks.filter((task) => task.accepted).length, 0);
@@ -263,6 +294,26 @@ function buildGuardrails(text: string): PreviewGuardrail[] {
   ];
 }
 
+function buildAuditEvents(
+  suggestions: readonly PreviewSuggestion[],
+  guardrails: readonly PreviewGuardrail[],
+): readonly PreviewAuditEvent[] {
+  return [
+    ...suggestions.map((suggestionItem) => ({
+      label: `${suggestionItem.kind}: ${suggestionItem.title}`,
+      detail: suggestionItem.status === "blocked"
+        ? "Blocked before external execution."
+        : "Pending Mak approval before becoming fact or action.",
+      status: suggestionItem.status === "blocked" ? "blocked" as const : "pending" as const,
+    })),
+    ...guardrails.filter((guardrail) => guardrail.status !== "ok").map((guardrail) => ({
+      label: guardrail.label,
+      detail: guardrail.detail,
+      status: guardrail.status === "blocked" ? "blocked" as const : "recorded" as const,
+    })),
+  ].slice(0, 8);
+}
+
 function buildStages(messages: number, memories: number, edges: number, suggestions: number, blocked: number): PreviewStage[] {
   return [
     { label: "Read", detail: messages === 0 ? "Waiting for mock input" : `${messages} incoming message${messages === 1 ? "" : "s"}`, status: messages === 0 ? "waiting" : "done" },
@@ -290,11 +341,20 @@ function suggestion(
   risk: PreviewSuggestion["risk"],
   status: PreviewStatus = "pending",
 ): PreviewSuggestion {
-  return { kind, title, rationale, impact, risk, status };
+  const confidence = impact === "high" ? 0.84 : impact === "medium" ? 0.76 : 0.62;
+  return { kind, title, rationale, sourceLabel: "current context + structured memory", confidence, impact, risk, status };
 }
 
 function hasAny(text: string, terms: readonly string[]): boolean {
   return terms.some((term) => text.includes(term));
+}
+
+function slug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "node";
 }
 
 function dedupeMemories(memories: readonly PreviewMemory[]): readonly PreviewMemory[] {

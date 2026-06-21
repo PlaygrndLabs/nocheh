@@ -8,11 +8,15 @@ import { openSqliteDatabase, type SqliteDatabase } from "../src/infrastructure/s
 import { SqliteAuditRepository } from "../src/infrastructure/sqlite/sqlite-audit-repository.js";
 import { SqliteGroupAssistantSettingsRepository } from "../src/infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
 import { SqliteLiveMessageBufferRepository } from "../src/infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
+import { SqliteMemoryGraphRepository } from "../src/infrastructure/sqlite/sqlite-memory-graph-repository.js";
 import { SqliteMemoryRecordRepository } from "../src/infrastructure/sqlite/sqlite-memory-record-repository.js";
+import { SqliteSuggestionRepository } from "../src/infrastructure/sqlite/sqlite-suggestion-repository.js";
 import { SqliteTaskRepository } from "../src/infrastructure/sqlite/sqlite-task-repository.js";
 import { SqliteTaskSyncRepository } from "../src/infrastructure/sqlite/sqlite-task-sync-repository.js";
 import { createGroupAssistantSettings } from "../src/domain/assistant/group-assistant-settings.js";
+import { createMemoryEdge, createMemoryNode } from "../src/domain/memory/memory-graph.js";
 import type { MemoryRecord } from "../src/domain/memory/memory-record.js";
+import { createStrategicSuggestion } from "../src/domain/memory/strategic-suggestion.js";
 import type { ProcessingAuditRecord } from "../src/domain/observability/audit.js";
 import { Task } from "../src/domain/tasks/task.js";
 
@@ -122,6 +126,118 @@ test("SQLite sensitive payload columns are encrypted", async () => {
     assert.match(row.payload, /^v1\./);
     assert.doesNotMatch(row.payload, /Do not store this title/);
     assert.doesNotMatch(row.payload, /sk_live/);
+  } finally {
+    database.close();
+  }
+});
+
+test("SQLite memory graph repository persists, updates, queries, and encrypts sensitive fields", async () => {
+  const database = await testDatabase();
+  try {
+    const repository = new SqliteMemoryGraphRepository(database, encryption);
+    const mak = createMemoryNode({
+      id: "person:mak",
+      kind: "person",
+      label: "Mak",
+      scope: "user",
+      source,
+      confidence: 0.95,
+      payload: { payloadKind: "person", role: "owner", privateNote: "sensitive profile note" },
+      now,
+    });
+    const project = createMemoryNode({
+      id: "project:nocheh",
+      kind: "project",
+      label: "Nocheh",
+      scope: "project",
+      source,
+      confidence: 0.9,
+      now,
+    });
+    await repository.saveNode(mak);
+    await repository.saveNode(project);
+
+    const updatedProject = createMemoryNode({
+      id: "project:nocheh",
+      kind: "project",
+      label: "Nocheh Brain",
+      scope: "project",
+      source,
+      confidence: 0.93,
+      now: new Date("2026-06-19T12:05:00.000Z"),
+    });
+    await repository.saveNode(updatedProject);
+
+    const edge = createMemoryEdge({
+      id: "edge:mak-nocheh",
+      fromNodeId: mak.id,
+      toNodeId: project.id,
+      relation: "PERSON_WORKS_ON_PROJECT",
+      fact: "Mak works on a sensitive startup operating system",
+      source,
+      confidence: 0.88,
+      now,
+    });
+    await repository.saveEdge(edge);
+
+    assert.equal((await repository.findNodeById(project.id))?.label, "Nocheh Brain");
+    assert.equal((await repository.listNodes()).length, 2);
+    assert.equal((await repository.listEdgesForNode(mak.id))[0]?.fact, "Mak works on a sensitive startup operating system");
+    assert.equal((await repository.listEdgesByRelation("PERSON_WORKS_ON_PROJECT")).length, 1);
+
+    const nodeRow = database.prepare("SELECT source, payload FROM memory_nodes WHERE id = ?").get(mak.id) as {
+      source: string;
+      payload: string;
+    };
+    const edgeRow = database.prepare("SELECT fact, source FROM memory_edges WHERE id = ?").get(edge.id) as {
+      fact: string;
+      source: string;
+    };
+    assert.match(nodeRow.source, /^v1\./);
+    assert.match(nodeRow.payload, /^v1\./);
+    assert.match(edgeRow.fact, /^v1\./);
+    assert.doesNotMatch(nodeRow.payload, /sensitive profile note/);
+    assert.doesNotMatch(edgeRow.fact, /sensitive startup/);
+    assert.doesNotMatch(edgeRow.source, /telegram/);
+  } finally {
+    database.close();
+  }
+});
+
+test("SQLite suggestion repository persists pending suggestions and encrypts rationale/source/payload", async () => {
+  const database = await testDatabase();
+  try {
+    const repository = new SqliteSuggestionRepository(database, encryption);
+    const suggestion = createStrategicSuggestion({
+      id: "suggestion:growth",
+      kind: "opportunity",
+      title: "Grow X page with build-in-public posts",
+      rationale: "Private reasoning about Mak's business growth path",
+      expectedValue: "More relevant startup and freelance leads",
+      source,
+      confidence: 0.76,
+      riskLevel: "medium",
+      evidenceNodeIds: ["goal:growth"],
+      now,
+    });
+
+    await repository.save(suggestion);
+    const stored = await repository.findById(suggestion.id);
+    assert.equal(stored?.status, "pending");
+    assert.equal((await repository.findPending()).length, 1);
+    assert.equal((await repository.findByStatus("accepted")).length, 0);
+
+    const row = database.prepare("SELECT rationale, source, payload FROM suggestions WHERE id = ?").get(suggestion.id) as {
+      rationale: string;
+      source: string;
+      payload: string;
+    };
+    assert.match(row.rationale, /^v1\./);
+    assert.match(row.source, /^v1\./);
+    assert.match(row.payload, /^v1\./);
+    assert.doesNotMatch(row.rationale, /Private reasoning/);
+    assert.doesNotMatch(row.source, /telegram/);
+    assert.doesNotMatch(row.payload, /business growth path/);
   } finally {
     database.close();
   }

@@ -26,81 +26,81 @@ SQLite persistence, and query services.
 
 ### 2. Expanded Memory Types
 
-- [ ] Add memory payload types for `Person`, `Preference`, `StyleRule`, `PersonalRule`, and `Skill`.
-- [ ] Add strategic memory payload types for `Goal`, `Idea`, `Opportunity`, and `Insight`.
-- [ ] Add routine payload types for `Routine` and `RoutineExperiment`.
-- [ ] Add operating-domain payload types for `Asset`, `Risk`, `ContentPlan`, `LearningPlan`, and `InvestmentThesis`.
-- [ ] Keep raw chat text out of durable payloads.
+- [x] Add memory payload types for `Person`, `Preference`, `StyleRule`, `PersonalRule`, and `Skill`.
+- [x] Add strategic memory payload types for `Goal`, `Idea`, `Opportunity`, and `Insight`.
+- [x] Add routine payload types for `Routine` and `RoutineExperiment`.
+- [x] Add operating-domain payload types for `Asset`, `Risk`, `ContentPlan`, `LearningPlan`, and `InvestmentThesis`.
+- [x] Keep raw chat text out of durable payloads.
 
 ### 3. Strategic Suggestions
 
-- [ ] Add `StrategicSuggestion` domain type.
-- [ ] Add `ActionSuggestion` domain type.
-- [ ] Add suggestion statuses: `pending`, `accepted`, `rejected`, `archived`, `converted`.
-- [ ] Add risk levels for suggestions and external actions.
-- [ ] Ensure suggestions do not become facts until Mak accepts or converts them.
+- [x] Add `StrategicSuggestion` domain type.
+- [x] Add `ActionSuggestion` domain type.
+- [x] Add suggestion statuses: `pending`, `accepted`, `rejected`, `archived`, `converted`.
+- [x] Add risk levels for suggestions and external actions.
+- [x] Ensure suggestions do not become facts until Mak accepts or converts them.
 
 ### 4. SQLite Persistence
 
-- [ ] Create fresh SQLite schema for `memory_nodes`.
-- [ ] Create fresh SQLite schema for `memory_edges`.
-- [ ] Create fresh SQLite schema for `suggestions`.
-- [ ] Encrypt sensitive payload/source/fact/rationale fields.
-- [ ] Add indexes for node kind/scope/status and edge relation/from/to/status.
-- [ ] Add repository interfaces in application ports.
-- [ ] Add SQLite repository implementations.
-- [ ] Add repository tests for save/read/list/update behavior.
-- [ ] Add tests proving encrypted fields are not stored as plaintext.
+- [x] Create fresh SQLite schema for `memory_nodes`.
+- [x] Create fresh SQLite schema for `memory_edges`.
+- [x] Create fresh SQLite schema for `suggestions`.
+- [x] Encrypt sensitive payload/source/fact/rationale fields.
+- [x] Add indexes for node kind/scope/status and edge relation/from/to/status.
+- [x] Add repository interfaces in application ports.
+- [x] Add SQLite repository implementations.
+- [x] Add repository tests for save/read/list/update behavior.
+- [x] Add tests proving encrypted fields are not stored as plaintext.
 
 ### 5. Graph Query Services
 
-- [ ] Add `MemoryGraphQueryService`.
-- [ ] Query node by id.
-- [ ] List edges for node.
-- [ ] Query graph neighborhood with bounded depth.
-- [ ] Query by relation type.
-- [ ] Add cycle protection for recursive graph traversal.
-- [ ] Add tests for graph queries across people, projects, goals, routines, ideas, and tasks.
+- [x] Add `MemoryGraphQueryService`.
+- [x] Query node by id.
+- [x] List edges for node.
+- [x] Query graph neighborhood with bounded depth.
+- [x] Query by relation type.
+- [x] Add cycle protection for recursive graph traversal.
+- [x] Add tests for graph queries across people, projects, goals, routines, ideas, and tasks.
 
 ### 6. Suggestion Services
 
-- [ ] Add service to create pending suggestions.
-- [ ] Add approve/edit/reject/archive flows.
-- [ ] Add conversion flow from accepted suggestion to memory/project/task/routine.
-- [ ] Add tests that external actions cannot execute without approval.
+- [x] Add service to create pending suggestions.
+- [x] Add approve/edit/reject/archive flows.
+- [x] Add conversion flow from accepted suggestion to memory/project/task/routine.
+- [x] Add tests that external actions cannot execute without approval.
 
 ### 7. Assistant Context Builder Upgrade
 
-- [ ] Include relevant graph neighborhood in assistant context.
-- [ ] Include accepted preferences/style rules/personal rules.
-- [ ] Include pending high-value suggestions when useful.
-- [ ] Keep context bounded by token budget.
-- [ ] Never send full chat history.
+- [x] Include relevant graph neighborhood in assistant context.
+- [x] Include accepted preferences/style rules/personal rules.
+- [x] Include pending high-value suggestions when useful.
+- [x] Keep context bounded by token budget.
+- [x] Never send full chat history.
 
 ### 8. AI Analysis Contract
 
-- [ ] Define provider-neutral AI output schema.
-- [ ] Validate AI output before persistence.
-- [ ] Support output arrays for memories, nodes, edges, strategic suggestions, action suggestions, and warnings.
-- [ ] Require source references, confidence, reason, and idempotency key per item.
-- [ ] Add tests for invalid/partial/low-confidence AI output.
+- [x] Define provider-neutral AI output schema.
+- [x] Validate AI output before persistence.
+- [x] Support output arrays for memories, nodes, edges, strategic suggestions, action suggestions, and warnings.
+- [x] Require source references, confidence, reason, and idempotency key per item.
+- [x] Add tests for invalid/partial/low-confidence AI output.
 
 ### 9. UI And Observability
 
 - [x] Add complete pre-deployment simulator preview for intake, memory, graph, suggestions, approval, safety, and cost.
-- [ ] Add memory graph inspection view.
-- [ ] Add pending suggestions view.
-- [ ] Add approve/edit/reject controls.
-- [ ] Add graph/suggestion audit records.
+- [x] Add memory graph inspection view.
+- [x] Add pending suggestions view.
+- [x] Add approve/edit/reject controls.
+- [x] Add graph/suggestion audit records.
 - [ ] Expose AI token usage once provider calls exist.
 
 ### 10. Safety Guardrails
 
-- [ ] Keep human approval required for external actions.
-- [ ] Keep crypto support as decision support only; no auto-trading.
-- [ ] Label generated goals, ideas, hypotheses, and routine experiments as suggestions until accepted.
-- [ ] Add source/confidence display for advice and suggestions.
-- [ ] Add tests for no raw chat text in durable graph nodes/edges.
+- [x] Keep human approval required for external actions.
+- [x] Keep crypto support as decision support only; no auto-trading.
+- [x] Label generated goals, ideas, hypotheses, and routine experiments as suggestions until accepted.
+- [x] Add source/confidence display for advice and suggestions.
+- [x] Add tests for no raw chat text in durable graph nodes/edges.
 
 ## Development Tooling
 

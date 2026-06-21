@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, CheckCircle2, Database, Gauge, GitBranch, Lightbulb, Lock, Play, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { BrainCircuit, Check, CheckCircle2, Database, Gauge, GitBranch, Lightbulb, ListChecks, Lock, Pencil, Play, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { api, type AuditRecord, type GroupSettings } from "../api/client.js";
 import { GroupChat } from "../components/GroupChat.js";
 import { SystemGraph } from "../components/SystemGraph.js";
 import { Card, Notice, PageHeader, type NoticeMessage } from "../components/ui.js";
-import { buildBrainPreview, type BrainPreview, type PreviewGuardrail, type PreviewMemory, type PreviewSuggestion } from "../sim/brain-preview.js";
+import { buildBrainPreview, type BrainPreview, type PreviewAuditEvent, type PreviewGuardrail, type PreviewMemory, type PreviewSuggestion } from "../sim/brain-preview.js";
 import { buildTimeline } from "../sim/pipeline.js";
 import { usePlayback } from "../sim/usePlayback.js";
 import { useSimulation } from "../state/useSimulation.js";
@@ -250,7 +250,17 @@ function BrainConsole({ preview }: { readonly preview: BrainPreview }): JSX.Elem
         </section>
 
         <section className="brain-panel graph-panel">
-          <PanelTitle icon={<GitBranch size={15} aria-hidden="true" />} title="Knowledge graph" />
+          <PanelTitle icon={<GitBranch size={15} aria-hidden="true" />} title="Memory graph inspector" />
+          <div className="node-list">
+            {preview.nodes.map((node) => (
+              <div key={node.id} className="node-row">
+                <code>{node.id}</code>
+                <span>{node.kind}</span>
+                <b>{node.label}</b>
+                <em>{Math.round(node.confidence * 100)}%</em>
+              </div>
+            ))}
+          </div>
           <div className="edge-list">
             {preview.edges.map((edge) => (
               <div key={`${edge.from}-${edge.relation}-${edge.to}`} className="edge-row">
@@ -264,7 +274,7 @@ function BrainConsole({ preview }: { readonly preview: BrainPreview }): JSX.Elem
         </section>
 
         <section className="brain-panel suggestion-panel">
-          <PanelTitle icon={<Lightbulb size={15} aria-hidden="true" />} title="Suggestions awaiting Mak" />
+          <PanelTitle icon={<Lightbulb size={15} aria-hidden="true" />} title="Pending suggestions approval" />
           <div className="suggestion-list">
             {preview.suggestions.map((suggestion) => <SuggestionRow key={`${suggestion.kind}-${suggestion.title}`} suggestion={suggestion} />)}
           </div>
@@ -274,6 +284,13 @@ function BrainConsole({ preview }: { readonly preview: BrainPreview }): JSX.Elem
           <PanelTitle icon={<ShieldCheck size={15} aria-hidden="true" />} title="Safety and cost guardrails" />
           <div className="guardrail-list">
             {preview.guardrails.map((guardrail) => <GuardrailRow key={guardrail.label} guardrail={guardrail} />)}
+          </div>
+        </section>
+
+        <section className="brain-panel audit-panel">
+          <PanelTitle icon={<ListChecks size={15} aria-hidden="true" />} title="Graph and suggestion audit" />
+          <div className="audit-list">
+            {preview.auditEvents.map((event) => <AuditRow key={`${event.label}-${event.status}`} event={event} />)}
           </div>
         </section>
       </div>
@@ -321,8 +338,21 @@ function SuggestionRow({ suggestion }: { readonly suggestion: PreviewSuggestion 
         <p>{suggestion.rationale}</p>
       </div>
       <div className="suggestion-meta">
+        <span>{Math.round(suggestion.confidence * 100)}%</span>
+        <span>{suggestion.sourceLabel}</span>
         <span>impact {suggestion.impact}</span>
         <span>risk {suggestion.risk}</span>
+      </div>
+      <div className="approval-actions" aria-label={`Approval controls for ${suggestion.title}`}>
+        <button type="button" title="Approve suggestion" disabled={suggestion.status === "blocked"}>
+          <Check size={13} aria-hidden="true" />
+        </button>
+        <button type="button" title="Edit suggestion">
+          <Pencil size={13} aria-hidden="true" />
+        </button>
+        <button type="button" title="Reject suggestion">
+          <X size={13} aria-hidden="true" />
+        </button>
       </div>
     </article>
   );
@@ -336,6 +366,18 @@ function GuardrailRow({ guardrail }: { readonly guardrail: PreviewGuardrail }): 
       <div>
         <b>{guardrail.label}</b>
         <p>{guardrail.detail}</p>
+      </div>
+    </article>
+  );
+}
+
+function AuditRow({ event }: { readonly event: PreviewAuditEvent }): JSX.Element {
+  return (
+    <article className={`audit-row audit-${event.status}`}>
+      <span>{event.status}</span>
+      <div>
+        <b>{event.label}</b>
+        <p>{event.detail}</p>
       </div>
     </article>
   );

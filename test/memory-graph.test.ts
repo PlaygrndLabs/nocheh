@@ -7,6 +7,7 @@ import {
   normalizeGraphLabel,
   validateConfidence,
   validateTemporalRange,
+  type ExpandedMemoryPayload,
   type MemoryGraphSource,
 } from "../src/domain/memory/memory-graph.js";
 
@@ -103,4 +104,37 @@ test("rejects invalid source references", () => {
     source: { ...source, occurredAt: new Date("bad") },
     confidence: 0.7,
   }), /occurredAt/);
+});
+
+test("supports expanded structured payloads without raw chat text", () => {
+  const payloads: readonly ExpandedMemoryPayload[] = [{
+    payloadKind: "goal",
+    status: "active",
+    desiredOutcome: "Improve English speaking confidence",
+    successMetric: "Daily speaking practice completed five days per week",
+  }, {
+    payloadKind: "routine_experiment",
+    hypothesis: "Morning English shadowing improves recall",
+    durationDays: 14,
+    measurement: "Completed sessions and speaking notes",
+  }, {
+    payloadKind: "investment_thesis",
+    market: "crypto",
+    thesis: "Decision support only; review risk before any trade",
+    invalidationSignal: "Breaks risk limit",
+  }];
+
+  const node = createMemoryNode({
+    id: "goal:english",
+    kind: "goal",
+    label: "English learning goal",
+    scope: "user",
+    source,
+    confidence: 0.9,
+    payload: payloads[0]!,
+  });
+
+  assert.equal(node.payload.payloadKind, "goal");
+  assert.equal(JSON.stringify(payloads).includes("rawText"), false);
+  assert.equal(JSON.stringify(payloads).includes("messageText"), false);
 });
