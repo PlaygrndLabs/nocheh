@@ -370,7 +370,9 @@ docs                Short architecture notes and ADRs
 - [ADR 0005: SQLite VPS Persistence](docs/adr/0005-sqlite-vps-persistence.md)
 - [ADR 0006: Client UI and Chat-Flow Visualization](docs/adr/0006-setup-dashboard.md)
 - [ADR 0007: Personal AI Brain Roadmap](docs/adr/0007-personal-ai-brain-roadmap.md)
+- [ADR 0008: Memory Graph Architecture](docs/adr/0008-memory-graph-architecture.md)
 - [Research 0001: Second-Brain and Agent Memory Patterns](docs/research/0001-second-brain-and-agent-memory.md)
+- [Research 0002: Memory Graph Implementation](docs/research/0002-memory-graph-implementation-research.md)
 
 ## Commands
 
