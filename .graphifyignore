@@ -1,0 +1,10 @@
+# Default local graph is code/config only so Graphify works without an LLM key.
+# Remove these ignores and set an API key to include semantic docs extraction.
+*.md
+*.mdx
+*.txt
+*.rst
+*.html
+*.yaml
+*.yml
+docs/

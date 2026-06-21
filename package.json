@@ -10,6 +10,9 @@
     "dev": "npm run build && node dist/src/dev-server.js",
     "dev:watch": "npm run build && (tsc -p tsconfig.json --watch --preserveWatchOutput --watchFile priorityPollingInterval --watchDirectory dynamicPriorityPolling & node --watch dist/src/dev-server.js)",
     "dev:web": "npm --prefix web run dev",
+    "graphify:extract": "graphify extract . --no-cluster --out .",
+    "graphify:report": "graphify cluster-only . --no-label",
+    "graphify:update": "graphify update .",
     "test": "npm run build && node --test dist/**/*.test.js",
     "test:web": "npm --prefix web test"
   },
