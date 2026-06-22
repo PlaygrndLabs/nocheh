@@ -11,6 +11,8 @@ requires Mak approval before external actions.
 
 Memory graph foundation and live rule-based pipeline are implemented. Current
 phase is model/provider selection research before enabling a paid AI provider.
+Mak's first preferred paid-provider target is Claude Sonnet through Anthropic
+direct API, not AWS Bedrock.
 
 ## Task Plan
 
@@ -114,7 +116,8 @@ phase is model/provider selection research before enabling a paid AI provider.
 - [ ] Compare candidate models for reasoning quality, structured JSON reliability, privacy, latency, and real cost.
 - [ ] Estimate monthly cost from Nocheh's expected message volume and token budget.
 - [ ] Run a local eval set for memory extraction, graph extraction, suggestions, and safety refusals.
-- [ ] Select provider/model only after eval results and budget review.
+- [ ] Evaluate Claude Sonnet through Anthropic direct API as the first quality candidate.
+- [ ] Select final provider/model only after eval results and budget review.
 - [ ] Keep provider disabled by default until explicitly selected.
 
 ## Verification Commands

@@ -24,7 +24,7 @@ export function GroupChat({
   onRemoveMember,
   onSend,
 }: GroupChatProps): JSX.Element {
-  const [text, setText] = useState("Task: ship the report by Friday urgent");
+  const [text, setText] = useState("Project: Atlas. Task: prepare release notes by Friday.");
   const [newMember, setNewMember] = useState("");
 
   const send = (): void => {
@@ -39,6 +39,7 @@ export function GroupChat({
   return (
     <div className="group-chat">
       <div className="roster">
+        <span className="roster-label">Send as</span>
         {members.map((member) => (
           <span key={member.id} className={`member-chip${member.id === activeMemberId ? " active" : ""}`}>
             <button className="member-pick" onClick={() => onSetActiveMember(member.id)}>{member.name}</button>
@@ -66,7 +67,7 @@ export function GroupChat({
 
       <div className="transcript">
         {entries.length === 0 ? (
-          <p className="muted">No messages yet. Pick a member and send one through the brain flow.</p>
+          <p className="muted empty-chat">No messages yet. Pick a sender and post a mock Telegram message.</p>
         ) : (
           entries.map((entry, index) => <Bubble key={index} entry={entry} />)
         )}
@@ -81,7 +82,7 @@ export function GroupChat({
               send();
             }
           }}
-          placeholder="Message the group…"
+          placeholder="Message the group..."
         />
         <button className="action" disabled={busy} onClick={send}>
           <Send size={15} aria-hidden="true" />
@@ -105,7 +106,7 @@ function Bubble({ entry }: { entry: SimEntry }): JSX.Element {
   if (entry.kind === "bot") {
     return (
       <div className="bubble bot">
-        <span className="who">Nocheh suggestion · simulated</span>
+        <span className="who">Nocheh system result</span>
         {entry.text}
       </div>
     );
@@ -114,7 +115,7 @@ function Bubble({ entry }: { entry: SimEntry }): JSX.Element {
   const { record } = entry;
   return (
     <div className="bubble assistant">
-      <span className="who">brain flow · trace</span>
+      <span className="who">system analysis result</span>
       <div>{summarize(record.extractedTasks.length)}</div>
       {record.extractedTasks.length > 0 && (
         <ul className="tasks-out">

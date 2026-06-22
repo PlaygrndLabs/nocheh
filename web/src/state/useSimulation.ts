@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuditRecord } from "../api/client.js";
-import { botReplyText } from "../sim/pipeline.js";
+import { botReplyText } from "../sim/flow-model.js";
 
 export interface Member {
   readonly id: string;
@@ -78,7 +78,7 @@ export interface Simulation {
   readonly activeMemberName: string;
   readonly lastAssistant: AssistantEntry | undefined;
   addUserEntry(sender: string, text: string): void;
-  /** Appends an assistant + simulated bot entry for each audit record not already seen. Returns how many were new. */
+  /** Appends an analysis trace + system result for each audit record not already seen. Returns how many were new. */
   ingestRecords(records: readonly AuditRecord[]): number;
   addMember(name: string): void;
   removeMember(id: string): void;

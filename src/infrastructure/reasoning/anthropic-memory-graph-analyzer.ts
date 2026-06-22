@@ -1,4 +1,3 @@
-import { createHash, createHmac } from "node:crypto";
 import type { IncomingMessage } from "../../application/dto/incoming-message.js";
 import type { MemoryGraphAnalysis, MemoryGraphAnalyzerPort } from "../../application/ports/memory-graph-analyzer.js";
 import { validateAiAnalysisOutput } from "../../application/services/ai-analysis-contract.js";
@@ -20,20 +19,19 @@ import {
 } from "../../domain/memory/strategic-suggestion.js";
 import type { AiTokenUsage } from "../../domain/observability/audit.js";
 
-const SERVICE = "bedrock";
-const DEFAULT_REGION = "us-east-1";
+const DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
+const DEFAULT_API_VERSION = "2023-06-01";
 
-export interface BedrockMemoryGraphAnalyzerConfig {
-  readonly accessKeyId: string;
-  readonly secretAccessKey: string;
-  readonly sessionToken?: string;
-  readonly region?: string;
-  readonly modelId: string;
+export interface AnthropicMemoryGraphAnalyzerConfig {
+  readonly apiKey: string;
+  readonly model: string;
+  readonly apiVersion?: string;
+  readonly baseUrl?: string;
   readonly minimumConfidence?: number;
   readonly maxTokens?: number;
 }
 
-interface BedrockClaudeResponse {
+interface AnthropicClaudeResponse {
   readonly content?: readonly { readonly type?: string; readonly text?: string }[];
   readonly usage?: {
     readonly input_tokens?: number;
@@ -43,25 +41,27 @@ interface BedrockClaudeResponse {
 
 type JsonRecord = Record<string, unknown>;
 
-/** Provider-backed graph analyzer using Anthropic Claude through AWS Bedrock. */
-export class BedrockMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
-  private readonly region: string;
-  private readonly modelId: string;
+/** Provider-backed graph analyzer using Anthropic Claude directly. */
+export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
+  private readonly apiKey: string;
+  private readonly model: string;
+  private readonly apiVersion: string;
+  private readonly baseUrl: string;
   private readonly minimumConfidence: number;
   private readonly maxTokens: number;
 
-  public constructor(private readonly config: BedrockMemoryGraphAnalyzerConfig) {
-    this.region = config.region ?? DEFAULT_REGION;
-    this.modelId = config.modelId;
+  public constructor(config: AnthropicMemoryGraphAnalyzerConfig) {
+    this.apiKey = config.apiKey;
+    this.model = config.model;
+    this.apiVersion = config.apiVersion ?? DEFAULT_API_VERSION;
+    this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.minimumConfidence = config.minimumConfidence ?? 0.55;
     this.maxTokens = config.maxTokens ?? 4000;
   }
 
   public async analyze(message: IncomingMessage): Promise<MemoryGraphAnalysis> {
-    const host = `bedrock-runtime.${this.region}.amazonaws.com`;
-    const path = `/model/${encodeURIComponent(this.modelId)}/invoke`;
     const body = JSON.stringify({
-      anthropic_version: "bedrock-2023-05-31",
+      model: this.model,
       max_tokens: this.maxTokens,
       system: systemPrompt(),
       messages: [{
@@ -69,26 +69,23 @@ export class BedrockMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
         content: [{ type: "text", text: userPrompt(message) }],
       }],
     });
-    const headers = this.sign({
-      method: "POST",
-      host,
-      path,
-      body,
-      contentType: "application/json",
-    });
 
-    const response = await fetch(`https://${host}${path}`, {
+    const response = await fetch(this.baseUrl, {
       method: "POST",
-      headers,
+      headers: {
+        "content-type": "application/json",
+        "anthropic-version": this.apiVersion,
+        "x-api-key": this.apiKey,
+      },
       body,
     });
 
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`Bedrock response failed with status ${response.status}: ${text}`);
+      throw new Error(`Anthropic response failed with status ${response.status}: ${text}`);
     }
 
-    const parsed = JSON.parse(text) as BedrockClaudeResponse;
+    const parsed = JSON.parse(text) as AnthropicClaudeResponse;
     const validated = validateAiAnalysisOutput(parseJsonOutput(parsed), { minimumConfidence: this.minimumConfidence });
     if (!validated.ok) {
       throw validated.error;
@@ -104,7 +101,7 @@ export class BedrockMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
         createActionSuggestion(actionSuggestionInput(item.value, item.source, item.confidence)),
       ),
     ];
-    const usage = tokenUsage(parsed, this.modelId);
+    const usage = tokenUsage(parsed, this.model);
 
     return {
       nodes,
@@ -112,59 +109,6 @@ export class BedrockMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       suggestions,
       warnings: validated.value.warnings.map((warning) => warning.message),
       ...(usage === undefined ? {} : { tokenUsage: usage }),
-    };
-  }
-
-  private sign(input: {
-    readonly method: "POST";
-    readonly host: string;
-    readonly path: string;
-    readonly body: string;
-    readonly contentType: string;
-  }): Record<string, string> {
-    const now = new Date();
-    const amzDate = toAmzDate(now);
-    const dateStamp = amzDate.slice(0, 8);
-    const payloadHash = sha256Hex(input.body);
-    const headers: Record<string, string> = {
-      "content-type": input.contentType,
-      host: input.host,
-      "x-amz-content-sha256": payloadHash,
-      "x-amz-date": amzDate,
-    };
-    if (this.config.sessionToken !== undefined && this.config.sessionToken.length > 0) {
-      headers["x-amz-security-token"] = this.config.sessionToken;
-    }
-
-    const signedHeaders = Object.keys(headers).sort().join(";");
-    const canonicalHeaders = Object.keys(headers)
-      .sort()
-      .map((key) => `${key}:${headers[key]}\n`)
-      .join("");
-    const canonicalRequest = [
-      input.method,
-      input.path,
-      "",
-      canonicalHeaders,
-      signedHeaders,
-      payloadHash,
-    ].join("\n");
-    const credentialScope = `${dateStamp}/${this.region}/${SERVICE}/aws4_request`;
-    const stringToSign = [
-      "AWS4-HMAC-SHA256",
-      amzDate,
-      credentialScope,
-      sha256Hex(canonicalRequest),
-    ].join("\n");
-    const signature = hmacHex(signingKey(this.config.secretAccessKey, dateStamp, this.region), stringToSign);
-
-    return {
-      ...headers,
-      authorization: [
-        `AWS4-HMAC-SHA256 Credential=${this.config.accessKeyId}/${credentialScope}`,
-        `SignedHeaders=${signedHeaders}`,
-        `Signature=${signature}`,
-      ].join(", "),
     };
   }
 }
@@ -196,7 +140,7 @@ function userPrompt(message: IncomingMessage): string {
   });
 }
 
-function parseJsonOutput(response: BedrockClaudeResponse): unknown {
+function parseJsonOutput(response: AnthropicClaudeResponse): unknown {
   const text = response.content
     ?.filter((content) => content.type === "text" || content.type === undefined)
     .map((content) => content.text)
@@ -204,7 +148,7 @@ function parseJsonOutput(response: BedrockClaudeResponse): unknown {
     .join("")
     .trim();
   if (text === undefined || text.length === 0) {
-    throw new Error("Bedrock Claude response did not include text output.");
+    throw new Error("Anthropic Claude response did not include text output.");
   }
   return JSON.parse(stripCodeFence(text));
 }
@@ -275,7 +219,7 @@ function actionSuggestionInput(value: unknown, source: MemoryGraphSource, confid
   };
 }
 
-function tokenUsage(response: BedrockClaudeResponse, model: string): AiTokenUsage | undefined {
+function tokenUsage(response: AnthropicClaudeResponse, model: string): AiTokenUsage | undefined {
   const usage = response.usage;
   if (usage === undefined) {
     return undefined;
@@ -283,7 +227,7 @@ function tokenUsage(response: BedrockClaudeResponse, model: string): AiTokenUsag
   const inputTokens = usage.input_tokens ?? 0;
   const outputTokens = usage.output_tokens ?? 0;
   return {
-    provider: "bedrock",
+    provider: "anthropic",
     model,
     inputTokens,
     outputTokens,
@@ -300,14 +244,14 @@ function hydrateSource(source: MemoryGraphSource): MemoryGraphSource {
 
 function requireRecord(value: unknown, label: string): JsonRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`Bedrock ${label} must be an object.`);
+    throw new Error(`Anthropic ${label} must be an object.`);
   }
   return value as JsonRecord;
 }
 
 function requiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`Bedrock ${label} must be a non-empty string.`);
+    throw new Error(`Anthropic ${label} must be a non-empty string.`);
   }
   return value.trim();
 }
@@ -324,27 +268,4 @@ function objectValue(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
     : {};
-}
-
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function hmac(key: Buffer | string, value: string): Buffer {
-  return createHmac("sha256", key).update(value, "utf8").digest();
-}
-
-function hmacHex(key: Buffer, value: string): string {
-  return createHmac("sha256", key).update(value, "utf8").digest("hex");
-}
-
-function signingKey(secretAccessKey: string, dateStamp: string, region: string): Buffer {
-  const date = hmac(`AWS4${secretAccessKey}`, dateStamp);
-  const regionKey = hmac(date, region);
-  const serviceKey = hmac(regionKey, SERVICE);
-  return hmac(serviceKey, "aws4_request");
-}
-
-function toAmzDate(date: Date): string {
-  return date.toISOString().replace(/[:-]|\.\d{3}/g, "");
 }

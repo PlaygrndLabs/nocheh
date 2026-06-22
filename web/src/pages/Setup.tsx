@@ -5,9 +5,8 @@ import { Card, Notice, PageHeader, StatusFlag, type NoticeMessage } from "../com
 
 export function Setup(): JSX.Element {
   const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [accessKeyId, setAccessKeyId] = useState("");
-  const [secretAccessKey, setSecretAccessKey] = useState("");
-  const [modelId, setModelId] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
   const [message, setMessage] = useState<NoticeMessage | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -22,15 +21,13 @@ export function Setup(): JSX.Element {
     setMessage(null);
     try {
       await api.putEnv({
-        AI_PROVIDER: "bedrock",
-        AWS_ACCESS_KEY_ID: accessKeyId,
-        AWS_SECRET_ACCESS_KEY: secretAccessKey,
-        AWS_BEDROCK_MODEL_ID: modelId,
+        AI_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: apiKey,
+        ANTHROPIC_MODEL: model,
       });
-      setAccessKeyId("");
-      setSecretAccessKey("");
-      setModelId("");
-      setMessage({ kind: "success", text: "Bedrock provider config saved to .env. Restart the server for it to take effect." });
+      setApiKey("");
+      setModel("");
+      setMessage({ kind: "success", text: "Anthropic provider config saved to .env. Restart the server for it to take effect." });
       refresh();
     } catch (error) {
       setMessage({ kind: "error", text: (error as Error).message });
@@ -62,30 +59,22 @@ export function Setup(): JSX.Element {
       </Card>
 
       <Card title="Optional provider config">
-        <p className="muted">Leave this empty while model research is in progress. Rule-based analysis remains active.</p>
-        <label htmlFor="aws-access-key">AWS_ACCESS_KEY_ID</label>
+        <p className="muted">Leave this empty while model research is in progress. Rule-based analysis remains active. First paid-provider target is Claude Sonnet through Anthropic.</p>
+        <label htmlFor="anthropic-api-key">ANTHROPIC_API_KEY</label>
         <input
-          id="aws-access-key"
-          value={accessKeyId}
-          placeholder="AKIA..."
-          onChange={(event) => setAccessKeyId(event.target.value)}
+          id="anthropic-api-key"
+          value={apiKey}
+          placeholder="sk-ant-..."
+          onChange={(event) => setApiKey(event.target.value)}
         />
-        <label htmlFor="aws-secret-key">AWS_SECRET_ACCESS_KEY</label>
+        <label htmlFor="anthropic-model">ANTHROPIC_MODEL</label>
         <input
-          id="aws-secret-key"
-          type="password"
-          value={secretAccessKey}
-          placeholder="AWS secret access key"
-          onChange={(event) => setSecretAccessKey(event.target.value)}
+          id="anthropic-model"
+          value={model}
+          placeholder="Claude Sonnet model id after selection"
+          onChange={(event) => setModel(event.target.value)}
         />
-        <label htmlFor="bedrock-model">AWS_BEDROCK_MODEL_ID</label>
-        <input
-          id="bedrock-model"
-          value={modelId}
-          placeholder="Set only after model selection research"
-          onChange={(event) => setModelId(event.target.value)}
-        />
-        <button className="action" disabled={saving || accessKeyId.length === 0 || secretAccessKey.length === 0 || modelId.length === 0} onClick={() => void saveKey()}>
+        <button className="action" disabled={saving || apiKey.length === 0 || model.length === 0} onClick={() => void saveKey()}>
           <Save size={15} aria-hidden="true" />
           {saving ? "Saving…" : "Save key"}
         </button>

@@ -160,8 +160,8 @@ export { TaskValidationService, normalizeTaskTitle } from "./domain/tasks/task-v
 export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarningCode } from "./domain/tasks/task-validation.js";
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
 export { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
-export { BedrockMemoryGraphAnalyzer } from "./infrastructure/reasoning/bedrock-memory-graph-analyzer.js";
-export type { BedrockMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/bedrock-memory-graph-analyzer.js";
+export { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
+export type { AnthropicMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 export { RuleBasedMemoryGraphAnalyzer } from "./infrastructure/reasoning/rule-based-memory-graph-analyzer.js";
 export { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";

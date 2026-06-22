@@ -6,9 +6,10 @@ long-term memory, and helps Mak remember, decide, communicate, set goals, and
 generate new ideas. It should also help Mak improve routines and repeated
 behaviors over time.
 
-The current implementation is at **Phase 2: Structured Memory**. Telegram is
-the first channel, but the product direction is platform-neutral: Telegram
-groups now, more conversations and tools later.
+The current implementation is a **private MVP** for structured memory, memory
+graph persistence, pending suggestions, Telegram ingestion, and dashboard-based
+inspection. Telegram is the first channel, but the product direction is
+platform-neutral: Telegram groups now, more conversations and tools later.
 
 ## What Works
 
@@ -19,16 +20,20 @@ groups now, more conversations and tools later.
 - Configurable live group-message batching before analysis
 - One-time history import service for old group exports
 - AI context builder that uses recent messages plus retrieved structured memory
+- Memory graph nodes and edges for personal/business context
+- Pending strategic/action suggestions with approval flow
+- Rule-based brain analyzer active by default
+- Provider/model selection intentionally disabled until model research is done
 - Task-to-project linking when project context is detected
 - Semantic-style local memory retrieval
 - Task validation and audit trail
 - SQLite task/memory/audit store with encrypted payload fields
 - Notion MCP task sync adapter
-- React client at `/app` for configuration, bot connection, history import, mock testing, metrics, conversations, and chat-flow visualization
+- React client at `/app` for configuration, bot connection, history import, mock testing, metrics, conversations, graph inspection, pending suggestions, approval, and chat-flow visualization
 
-Not included yet: concrete AI provider calls, personal profile/style memory,
-approval workflow for suggested replies/actions, embedding-backed vector search,
-or additional platform adapters beyond Telegram/mock/history import.
+Not included yet: selected paid AI provider/model, embedding-backed vector
+search, additional platform adapters beyond Telegram/mock/history import, or
+autonomous external action execution.
 
 ## Product Direction
 
@@ -256,11 +261,8 @@ DATA_DIR=./data
 DATABASE_PATH=./data/nocheh.sqlite
 LOCAL_ENCRYPTION_SECRET=change-this-secret
 AI_PROVIDER=
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_SESSION_TOKEN=
-AWS_BEDROCK_REGION=us-east-1
-AWS_BEDROCK_MODEL_ID=
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=
 MESSAGE_ANALYSIS_MODE=batch
 LIVE_ANALYSIS_INTERVAL_SECONDS=300
 LIVE_MAX_MESSAGES_PER_BATCH=50
@@ -369,6 +371,7 @@ docs                Short architecture notes and ADRs
 ## Docs
 
 - [Task Plan](TASK.md)
+- [Deploy and Use Guide](docs/deploy-and-use.md)
 - [Development Tooling](docs/development-tooling.md)
 - [ADR 0001: Phase 1 Core Processing](docs/adr/0001-phase-1-core-processing.md)
 - [Phase 1.5 Observability](docs/observability-architecture.md)

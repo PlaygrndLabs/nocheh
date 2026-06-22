@@ -4,11 +4,8 @@ import type { JsonHandler } from "../router.js";
 /** Environment keys the client is allowed to write. */
 export const WRITABLE_ENV_KEYS = [
   "AI_PROVIDER",
-  "AWS_ACCESS_KEY_ID",
-  "AWS_SECRET_ACCESS_KEY",
-  "AWS_SESSION_TOKEN",
-  "AWS_BEDROCK_REGION",
-  "AWS_BEDROCK_MODEL_ID",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_MODEL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_WEBHOOK_URL",
   "MESSAGE_ANALYSIS_MODE",
@@ -21,7 +18,7 @@ export const WRITABLE_ENV_KEYS = [
   "SUMMARY_EVERY_MINUTES",
 ] as const;
 
-const SECRET_KEYS = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "TELEGRAM_BOT_TOKEN"];
+const SECRET_KEYS = ["ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN"];
 
 export interface SetupRoutes {
   readonly getEnv: JsonHandler;
@@ -62,18 +59,17 @@ export function createSetupRoutes(envStore: EnvStorePort): SetupRoutes {
     },
 
     getStatus: async () => {
-      const presence = await envStore.presence([...SECRET_KEYS, "AWS_BEDROCK_MODEL_ID", "TELEGRAM_WEBHOOK_URL", "LOCAL_ENCRYPTION_SECRET"]);
+      const presence = await envStore.presence([...SECRET_KEYS, "ANTHROPIC_MODEL", "TELEGRAM_WEBHOOK_URL", "LOCAL_ENCRYPTION_SECRET"]);
       const values = await envStore.read();
       const aiProvider = values.AI_PROVIDER;
-      const hasBedrockConfig = aiProvider === "bedrock"
-        && (presence.AWS_ACCESS_KEY_ID ?? false)
-        && (presence.AWS_SECRET_ACCESS_KEY ?? false)
-        && (presence.AWS_BEDROCK_MODEL_ID ?? false);
+      const hasAnthropicConfig = aiProvider === "anthropic"
+        && (presence.ANTHROPIC_API_KEY ?? false)
+        && (presence.ANTHROPIC_MODEL ?? false);
       return {
         status: 200,
         body: {
           ok: true,
-          hasAiKey: hasBedrockConfig,
+          hasAiKey: hasAnthropicConfig,
           aiProvider: aiProvider ?? "none",
           hasBotToken: presence.TELEGRAM_BOT_TOKEN ?? false,
           botConnected: (presence.TELEGRAM_BOT_TOKEN ?? false) && (presence.TELEGRAM_WEBHOOK_URL ?? false),

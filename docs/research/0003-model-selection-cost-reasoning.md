@@ -4,7 +4,8 @@ Date: 2026-06-21
 
 ## Decision State
 
-No paid AI provider is selected yet.
+No paid AI provider is selected yet. Mak's first preferred quality candidate is
+Claude Sonnet through Anthropic direct API, not AWS Bedrock.
 
 Nocheh should continue using the rule-based analyzer until a model is selected
 through a small eval set and budget review. Provider config must stay explicit:
@@ -55,15 +56,16 @@ Use for:
 - Non-sensitive synthetic evals.
 - Possible self-host/open-router comparison later.
 
-### Claude Haiku / Sonnet via Bedrock or Anthropic
+### Claude Sonnet via Anthropic
 
-Strong quality candidate when advice quality matters more than minimum cost.
+First-priority quality candidate when advice quality matters more than minimum
+cost.
 
-- Haiku is cheaper but may be less reliable for complex strategic reasoning.
 - Sonnet is a stronger default-quality candidate, but output cost is much
   higher than Gemini Flash or DeepSeek.
-- Bedrock can be attractive if AWS data/governance is preferred, but model
-  choice still needs evaluation.
+- Direct Anthropic API is the preferred integration path for this project.
+- Haiku can still be tested later as a cheaper Claude extraction baseline, but
+  it is not the first target.
 
 Use for:
 
