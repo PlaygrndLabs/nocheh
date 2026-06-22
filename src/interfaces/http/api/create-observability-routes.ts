@@ -29,13 +29,13 @@ export function createObservabilityRoutes(
 
     conversations: async () => {
       const records = await auditRepository.findRecent(CONVERSATION_SCAN_LIMIT);
-      return { status: 200, body: { ok: true, conversations: summarize(records) } };
+      return { status: 200, body: { ok: true, conversations: summarize(realConversationRecords(records)) } };
     },
 
     conversation: async ({ params }) => {
       const conversationId = params.conversationId ?? "";
       const records = await auditRepository.findRecent(CONVERSATION_SCAN_LIMIT);
-      const matching = records.filter((record) => record.conversationId === conversationId);
+      const matching = realConversationRecords(records).filter((record) => record.conversationId === conversationId);
       return { status: 200, body: { ok: true, conversationId, records: matching } };
     },
   };
@@ -75,6 +75,10 @@ function summarize(records: readonly ProcessingAuditRecord[]): ConversationSumma
   return [...byConversation.values()].sort(
     (left, right) => right.lastProcessedAt.getTime() - left.lastProcessedAt.getTime(),
   );
+}
+
+function realConversationRecords(records: readonly ProcessingAuditRecord[]): readonly ProcessingAuditRecord[] {
+  return records.filter((record) => record.platform !== "mock" && record.platform !== "simulator");
 }
 
 function clampLimit(raw: string | null): number {

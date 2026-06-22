@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Bot as BotIcon,
   FlaskConical,
+  GitBranch,
   MessagesSquare,
   Settings as SettingsIcon,
   Sparkles,
@@ -12,8 +13,9 @@ import {
 import { Setup } from "./pages/Setup.js";
 import { Bot } from "./pages/Bot.js";
 import { History } from "./pages/History.js";
-import { Mock } from "./pages/Mock.js";
+import { Simulator } from "./pages/Simulator.js";
 import { Conversations } from "./pages/Conversations.js";
+import { Knowledge } from "./pages/Knowledge.js";
 import { Settings } from "./pages/Settings.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
 import { useTheme } from "./theme.js";
@@ -22,8 +24,9 @@ const PAGES = {
   setup: { label: "Setup", render: () => <Setup /> },
   bot: { label: "Connect bot", render: () => <Bot /> },
   history: { label: "Import history", render: () => <History /> },
-  mock: { label: "Simulator", render: () => <Mock /> },
+  mock: { label: "Simulator", render: () => <Simulator /> },
   conversations: { label: "Conversations", render: () => <Conversations /> },
+  knowledge: { label: "Knowledge graph", render: () => <Knowledge /> },
   settings: { label: "Settings", render: () => <Settings /> },
 } as const;
 
@@ -35,6 +38,7 @@ const PAGE_ICONS: Record<PageKey, LucideIcon> = {
   history: Upload,
   mock: FlaskConical,
   conversations: MessagesSquare,
+  knowledge: GitBranch,
   settings: SettingsIcon,
 };
 

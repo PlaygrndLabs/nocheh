@@ -5,13 +5,17 @@ import type { GroupAssistantSettingsRepositoryPort } from "../src/application/po
 import type { IncomingMessageProcessorPort } from "../src/application/ports/incoming-message-processor.js";
 import type { LiveMessageBufferRepositoryPort } from "../src/application/ports/live-message-buffer-repository.js";
 import type { LoggerPort } from "../src/application/ports/logger.js";
+import type { AuditRepositoryPort } from "../src/application/ports/audit-repository.js";
 import type { IncomingMessage } from "../src/application/dto/incoming-message.js";
 import type { BufferedMessage } from "../src/domain/assistant/buffered-message.js";
 import type { GroupAssistantSettings } from "../src/domain/assistant/group-assistant-settings.js";
+import type { ProcessingAuditRecord } from "../src/domain/observability/audit.js";
 import { createGroupAssistantSettings } from "../src/domain/assistant/group-assistant-settings.js";
 import { LiveMessageBufferService } from "../src/application/services/live-message-buffer-service.js";
+import { NoopMetricsCollector } from "../src/application/ports/metrics.js";
 import { RegexSecretDetector } from "../src/infrastructure/security/regex-secret-detector.js";
 import { createMockRoutes } from "../src/interfaces/http/api/create-mock-routes.js";
+import { createObservabilityRoutes } from "../src/interfaces/http/api/create-observability-routes.js";
 import { createSettingsRoutes } from "../src/interfaces/http/api/create-settings-routes.js";
 import { parseTelegramExport } from "../src/interfaces/http/api/create-history-routes.js";
 import type { RequestContext } from "../src/interfaces/http/router.js";
@@ -54,6 +58,14 @@ class InMemoryBufferRepository implements LiveMessageBufferRepositoryPort {
     return this.messages.filter((message) => message.conversationId === id);
   }
   public async remove(): Promise<void> {}
+}
+
+class InMemoryAuditRepository implements AuditRepositoryPort {
+  public constructor(private readonly records: readonly ProcessingAuditRecord[]) {}
+  public async save(): Promise<void> {}
+  public async findRecent(): Promise<readonly ProcessingAuditRecord[]> {
+    return this.records;
+  }
 }
 
 function context(overrides: Partial<RequestContext>): RequestContext {
@@ -109,6 +121,20 @@ test("mock inject rejects messages missing required fields", async () => {
   assert.equal(result.status, 400);
 });
 
+test("conversations route hides synthetic simulator records", async () => {
+  const routes = createObservabilityRoutes(new InMemoryAuditRepository([
+    auditRecord({ platform: "mock", conversationId: "mock-chat-1", preview: "simulated" }),
+    auditRecord({ platform: "simulator", conversationId: "sim-chat-1", preview: "local" }),
+    auditRecord({ platform: "telegram", conversationId: "telegram:real", preview: "real message" }),
+  ]), new NoopMetricsCollector());
+
+  const result = await routes.conversations(context({ method: "GET" }));
+
+  assert.equal(result.status, 200);
+  const conversations = (result.body as { conversations: { conversationId: string }[] }).conversations;
+  assert.deepEqual(conversations.map((item) => item.conversationId), ["telegram:real"]);
+});
+
 test("settings PUT persists via the repository", async () => {
   const repository = new InMemorySettingsRepository();
   const routes = createSettingsRoutes(repository, new FixedClock());
@@ -120,6 +146,25 @@ test("settings PUT persists via the repository", async () => {
   assert.equal(stored?.analysisMode, "immediate");
   assert.equal(stored?.maxMessagesPerBatch, 5);
 });
+
+function auditRecord(input: { platform: string; conversationId: string; preview: string }): ProcessingAuditRecord {
+  const now = new Date("2026-06-20T00:00:00.000Z");
+  return {
+    id: `${input.platform}:${input.conversationId}`,
+    platform: input.platform,
+    conversationId: input.conversationId,
+    messageId: "message-1",
+    senderId: "sender-1",
+    receivedAt: now,
+    processedAt: now,
+    redactedContentPreview: input.preview,
+    redactionFindingCount: 0,
+    steps: [],
+    extractedTasks: [],
+    errorLogs: [],
+    totalLatencyMs: 1,
+  };
+}
 
 test("settings GET returns defaults when none stored", async () => {
   const routes = createSettingsRoutes(new InMemorySettingsRepository(), new FixedClock());

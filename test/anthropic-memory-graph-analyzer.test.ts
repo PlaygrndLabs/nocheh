@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BedrockMemoryGraphAnalyzer } from "../src/infrastructure/reasoning/bedrock-memory-graph-analyzer.js";
+import { AnthropicMemoryGraphAnalyzer } from "../src/infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 
 const source = {
   platform: "telegram",
@@ -9,7 +9,7 @@ const source = {
   occurredAt: "2026-06-21T12:00:00.000Z",
 };
 
-test("Bedrock memory graph analyzer signs invoke-model requests and returns token usage", async () => {
+test("Anthropic memory graph analyzer sends messages request and returns token usage", async () => {
   const originalFetch = globalThis.fetch;
   const calls: { readonly url: string; readonly init: RequestInit }[] = [];
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -71,11 +71,9 @@ test("Bedrock memory graph analyzer signs invoke-model requests and returns toke
   }) as typeof fetch;
 
   try {
-    const analyzer = new BedrockMemoryGraphAnalyzer({
-      accessKeyId: "AKIATEST",
-      secretAccessKey: "secret",
-      region: "us-west-2",
-      modelId: "anthropic.claude-sonnet-4-6-20260217-v1:0",
+    const analyzer = new AnthropicMemoryGraphAnalyzer({
+      apiKey: "sk-ant-test",
+      model: "claude-sonnet-test",
     });
     const result = await analyzer.analyze({
       platform: "telegram",
@@ -90,25 +88,23 @@ test("Bedrock memory graph analyzer signs invoke-model requests and returns toke
     assert.equal(result.edges[0]?.relation, "GOAL_HAS_ROUTINE");
     assert.equal(result.suggestions[0]?.status, "pending");
     assert.deepEqual(result.tokenUsage, {
-      provider: "bedrock",
-      model: "anthropic.claude-sonnet-4-6-20260217-v1:0",
+      provider: "anthropic",
+      model: "claude-sonnet-test",
       inputTokens: 111,
       outputTokens: 222,
       totalTokens: 333,
     });
 
     const request = JSON.parse(calls[0]?.init.body as string) as {
-      anthropic_version: string;
+      model: string;
       max_tokens: number;
       system: string;
       messages: readonly { readonly role: string; readonly content: readonly { readonly text: string }[] }[];
     };
-    assert.equal(
-      calls[0]?.url,
-      "https://bedrock-runtime.us-west-2.amazonaws.com/model/anthropic.claude-sonnet-4-6-20260217-v1%3A0/invoke",
-    );
-    assert.match((calls[0]?.init.headers as Record<string, string>).authorization ?? "", /AWS4-HMAC-SHA256/);
-    assert.equal(request.anthropic_version, "bedrock-2023-05-31");
+    assert.equal(calls[0]?.url, "https://api.anthropic.com/v1/messages");
+    assert.equal((calls[0]?.init.headers as Record<string, string>)["x-api-key"], "sk-ant-test");
+    assert.equal((calls[0]?.init.headers as Record<string, string>)["anthropic-version"], "2023-06-01");
+    assert.equal(request.model, "claude-sonnet-test");
     assert.equal(request.max_tokens, 4000);
     assert.equal(request.messages[0]?.role, "user");
   } finally {

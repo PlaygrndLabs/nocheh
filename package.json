@@ -13,7 +13,7 @@
     "graphify:extract": "graphify extract . --no-cluster --out .",
     "graphify:report": "graphify cluster-only . --no-label",
     "graphify:update": "graphify update .",
-    "test": "npm run build && node --test dist/**/*.test.js",
+    "test": "npm run build && node scripts/run-tests.mjs",
     "test:web": "npm --prefix web test"
   },
   "devDependencies": {
