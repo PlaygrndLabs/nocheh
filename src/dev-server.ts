@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExternalTask, TaskProviderPort } from "./application/ports/task-provider.js";
 import { SystemClock } from "./application/ports/clock.js";
+import { SystemIdGenerator } from "./application/ports/id-generator.js";
 import { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 import type { Task } from "./domain/tasks/task.js";
 import { HistoryImportService } from "./application/services/history-import-service.js";
@@ -57,6 +58,7 @@ const database = openSqliteDatabase(databasePath);
 const metrics = new InMemoryMetricsCollector();
 const secretDetector = new RegexSecretDetector();
 const clock = new SystemClock();
+const idGenerator = new SystemIdGenerator();
 const envStore = new DotenvFileStore(join(process.cwd(), ".env"));
 const telegramClient = new TelegramHttpClient();
 
@@ -83,6 +85,7 @@ const useCase = new ProcessIncomingMessageUseCase(
   metrics,
   memoryGraphRepository,
   suggestionRepository,
+  idGenerator,
 );
 
 const liveProcessor = new LiveMessageBufferService(

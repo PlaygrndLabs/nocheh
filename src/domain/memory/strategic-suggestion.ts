@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   CreateMemoryEdgeInput,
   CreateMemoryNodeInput,
@@ -109,7 +108,7 @@ export type Suggestion = StrategicSuggestion | ActionSuggestion;
 export function createStrategicSuggestion(input: CreateStrategicSuggestionInput): StrategicSuggestion {
   const now = input.now ?? new Date();
   return {
-    id: normalizeGraphId(input.id ?? randomUUID(), "Suggestion id"),
+    id: normalizeGraphId(input.id ?? crypto.randomUUID(), "Suggestion id"),
     type: "strategic",
     kind: input.kind,
     title: normalizeGraphLabel(input.title, "Suggestion title"),
@@ -130,7 +129,7 @@ export function createStrategicSuggestion(input: CreateStrategicSuggestionInput)
 export function createActionSuggestion(input: CreateActionSuggestionInput): ActionSuggestion {
   const now = input.now ?? new Date();
   return {
-    id: normalizeGraphId(input.id ?? randomUUID(), "Suggestion id"),
+    id: normalizeGraphId(input.id ?? crypto.randomUUID(), "Suggestion id"),
     type: "action",
     kind: input.kind,
     title: normalizeGraphLabel(input.title, "Suggestion title"),

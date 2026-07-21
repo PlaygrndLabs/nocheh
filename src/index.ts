@@ -11,6 +11,8 @@ export type { ClockPort } from "./application/ports/clock.js";
 export { SystemClock } from "./application/ports/clock.js";
 export type { EncryptionPort } from "./application/ports/encryption.js";
 export type { GroupAssistantSettingsRepositoryPort } from "./application/ports/group-assistant-settings-repository.js";
+export type { IdGeneratorPort } from "./application/ports/id-generator.js";
+export { SystemIdGenerator } from "./application/ports/id-generator.js";
 export type { IncomingMessageProcessorPort, ConversationWindowProcessorPort, ConversationProcessorPort, ReactionProcessorPort, NoteProcessorPort } from "./application/ports/incoming-message-processor.js";
 export type { LiveMessageBufferRepositoryPort } from "./application/ports/live-message-buffer-repository.js";
 export type { LoggerPort } from "./application/ports/logger.js";
