@@ -47,5 +47,8 @@ test("setWebhook posts the url payload", async () => {
   await client.setWebhook("token-123", "https://example.com/telegram/webhook");
 
   assert.equal(calls[0]?.url, "https://api.telegram.org/bottoken-123/setWebhook");
-  assert.deepEqual(calls[0]?.body, { url: "https://example.com/telegram/webhook" });
+  assert.deepEqual(calls[0]?.body, {
+    url: "https://example.com/telegram/webhook",
+    allowed_updates: ["message", "edited_message", "message_reaction"],
+  });
 });

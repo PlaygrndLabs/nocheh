@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ClockPort } from "../src/application/ports/clock.js";
 import type { GroupAssistantSettingsRepositoryPort } from "../src/application/ports/group-assistant-settings-repository.js";
-import type { IncomingMessageProcessorPort } from "../src/application/ports/incoming-message-processor.js";
+import type { ConversationProcessorPort } from "../src/application/ports/incoming-message-processor.js";
+import type { ConversationWindow } from "../src/application/dto/conversation-window.js";
+import type { IncomingReactionEvent } from "../src/application/dto/incoming-reaction-event.js";
+import type { NoteInput } from "../src/application/dto/incoming-note.js";
 import type { LiveMessageBufferRepositoryPort } from "../src/application/ports/live-message-buffer-repository.js";
 import type { LoggerPort } from "../src/application/ports/logger.js";
 import type { AuditRepositoryPort } from "../src/application/ports/audit-repository.js";
@@ -15,6 +18,7 @@ import { LiveMessageBufferService } from "../src/application/services/live-messa
 import { NoopMetricsCollector } from "../src/application/ports/metrics.js";
 import { RegexSecretDetector } from "../src/infrastructure/security/regex-secret-detector.js";
 import { createMockRoutes } from "../src/interfaces/http/api/create-mock-routes.js";
+import { createNoteRoutes } from "../src/interfaces/http/api/create-note-routes.js";
 import { createObservabilityRoutes } from "../src/interfaces/http/api/create-observability-routes.js";
 import { createSettingsRoutes } from "../src/interfaces/http/api/create-settings-routes.js";
 import { createTelegramRoutes } from "../src/interfaces/http/api/create-telegram-routes.js";
@@ -35,10 +39,22 @@ class SilentLogger implements LoggerPort {
   public error(): void {}
 }
 
-class RecordingProcessor implements IncomingMessageProcessorPort {
+class RecordingProcessor implements ConversationProcessorPort {
   public readonly messages: IncomingMessage[] = [];
+  public readonly windows: ConversationWindow[] = [];
+  public readonly reactions: IncomingReactionEvent[] = [];
+  public readonly notes: NoteInput[] = [];
   public async execute(message: IncomingMessage): Promise<void> {
     this.messages.push(message);
+  }
+  public async executeWindow(window: ConversationWindow): Promise<void> {
+    this.windows.push(window);
+  }
+  public async executeReaction(event: IncomingReactionEvent): Promise<void> {
+    this.reactions.push(event);
+  }
+  public async executeNote(input: NoteInput): Promise<void> {
+    this.notes.push(input);
   }
 }
 
@@ -128,6 +144,30 @@ test("mock inject runs messages through the live processor in immediate mode", a
   assert.equal(downstream.messages.length, 1);
   assert.equal(downstream.messages[0]?.platform, "mock");
   assert.equal(downstream.messages[0]?.conversationId, "chat-1");
+});
+
+test("note route forwards a manual note to the processor", async () => {
+  const clock = new FixedClock();
+  const settingsRepository = new InMemorySettingsRepository();
+  const downstream = new RecordingProcessor();
+  const processor = new LiveMessageBufferService(
+    new InMemoryBufferRepository(),
+    settingsRepository,
+    downstream,
+    new RegexSecretDetector(),
+    clock,
+    new SilentLogger(),
+  );
+  const routes = createNoteRoutes(processor);
+
+  const rejected = await routes.submit(context({ body: { text: "   " } }));
+  assert.equal(rejected.status, 400);
+
+  const ok = await routes.submit(context({ body: { conversationId: "notes", text: "Launch moved to August." } }));
+  assert.equal(ok.status, 200);
+  assert.equal(downstream.notes.length, 1);
+  assert.equal(downstream.notes[0]?.text, "Launch moved to August.");
+  assert.equal(downstream.notes[0]?.conversationId, "notes");
 });
 
 test("mock inject rejects messages missing required fields", async () => {

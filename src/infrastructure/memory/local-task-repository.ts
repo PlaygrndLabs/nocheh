@@ -33,6 +33,13 @@ export class LocalTaskRepository implements TaskRepositoryPort {
       .map((record) => this.deserialize(record));
   }
 
+  /** Finds tasks whose source message matches the given id. */
+  public async findBySourceMessageId(messageId: string): Promise<readonly Task[]> {
+    return (await this.store.read())
+      .filter((record) => record.source.messageId === messageId)
+      .map((record) => this.deserialize(record));
+  }
+
   private serialize(task: Task): StoredTaskRecord {
     const snapshot = task.toSnapshot();
     const { dueAt, source, createdAt, updatedAt, ...rest } = snapshot;

@@ -5,6 +5,7 @@ import {
   GitBranch,
   LogOut,
   MessagesSquare,
+  NotebookPen,
   Settings as SettingsIcon,
   Sparkles,
   Upload,
@@ -15,6 +16,7 @@ import { Setup } from "./pages/Setup.js";
 import { Bot } from "./pages/Bot.js";
 import { History } from "./pages/History.js";
 import { Simulator } from "./pages/Simulator.js";
+import { Notes } from "./pages/Notes.js";
 import { Conversations } from "./pages/Conversations.js";
 import { Knowledge } from "./pages/Knowledge.js";
 import { Settings } from "./pages/Settings.js";
@@ -28,6 +30,7 @@ const PAGES = {
   bot: { label: "Connect bot", render: () => <Bot /> },
   history: { label: "Import history", render: () => <History /> },
   mock: { label: "Simulator", render: () => <Simulator /> },
+  notes: { label: "Notes", render: () => <Notes /> },
   conversations: { label: "Conversations", render: () => <Conversations /> },
   knowledge: { label: "Knowledge graph", render: () => <Knowledge /> },
   settings: { label: "Settings", render: () => <Settings /> },
@@ -40,6 +43,7 @@ const PAGE_ICONS: Record<PageKey, LucideIcon> = {
   bot: BotIcon,
   history: Upload,
   mock: FlaskConical,
+  notes: NotebookPen,
   conversations: MessagesSquare,
   knowledge: GitBranch,
   settings: SettingsIcon,

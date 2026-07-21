@@ -29,7 +29,11 @@ export class TelegramHttpClient implements TelegramClientPort {
   }
 
   public async setWebhook(token: string, url: string): Promise<void> {
-    await this.call(token, "setWebhook", { url });
+    // message_reaction requires the bot to be an administrator in the chat to receive updates.
+    await this.call(token, "setWebhook", {
+      url,
+      allowed_updates: ["message", "edited_message", "message_reaction"],
+    });
   }
 
   public async getWebhookInfo(token: string): Promise<TelegramWebhookInfo> {

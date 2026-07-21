@@ -8,11 +8,12 @@ export interface AiTokenUsage {
   readonly totalTokens: number;
 }
 
-/** Pipeline step names tracked for each processed message. */
+/** Pipeline step names tracked for each processed conversation window. */
 export type ProcessingStepName =
   | "telegram_message"
   | "secret_detection"
   | "redaction"
+  | "analysis"
   | "memory_extraction"
   | "memory_persistence"
   | "graph_analysis"
@@ -21,6 +22,9 @@ export type ProcessingStepName =
   | "task_extraction"
   | "validation"
   | "persistence"
+  | "status_update"
+  | "reaction_analysis"
+  | "note_analysis"
   | "notion_sync";
 
 /** Execution status for a pipeline step. */

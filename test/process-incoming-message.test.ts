@@ -1,23 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { IncomingMessage } from "../src/application/dto/incoming-message.js";
+import type { ConversationAnalysisInput, MemoryGraphAnalysis, MemoryGraphAnalyzerPort } from "../src/application/ports/memory-graph-analyzer.js";
 import type { ClockPort } from "../src/application/ports/clock.js";
 import type { LoggerPort } from "../src/application/ports/logger.js";
 import type { MemoryRecordRepositoryPort } from "../src/application/ports/memory-record-repository.js";
 import type { AuditRepositoryPort } from "../src/application/ports/audit-repository.js";
-import type { SecretDetectorPort } from "../src/application/ports/secret-detector.js";
-import type { TaskExtractorPort } from "../src/application/ports/task-extractor.js";
 import type { ExternalTask, TaskProviderPort } from "../src/application/ports/task-provider.js";
 import type { TaskRepositoryPort } from "../src/application/ports/task-repository.js";
 import type { TaskSyncRepositoryPort } from "../src/application/ports/task-sync-repository.js";
 import type { MemoryRecord, MemoryRecordType } from "../src/domain/memory/memory-record.js";
+import { projectIdFromName } from "../src/domain/memory/memory-record.js";
 import type { ProcessingAuditRecord } from "../src/domain/observability/audit.js";
-import type { ExtractedTaskCandidate } from "../src/domain/tasks/task-extraction.js";
 import type { Task, TaskId } from "../src/domain/tasks/task.js";
 import { RegexSecretDetector } from "../src/infrastructure/security/regex-secret-detector.js";
 import { ProcessIncomingMessageUseCase } from "../src/application/use-cases/process-incoming-message.js";
 import { InMemoryMetricsCollector } from "../src/infrastructure/observability/in-memory-metrics-collector.js";
-import { RuleBasedMemoryExtractor } from "../src/infrastructure/reasoning/rule-based-memory-extractor.js";
 
 class FixedClock implements ClockPort {
   public now(): Date {
@@ -44,6 +41,10 @@ class InMemoryTaskRepository implements TaskRepositoryPort {
 
   public async findOpen(): Promise<readonly Task[]> {
     return [...this.tasks.values()].filter((task) => task.status === "open" || task.status === "in_progress");
+  }
+
+  public async findBySourceMessageId(messageId: string): Promise<readonly Task[]> {
+    return [...this.tasks.values()].filter((task) => task.source.messageId === messageId);
   }
 }
 
@@ -110,23 +111,41 @@ class FailingTaskProvider implements TaskProviderPort {
   }
 }
 
-class RecordingExtractor implements TaskExtractorPort {
+const EMPTY_ANALYSIS: MemoryGraphAnalysis = {
+  memories: [],
+  nodes: [],
+  edges: [],
+  suggestions: [],
+  tasks: [],
+  statusUpdates: [],
+  warnings: [],
+};
+
+/** A test double for the brain that records its input and returns a scripted analysis. */
+class StubAnalyzer implements MemoryGraphAnalyzerPort {
+  public lastInput: ConversationAnalysisInput | undefined;
   public seenText = "";
 
-  public async extractTasks(message: IncomingMessage): Promise<readonly ExtractedTaskCandidate[]> {
-    this.seenText = message.text;
-    return [{
+  public constructor(private readonly build: (input: ConversationAnalysisInput) => MemoryGraphAnalysis) {}
+
+  public async analyze(input: ConversationAnalysisInput): Promise<MemoryGraphAnalysis> {
+    this.lastInput = input;
+    this.seenText = input.window.messages.map((message) => message.text).join("\n");
+    return this.build(input);
+  }
+}
+
+test("redacts before analysis, then persists tasks, memory, and provider sync state", async () => {
+  const analyzer = new StubAnalyzer((input) => ({
+    ...EMPTY_ANALYSIS,
+    tasks: [{
       title: "Rotate production secret",
       confidence: 0.95,
       priority: "high",
       extractionReason: "Matched test candidate.",
-    }];
-  }
-}
-
-test("processes sanitized messages into tasks, memory records, and provider sync state", async () => {
-  const secretDetector: SecretDetectorPort = new RegexSecretDetector();
-  const extractor = new RecordingExtractor();
+      sourceMessageId: input.window.messages[0]?.messageId ?? "unknown",
+    }],
+  }));
   const taskRepository = new InMemoryTaskRepository();
   const memoryRepository = new InMemoryMemoryRepository();
   const syncRepository = new InMemorySyncRepository();
@@ -134,8 +153,8 @@ test("processes sanitized messages into tasks, memory records, and provider sync
   const auditRepository = new InMemoryAuditRepository();
   const metrics = new InMemoryMetricsCollector();
   const useCase = new ProcessIncomingMessageUseCase(
-    secretDetector,
-    extractor,
+    new RegexSecretDetector(),
+    analyzer,
     taskRepository,
     memoryRepository,
     syncRepository,
@@ -151,14 +170,14 @@ test("processes sanitized messages into tasks, memory records, and provider sync
     conversationId: "chat-1",
     messageId: "42",
     senderId: "7",
-    text: "Task: rotate this key sk_live_abcdefghijklmnopqrstuvwxyz",
+    text: "Please rotate this key sk_live_abcdefghijklmnopqrstuvwxyz",
     occurredAt: new Date("2026-06-19T11:59:00.000Z"),
   });
 
   assert.equal(result.createdTaskIds.length, 1);
   assert.equal(result.redactedFindingCount, 1);
-  assert.match(extractor.seenText, /\[REDACTED:api_key\]/);
-  assert.doesNotMatch(extractor.seenText, /sk_live/);
+  assert.match(analyzer.seenText, /\[REDACTED:api_key\]/);
+  assert.doesNotMatch(analyzer.seenText, /sk_live/);
   assert.equal(taskRepository.tasks.size, 1);
   assert.equal(memoryRepository.records.length, 1);
   assert.equal(memoryRepository.records[0]?.type, "Task");
@@ -169,27 +188,74 @@ test("processes sanitized messages into tasks, memory records, and provider sync
   assert.equal(auditRepository.records.length, 1);
   assert.equal(auditRepository.records[0]?.extractedTasks[0]?.confidence, 0.95);
   assert.equal(auditRepository.records[0]?.extractedTasks[0]?.extractionReason, "Matched test candidate.");
+  assert.equal(auditRepository.records[0]?.extractedTasks[0]?.sourceMessageId, "42");
   assert.match(auditRepository.records[0]?.redactedContentPreview ?? "", /\[REDACTED:api_key\]/);
   assert.equal(metrics.snapshot().messagesProcessed, 1);
   assert.equal(metrics.snapshot().syncSuccessRate, 1);
 });
 
-test("extracts structured memory after redaction and links task memory to project context", async () => {
+test("persists structured memory candidates and links task memory to project context", async () => {
+  const analyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    memories: [
+      {
+        sourceMessageId: "44",
+        candidate: {
+          type: "Project",
+          confidence: 0.9,
+          extractionReason: "Project named.",
+          project: { id: projectIdFromName("Atlas"), name: "Atlas" },
+          projectMemory: { name: "Atlas", description: "migration launch" },
+        },
+      },
+      {
+        sourceMessageId: "44",
+        candidate: {
+          type: "Decision",
+          confidence: 0.85,
+          extractionReason: "Decision made.",
+          decision: { title: "API platform", outcome: "Use Cloudflare Workers" },
+        },
+      },
+      {
+        sourceMessageId: "44",
+        candidate: {
+          type: "Blocker",
+          confidence: 0.8,
+          extractionReason: "Blocker raised.",
+          blocker: { description: "waiting on legal review", status: "open" },
+        },
+      },
+      {
+        sourceMessageId: "44",
+        candidate: {
+          type: "Deadline",
+          confidence: 0.82,
+          extractionReason: "Deadline stated.",
+          deadline: { title: "launch", dueAt: new Date("2026-07-01T00:00:00.000Z") },
+        },
+      },
+    ],
+    tasks: [{
+      title: "rotate production secret",
+      confidence: 0.9,
+      extractionReason: "Task requested.",
+      sourceMessageId: "44",
+    }],
+  }));
   const taskRepository = new InMemoryTaskRepository();
   const memoryRepository = new InMemoryMemoryRepository();
-  const syncRepository = new InMemorySyncRepository();
   const useCase = new ProcessIncomingMessageUseCase(
     new RegexSecretDetector(),
-    new RecordingExtractor(),
+    analyzer,
     taskRepository,
     memoryRepository,
-    syncRepository,
+    new InMemorySyncRepository(),
     new RecordingTaskProvider(),
     new FixedClock(),
     new SilentLogger(),
     new InMemoryAuditRepository(),
     new InMemoryMetricsCollector(),
-    new RuleBasedMemoryExtractor(),
   );
 
   const result = await useCase.execute({
@@ -197,13 +263,7 @@ test("extracts structured memory after redaction and links task memory to projec
     conversationId: "chat-1",
     messageId: "44",
     senderId: "7",
-    text: [
-      "Project: Atlas - migration launch",
-      "Decision: use Cloudflare Workers for the API sk_live_abcdefghijklmnopqrstuvwxyz",
-      "Blocker: waiting on legal review",
-      "Deadline: launch by 2026-07-01",
-      "Task: rotate production secret",
-    ].join("\n"),
+    text: "Atlas migration: pick a platform, watch legal, launch by July.",
     occurredAt: new Date("2026-06-19T11:59:00.000Z"),
   });
 
@@ -215,14 +275,19 @@ test("extracts structured memory after redaction and links task memory to projec
   assert.equal(memoryRepository.records.some((record) => record.type === "Deadline"), true);
   assert.equal(memoryRepository.records.every((record) => record.source.messageId === "44"), true);
   assert.equal(memoryRepository.records.every((record) => record.timestamp.toISOString() === "2026-06-19T12:00:00.000Z"), true);
-  assert.equal(memoryRepository.records.every((record) => record.confidence > 0), true);
   assert.equal(memoryRepository.records.find((record) => record.type === "Task")?.project?.name, "Atlas");
-  assert.doesNotMatch(JSON.stringify(memoryRepository.records), /sk_live/);
-  assert.match(JSON.stringify(memoryRepository.records), /\[REDACTED:api_key\]/);
 });
 
 test("records failed Notion syncs without rolling back local persistence", async () => {
-  const extractor = new RecordingExtractor();
+  const analyzer = new StubAnalyzer((input) => ({
+    ...EMPTY_ANALYSIS,
+    tasks: [{
+      title: "rotate production secret",
+      confidence: 0.95,
+      extractionReason: "Task requested.",
+      sourceMessageId: input.window.messages[0]?.messageId ?? "43",
+    }],
+  }));
   const taskRepository = new InMemoryTaskRepository();
   const memoryRepository = new InMemoryMemoryRepository();
   const syncRepository = new InMemorySyncRepository();
@@ -230,7 +295,7 @@ test("records failed Notion syncs without rolling back local persistence", async
   const metrics = new InMemoryMetricsCollector();
   const useCase = new ProcessIncomingMessageUseCase(
     new RegexSecretDetector(),
-    extractor,
+    analyzer,
     taskRepository,
     memoryRepository,
     syncRepository,
@@ -246,7 +311,7 @@ test("records failed Notion syncs without rolling back local persistence", async
     conversationId: "chat-1",
     messageId: "43",
     senderId: "7",
-    text: "Task: rotate production secret",
+    text: "rotate production secret",
     occurredAt: new Date("2026-06-19T11:59:00.000Z"),
   });
 
@@ -258,4 +323,193 @@ test("records failed Notion syncs without rolling back local persistence", async
   assert.equal(auditRepository.records[0]?.extractedTasks[0]?.syncStatus, "failed");
   assert.match(auditRepository.records[0]?.errorLogs[0] ?? "", /Notion sync failed/);
   assert.equal(metrics.snapshot().syncSuccessRate, 0);
+});
+
+test("analyzes a multi-message window and attributes each task to its source message", async () => {
+  const analyzer = new StubAnalyzer((input) => ({
+    ...EMPTY_ANALYSIS,
+    tasks: input.window.messages.map((message, index) => ({
+      title: `task from message ${message.messageId}`,
+      confidence: 0.9,
+      extractionReason: "Derived from window.",
+      sourceMessageId: message.messageId,
+      priority: index === 0 ? "high" : "medium",
+    })),
+  }));
+  const taskRepository = new InMemoryTaskRepository();
+  const useCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(),
+    analyzer,
+    taskRepository,
+    new InMemoryMemoryRepository(),
+    new InMemorySyncRepository(),
+    new RecordingTaskProvider(),
+    new FixedClock(),
+    new SilentLogger(),
+  );
+
+  const result = await useCase.executeWindow({
+    platform: "telegram",
+    conversationId: "chat-9",
+    messages: [
+      { platform: "telegram", conversationId: "chat-9", messageId: "100", senderId: "a", text: "let's ship the beta", occurredAt: new Date("2026-06-19T11:50:00.000Z") },
+      { platform: "telegram", conversationId: "chat-9", messageId: "101", senderId: "b", text: "and write release notes", occurredAt: new Date("2026-06-19T11:52:00.000Z"), replyToMessageId: "100" },
+    ],
+  });
+
+  assert.equal(analyzer.lastInput?.window.messages.length, 2);
+  assert.equal(result.createdTaskIds.length, 2);
+  const sources = [...taskRepository.tasks.values()].map((task) => task.source.messageId).sort();
+  assert.deepEqual(sources, ["100", "101"]);
+});
+
+test("applies an inferred status update to an existing task from the same source message", async () => {
+  const taskRepository = new InMemoryTaskRepository();
+  const createAnalyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    tasks: [{ title: "prepare release notes", confidence: 0.9, extractionReason: "requested", sourceMessageId: "200" }],
+  }));
+  const closeAnalyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    statusUpdates: [{ targetMessageId: "200", status: "completed", reason: "done reaction", confidence: 0.9 }],
+  }));
+  const shared = {
+    memory: new InMemoryMemoryRepository(),
+    sync: new InMemorySyncRepository(),
+    provider: new RecordingTaskProvider(),
+    clock: new FixedClock(),
+    logger: new SilentLogger(),
+  };
+
+  const createUseCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(), createAnalyzer, taskRepository, shared.memory, shared.sync, shared.provider, shared.clock, shared.logger,
+  );
+  await createUseCase.execute({
+    platform: "telegram", conversationId: "chat-2", messageId: "200", senderId: "7",
+    text: "prepare release notes", occurredAt: new Date("2026-06-19T11:59:00.000Z"),
+  });
+  assert.equal([...taskRepository.tasks.values()][0]?.status, "open");
+
+  const closeUseCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(), closeAnalyzer, taskRepository, shared.memory, shared.sync, shared.provider, shared.clock, shared.logger,
+  );
+  const result = await closeUseCase.execute({
+    platform: "telegram", conversationId: "chat-2", messageId: "200", senderId: "7",
+    text: "(done reaction)", occurredAt: new Date("2026-06-19T12:05:00.000Z"),
+  });
+
+  assert.equal(result.statusUpdateCount, 1);
+  assert.equal([...taskRepository.tasks.values()][0]?.status, "completed");
+});
+
+test("executeReaction interprets a reaction and closes the task derived from that message", async () => {
+  const taskRepository = new InMemoryTaskRepository();
+  const memory = new InMemoryMemoryRepository();
+  const sync = new InMemorySyncRepository();
+  const provider = new RecordingTaskProvider();
+  const clock = new FixedClock();
+  const logger = new SilentLogger();
+
+  const createAnalyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    tasks: [{ title: "prepare release notes", confidence: 0.9, extractionReason: "requested", sourceMessageId: "300" }],
+  }));
+  await new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(), createAnalyzer, taskRepository, memory, sync, provider, clock, logger,
+  ).execute({
+    platform: "mock", conversationId: "chat-3", messageId: "300", senderId: "a",
+    text: "can someone prepare the release notes?", occurredAt: new Date("2026-06-19T11:59:00.000Z"),
+  });
+  assert.equal([...taskRepository.tasks.values()][0]?.status, "open");
+
+  // The reaction analyzer should see the candidate target and the reaction emoji, then decide to complete it.
+  const reactionAnalyzer = new StubAnalyzer((input) => {
+    assert.equal(input.candidateTargets?.[0]?.kind, "task");
+    assert.equal(input.window.messages[0]?.reactions?.[0]?.emoji, "\u2705");
+    return { ...EMPTY_ANALYSIS, statusUpdates: [{ targetMessageId: "300", status: "completed", reason: "done reaction", confidence: 0.95 }] };
+  });
+  const reactionUseCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(), reactionAnalyzer, taskRepository, memory, sync, provider, clock, logger,
+  );
+
+  const result = await reactionUseCase.executeReaction({
+    platform: "mock",
+    conversationId: "chat-3",
+    targetMessageId: "300",
+    reactorId: "b",
+    reactions: [{ emoji: "\u2705", reactorId: "b" }],
+    occurredAt: new Date("2026-06-19T12:10:00.000Z"),
+  });
+
+  assert.equal(result.statusUpdateCount, 1);
+  assert.equal([...taskRepository.tasks.values()][0]?.status, "completed");
+  assert.ok(reactionAnalyzer.lastInput !== undefined);
+});
+
+test("executeReaction is a no-op when no prior knowledge exists for the message", async () => {
+  const taskRepository = new InMemoryTaskRepository();
+  const analyzer = new StubAnalyzer(() => EMPTY_ANALYSIS);
+  const useCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(), analyzer, taskRepository, new InMemoryMemoryRepository(),
+    new InMemorySyncRepository(), new RecordingTaskProvider(), new FixedClock(), new SilentLogger(),
+  );
+
+  const result = await useCase.executeReaction({
+    platform: "mock",
+    conversationId: "chat-x",
+    targetMessageId: "999",
+    reactorId: "b",
+    reactions: [{ emoji: "\u{1F44D}", reactorId: "b" }],
+    occurredAt: new Date("2026-06-19T12:10:00.000Z"),
+  });
+
+  assert.equal(result.statusUpdateCount, 0);
+  assert.equal(analyzer.lastInput, undefined);
+});
+
+test("executeNote treats a note as an authoritative window and offers open tasks as candidates", async () => {
+  const taskRepository = new InMemoryTaskRepository();
+  const memory = new InMemoryMemoryRepository();
+  const graphNodes = new Map<string, unknown>();
+
+  // Seed an open task so the note has a candidate target.
+  const seedAnalyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    tasks: [{ title: "draft the pitch", confidence: 0.9, extractionReason: "seed", sourceMessageId: "500" }],
+  }));
+  await new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(), seedAnalyzer, taskRepository, memory,
+    new InMemorySyncRepository(), new RecordingTaskProvider(), new FixedClock(), new SilentLogger(),
+  ).execute({
+    platform: "mock", conversationId: "chat-note", messageId: "500", senderId: "a",
+    text: "someone should draft the pitch", occurredAt: new Date("2026-06-19T11:00:00.000Z"),
+  });
+
+  const noteAnalyzer = new StubAnalyzer((input) => {
+    assert.equal(input.window.note, "Remember: our launch date moved to August.");
+    assert.equal(input.window.platform, "note");
+    assert.ok((input.candidateTargets?.length ?? 0) >= 1);
+    assert.equal(input.candidateTargets?.[0]?.kind, "task");
+    return {
+      ...EMPTY_ANALYSIS,
+      memories: [{
+        sourceMessageId: input.window.messages[0]?.messageId ?? "note",
+        candidate: {
+          type: "Deadline",
+          confidence: 0.9,
+          extractionReason: "note",
+          deadline: { title: "Launch", dueAt: new Date("2026-08-01T00:00:00.000Z") },
+        },
+      }],
+    };
+  });
+  const result = await new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(), noteAnalyzer, taskRepository, memory,
+    new InMemorySyncRepository(), new RecordingTaskProvider(), new FixedClock(), new SilentLogger(),
+  ).executeNote({ conversationId: "chat-note", text: "Remember: our launch date moved to August." });
+
+  void graphNodes;
+  assert.equal(result.createdMemoryRecordIds.length, 1);
+  assert.equal(memory.records.some((record) => record.type === "Deadline"), true);
+  assert.ok(noteAnalyzer.lastInput !== undefined);
 });

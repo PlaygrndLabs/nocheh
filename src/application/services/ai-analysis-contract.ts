@@ -31,6 +31,8 @@ export interface ProviderNeutralAiAnalysisOutput {
   readonly edges: readonly AiAnalysisItemEnvelope<CreateMemoryEdgeInput>[];
   readonly strategicSuggestions: readonly AiAnalysisItemEnvelope<CreateStrategicSuggestionInput>[];
   readonly actionSuggestions: readonly AiAnalysisItemEnvelope<CreateActionSuggestionInput>[];
+  readonly tasks: readonly AiAnalysisItemEnvelope<Readonly<Record<string, unknown>>>[];
+  readonly statusUpdates: readonly AiAnalysisItemEnvelope<Readonly<Record<string, unknown>>>[];
   readonly warnings: readonly AiAnalysisWarning[];
 }
 
@@ -47,15 +49,22 @@ export function validateAiAnalysisOutput(
     return err(new Error("AI analysis output must be an object."));
   }
 
-  const keys = ["memories", "nodes", "edges", "strategicSuggestions", "actionSuggestions", "warnings"] as const;
-  for (const key of keys) {
+  const requiredKeys = ["memories", "nodes", "edges", "strategicSuggestions", "actionSuggestions", "warnings"] as const;
+  const optionalKeys = ["tasks", "statusUpdates"] as const;
+  for (const key of requiredKeys) {
     if (!Array.isArray(value[key])) {
       return err(new Error(`AI analysis output ${key} must be an array.`));
     }
   }
+  for (const key of optionalKeys) {
+    if (value[key] !== undefined && !Array.isArray(value[key])) {
+      return err(new Error(`AI analysis output ${key} must be an array when present.`));
+    }
+  }
 
+  const keys = [...requiredKeys, ...optionalKeys] as const;
   for (const key of keys) {
-    const items = value[key] as readonly unknown[];
+    const items = (value[key] ?? []) as readonly unknown[];
     for (const item of items) {
       const validation = validateEnvelope(item, key, minimumConfidence);
       if (!validation.ok) {
@@ -64,7 +73,12 @@ export function validateAiAnalysisOutput(
     }
   }
 
-  return ok(value as unknown as ProviderNeutralAiAnalysisOutput);
+  const normalized = {
+    ...value,
+    tasks: value.tasks ?? [],
+    statusUpdates: value.statusUpdates ?? [],
+  };
+  return ok(normalized as unknown as ProviderNeutralAiAnalysisOutput);
 }
 
 function validateEnvelope(item: unknown, key: string, minimumConfidence: number): Result<void> {

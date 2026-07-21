@@ -56,6 +56,7 @@ export interface AuditTask {
   title: string;
   confidence: number;
   extractionReason: string;
+  sourceMessageId?: string;
   accepted: boolean;
   syncStatus: "not_attempted" | "succeeded" | "failed";
   warnings: { code: string }[];
@@ -103,6 +104,7 @@ export interface GroupSettings {
   summaryEveryMessages: number;
   summaryEveryMinutes: number;
   replyMode: "silent" | "mention" | "active" | "digest";
+  projectHint: "single" | "multi";
 }
 
 export interface BrainGraphNode {
@@ -168,10 +170,14 @@ export const api = {
       "/api/history/import",
       payload,
     ),
-  injectMock: (messages: { conversationId: string; text: string; senderDisplayName?: string }[]) =>
+  injectMock: (messages: { conversationId: string; text: string; messageId?: string; senderId?: string; senderDisplayName?: string; replyToMessageId?: string }[]) =>
     request<{ ok: boolean; results: unknown[] }>("POST", "/api/mock/inject", { messages }),
   flushMock: (conversationId: string) =>
     request<{ ok: boolean; flushedMessageCount: number }>("POST", "/api/mock/flush", { conversationId }),
+  reactMock: (input: { conversationId: string; targetMessageId: string; emoji?: string; emojis?: string[]; reactorId?: string; reactorDisplayName?: string }) =>
+    request<{ ok: boolean; result: { statusUpdateCount: number } }>("POST", "/api/mock/reaction", input),
+  sendNote: (input: { conversationId?: string; text: string; authorDisplayName?: string }) =>
+    request<{ ok: boolean; result: unknown }>("POST", "/api/brain/note", input),
   getSettings: (conversationId: string) =>
     request<{ ok: boolean; settings: GroupSettings; isDefault: boolean }>("GET", `/api/settings/${encodeURIComponent(conversationId)}`),
   putSettings: (conversationId: string, settings: Partial<GroupSettings>) =>
@@ -183,6 +189,8 @@ export const api = {
       "GET",
       `/api/conversations/${encodeURIComponent(conversationId)}`,
     ),
+  getAudit: (limit = 200) =>
+    request<{ ok: boolean; records: AuditRecord[] }>("GET", `/api/audit?limit=${encodeURIComponent(limit)}`),
   getBrainGraph: () =>
     request<{ nodes: BrainGraphNode[]; edges: BrainGraphEdge[] }>("GET", "/api/brain/graph"),
   getBrainSuggestions: (status = "pending") =>

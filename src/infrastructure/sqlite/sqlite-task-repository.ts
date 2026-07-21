@@ -61,6 +61,12 @@ export class SqliteTaskRepository implements TaskRepositoryPort {
     return Promise.all(rows.map(async (row) => this.deserialize(await this.codec.decode<StoredTaskRecord>(row.payload))));
   }
 
+  public async findBySourceMessageId(messageId: string): Promise<readonly Task[]> {
+    const rows = this.database.prepare("SELECT payload FROM tasks ORDER BY updated_at DESC").all() as TaskRow[];
+    const tasks = await Promise.all(rows.map(async (row) => this.deserialize(await this.codec.decode<StoredTaskRecord>(row.payload))));
+    return tasks.filter((task) => task.source.messageId === messageId);
+  }
+
   private serialize(task: Task): StoredTaskRecord {
     const snapshot = task.toSnapshot();
     const { dueAt, source, createdAt, updatedAt, ...rest } = snapshot;

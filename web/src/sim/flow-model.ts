@@ -1,5 +1,15 @@
-import type { AuditRecord, AuditStep } from "../api/client.js";
-import type { BrainPreview } from "./brain-preview.js";
+import type { AuditRecord, AuditStep, BrainGraphEdge, BrainGraphNode, BrainSuggestion } from "../api/client.js";
+
+/**
+ * Lean, backend-derived view of what the analysis produced: the current
+ * knowledge graph plus pending suggestions. Replaces the old keyword
+ * `BrainPreview` — every field here comes from real `/api/*` responses.
+ */
+export interface FlowInsights {
+  readonly nodes: readonly BrainGraphNode[];
+  readonly edges: readonly BrainGraphEdge[];
+  readonly suggestions: readonly BrainSuggestion[];
+}
 
 /** The nine human-readable stages a message passes through, in flow order. */
 export type StageId =
@@ -75,7 +85,7 @@ export const FLOW_STAGES: readonly FlowStage[] = [
     sublabel: "A message appears in a group.",
     lane: "external",
     column: 0,
-    property: "The simulator runs fully local — no real Telegram or backend is contacted.",
+    property: "The simulator posts real messages through Nocheh's pipeline — buffered until you run analysis.",
   },
   {
     id: "receive",
@@ -83,7 +93,7 @@ export const FLOW_STAGES: readonly FlowStage[] = [
     sublabel: "The bot accepts the message; it can batch several together.",
     lane: "infra",
     column: 1,
-    property: "Immediate or batch mode — high-traffic groups are grouped to control cost.",
+    property: "Immediate or batch mode — high-traffic groups are grouped into one conversation window to control cost.",
   },
   {
     id: "protect",
@@ -96,10 +106,10 @@ export const FLOW_STAGES: readonly FlowStage[] = [
   {
     id: "ai_brain",
     label: "AI Brain",
-    sublabel: "Extracts memory, graph, and tasks.",
+    sublabel: "Reads the whole window; extracts memory, graph, and tasks.",
     lane: "process",
     column: 3,
-    property: "Rule-based now; Claude when an Anthropic key is configured.",
+    property: "One LLM pass over the conversation window (Claude). Dry-run with no API key returns an empty analysis.",
   },
   {
     id: "memory",
@@ -131,7 +141,7 @@ export const FLOW_STAGES: readonly FlowStage[] = [
     sublabel: "Possible tasks are extracted, checked, and saved.",
     lane: "stores",
     column: 4,
-    property: "Validated for clarity and duplicates; optional Notion sync (skipped here — local-only).",
+    property: "Validated for clarity and duplicates; optional Notion sync when a provider is configured.",
   },
   {
     id: "audit",
@@ -157,20 +167,24 @@ export const FLOW_EDGES: readonly FlowEdge[] = [
   { from: "tasks", to: "audit" },
 ];
 
-/** Maps a backend audit step name to the flow stage it animates. */
+/** Maps a backend audit step name to the flow stage it animates. Unknown steps are ignored. */
 export const STEP_TO_STAGE: Record<string, StageId> = {
   telegram_message: "receive",
   secret_detection: "protect",
   redaction: "protect",
-  memory_extraction: "ai_brain",
+  // Current backend: one combined LLM pass over the conversation window.
+  analysis: "ai_brain",
   memory_persistence: "memory",
-  graph_analysis: "ai_brain",
   graph_persistence: "knowledge",
   suggestion_persistence: "ideas",
-  task_extraction: "ai_brain",
   validation: "tasks",
   persistence: "tasks",
+  status_update: "tasks",
   notion_sync: "tasks",
+  // Legacy step names kept for backward compatibility with older audit records.
+  memory_extraction: "ai_brain",
+  graph_analysis: "ai_brain",
+  task_extraction: "ai_brain",
 };
 
 /** Stage display order for playback (same as FLOW_STAGES order). */
@@ -186,9 +200,10 @@ export function stageById(id: StageId): FlowStage {
   return stage;
 }
 
-/** Turns a processed message's audit record (+ brain preview) into ordered, enriched flow frames. */
-export function buildFlow(record: AuditRecord, preview: BrainPreview): readonly FlowFrame[] {
+/** Turns a processed window's audit record (+ real backend insights) into ordered, enriched flow frames. */
+export function buildFlow(record: AuditRecord, insights: FlowInsights): readonly FlowFrame[] {
   const stepsByStage = groupSteps(record.steps);
+  const labels = labelMap(insights);
   return STAGE_ORDER.map((stageId) => {
     const steps = stepsByStage.get(stageId);
     return {
@@ -196,10 +211,10 @@ export function buildFlow(record: AuditRecord, preview: BrainPreview): readonly 
       status: stageStatus(stageId, steps),
       durationMs: durationFor(steps),
       headline: stageHeadline(stageId, record, steps),
-      detail: stageDetail(stageId, record, preview, steps),
-      metrics: stageMetrics(stageId, record, preview, steps),
+      detail: stageDetail(stageId, record, insights, steps),
+      metrics: stageMetrics(stageId, record, insights, steps),
       property: stageById(stageId).property,
-      samples: stageSamples(stageId, record, preview),
+      samples: stageSamples(stageId, record, insights, labels),
     };
   });
 }
@@ -256,14 +271,16 @@ function stageHeadline(stageId: StageId, record: AuditRecord, steps: readonly Au
   switch (stageId) {
     case "chat":
       return "new message";
-    case "receive":
-      return "local only";
+    case "receive": {
+      const count = metadataNumber(stepByName(steps, "telegram_message"), "messageCount");
+      return count > 0 ? countLabel(count, "message") : "received";
+    }
     case "protect":
       return record.redactionFindingCount > 0 ? `${record.redactionFindingCount} redacted` : "clean";
     case "ai_brain": {
-      const graph = stepByName(steps, "graph_analysis");
-      const nodes = metadataNumber(graph, "nodeCount");
-      const edges = metadataNumber(graph, "edgeCount");
+      const brain = brainStep(steps);
+      const nodes = metadataNumber(brain, "nodeCount");
+      const edges = metadataNumber(brain, "edgeCount");
       return nodes + edges > 0 ? `${nodes} facts, ${edges} links` : "understood";
     }
     case "memory":
@@ -288,35 +305,46 @@ function stageHeadline(stageId: StageId, record: AuditRecord, steps: readonly Au
 function stageDetail(
   stageId: StageId,
   record: AuditRecord,
-  preview: BrainPreview,
+  insights: FlowInsights,
   steps: readonly AuditStep[] | undefined,
 ): string {
   switch (stageId) {
     case "chat":
       return `A member posts a message in conversation "${record.conversationId}".`;
-    case "receive":
-      return "Nocheh accepts the message. Busy groups can be batched before analysis to save tokens.";
+    case "receive": {
+      const count = metadataNumber(stepByName(steps, "telegram_message"), "messageCount");
+      return count > 1
+        ? `Nocheh grouped ${count} buffered messages into one conversation window before analysis.`
+        : "Nocheh accepts the message. Busy groups can be batched into one window before analysis to save tokens.";
+    }
     case "protect":
       return record.redactionFindingCount > 0
         ? `${record.redactionFindingCount} sensitive value${record.redactionFindingCount === 1 ? "" : "s"} were redacted before anything was stored.`
         : "No secrets detected. Only redacted, structured text moves forward — raw chat is never persisted.";
     case "ai_brain": {
-      const graph = stepByName(steps, "graph_analysis");
-      const nodes = metadataNumber(graph, "nodeCount");
-      const edges = metadataNumber(graph, "edgeCount");
-      return `The brain read the message and produced ${nodes} fact${nodes === 1 ? "" : "s"} and ${edges} link${edges === 1 ? "" : "s"}. Rule-based today; Claude when configured.`;
+      const brain = brainStep(steps);
+      const nodes = metadataNumber(brain, "nodeCount");
+      const edges = metadataNumber(brain, "edgeCount");
+      const provider = record.aiTokenUsage?.provider;
+      return `The brain read the whole window and produced ${nodes} fact${nodes === 1 ? "" : "s"} and ${edges} link${edges === 1 ? "" : "s"} in one pass. ${provider === undefined ? "Dry-run (no API key) returns an empty analysis." : `Analyzed by ${provider}.`}`;
     }
-    case "memory":
-      return `${preview.metrics.memories} structured memory candidate${preview.metrics.memories === 1 ? "" : "s"} would be saved with source and confidence.`;
-    case "knowledge":
-      return `${preview.metrics.edges} relationship${preview.metrics.edges === 1 ? "" : "s"} connect people, goals, projects, routines, and risks.`;
-    case "ideas":
-      return `${preview.metrics.suggestions} suggestion${preview.metrics.suggestions === 1 ? "" : "s"} are queued, all pending your approval before any action.`;
+    case "memory": {
+      const count = metadataNumber(stepByName(steps, "memory_persistence"), "recordCount");
+      return `${count} structured memory record${count === 1 ? "" : "s"} saved with source and confidence.`;
+    }
+    case "knowledge": {
+      const edges = metadataNumber(stepByName(steps, "graph_persistence"), "edgeCount");
+      return `${edges} relationship${edges === 1 ? "" : "s"} connect people, goals, projects, routines, and risks. The graph now holds ${insights.nodes.length} node${insights.nodes.length === 1 ? "" : "s"}.`;
+    }
+    case "ideas": {
+      const count = metadataNumber(stepByName(steps, "suggestion_persistence"), "suggestionCount");
+      return `${count} suggestion${count === 1 ? "" : "s"} saved this run; ${insights.suggestions.length} pending your approval overall. None act without you.`;
+    }
     case "tasks": {
       const accepted = record.extractedTasks.filter((task) => task.accepted).length;
       return record.extractedTasks.length === 0
-        ? "No actionable tasks were found in this message."
-        : `${accepted} of ${record.extractedTasks.length} candidate task${record.extractedTasks.length === 1 ? "" : "s"} passed validation. Notion sync is skipped (local-only).`;
+        ? "No actionable tasks were found in this window."
+        : `${accepted} of ${record.extractedTasks.length} candidate task${record.extractedTasks.length === 1 ? "" : "s"} passed validation.`;
     }
     case "audit":
       return record.errorLogs.length > 0
@@ -330,7 +358,7 @@ function stageDetail(
 function stageMetrics(
   stageId: StageId,
   record: AuditRecord,
-  preview: BrainPreview,
+  insights: FlowInsights,
   steps: readonly AuditStep[] | undefined,
 ): readonly FlowMetric[] {
   switch (stageId) {
@@ -340,30 +368,35 @@ function stageMetrics(
         { label: "Preview", value: `${record.redactedContentPreview.length} chars` },
       ];
     case "ai_brain": {
-      const graph = stepByName(steps, "graph_analysis");
-      return [
-        { label: "Facts", value: metadataNumber(graph, "nodeCount") },
-        { label: "Links", value: metadataNumber(graph, "edgeCount") },
-        { label: "Provider", value: record.aiTokenUsage?.provider ?? "rule-based" },
+      const brain = brainStep(steps);
+      const base: FlowMetric[] = [
+        { label: "Facts", value: metadataNumber(brain, "nodeCount") },
+        { label: "Links", value: metadataNumber(brain, "edgeCount") },
+        { label: "Provider", value: record.aiTokenUsage?.provider ?? "dry-run" },
       ];
+      return record.aiTokenUsage === undefined
+        ? base
+        : [...base, { label: "Tokens", value: record.aiTokenUsage.totalTokens }];
     }
     case "memory":
-      return [{ label: "Memories", value: preview.metrics.memories }];
+      return [{ label: "Memories", value: metadataNumber(stepByName(steps, "memory_persistence"), "recordCount") }];
     case "knowledge":
       return [
-        { label: "Nodes", value: preview.nodes.length },
-        { label: "Links", value: preview.metrics.edges },
+        { label: "Nodes", value: metadataNumber(stepByName(steps, "graph_persistence"), "nodeCount") },
+        { label: "Links", value: metadataNumber(stepByName(steps, "graph_persistence"), "edgeCount") },
+        { label: "Graph total", value: insights.nodes.length },
       ];
     case "ideas":
       return [
-        { label: "Suggestions", value: preview.metrics.suggestions },
-        { label: "Blocked", value: preview.metrics.blocked },
+        { label: "Suggestions", value: metadataNumber(stepByName(steps, "suggestion_persistence"), "suggestionCount") },
+        { label: "High risk", value: insights.suggestions.filter((suggestion) => suggestion.riskLevel === "high").length },
+        { label: "Pending", value: insights.suggestions.length },
       ];
     case "tasks":
       return [
         { label: "Accepted", value: record.extractedTasks.filter((task) => task.accepted).length },
         { label: "Total", value: record.extractedTasks.length },
-        { label: "Notion sync", value: "skipped" },
+        { label: "Notion sync", value: notionSyncValue(steps) },
       ];
     case "audit":
       return [
@@ -376,24 +409,43 @@ function stageMetrics(
   }
 }
 
-function stageSamples(stageId: StageId, record: AuditRecord, preview: BrainPreview): readonly string[] {
+function stageSamples(
+  stageId: StageId,
+  record: AuditRecord,
+  insights: FlowInsights,
+  labels: ReadonlyMap<string, string>,
+): readonly string[] {
   switch (stageId) {
-    case "memory":
-      return preview.memories
-        .filter((memory) => memory.type !== "Preview")
-        .slice(0, 4)
-        .map((memory) => `${memory.title} (${memory.type})`);
     case "knowledge":
-      return preview.edges.slice(0, 4).map((edge) => `${edge.from} → ${humanRelation(edge.relation)} → ${edge.to}`);
+      return insights.edges.slice(0, 4).map((edge) =>
+        `${labels.get(edge.fromNodeId) ?? edge.fromNodeId} → ${humanRelation(edge.relation)} → ${labels.get(edge.toNodeId) ?? edge.toNodeId}`);
     case "ideas":
-      return preview.suggestions.slice(0, 4).map((suggestion) =>
-        `${suggestion.title}${suggestion.status === "blocked" ? " — approval required" : ""}`);
+      return insights.suggestions.slice(0, 4).map((suggestion) =>
+        `${suggestion.title} — ${suggestion.riskLevel} risk`);
     case "tasks":
       return record.extractedTasks.slice(0, 4).map((task) =>
         `${task.title || "(empty)"} — ${task.confidence.toFixed(2)} ${task.accepted ? "accepted" : "rejected"}`);
     default:
       return [];
   }
+}
+
+/** The one combined analysis step, falling back to the legacy graph_analysis step name. */
+function brainStep(steps: readonly AuditStep[] | undefined): AuditStep | undefined {
+  return stepByName(steps, "analysis") ?? stepByName(steps, "graph_analysis");
+}
+
+function notionSyncValue(steps: readonly AuditStep[] | undefined): string {
+  const notion = stepByName(steps, "notion_sync");
+  if (notion === undefined) {
+    return "skipped";
+  }
+  return notion.status === "succeeded" ? "synced" : notion.status === "failed" ? "failed" : "skipped";
+}
+
+/** Maps node ids to labels so graph edges can be rendered with readable endpoints. */
+function labelMap(insights: FlowInsights): ReadonlyMap<string, string> {
+  return new Map(insights.nodes.map((node) => [node.id, node.label]));
 }
 
 function stepByName(steps: readonly AuditStep[] | undefined, name: string): AuditStep | undefined {
