@@ -17,7 +17,10 @@ import { RegexSecretDetector } from "../src/infrastructure/security/regex-secret
 import { createMockRoutes } from "../src/interfaces/http/api/create-mock-routes.js";
 import { createObservabilityRoutes } from "../src/interfaces/http/api/create-observability-routes.js";
 import { createSettingsRoutes } from "../src/interfaces/http/api/create-settings-routes.js";
+import { createTelegramRoutes } from "../src/interfaces/http/api/create-telegram-routes.js";
 import { parseTelegramExport } from "../src/interfaces/http/api/create-history-routes.js";
+import type { EnvStorePort } from "../src/application/ports/env-store.js";
+import type { TelegramClientPort, TelegramBotInfo, TelegramWebhookInfo } from "../src/application/ports/telegram-client.js";
 import type { RequestContext } from "../src/interfaces/http/router.js";
 
 class FixedClock implements ClockPort {
@@ -65,6 +68,30 @@ class InMemoryAuditRepository implements AuditRepositoryPort {
   public async save(): Promise<void> {}
   public async findRecent(): Promise<readonly ProcessingAuditRecord[]> {
     return this.records;
+  }
+}
+
+class InMemoryEnvStore implements EnvStorePort {
+  public constructor(public readonly values: Record<string, string> = {}) {}
+  public async read(): Promise<Record<string, string>> {
+    return { ...this.values };
+  }
+  public async setMany(values: Record<string, string>): Promise<readonly string[]> {
+    Object.assign(this.values, values);
+    return Object.keys(values);
+  }
+  public async presence(keys: readonly string[]): Promise<Record<string, boolean>> {
+    return Object.fromEntries(keys.map((key) => [key, (this.values[key] ?? "").length > 0]));
+  }
+}
+
+class FakeTelegramClient implements TelegramClientPort {
+  public async getMe(): Promise<TelegramBotInfo> {
+    return { id: 1, firstName: "Nocheh", username: "nocheh_bot" };
+  }
+  public async setWebhook(): Promise<void> {}
+  public async getWebhookInfo(): Promise<TelegramWebhookInfo> {
+    return { url: "https://example.test/telegram/webhook" };
   }
 }
 
@@ -173,6 +200,32 @@ test("settings GET returns defaults when none stored", async () => {
 
   assert.equal(result.status, 200);
   assert.deepEqual((result.body as { isDefault: boolean }).isDefault, true);
+});
+
+test("telegram access routes read, validate, and persist allow-lists", async () => {
+  const env = new InMemoryEnvStore({
+    TELEGRAM_ALLOWED_CHAT_IDS: "-1001,-1002",
+    TELEGRAM_ALLOWED_USER_IDS: "42",
+  });
+  const routes = createTelegramRoutes(new FakeTelegramClient(), env);
+
+  const current = await routes.getAccess(context({ method: "GET" }));
+  assert.equal(current.status, 200);
+  assert.deepEqual((current.body as { allowedChatIds: string[] }).allowedChatIds, ["-1001", "-1002"]);
+
+  const rejected = await routes.putAccess(context({
+    method: "PUT",
+    body: { allowedChatIds: ["abc"], allowedUserIds: ["42"] },
+  }));
+  assert.equal(rejected.status, 400);
+
+  const saved = await routes.putAccess(context({
+    method: "PUT",
+    body: { allowedChatIds: ["-1003", "-1003"], allowedUserIds: ["42", "43"] },
+  }));
+  assert.equal(saved.status, 200);
+  assert.equal(env.values.TELEGRAM_ALLOWED_CHAT_IDS, "-1003");
+  assert.equal(env.values.TELEGRAM_ALLOWED_USER_IDS, "42,43");
 });
 
 test("parseTelegramExport maps a Telegram Desktop export", () => {

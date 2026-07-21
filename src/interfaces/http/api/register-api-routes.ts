@@ -9,6 +9,7 @@ import type { LiveMessageBufferService } from "../../../application/services/liv
 import type { MemoryGraphRepositoryPort } from "../../../application/ports/memory-graph-repository.js";
 import type { Router } from "../router.js";
 import type { SuggestionRepositoryPort } from "../../../application/ports/suggestion-repository.js";
+import { createAuthRoutes } from "./create-auth-routes.js";
 import { createBrainRoutes } from "./create-brain-routes.js";
 import { createHistoryRoutes } from "./create-history-routes.js";
 import { createMockRoutes } from "./create-mock-routes.js";
@@ -16,6 +17,7 @@ import { createObservabilityRoutes } from "./create-observability-routes.js";
 import { createSettingsRoutes } from "./create-settings-routes.js";
 import { createSetupRoutes } from "./create-setup-routes.js";
 import { createTelegramRoutes } from "./create-telegram-routes.js";
+import type { SessionAuth } from "../auth/session-auth.js";
 
 /** Dependencies the UI API needs, supplied from the composition root. */
 export interface ApiDependencies {
@@ -29,10 +31,12 @@ export interface ApiDependencies {
   readonly suggestionRepository: SuggestionRepositoryPort;
   readonly metrics: MetricsCollectorPort;
   readonly clock: ClockPort;
+  readonly auth: SessionAuth;
 }
 
 /** Registers every `/api/*` route on the given router. */
 export function registerApiRoutes(router: Router, deps: ApiDependencies): Router {
+  const auth = createAuthRoutes(deps.auth);
   const setup = createSetupRoutes(deps.envStore);
   const telegram = createTelegramRoutes(deps.telegramClient, deps.envStore);
   const history = createHistoryRoutes(deps.historyImportService);
@@ -42,11 +46,16 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
   const brain = createBrainRoutes(deps.memoryGraphRepository, deps.suggestionRepository);
 
   router
+    .get("/api/auth/status", auth.status)
+    .post("/api/auth/login", auth.login)
+    .post("/api/auth/logout", auth.logout)
     .get("/api/setup/status", setup.getStatus)
     .get("/api/env", setup.getEnv)
     .put("/api/env", setup.putEnv)
     .post("/api/telegram/connect", telegram.connect)
     .get("/api/telegram/status", telegram.status)
+    .get("/api/telegram/access", telegram.getAccess)
+    .put("/api/telegram/access", telegram.putAccess)
     .post("/api/history/import", history.importHistory)
     .post("/api/mock/inject", mock.inject)
     .post("/api/mock/flush", mock.flush)

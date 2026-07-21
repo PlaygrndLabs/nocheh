@@ -11,6 +11,10 @@ graph persistence, pending suggestions, Telegram ingestion, and dashboard-based
 inspection. Telegram is the first channel, but the product direction is
 platform-neutral: Telegram groups now, more conversations and tools later.
 
+Access is private by default for MVP testing: the dashboard/API require
+`APP_AUTH_USERNAME` and `APP_AUTH_PASSWORD`, and Telegram webhook ingestion can
+be restricted with `TELEGRAM_ALLOWED_CHAT_IDS` and `TELEGRAM_ALLOWED_USER_IDS`.
+
 ## What Works
 
 - Telegram webhook ingestion
@@ -332,7 +336,7 @@ mounted data directory.
 
 ```bash
 cp .env.example .env
-# edit LOCAL_ENCRYPTION_SECRET and CLOUDFLARE_TUNNEL_TOKEN
+# edit LOCAL_ENCRYPTION_SECRET, APP_AUTH_USERNAME, APP_AUTH_PASSWORD, and CLOUDFLARE_TUNNEL_TOKEN
 docker compose --profile tunnel up -d --build
 ```
 

@@ -136,6 +136,81 @@ body {
 
 .layout { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background:
+    linear-gradient(color-mix(in srgb, var(--border) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border) 22%, transparent) 1px, transparent 1px),
+    var(--bg);
+  background-size: 42px 42px;
+}
+.auth-panel {
+  width: min(100%, 420px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--surface) 96%, var(--accent));
+  padding: var(--sp-6);
+  box-shadow: var(--shadow-md);
+}
+.auth-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+.auth-panel h1 {
+  margin: 0;
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-tight);
+}
+.auth-panel p {
+  margin: var(--sp-2) 0 var(--sp-5);
+  color: var(--text-muted);
+}
+.auth-form {
+  display: grid;
+  gap: var(--sp-2);
+}
+.auth-form label {
+  margin-top: var(--sp-2);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.auth-form .action {
+  justify-content: center;
+  margin-top: var(--sp-3);
+}
+.auth-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--warn) 52%, var(--border));
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+}
+.auth-warning b,
+.auth-warning span {
+  display: block;
+}
+.auth-warning span {
+  margin-top: var(--sp-1);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
 nav.sidebar {
   border-right: 1px solid var(--border);
   padding: var(--sp-5) var(--sp-3);
@@ -437,6 +512,76 @@ button.action:disabled { opacity: 0.5; cursor: default; }
 .scenario-button:disabled { opacity: 0.55; cursor: default; }
 .scenario-button b { display: block; margin-bottom: var(--sp-2); font-size: var(--fs-sm); }
 .scenario-button span { display: block; color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.35; }
+
+.access-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  margin: var(--sp-4) 0;
+}
+.access-list {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.access-list > b {
+  font-size: var(--fs-sm);
+}
+.access-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: var(--sp-2);
+}
+.access-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-height: 30px;
+  align-items: center;
+}
+.access-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 4px 6px 4px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.access-pill button,
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.icon-button {
+  width: 38px;
+  height: 38px;
+  border-color: var(--border);
+  background: var(--surface);
+}
+.access-pill button:hover,
+.icon-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+.icon-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
 
 .brain-console { display: grid; gap: var(--sp-4); margin-bottom: var(--sp-4); }
 .brain-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sp-3); }
@@ -1047,6 +1192,7 @@ main.content:has(.sim-page) {
   .sim-body { grid-template-columns: 1fr; }
   .sim-panel { min-height: 420px; }
   .sim-dock { height: auto; }
+  .access-grid { grid-template-columns: 1fr; }
   .scenario-grid, .brain-metrics, .brain-stage-strip, .brain-grid { grid-template-columns: 1fr; }
   .plain-stat-row { grid-template-columns: 1fr 1fr; }
   .plain-item { grid-template-columns: 1fr; }
