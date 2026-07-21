@@ -887,6 +887,15 @@ button.action:disabled { opacity: 0.5; cursor: default; }
   font-size: var(--fs-sm);
 }
 .sim-hint { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
+/* Compact one-line banner variant used at the top of the simulator chat panel. */
+.sim-chat-panel > .sim-hint {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
 
 /* ============================================================================
    Group chat roster
@@ -1456,7 +1465,10 @@ main.content:has(.sim-page) {
   line-height: 1.45;
 }
 
-.group-chat { display: flex; flex: 1; min-height: 0; flex-direction: column; background: var(--surface); }
+.group-chat { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; background: var(--surface); }
+/* Keep the transcript as the flexible, scrolling region; hint/roster/composer/note stay fixed. */
+.sim-chat-panel > .sim-hint { flex: 0 0 auto; }
+.sim-chat-panel > .sim-note { flex: 0 0 auto; }
 .roster {
   display: flex;
   flex-wrap: wrap;
@@ -1510,19 +1522,32 @@ main.content:has(.sim-page) {
   resize: vertical;
 }
 
-/* Out-of-band note composer inside the simulator chat panel. */
+/* Out-of-band note composer inside the simulator chat panel (collapsible to protect chat height). */
 .sim-note {
-  margin-top: var(--sp-3);
-  padding-top: var(--sp-3);
-  border-top: 1px dashed var(--border-strong);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
 }
-.sim-note > label {
-  display: inline-flex;
+.sim-note > summary {
+  display: flex;
   align-items: center;
   gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-sm);
   font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
 }
+.sim-note > summary::-webkit-details-marker { display: none; }
+.sim-note > summary::before {
+  content: "▸";
+  color: var(--text-muted);
+  transition: transform var(--dur-fast);
+}
+.sim-note[open] > summary::before { transform: rotate(90deg); }
+.sim-note[open] > summary { border-bottom: 1px solid var(--border); }
+.sim-note .sim-hint { margin: 0; padding: var(--sp-2) var(--sp-3) 0; }
+.sim-note .composer-row { border-top: none; background: transparent; }
 
 /* Notes page: local transcript + composer. */
 .notes-chat {

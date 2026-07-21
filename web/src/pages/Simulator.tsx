@@ -603,8 +603,7 @@ export function Simulator(): JSX.Element {
             <b>pending (buffered): {pendingCount}</b>
           </div>
           <p className="muted sim-hint">
-            Try the reaction flow: post a message asking someone to do something, click <b>Run analysis</b> to turn it into a
-            task, then react with ✅ on that same message — Nocheh reads the reaction and marks the task done.
+            Reaction flow: post a request, click <b>Run analysis</b> to make it a task, then react ✅ on that message to mark it done.
           </p>
           <GroupChat
             entries={sim.entries}
@@ -617,8 +616,8 @@ export function Simulator(): JSX.Element {
             onSend={(text) => send(text)}
             onReact={(messageId, emoji) => void react(messageId, emoji)}
           />
-          <div className="sim-note" aria-label="Send a note to Nocheh">
-            <label htmlFor="sim-note-input"><NotebookPen size={14} aria-hidden="true" /> Send a note to Nocheh</label>
+          <details className="sim-note" aria-label="Send a note to Nocheh">
+            <summary><NotebookPen size={14} aria-hidden="true" /> Send a note to Nocheh</summary>
             <p className="muted sim-hint">
               A note is an out-of-band instruction from you — not group chatter. It bypasses buffering and runs immediately,
               turning your words into knowledge (new nodes, links, memories, tasks) and it can correct or close open tasks.
@@ -641,7 +640,7 @@ export function Simulator(): JSX.Element {
                 Send note
               </button>
             </div>
-          </div>
+          </details>
         </section>
 
         <section className="sim-panel sim-flow-panel" aria-label="System flow">
