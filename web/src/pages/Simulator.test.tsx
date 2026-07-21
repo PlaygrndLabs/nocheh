@@ -238,6 +238,7 @@ test("the note composer sends an out-of-band note for the active conversation an
   render(<Simulator />);
   await waitFor(() => expect(mocks.getSettings).toHaveBeenCalledWith("mock-chat-1"));
 
+  fireEvent.click(screen.getByText(/Send a note to Nocheh/));
   fireEvent.change(screen.getByLabelText("Note to Nocheh"), {
     target: { value: "Close the release-notes task, it is done." },
   });
