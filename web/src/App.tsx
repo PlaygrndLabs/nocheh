@@ -3,6 +3,7 @@ import {
   Bot as BotIcon,
   FlaskConical,
   GitBranch,
+  LogOut,
   MessagesSquare,
   Settings as SettingsIcon,
   Sparkles,
@@ -18,6 +19,8 @@ import { Conversations } from "./pages/Conversations.js";
 import { Knowledge } from "./pages/Knowledge.js";
 import { Settings } from "./pages/Settings.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
+import { AuthGate } from "./components/AuthGate.js";
+import { api } from "./api/client.js";
 import { useTheme } from "./theme.js";
 
 const PAGES = {
@@ -43,6 +46,14 @@ const PAGE_ICONS: Record<PageKey, LucideIcon> = {
 };
 
 export function App(): JSX.Element {
+  return (
+    <AuthGate>
+      <Dashboard />
+    </AuthGate>
+  );
+}
+
+function Dashboard(): JSX.Element {
   const [page, setPage] = useState<PageKey>("setup");
   const { theme, toggle } = useTheme();
 
@@ -74,9 +85,18 @@ export function App(): JSX.Element {
         })}
         <div className="sidebar-footer">
           <ThemeToggle theme={theme} onToggle={toggle} />
+          <button className="theme-toggle" onClick={() => void logout()}>
+            <LogOut size={15} aria-hidden="true" />
+            Logout
+          </button>
         </div>
       </nav>
       <main className="content">{PAGES[page].render()}</main>
     </div>
   );
+}
+
+async function logout(): Promise<void> {
+  await api.logout();
+  window.location.reload();
 }

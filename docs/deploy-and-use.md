@@ -74,6 +74,8 @@ Edit at minimum:
 
 ```bash
 LOCAL_ENCRYPTION_SECRET=replace-with-a-long-stable-secret
+APP_AUTH_USERNAME=mak
+APP_AUTH_PASSWORD=replace-with-a-strong-password
 ```
 
 Start:
@@ -121,11 +123,22 @@ Edit `.env`:
 
 ```bash
 LOCAL_ENCRYPTION_SECRET=replace-with-a-long-stable-secret
+APP_AUTH_USERNAME=mak
+APP_AUTH_PASSWORD=replace-with-a-strong-password
 CLOUDFLARE_TUNNEL_TOKEN=replace-with-cloudflare-tunnel-token
 MESSAGE_ANALYSIS_MODE=batch
 LIVE_ANALYSIS_INTERVAL_SECONDS=300
 LIVE_MAX_MESSAGES_PER_BATCH=50
 ```
+
+Optional bot allow-list:
+
+```bash
+TELEGRAM_ALLOWED_CHAT_IDS=-1001234567890
+TELEGRAM_ALLOWED_USER_IDS=123456789
+```
+
+When either allow-list is set, the webhook ignores Telegram messages outside the configured chat/user IDs.
 
 Keep these blank until model research is done:
 

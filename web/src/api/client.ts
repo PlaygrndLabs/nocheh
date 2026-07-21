@@ -21,6 +21,19 @@ export interface BotInfo {
   firstName: string;
 }
 
+export interface TelegramAccess {
+  ok: boolean;
+  allowedChatIds: string[];
+  allowedUserIds: string[];
+}
+
+export interface AuthStatus {
+  ok: boolean;
+  configured: boolean;
+  authenticated: boolean;
+  username?: string;
+}
+
 export interface MetricsSnapshot {
   messagesProcessed: number;
   tasksExtracted: number;
@@ -135,6 +148,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  getAuthStatus: () => request<AuthStatus>("GET", "/api/auth/status"),
+  login: (username: string, password: string) =>
+    request<{ ok: boolean; username: string }>("POST", "/api/auth/login", { username, password }),
+  logout: () => request<{ ok: boolean }>("POST", "/api/auth/logout"),
   getSetupStatus: () => request<SetupStatus>("GET", "/api/setup/status"),
   getEnv: () => request<EnvPresence>("GET", "/api/env"),
   putEnv: (values: Record<string, string>) =>
@@ -142,6 +159,9 @@ export const api = {
   connectBot: (token: string, webhookUrl: string) =>
     request<{ ok: boolean; bot: BotInfo; webhookUrl: string }>("POST", "/api/telegram/connect", { token, webhookUrl }),
   getBotStatus: () => request<{ ok: boolean; connected: boolean; bot?: BotInfo }>("GET", "/api/telegram/status"),
+  getTelegramAccess: () => request<TelegramAccess>("GET", "/api/telegram/access"),
+  putTelegramAccess: (values: { allowedChatIds: string[]; allowedUserIds: string[] }) =>
+    request<TelegramAccess>("PUT", "/api/telegram/access", values),
   importHistory: (payload: { rawExport?: unknown; messages?: unknown; options?: { chunkMessageCount?: number; chunkDays?: number } }) =>
     request<{ ok: boolean; importedMessageCount: number; processedChunkCount: number; redactedFindingCount: number }>(
       "POST",
