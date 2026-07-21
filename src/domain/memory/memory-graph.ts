@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { SourceReference } from "../tasks/task.js";
 
 export type MemoryNodeId = string;
@@ -270,7 +269,7 @@ export function createMemoryNode(input: CreateMemoryNodeInput): MemoryNode {
   const now = input.now ?? new Date();
   const summary = optionalText(input.summary);
   const node: MemoryNode = {
-    id: normalizeGraphId(input.id ?? randomUUID(), "Memory node id"),
+    id: normalizeGraphId(input.id ?? crypto.randomUUID(), "Memory node id"),
     kind: input.kind,
     label: normalizeGraphLabel(input.label, "Memory node label"),
     scope: input.scope,
@@ -293,7 +292,7 @@ export function createMemoryEdge(input: CreateMemoryEdgeInput): MemoryEdge {
   const now = input.now ?? new Date();
   validateTemporalRange(input.validFrom, input.validUntil);
   return {
-    id: normalizeGraphId(input.id ?? randomUUID(), "Memory edge id"),
+    id: normalizeGraphId(input.id ?? crypto.randomUUID(), "Memory edge id"),
     fromNodeId: normalizeGraphId(input.fromNodeId, "Memory edge fromNodeId"),
     toNodeId: normalizeGraphId(input.toNodeId, "Memory edge toNodeId"),
     relation: input.relation,

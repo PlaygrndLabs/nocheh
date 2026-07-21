@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { MemoryRecord, MemorySource, ProjectReference, SummaryMemory } from "./memory-record.js";
 import { memoryRecordText } from "./memory-record.js";
 
@@ -19,7 +18,7 @@ export class ConversationSummaryService {
 
     const summary = this.buildSummary(records);
     return {
-      id: randomUUID(),
+      id: crypto.randomUUID(),
       type: "Summary",
       source: input.source,
       timestamp: input.timestamp,

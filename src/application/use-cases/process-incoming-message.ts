@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { ConversationWindow } from "../dto/conversation-window.js";
 import { singleMessageWindow, windowAnchor } from "../dto/conversation-window.js";
 import type { IncomingMessage } from "../dto/incoming-message.js";
@@ -7,6 +6,8 @@ import type { NoteInput } from "../dto/incoming-note.js";
 import type { AuditRepositoryPort } from "../ports/audit-repository.js";
 import { NoopAuditRepository } from "../ports/audit-repository.js";
 import type { ClockPort } from "../ports/clock.js";
+import type { IdGeneratorPort } from "../ports/id-generator.js";
+import { SystemIdGenerator } from "../ports/id-generator.js";
 import type { LoggerPort } from "../ports/logger.js";
 import type {
   AnalysisCandidateTarget,
@@ -62,6 +63,7 @@ export class ProcessIncomingMessageUseCase {
     private readonly metrics: MetricsCollectorPort = new NoopMetricsCollector(),
     private readonly memoryGraphRepository?: MemoryGraphRepositoryPort,
     private readonly suggestionRepository?: SuggestionRepositoryPort,
+    private readonly idGenerator: IdGeneratorPort = new SystemIdGenerator(),
   ) {}
 
   /** Immediate-mode entry point: processes a single message as a one-message window. */
@@ -85,7 +87,7 @@ export class ProcessIncomingMessageUseCase {
     const message: IncomingMessage = {
       platform: "note",
       conversationId,
-      messageId: `note:${randomUUID()}`,
+      messageId: `note:${this.idGenerator.generate()}`,
       senderId: input.authorId ?? "mak",
       ...(input.authorDisplayName === undefined ? {} : { senderDisplayName: input.authorDisplayName }),
       text: input.text,
@@ -261,13 +263,13 @@ export class ProcessIncomingMessageUseCase {
     for (const validationResult of validationResults.filter((result) => result.accepted)) {
       const candidate = validationResult.candidate as AnalyzedTaskCandidate;
       const taskSource = this.sourceFor(sanitizedWindow, candidate.sourceMessageId);
-      const task = Task.create({ ...candidate, source: taskSource }, this.clock.now());
+      const task = Task.create({ ...candidate, source: taskSource }, this.clock.now(), this.idGenerator.generate());
 
       const persistenceStartedAt = this.clock.now();
       await this.taskRepository.save(task);
       const project = primaryProject(analysis.memories.map((memory) => memory.candidate));
       const taskMemoryRecord: MemoryRecord = {
-        id: randomUUID(),
+        id: this.idGenerator.generate(),
         type: "Task",
         source: task.source,
         timestamp: this.clock.now(),
@@ -335,7 +337,7 @@ export class ProcessIncomingMessageUseCase {
     const latencyMs = completedAt.getTime() - startedAt.getTime();
     this.metrics.recordMessageProcessed(latencyMs);
     await this.auditRepository.save({
-      id: randomUUID(),
+      id: this.idGenerator.generate(),
       platform: window.platform,
       conversationId: window.conversationId,
       messageId: anchorMessageId,
@@ -444,7 +446,7 @@ export class ProcessIncomingMessageUseCase {
   ): Promise<void> {
     const completedAt = this.clock.now();
     await this.auditRepository.save({
-      id: randomUUID(),
+      id: this.idGenerator.generate(),
       platform: event.platform,
       conversationId: event.conversationId,
       messageId: `reaction:${event.targetMessageId}`,
@@ -518,7 +520,7 @@ export class ProcessIncomingMessageUseCase {
 
   private createMemoryRecord(candidate: ExtractedMemoryCandidate, source: SourceReference): MemoryRecord {
     return {
-      id: randomUUID(),
+      id: this.idGenerator.generate(),
       type: candidate.type,
       source,
       timestamp: this.clock.now(),

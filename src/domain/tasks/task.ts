@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 /** Stable internal task identifier. */
 export type TaskId = string;
 
@@ -57,14 +55,14 @@ export class Task {
   ) {}
 
   /** Creates a new open task after enforcing core task invariants. */
-  public static create(input: CreateTaskInput, now: Date = new Date()): Task {
+  public static create(input: CreateTaskInput, now: Date = new Date(), id: TaskId = crypto.randomUUID()): Task {
     const title = input.title.trim();
     if (title.length < 3) {
       throw new Error("Task title must contain at least 3 characters.");
     }
 
     return new Task(
-      randomUUID(),
+      id,
       title,
       input.description?.trim() || undefined,
       "open",
