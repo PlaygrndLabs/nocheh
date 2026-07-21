@@ -12,6 +12,10 @@ export interface UserEntry {
   readonly sender: string;
   readonly text: string;
   readonly at: string;
+  /** Stable client-supplied id, passed to injectMock so reactions can target this message later. */
+  readonly messageId: string;
+  /** Emoji reactions applied locally, rendered as chips under the bubble. */
+  readonly reactions?: readonly string[];
 }
 
 export interface AssistantEntry {
@@ -49,6 +53,18 @@ function storageKey(conversationId: string): string {
   return `nocheh.sim.${conversationId}`;
 }
 
+let messageCounter = 0;
+
+/** Generates a stable, unique message id for a user message so reactions can target it. */
+export function createMessageId(): string {
+  const cryptoRef = globalThis.crypto;
+  if (cryptoRef !== undefined && typeof cryptoRef.randomUUID === "function") {
+    return `mock-${cryptoRef.randomUUID()}`;
+  }
+  messageCounter += 1;
+  return `mock-${Date.now().toString(36)}-${messageCounter}`;
+}
+
 export function loadState(conversationId: string): SimState {
   try {
     const raw = localStorage.getItem(storageKey(conversationId));
@@ -77,7 +93,10 @@ export interface Simulation {
   readonly activeMemberId: string;
   readonly activeMemberName: string;
   readonly lastAssistant: AssistantEntry | undefined;
-  addUserEntry(sender: string, text: string): void;
+  /** Appends a user message. Generates a messageId when one is not supplied and returns the id used. */
+  addUserEntry(sender: string, text: string, messageId?: string): string;
+  /** Records an emoji reaction on a user message locally so its bubble can render reaction chips. */
+  addReaction(messageId: string, emoji: string): void;
   /** Appends an analysis trace + system result for each audit record not already seen. Returns how many were new. */
   ingestRecords(records: readonly AuditRecord[]): number;
   addMember(name: string): void;
@@ -116,10 +135,28 @@ export function useSimulation(conversationId: string): Simulation {
     }
   }, [state, conversationId]);
 
-  const addUserEntry = useCallback((sender: string, text: string): void => {
+  const addUserEntry = useCallback((sender: string, text: string, messageId?: string): string => {
+    const id = messageId ?? createMessageId();
     setState((current) => ({
       ...current,
-      entries: [...current.entries, { kind: "user", sender, text, at: new Date().toISOString() }],
+      entries: [...current.entries, { kind: "user", sender, text, at: new Date().toISOString(), messageId: id }],
+    }));
+    return id;
+  }, []);
+
+  const addReaction = useCallback((messageId: string, emoji: string): void => {
+    setState((current) => ({
+      ...current,
+      entries: current.entries.map((entry) => {
+        if (entry.kind !== "user" || entry.messageId !== messageId) {
+          return entry;
+        }
+        const existing = entry.reactions ?? [];
+        if (existing.includes(emoji)) {
+          return entry;
+        }
+        return { ...entry, reactions: [...existing, emoji] };
+      }),
     }));
   }, []);
 
@@ -189,6 +226,7 @@ export function useSimulation(conversationId: string): Simulation {
     activeMemberName,
     lastAssistant,
     addUserEntry,
+    addReaction,
     ingestRecords,
     addMember,
     removeMember,

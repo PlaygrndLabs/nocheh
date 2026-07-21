@@ -155,6 +155,11 @@ export class SqliteMemoryGraphRepository implements MemoryGraphRepositoryPort {
       .all(relation) as EdgeRow[]).map((row) => this.deserializeEdge(row)));
   }
 
+  public async findNodesBySourceMessageId(messageId: string): Promise<readonly MemoryNode[]> {
+    const nodes = await this.listNodes();
+    return nodes.filter((node) => node.source.messageId === messageId);
+  }
+
   private async deserializeNode(row: NodeRow): Promise<MemoryNode> {
     const summary = row.summary === null ? undefined : await this.codec.decode<string>(row.summary);
     return {

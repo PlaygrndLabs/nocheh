@@ -7,4 +7,5 @@ export interface BufferedMessage {
   readonly text: string;
   readonly occurredAt: Date;
   readonly bufferedAt: Date;
+  readonly replyToMessageId?: string;
 }

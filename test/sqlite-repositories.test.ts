@@ -63,6 +63,7 @@ test("SQLite repositories persist and rehydrate app state", async () => {
       conversationId: "chat-1",
       analysisMode: "immediate",
       maxMessagesPerBatch: 7,
+      projectHint: "multi",
     }, now);
     await settingsRepository.save(settings);
 
@@ -85,6 +86,7 @@ test("SQLite repositories persist and rehydrate app state", async () => {
     assert.equal((await memoryRepository.findByType("Task"))[0]?.project?.name, "Atlas");
     assert.equal((await memoryRepository.findByProjectId("project:atlas")).length, 1);
     assert.equal((await settingsRepository.findByConversationId("chat-1"))?.maxMessagesPerBatch, 7);
+    assert.equal((await settingsRepository.findByConversationId("chat-1"))?.projectHint, "multi");
     assert.equal((await bufferRepository.findByConversationId("chat-1"))[0]?.text, "Decision: ship SQLite");
     assert.equal((await auditRepository.findRecent(1))[0]?.id, "audit-1");
 

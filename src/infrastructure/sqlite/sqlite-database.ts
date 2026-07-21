@@ -14,7 +14,21 @@ export function openSqliteDatabase(databasePath: string): SqliteDatabase {
   database.pragma("foreign_keys = ON");
   applyMigrations(database);
   applyMemoryGraphSchema(database);
+  applyIncrementalColumns(database);
   return database;
+}
+
+/** Idempotent additive column migrations that are safe to run on every open. */
+function applyIncrementalColumns(database: SqliteDatabase): void {
+  addColumnIfMissing(database, "group_settings", "project_hint", "TEXT NOT NULL DEFAULT 'single'");
+}
+
+function addColumnIfMissing(database: SqliteDatabase, table: string, column: string, definition: string): void {
+  const columns = database.prepare(`PRAGMA table_info(${table})`).all() as { readonly name: string }[];
+  if (columns.some((entry) => entry.name === column)) {
+    return;
+  }
+  database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 function applyMigrations(database: SqliteDatabase): void {

@@ -862,6 +862,31 @@ button.action:disabled { opacity: 0.5; cursor: default; }
 .bubble .meta { margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-muted); }
 .bubble .tasks-out { margin: var(--sp-2) 0 0; padding-left: var(--sp-4); }
 .bubble .tasks-out li { font-size: var(--fs-base); }
+.bubble.user .reaction-bar { display: flex; gap: var(--sp-1); margin-top: var(--sp-2); flex-wrap: wrap; }
+.reaction-btn {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  padding: 1px var(--sp-2);
+  font-size: var(--fs-base);
+  line-height: 1.4;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
+}
+.reaction-btn:hover:not(:disabled) { opacity: 1; border-color: var(--accent); background: var(--accent-muted); }
+.reaction-btn:disabled { cursor: not-allowed; opacity: 0.4; }
+.bubble.user .reaction-chips { display: flex; gap: var(--sp-1); margin-top: var(--sp-2); flex-wrap: wrap; }
+.reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill, 999px);
+  background: var(--surface-2);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.sim-hint { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
 
 /* ============================================================================
    Group chat roster
@@ -907,6 +932,96 @@ main.content:has(.sim-page) {
   min-height: 32px;
   width: 160px;
 }
+.sim-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.sim-groups-label {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sim-group-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.sim-group-chip.active { border-color: var(--accent); background: var(--accent-muted); }
+.sim-group-pick {
+  background: none;
+  border: none;
+  font: inherit;
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  cursor: pointer;
+  color: var(--text);
+}
+.sim-group-remove {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  padding: 0 var(--sp-2);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+.sim-group-remove:hover { color: var(--fail); background: var(--surface-3); }
+.sim-group-add { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.sim-group-add input { min-height: 32px; width: 120px; }
+.sim-group-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.sim-group-add-btn:hover { border-color: var(--accent); background: var(--surface-3); }
+.sim-project-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.sim-project-mode > span {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sim-project-mode .seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.sim-project-mode .seg button {
+  min-height: 32px;
+  border: none;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 var(--sp-3);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.sim-project-mode .seg button + button { border-left: 1px solid var(--border); }
+.sim-project-mode .seg button.is-active { background: var(--accent-muted); color: var(--text); }
+.sim-project-mode .seg button:disabled { opacity: 0.55; cursor: default; }
 .sim-mode-pill {
   display: inline-flex;
   align-items: center;
@@ -962,6 +1077,9 @@ main.content:has(.sim-page) {
   opacity: 0.55;
   cursor: default;
 }
+/* Topbar action buttons align with the row instead of the form default margin. */
+.sim-topbar .action { margin-top: 0; }
+.sim-token-usage { margin: 0; font-size: var(--fs-sm); }
 .sim-body {
   display: grid;
   grid-template-columns: minmax(280px, 0.7fr) minmax(440px, 1.3fr);
@@ -1390,6 +1508,38 @@ main.content:has(.sim-page) {
   min-height: 56px;
   max-height: 140px;
   resize: vertical;
+}
+
+/* Out-of-band note composer inside the simulator chat panel. */
+.sim-note {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--border-strong);
+}
+.sim-note > label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+/* Notes page: local transcript + composer. */
+.notes-chat {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+.notes-transcript {
+  min-height: 140px;
+  max-height: 320px;
+  padding: var(--sp-3);
+}
+.notes-chat .composer-row {
+  border-top: 1px solid var(--border);
 }
 
 /* ============================================================================

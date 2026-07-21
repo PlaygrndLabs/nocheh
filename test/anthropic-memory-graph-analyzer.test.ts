@@ -76,12 +76,18 @@ test("Anthropic memory graph analyzer sends messages request and returns token u
       model: "claude-sonnet-test",
     });
     const result = await analyzer.analyze({
-      platform: "telegram",
-      conversationId: "chat-1",
-      messageId: "message-1",
-      senderId: "mak",
-      text: "I need an English routine.",
-      occurredAt: new Date(source.occurredAt),
+      window: {
+        platform: "telegram",
+        conversationId: "chat-1",
+        messages: [{
+          platform: "telegram",
+          conversationId: "chat-1",
+          messageId: "message-1",
+          senderId: "mak",
+          text: "I need an English routine.",
+          occurredAt: new Date(source.occurredAt),
+        }],
+      },
     });
 
     assert.equal(result.nodes[0]?.id, "goal:english");

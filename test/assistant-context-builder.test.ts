@@ -163,6 +163,10 @@ class InMemoryMemoryGraphRepository implements MemoryGraphRepositoryPort {
   public async listEdgesByRelation(relation: MemoryRelation): Promise<readonly MemoryEdge[]> {
     return this.edges.filter((edge) => edge.relation === relation);
   }
+
+  public async findNodesBySourceMessageId(messageId: string): Promise<readonly MemoryNode[]> {
+    return this.nodes.filter((node) => node.source.messageId === messageId);
+  }
 }
 
 class InMemorySuggestionRepository implements SuggestionRepositoryPort {

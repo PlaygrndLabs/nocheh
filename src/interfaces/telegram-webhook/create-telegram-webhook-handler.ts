@@ -1,6 +1,10 @@
 import { Buffer } from "node:buffer";
 import type { IncomingMessage as HttpIncomingMessage, ServerResponse } from "node:http";
-import type { IncomingMessageProcessorPort } from "../../application/ports/incoming-message-processor.js";
+import type {
+  IncomingMessageProcessorPort,
+  NoteProcessorPort,
+  ReactionProcessorPort,
+} from "../../application/ports/incoming-message-processor.js";
 import { TelegramUpdateMapper, type TelegramUpdate } from "../../infrastructure/messaging/telegram/telegram-update-mapper.js";
 import type { LoggerPort } from "../../application/ports/logger.js";
 
@@ -9,9 +13,11 @@ export interface TelegramWebhookAuthOptions {
   readonly allowedUserIds?: ReadonlySet<string> | (() => ReadonlySet<string>);
 }
 
-/** HTTP handler for Telegram webhook requests. */
+const NOTE_COMMAND = /^\/note(?:@\w+)?\s+([\s\S]+)$/;
+
+/** HTTP handler for Telegram webhook requests (messages, /note commands, and reactions). */
 export function createTelegramWebhookHandler(
-  processor: IncomingMessageProcessorPort,
+  processor: IncomingMessageProcessorPort & ReactionProcessorPort & NoteProcessorPort,
   logger: LoggerPort,
   auth: TelegramWebhookAuthOptions = {},
 ): (request: HttpIncomingMessage, response: ServerResponse) => Promise<void> {
@@ -28,12 +34,35 @@ export function createTelegramWebhookHandler(
       const message = mapper.toIncomingMessage(update);
       if (message !== undefined) {
         if (isTelegramMessageAllowed(message.conversationId, message.senderId, auth)) {
-          await processor.execute(message);
+          const noteMatch = NOTE_COMMAND.exec(message.text);
+          if (noteMatch?.[1] !== undefined) {
+            await processor.executeNote({
+              conversationId: message.conversationId,
+              text: noteMatch[1].trim(),
+              authorId: message.senderId,
+              ...(message.senderDisplayName === undefined ? {} : { authorDisplayName: message.senderDisplayName }),
+              occurredAt: message.occurredAt,
+            });
+          } else {
+            await processor.execute(message);
+          }
         } else {
           logger.warn("Telegram message ignored by allow-list", {
             conversationId: message.conversationId,
             senderId: message.senderId,
           });
+        }
+      } else {
+        const reaction = mapper.toIncomingReaction(update);
+        if (reaction !== undefined) {
+          if (isTelegramMessageAllowed(reaction.conversationId, reaction.reactorId, auth)) {
+            await processor.executeReaction(reaction);
+          } else {
+            logger.warn("Telegram reaction ignored by allow-list", {
+              conversationId: reaction.conversationId,
+              reactorId: reaction.reactorId,
+            });
+          }
         }
       }
 

@@ -35,7 +35,8 @@ export function createObservabilityRoutes(
     conversation: async ({ params }) => {
       const conversationId = params.conversationId ?? "";
       const records = await auditRepository.findRecent(CONVERSATION_SCAN_LIMIT);
-      const matching = realConversationRecords(records).filter((record) => record.conversationId === conversationId);
+      // Detail view is not filtered so the Simulator can read back its own mock/simulator runs.
+      const matching = records.filter((record) => record.conversationId === conversationId);
       return { status: 200, body: { ok: true, conversationId, records: matching } };
     },
   };

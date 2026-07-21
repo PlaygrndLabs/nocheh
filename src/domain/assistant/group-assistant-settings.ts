@@ -1,3 +1,5 @@
+import type { ProjectHint } from "./project-hint.js";
+
 export type MessageAnalysisMode = "immediate" | "batch";
 export type AssistantReplyMode = "silent" | "mention" | "active" | "digest";
 
@@ -12,6 +14,7 @@ export interface GroupAssistantSettings {
   readonly summaryEveryMessages: number;
   readonly summaryEveryMinutes: number;
   readonly replyMode: AssistantReplyMode;
+  readonly projectHint: ProjectHint;
   readonly updatedAt: Date;
 }
 
@@ -26,6 +29,7 @@ export interface CreateGroupAssistantSettingsInput {
   readonly summaryEveryMessages?: number;
   readonly summaryEveryMinutes?: number;
   readonly replyMode?: AssistantReplyMode;
+  readonly projectHint?: ProjectHint;
 }
 
 export const DEFAULT_GROUP_ASSISTANT_SETTINGS: Omit<GroupAssistantSettings, "conversationId" | "updatedAt"> = {
@@ -38,6 +42,7 @@ export const DEFAULT_GROUP_ASSISTANT_SETTINGS: Omit<GroupAssistantSettings, "con
   summaryEveryMessages: 100,
   summaryEveryMinutes: 60,
   replyMode: "mention",
+  projectHint: "single",
 };
 
 export function createGroupAssistantSettings(
@@ -55,6 +60,7 @@ export function createGroupAssistantSettings(
     summaryEveryMessages: positiveInteger(input.summaryEveryMessages, DEFAULT_GROUP_ASSISTANT_SETTINGS.summaryEveryMessages),
     summaryEveryMinutes: positiveInteger(input.summaryEveryMinutes, DEFAULT_GROUP_ASSISTANT_SETTINGS.summaryEveryMinutes),
     replyMode: input.replyMode ?? DEFAULT_GROUP_ASSISTANT_SETTINGS.replyMode,
+    projectHint: input.projectHint ?? DEFAULT_GROUP_ASSISTANT_SETTINGS.projectHint,
     updatedAt: now,
   };
 }

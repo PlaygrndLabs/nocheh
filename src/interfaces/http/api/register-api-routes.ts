@@ -13,6 +13,7 @@ import { createAuthRoutes } from "./create-auth-routes.js";
 import { createBrainRoutes } from "./create-brain-routes.js";
 import { createHistoryRoutes } from "./create-history-routes.js";
 import { createMockRoutes } from "./create-mock-routes.js";
+import { createNoteRoutes } from "./create-note-routes.js";
 import { createObservabilityRoutes } from "./create-observability-routes.js";
 import { createSettingsRoutes } from "./create-settings-routes.js";
 import { createSetupRoutes } from "./create-setup-routes.js";
@@ -44,6 +45,7 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
   const settings = createSettingsRoutes(deps.settingsRepository, deps.clock);
   const observability = createObservabilityRoutes(deps.auditRepository, deps.metrics);
   const brain = createBrainRoutes(deps.memoryGraphRepository, deps.suggestionRepository);
+  const note = createNoteRoutes(deps.liveProcessor);
 
   router
     .get("/api/auth/status", auth.status)
@@ -59,6 +61,7 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
     .post("/api/history/import", history.importHistory)
     .post("/api/mock/inject", mock.inject)
     .post("/api/mock/flush", mock.flush)
+    .post("/api/mock/reaction", mock.reaction)
     .get("/api/settings/:conversationId", settings.get)
     .put("/api/settings/:conversationId", settings.put)
     .get("/api/metrics", observability.metrics)
@@ -67,6 +70,7 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
     .get("/api/conversations/:conversationId", observability.conversation)
     .get("/api/brain/graph", brain.graph)
     .get("/api/brain/suggestions", brain.suggestions)
+    .post("/api/brain/note", note.submit)
     .post("/api/brain/suggestions/:id/approve", brain.approveSuggestion)
     .post("/api/brain/suggestions/:id/reject", brain.rejectSuggestion)
     .post("/api/brain/suggestions/:id/archive", brain.archiveSuggestion)

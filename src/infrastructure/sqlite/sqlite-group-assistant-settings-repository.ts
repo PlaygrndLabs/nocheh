@@ -4,6 +4,7 @@ import type {
   GroupAssistantSettings,
   MessageAnalysisMode,
 } from "../../domain/assistant/group-assistant-settings.js";
+import type { ProjectHint } from "../../domain/assistant/project-hint.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
 interface SettingsRow {
@@ -17,6 +18,7 @@ interface SettingsRow {
   readonly max_recent_messages: number;
   readonly summary_every_messages: number;
   readonly summary_every_minutes: number;
+  readonly project_hint: ProjectHint | null;
   readonly updated_at: string;
 }
 
@@ -36,6 +38,7 @@ export class SqliteGroupAssistantSettingsRepository implements GroupAssistantSet
         max_recent_messages,
         summary_every_messages,
         summary_every_minutes,
+        project_hint,
         updated_at
       )
       VALUES (
@@ -49,6 +52,7 @@ export class SqliteGroupAssistantSettingsRepository implements GroupAssistantSet
         @maxRecentMessages,
         @summaryEveryMessages,
         @summaryEveryMinutes,
+        @projectHint,
         @updatedAt
       )
       ON CONFLICT(conversation_id) DO UPDATE SET
@@ -61,6 +65,7 @@ export class SqliteGroupAssistantSettingsRepository implements GroupAssistantSet
         max_recent_messages = excluded.max_recent_messages,
         summary_every_messages = excluded.summary_every_messages,
         summary_every_minutes = excluded.summary_every_minutes,
+        project_hint = excluded.project_hint,
         updated_at = excluded.updated_at
     `).run({
       ...settings,
@@ -87,6 +92,7 @@ export class SqliteGroupAssistantSettingsRepository implements GroupAssistantSet
       maxRecentMessages: row.max_recent_messages,
       summaryEveryMessages: row.summary_every_messages,
       summaryEveryMinutes: row.summary_every_minutes,
+      projectHint: row.project_hint ?? "single",
       updatedAt: new Date(row.updated_at),
     };
   }

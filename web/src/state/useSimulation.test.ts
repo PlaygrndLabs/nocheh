@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { useSimulation } from "./useSimulation.js";
+import { useSimulation, type UserEntry } from "./useSimulation.js";
 import type { AuditRecord } from "../api/client.js";
 
 function record(id: string): AuditRecord {
@@ -25,7 +25,9 @@ afterEach(() => localStorage.clear());
 test("ingests new audit records as assistant + bot entries, deduping by id", () => {
   const { result } = renderHook(() => useSimulation("chat-1"));
 
-  act(() => result.current.addUserEntry("Alice", "hi"));
+  act(() => {
+    result.current.addUserEntry("Alice", "hi");
+  });
   let added = 0;
   act(() => {
     added = result.current.ingestRecords([record("a"), record("b")]);
@@ -40,6 +42,47 @@ test("ingests new audit records as assistant + bot entries, deduping by id", () 
   });
   expect(added).toBe(0);
   expect(result.current.lastAssistant?.auditId).toBe("b");
+});
+
+test("assigns a stable messageId to each user entry and returns it", () => {
+  const { result } = renderHook(() => useSimulation("chat-1"));
+
+  let returnedId = "";
+  act(() => {
+    returnedId = result.current.addUserEntry("Alice", "own the release notes");
+  });
+  expect(returnedId).not.toBe("");
+
+  const entry = result.current.entries.find((e): e is UserEntry => e.kind === "user");
+  expect(entry?.messageId).toBe(returnedId);
+
+  // A caller-supplied id is preserved and threaded through to injectMock.
+  let supplied = "";
+  act(() => {
+    supplied = result.current.addUserEntry("Bob", "on it", "mock-custom-id");
+  });
+  expect(supplied).toBe("mock-custom-id");
+  expect(result.current.entries.some((e) => e.kind === "user" && e.messageId === "mock-custom-id")).toBe(true);
+});
+
+test("addReaction records emoji chips on the targeted user message without duplicates", () => {
+  const { result } = renderHook(() => useSimulation("chat-1"));
+
+  let messageId = "";
+  act(() => {
+    messageId = result.current.addUserEntry("Alice", "ship the beta");
+  });
+
+  act(() => result.current.addReaction(messageId, "\u2705"));
+  act(() => result.current.addReaction(messageId, "\u2705"));
+  act(() => result.current.addReaction(messageId, "\uD83D\uDC4D"));
+
+  const entry = result.current.entries.find((e): e is UserEntry => e.kind === "user" && e.messageId === messageId);
+  expect(entry?.reactions).toEqual(["\u2705", "\uD83D\uDC4D"]);
+
+  // Reacting on an unknown id is a no-op.
+  act(() => result.current.addReaction("missing", "\u274C"));
+  expect(result.current.entries.filter((e) => e.kind === "user")).toHaveLength(1);
 });
 
 test("starts with a default roster and supports add/remove/select", () => {
@@ -59,7 +102,9 @@ test("starts with a default roster and supports add/remove/select", () => {
 
 test("persists transcript and roster, restoring on reload", () => {
   const first = renderHook(() => useSimulation("chat-1"));
-  act(() => first.result.current.addUserEntry("Bob", "ping"));
+  act(() => {
+    first.result.current.addUserEntry("Bob", "ping");
+  });
   act(() => first.result.current.addMember("Dave"));
   act(() => {
     first.result.current.ingestRecords([record("x")]);
@@ -72,7 +117,9 @@ test("persists transcript and roster, restoring on reload", () => {
 
 test("clear empties the transcript and removes the storage key", () => {
   const { result } = renderHook(() => useSimulation("chat-1"));
-  act(() => result.current.addUserEntry("Bob", "ping"));
+  act(() => {
+    result.current.addUserEntry("Bob", "ping");
+  });
   act(() => {
     result.current.ingestRecords([record("x")]);
   });

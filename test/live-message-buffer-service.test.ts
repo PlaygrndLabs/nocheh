@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import type { IncomingMessage } from "../src/application/dto/incoming-message.js";
 import type { ClockPort } from "../src/application/ports/clock.js";
 import type { GroupAssistantSettingsRepositoryPort } from "../src/application/ports/group-assistant-settings-repository.js";
-import type { IncomingMessageProcessorPort } from "../src/application/ports/incoming-message-processor.js";
+import type { ConversationProcessorPort } from "../src/application/ports/incoming-message-processor.js";
+import type { ConversationWindow } from "../src/application/dto/conversation-window.js";
+import type { IncomingReactionEvent } from "../src/application/dto/incoming-reaction-event.js";
+import type { NoteInput } from "../src/application/dto/incoming-note.js";
 import type { LiveMessageBufferRepositoryPort } from "../src/application/ports/live-message-buffer-repository.js";
 import type { LoggerPort } from "../src/application/ports/logger.js";
 import { LiveMessageBufferService } from "../src/application/services/live-message-buffer-service.js";
@@ -59,11 +62,26 @@ class InMemoryBufferRepository implements LiveMessageBufferRepositoryPort {
   }
 }
 
-class RecordingProcessor implements IncomingMessageProcessorPort {
+class RecordingProcessor implements ConversationProcessorPort {
   public readonly messages: IncomingMessage[] = [];
+  public readonly windows: ConversationWindow[] = [];
+  public readonly reactions: IncomingReactionEvent[] = [];
+  public readonly notes: NoteInput[] = [];
 
   public async execute(message: IncomingMessage): Promise<void> {
     this.messages.push(message);
+  }
+
+  public async executeWindow(window: ConversationWindow): Promise<void> {
+    this.windows.push(window);
+  }
+
+  public async executeReaction(event: IncomingReactionEvent): Promise<void> {
+    this.reactions.push(event);
+  }
+
+  public async executeNote(input: NoteInput): Promise<void> {
+    this.notes.push(input);
   }
 }
 
@@ -75,6 +93,7 @@ test("buffers live messages until the configured interval elapses", async () => 
     analysisMode: "batch",
     analysisIntervalSeconds: 60,
     maxMessagesPerBatch: 10,
+    projectHint: "multi",
   }, clock.now()));
   const bufferRepository = new InMemoryBufferRepository();
   const processor = new RecordingProcessor();
@@ -97,9 +116,11 @@ test("buffers live messages until the configured interval elapses", async () => 
 
   assert.equal(result.flushedMessageCount, 2);
   assert.equal(bufferRepository.messages.length, 0);
-  assert.equal(processor.messages.length, 1);
-  assert.equal(processor.messages[0]?.messageId, "batch:1-2");
-  assert.match(processor.messages[0]?.text ?? "", /\[REDACTED:api_key\]/);
+  assert.equal(processor.windows.length, 1);
+  assert.equal(processor.windows[0]?.messages.length, 2);
+  assert.equal(processor.windows[0]?.projectHint, "multi");
+  assert.deepEqual(processor.windows[0]?.messages.map((m) => m.messageId), ["1", "2"]);
+  assert.match(processor.windows[0]?.messages[0]?.text ?? "", /\[REDACTED:api_key\]/);
 });
 
 test("processes immediately when conversation settings request immediate mode", async () => {

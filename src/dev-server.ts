@@ -10,9 +10,7 @@ import { LiveMessageBufferService } from "./application/services/live-message-bu
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
 import { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
-import { RuleBasedMemoryGraphAnalyzer } from "./infrastructure/reasoning/rule-based-memory-graph-analyzer.js";
-import { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
-import { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
+import { NoopMemoryGraphAnalyzer, type MemoryGraphAnalyzerPort } from "./application/ports/memory-graph-analyzer.js";
 import { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 import { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
 import { openSqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
@@ -74,7 +72,7 @@ const liveBufferRepository = new SqliteLiveMessageBufferRepository(database, enc
 const taskProvider = createTaskProvider();
 const useCase = new ProcessIncomingMessageUseCase(
   secretDetector,
-  new RuleBasedTaskExtractor(),
+  createMemoryGraphAnalyzer(),
   taskRepository,
   memoryRepository,
   syncRepository,
@@ -83,8 +81,6 @@ const useCase = new ProcessIncomingMessageUseCase(
   logger,
   auditRepository,
   metrics,
-  new RuleBasedMemoryExtractor(),
-  createMemoryGraphAnalyzer(),
   memoryGraphRepository,
   suggestionRepository,
 );
@@ -201,9 +197,10 @@ function createTaskProvider(): TaskProviderPort {
   );
 }
 
-function createMemoryGraphAnalyzer() {
+function createMemoryGraphAnalyzer(): MemoryGraphAnalyzerPort {
   if (process.env.AI_PROVIDER !== "anthropic") {
-    return new RuleBasedMemoryGraphAnalyzer();
+    logger.warn("AI provider is not configured (AI_PROVIDER != anthropic). Running in dry-run mode: no analysis will be produced.");
+    return new NoopMemoryGraphAnalyzer();
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -212,7 +209,8 @@ function createMemoryGraphAnalyzer() {
     apiKey === undefined || apiKey.trim().length === 0
     || model === undefined || model.trim().length === 0
   ) {
-    return new RuleBasedMemoryGraphAnalyzer();
+    logger.warn("Anthropic is selected but ANTHROPIC_API_KEY/ANTHROPIC_MODEL are missing. Running in dry-run mode.");
+    return new NoopMemoryGraphAnalyzer();
   }
 
   return new AnthropicMemoryGraphAnalyzer({

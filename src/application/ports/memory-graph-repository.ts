@@ -14,4 +14,6 @@ export interface MemoryGraphRepositoryPort {
   listNodes(): Promise<readonly MemoryNode[]>;
   listEdgesForNode(nodeId: MemoryNodeId): Promise<readonly MemoryEdge[]>;
   listEdgesByRelation(relation: MemoryRelation): Promise<readonly MemoryEdge[]>;
+  /** Finds nodes whose source message matches the given id (used to link reactions to prior knowledge). */
+  findNodesBySourceMessageId(messageId: string): Promise<readonly MemoryNode[]>;
 }

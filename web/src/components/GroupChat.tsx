@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Send, X } from "lucide-react";
 import type { Member, SimEntry } from "../state/useSimulation.js";
 
+/** Quick reactions offered on each user message; the LLM interprets them against the message's knowledge. */
+const REACTION_EMOJIS = ["✅", "👍", "🎯", "❌", "👀"] as const;
+
 interface GroupChatProps {
   readonly entries: SimEntry[];
   readonly members: Member[];
@@ -11,6 +14,7 @@ interface GroupChatProps {
   onAddMember(name: string): void;
   onRemoveMember(id: string): void;
   onSend(text: string): void;
+  onReact(messageId: string, emoji: string): void;
 }
 
 /** Mock Telegram group: member roster, transcript, and a composer. */
@@ -23,8 +27,9 @@ export function GroupChat({
   onAddMember,
   onRemoveMember,
   onSend,
+  onReact,
 }: GroupChatProps): JSX.Element {
-  const [text, setText] = useState("Project: Atlas. Task: prepare release notes by Friday.");
+  const [text, setText] = useState("hey, I think we should ship the beta this week — can someone own the release notes?");
   const [newMember, setNewMember] = useState("");
 
   const send = (): void => {
@@ -69,7 +74,7 @@ export function GroupChat({
         {entries.length === 0 ? (
           <p className="muted empty-chat">No messages yet. Pick a sender and post a mock Telegram message.</p>
         ) : (
-          entries.map((entry, index) => <Bubble key={index} entry={entry} />)
+          entries.map((entry, index) => <Bubble key={index} entry={entry} busy={busy} onReact={onReact} />)
         )}
       </div>
 
@@ -93,12 +98,42 @@ export function GroupChat({
   );
 }
 
-function Bubble({ entry }: { entry: SimEntry }): JSX.Element {
+function Bubble({
+  entry,
+  busy,
+  onReact,
+}: {
+  readonly entry: SimEntry;
+  readonly busy: boolean;
+  onReact(messageId: string, emoji: string): void;
+}): JSX.Element {
   if (entry.kind === "user") {
+    const reactions = entry.reactions ?? [];
     return (
       <div className="bubble user">
         <span className="who">{entry.sender}</span>
         {entry.text}
+        <div className="reaction-bar" role="group" aria-label="React to this message">
+          {REACTION_EMOJIS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              className="reaction-btn"
+              disabled={busy}
+              aria-label={`React with ${emoji}`}
+              onClick={() => onReact(entry.messageId, emoji)}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+        {reactions.length > 0 && (
+          <div className="reaction-chips" aria-label="Reactions">
+            {reactions.map((emoji) => (
+              <span key={emoji} className="reaction-chip">{emoji}</span>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

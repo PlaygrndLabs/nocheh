@@ -1,4 +1,8 @@
-export type { IncomingMessage } from "./application/dto/incoming-message.js";
+export type { IncomingMessage, MessageReaction } from "./application/dto/incoming-message.js";
+export type { IncomingReactionEvent } from "./application/dto/incoming-reaction-event.js";
+export type { NoteInput } from "./application/dto/incoming-note.js";
+export type { ConversationWindow, ProjectHint } from "./application/dto/conversation-window.js";
+export { singleMessageWindow, windowAnchor } from "./application/dto/conversation-window.js";
 export type { AssistantAiAnalysis, AssistantAiPort } from "./application/ports/assistant-ai.js";
 export { NoopAssistantAi } from "./application/ports/assistant-ai.js";
 export type { AuditRepositoryPort } from "./application/ports/audit-repository.js";
@@ -7,11 +11,19 @@ export type { ClockPort } from "./application/ports/clock.js";
 export { SystemClock } from "./application/ports/clock.js";
 export type { EncryptionPort } from "./application/ports/encryption.js";
 export type { GroupAssistantSettingsRepositoryPort } from "./application/ports/group-assistant-settings-repository.js";
-export type { IncomingMessageProcessorPort } from "./application/ports/incoming-message-processor.js";
+export type { IncomingMessageProcessorPort, ConversationWindowProcessorPort, ConversationProcessorPort, ReactionProcessorPort, NoteProcessorPort } from "./application/ports/incoming-message-processor.js";
 export type { LiveMessageBufferRepositoryPort } from "./application/ports/live-message-buffer-repository.js";
 export type { LoggerPort } from "./application/ports/logger.js";
 export { NoopLogger } from "./application/ports/logger.js";
-export type { MemoryGraphAnalysis, MemoryGraphAnalyzerPort } from "./application/ports/memory-graph-analyzer.js";
+export type {
+  AnalysisCandidateTarget,
+  AnalyzedMemoryCandidate,
+  AnalyzedStatusUpdate,
+  AnalyzedTaskCandidate,
+  ConversationAnalysisInput,
+  MemoryGraphAnalysis,
+  MemoryGraphAnalyzerPort,
+} from "./application/ports/memory-graph-analyzer.js";
 export { NoopMemoryGraphAnalyzer } from "./application/ports/memory-graph-analyzer.js";
 export type {
   ExtractedBlockerCandidate,
@@ -159,11 +171,8 @@ export type { ExtractedTaskCandidate } from "./domain/tasks/task-extraction.js";
 export { TaskValidationService, normalizeTaskTitle } from "./domain/tasks/task-validation.js";
 export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarningCode } from "./domain/tasks/task-validation.js";
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
-export { RuleBasedTaskExtractor } from "./infrastructure/reasoning/rule-based-task-extractor.js";
 export { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 export type { AnthropicMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
-export { RuleBasedMemoryGraphAnalyzer } from "./infrastructure/reasoning/rule-based-memory-graph-analyzer.js";
-export { RuleBasedMemoryExtractor } from "./infrastructure/reasoning/rule-based-memory-extractor.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 export { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-file-store.js";
 export { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
@@ -207,3 +216,4 @@ export { registerApiRoutes } from "./interfaces/http/api/register-api-routes.js"
 export type { ApiDependencies } from "./interfaces/http/api/register-api-routes.js";
 export { parseTelegramExport } from "./interfaces/http/api/create-history-routes.js";
 export { createBrainRoutes } from "./interfaces/http/api/create-brain-routes.js";
+export { createNoteRoutes } from "./interfaces/http/api/create-note-routes.js";

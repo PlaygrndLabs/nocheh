@@ -1,14 +1,12 @@
 import { Fragment } from "react";
 import { ShieldCheck } from "lucide-react";
 import type { AuditRecord } from "../api/client.js";
-import type { BrainPreview } from "../sim/brain-preview.js";
 import { LANE_LABELS, type FlowFrame, type FlowStage } from "../sim/flow-model.js";
 
 interface StageInspectorProps {
   readonly stage: FlowStage;
   readonly frame: FlowFrame | undefined;
   readonly record: AuditRecord | undefined;
-  readonly preview: BrainPreview;
 }
 
 /** Detail panel for the selected (or active) flow stage. */
