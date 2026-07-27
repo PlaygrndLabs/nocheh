@@ -43,6 +43,8 @@ export type { MemoryQuery, MemoryRetrievalPort, MemorySearchResult } from "./app
 export type { MetricsCollectorPort, MetricsSnapshot } from "./application/ports/metrics.js";
 export { NoopMetricsCollector } from "./application/ports/metrics.js";
 export type { SecretDetectorPort } from "./application/ports/secret-detector.js";
+export type { AppConfigRepositoryPort } from "./application/ports/app-config-repository.js";
+export type { RedactionPolicyProvider } from "./application/ports/redaction-policy-provider.js";
 export type { SuggestionRepositoryPort } from "./application/ports/suggestion-repository.js";
 export type { TaskExtractorPort } from "./application/ports/task-extractor.js";
 export type { ExternalTask, TaskProviderPort } from "./application/ports/task-provider.js";
@@ -60,6 +62,7 @@ export { MemoryGraphQueryService } from "./application/services/memory-graph-que
 export type { MemoryGraphNeighborhood } from "./application/services/memory-graph-query-service.js";
 export { MemoryQueryService } from "./application/services/memory-query-service.js";
 export { SuggestionService } from "./application/services/suggestion-service.js";
+export { SettingsService } from "./application/services/settings-service.js";
 export { validateAiAnalysisOutput } from "./application/services/ai-analysis-contract.js";
 export type {
   AiAnalysisItemEnvelope,
@@ -166,6 +169,23 @@ export type {
   ProcessingStepStatus,
 } from "./domain/observability/audit.js";
 export type { RedactedContent, SensitiveFinding, SensitiveFindingKind } from "./domain/security/redaction.js";
+export {
+  DEFAULT_REDACTION_POLICY,
+  DEFAULT_REDACTION_PLACEHOLDER,
+  REDACTION_CATEGORIES,
+  compileCustomPattern,
+  isSensitiveFindingKind,
+  normalizeRedactionPolicy,
+  normalizeRegexFlags,
+  renderPlaceholder,
+} from "./domain/security/redaction-policy.js";
+export type {
+  CustomRedactionPattern,
+  RedactionPolicy,
+  RedactionPolicyPatch,
+} from "./domain/security/redaction-policy.js";
+export { APP_CONFIG_KEYS, DEFAULT_APP_CONFIG } from "./domain/config/app-config.js";
+export type { AppConfig } from "./domain/config/app-config.js";
 export { Task } from "./domain/tasks/task.js";
 export type { CreateTaskInput, SourceReference, TaskId, TaskPriority, TaskSnapshot, TaskStatus } from "./domain/tasks/task.js";
 export { TaskCandidatePolicy } from "./domain/tasks/task-extraction.js";
@@ -173,6 +193,10 @@ export type { ExtractedTaskCandidate } from "./domain/tasks/task-extraction.js";
 export { TaskValidationService, normalizeTaskTitle } from "./domain/tasks/task-validation.js";
 export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarningCode } from "./domain/tasks/task-validation.js";
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
+export { ConfigurableSecretDetector } from "./infrastructure/security/configurable-secret-detector.js";
+export { BUILT_IN_SECRET_PATTERNS } from "./infrastructure/security/built-in-secret-patterns.js";
+export { redactWithPatterns } from "./infrastructure/security/redaction-engine.js";
+export type { CompiledSecretPattern } from "./infrastructure/security/redaction-engine.js";
 export { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 export type { AnthropicMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
@@ -185,6 +209,7 @@ export { InMemoryMetricsCollector } from "./infrastructure/observability/in-memo
 export { LocalAuditRepository } from "./infrastructure/observability/local-audit-repository.js";
 export { openSqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
 export type { SqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
+export { SqliteAppConfigRepository } from "./infrastructure/sqlite/sqlite-app-config-repository.js";
 export { SqliteAuditRepository } from "./infrastructure/sqlite/sqlite-audit-repository.js";
 export { SqliteGroupAssistantSettingsRepository } from "./infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
 export { SqliteLiveMessageBufferRepository } from "./infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
@@ -218,4 +243,5 @@ export { registerApiRoutes } from "./interfaces/http/api/register-api-routes.js"
 export type { ApiDependencies } from "./interfaces/http/api/register-api-routes.js";
 export { parseTelegramExport } from "./interfaces/http/api/create-history-routes.js";
 export { createBrainRoutes } from "./interfaces/http/api/create-brain-routes.js";
+export { createConfigRoutes } from "./interfaces/http/api/create-config-routes.js";
 export { createNoteRoutes } from "./interfaces/http/api/create-note-routes.js";
