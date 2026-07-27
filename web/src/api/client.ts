@@ -107,6 +107,25 @@ export interface GroupSettings {
   projectHint: "single" | "multi";
 }
 
+export interface CustomRedactionPattern {
+  id: string;
+  kind: string;
+  label: string;
+  regex: string;
+  flags?: string;
+  enabled: boolean;
+}
+
+export interface RedactionPolicy {
+  categories: Record<string, boolean>;
+  customPatterns: CustomRedactionPattern[];
+  placeholder: string;
+}
+
+export interface AppConfig {
+  redaction: RedactionPolicy;
+}
+
 export interface BrainGraphNode {
   id: string;
   kind: string;
@@ -182,6 +201,10 @@ export const api = {
     request<{ ok: boolean; settings: GroupSettings; isDefault: boolean }>("GET", `/api/settings/${encodeURIComponent(conversationId)}`),
   putSettings: (conversationId: string, settings: Partial<GroupSettings>) =>
     request<{ ok: boolean; settings: GroupSettings }>("PUT", `/api/settings/${encodeURIComponent(conversationId)}`, settings),
+  getConfig: () =>
+    request<{ ok: boolean; config: AppConfig; redactionCategories: string[] }>("GET", "/api/config"),
+  putRedaction: (patch: Partial<RedactionPolicy>) =>
+    request<{ ok: boolean; redaction: RedactionPolicy }>("PUT", "/api/config/redaction", patch),
   getMetrics: () => request<{ ok: boolean; metrics: MetricsSnapshot }>("GET", "/api/metrics"),
   getConversations: () => request<{ ok: boolean; conversations: ConversationSummary[] }>("GET", "/api/conversations"),
   getConversation: (conversationId: string) =>

@@ -21,8 +21,11 @@ import { createMockRoutes } from "../src/interfaces/http/api/create-mock-routes.
 import { createNoteRoutes } from "../src/interfaces/http/api/create-note-routes.js";
 import { createObservabilityRoutes } from "../src/interfaces/http/api/create-observability-routes.js";
 import { createSettingsRoutes } from "../src/interfaces/http/api/create-settings-routes.js";
+import { createConfigRoutes } from "../src/interfaces/http/api/create-config-routes.js";
 import { createTelegramRoutes } from "../src/interfaces/http/api/create-telegram-routes.js";
 import { parseTelegramExport } from "../src/interfaces/http/api/create-history-routes.js";
+import { SettingsService } from "../src/application/services/settings-service.js";
+import type { AppConfigRepositoryPort } from "../src/application/ports/app-config-repository.js";
 import type { EnvStorePort } from "../src/application/ports/env-store.js";
 import type { TelegramClientPort, TelegramBotInfo, TelegramWebhookInfo } from "../src/application/ports/telegram-client.js";
 import type { RequestContext } from "../src/interfaces/http/router.js";
@@ -108,6 +111,16 @@ class FakeTelegramClient implements TelegramClientPort {
   public async setWebhook(): Promise<void> {}
   public async getWebhookInfo(): Promise<TelegramWebhookInfo> {
     return { url: "https://example.test/telegram/webhook" };
+  }
+}
+
+class InMemoryAppConfigRepository implements AppConfigRepositoryPort {
+  public readonly store = new Map<string, string>();
+  public async getAll(): Promise<Record<string, string>> {
+    return Object.fromEntries(this.store);
+  }
+  public async set(key: string, value: string): Promise<void> {
+    this.store.set(key, value);
   }
 }
 
@@ -283,4 +296,60 @@ test("parseTelegramExport maps a Telegram Desktop export", () => {
   assert.equal(messages[0]?.conversationId, "telegram:555");
   assert.equal(messages[0]?.senderDisplayName, "Alice");
   assert.equal(messages[1]?.text, "see this");
+});
+
+test("config GET returns the current redaction policy and categories", async () => {
+  const service = new SettingsService(new InMemoryAppConfigRepository());
+  await service.init();
+  const routes = createConfigRoutes(service);
+
+  const result = await routes.get(context({ method: "GET" }));
+
+  assert.equal(result.status, 200);
+  const body = result.body as { config: { redaction: { categories: Record<string, boolean> } }; redactionCategories: string[] };
+  assert.equal(body.config.redaction.categories.password, true);
+  assert.ok(body.redactionCategories.includes("api_key"));
+});
+
+test("config PUT redaction toggles a category and applies live", async () => {
+  const service = new SettingsService(new InMemoryAppConfigRepository());
+  await service.init();
+  const routes = createConfigRoutes(service);
+
+  const result = await routes.putRedaction(context({
+    method: "PUT",
+    body: { categories: { password: false } },
+  }));
+
+  assert.equal(result.status, 200);
+  assert.equal(service.currentRedactionPolicy().categories.password, false);
+});
+
+test("config PUT redaction rejects an invalid custom pattern", async () => {
+  const service = new SettingsService(new InMemoryAppConfigRepository());
+  await service.init();
+  const routes = createConfigRoutes(service);
+
+  const result = await routes.putRedaction(context({
+    method: "PUT",
+    body: { customPatterns: [{ kind: "api_key", label: "bad", regex: "([" }] },
+  }));
+
+  assert.equal(result.status, 400);
+});
+
+test("config PUT redaction assigns ids to new custom patterns", async () => {
+  const service = new SettingsService(new InMemoryAppConfigRepository());
+  await service.init();
+  const routes = createConfigRoutes(service);
+
+  const result = await routes.putRedaction(context({
+    method: "PUT",
+    body: { customPatterns: [{ kind: "api_key", label: "Internal", regex: "INTERNAL-[0-9]{6}" }] },
+  }));
+
+  assert.equal(result.status, 200);
+  const patterns = service.currentRedactionPolicy().customPatterns;
+  assert.equal(patterns.length, 1);
+  assert.ok((patterns[0]?.id ?? "").length > 0);
 });

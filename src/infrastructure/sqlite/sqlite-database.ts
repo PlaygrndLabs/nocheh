@@ -14,6 +14,7 @@ export function openSqliteDatabase(databasePath: string): SqliteDatabase {
   database.pragma("foreign_keys = ON");
   applyMigrations(database);
   applyMemoryGraphSchema(database);
+  applyAppConfigSchema(database);
   applyIncrementalColumns(database);
   return database;
 }
@@ -184,5 +185,20 @@ function applyMemoryGraphSchema(database: SqliteDatabase): void {
 
     CREATE INDEX IF NOT EXISTS idx_suggestions_status_updated
       ON suggestions(status, updated_at);
+  `);
+}
+
+/**
+ * Global application configuration as an encrypted-capable key/value store.
+ * Values are JSON strings; when `encrypted = 1` the value is an AES-GCM payload.
+ */
+function applyAppConfigSchema(database: SqliteDatabase): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS app_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      encrypted INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
   `);
 }

@@ -13,8 +13,10 @@ import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memo
 import { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 import { NoopMemoryGraphAnalyzer, type MemoryGraphAnalyzerPort } from "./application/ports/memory-graph-analyzer.js";
 import { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
-import { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
+import { ConfigurableSecretDetector } from "./infrastructure/security/configurable-secret-detector.js";
+import { SettingsService } from "./application/services/settings-service.js";
 import { openSqliteDatabase } from "./infrastructure/sqlite/sqlite-database.js";
+import { SqliteAppConfigRepository } from "./infrastructure/sqlite/sqlite-app-config-repository.js";
 import { SqliteAuditRepository } from "./infrastructure/sqlite/sqlite-audit-repository.js";
 import { SqliteGroupAssistantSettingsRepository } from "./infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
 import { SqliteLiveMessageBufferRepository } from "./infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
@@ -56,7 +58,10 @@ const sessionAuth = new SessionAuth({
 });
 const database = openSqliteDatabase(databasePath);
 const metrics = new InMemoryMetricsCollector();
-const secretDetector = new RegexSecretDetector();
+const appConfigRepository = new SqliteAppConfigRepository(database, encryption);
+const settingsService = new SettingsService(appConfigRepository, logger);
+await settingsService.init();
+const secretDetector = new ConfigurableSecretDetector(settingsService);
 const clock = new SystemClock();
 const idGenerator = new SystemIdGenerator();
 const envStore = new DotenvFileStore(join(process.cwd(), ".env"));
@@ -120,6 +125,7 @@ const apiRouter = registerApiRoutes(new Router(), {
   historyImportService,
   liveProcessor,
   settingsRepository,
+  settingsService,
   auditRepository,
   memoryGraphRepository,
   suggestionRepository,

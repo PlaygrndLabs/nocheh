@@ -9,8 +9,10 @@ import type { LiveMessageBufferService } from "../../../application/services/liv
 import type { MemoryGraphRepositoryPort } from "../../../application/ports/memory-graph-repository.js";
 import type { Router } from "../router.js";
 import type { SuggestionRepositoryPort } from "../../../application/ports/suggestion-repository.js";
+import type { SettingsService } from "../../../application/services/settings-service.js";
 import { createAuthRoutes } from "./create-auth-routes.js";
 import { createBrainRoutes } from "./create-brain-routes.js";
+import { createConfigRoutes } from "./create-config-routes.js";
 import { createHistoryRoutes } from "./create-history-routes.js";
 import { createMockRoutes } from "./create-mock-routes.js";
 import { createNoteRoutes } from "./create-note-routes.js";
@@ -27,6 +29,7 @@ export interface ApiDependencies {
   readonly historyImportService: HistoryImportService;
   readonly liveProcessor: LiveMessageBufferService;
   readonly settingsRepository: GroupAssistantSettingsRepositoryPort;
+  readonly settingsService: SettingsService;
   readonly auditRepository: AuditRepositoryPort;
   readonly memoryGraphRepository: MemoryGraphRepositoryPort;
   readonly suggestionRepository: SuggestionRepositoryPort;
@@ -43,6 +46,7 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
   const history = createHistoryRoutes(deps.historyImportService);
   const mock = createMockRoutes(deps.liveProcessor, deps.clock);
   const settings = createSettingsRoutes(deps.settingsRepository, deps.clock);
+  const config = createConfigRoutes(deps.settingsService);
   const observability = createObservabilityRoutes(deps.auditRepository, deps.metrics);
   const brain = createBrainRoutes(deps.memoryGraphRepository, deps.suggestionRepository);
   const note = createNoteRoutes(deps.liveProcessor);
@@ -64,6 +68,8 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
     .post("/api/mock/reaction", mock.reaction)
     .get("/api/settings/:conversationId", settings.get)
     .put("/api/settings/:conversationId", settings.put)
+    .get("/api/config", config.get)
+    .put("/api/config/redaction", config.putRedaction)
     .get("/api/metrics", observability.metrics)
     .get("/api/audit", observability.audit)
     .get("/api/conversations", observability.conversations)
