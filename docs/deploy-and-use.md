@@ -7,25 +7,25 @@ Nocheh is ready for private MVP use as a local/VPS assistant with:
 - Telegram webhook ingestion.
 - Multi-conversation settings.
 - Secret redaction before processing.
-- Rule-based task and structured memory extraction.
+- Task and structured memory extraction from conversation windows.
 - Memory graph nodes, edges, and pending suggestions.
 - SQLite persistence with encrypted sensitive payload fields.
 - Dashboard at `/app` for setup, simulation, metrics, conversation audit, graph,
   and suggestion approval.
 - Optional Notion MCP task sync.
-- Optional provider adapter support, disabled by default until model research is
-  complete.
+- Provider-backed analysis behind one application port; NVIDIA-hosted GLM-5.2 is
+  the selected provider, Anthropic Claude is the alternative.
 
 Nocheh is not yet ready as a fully autonomous or fully AI-powered clone:
 
-- No paid AI provider/model is selected by default.
-- The default analyzer is deterministic/rule-based.
+- Analysis requires a configured provider. With `AI_PROVIDER` blank the
+  assistant runs in dry-run mode and produces no analysis at all.
 - Suggested replies/actions still require human approval.
 - Telegram is the only live chat adapter.
 - Crypto support is decision support only; no auto-trading.
 
-Use it now to collect structured memory, test workflows, import history, inspect
-the graph, and validate the operating model before enabling paid model calls.
+Dry-run mode is still useful: it collects and redacts messages, records audits,
+and lets you validate the operating model before spending tokens.
 
 ## Local Run
 
@@ -140,12 +140,11 @@ TELEGRAM_ALLOWED_USER_IDS=123456789
 
 When either allow-list is set, the webhook ignores Telegram messages outside the configured chat/user IDs.
 
-Keep these blank until model research is done:
+Set the AI provider (or leave `AI_PROVIDER` blank to stay in dry-run mode):
 
 ```bash
-AI_PROVIDER=
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=
+AI_PROVIDER=nvidia
+NVIDIA_API_KEY=nvapi-...
 ```
 
 Start the app and tunnel:
@@ -172,7 +171,8 @@ https://<your-public-hostname>/app
 1. Open `/app`.
 2. Go to **Setup**.
 3. Confirm encryption is configured.
-4. Leave AI provider empty while model selection is still open.
+4. Select the AI provider (NVIDIA / GLM-5.2) and paste the API key, or leave it
+   unset to stay in dry-run mode. Restart the app after saving.
 5. Connect the Telegram bot:
    - paste Telegram bot token
    - set webhook URL to `https://<your-public-hostname>/telegram/webhook`
@@ -228,34 +228,63 @@ Expected behavior:
 
 ## Provider / Model Selection
 
-Provider calls are disabled by default.
+Selected provider: **NVIDIA API Catalog, model `z-ai/glm-5.2` (GLM-5.2 by Z.ai)**.
 
-Current policy:
+Enable it with:
 
-- Use rule-based analysis until model selection research is complete.
-- Do not set `AI_PROVIDER` unless Mak explicitly approves a provider/model.
-- Do not enable a premium reasoning model for every group message.
-- Run evals first for JSON reliability, memory quality, safety, latency, and
-  real token cost.
-- First preferred paid-provider path is Claude Sonnet through Anthropic direct
-  API, not AWS Bedrock.
+```bash
+AI_PROVIDER=nvidia
+NVIDIA_API_KEY=nvapi-...
+# Optional. Defaults to z-ai/glm-5.2.
+NVIDIA_MODEL=z-ai/glm-5.2
+```
 
-Research plan:
+Get the key from <https://build.nvidia.com/z-ai/glm-5.2> (Build with this NIM ->
+API key). The endpoint is OpenAI-compatible:
+`https://integrate.api.nvidia.com/v1/chat/completions`.
 
-- See `docs/research/0003-model-selection-cost-reasoning.md`.
-- Candidate families include Claude Sonnet first, then Gemini Flash/Lite or
-  DeepSeek as cheaper extraction baselines.
-- Final selection should be based on measured Nocheh eval results, not brand.
+Why this model:
 
-If Anthropic Sonnet is selected later:
+- 1M-token context, so a whole conversation window fits without aggressive
+  trimming.
+- Advertised structured output, which the analyzer depends on: the adapter sends
+  `response_format: { type: "json_object" }` and validates every item against the
+  provider-neutral contract.
+- Strong agentic/reasoning benchmarks relative to cost.
+
+Optional overrides:
+
+- `NVIDIA_BASE_URL` — point at a self-hosted NIM or a different
+  OpenAI-compatible gateway.
+- `NVIDIA_JSON_RESPONSE_FORMAT=false` — stop sending `response_format` if an
+  endpoint rejects it. The system prompt still demands JSON only and the adapter
+  strips a ```json fence if the model adds one.
+- `MAX_AI_OUTPUT_TOKENS` — output budget per analysis call (default 4000). A
+  truncated response fails loudly instead of surfacing as a JSON parse error.
+
+Standing policy:
+
+- Do not enable a premium reasoning model for every group message. Keep
+  `MESSAGE_ANALYSIS_MODE=batch` so windows, not messages, drive calls.
+- Track real token cost in **History** / the pipeline trace before widening
+  usage; `aiTokenUsage` records provider, model, and token counts per run.
+- Alternative provider still wired behind the same port (Anthropic Messages API,
+  model id required):
 
 ```bash
 AI_PROVIDER=anthropic
-ANTHROPIC_API_KEY=...
-ANTHROPIC_MODEL=<explicit-approved-sonnet-model-id>
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=<explicit-model-id>
 ```
 
-Restart after changing provider env.
+- Leaving `AI_PROVIDER` blank, or omitting the selected provider's API key, keeps
+  the assistant in dry-run mode: redaction, buffering, and auditing still run,
+  but no analysis is produced and nothing leaves the box.
+- Earlier evaluation notes live in
+  `docs/research/0003-model-selection-cost-reasoning.md`.
+
+Restart after changing provider env. The dashboard reports
+`restartRequired: true` when it writes these keys.
 
 ## Backups
 
@@ -312,9 +341,13 @@ Telegram messages do not appear:
 
 No AI-like suggestions:
 
-- This is expected while provider is disabled.
-- Rule-based graph/suggestions still work for supported patterns.
-- Do not enable provider until model research is complete.
+- Check **Setup** shows `Provider ready: yes`. If not, `AI_PROVIDER` or the
+  provider's API key is missing and the assistant is in dry-run mode.
+- Restart the app after saving provider env; it is read once at boot.
+- Check the boot log for `AI provider configured.` with the expected provider and
+  model, or a warning naming the missing env keys.
+- Check the pipeline trace / **History** for the analysis step: a provider error
+  (bad key, unknown model, rate limit) is recorded there.
 
 Notion sync fails:
 

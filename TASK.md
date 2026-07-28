@@ -9,10 +9,12 @@ requires Mak approval before external actions.
 
 ## Current Phase
 
-Memory graph foundation and live rule-based pipeline are implemented. Current
-phase is model/provider selection research before enabling a paid AI provider.
-Mak's first preferred paid-provider target is Claude Sonnet through Anthropic
-direct API, not AWS Bedrock.
+Memory graph foundation and the live pipeline are implemented. The selected
+provider is NVIDIA-hosted GLM-5.2 (`z-ai/glm-5.2`) over the OpenAI-compatible
+endpoint at `integrate.api.nvidia.com`, chosen for its 1M-token context and
+structured-output support. Anthropic Claude stays wired as an alternative behind
+the same port. Current phase is measuring real quality and token cost on Mak's
+own conversations.
 
 ## Task Plan
 
@@ -111,14 +113,20 @@ direct API, not AWS Bedrock.
 - [x] Generate initial codebase graph.
 - [x] Ignore generated `graphify-out/`.
 
-## Model Selection Research
+## Model Selection
 
-- [ ] Compare candidate models for reasoning quality, structured JSON reliability, privacy, latency, and real cost.
-- [ ] Estimate monthly cost from Nocheh's expected message volume and token budget.
-- [ ] Run a local eval set for memory extraction, graph extraction, suggestions, and safety refusals.
-- [ ] Evaluate Claude Sonnet through Anthropic direct API as the first quality candidate.
-- [ ] Select final provider/model only after eval results and budget review.
-- [ ] Keep provider disabled by default until explicitly selected.
+- [x] Select a provider/model: NVIDIA API Catalog, `z-ai/glm-5.2`.
+- [x] Keep provider selection behind a catalog so adding one is an adapter plus a
+      catalog entry (`src/application/config/ai-provider-catalog.ts`).
+- [x] Keep dry-run mode as the default when no provider is configured.
+- [ ] Measure real quality on Mak's conversations: memory extraction, graph
+      extraction, suggestions, and safety refusals.
+- [ ] Measure real token cost per window and estimate monthly cost from actual
+      message volume.
+- [ ] Decide whether a cheaper extraction tier is needed for noisy groups
+      (two-tier policy in `docs/research/0003-model-selection-cost-reasoning.md`).
+- [ ] Verify JSON reliability in practice; if `response_format` proves
+      unnecessary or unsupported, revisit `NVIDIA_JSON_RESPONSE_FORMAT`.
 
 ## Verification Commands
 

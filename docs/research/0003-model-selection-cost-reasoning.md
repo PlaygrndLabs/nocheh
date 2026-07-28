@@ -4,6 +4,33 @@ Date: 2026-06-21
 
 ## Decision State
 
+**Superseded on 2026-07-28: selected NVIDIA API Catalog with `z-ai/glm-5.2`
+(GLM-5.2 by Z.ai).** See `docs/deploy-and-use.md` -> "Provider / Model Selection".
+
+Reasons for the choice over the shortlist below:
+
+- 1M-token input context, so a whole conversation window plus grounding context
+  fits without aggressive trimming.
+- Advertised structured output and function calling; the adapter requests
+  `response_format: { type: "json_object" }` and still validates everything
+  against the provider-neutral contract.
+- OpenAI-compatible endpoint, so the adapter is thin and the same transport can
+  be repointed at another gateway with `NVIDIA_BASE_URL`.
+- Strong reasoning/agentic benchmark results relative to cost.
+
+Open items from this research that still apply:
+
+- Real cost per window and per month is still unmeasured; the shortlist below
+  stays relevant if GLM-5.2 proves too expensive for noisy groups.
+- The two-tier policy (cheap extraction tier plus a stronger reasoning tier) is
+  still the intended cost-control mechanism.
+- Provider config stays explicit: `AI_PROVIDER` is blank by default and a
+  provider never activates just because credentials exist.
+
+The original research state follows, kept for context.
+
+### Original state (2026-06-21)
+
 No paid AI provider is selected yet. Mak's first preferred quality candidate is
 Claude Sonnet through Anthropic direct API, not AWS Bedrock.
 

@@ -1,9 +1,21 @@
 /** Typed wrapper around the backend JSON API. Throws on non-ok responses. */
 
+export interface AiProviderOption {
+  id: string;
+  label: string;
+  apiKeyEnvKey: string;
+  modelEnvKey: string;
+  defaultModel?: string;
+  modelRequired: boolean;
+  notes: string;
+}
+
 export interface SetupStatus {
   ok: boolean;
   hasAiKey: boolean;
   aiProvider?: string;
+  aiModel?: string;
+  providers?: AiProviderOption[];
   hasBotToken: boolean;
   botConnected: boolean;
   webhookUrl?: string;

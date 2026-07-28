@@ -108,7 +108,7 @@ export function Notes(): JSX.Element {
       setText("");
       await loadKnowledge();
       setNotice(hasAiKey === false
-        ? { kind: "success", text: "Note sent. AI is in dry-run mode, so knowledge did not change. Set an Anthropic key in Setup to let notes update the brain." }
+        ? { kind: "success", text: "Note sent. AI is in dry-run mode, so knowledge did not change. Configure an AI provider in Setup to let notes update the brain." }
         : { kind: "success", text: "Note sent. Nocheh turned it into knowledge and refreshed the graph and suggestions below." });
     } catch (error) {
       setNotice({ kind: "error", text: (error as Error).message });
@@ -136,7 +136,7 @@ export function Notes(): JSX.Element {
           <Lightbulb className="notice-icon" size={16} aria-hidden="true" />
           <span>
             AI is disabled (dry-run). Notes are recorded and sent, but the backend produces no knowledge changes until an
-            Anthropic key is set in Setup. The graph and suggestions below will not change from a note while dry-run is active.
+            AI provider is configured in Setup. The graph and suggestions below will not change from a note while dry-run is active.
           </span>
         </div>
       )}
@@ -191,7 +191,7 @@ export function Notes(): JSX.Element {
         <KnowledgeGraph
           nodes={graph.nodes}
           edges={graph.edges}
-          emptyMessage="No knowledge graph yet. Send a note (an Anthropic key is required for real results)."
+          emptyMessage="No knowledge graph yet. Send a note (a configured AI provider is required for real results)."
           height={420}
         />
       </Card>

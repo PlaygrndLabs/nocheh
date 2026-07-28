@@ -11,6 +11,13 @@ import { LiveMessageBufferService } from "./application/services/live-message-bu
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
 import { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
+import { NvidiaMemoryGraphAnalyzer } from "./infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
+import {
+  aiProviderIds,
+  findAiProvider,
+  normalizeAiProviderId,
+  requiredAiProviderEnvKeys,
+} from "./application/config/ai-provider-catalog.js";
 import { NoopMemoryGraphAnalyzer, type MemoryGraphAnalyzerPort } from "./application/ports/memory-graph-analyzer.js";
 import { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 import { ConfigurableSecretDetector } from "./infrastructure/security/configurable-secret-detector.js";
@@ -207,25 +214,57 @@ function createTaskProvider(): TaskProviderPort {
 }
 
 function createMemoryGraphAnalyzer(): MemoryGraphAnalyzerPort {
-  if (process.env.AI_PROVIDER !== "anthropic") {
-    logger.warn("AI provider is not configured (AI_PROVIDER != anthropic). Running in dry-run mode: no analysis will be produced.");
+  const providerId = normalizeAiProviderId(process.env.AI_PROVIDER);
+  if (providerId === undefined) {
+    logger.warn("AI provider is not configured (AI_PROVIDER is empty). Running in dry-run mode: no analysis will be produced.");
     return new NoopMemoryGraphAnalyzer();
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const model = process.env.ANTHROPIC_MODEL;
-  if (
-    apiKey === undefined || apiKey.trim().length === 0
-    || model === undefined || model.trim().length === 0
-  ) {
-    logger.warn("Anthropic is selected but ANTHROPIC_API_KEY/ANTHROPIC_MODEL are missing. Running in dry-run mode.");
+  const provider = findAiProvider(providerId);
+  if (provider === undefined) {
+    logger.warn("Unknown AI_PROVIDER. Running in dry-run mode.", {
+      provider: providerId,
+      supported: aiProviderIds().join(", "),
+    });
     return new NoopMemoryGraphAnalyzer();
   }
 
-  return new AnthropicMemoryGraphAnalyzer({
-    apiKey,
-    model,
-  });
+  const missing = requiredAiProviderEnvKeys(provider).filter((key) => trimmedEnv(key) === undefined);
+  if (missing.length > 0) {
+    logger.warn("AI provider is selected but required env keys are missing. Running in dry-run mode.", {
+      provider: provider.id,
+      missing: missing.join(", "),
+    });
+    return new NoopMemoryGraphAnalyzer();
+  }
+
+  const apiKey = trimmedEnv(provider.apiKeyEnvKey) ?? "";
+  const model = trimmedEnv(provider.modelEnvKey) ?? provider.defaultModel ?? "";
+  const maxTokens = numberEnv("MAX_AI_OUTPUT_TOKENS", 4000);
+  logger.info("AI provider configured.", { provider: provider.id, model });
+
+  switch (provider.id) {
+    case "nvidia": {
+      const baseUrl = trimmedEnv("NVIDIA_BASE_URL");
+      return new NvidiaMemoryGraphAnalyzer({
+        apiKey,
+        model,
+        maxTokens,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+        ...(process.env.NVIDIA_JSON_RESPONSE_FORMAT === "false" ? { jsonResponseFormat: false } : {}),
+      });
+    }
+    case "anthropic":
+      return new AnthropicMemoryGraphAnalyzer({ apiKey, model, maxTokens });
+    default:
+      logger.warn("AI provider has a catalog entry but no adapter. Running in dry-run mode.", { provider: provider.id });
+      return new NoopMemoryGraphAnalyzer();
+  }
+}
+
+function trimmedEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value === undefined || value.length === 0 ? undefined : value;
 }
 
 function splitArgs(value: string): readonly string[] {
@@ -256,7 +295,9 @@ function loadDotenvFile(path: string): void {
     }
     const key = trimmed.slice(0, separator).trim();
     const rawValue = trimmed.slice(separator + 1).trim();
-    if (key.length === 0 || process.env[key] !== undefined) {
+    // A real process env value wins, but an empty one (common with
+    // `VAR: ${VAR:-}` in compose) must not shadow the .env file.
+    if (key.length === 0 || (process.env[key] ?? "").length > 0) {
       continue;
     }
     process.env[key] = unquoteEnvValue(rawValue);

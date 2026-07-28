@@ -13,14 +13,14 @@ function mockFetch(status: number, payload: unknown): void {
 }
 
 test("putEnv posts the values envelope and returns the result", async () => {
-  mockFetch(200, { ok: true, updated: ["AI_API_KEY"], rejected: [] });
+  mockFetch(200, { ok: true, updated: ["NVIDIA_API_KEY"], rejected: [] });
 
-  const result = await api.putEnv({ AI_API_KEY: "secret" });
+  const result = await api.putEnv({ NVIDIA_API_KEY: "secret" });
 
-  expect(result.updated).toEqual(["AI_API_KEY"]);
+  expect(result.updated).toEqual(["NVIDIA_API_KEY"]);
   const call = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
   expect(call?.[0]).toBe("/api/env");
-  expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ values: { AI_API_KEY: "secret" } });
+  expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ values: { NVIDIA_API_KEY: "secret" } });
 });
 
 test("throws with the server error message on ok:false", async () => {

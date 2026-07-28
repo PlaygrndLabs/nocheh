@@ -19,15 +19,17 @@ be restricted with `TELEGRAM_ALLOWED_CHAT_IDS` and `TELEGRAM_ALLOWED_USER_IDS`.
 
 - Telegram webhook ingestion
 - Secret detection and redaction
-- Rule-based task extraction
+- Task extraction from conversation windows
 - Structured memory extraction for projects, decisions, blockers, deadlines, and summaries
 - Configurable live group-message batching before analysis
 - One-time history import service for old group exports
 - AI context builder that uses recent messages plus retrieved structured memory
 - Memory graph nodes and edges for personal/business context
 - Pending strategic/action suggestions with approval flow
-- Rule-based brain analyzer active by default
-- Provider/model selection intentionally disabled until model research is done
+- AI analysis behind one provider-neutral port, with NVIDIA-hosted GLM-5.2
+  (`z-ai/glm-5.2`) as the selected provider and Anthropic Claude as the alternative
+- Dry-run mode when no provider is configured: ingestion, redaction, and audit
+  still run, but no analysis is produced
 - Task-to-project linking when project context is detected
 - Semantic-style local memory retrieval
 - Task validation and audit trail
@@ -35,9 +37,8 @@ be restricted with `TELEGRAM_ALLOWED_CHAT_IDS` and `TELEGRAM_ALLOWED_USER_IDS`.
 - Notion MCP task sync adapter
 - React client at `/app` for configuration, bot connection, history import, mock testing, metrics, conversations, graph inspection, pending suggestions, approval, and chat-flow visualization
 
-Not included yet: selected paid AI provider/model, embedding-backed vector
-search, additional platform adapters beyond Telegram/mock/history import, or
-autonomous external action execution.
+Not included yet: embedding-backed vector search, additional platform adapters
+beyond Telegram/mock/history import, or autonomous external action execution.
 
 ## Product Direction
 
@@ -134,8 +135,12 @@ The AI context should be built from:
 - relevant structured memories
 - summaries/tasks/blockers
 
-It should not receive full chat history. Future AI provider adapters must remain
-behind the existing provider-neutral application port.
+It should not receive full chat history. Provider adapters must remain behind the
+existing provider-neutral application port: transport lives in the adapter, while
+the prompt, the output contract, and the domain mapping are shared
+(`src/infrastructure/reasoning/memory-graph-analysis-mapping.ts`). Adding a
+provider means one adapter plus one entry in
+`src/application/config/ai-provider-catalog.ts`.
 
 ## Memory Policy
 
@@ -264,13 +269,24 @@ PORT=3000
 DATA_DIR=./data
 DATABASE_PATH=./data/nocheh.sqlite
 LOCAL_ENCRYPTION_SECRET=change-this-secret
-AI_PROVIDER=
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=
+
+# AI provider. Blank keeps the assistant in dry-run mode.
+AI_PROVIDER=nvidia
+NVIDIA_API_KEY=nvapi-...
+NVIDIA_MODEL=z-ai/glm-5.2
+# NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1/chat/completions
+# NVIDIA_JSON_RESPONSE_FORMAT=true
+
+# Alternative provider (model id required).
+# AI_PROVIDER=anthropic
+# ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_MODEL=
+
 MESSAGE_ANALYSIS_MODE=batch
 LIVE_ANALYSIS_INTERVAL_SECONDS=300
 LIVE_MAX_MESSAGES_PER_BATCH=50
 MAX_AI_CONTEXT_TOKENS=4000
+MAX_AI_OUTPUT_TOKENS=4000
 MAX_RETRIEVED_MEMORIES=12
 MAX_RECENT_MESSAGES=30
 SUMMARY_EVERY_MESSAGES=100

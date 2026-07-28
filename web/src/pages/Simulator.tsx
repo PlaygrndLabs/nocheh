@@ -400,7 +400,7 @@ export function Simulator(): JSX.Element {
       setNotice(hasAiKey === false
         ? {
             kind: "error",
-            text: "Note sent, but AI is in dry-run mode so nothing changed. Set an Anthropic key in Setup to let notes update knowledge.",
+            text: "Note sent, but AI is in dry-run mode so nothing changed. Configure an AI provider in Setup to let notes update knowledge.",
           }
         : {
             kind: "success",
@@ -450,7 +450,7 @@ export function Simulator(): JSX.Element {
       } else if (hasAiKey === false) {
         setNotice({
           kind: "error",
-          text: "Reaction sent, but AI is in dry-run mode so nothing changed. Set an Anthropic key in Setup to let reactions update tasks.",
+          text: "Reaction sent, but AI is in dry-run mode so nothing changed. Configure an AI provider in Setup to let reactions update tasks.",
         });
       } else {
         setNotice({
@@ -588,7 +588,7 @@ export function Simulator(): JSX.Element {
           <AlertTriangle className="notice-icon" size={16} aria-hidden="true" />
           <span>
             AI is disabled (dry-run). Analysis runs, but the backend produces an empty result — no memory, graph, or
-            suggestions will appear until an Anthropic key is set in Setup. Emoji reactions also need an Anthropic key to
+            suggestions will appear until an AI provider is configured in Setup. Emoji reactions also need a provider to
             change anything (the reaction is sent, but no task or knowledge will update).
           </span>
         </div>
@@ -800,7 +800,7 @@ function KnowledgeTab({
     <KnowledgeGraph
       nodes={graph.nodes}
       edges={graph.edges}
-      emptyMessage="No knowledge graph yet. Send a message and run analysis (an Anthropic key is required for real results)."
+      emptyMessage="No knowledge graph yet. Send a message and run analysis (a configured AI provider is required for real results)."
       height={260}
     />
   );
