@@ -5,7 +5,7 @@ import type { EncryptionPort } from "../../application/ports/encryption.js";
 export class AesGcmEncryption implements EncryptionPort {
   private readonly key: Buffer;
 
-  public constructor(secret: string, salt = "my-nocheh-local-store") {
+  public constructor(secret: string, salt = "nocheh-local-store") {
     if (secret.length < 16) {
       throw new Error("Encryption secret must contain at least 16 characters.");
     }

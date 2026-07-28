@@ -114,8 +114,8 @@ Prerequisites:
 On the VPS:
 
 ```bash
-git clone <repo-url> my-nocheh
-cd my-nocheh
+git clone <repo-url> nocheh
+cd nocheh
 cp .env.example .env
 ```
 
