@@ -60,7 +60,7 @@ const encryption = new AesGcmEncryption(encryptionSecret);
 const sessionAuth = new SessionAuth({
   ...(process.env.APP_AUTH_USERNAME === undefined ? {} : { username: process.env.APP_AUTH_USERNAME }),
   ...(process.env.APP_AUTH_PASSWORD === undefined ? {} : { password: process.env.APP_AUTH_PASSWORD }),
-  sessionSecret: process.env.APP_AUTH_SESSION_SECRET ?? encryptionSecret,
+  sessionSecret: process.env.APP_AUTH_SESSION_SECRET || encryptionSecret,
   secureCookie: process.env.APP_AUTH_SECURE_COOKIE === "true",
 });
 const database = openSqliteDatabase(databasePath);
