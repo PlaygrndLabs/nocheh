@@ -109,7 +109,7 @@ export const FLOW_STAGES: readonly FlowStage[] = [
     sublabel: "Reads the whole window; extracts memory, graph, and tasks.",
     lane: "process",
     column: 3,
-    property: "One LLM pass over the conversation window (Claude). Dry-run with no API key returns an empty analysis.",
+    property: "One LLM pass over the conversation window (the configured provider, e.g. GLM-5.2). Dry-run with no provider returns an empty analysis.",
   },
   {
     id: "memory",

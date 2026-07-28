@@ -199,6 +199,19 @@ export { redactWithPatterns } from "./infrastructure/security/redaction-engine.j
 export type { CompiledSecretPattern } from "./infrastructure/security/redaction-engine.js";
 export { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 export type { AnthropicMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
+export { NvidiaMemoryGraphAnalyzer, NVIDIA_DEFAULT_BASE_URL } from "./infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
+export type { NvidiaMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
+export {
+  AI_PROVIDERS,
+  DEFAULT_AI_PROVIDER_ID,
+  aiProviderEnvKeys,
+  aiProviderIds,
+  aiProviderSecretEnvKeys,
+  findAiProvider,
+  normalizeAiProviderId,
+  requiredAiProviderEnvKeys,
+} from "./application/config/ai-provider-catalog.js";
+export type { AiProviderDescriptor } from "./application/config/ai-provider-catalog.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 export { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-file-store.js";
 export { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
