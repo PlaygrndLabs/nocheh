@@ -24,7 +24,7 @@ We need one operator-facing client that makes the app self-serviceable:
 - visualize conversations and the step-by-step processing flow.
 
 This must be added without coupling the existing hexagonal core to a web
-framework, and without weakening the security policy in AGENT.md.
+framework, and without weakening the security policy in AGENTS.md.
 
 ## Decision
 

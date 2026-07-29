@@ -5,7 +5,7 @@ Date: 2026-06-21
 ## Decision State
 
 **Superseded on 2026-07-28: selected NVIDIA API Catalog with `z-ai/glm-5.2`
-(GLM-5.2 by Z.ai).** See `docs/deploy-and-use.md` -> "Provider / Model Selection".
+(GLM-5.2 by Z.ai).** See `docs/deploy.md` -> "Provider and Cost".
 
 Reasons for the choice over the shortlist below:
 
@@ -31,7 +31,7 @@ The original research state follows, kept for context.
 
 ### Original state (2026-06-21)
 
-No paid AI provider is selected yet. Mak's first preferred quality candidate is
+No paid AI provider is selected yet. The first preferred quality candidate is
 Claude Sonnet through Anthropic direct API, not AWS Bedrock.
 
 Nocheh should continue using the rule-based analyzer until a model is selected
@@ -144,7 +144,7 @@ Do not enable a paid provider until:
 - The eval harness exists.
 - At least two low/mid-cost models have been tested.
 - Monthly cost is estimated from expected message volume.
-- Mak explicitly approves the provider/model.
+- The owner explicitly approves the provider/model.
 
 ## Sources Checked
 

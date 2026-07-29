@@ -2,245 +2,134 @@
 
 ## Mission
 
-Build Nocheh as a personal AI brain: a multi-conversation assistant that reads
-incoming chats, understands context, builds structured long-term memory, and
-helps Mak think, decide, remember, communicate, set goals, and generate new
-ideas. It should also help Mak improve routines and repeated behaviors over
-time.
+Nocheh is a personal AI brain: it reads conversations, builds structured
+long-term memory and a knowledge graph, and helps its owner remember, decide,
+communicate, set goals, generate ideas, and improve routines.
 
-Telegram is the first input and output channel. The core product is not a
-Telegram bot; it is a platform-neutral personal memory and analysis system that
-can later connect to more groups, DMs, email, calendar, and other tools.
+Telegram is an adapter. Memory and reasoning are the product.
 
-The long-term direction is a Mak-like assistant that can draft, reason, and
-suggest actions in Mak's style. It must not impersonate Mak or act externally
-without approval.
+Operating domains: startups and partners, freelance clients and deliverables,
+coaching and personal growth, projects and tasks, English learning, X/Twitter
+growth, asset tracking, crypto decision support, and advice grounded in the
+owner's memory, goals, routines, and accepted rules.
 
-## Product Model
+## Non-Negotiable Rules
+
+1. **No raw chat as long-term memory.** Store structured records with source
+   reference, confidence, and timestamp. Raw messages are temporary working data.
+2. **Redact before anything else.** Passwords, API keys, tokens, private keys,
+   seed phrases, and connection strings must be redacted before buffering,
+   analysis, persistence, logs, context building, or external sync.
+3. **Human approval for external actions.** External effects stay `pending`.
+   Nocheh may draft and suggest; it must not impersonate the owner or act on its own.
+4. **Suggestions are not facts** until the owner accepts or converts them.
+5. **No auto-trading.** Crypto support is decision support only.
+6. **Cost is a feature.** Batch windows, bounded context, capped retrieval, and
+   dry-run mode when no provider is configured.
+7. **Providers stay behind ports.** Transport in the adapter; prompt, output
+   contract, and domain mapping stay shared.
+
+## Architecture
 
 ```text
-Input channels
-  -> normalized incoming messages
-  -> redaction and safety checks
-  -> bounded AI/rule analysis
-  -> structured personal memory
-  -> knowledge graph updates
-  -> retrieval and context building
-  -> goals, ideas, answers, and actions for Mak approval
+interfaces -> application -> domain
+infrastructure -> application ports
 ```
 
-Nocheh should understand both:
+- `src/domain` — entities, memory graph, suggestions, redaction policy, audit.
+  No I/O, no framework types.
+- `src/application` — use cases, services, ports, provider catalog.
+- `src/infrastructure` — Telegram, SQLite, security, reasoning, metrics, Notion MCP.
+- `src/interfaces` — HTTP router, JSON API, Telegram webhook, static handler.
+- `src/dev-server.ts` — the only composition root.
 
-- Local context: what happened in one conversation or group.
-- Global context: what Mak knows across all connected conversations and future
-  platforms.
+Conventions: TypeScript ESM with `.js` import specifiers, `readonly` domain
+types, no `any`, ports for clock/id/logger/metrics so the core stays portable
+(`test/core-layer-portability.test.ts` enforces this). New public types are
+re-exported from `src/index.ts`.
 
-## Core Responsibilities
+## Current State
 
-### Conversation Intelligence
+Pipeline:
 
-- Monitor configured Telegram groups first, then support more sources through
-  the same normalized message model.
-- Analyze conversations for meaning, commitments, decisions, risks, questions,
-  blockers, deadlines, people, preferences, goals, ideas, opportunities, and
-  project movement.
-- Preserve source references so memory can explain where knowledge came from.
-- Keep context bounded by recent messages, retrieved memory, summaries, and
-  explicit token budgets.
+```text
+Telegram webhook | mock | note | history import
+  -> secret detection + redaction
+  -> LiveMessageBufferService (batch or immediate)
+  -> MemoryGraphAnalyzerPort (NVIDIA glm-5.2 | Anthropic | noop dry-run)
+  -> validated AI contract -> memory records + graph nodes/edges + tasks
+  -> pending suggestions
+```
 
-### Strategic Thinking
+Implemented:
 
-- Turn scattered chat context into possible goals, priorities, and next moves.
-- Notice weak signals, repeated problems, opportunities, and open loops.
-- Generate original ideas for products, workflows, content, technical direction,
-  business development, and personal improvement.
-- Suggest routine improvements from observed patterns, missed commitments,
-  recurring blockers, energy signals, and explicit feedback.
-- Separate facts from suggestions: the assistant can propose goals or ideas, but
-  Mak decides what becomes real.
-- Track idea lifecycle: captured, explored, accepted, rejected, archived, or
-  converted into a project/task.
+- Memory records: `Task`, `Decision`, `Project`, `Deadline`, `Blocker`, `Summary`
+- Graph: 17 node kinds, 20 relations, 16 expanded payload kinds, status lifecycle
+  (`active`/`superseded`/`archived`/`deleted`), scopes, temporal validity
+- Suggestions: strategic + action, `pending`/`accepted`/`rejected`/`archived`/`converted`
+- `AssistantContextBuilder`: recent window + retrieved memory + bounded graph
+  neighborhood + accepted rules + high-value pending suggestions, token-capped
+- SQLite with encrypted payload columns, per-step audit records, token usage
+- Password-gated dashboard (`/app`), configurable redaction policy
 
-### Life and Business Operating Domains
+Gaps to respect when planning:
 
-Nocheh should support Mak across personal and business domains, including:
+- Retrieval is lexical, not embedding-based.
+- Suggestion approval exists in the API and domain, not in the UI.
+- Nocheh never sends outbound messages.
+- Telegram is the only live channel.
 
-- Startups, startup partners, equity/role context, risks, opportunities, and
-  strategic decisions.
-- Freelance projects, clients, deliverables, invoices, deadlines, and follow-ups.
-- Coaching Mak toward better decisions, stronger routines, and clearer goals.
-- Project and task management across work, personal life, and learning.
-- English learning goals, practice routines, vocabulary, writing feedback, and
-  communication improvement.
-- X/Twitter growth: content ideas, drafts, posting routines, audience insights,
-  experiments, and performance notes.
-- Asset tracking: domains, projects, tools, subscriptions, accounts,
-  investments, wallets, and other owned resources.
-- Crypto trading support: thesis, risk rules, watchlists, trade journal,
-  lessons, and decision support. Nocheh must not auto-trade.
-- Personal and business advice grounded in Mak's goals, memory, relationships,
-  routines, constraints, and accepted rules.
+## Memory Policy
 
-### Routine Improvement
+Every record carries `id`, `type`, `source`, `timestamp`, `confidence`. Graph
+nodes and edges carry source references, confidence, and validity windows — never
+raw chat text. Encrypted payloads depend on a stable `LOCAL_ENCRYPTION_SECRET`.
 
-- Identify routines Mak already follows across work, communication, planning,
-  health, learning, and personal operations.
-- Detect repeated friction: delays, context switching, forgotten follow-ups,
-  overloaded days, unclear priorities, and avoidable rework.
-- Propose small routine experiments with a clear trigger, action, review cadence,
-  and success signal.
-- Track whether a routine is active, paused, rejected, or needs adjustment.
-- Avoid moralizing or nagging. Routine advice should be practical, specific, and
-  easy to accept, edit, or reject.
+## Working Agreements
 
-### Second-Brain Memory
+- Read the code before the docs; docs describe intent, code is the truth.
+- Extend the domain before the UI. A feature that cannot be audited is not done.
+- Add tests next to behavior: `npm test` (backend), `npm run test:web` (frontend).
+- Record real decisions as a new ADR in `docs/adr/`. Do not rewrite accepted ADRs.
+- Keep docs short and scannable. Delete stale sections instead of appending.
 
-Maintain structured long-term memory and a knowledge graph for:
+## Graphify (Dev Tooling Only)
 
-- Projects
-- Tasks
-- Decisions
-- Deadlines
-- Blockers
-- Summaries
-- People and roles
-- Preferences
-- Communication style
-- Personal rules
-- Learned skills
-- Goals
-- Ideas
-- Opportunities
-- Insights
-- Routines
-- Routine experiments
-- Assets
-- Risks
-- Content plans
-- Learning plans
-- Investment theses
+Graphify builds a queryable graph of *this codebase*. It is not part of the
+runtime and is not Nocheh's memory engine.
 
-The system stores knowledge, not raw chat history. Raw or near-raw messages are
-temporary working data only.
+```text
+Graphify            = dev/codebase graph
+Nocheh memory graph = product/user/life graph
+```
 
-### Knowledge Graph
+When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"`
+first.
 
-- Represent important entities as memory nodes: Mak, people, projects,
-  conversations, tasks, decisions, goals, ideas, routines, areas, resources, and
-  skills.
-- Represent relationships as typed edges with source references, confidence,
-  and valid/invalid timestamps.
-- Use the graph to answer cross-context questions such as who is connected to a
-  project, which routines affect a goal, what is blocking an outcome, and which
-  ideas came from which conversations.
-- Keep graph facts structured and auditable. Do not store raw chat text inside
-  graph nodes or edges.
+For codebase questions, when `graphify-out/graph.json` exists:
 
-### Task and Commitment Management
+```bash
+graphify query "How does incoming message processing work?" --budget 1200
+graphify path "<A>" "<B>"
+graphify explain "<concept>"
+npm run graphify:update        # after code changes, AST-only, no API cost
+```
 
-- Extract tasks and promises from conversations.
-- Track ownership, status, due dates, project links, and source references.
-- Prioritize by urgency, importance, blockers, and Mak's current context.
-- Synchronize approved task updates with external tools such as Notion through
-  adapters.
+These return a scoped subgraph, far smaller than `graphify-out/GRAPH_REPORT.md`
+or raw grep. Use `graphify-out/wiki/index.md` for broad navigation and
+`GRAPH_REPORT.md` only for architecture review. Open `graphify-out/graph.html`
+for interactive exploration.
 
-### Communication and Clone Layer
+Dirty `graphify-out/` files are expected and are not a reason to skip Graphify.
+Skip only when the task is about stale graph output, or the user says not to.
 
-- Generate summaries, status updates, and reply drafts.
-- Learn Mak's tone, language mix, technical depth, wording patterns, and
-  decision habits as structured style rules.
-- Draft in Mak's style when asked, while keeping human approval in the loop.
-- Never invent Mak's opinions or send messages as Mak without explicit approval.
+Install (Python tooling, never a Node dependency; PyPI package `graphifyy`, CLI
+`graphify`):
 
-### Human Approval and Control
+```bash
+uv tool install graphifyy      # or: pipx install graphifyy
+```
 
-- The assistant may suggest goals, ideas, routine experiments, replies, task
-  updates, reminders, or next actions.
-- External actions must be pending by default.
-- Mak must approve, edit, or reject any outgoing reply or external action.
-- Strategic suggestions must be clearly labeled as suggestions, not remembered
-  as facts unless Mak accepts them.
-- Routine suggestions must stay optional and reviewable; the assistant should
-  not pressure Mak or treat failed routines as personal failure.
-- Autonomous behavior can only be added later behind explicit, narrow settings.
-
-### Cost Management
-
-- Prefer batching over per-message AI calls for noisy group chats.
-- Use structured memory retrieval instead of sending full history.
-- Keep max messages, max retrieved memories, and max AI context tokens
-  configurable.
-- Track AI token usage when a provider adapter is implemented.
-- Support rule-based or dry-run operation where AI calls are disabled.
-
-## Security
-
-### Sensitive Data Protection
-
-Never store or expose:
-
-- Passwords
-- API keys
-- Access tokens
-- Private keys
-- Seed phrases
-- Connection secrets
-
-Sensitive information must be detected and redacted before buffering, analysis,
-memory extraction, persistence, logs, context building, or external sync.
-
-### Memory Policy
-
-Store:
-
-- Structured tasks, decisions, summaries, people, preferences, style rules,
-  personal rules, and learned skills.
-- Knowledge graph nodes and relationship facts with source references.
-- Source references and confidence scores.
-- Sanitized summaries derived from memory.
-
-Do not store raw chat history as long-term memory.
-
-### Data Retention
-
-- Raw messages should be temporary.
-- Long-term storage should contain only structured knowledge.
-- Persisted sensitive payloads must be encrypted at rest.
-- History import must chunk and sanitize data before analysis.
-
-## Principles
-
-- Build the brain, not just the bot.
-- Telegram is an adapter; memory and reasoning are the product.
-- Prefer structured memory over chat history.
-- Keep AI provider details behind application ports.
-- Preserve explainability through source references and audit records.
-- Reduce Mak's cognitive load without removing Mak's control.
-- Security and cost control are product requirements, not add-ons.
-- Human approval is required before acting externally.
-
-## Graphify
-
-This project has a knowledge graph at `graphify-out/` with god nodes, community
-structure, and cross-file relationships.
-
-When the user types `/graphify`, invoke the `skill` tool with
-`skill: "graphify"` before doing anything else.
-
-Rules:
-
-- For codebase questions, first run `graphify query "<question>"` when
-  `graphify-out/graph.json` exists. Use `graphify path "<A>" "<B>"` for
-  relationships and `graphify explain "<concept>"` for focused concepts. These
-  return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw
-  grep output.
-- Dirty `graphify-out/` files are expected after hooks or incremental updates;
-  dirty graph files are not a reason to skip graphify. Only skip graphify if the
-  task is about stale or incorrect graph output, or the user explicitly says not
-  to use it.
-- If `graphify-out/wiki/index.md` exists, use it for broad navigation instead
-  of raw source browsing.
-- Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review or when
-  query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current
-  (AST-only, no API cost).
+`.graphifyignore` excludes docs and markup so extraction works without an LLM
+key. Rebuild from scratch by deleting `graphify-out/` and running
+`npm run graphify:extract && npm run graphify:report`.

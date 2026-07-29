@@ -10,15 +10,16 @@ Nocheh started as an AI Telegram assistant that ingests group messages, redacts
 secrets, extracts tasks and structured memory, stores data locally, and can sync
 tasks to Notion.
 
-The intended product is broader: a personal AI brain for Mak. It should observe
+The intended product is broader: a personal AI brain for its owner. It should observe
 many conversations over time, analyze context, preserve durable knowledge, learn
-preferences and communication style, and help Mak remember, decide, and draft
-responses. It should also help Mak set goals, find opportunities, and generate
+preferences and communication style, and help the owner remember, decide, and
+draft responses. It should also help the owner set goals, find opportunities, and
+generate
 new ideas from accumulated context. It should help improve routines and repeated
 behaviors through small, reviewable experiments. Telegram is the first adapter,
 not the product boundary.
 
-The product must cover Mak's real operating domains: startups and partners,
+The product must cover the owner's real operating domains: startups and partners,
 freelance work, coaching and personal growth, projects and tasks, English
 learning, X/Twitter growth, asset management, crypto trading decision support,
 and personal/business advice.
@@ -26,7 +27,7 @@ and personal/business advice.
 The assistant must avoid two failure modes:
 
 - becoming a raw chat archive that stores too much sensitive data
-- acting or speaking as Mak without explicit approval
+- acting or speaking as the owner without explicit approval
 
 AI provider choice should also remain replaceable. The current code already has
 `AssistantAiPort`, bounded context building, structured memory repositories,
@@ -44,7 +45,7 @@ Input channels
   -> structured personal memory
   -> knowledge graph updates
   -> retrieval and context building
-  -> goals, ideas, routine experiments, answers, and actions for Mak approval
+  -> goals, ideas, routine experiments, answers, and actions for owner approval
 ```
 
 Telegram remains the first production source. Future sources such as email,
@@ -68,10 +69,10 @@ logic must not depend on a specific provider.
 Any outward action requires approval. The assistant may draft replies, propose
 task changes, propose goals, generate ideas, identify opportunities, or suggest
 routine experiments and next actions, but early versions must persist those as
-pending suggestions until Mak approves, edits, rejects, or archives them.
+pending suggestions until the owner approves, edits, rejects, or archives them.
 
 Strategic suggestions are not facts. Proposed goals, ideas, opportunities, and
-hypotheses must be labeled as suggestions until Mak accepts them or converts
+hypotheses must be labeled as suggestions until the owner accepts them or converts
 them into a project, task, rule, or durable memory.
 
 Routine suggestions are also not commands. They should be framed as small
@@ -86,7 +87,7 @@ implemented.
 ## Roadmap
 
 1. Documentation and product alignment
-   - Update `AGENT.md`, `CLAUDE.md`, `README.md`, and ADRs to describe Nocheh as
+   - Update `AGENTS.md`, `README.md`, and ADRs to describe Nocheh as
      a personal AI brain.
    - Keep current capabilities clearly separate from planned capabilities.
 
@@ -177,9 +178,9 @@ Tradeoffs:
 - Do not send full history to an AI provider.
 - Do not store raw chat text inside graph nodes or edges.
 - Do not implement provider-specific logic outside provider adapters.
-- Do not auto-send replies or auto-execute external actions without Mak approval.
+- Do not auto-send replies or auto-execute external actions without owner approval.
 - Do not treat generated ideas, hypotheses, or proposed goals as accepted facts.
-- Do not treat routine suggestions as obligations unless Mak accepts them.
+- Do not treat routine suggestions as obligations unless the owner accepts them.
 - Do not auto-trade, make financial decisions, or present trading support as
   guaranteed financial advice.
 - Do not claim clone/personality behavior is implemented before style memory,

@@ -63,7 +63,7 @@ Use JSON Schema as the provider-neutral AI output contract, with application
 validation before persistence. AI output may propose memory, graph records, and
 suggestions, but it may not execute actions.
 
-Persist all externally meaningful actions as pending suggestions first. Mak must
+Persist all externally meaningful actions as pending suggestions first. The owner must
 approve, edit, reject, archive, or convert them before execution or durable
 behavior changes.
 
@@ -153,5 +153,5 @@ Tradeoffs:
 - Do not execute external actions from AI output.
 - Do not auto-trade or present crypto support as guaranteed financial advice.
 - Do not let suggestions become accepted goals, routines, tasks, or rules
-  without Mak approval.
+  without owner approval.
 - Keep graph queries bounded by depth and limit to avoid runaway traversal.

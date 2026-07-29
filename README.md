@@ -1,288 +1,115 @@
-# My Nocheh
+# Nocheh
 
-Nocheh is being built as a **personal AI brain**: a multi-conversation
-assistant that reads incoming chats, analyzes what matters, builds structured
-long-term memory, and helps Mak remember, decide, communicate, set goals, and
-generate new ideas. It should also help Mak improve routines and repeated
-behaviors over time.
+Personal AI brain. It reads chats, redacts secrets, turns them into structured
+memory plus a knowledge graph, and proposes suggestions the owner approves.
 
-The current implementation is a **private MVP** for structured memory, memory
-graph persistence, pending suggestions, Telegram ingestion, and dashboard-based
-inspection. Telegram is the first channel, but the product direction is
-platform-neutral: Telegram groups now, more conversations and tools later.
+Telegram is the first input channel. Memory and reasoning are the product.
 
-Access is private by default for MVP testing: the dashboard/API require
-`APP_AUTH_USERNAME` and `APP_AUTH_PASSWORD`, and Telegram webhook ingestion can
-be restricted with `TELEGRAM_ALLOWED_CHAT_IDS` and `TELEGRAM_ALLOWED_USER_IDS`.
+**Status:** private MVP. Single owner, password-gated dashboard, SQLite on one box.
 
-## What Works
-
-- Telegram webhook ingestion
-- Secret detection and redaction
-- Task extraction from conversation windows
-- Structured memory extraction for projects, decisions, blockers, deadlines, and summaries
-- Configurable live group-message batching before analysis
-- One-time history import service for old group exports
-- AI context builder that uses recent messages plus retrieved structured memory
-- Memory graph nodes and edges for personal/business context
-- Pending strategic/action suggestions with approval flow
-- AI analysis behind one provider-neutral port, with NVIDIA-hosted GLM-5.2
-  (`z-ai/glm-5.2`) as the selected provider and Anthropic Claude as the alternative
-- Dry-run mode when no provider is configured: ingestion, redaction, and audit
-  still run, but no analysis is produced
-- Task-to-project linking when project context is detected
-- Semantic-style local memory retrieval
-- Task validation and audit trail
-- SQLite task/memory/audit store with encrypted payload fields
-- Notion MCP task sync adapter
-- React client at `/app` for configuration, bot connection, history import, mock testing, metrics, conversations, graph inspection, pending suggestions, approval, and chat-flow visualization
-
-Not included yet: embedding-backed vector search, additional platform adapters
-beyond Telegram/mock/history import, or autonomous external action execution.
-
-## Product Direction
-
-Nocheh should become a second brain, not just a task extractor:
+## Pipeline
 
 ```text
-Telegram groups / future sources
-  -> normalized messages
-  -> redaction and safety checks
-  -> bounded AI/rule analysis
-  -> structured personal memory
-  -> knowledge graph updates
-  -> retrieval and context building
-  -> goals, ideas, routine experiments, drafts, and actions for Mak approval
+Telegram webhook | mock | note | history import
+  -> secret detection + redaction
+  -> buffer (batch or immediate)
+  -> AI analysis (one provider port)
+  -> memory records + graph nodes/edges + tasks
+  -> pending suggestions -> owner approves
 ```
 
-The assistant should understand:
+Raw chat is working data only. Long-term storage keeps structured knowledge with
+source references and confidence.
 
-- local context inside one conversation
-- global context across all connected conversations
-- tasks, decisions, deadlines, blockers, projects, people, preferences, style,
-  goals, ideas, opportunities, insights, routines, and learned personal rules
-- graph relationships between people, projects, goals, tasks, routines, and
-  ideas
-- what Mak is likely to forget or need next
-- recurring patterns that could become better routines
-
-Any outgoing reply or external action must require Mak approval. The system may
-draft, suggest, and generate ideas; it must not impersonate Mak or auto-act by
-default. Strategic suggestions should stay separate from facts until Mak accepts
-them. Routine suggestions should be optional experiments, not pressure.
-
-## Operating Domains
-
-Nocheh should eventually help across Mak's personal and business operating
-system:
-
-- startups, startup partners, roles, risks, strategic decisions, and
-  opportunities
-- freelance projects, clients, deliverables, invoices, deadlines, and follow-ups
-- coaching, personal growth, better decisions, and routine improvement
-- project and task management across business, personal life, and learning
-- English learning goals, practice routines, vocabulary, and writing feedback
-- X/Twitter growth: content ideas, drafts, posting routines, audience insights,
-  experiments, and performance notes
-- asset tracking: domains, projects, tools, subscriptions, accounts,
-  investments, wallets, and owned resources
-- crypto trading support: thesis, risk rules, watchlists, trade journal,
-  lessons, and decision support, without auto-trading
-- personal and business advice grounded in memory, goals, relationships,
-  routines, constraints, and accepted rules
-
-## Roadmap
-
-1. **Docs and product alignment**
-   Reframe the app as Nocheh Brain in agent docs, README, ADRs, and UI wording.
-2. **Multi-group Telegram foundation**
-   Make conversation identity, settings, retrieval, history import, and views
-   clearly support many Telegram groups.
-3. **AI analysis contract**
-   Define provider-neutral schemas for tasks, memories, people, preferences,
-   style signals, risks, goals, ideas, opportunities, routine improvements,
-   suggested replies, and suggested actions.
-4. **Structured personal memory**
-   Extend memory with people, preferences, style rules, personal rules, goals,
-   ideas, opportunities, insights, routines, routine experiments, and learned
-   skills while continuing to avoid raw long-term chat storage.
-5. **Knowledge graph memory**
-   Add graph nodes for entities and typed relationship facts with source,
-   confidence, and temporal validity.
-6. **Cost-managed AI processing**
-   Add explicit AI budgets, token usage tracking, dry-run mode, and controls for
-   batch size, interval, retrieved memories, and context size.
-7. **Human approval layer**
-   Persist suggested replies/actions as pending until Mak approves, edits, or
-   rejects them.
-8. **Future platform expansion**
-   Add email, calendar, or other chat sources after Telegram multi-group memory
-   works well.
-
-## Current Assistant Model
-
-Telegram bots receive new updates after they can see a chat; they do not automatically fetch old group history. Nocheh handles this with two paths:
-
-```text
-Old group export -> HistoryImportService -> chunked analysis -> structured memory
-New messages     -> LiveMessageBufferService -> interval/batch flush -> structured memory/tasks
-```
-
-The AI context should be built from:
-
-- current message or batch
-- recent short window
-- relevant structured memories
-- summaries/tasks/blockers
-
-It should not receive full chat history. Provider adapters must remain behind the
-existing provider-neutral application port: transport lives in the adapter, while
-the prompt, the output contract, and the domain mapping are shared
-(`src/infrastructure/reasoning/memory-graph-analysis-mapping.ts`). Adding a
-provider means one adapter plus one entry in
-`src/application/config/ai-provider-catalog.ts`.
-
-## Memory Policy
-
-Long-term memory stores structured knowledge only. It does not store raw Telegram messages.
-
-Every memory record includes:
-
-- `id`
-- `type`
-- `source`
-- `timestamp`
-- `confidence`
-
-Supported memory types:
-
-- `Task`
-- `Decision`
-- `Project`
-- `Deadline`
-- `Blocker`
-- `Summary`
-
-Planned memory types:
-
-- `Person`
-- `Preference`
-- `StyleRule`
-- `PersonalRule`
-- `Skill`
-- `Goal`
-- `Idea`
-- `Opportunity`
-- `Insight`
-- `Routine`
-- `RoutineExperiment`
-- `Asset`
-- `Risk`
-- `ContentPlan`
-- `LearningPlan`
-- `InvestmentThesis`
-
-Planned graph records:
-
-- `MemoryNode`
-- `MemoryEdge`
-- typed relations such as `PERSON_WORKS_ON_PROJECT`, `GOAL_HAS_ROUTINE`,
-  `IDEA_SUPPORTS_GOAL`, `TASK_BLOCKED_BY_PERSON`, and `PROJECT_HAS_DECISION`
-
-Redaction runs before memory extraction. Secrets, passwords, API keys, access tokens, private keys, seed phrases, and connection strings must not be persisted.
-
-## Run
+## Quickstart
 
 ```bash
 npm install
-npm test
-npm run dev
+npm run build:all           # backend + web/dist
+npm run dev                 # http://127.0.0.1:3000/app
 ```
 
-For local smoke tests where each webhook should process immediately:
+`.env` needs at minimum:
 
 ```bash
-MESSAGE_ANALYSIS_MODE=immediate npm run dev
+APP_AUTH_USERNAME=<username>
+APP_AUTH_PASSWORD=<strong-password>
+LOCAL_ENCRYPTION_SECRET=<long-stable-secret>
 ```
 
-Open:
-
-```text
-http://127.0.0.1:3000/app
-```
-
-Health check:
+Without auth env, every `/api/*` route except `/api/auth/*` returns 503. Without
+an AI provider the app runs in **dry-run**: ingestion, redaction, buffering, and
+audit still work, no analysis is produced.
 
 ```bash
 curl http://127.0.0.1:3000/health
+MESSAGE_ANALYSIS_MODE=immediate npm run dev   # process each message at once
 ```
 
-Send a test Telegram-style message:
+UI hot reload: `npm run dev` + `npm run dev:web` (Vite on :5173, proxies `/api`).
 
-```bash
-curl -X POST http://127.0.0.1:3000/telegram/webhook \
-  -H 'content-type: application/json' \
-  -d '{"update_id":1,"message":{"message_id":101,"date":1781870400,"chat":{"id":"dev-chat"},"from":{"id":7,"first_name":"Dev"},"text":"Task: prepare release notes by 2026-06-20 urgent"}}'
-```
+## Dashboard (`/app`)
 
-Then refresh `/app`.
+| Tab | Does |
+| --- | --- |
+| Setup | Readiness checks; pick AI provider, save key/model to `.env` |
+| Connect bot | Validate Telegram token, register webhook, edit chat/user allow-lists |
+| Import history | Paste a Telegram Desktop export and process it into memory |
+| Simulator | Mock groups: inject messages, reactions, notes, run analysis, inspect the flow |
+| Notes | Send authoritative out-of-band notes to the brain |
+| Conversations | Metrics plus per-conversation pipeline audit trace |
+| Knowledge graph | Read-only memory graph and recent relations |
+| Settings | Per-conversation analysis settings and the redaction policy |
 
-## Client UI
+Secrets are written to a gitignored `.env` and never read back. Most env is read
+at boot, so provider changes need a restart (the dashboard reports
+`restartRequired`). The Telegram token applies immediately.
 
-A React client at `/app` bootstraps the assistant: add the AI key, connect a
-Telegram bot (validate + register webhook), import history, configure group
-settings, inject mock messages, and visualize the processing flow. Secrets are
-written to a gitignored `.env` and never read back through the API.
+## What Works
 
-Build it once, then it is served by the same backend:
+- Telegram webhook ingestion with chat/user allow-lists
+- Configurable secret detection and redaction before anything is stored
+- Batch or immediate analysis windows, with summary cadence
+- Provider-neutral AI analysis: NVIDIA `z-ai/glm-5.2` (default) or Anthropic Claude
+- Validated AI output contract (source ref, confidence, reason, idempotency key)
+- 6 memory record types, 17 graph node kinds, 20 relation types, 16 payload kinds
+- Bounded assistant context: recent window + retrieved memory + graph neighborhood
+  + accepted rules + high-value pending suggestions
+- Pending suggestions with an approve/reject/archive/convert domain lifecycle
+- SQLite persistence with encrypted payload columns; per-step audit records
+- Token usage recorded per analysis run
+- One-time Telegram history import
+- Notion MCP task sync adapter
 
-```bash
-npm run build:all   # backend + web/dist
-npm run dev
-# open http://127.0.0.1:3000/app
-```
+## Not Yet
 
-For active UI development with hot reload, run the backend and the Vite dev
-server (it proxies `/api` to the backend, so there is no CORS to configure):
-
-```bash
-npm run dev          # backend on :3000
-npm run dev:web      # Vite on :5173, proxying /api -> :3000
-```
-
-Frontend tests:
-
-```bash
-npm run test:web
-```
-
-Note: most environment variables are read once at startup, so values saved
-through the client require a restart to take effect. The Telegram token is
-used immediately when connecting the bot.
+- Embedding-backed vector search (retrieval is lexical scoring)
+- Approval controls in the UI (the suggestion API exists; no buttons wired)
+- Outbound messages: Nocheh never writes to Telegram, ingestion only
+- Any channel other than Telegram, mock, note, and history import
+- Autonomous external actions (by design: approval first)
 
 ## Env
 
-Optional:
-
 ```bash
 PORT=3000
+HOST=127.0.0.1
 DATA_DIR=./data
 DATABASE_PATH=./data/nocheh.sqlite
-LOCAL_ENCRYPTION_SECRET=change-this-secret
+LOCAL_ENCRYPTION_SECRET=
+APP_AUTH_USERNAME=
+APP_AUTH_PASSWORD=
+APP_AUTH_SESSION_SECRET=          # defaults to LOCAL_ENCRYPTION_SECRET
+APP_AUTH_SECURE_COOKIE=false      # true when served over HTTPS
 
-# AI provider. Blank keeps the assistant in dry-run mode.
-AI_PROVIDER=nvidia
+AI_PROVIDER=nvidia                # blank = dry-run
 NVIDIA_API_KEY=nvapi-...
-NVIDIA_MODEL=z-ai/glm-5.2
-# NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1/chat/completions
-# NVIDIA_JSON_RESPONSE_FORMAT=true
+NVIDIA_MODEL=z-ai/glm-5.2         # optional, this is the default
+NVIDIA_BASE_URL=                  # optional, self-hosted NIM or gateway
+NVIDIA_JSON_RESPONSE_FORMAT=true  # false if the endpoint rejects json_object
+# AI_PROVIDER=anthropic; ANTHROPIC_API_KEY=sk-ant-...; ANTHROPIC_MODEL=<required>
 
-# Alternative provider (model id required).
-# AI_PROVIDER=anthropic
-# ANTHROPIC_API_KEY=sk-ant-...
-# ANTHROPIC_MODEL=
-
-MESSAGE_ANALYSIS_MODE=batch
+MESSAGE_ANALYSIS_MODE=batch       # or immediate
 LIVE_ANALYSIS_INTERVAL_SECONDS=300
 LIVE_MAX_MESSAGES_PER_BATCH=50
 MAX_AI_CONTEXT_TOKENS=4000
@@ -291,124 +118,51 @@ MAX_RETRIEVED_MEMORIES=12
 MAX_RECENT_MESSAGES=30
 SUMMARY_EVERY_MESSAGES=100
 SUMMARY_EVERY_MINUTES=60
-```
 
-For real Notion MCP sync:
+TELEGRAM_ALLOWED_CHAT_IDS=        # optional allow-lists
+TELEGRAM_ALLOWED_USER_IDS=
 
-```bash
-NOTION_MCP_COMMAND=...
-NOTION_MCP_ARGS=...
-NOTION_DATABASE_ID=...
+NOTION_MCP_COMMAND=               # optional Notion sync
+NOTION_MCP_ARGS=
+NOTION_DATABASE_ID=
 NOTION_MCP_CREATE_TOOL=notion_create_task
 NOTION_MCP_UPDATE_TOOL=notion_update_task
 ```
 
-If Notion env is missing, local tasks still persist and the audit trail shows sync failure.
-
-## Docker
-
-### Dev (live reload)
-
-Keep a stack running that rebuilds on every code change:
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-# UI (Vite HMR):     http://127.0.0.1:5173/app
-# Backend API/SPA:   http://127.0.0.1:3000
-```
-
-- **Frontend** runs under Vite with hot module replacement — edit anything in
-  `web/src` and the browser updates instantly.
-- **Backend** runs `tsc --watch` + `node --watch` — edit anything in `src` and it
-  recompiles and restarts automatically.
-- Source is bind-mounted; `node_modules` live in named volumes so the container's
-  native `better-sqlite3` build is preserved. Run detached with `-d`; follow logs
-  with `docker compose -f docker-compose.dev.yml logs -f`. Override ports with
-  `HOST_PORT` (backend) and `WEB_PORT` (Vite).
-
-Develop against the Vite URL (`:5173/app`) for instant UI updates; it proxies
-`/api` to the backend container.
-
-### Local (built image)
-
-```bash
-docker compose up -d --build
-# open http://127.0.0.1:3000/app
-```
-
-This starts only the `nocheh` app container and publishes it to
-`127.0.0.1:3000`. The `cloudflared` tunnel is behind a `tunnel` profile, so it is
-not started locally (it would crash-loop without a token). Set `HOST_PORT` to use
-a different host port:
-
-```bash
-HOST_PORT=8080 docker compose up -d --build   # http://127.0.0.1:8080/app
-```
-
-### VPS (Cloudflare Tunnel ingress)
-
-The production path adds the Cloudflare Tunnel for ingress with SQLite on a
-mounted data directory.
-
-```bash
-cp .env.example .env
-# edit LOCAL_ENCRYPTION_SECRET, APP_AUTH_USERNAME, APP_AUTH_PASSWORD, and CLOUDFLARE_TUNNEL_TOKEN
-docker compose --profile tunnel up -d --build
-```
-
-The app listens inside Docker on:
-
-```text
-http://nocheh:3000
-```
-
-Configure the Cloudflare Tunnel public hostname to route to:
-
-```text
-http://nocheh:3000
-```
-
-Then set the Telegram webhook to:
-
-```text
-https://<your-tunnel-hostname>/telegram/webhook
-```
-
-SQLite is stored at `./data/nocheh.sqlite` on the VPS. Back up the `data` directory, and keep `LOCAL_ENCRYPTION_SECRET` stable; encrypted payloads cannot be read if that secret changes.
+Without Notion env, tasks still persist locally and the audit shows sync failure.
 
 ## Structure
 
 ```text
-src/domain          Core entities, validation, memory, audit types
-src/application     Use cases, query services, and ports
-src/infrastructure  Telegram, storage, security, reasoning, metrics, Notion MCP adapters
-src/interfaces      HTTP webhook, JSON API router, and static handler
-test                Unit tests
-web                 React client (Vite, served at /app)
-docs                Short architecture notes and ADRs
+src/domain          Entities, memory graph, suggestions, redaction policy, audit
+src/application     Use cases, services, ports, provider catalog
+src/infrastructure  Telegram, SQLite, security, reasoning, metrics, Notion MCP
+src/interfaces      HTTP router, JSON API, webhook, static handler
+src/dev-server.ts   Composition root
+test                Backend tests (node:test)
+web                 React client served at /app
+docs                Deploy guide, ADRs, research
 ```
 
-## Docs
-
-- [Task Plan](TASK.md)
-- [Deploy and Use Guide](docs/deploy-and-use.md)
-- [Development Tooling](docs/development-tooling.md)
-- [ADR 0001: Phase 1 Core Processing](docs/adr/0001-phase-1-core-processing.md)
-- [Phase 1.5 Observability](docs/observability-architecture.md)
-- [ADR 0002: Phase 1.5 Validation and Observability](docs/adr/0002-phase-1-5-validation-observability.md)
-- [ADR 0003: Phase 2 Structured Memory](docs/adr/0003-phase-2-structured-memory.md)
-- [ADR 0004: Live Buffering, History Import, and AI Context](docs/adr/0004-live-buffering-history-import-ai-context.md)
-- [ADR 0005: SQLite VPS Persistence](docs/adr/0005-sqlite-vps-persistence.md)
-- [ADR 0006: Client UI and Chat-Flow Visualization](docs/adr/0006-setup-dashboard.md)
-- [ADR 0007: Personal AI Brain Roadmap](docs/adr/0007-personal-ai-brain-roadmap.md)
-- [ADR 0008: Memory Graph Architecture](docs/adr/0008-memory-graph-architecture.md)
-- [Research 0001: Second-Brain and Agent Memory Patterns](docs/research/0001-second-brain-and-agent-memory.md)
-- [Research 0002: Memory Graph Implementation](docs/research/0002-memory-graph-implementation-research.md)
+Adding an AI provider = one adapter in `src/infrastructure/reasoning/` plus one
+entry in `src/application/config/ai-provider-catalog.ts`.
 
 ## Commands
 
 ```bash
-npm run build
-npm test
-npm run dev
+npm run build          # backend
+npm run build:all      # backend + web
+npm test               # backend tests
+npm run test:web       # frontend tests
+npm run graphify:update
 ```
+
+## Docs
+
+- [Deploy](docs/deploy.md)
+- [Open tasks](TASK.md)
+- [Agent rules](AGENTS.md)
+- [ADRs](docs/adr/README.md)
+- Research: [second-brain memory](docs/research/0001-second-brain-and-agent-memory.md),
+  [memory graph](docs/research/0002-memory-graph-implementation-research.md),
+  [model cost](docs/research/0003-model-selection-cost-reasoning.md)

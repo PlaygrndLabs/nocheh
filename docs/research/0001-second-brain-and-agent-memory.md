@@ -67,7 +67,7 @@ ideas, decisions, blockers, routines, preferences, areas, resources, and skills.
 Graph edges should be typed facts with source, confidence, and temporal
 validity.
 
-The graph must be broad enough for Mak's real operating domains: startups,
+The graph must be broad enough for the owner's real operating domains: startups,
 partners, freelance work, coaching, routines, English learning, X/Twitter
 growth, assets, crypto trading decision support, and personal/business advice.
 
@@ -179,7 +179,7 @@ Use four durable memory layers:
 5. `StrategicSuggestion`
    - pending goals, ideas, opportunities, routine experiments, hypotheses, and
      recommendations
-   - not treated as facts until accepted by Mak
+   - not treated as facts until accepted by the owner
    - can be converted into projects, tasks, personal rules, or durable memories
 
 ## Recommended Record Fields
