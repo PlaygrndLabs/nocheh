@@ -23,6 +23,15 @@ source references and confidence.
 
 ## Quickstart
 
+VPS, one command after a clone — installs Docker, generates every secret, starts
+the stack behind a Cloudflare Tunnel, registers the Telegram webhook:
+
+```bash
+bash scripts/bootstrap.sh
+```
+
+Local:
+
 ```bash
 npm install
 npm run build:all           # backend + web/dist
@@ -36,6 +45,8 @@ APP_AUTH_USERNAME=<username>
 APP_AUTH_PASSWORD=<strong-password>
 LOCAL_ENCRYPTION_SECRET=<long-stable-secret>
 ```
+
+`bash scripts/bootstrap.sh --env-only` writes those for you.
 
 Without auth env, every `/api/*` route except `/api/auth/*` returns 503. Without
 an AI provider the app runs in **dry-run**: ingestion, redaction, buffering, and
@@ -101,6 +112,7 @@ APP_AUTH_USERNAME=
 APP_AUTH_PASSWORD=
 APP_AUTH_SESSION_SECRET=          # defaults to LOCAL_ENCRYPTION_SECRET
 APP_AUTH_SECURE_COOKIE=false      # true when served over HTTPS
+PUBLIC_HOSTNAME=                  # tunnel hostname, used by scripts/bootstrap.sh
 
 AI_PROVIDER=nvidia                # blank = dry-run
 NVIDIA_API_KEY=nvapi-...
@@ -139,6 +151,7 @@ src/application     Use cases, services, ports, provider catalog
 src/infrastructure  Telegram, SQLite, security, reasoning, metrics, Notion MCP
 src/interfaces      HTTP router, JSON API, webhook, static handler
 src/dev-server.ts   Composition root
+scripts             bootstrap.sh (VPS deploy), run-tests.mjs
 test                Backend tests (node:test)
 web                 React client served at /app
 docs                Deploy guide, ADRs, research
@@ -150,6 +163,7 @@ entry in `src/application/config/ai-provider-catalog.ts`.
 ## Commands
 
 ```bash
+bash scripts/bootstrap.sh   # provision/deploy on a VPS (idempotent, --help)
 npm run build          # backend
 npm run build:all      # backend + web
 npm test               # backend tests
