@@ -39,6 +39,12 @@ services:
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
     volumes:
       - ./data:/app/data
+      # The dashboard writes provider keys and the Telegram token to /app/.env.
+      # Mounting the host file keeps those writes across container rebuilds and
+      # keeps one source of truth for compose interpolation and the app.
+      # The host .env must exist before `up`; scripts/bootstrap.sh guarantees it,
+      # otherwise Docker creates a directory here.
+      - ./.env:/app/.env
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
