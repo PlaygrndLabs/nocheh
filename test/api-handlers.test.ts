@@ -27,7 +27,7 @@ import { parseTelegramExport } from "../src/interfaces/http/api/create-history-r
 import { SettingsService } from "../src/application/services/settings-service.js";
 import type { AppConfigRepositoryPort } from "../src/application/ports/app-config-repository.js";
 import type { EnvStorePort } from "../src/application/ports/env-store.js";
-import type { TelegramClientPort, TelegramBotInfo, TelegramWebhookInfo } from "../src/application/ports/telegram-client.js";
+import type { TelegramClientPort, TelegramBotInfo, TelegramFileInfo, TelegramWebhookInfo } from "../src/application/ports/telegram-client.js";
 import type { RequestContext } from "../src/interfaces/http/router.js";
 
 class FixedClock implements ClockPort {
@@ -80,6 +80,9 @@ class InMemoryBufferRepository implements LiveMessageBufferRepositoryPort {
     return this.messages.filter((message) => message.conversationId === id);
   }
   public async remove(): Promise<void> {}
+  public async conversationIds(): Promise<readonly string[]> {
+    return [...new Set(this.messages.map((message) => message.conversationId))];
+  }
 }
 
 class InMemoryAuditRepository implements AuditRepositoryPort {
@@ -111,6 +114,12 @@ class FakeTelegramClient implements TelegramClientPort {
   public async setWebhook(): Promise<void> {}
   public async getWebhookInfo(): Promise<TelegramWebhookInfo> {
     return { url: "https://example.test/telegram/webhook" };
+  }
+  public async getFile(): Promise<TelegramFileInfo> {
+    return { fileId: "file-1", path: "photos/file-1.jpg", sizeBytes: 3 };
+  }
+  public async downloadFile(): Promise<Uint8Array> {
+    return new Uint8Array([1, 2, 3]);
   }
 }
 

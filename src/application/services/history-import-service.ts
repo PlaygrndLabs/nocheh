@@ -51,10 +51,12 @@ export class HistoryImportService {
         continue;
       }
 
-      const lines = chunk.map((message) => {
-        const redacted = this.secretDetector.redact(message.text);
-        redactedFindingCount += redacted.findings.length;
-        return `${message.occurredAt.toISOString()} ${message.senderDisplayName ?? message.senderId}: ${redacted.text}`;
+      // One batched call so a model-backed detector stays at one request per chunk.
+      const redactedChunk = await this.secretDetector.redactMany(chunk.map((message) => message.text));
+      const lines = chunk.map((message, index) => {
+        const redacted = redactedChunk[index];
+        redactedFindingCount += redacted?.findings.length ?? 0;
+        return `${message.occurredAt.toISOString()} ${message.senderDisplayName ?? message.senderId}: ${redacted?.text ?? ""}`;
       });
 
       const syntheticMessage: IncomingMessage = {

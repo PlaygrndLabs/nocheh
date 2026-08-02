@@ -78,10 +78,14 @@ PUBLIC_HOSTNAME=<hostname routed by the tunnel>
 APP_AUTH_SECURE_COOKIE=true
 ```
 
-Optional AI provider (blank `AI_PROVIDER` = dry-run):
+Optional model roles. Each is independent: a blank role disables only that role.
+Credentials are per provider; model ids are per role.
 
 ```bash
-AI_PROVIDER=nvidia
+AI_PROVIDER=nvidia            # text analysis. blank = dry-run
+AI_IMAGE_PROVIDER=nvidia      # blank = images recorded, not described
+AI_AUDIO_PROVIDER=nvidia      # blank = voice notes recorded, not transcribed
+AI_GUARD_PROVIDER=            # blank = pattern redaction only
 NVIDIA_API_KEY=nvapi-...
 ```
 
@@ -165,10 +169,65 @@ ANTHROPIC_MODEL=<explicit-model-id>
 Cost rules:
 
 - Keep `MESSAGE_ANALYSIS_MODE=batch`. Windows drive calls, not messages.
+- A window now costs `1 + N_media + 1 guard` calls. Bound the media term with
+  `MEDIA_MAX_ATTACHMENTS_PER_WINDOW`; the understanding cache makes a resent file
+  free.
 - `MAX_AI_OUTPUT_TOKENS` caps output; truncation fails loudly.
 - Watch `aiTokenUsage` (provider, model, token counts per run) in the pipeline
   trace before widening usage.
 - Reasoning behind the choice: `docs/research/0003-model-selection-cost-reasoning.md`.
+
+## Image, Voice, and the Secret Guard
+
+Full reasoning: [ADR-0010](adr/0010-multimodal-ingestion-model-roles-secret-guard.md).
+
+Media bytes are fetched, turned into text, and dropped. Only derived text is
+cached, keyed on Telegram's `file_unique_id`.
+
+`MEDIA_MAX_INLINE_BYTES` (default 5MB) is a latency guard, not a protocol limit: the
+catalog endpoint accepted 10.7MB of base64 in testing. Keep it above Telegram's photo
+sizes, because downscaling costs OCR accuracy on whiteboards and screenshots.
+
+Telegram voice notes are OGG/Opus and the NVIDIA omni model transcribes them directly,
+so no ffmpeg is needed. Gemini is available as an alternative for any role:
+
+```bash
+AI_AUDIO_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_AUDIO_MODEL=<explicit-model-id>
+```
+
+Pick the guard model deliberately. `nvidia/nvidia-nemotron-nano-9b-v2` caught every
+planted secret with no false positives; `nvidia/nemotron-3-nano-30b-a3b` returned an
+empty result for the same input. A guard that silently finds nothing is worse than
+none, so evaluate a candidate before trusting it.
+
+Expect analysis to dominate latency: 189-240s per window against `z-ai/glm-5.2`, versus
+~8s for perception and ~8s for the guard. Adapters carry explicit timeouts and name the
+call that gave up.
+
+The secret guard catches credentials pattern rules cannot, such as "the wifi
+password is bluebird77". It is off unless `AI_GUARD_PROVIDER` is set. With it on,
+the default failure policy is **fail closed**: a guard outage leaves the window
+buffered and unanalysed rather than sending unguarded text to the analysis model.
+
+```bash
+SECRET_GUARD_ON_FAILURE=fail_closed        # default
+# SECRET_GUARD_ON_FAILURE=degrade_to_patterns   # availability over strictness
+SECRET_GUARD_MAX_ATTEMPTS=5                # then the message is quarantined
+```
+
+Operational notes:
+
+- A quarantined message is kept for inspection, excluded from future windows, and
+  reported only in the logs today (`Messages quarantined after repeated secret
+  guard failures`). Grep for it after a provider incident.
+- `FLUSH_SWEEP_INTERVAL_SECONDS` drives retries. Without the sweep a batch only
+  flushes when the next message arrives, so a stalled window in a quiet
+  conversation would never be retried.
+- A guard failure returns `200` to Telegram on purpose. The buffer already holds
+  the message, and a non-2xx would make Telegram retry the same update and hammer
+  an already-failing guard.
 
 ## Import Telegram History
 

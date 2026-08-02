@@ -12,11 +12,25 @@ import {
   createGroupAssistantSettings,
   type CreateGroupAssistantSettingsInput,
 } from "../../domain/assistant/group-assistant-settings.js";
+import { isQuarantined, type BufferedMessage } from "../../domain/assistant/buffered-message.js";
+
+/**
+ * Recognises a fail-closed secret guard error without the application layer
+ * depending on the infrastructure class that raises it.
+ */
+function isSecretGuardUnavailable(error: unknown): boolean {
+  return error instanceof Error && error.name === "SecretGuardUnavailableError";
+}
 
 export interface LiveMessageBufferResult {
   readonly processedImmediately: boolean;
   readonly flushedMessageCount: number;
+  /** True when the flush was abandoned because the secret guard was unavailable. */
+  readonly guardUnavailable?: boolean;
 }
+
+/** How many guard failures a message tolerates before it is set aside. */
+export const DEFAULT_MAX_GUARD_ATTEMPTS = 5;
 
 /** Buffers live group messages and flushes them into the pipeline as one conversation window. */
 export class LiveMessageBufferService implements IncomingMessageProcessorPort {
@@ -28,6 +42,7 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
     private readonly clock: ClockPort,
     private readonly logger: LoggerPort,
     private readonly defaultSettings: Omit<CreateGroupAssistantSettingsInput, "conversationId"> = {},
+    private readonly maxGuardAttempts: number = DEFAULT_MAX_GUARD_ATTEMPTS,
   ) {}
 
   public async execute(message: IncomingMessage): Promise<LiveMessageBufferResult> {
@@ -39,7 +54,9 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
       return { processedImmediately: true, flushedMessageCount: 1 };
     }
 
-    const redacted = this.secretDetector.redact(message.text);
+    // Pattern redaction on the webhook path: cheap, deterministic, and enough to keep
+    // an obvious credential out of storage. The authoritative guard runs at flush time.
+    const redacted = await this.secretDetector.redact(message.text);
     await this.bufferRepository.append({
       ...message,
       text: redacted.text,
@@ -47,14 +64,11 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
     });
 
     const buffered = await this.bufferRepository.findByConversationId(message.conversationId);
-    if (!this.shouldFlush(buffered, settings.analysisIntervalSeconds, settings.maxMessagesPerBatch)) {
+    if (!this.shouldFlush(buffered.filter((entry) => !isQuarantined(entry)), settings.analysisIntervalSeconds, settings.maxMessagesPerBatch)) {
       return { processedImmediately: false, flushedMessageCount: 0 };
     }
 
-    return {
-      processedImmediately: false,
-      flushedMessageCount: await this.flush(message.conversationId),
-    };
+    return this.flushWithResult(message.conversationId);
   }
 
   /** Reactions are not buffered; they are interpreted immediately against prior knowledge. */
@@ -68,21 +82,55 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
   }
 
   public async flush(conversationId: string): Promise<number> {
+    return (await this.flushWithResult(conversationId)).flushedMessageCount;
+  }
+
+  /**
+   * Flushes every conversation whose buffer is due.
+   *
+   * Without this, a batch only flushes when the next message arrives, so the analysis
+   * interval never fires in a quiet conversation and a guard-failed window is never
+   * retried.
+   */
+  public async flushDue(): Promise<number> {
+    let flushed = 0;
+    for (const conversationId of await this.bufferRepository.conversationIds()) {
+      const settings = await this.settingsRepository.findByConversationId(conversationId)
+        ?? createGroupAssistantSettings({ conversationId, ...this.defaultSettings }, this.clock.now());
+      if (settings.analysisMode === "immediate") {
+        continue;
+      }
+      const buffered = (await this.bufferRepository.findByConversationId(conversationId))
+        .filter((entry) => !isQuarantined(entry));
+      if (!this.shouldFlush(buffered, settings.analysisIntervalSeconds, settings.maxMessagesPerBatch)) {
+        continue;
+      }
+      const result = await this.flushWithResult(conversationId);
+      flushed += result.flushedMessageCount;
+    }
+    return flushed;
+  }
+
+  private async flushWithResult(conversationId: string): Promise<LiveMessageBufferResult> {
     const settings = await this.settingsRepository.findByConversationId(conversationId)
       ?? createGroupAssistantSettings({ conversationId, ...this.defaultSettings }, this.clock.now());
     const buffered = [...await this.bufferRepository.findByConversationId(conversationId)]
+      // Quarantined messages are kept for inspection but never re-analysed.
+      .filter((message) => !isQuarantined(message))
       .sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime())
       .slice(0, settings.maxMessagesPerBatch);
 
     if (buffered.length === 0) {
-      return 0;
+      return { processedImmediately: false, flushedMessageCount: 0 };
     }
 
     const first = buffered[0];
     if (first === undefined) {
-      return 0;
+      return { processedImmediately: false, flushedMessageCount: 0 };
     }
 
+    // Field-by-field on purpose: buffered rows must not leak storage-only fields
+    // into the window. Every new IncomingMessage field has to be added here too.
     const messages: IncomingMessage[] = buffered.map((message) => ({
       platform: message.platform,
       conversationId: message.conversationId,
@@ -92,6 +140,9 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
       ...(message.replyToMessageId === undefined ? {} : { replyToMessageId: message.replyToMessageId }),
       text: message.text,
       occurredAt: message.occurredAt,
+      ...(message.attachments === undefined || message.attachments.length === 0
+        ? {}
+        : { attachments: message.attachments }),
     }));
 
     const window: ConversationWindow = {
@@ -100,14 +151,60 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
       messages,
       projectHint: settings.projectHint,
     };
-    await this.downstream.executeWindow(window);
+
+    try {
+      await this.downstream.executeWindow(window);
+    } catch (error) {
+      if (!isSecretGuardUnavailable(error)) {
+        throw error;
+      }
+      // The buffer is deliberately left intact so nothing is lost, and the error is
+      // swallowed so the webhook can still ack: a non-2xx would make Telegram retry
+      // the same update and hammer an already-failing guard.
+      await this.recordGuardFailure(conversationId, buffered);
+      return { processedImmediately: false, flushedMessageCount: 0, guardUnavailable: true };
+    }
 
     await this.bufferRepository.remove(conversationId, buffered.map((message) => message.messageId));
     this.logger.info("Flushed live message batch", {
       conversationId,
       messageCount: buffered.length,
     });
-    return buffered.length;
+    return { processedImmediately: false, flushedMessageCount: buffered.length };
+  }
+
+  /** Counts a guard failure and quarantines messages once retries are exhausted. */
+  private async recordGuardFailure(
+    conversationId: string,
+    buffered: readonly BufferedMessage[],
+  ): Promise<void> {
+    const now = this.clock.now();
+    let quarantined = 0;
+    for (const message of buffered) {
+      const attempts = (message.guardAttempts ?? 0) + 1;
+      const exhausted = attempts >= this.maxGuardAttempts;
+      if (exhausted) {
+        quarantined += 1;
+      }
+      await this.bufferRepository.append({
+        ...message,
+        guardAttempts: attempts,
+        ...(exhausted ? { quarantinedAt: now } : {}),
+      });
+    }
+
+    if (quarantined > 0) {
+      this.logger.error("Messages quarantined after repeated secret guard failures.", {
+        conversationId,
+        quarantined,
+        maxGuardAttempts: this.maxGuardAttempts,
+      });
+      return;
+    }
+    this.logger.warn("Secret guard unavailable; batch kept buffered for retry.", {
+      conversationId,
+      messageCount: buffered.length,
+    });
   }
 
   private shouldFlush(

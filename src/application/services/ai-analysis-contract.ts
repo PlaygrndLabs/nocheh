@@ -38,13 +38,37 @@ export interface ProviderNeutralAiAnalysisOutput {
 
 export interface AiAnalysisValidationOptions {
   readonly minimumConfidence?: number;
+  /**
+   * What to do with an item that fails envelope validation.
+   *
+   * `reject` fails the whole window and is the strict default. `skip` drops just the
+   * offending item and reports why, so one malformed suggestion cannot discard an
+   * entire window of otherwise good knowledge. Structural problems — a non-object
+   * root, or a required key that is not an array — always reject either way.
+   */
+  readonly onInvalidItem?: "reject" | "skip";
+}
+
+export interface AiAnalysisValidationResult {
+  readonly output: ProviderNeutralAiAnalysisOutput;
+  /** One message per dropped item. Empty when nothing was skipped. */
+  readonly skipped: readonly string[];
 }
 
 export function validateAiAnalysisOutput(
   value: unknown,
   options: AiAnalysisValidationOptions = {},
 ): Result<ProviderNeutralAiAnalysisOutput> {
+  const detailed = validateAiAnalysisOutputDetailed(value, options);
+  return detailed.ok ? ok(detailed.value.output) : err(detailed.error);
+}
+
+export function validateAiAnalysisOutputDetailed(
+  value: unknown,
+  options: AiAnalysisValidationOptions = {},
+): Result<AiAnalysisValidationResult> {
   const minimumConfidence = options.minimumConfidence ?? 0.5;
+  const onInvalidItem = options.onInvalidItem ?? "reject";
   if (!isRecord(value)) {
     return err(new Error("AI analysis output must be an object."));
   }
@@ -63,22 +87,29 @@ export function validateAiAnalysisOutput(
   }
 
   const keys = [...requiredKeys, ...optionalKeys] as const;
+  const kept: Record<string, unknown[]> = {};
+  const skipped: string[] = [];
   for (const key of keys) {
     const items = (value[key] ?? []) as readonly unknown[];
+    kept[key] = [];
     for (const item of items) {
       const validation = validateEnvelope(item, key, minimumConfidence);
-      if (!validation.ok) {
-        return validation;
+      if (validation.ok) {
+        kept[key]?.push(item);
+        continue;
       }
+      if (onInvalidItem === "reject") {
+        return err(validation.error);
+      }
+      skipped.push(validation.error.message);
     }
   }
 
-  const normalized = {
-    ...value,
-    tasks: value.tasks ?? [],
-    statusUpdates: value.statusUpdates ?? [],
-  };
-  return ok(normalized as unknown as ProviderNeutralAiAnalysisOutput);
+  const normalized = { ...value, ...kept };
+  return ok({
+    output: normalized as unknown as ProviderNeutralAiAnalysisOutput,
+    skipped,
+  });
 }
 
 function validateEnvelope(item: unknown, key: string, minimumConfidence: number): Result<void> {

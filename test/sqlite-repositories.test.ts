@@ -8,6 +8,7 @@ import { openSqliteDatabase, type SqliteDatabase } from "../src/infrastructure/s
 import { SqliteAuditRepository } from "../src/infrastructure/sqlite/sqlite-audit-repository.js";
 import { SqliteGroupAssistantSettingsRepository } from "../src/infrastructure/sqlite/sqlite-group-assistant-settings-repository.js";
 import { SqliteLiveMessageBufferRepository } from "../src/infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
+import { SqliteMediaUnderstandingCache } from "../src/infrastructure/sqlite/sqlite-media-understanding-cache.js";
 import { SqliteMemoryGraphRepository } from "../src/infrastructure/sqlite/sqlite-memory-graph-repository.js";
 import { SqliteMemoryRecordRepository } from "../src/infrastructure/sqlite/sqlite-memory-record-repository.js";
 import { SqliteSuggestionRepository } from "../src/infrastructure/sqlite/sqlite-suggestion-repository.js";
@@ -240,6 +241,87 @@ test("SQLite suggestion repository persists pending suggestions and encrypts rat
     assert.doesNotMatch(row.rationale, /Private reasoning/);
     assert.doesNotMatch(row.source, /telegram/);
     assert.doesNotMatch(row.payload, /business growth path/);
+  } finally {
+    database.close();
+  }
+});
+
+test("the media understanding cache stores derived text encrypted and never bytes", async () => {
+  const database = await testDatabase();
+  try {
+    const cache = new SqliteMediaUnderstandingCache(database, encryption);
+
+    assert.equal(await cache.find("u-1"), undefined);
+
+    await cache.save("u-1", {
+      description: "A whiteboard listing next steps.",
+      transcript: "move Tuesday to Thursday",
+      confidence: 0.85,
+      provider: "nvidia",
+      model: "omni-test",
+    });
+
+    const found = await cache.find("u-1");
+    assert.equal(found?.description, "A whiteboard listing next steps.");
+    assert.equal(found?.transcript, "move Tuesday to Thursday");
+    assert.equal(found?.confidence, 0.85);
+
+    // Descriptions can quote a conversation, so the stored payload must be encrypted.
+    const row = database
+      .prepare("SELECT payload FROM media_understanding WHERE file_unique_id = ?")
+      .get("u-1") as { readonly payload: string };
+    assert.doesNotMatch(row.payload, /whiteboard/);
+
+    // Re-understanding the same file replaces the entry rather than duplicating it.
+    await cache.save("u-1", {
+      description: "A clearer second look.",
+      confidence: 0.9,
+      provider: "nvidia",
+      model: "omni-test",
+    });
+    assert.equal((await cache.find("u-1"))?.description, "A clearer second look.");
+    const count = database
+      .prepare("SELECT COUNT(*) AS total FROM media_understanding")
+      .get() as { readonly total: number };
+    assert.equal(count.total, 1);
+  } finally {
+    database.close();
+  }
+});
+
+test("the live buffer round-trips attachments, guard attempts, and quarantine state", async () => {
+  const database = await testDatabase();
+  try {
+    const bufferRepository = new SqliteLiveMessageBufferRepository(database, encryption);
+    const quarantinedAt = new Date("2026-06-19T12:05:00.000Z");
+
+    await bufferRepository.append({
+      platform: "telegram",
+      conversationId: "chat-9",
+      messageId: "m-1",
+      senderId: "7",
+      text: "",
+      occurredAt: now,
+      bufferedAt: now,
+      attachments: [{
+        kind: "image",
+        fileUniqueId: "u-1",
+        fileId: "file-1",
+        mimeType: "image/jpeg",
+        variants: [{ fileId: "file-1", fileUniqueId: "u-1", sizeBytes: 1024 }],
+      }],
+      guardAttempts: 3,
+      quarantinedAt,
+    });
+
+    const [stored] = await bufferRepository.findByConversationId("chat-9");
+    // Attachments live in the encrypted payload, so no schema migration was needed.
+    assert.equal(stored?.attachments?.[0]?.fileUniqueId, "u-1");
+    assert.equal(stored?.attachments?.[0]?.variants?.[0]?.sizeBytes, 1024);
+    assert.equal(stored?.guardAttempts, 3);
+    assert.deepEqual(stored?.quarantinedAt, quarantinedAt);
+
+    assert.deepEqual(await bufferRepository.conversationIds(), ["chat-9"]);
   } finally {
     database.close();
   }

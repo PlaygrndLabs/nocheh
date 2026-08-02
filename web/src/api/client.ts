@@ -1,5 +1,6 @@
 /** Typed wrapper around the backend JSON API. Throws on non-ok responses. */
 
+/** A provider offered for one model role. Model env key is role-scoped. */
 export interface AiProviderOption {
   id: string;
   label: string;
@@ -10,12 +11,36 @@ export interface AiProviderOption {
   notes: string;
 }
 
+/** A distinct model job. Roles are configured and degrade independently. */
+export interface AiRoleStatus {
+  id: string;
+  label: string;
+  purpose: string;
+  whenUnset: string;
+  providerEnvKey: string;
+  provider: string;
+  supported: boolean;
+  ready: boolean;
+  model?: string;
+  providers: AiProviderOption[];
+}
+
+export interface AiProviderSummary {
+  id: string;
+  label: string;
+  apiKeyEnvKey: string;
+  hasApiKey: boolean;
+  notes: string;
+  roles: string[];
+}
+
 export interface SetupStatus {
   ok: boolean;
   hasAiKey: boolean;
   aiProvider?: string;
   aiModel?: string;
-  providers?: AiProviderOption[];
+  roles?: AiRoleStatus[];
+  providers?: AiProviderSummary[];
   hasBotToken: boolean;
   botConnected: boolean;
   webhookUrl?: string;

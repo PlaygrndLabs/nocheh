@@ -17,17 +17,27 @@ owner's memory, goals, routines, and accepted rules.
 
 1. **No raw chat as long-term memory.** Store structured records with source
    reference, confidence, and timestamp. Raw messages are temporary working data.
+   Media bytes are never persisted: they are fetched, turned into text, and dropped.
 2. **Redact before anything else.** Passwords, API keys, tokens, private keys,
    seed phrases, and connection strings must be redacted before buffering,
-   analysis, persistence, logs, context building, or external sync.
+   analysis, persistence, logs, context building, or external sync. Text derived
+   from media (descriptions, transcripts) is redacted with the same gate.
+   The one placed exception: raw image and audio bytes reach the perception
+   provider unredacted, because a JPEG cannot be pattern-scanned. Whichever
+   provider fills the image and audio roles is trusted accordingly (ADR-0010).
 3. **Human approval for external actions.** External effects stay `pending`.
    Nocheh may draft and suggest; it must not impersonate the owner or act on its own.
 4. **Suggestions are not facts** until the owner accepts or converts them.
 5. **No auto-trading.** Crypto support is decision support only.
-6. **Cost is a feature.** Batch windows, bounded context, capped retrieval, and
-   dry-run mode when no provider is configured.
+6. **Cost is a feature.** Batch windows, bounded context, capped retrieval,
+   per-window media caps, a media understanding cache, and dry-run mode when no
+   provider is configured.
 7. **Providers stay behind ports.** Transport in the adapter; prompt, output
    contract, and domain mapping stay shared.
+8. **A model may detect, but never rewrite.** The secret guard returns the literal
+   substrings it found; masking happens locally and deterministically. A model
+   asked to rewrite text will also alter wording, and an edit would be
+   indistinguishable from a redaction.
 
 ## Architecture
 
@@ -54,12 +64,25 @@ Pipeline:
 
 ```text
 Telegram webhook | mock | note | history import
-  -> secret detection + redaction
-  -> LiveMessageBufferService (batch or immediate)
+  -> text or caption or attachments (media-only messages are kept)
+  -> pattern redaction -> LiveMessageBufferService (batch or immediate)
+  -> [flush] media fetch -> perception model -> description + transcript
+  -> secret guard over ALL text (typed, described, transcribed), fail closed
   -> MemoryGraphAnalyzerPort (NVIDIA glm-5.2 | Anthropic | noop dry-run)
   -> validated AI contract -> memory records + graph nodes/edges + tasks
   -> pending suggestions
 ```
+
+Model roles, configured and degrading independently (ADR-0010):
+
+| Role | Provider env key | Unset behaviour |
+| --- | --- | --- |
+| `text_analysis` | `AI_PROVIDER` | Dry-run |
+| `image_understanding` | `AI_IMAGE_PROVIDER` | Images recorded, not described |
+| `audio_understanding` | `AI_AUDIO_PROVIDER` | Voice notes recorded, not transcribed |
+| `secret_guard` | `AI_GUARD_PROVIDER` | Pattern rules only |
+
+Credentials are per provider; model ids are per role.
 
 Implemented:
 
@@ -69,6 +92,10 @@ Implemented:
 - Suggestions: strategic + action, `pending`/`accepted`/`rejected`/`archived`/`converted`
 - `AssistantContextBuilder`: recent window + retrieved memory + bounded graph
   neighborhood + accepted rules + high-value pending suggestions, token-capped
+- Image and voice ingestion: attachment variants, per-kind model routing, derived
+  text cache keyed on `file_unique_id`, per-window caps, bytes never persisted
+- Secret guard: model detects literals, masking is local; fail closed with
+  quarantine after repeated failures; interval-driven flush sweep
 - SQLite with encrypted payload columns, per-step audit records, token usage
 - Password-gated dashboard (`/app`), configurable redaction policy
 
@@ -78,6 +105,21 @@ Gaps to respect when planning:
 - Suggestion approval exists in the API and domain, not in the UI.
 - Nocheh never sends outbound messages.
 - Telegram is the only live channel.
+- Only image and audio are understood. Documents, video, and stickers are recorded
+  but never sent to a model.
+- Reactions bypass the secret detector; they carry synthetic text, not user content.
+- Telegram Desktop history imports skip media: export entries reference local file
+  paths, not `file_id`s.
+- **Graph nodes, edges, and suggestions are dropped on every real run.** The analysis
+  prompt documents the value shape for `tasks`, `memories`, and `statusUpdates` only,
+  so the model invents non-conforming shapes for the rest and each item is dropped
+  with a reason in the audit trail. Top priority in `TASK.md`.
+- Analysis takes 189-240s per window against `z-ai/glm-5.2`, which is longer than a
+  Telegram webhook should block. The flush still runs in the request path.
+- The perception model reproduces credentials it is told to omit (verified on a
+  photographed password), so the secret guard is load-bearing, not belt-and-braces.
+- NVIDIA wire formats are verified: audio uses `audio_url`, **not** the OpenAI
+  `input_audio` block, and OGG/Opus needs no transcoding. See ADR-0010.
 
 ## Memory Policy
 

@@ -170,6 +170,9 @@ export const FLOW_EDGES: readonly FlowEdge[] = [
 /** Maps a backend audit step name to the flow stage it animates. Unknown steps are ignored. */
 export const STEP_TO_STAGE: Record<string, StageId> = {
   telegram_message: "receive",
+  // Media is fetched and turned into text as part of receiving the message.
+  media_fetch: "receive",
+  media_understanding: "receive",
   secret_detection: "protect",
   redaction: "protect",
   // Current backend: one combined LLM pass over the conversation window.

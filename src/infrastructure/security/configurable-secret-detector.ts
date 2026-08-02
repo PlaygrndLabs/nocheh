@@ -24,6 +24,11 @@ export class ConfigurableSecretDetector implements SecretDetectorPort {
     return redactWithPatterns(text, patterns, (kind) => renderPlaceholder(policy.placeholder, kind));
   }
 
+  /** Pattern matching is local and cheap, so there is nothing to batch. */
+  public async redactMany(texts: readonly string[]): Promise<readonly RedactedContent[]> {
+    return texts.map((text) => this.redact(text));
+  }
+
   private patternsFor(policy: RedactionPolicy): readonly CompiledSecretPattern[] {
     if (this.compiled?.policy === policy) {
       return this.compiled.patterns;

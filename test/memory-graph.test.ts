@@ -138,3 +138,34 @@ test("supports expanded structured payloads without raw chat text", () => {
   assert.equal(JSON.stringify(payloads).includes("rawText"), false);
   assert.equal(JSON.stringify(payloads).includes("messageText"), false);
 });
+
+test("a short platform message id is a valid source, since Telegram ids start at 1", () => {
+  // The graph-id minimum length must not leak into source validation: the first
+  // hundred messages of any Telegram chat have one- or two-character ids.
+  const node = createMemoryNode({
+    id: "task:first-message",
+    kind: "task",
+    label: "Reply to the first message",
+    scope: "user",
+    source: { platform: "telegram", conversationId: "-100123", messageId: "1", occurredAt: new Date("2026-06-19T12:00:00.000Z") },
+    confidence: 0.9,
+    now: new Date("2026-06-19T12:00:00.000Z"),
+  });
+
+  assert.equal(node.source.messageId, "1");
+});
+
+test("an empty or whitespace source identifier is still rejected", () => {
+  const base = {
+    id: "task:xy",
+    kind: "task" as const,
+    label: "Check the source",
+    scope: "user" as const,
+    confidence: 0.9,
+    now: new Date("2026-06-19T12:00:00.000Z"),
+  };
+  const source = { platform: "telegram", conversationId: "-100123", messageId: "1", occurredAt: new Date("2026-06-19T12:00:00.000Z") };
+
+  assert.throws(() => createMemoryNode({ ...base, source: { ...source, messageId: "" } }), /must not be empty/);
+  assert.throws(() => createMemoryNode({ ...base, source: { ...source, messageId: "a b" } }), /must not contain whitespace/);
+});

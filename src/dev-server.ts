@@ -12,11 +12,34 @@ import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
 import { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 import { NvidiaMemoryGraphAnalyzer } from "./infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
+import { NvidiaOmniMediaUnderstanding } from "./infrastructure/reasoning/nvidia-omni-media-understanding.js";
+import { GeminiMediaUnderstanding } from "./infrastructure/reasoning/gemini-media-understanding.js";
+import { MediaUnderstandingRouter } from "./application/services/media-understanding-router.js";
+import { MediaUnderstandingService } from "./application/services/media-understanding-service.js";
+import type { MediaUnderstandingPort } from "./application/ports/media-understanding.js";
+import type { MessageAttachmentKind } from "./domain/messaging/message-attachment.js";
+import { TelegramAttachmentFetcher } from "./infrastructure/messaging/telegram/telegram-attachment-fetcher.js";
+import { SqliteMediaUnderstandingCache } from "./infrastructure/sqlite/sqlite-media-understanding-cache.js";
+import { OpenAiCompatibleTextCompletion } from "./infrastructure/reasoning/openai-compatible-text-completion.js";
+import { GeminiTextCompletion } from "./infrastructure/reasoning/gemini-text-completion.js";
+import { AnthropicTextCompletion } from "./infrastructure/reasoning/anthropic-text-completion.js";
+import type { TextCompletionPort } from "./application/ports/text-completion.js";
+import type { SecretDetectorPort } from "./application/ports/secret-detector.js";
+import { LlmSecretDetector } from "./infrastructure/security/llm-secret-detector.js";
+import {
+  GuardedSecretDetector,
+  type SecretGuardFailurePolicy,
+} from "./infrastructure/security/guarded-secret-detector.js";
 import {
   aiProviderIds,
+  aiProviderRoleSupport,
+  findAiModelRole,
   findAiProvider,
   normalizeAiProviderId,
+  providersForRole,
   requiredAiProviderEnvKeys,
+  type AiModelRole,
+  type AiProviderDescriptor,
 } from "./application/config/ai-provider-catalog.js";
 import { NoopMemoryGraphAnalyzer, type MemoryGraphAnalyzerPort } from "./application/ports/memory-graph-analyzer.js";
 import { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
@@ -84,8 +107,12 @@ const settingsRepository = new SqliteGroupAssistantSettingsRepository(database);
 const liveBufferRepository = new SqliteLiveMessageBufferRepository(database, encryption);
 
 const taskProvider = createTaskProvider();
+const mediaUnderstanding = createMediaUnderstandingService();
+// The buffer path keeps pattern redaction (cheap, on the webhook ack path); the
+// analysis gate uses the guard model with patterns as its emergency fallback.
+const guardDetector = createGuardedSecretDetector();
 const useCase = new ProcessIncomingMessageUseCase(
-  secretDetector,
+  guardDetector,
   createMemoryGraphAnalyzer(),
   taskRepository,
   memoryRepository,
@@ -98,6 +125,7 @@ const useCase = new ProcessIncomingMessageUseCase(
   memoryGraphRepository,
   suggestionRepository,
   idGenerator,
+  mediaUnderstanding,
 );
 
 const liveProcessor = new LiveMessageBufferService(
@@ -117,6 +145,7 @@ const liveProcessor = new LiveMessageBufferService(
     summaryEveryMessages: numberEnv("SUMMARY_EVERY_MESSAGES", 100),
     summaryEveryMinutes: numberEnv("SUMMARY_EVERY_MINUTES", 60),
   },
+  numberEnv("SECRET_GUARD_MAX_ATTEMPTS", 5),
 );
 
 const historyImportService = new HistoryImportService(liveProcessor, secretDetector, clock, logger);
@@ -195,6 +224,28 @@ server.listen(port, host, () => {
   });
 });
 
+/**
+ * Flush sweep.
+ *
+ * Without this, a batch only flushes when the next message arrives, so the analysis
+ * interval never fires in a quiet conversation and a window that failed the secret
+ * guard is never retried.
+ */
+const flushSweepSeconds = numberEnv("FLUSH_SWEEP_INTERVAL_SECONDS", 60);
+const flushSweep = setInterval(() => {
+  void liveProcessor.flushDue().then((flushed) => {
+    if (flushed > 0) {
+      logger.info("Flush sweep processed due batches", { flushed });
+    }
+  }).catch((error: unknown) => {
+    logger.error("Flush sweep failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}, flushSweepSeconds * 1000);
+// Never hold the process open for the timer alone.
+flushSweep.unref();
+
 function createTaskProvider(): TaskProviderPort {
   const command = process.env.NOTION_MCP_COMMAND;
   const databaseId = process.env.NOTION_DATABASE_ID;
@@ -213,35 +264,75 @@ function createTaskProvider(): TaskProviderPort {
   );
 }
 
-function createMemoryGraphAnalyzer(): MemoryGraphAnalyzerPort {
-  const providerId = normalizeAiProviderId(process.env.AI_PROVIDER);
+interface ResolvedAiRole {
+  readonly provider: AiProviderDescriptor;
+  readonly model: string;
+  readonly apiKey: string;
+}
+
+/**
+ * Resolves the provider and model configured for a role.
+ *
+ * Roles degrade independently and never throw: an unconfigured or misconfigured
+ * role is disabled with a warning so one missing model cannot take the pipeline
+ * down. Returns undefined when the role cannot run.
+ */
+function resolveAiRole(role: AiModelRole): ResolvedAiRole | undefined {
+  const descriptor = findAiModelRole(role);
+  if (descriptor === undefined) {
+    return undefined;
+  }
+
+  const providerId = normalizeAiProviderId(process.env[descriptor.providerEnvKey]);
   if (providerId === undefined) {
-    logger.warn("AI provider is not configured (AI_PROVIDER is empty). Running in dry-run mode: no analysis will be produced.");
-    return new NoopMemoryGraphAnalyzer();
+    logger.warn(`AI role "${role}" is not configured (${descriptor.providerEnvKey} is empty).`, {
+      consequence: descriptor.whenUnset,
+    });
+    return undefined;
   }
 
   const provider = findAiProvider(providerId);
   if (provider === undefined) {
-    logger.warn("Unknown AI_PROVIDER. Running in dry-run mode.", {
+    logger.warn(`Unknown provider for AI role "${role}". Role disabled.`, {
       provider: providerId,
       supported: aiProviderIds().join(", "),
     });
-    return new NoopMemoryGraphAnalyzer();
+    return undefined;
   }
 
-  const missing = requiredAiProviderEnvKeys(provider).filter((key) => trimmedEnv(key) === undefined);
+  const support = aiProviderRoleSupport(provider, role);
+  if (support === undefined) {
+    logger.warn(`Provider cannot fill AI role "${role}". Role disabled.`, {
+      provider: provider.id,
+      supported: providersForRole(role).map((candidate) => candidate.id).join(", "),
+    });
+    return undefined;
+  }
+
+  const missing = requiredAiProviderEnvKeys(provider, role).filter((key) => trimmedEnv(key) === undefined);
   if (missing.length > 0) {
-    logger.warn("AI provider is selected but required env keys are missing. Running in dry-run mode.", {
+    logger.warn(`AI role "${role}" is selected but required env keys are missing. Role disabled.`, {
       provider: provider.id,
       missing: missing.join(", "),
+      consequence: descriptor.whenUnset,
     });
+    return undefined;
+  }
+
+  const model = trimmedEnv(support.modelEnvKey) ?? support.defaultModel ?? "";
+  logger.info(`AI role "${role}" configured.`, { provider: provider.id, model });
+  return { provider, model, apiKey: trimmedEnv(provider.apiKeyEnvKey) ?? "" };
+}
+
+function createMemoryGraphAnalyzer(): MemoryGraphAnalyzerPort {
+  const resolved = resolveAiRole("text_analysis");
+  if (resolved === undefined) {
+    logger.warn("Running in dry-run mode: no analysis will be produced.");
     return new NoopMemoryGraphAnalyzer();
   }
 
-  const apiKey = trimmedEnv(provider.apiKeyEnvKey) ?? "";
-  const model = trimmedEnv(provider.modelEnvKey) ?? provider.defaultModel ?? "";
+  const { provider, model, apiKey } = resolved;
   const maxTokens = numberEnv("MAX_AI_OUTPUT_TOKENS", 4000);
-  logger.info("AI provider configured.", { provider: provider.id, model });
 
   switch (provider.id) {
     case "nvidia": {
@@ -257,9 +348,144 @@ function createMemoryGraphAnalyzer(): MemoryGraphAnalyzerPort {
     case "anthropic":
       return new AnthropicMemoryGraphAnalyzer({ apiKey, model, maxTokens });
     default:
-      logger.warn("AI provider has a catalog entry but no adapter. Running in dry-run mode.", { provider: provider.id });
+      logger.warn("AI provider has a catalog entry but no text-analysis adapter. Running in dry-run mode.", {
+        provider: provider.id,
+      });
       return new NoopMemoryGraphAnalyzer();
   }
+}
+
+/** Builds the perception adapter for one attachment kind, or undefined when unconfigured. */
+function createMediaUnderstanding(
+  role: "image_understanding" | "audio_understanding",
+  kind: MessageAttachmentKind,
+): MediaUnderstandingPort | undefined {
+  const resolved = resolveAiRole(role);
+  if (resolved === undefined) {
+    return undefined;
+  }
+
+  const { provider, model, apiKey } = resolved;
+  switch (provider.id) {
+    case "nvidia": {
+      const baseUrl = trimmedEnv("NVIDIA_BASE_URL");
+      return new NvidiaOmniMediaUnderstanding({
+        apiKey,
+        model,
+        supportedKinds: [kind],
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      });
+    }
+    case "gemini": {
+      const baseUrl = trimmedEnv("GEMINI_BASE_URL");
+      return new GeminiMediaUnderstanding({
+        apiKey,
+        model,
+        supportedKinds: [kind],
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      });
+    }
+    default:
+      logger.warn("Provider has a catalog entry but no media adapter. Role disabled.", {
+        provider: provider.id,
+        role,
+      });
+      return undefined;
+  }
+}
+
+/**
+ * Wires image and audio perception. Kinds are configured separately so they can use
+ * one omni model or two specialised ones. Undefined when neither kind is configured,
+ * which leaves attachments recorded but undescribed.
+ */
+function createMediaUnderstandingService(): MediaUnderstandingService | undefined {
+  const image = createMediaUnderstanding("image_understanding", "image");
+  const audio = createMediaUnderstanding("audio_understanding", "audio");
+  if (image === undefined && audio === undefined) {
+    return undefined;
+  }
+
+  const router = new MediaUnderstandingRouter({
+    ...(image === undefined ? {} : { image }),
+    ...(audio === undefined ? {} : { audio }),
+  });
+  const fetcher = new TelegramAttachmentFetcher(telegramClient, () => trimmedEnv("TELEGRAM_BOT_TOKEN"));
+  return new MediaUnderstandingService(
+    router,
+    [fetcher],
+    logger,
+    clock,
+    {
+      maxAttachmentsPerWindow: numberEnv("MEDIA_MAX_ATTACHMENTS_PER_WINDOW", 8),
+      maxDownloadBytes: numberEnv("MEDIA_MAX_DOWNLOAD_BYTES", 20 * 1024 * 1024),
+      maxInlineBytes: numberEnv("MEDIA_MAX_INLINE_BYTES", 5 * 1024 * 1024),
+    },
+    new SqliteMediaUnderstandingCache(database, encryption),
+  );
+}
+
+/** Builds a provider-agnostic single-turn completion client for a role, if configured. */
+function createTextCompletion(role: AiModelRole, maxTokens: number): TextCompletionPort | undefined {
+  const resolved = resolveAiRole(role);
+  if (resolved === undefined) {
+    return undefined;
+  }
+
+  const { provider, model, apiKey } = resolved;
+  switch (provider.id) {
+    case "nvidia": {
+      const baseUrl = trimmedEnv("NVIDIA_BASE_URL");
+      return new OpenAiCompatibleTextCompletion({
+        provider: provider.id,
+        apiKey,
+        model,
+        maxTokens,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      });
+    }
+    case "gemini": {
+      const baseUrl = trimmedEnv("GEMINI_BASE_URL");
+      return new GeminiTextCompletion({
+        apiKey,
+        model,
+        maxTokens,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      });
+    }
+    case "anthropic":
+      return new AnthropicTextCompletion({ apiKey, model, maxTokens });
+    default:
+      logger.warn("Provider has a catalog entry but no completion adapter. Role disabled.", {
+        provider: provider.id,
+        role,
+      });
+      return undefined;
+  }
+}
+
+/**
+ * Builds the pre-analysis secret gate.
+ *
+ * Without a guard model this is just the pattern detector, which is the behaviour
+ * Nocheh has always had. With one, the model becomes authoritative and patterns
+ * become the emergency fallback.
+ */
+function createGuardedSecretDetector(): SecretDetectorPort {
+  const completion = createTextCompletion("secret_guard", numberEnv("SECRET_GUARD_MAX_OUTPUT_TOKENS", 4000));
+  if (completion === undefined) {
+    logger.warn("Secret guard model is not configured. Redaction uses pattern rules only.");
+    return secretDetector;
+  }
+
+  const guard = new LlmSecretDetector(completion, settingsService, logger, {
+    maxInputCharacters: numberEnv("SECRET_GUARD_MAX_INPUT_CHARACTERS", 24_000),
+  });
+  const onFailure: SecretGuardFailurePolicy = process.env.SECRET_GUARD_ON_FAILURE === "degrade_to_patterns"
+    ? "degrade_to_patterns"
+    : "fail_closed";
+  logger.info("Secret guard configured.", { onFailure });
+  return new GuardedSecretDetector(guard, secretDetector, logger, { onFailure });
 }
 
 function trimmedEnv(name: string): string | undefined {

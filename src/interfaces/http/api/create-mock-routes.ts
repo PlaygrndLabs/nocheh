@@ -3,6 +3,10 @@ import type { IncomingMessage } from "../../../application/dto/incoming-message.
 import type { IncomingReactionEvent } from "../../../application/dto/incoming-reaction-event.js";
 import type { ClockPort } from "../../../application/ports/clock.js";
 import type { LiveMessageBufferService } from "../../../application/services/live-message-buffer-service.js";
+import type {
+  MessageAttachment,
+  MessageAttachmentKind,
+} from "../../../domain/messaging/message-attachment.js";
 import type { JsonHandler } from "../router.js";
 
 export interface MockRoutes {
@@ -19,7 +23,10 @@ interface MockMessageInput {
   readonly senderDisplayName?: unknown;
   readonly occurredAt?: unknown;
   readonly replyToMessageId?: unknown;
+  readonly attachments?: unknown;
 }
+
+const ATTACHMENT_KINDS: readonly MessageAttachmentKind[] = ["image", "audio", "video", "document", "sticker"];
 
 /**
  * Routes that feed synthetic messages and reactions through the exact processor path the
@@ -35,8 +42,14 @@ export function createMockRoutes(processor: LiveMessageBufferService, clock: Clo
 
       const results: unknown[] = [];
       for (const raw of rawMessages as MockMessageInput[]) {
-        if (typeof raw.conversationId !== "string" || typeof raw.text !== "string") {
-          return { status: 400, body: { ok: false, error: "Each message requires conversationId and text" } };
+        if (typeof raw.conversationId !== "string") {
+          return { status: 400, body: { ok: false, error: "Each message requires conversationId" } };
+        }
+        const text = typeof raw.text === "string" ? raw.text : "";
+        const attachments = normalizeAttachments(raw.attachments);
+        // Mirrors the Telegram mapper: a message needs text or an attachment.
+        if (text.length === 0 && attachments.length === 0) {
+          return { status: 400, body: { ok: false, error: "Each message requires text or attachments" } };
         }
         const message: IncomingMessage = {
           platform: "mock",
@@ -45,8 +58,9 @@ export function createMockRoutes(processor: LiveMessageBufferService, clock: Clo
           senderId: typeof raw.senderId === "string" ? raw.senderId : "mock-user",
           ...(typeof raw.senderDisplayName === "string" ? { senderDisplayName: raw.senderDisplayName } : {}),
           ...(typeof raw.replyToMessageId === "string" ? { replyToMessageId: raw.replyToMessageId } : {}),
-          text: raw.text,
+          text,
           occurredAt: typeof raw.occurredAt === "string" ? new Date(raw.occurredAt) : clock.now(),
+          ...(attachments.length === 0 ? {} : { attachments }),
         };
         results.push(await processor.execute(message));
       }
@@ -100,4 +114,58 @@ function normalizeEmojis(emojis: unknown, emoji: unknown): readonly string[] {
     return emojis.filter((value): value is string => typeof value === "string" && value.length > 0);
   }
   return typeof emoji === "string" && emoji.length > 0 ? [emoji] : [];
+}
+
+/**
+ * Accepts synthetic attachments so the media path can be exercised without Telegram.
+ * A caller may supply `understanding` directly to test the text model in isolation.
+ */
+function normalizeAttachments(value: unknown): readonly MessageAttachment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const attachments: MessageAttachment[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) {
+      continue;
+    }
+    const input = raw as Record<string, unknown>;
+    const kind = ATTACHMENT_KINDS.find((candidate) => candidate === input.kind);
+    if (kind === undefined) {
+      continue;
+    }
+    const fileUniqueId = typeof input.fileUniqueId === "string" && input.fileUniqueId.length > 0
+      ? input.fileUniqueId
+      : `mock-file:${randomUUID()}`;
+    const understanding = normalizeUnderstanding(input.understanding);
+    attachments.push({
+      kind,
+      fileUniqueId,
+      fileId: typeof input.fileId === "string" && input.fileId.length > 0 ? input.fileId : fileUniqueId,
+      ...(typeof input.mimeType === "string" ? { mimeType: input.mimeType } : {}),
+      ...(typeof input.sizeBytes === "number" ? { sizeBytes: input.sizeBytes } : {}),
+      ...(typeof input.durationSeconds === "number" ? { durationSeconds: input.durationSeconds } : {}),
+      ...(typeof input.fileName === "string" ? { fileName: input.fileName } : {}),
+      ...(understanding === undefined ? {} : { understanding }),
+    });
+  }
+  return attachments;
+}
+
+function normalizeUnderstanding(value: unknown): MessageAttachment["understanding"] {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const input = value as Record<string, unknown>;
+  if (typeof input.description !== "string" || input.description.length === 0) {
+    return undefined;
+  }
+  return {
+    description: input.description,
+    ...(typeof input.transcript === "string" ? { transcript: input.transcript } : {}),
+    confidence: typeof input.confidence === "number" ? input.confidence : 1,
+    provider: typeof input.provider === "string" ? input.provider : "mock",
+    model: typeof input.model === "string" ? input.model : "mock",
+  };
 }
