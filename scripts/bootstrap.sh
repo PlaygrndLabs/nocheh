@@ -472,6 +472,64 @@ configure_env() {
       ;;
   esac
 
+  # --- image and voice understanding -----------------------------------
+  # A separate role from text analysis: GLM-5.2 cannot read images or audio.
+  # Left blank, photos and voice notes are still recorded, just not described.
+  local media
+  media="$(ask "Understand images and voice notes? (nvidia | none)" \
+    "$(resolved_default AI_IMAGE_PROVIDER nvidia)")"
+  if [[ $media == nvidia && -n "$(resolved_default NVIDIA_API_KEY)" ]]; then
+    env_set AI_IMAGE_PROVIDER nvidia
+    env_set AI_AUDIO_PROVIDER nvidia
+    ok "image and voice: nvidia omni model (reads images, transcribes OGG/Opus)"
+  else
+    env_set AI_IMAGE_PROVIDER ""
+    env_set AI_AUDIO_PROVIDER ""
+    warn "media understanding off: photos and voice notes are recorded, not described"
+  fi
+
+  # --- secret guard ----------------------------------------------------
+  # Pattern rules cannot catch "the wifi password is bluebird77". A guard model can.
+  # Off by default: with it on, a guard outage stops analysis until it recovers.
+  local guard
+  guard="$(ask "Secret guard model (gemini | nvidia | none)" \
+    "$(resolved_default AI_GUARD_PROVIDER none)")"
+  case "$guard" in
+    gemini)
+      local key model
+      key="$(ask_secret "GEMINI_API_KEY" "$(resolved_default GEMINI_API_KEY)")"
+      model="$(ask "GEMINI_GUARD_MODEL (required, prefer a small fast model)" \
+        "$(resolved_default GEMINI_GUARD_MODEL)")"
+      if [[ -z $key || -z $model ]]; then
+        warn "key or model missing; redaction stays on pattern rules only"
+        env_set AI_GUARD_PROVIDER ""
+      else
+        env_set AI_GUARD_PROVIDER gemini
+        env_set GEMINI_API_KEY "$key"
+        env_set GEMINI_GUARD_MODEL "$model"
+        ok "secret guard: gemini ($model), fail closed on outage"
+      fi
+      ;;
+    nvidia)
+      local model
+      has_tty && info "Verified good: nvidia/nvidia-nemotron-nano-9b-v2. Avoid nemotron-3-nano-30b-a3b (finds nothing)."
+      model="$(ask "NVIDIA_GUARD_MODEL (required, prefer a small fast model)" \
+        "$(resolved_default NVIDIA_GUARD_MODEL nvidia/nvidia-nemotron-nano-9b-v2)")"
+      if [[ -z $model || -z "$(resolved_default NVIDIA_API_KEY)" ]]; then
+        warn "key or model missing; redaction stays on pattern rules only"
+        env_set AI_GUARD_PROVIDER ""
+      else
+        env_set AI_GUARD_PROVIDER nvidia
+        env_set NVIDIA_GUARD_MODEL "$model"
+        ok "secret guard: nvidia ($model), fail closed on outage"
+      fi
+      ;;
+    *)
+      env_set AI_GUARD_PROVIDER ""
+      warn "secret guard off: redaction uses built-in pattern rules only"
+      ;;
+  esac
+
   # --- analysis mode ---------------------------------------------------
   local mode
   mode="$(ask "Analysis mode (batch = cheaper windows | immediate = per message)" \

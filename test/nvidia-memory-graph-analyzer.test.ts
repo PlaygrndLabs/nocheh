@@ -244,3 +244,84 @@ test("NVIDIA GLM analyzer rejects output that violates the provider-neutral cont
     },
   );
 });
+
+const sourceOnlyMessageId = {
+  memories: [], nodes: [], edges: [], strategicSuggestions: [], actionSuggestions: [],
+  warnings: [], statusUpdates: [],
+  tasks: [{
+    idempotencyKey: "t1",
+    reason: "from the second message",
+    confidence: 0.9,
+    // Verified live: z-ai/glm-5.2 returns source as { messageId } only.
+    source: { messageId: "m2" },
+    value: { title: "Ship the billing fix" },
+  }],
+};
+
+const twoMessageWindow: ConversationAnalysisInput = {
+  window: {
+    platform: "telegram",
+    conversationId: "chat-1",
+    messages: [
+      {
+        platform: "telegram", conversationId: "chat-1", messageId: "m1", senderId: "7",
+        text: "first", occurredAt: new Date("2026-06-19T11:00:00.000Z"),
+      },
+      {
+        platform: "telegram", conversationId: "chat-1", messageId: "m2", senderId: "7",
+        text: "second", occurredAt: new Date("2026-06-19T11:05:00.000Z"),
+      },
+    ],
+  },
+};
+
+test("resolves item source references from the window instead of trusting the model", async () => {
+  await withStubbedFetch(
+    () => jsonResponse(chatCompletion(JSON.stringify(sourceOnlyMessageId))),
+    async () => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({ apiKey: "nvapi-test", model: "z-ai/glm-5.2" });
+
+      // Platform, conversation id, and timestamp are known locally. Requiring the
+      // model to echo them wastes tokens and lets it misattribute a conversation.
+      const result = await analyzer.analyze(twoMessageWindow);
+
+      assert.equal(result.tasks.length, 1);
+      assert.equal(result.tasks[0]?.sourceMessageId, "m2");
+    },
+  );
+});
+
+test("an invented messageId falls back to the window anchor instead of dropping knowledge", async () => {
+  const invented = {
+    ...sourceOnlyMessageId,
+    tasks: [{ ...sourceOnlyMessageId.tasks[0], source: { messageId: "does-not-exist" } }],
+  };
+
+  await withStubbedFetch(
+    () => jsonResponse(chatCompletion(JSON.stringify(invented))),
+    async () => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({ apiKey: "nvapi-test", model: "z-ai/glm-5.2" });
+      const result = await analyzer.analyze(twoMessageWindow);
+
+      assert.equal(result.tasks.length, 1);
+      assert.equal(result.tasks[0]?.sourceMessageId, "m2");
+    },
+  );
+});
+
+test("the analysis prompt asks for a messageId-only source", async () => {
+  await withStubbedFetch(
+    () => jsonResponse(chatCompletion(JSON.stringify(sourceOnlyMessageId))),
+    async (calls) => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({ apiKey: "nvapi-test", model: "z-ai/glm-5.2" });
+      await analyzer.analyze(twoMessageWindow);
+
+      const body = JSON.parse(String(calls[0]?.init.body)) as {
+        messages: readonly { readonly role: string; readonly content: string }[];
+      };
+      const system = body.messages.find((message) => message.role === "system")?.content ?? "";
+      assert.match(system, /source is exactly \{ "messageId"/);
+      assert.match(system, /Never invent a messageId/);
+    },
+  );
+});

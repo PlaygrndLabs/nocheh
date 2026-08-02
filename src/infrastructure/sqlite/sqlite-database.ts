@@ -15,6 +15,7 @@ export function openSqliteDatabase(databasePath: string): SqliteDatabase {
   applyMigrations(database);
   applyMemoryGraphSchema(database);
   applyAppConfigSchema(database);
+  applyMediaUnderstandingSchema(database);
   applyIncrementalColumns(database);
   return database;
 }
@@ -199,6 +200,22 @@ function applyAppConfigSchema(database: SqliteDatabase): void {
       value TEXT NOT NULL,
       encrypted INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL
+    );
+  `);
+}
+
+/**
+ * Derived text for attachments, keyed by the platform's stable file identity.
+ *
+ * Only the description and transcript are stored, always encrypted. Media bytes are
+ * never persisted: they are fetched, turned into text, and dropped.
+ */
+function applyMediaUnderstandingSchema(database: SqliteDatabase): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS media_understanding (
+      file_unique_id TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
   `);
 }

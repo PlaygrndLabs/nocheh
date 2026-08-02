@@ -2,9 +2,10 @@ import type { LiveMessageBufferRepositoryPort } from "../../application/ports/li
 import type { BufferedMessage } from "../../domain/assistant/buffered-message.js";
 import type { EncryptedJsonFileStore } from "../memory/encrypted-json-file-store.js";
 
-interface StoredBufferedMessage extends Omit<BufferedMessage, "occurredAt" | "bufferedAt"> {
+interface StoredBufferedMessage extends Omit<BufferedMessage, "occurredAt" | "bufferedAt" | "quarantinedAt"> {
   readonly occurredAt: string;
   readonly bufferedAt: string;
+  readonly quarantinedAt?: string;
 }
 
 /** Local encrypted buffer for short-lived sanitized live messages. */
@@ -33,19 +34,27 @@ export class LocalLiveMessageBufferRepository implements LiveMessageBufferReposi
     ));
   }
 
+  public async conversationIds(): Promise<readonly string[]> {
+    return [...new Set((await this.store.read()).map((record) => record.conversationId))];
+  }
+
   private serialize(message: BufferedMessage): StoredBufferedMessage {
+    const { quarantinedAt, ...rest } = message;
     return {
-      ...message,
+      ...rest,
       occurredAt: message.occurredAt.toISOString(),
       bufferedAt: message.bufferedAt.toISOString(),
+      ...(quarantinedAt === undefined ? {} : { quarantinedAt: quarantinedAt.toISOString() }),
     };
   }
 
   private deserialize(record: StoredBufferedMessage): BufferedMessage {
+    const { quarantinedAt, ...rest } = record;
     return {
-      ...record,
+      ...rest,
       occurredAt: new Date(record.occurredAt),
       bufferedAt: new Date(record.bufferedAt),
+      ...(quarantinedAt === undefined ? {} : { quarantinedAt: new Date(quarantinedAt) }),
     };
   }
 }

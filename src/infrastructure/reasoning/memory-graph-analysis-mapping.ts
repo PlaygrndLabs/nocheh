@@ -6,7 +6,8 @@ import type {
   MemoryGraphAnalysis,
 } from "../../application/ports/memory-graph-analyzer.js";
 import type { ExtractedMemoryCandidate } from "../../application/ports/memory-extractor.js";
-import { validateAiAnalysisOutput } from "../../application/services/ai-analysis-contract.js";
+import { validateAiAnalysisOutputDetailed } from "../../application/services/ai-analysis-contract.js";
+import type { ConversationWindow } from "../../application/dto/conversation-window.js";
 import type { IncomingMessage } from "../../application/dto/incoming-message.js";
 import {
   createMemoryEdge,
@@ -14,7 +15,9 @@ import {
   type CreateMemoryEdgeInput,
   type CreateMemoryNodeInput,
   type MemoryGraphSource,
+  type MemoryEdge,
   type MemoryGraphStatus,
+  type MemoryNode,
   type MemoryNodeId,
 } from "../../domain/memory/memory-graph.js";
 import { projectIdFromName } from "../../domain/memory/memory-record.js";
@@ -55,6 +58,11 @@ export interface BuildMemoryGraphAnalysisOptions {
   readonly provider: string;
   readonly minimumConfidence: number;
   readonly tokenUsage?: AiTokenUsage;
+  /**
+   * The analysed window. When given, each item's source reference is resolved from
+   * it rather than taken from the model. Adapters should always pass this.
+   */
+  readonly window?: ConversationWindow;
 }
 
 /** Shared system instructions. Identical across providers so output stays comparable. */
@@ -66,6 +74,8 @@ export function analysisSystemPrompt(): string {
     "Understand meaning from natural language. Do NOT rely on rigid keywords or templates like 'Project: X' or 'Task: Y'.",
     "Infer projects from natural conversation. A conversation may cover one project or several; link tasks, decisions, and people to the right project.",
     "Interpret emoji reactions in context (for example a check-style reaction usually means done, a thumbs up means acknowledged) — decide from meaning, never a fixed rule.",
+    "A message may carry attachments (images, voice notes). When an attachment has understood=true, treat its description and transcript as that message's content and extract knowledge from it. When understood=false, note that media was sent but do not guess what it contained.",
+    "Attachment descriptions come from a perception model and may be wrong; lower confidence for knowledge derived only from an attachment.",
     "Treat any provided manual note as an authoritative instruction from Mak that overrides conflicting chatter.",
     "Return only JSON. No markdown, no prose outside JSON.",
     "Do not copy raw chat text into durable payloads, facts, or rationales.",
@@ -73,7 +83,8 @@ export function analysisSystemPrompt(): string {
     "Never suggest automatic crypto trading. Crypto support is thesis, risk, journal, and decision support only.",
     "The JSON root must contain arrays: memories, nodes, edges, strategicSuggestions, actionSuggestions, tasks, statusUpdates, warnings.",
     "Every item must include idempotencyKey, source, confidence, reason, and value. Warnings use message instead of value.",
-    "source.messageId MUST be the id of the specific window message the item came from, so knowledge stays traceable.",
+    "source is exactly { \"messageId\": \"<id of the window message this came from>\" } and nothing else.",
+    "Never invent a messageId. Use one of the ids listed in messages, so knowledge stays traceable.",
     "tasks[].value: { title, description?, priority?(low|medium|high|urgent), dueAt?(ISO), assignee? }.",
     "statusUpdates[].value: { targetMessageId, status(open|in_progress|completed|cancelled) } to change an EXISTING task/node derived from that message (e.g. closing a task after a done reaction).",
     "memories[].value: { type(Project|Decision|Deadline|Blocker|Summary), ...typed fields } for durable structured memory.",
@@ -135,31 +146,67 @@ export function createTokenUsage(
 
 /** Validates provider output against the neutral contract and maps it into domain objects. */
 export function buildMemoryGraphAnalysis(options: BuildMemoryGraphAnalysisOptions): MemoryGraphAnalysis {
-  const validated = validateAiAnalysisOutput(options.rawOutput, { minimumConfidence: options.minimumConfidence });
+  const rawOutput = options.window === undefined
+    ? options.rawOutput
+    : resolveItemSources(options.rawOutput, options.window);
+  const validated = validateAiAnalysisOutputDetailed(rawOutput, {
+    minimumConfidence: options.minimumConfidence,
+    // Structural problems still reject the window. A single malformed item does not:
+    // discarding a whole conversation over one bad suggestion loses real knowledge.
+    onInvalidItem: "skip",
+  });
   if (!validated.ok) {
     throw new Error(`${options.provider} analysis output rejected: ${validated.error.message}`, { cause: validated.error });
   }
 
+  const output = validated.value.output;
+  // Items that validated but cannot be mapped into the domain are dropped the same
+  // way, so a shape the prompt did not pin down degrades instead of failing.
+  const mappingWarnings: string[] = [...validated.value.skipped];
+  function mapKept<T>(items: readonly T[], map: (item: T) => unknown, label: string): readonly unknown[] {
+    const mapped: unknown[] = [];
+    for (const item of items) {
+      try {
+        mapped.push(map(item));
+      } catch (error) {
+        mappingWarnings.push(`Dropped ${label}: ${(error as Error).message}`);
+      }
+    }
+    return mapped;
+  }
+
   try {
-    const nodes = validated.value.nodes.map((item) => createMemoryNode(nodeInput(item.value, item.source, item.confidence)));
-    const edges = validated.value.edges.map((item) => createMemoryEdge(edgeInput(item.value, item.source, item.confidence)));
+    const nodes = mapKept(
+      output.nodes,
+      (item) => createMemoryNode(nodeInput(item.value, item.source, item.confidence)),
+      "graph node",
+    ) as readonly MemoryNode[];
+    const edges = mapKept(
+      output.edges,
+      (item) => createMemoryEdge(edgeInput(item.value, item.source, item.confidence)),
+      "graph edge",
+    ) as readonly MemoryEdge[];
     const suggestions: Suggestion[] = [
-      ...validated.value.strategicSuggestions.map((item) =>
-        createStrategicSuggestion(strategicSuggestionInput(item.value, item.source, item.confidence)),
-      ),
-      ...validated.value.actionSuggestions.map((item) =>
-        createActionSuggestion(actionSuggestionInput(item.value, item.source, item.confidence)),
-      ),
+      ...mapKept(
+        output.strategicSuggestions,
+        (item) => createStrategicSuggestion(strategicSuggestionInput(item.value, item.source, item.confidence)),
+        "strategic suggestion",
+      ) as readonly Suggestion[],
+      ...mapKept(
+        output.actionSuggestions,
+        (item) => createActionSuggestion(actionSuggestionInput(item.value, item.source, item.confidence)),
+        "action suggestion",
+      ) as readonly Suggestion[],
     ];
-    const memories = validated.value.memories.flatMap((item) => {
+    const memories = output.memories.flatMap((item) => {
       const candidate = memoryCandidate(item.value, item.confidence, item.reason);
       return candidate === undefined ? [] : [{ sourceMessageId: item.source.messageId, candidate }];
     }) as readonly AnalyzedMemoryCandidate[];
-    const tasks = validated.value.tasks.flatMap((item) => {
+    const tasks = output.tasks.flatMap((item) => {
       const task = taskCandidate(item.value, item.source.messageId, item.confidence, item.reason);
       return task === undefined ? [] : [task];
     }) as readonly AnalyzedTaskCandidate[];
-    const statusUpdates = validated.value.statusUpdates.flatMap((item) => {
+    const statusUpdates = output.statusUpdates.flatMap((item) => {
       const update = statusUpdate(item.value, item.source.messageId, item.confidence, item.reason);
       return update === undefined ? [] : [update];
     }) as readonly AnalyzedStatusUpdate[];
@@ -171,12 +218,77 @@ export function buildMemoryGraphAnalysis(options: BuildMemoryGraphAnalysisOption
       suggestions,
       tasks,
       statusUpdates,
-      warnings: validated.value.warnings.map((warning) => warning.message),
+      warnings: [...output.warnings.map((warning) => warning.message), ...mappingWarnings],
       ...(options.tokenUsage === undefined ? {} : { tokenUsage: options.tokenUsage }),
     };
   } catch (error) {
     throw new Error(`${options.provider} analysis output could not be mapped: ${(error as Error).message}`, { cause: error });
   }
+}
+
+const ENVELOPE_KEYS = [
+  "memories",
+  "nodes",
+  "edges",
+  "strategicSuggestions",
+  "actionSuggestions",
+  "tasks",
+  "statusUpdates",
+  "warnings",
+] as const;
+
+/**
+ * Fills each item's source reference from the window instead of trusting the model.
+ *
+ * The model is only asked which window message an item came from. Platform,
+ * conversation id, and timestamp are known locally, so echoing them back would waste
+ * tokens and give the model a chance to attribute knowledge to the wrong
+ * conversation. Verified against `z-ai/glm-5.2`, which returns `{ messageId }` alone.
+ *
+ * An unrecognised messageId falls back to the window anchor: the item still came from
+ * this conversation, and keeping it attributed to the closest real message is better
+ * than discarding extracted knowledge.
+ */
+function resolveItemSources(rawOutput: unknown, window: ConversationWindow): unknown {
+  if (!isJsonRecord(rawOutput)) {
+    return rawOutput;
+  }
+
+  const byId = new Map(window.messages.map((message) => [message.messageId, message]));
+  const anchor = window.messages[window.messages.length - 1];
+  if (anchor === undefined) {
+    return rawOutput;
+  }
+
+  const resolved: Record<string, unknown> = { ...rawOutput };
+  for (const key of ENVELOPE_KEYS) {
+    const items = resolved[key];
+    if (!Array.isArray(items)) {
+      continue;
+    }
+    resolved[key] = items.map((item) => {
+      if (!isJsonRecord(item)) {
+        return item;
+      }
+      const rawSource = isJsonRecord(item.source) ? item.source : {};
+      const claimedId = typeof rawSource.messageId === "string" ? rawSource.messageId : undefined;
+      const message = (claimedId === undefined ? undefined : byId.get(claimedId)) ?? anchor;
+      return {
+        ...item,
+        source: {
+          platform: message.platform,
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+          occurredAt: message.occurredAt.toISOString(),
+        },
+      };
+    });
+  }
+  return resolved;
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function describeMessage(message: IncomingMessage): JsonRecord {
@@ -195,6 +307,25 @@ function describeMessage(message: IncomingMessage): JsonRecord {
         })),
       }),
     text: message.text,
+    ...(message.attachments === undefined || message.attachments.length === 0
+      ? {}
+      : {
+        attachments: message.attachments.map((attachment) => ({
+          kind: attachment.kind,
+          ...(attachment.fileName === undefined ? {} : { fileName: attachment.fileName }),
+          ...(attachment.durationSeconds === undefined ? {} : { durationSeconds: attachment.durationSeconds }),
+          ...(attachment.understanding === undefined
+            ? { understood: false }
+            : {
+              understood: true,
+              description: attachment.understanding.description,
+              ...(attachment.understanding.transcript === undefined
+                ? {}
+                : { transcript: attachment.understanding.transcript }),
+              confidence: attachment.understanding.confidence,
+            }),
+        })),
+      }),
   };
 }
 

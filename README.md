@@ -11,15 +11,22 @@ Telegram is the first input channel. Memory and reasoning are the product.
 
 ```text
 Telegram webhook | mock | note | history import
-  -> secret detection + redaction
-  -> buffer (batch or immediate)
-  -> AI analysis (one provider port)
-  -> memory records + graph nodes/edges + tasks
+  -> text, caption, or attachments (photos and voice notes are kept)
+  -> pattern redaction -> buffer (batch or immediate)
+  -> images and voice -> perception model -> description + transcript
+  -> secret guard over all text, including what media became
+  -> AI analysis (memory, graph, tasks, suggestions)
   -> pending suggestions -> owner approves
 ```
 
 Raw chat is working data only. Long-term storage keeps structured knowledge with
-source references and confidence.
+source references and confidence. Media bytes are never stored: they are fetched,
+turned into text, and dropped.
+
+Four model roles are configured independently, so a missing media model never
+blocks text analysis: `text_analysis`, `image_understanding`,
+`audio_understanding`, `secret_guard`. Credentials are per provider; model ids are
+per role. See [ADR-0010](docs/adr/0010-multimodal-ingestion-model-roles-secret-guard.md).
 
 ## Quickstart
 
@@ -78,10 +85,17 @@ at boot, so provider changes need a restart (the dashboard reports
 
 ## What Works
 
-- Telegram webhook ingestion with chat/user allow-lists
-- Configurable secret detection and redaction before anything is stored
-- Batch or immediate analysis windows, with summary cadence
-- Provider-neutral AI analysis: NVIDIA `z-ai/glm-5.2` (default) or Anthropic Claude
+- Telegram webhook ingestion with chat/user allow-lists, including photos, voice
+  notes, captions, and media-only messages
+- Image and voice understanding: media becomes text a language model can reason
+  about, cached per file so a resend is not paid for twice
+- Configurable secret detection and redaction before anything is stored, covering
+  attachment descriptions and transcripts as well as typed text
+- Optional model-backed secret guard for credentials pattern rules miss, such as a
+  password spoken in a voice note. The model detects; masking stays local
+- Batch or immediate analysis windows, with summary cadence and a flush sweep
+- Provider-neutral AI analysis: NVIDIA `z-ai/glm-5.2` (default), Anthropic Claude,
+  or Google Gemini, selectable per role
 - Validated AI output contract (source ref, confidence, reason, idempotency key)
 - 6 memory record types, 17 graph node kinds, 20 relation types, 16 payload kinds
 - Bounded assistant context: recent window + retrieved memory + graph neighborhood
@@ -114,22 +128,39 @@ APP_AUTH_SESSION_SECRET=          # defaults to LOCAL_ENCRYPTION_SECRET
 APP_AUTH_SECURE_COOKIE=false      # true when served over HTTPS
 PUBLIC_HOSTNAME=                  # tunnel hostname, used by scripts/bootstrap.sh
 
-AI_PROVIDER=nvidia                # blank = dry-run
-NVIDIA_API_KEY=nvapi-...
+AI_PROVIDER=nvidia                # text analysis. blank = dry-run
+AI_IMAGE_PROVIDER=nvidia          # blank = images recorded, not described
+AI_AUDIO_PROVIDER=nvidia          # blank = voice notes recorded, not transcribed
+AI_GUARD_PROVIDER=                # blank = pattern redaction only
+
+NVIDIA_API_KEY=nvapi-...          # one credential per provider, shared by its roles
 NVIDIA_MODEL=z-ai/glm-5.2         # optional, this is the default
+NVIDIA_IMAGE_MODEL=               # optional, defaults to the nemotron omni model
+NVIDIA_AUDIO_MODEL=               # optional, same omni model; handles OGG/Opus
+NVIDIA_GUARD_MODEL=               # required for the guard role. verified good:
+                                  #   nvidia/nvidia-nemotron-nano-9b-v2
 NVIDIA_BASE_URL=                  # optional, self-hosted NIM or gateway
 NVIDIA_JSON_RESPONSE_FORMAT=true  # false if the endpoint rejects json_object
 # AI_PROVIDER=anthropic; ANTHROPIC_API_KEY=sk-ant-...; ANTHROPIC_MODEL=<required>
+# Gemini is an alternative for any role:
+# AI_AUDIO_PROVIDER=gemini; GEMINI_API_KEY=...; GEMINI_AUDIO_MODEL=<required>
 
 MESSAGE_ANALYSIS_MODE=batch       # or immediate
 LIVE_ANALYSIS_INTERVAL_SECONDS=300
 LIVE_MAX_MESSAGES_PER_BATCH=50
+FLUSH_SWEEP_INTERVAL_SECONDS=60   # sweeps due batches without a new message
 MAX_AI_CONTEXT_TOKENS=4000
 MAX_AI_OUTPUT_TOKENS=4000
 MAX_RETRIEVED_MEMORIES=12
 MAX_RECENT_MESSAGES=30
 SUMMARY_EVERY_MESSAGES=100
 SUMMARY_EVERY_MINUTES=60
+
+MEDIA_MAX_ATTACHMENTS_PER_WINDOW=8
+MEDIA_MAX_DOWNLOAD_BYTES=20971520
+MEDIA_MAX_INLINE_BYTES=5242880    # latency guard, not a protocol cap
+SECRET_GUARD_MAX_ATTEMPTS=5       # then the message is quarantined
+SECRET_GUARD_ON_FAILURE=          # fail_closed (default) | degrade_to_patterns
 
 TELEGRAM_ALLOWED_CHAT_IDS=        # optional allow-lists
 TELEGRAM_ALLOWED_USER_IDS=

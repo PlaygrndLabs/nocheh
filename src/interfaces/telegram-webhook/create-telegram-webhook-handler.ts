@@ -63,6 +63,13 @@ export function createTelegramWebhookHandler(
               reactorId: reaction.reactorId,
             });
           }
+        } else {
+          // Telegram only retries on a non-2xx, so an unhandled update is gone for
+          // good. Log it: a silent drop is indistinguishable from a delivery failure.
+          logger.warn("Telegram update ignored: no supported content", {
+            updateId: update.update_id,
+            reason: mapper.describeUnsupportedUpdate(update),
+          });
         }
       }
 

@@ -26,6 +26,9 @@ import type { SuggestionRepositoryPort } from "../ports/suggestion-repository.js
 import type { TaskProviderPort } from "../ports/task-provider.js";
 import type { TaskRepositoryPort } from "../ports/task-repository.js";
 import type { TaskSyncRepositoryPort } from "../ports/task-sync-repository.js";
+import type { MediaUnderstandingService } from "../services/media-understanding-service.js";
+import { WindowRedactionService, type WindowRedactionResult } from "../services/window-redaction-service.js";
+import { describeAttachment } from "../../domain/messaging/message-attachment.js";
 import { Task } from "../../domain/tasks/task.js";
 import type { SourceReference } from "../../domain/tasks/task.js";
 import { createMemoryEdge, createMemoryNode } from "../../domain/memory/memory-graph.js";
@@ -49,9 +52,11 @@ export interface ProcessIncomingMessageResult {
 /** Coordinates redaction, LLM analysis, local persistence, and basic task sync over a conversation window. */
 export class ProcessIncomingMessageUseCase {
   private readonly validationService = new TaskValidationService();
+  private readonly windowRedaction: WindowRedactionService;
 
   public constructor(
-    private readonly secretDetector: SecretDetectorPort,
+    /** The pre-analysis secret gate. Wrapped in a WindowRedactionService, not used directly. */
+    secretDetector: SecretDetectorPort,
     private readonly memoryGraphAnalyzer: MemoryGraphAnalyzerPort,
     private readonly taskRepository: TaskRepositoryPort,
     private readonly memoryRecordRepository: MemoryRecordRepositoryPort,
@@ -64,7 +69,11 @@ export class ProcessIncomingMessageUseCase {
     private readonly memoryGraphRepository?: MemoryGraphRepositoryPort,
     private readonly suggestionRepository?: SuggestionRepositoryPort,
     private readonly idGenerator: IdGeneratorPort = new SystemIdGenerator(),
-  ) {}
+    /** Absent when no perception model is configured: attachments then stay undescribed. */
+    private readonly mediaUnderstanding?: MediaUnderstandingService,
+  ) {
+    this.windowRedaction = new WindowRedactionService(secretDetector);
+  }
 
   /** Immediate-mode entry point: processes a single message as a one-message window. */
   public async execute(message: IncomingMessage): Promise<ProcessIncomingMessageResult> {
@@ -144,23 +153,61 @@ export class ProcessIncomingMessageUseCase {
       messageCount: window.messages.length,
     }));
 
+    // Media becomes text before anything else looks at the window, because the
+    // redaction and analysis steps below only understand text.
+    const understoodWindow = await this.understandMedia(window, steps, errorLogs);
+
     const secretDetectionStartedAt = this.clock.now();
-    let redactionFindingCount = 0;
-    const sanitizedMessages: IncomingMessage[] = window.messages.map((message) => {
-      const redacted = this.secretDetector.redact(message.text);
-      redactionFindingCount += redacted.findings.length;
-      return { ...message, text: redacted.text };
-    });
-    const sanitizedWindow: ConversationWindow = { ...window, messages: sanitizedMessages };
+    // Covers message text plus every attachment description and transcript: derived
+    // media text can carry a secret just as easily as a typed message.
+    let redaction: WindowRedactionResult;
+    try {
+      redaction = await this.windowRedaction.execute(understoodWindow);
+    } catch (error) {
+      // Fail closed: the guard is what makes it safe to send this window onward, so
+      // without it nothing is sent. The caller keeps the window buffered and retries.
+      const message = error instanceof Error ? error.message : String(error);
+      steps.push(step("secret_detection", "failed", secretDetectionStartedAt, this.clock.now(), {
+        messageCount: understoodWindow.messages.length,
+      }, message));
+      steps.push(step("redaction", "skipped", secretDetectionStartedAt, this.clock.now(), {
+        reason: "secret detection failed",
+      }));
+      errorLogs.push(`Secret detection failed: ${message}`);
+      // Audited before rethrowing, so a stalled window is visible instead of silent.
+      await this.saveAudit({
+        anchor,
+        anchorMessageId,
+        window: understoodWindow,
+        startedAt,
+        steps,
+        extractedTasks,
+        errorLogs,
+        redactedContentPreview: "(withheld: secret detection failed)",
+        redactionFindingCount: 0,
+      });
+      this.logger.error("Secret detection failed; window not analysed.", {
+        conversationId: window.conversationId,
+        messageId: anchorMessageId,
+        error: message,
+      });
+      throw error;
+    }
+
+    const sanitizedWindow = redaction.window;
+    const sanitizedMessages = sanitizedWindow.messages;
+    const redactionFindingCount = redaction.findingCount;
     steps.push(step("secret_detection", "succeeded", secretDetectionStartedAt, this.clock.now(), {
       findingCount: redactionFindingCount,
+      segmentCount: redaction.segmentCount,
+      ...Object.fromEntries(Object.entries(redaction.findingKinds).map(([kind, count]) => [`found_${kind}`, count])),
     }));
     steps.push(step("redaction", "succeeded", secretDetectionStartedAt, this.clock.now(), {
       redacted: redactionFindingCount > 0,
       messageCount: sanitizedMessages.length,
     }));
     this.metrics.recordRedactionEvents(redactionFindingCount);
-    const redactedPreview = preview(sanitizedMessages.map((message) => message.text).join("\n"));
+    const redactedPreview = preview(sanitizedMessages.map((message) => describeForPreview(message)).join("\n"));
 
     const analysisStartedAt = this.clock.now();
     const analysisInput: ConversationAnalysisInput = {
@@ -576,6 +623,99 @@ export class ProcessIncomingMessageUseCase {
     await this.memoryGraphRepository.saveEdge(taskEdge);
     return { nodeIds: [makNode.id, taskNode.id], edgeIds: [taskEdge.id] };
   }
+
+  /** Writes an audit record for a window that stopped before producing knowledge. */
+  private async saveAudit(input: {
+    readonly anchor: IncomingMessage;
+    readonly anchorMessageId: string;
+    readonly window: ConversationWindow;
+    readonly startedAt: Date;
+    readonly steps: readonly ProcessingAuditStep[];
+    readonly extractedTasks: readonly AuditedExtractedTask[];
+    readonly errorLogs: readonly string[];
+    readonly redactedContentPreview: string;
+    readonly redactionFindingCount: number;
+  }): Promise<void> {
+    const completedAt = this.clock.now();
+    await this.auditRepository.save({
+      id: this.idGenerator.generate(),
+      platform: input.window.platform,
+      conversationId: input.window.conversationId,
+      messageId: input.anchorMessageId,
+      senderId: input.anchor.senderId,
+      receivedAt: input.anchor.occurredAt,
+      processedAt: completedAt,
+      redactedContentPreview: input.redactedContentPreview,
+      redactionFindingCount: input.redactionFindingCount,
+      steps: input.steps,
+      extractedTasks: input.extractedTasks,
+      errorLogs: input.errorLogs,
+      totalLatencyMs: completedAt.getTime() - input.startedAt.getTime(),
+    });
+  }
+
+  /**
+   * Turns image and audio attachments into text.
+   *
+   * Never fatal: a window whose media cannot be understood is still analysed from
+   * its text. Losing a description costs quality; failing here would lose the
+   * conversation entirely.
+   */
+  private async understandMedia(
+    window: ConversationWindow,
+    steps: ProcessingAuditStep[],
+    errorLogs: string[],
+  ): Promise<ConversationWindow> {
+    const attachmentCount = window.messages
+      .reduce((total, message) => total + (message.attachments?.length ?? 0), 0);
+    if (attachmentCount === 0) {
+      return window;
+    }
+
+    const startedAt = this.clock.now();
+    if (this.mediaUnderstanding === undefined) {
+      steps.push(step("media_understanding", "skipped", startedAt, this.clock.now(), {
+        attachmentCount,
+        reason: "no perception model configured",
+      }));
+      return window;
+    }
+
+    try {
+      const outcome = await this.mediaUnderstanding.execute(window);
+      steps.push(step("media_fetch", "succeeded", startedAt, this.clock.now(), {
+        attachmentCount,
+        attempted: outcome.attempted,
+        fromCache: outcome.fromCache,
+        skipped: outcome.skipped,
+      }));
+      steps.push(step(
+        "media_understanding",
+        outcome.failed > 0 && outcome.understood === 0 ? "failed" : "succeeded",
+        startedAt,
+        this.clock.now(),
+        {
+          understood: outcome.understood,
+          fromCache: outcome.fromCache,
+          failed: outcome.failed,
+          skipped: outcome.skipped,
+          inputTokens: outcome.tokenUsage?.inputTokens ?? 0,
+          outputTokens: outcome.tokenUsage?.outputTokens ?? 0,
+          totalTokens: outcome.tokenUsage?.totalTokens ?? 0,
+        },
+      ));
+      errorLogs.push(...outcome.errors);
+      return outcome.window;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      steps.push(step("media_understanding", "failed", startedAt, this.clock.now(), {
+        attachmentCount,
+      }, message));
+      errorLogs.push(`Media understanding failed: ${message}`);
+      this.logger.warn("Media understanding failed; analysing text only.", { error: message });
+      return window;
+    }
+  }
 }
 
 function primaryProject(candidates: readonly ExtractedMemoryCandidate[]) {
@@ -618,4 +758,15 @@ function step(
 
 function preview(text: string, maxLength = 240): string {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}...`;
+}
+
+/**
+ * Renders a message for the audit preview, including attachment descriptions.
+ *
+ * Media-only messages have no text, so without this the operator sees an empty
+ * preview and cannot tell whether redaction actually covered the media.
+ */
+function describeForPreview(message: IncomingMessage): string {
+  const attachments = (message.attachments ?? []).map((attachment) => describeAttachment(attachment));
+  return [message.text, ...attachments].filter((part) => part.length > 0).join(" ");
 }

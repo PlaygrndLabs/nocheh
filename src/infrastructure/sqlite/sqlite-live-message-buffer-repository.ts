@@ -8,9 +8,10 @@ interface BufferRow {
   readonly payload: string;
 }
 
-interface StoredBufferedMessage extends Omit<BufferedMessage, "occurredAt" | "bufferedAt"> {
+interface StoredBufferedMessage extends Omit<BufferedMessage, "occurredAt" | "bufferedAt" | "quarantinedAt"> {
   readonly occurredAt: string;
   readonly bufferedAt: string;
+  readonly quarantinedAt?: string;
 }
 
 export class SqliteLiveMessageBufferRepository implements LiveMessageBufferRepositoryPort {
@@ -66,18 +67,29 @@ export class SqliteLiveMessageBufferRepository implements LiveMessageBufferRepos
   }
 
   private serialize(message: BufferedMessage): StoredBufferedMessage {
+    const { quarantinedAt, ...rest } = message;
     return {
-      ...message,
+      ...rest,
       occurredAt: message.occurredAt.toISOString(),
       bufferedAt: message.bufferedAt.toISOString(),
+      ...(quarantinedAt === undefined ? {} : { quarantinedAt: quarantinedAt.toISOString() }),
     };
   }
 
   private deserialize(record: StoredBufferedMessage): BufferedMessage {
+    const { quarantinedAt, ...rest } = record;
     return {
-      ...record,
+      ...rest,
       occurredAt: new Date(record.occurredAt),
       bufferedAt: new Date(record.bufferedAt),
+      ...(quarantinedAt === undefined ? {} : { quarantinedAt: new Date(quarantinedAt) }),
     };
+  }
+
+  public async conversationIds(): Promise<readonly string[]> {
+    const rows = this.database
+      .prepare("SELECT DISTINCT conversation_id AS conversationId FROM live_message_buffer")
+      .all() as { readonly conversationId: string }[];
+    return rows.map((row) => row.conversationId);
   }
 }

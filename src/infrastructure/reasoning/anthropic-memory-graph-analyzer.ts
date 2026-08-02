@@ -13,10 +13,12 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_MINIMUM_CONFIDENCE,
 } from "./memory-graph-analysis-mapping.js";
+import { fetchWithTimeout } from "../http/fetch-with-timeout.js";
 
 const PROVIDER = "anthropic";
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_API_VERSION = "2023-06-01";
+const ANALYSIS_REQUEST_TIMEOUT_MS = 280_000;
 
 export interface AnthropicMemoryGraphAnalyzerConfig {
   readonly apiKey: string;
@@ -25,6 +27,8 @@ export interface AnthropicMemoryGraphAnalyzerConfig {
   readonly baseUrl?: string;
   readonly minimumConfidence?: number;
   readonly maxTokens?: number;
+  /** Request timeout in milliseconds. Analysis windows can be slow. */
+  readonly timeoutMs?: number;
 }
 
 interface AnthropicClaudeResponse {
@@ -46,6 +50,7 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   private readonly baseUrl: string;
   private readonly minimumConfidence: number;
   private readonly maxTokens: number;
+  private readonly timeoutMs: number;
 
   public constructor(config: AnthropicMemoryGraphAnalyzerConfig) {
     this.apiKey = config.apiKey;
@@ -54,6 +59,7 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.minimumConfidence = config.minimumConfidence ?? DEFAULT_MINIMUM_CONFIDENCE;
     this.maxTokens = config.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+    this.timeoutMs = config.timeoutMs ?? ANALYSIS_REQUEST_TIMEOUT_MS;
   }
 
   public async analyze(input: ConversationAnalysisInput): Promise<MemoryGraphAnalysis> {
@@ -67,7 +73,7 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       }],
     });
 
-    const response = await fetch(this.baseUrl, {
+    const response = await fetchWithTimeout(fetch, this.baseUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -75,7 +81,7 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
         "x-api-key": this.apiKey,
       },
       body,
-    });
+    }, { timeoutMs: this.timeoutMs, label: "Anthropic analysis" });
 
     const text = await response.text();
     if (!response.ok) {
@@ -88,6 +94,8 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       rawOutput: parseAnalysisJson(outputText(parsed), "Anthropic Claude"),
       provider: PROVIDER,
       minimumConfidence: this.minimumConfidence,
+      // Source references are resolved from the window, never taken from the model.
+      window: input.window,
       ...(usage === undefined ? {} : { tokenUsage: usage }),
     });
   }

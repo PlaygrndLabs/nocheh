@@ -11,6 +11,8 @@ export interface AiTokenUsage {
 /** Pipeline step names tracked for each processed conversation window. */
 export type ProcessingStepName =
   | "telegram_message"
+  | "media_fetch"
+  | "media_understanding"
   | "secret_detection"
   | "redaction"
   | "analysis"

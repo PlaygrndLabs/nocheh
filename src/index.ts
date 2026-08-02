@@ -1,4 +1,17 @@
 export type { IncomingMessage, MessageReaction } from "./application/dto/incoming-message.js";
+export { isEmptyMessage } from "./application/dto/incoming-message.js";
+export type {
+  MessageAttachment,
+  MessageAttachmentKind,
+  MessageAttachmentVariant,
+  MessageAttachmentUnderstanding,
+} from "./domain/messaging/message-attachment.js";
+export {
+  UNDERSTANDABLE_ATTACHMENT_KINDS,
+  isUnderstandableAttachment,
+  selectAttachmentVariant,
+  describeAttachment,
+} from "./domain/messaging/message-attachment.js";
 export type { IncomingReactionEvent } from "./application/dto/incoming-reaction-event.js";
 export type { NoteInput } from "./application/dto/incoming-note.js";
 export type { ConversationWindow, ProjectHint } from "./application/dto/conversation-window.js";
@@ -43,6 +56,17 @@ export type { MemoryQuery, MemoryRetrievalPort, MemorySearchResult } from "./app
 export type { MetricsCollectorPort, MetricsSnapshot } from "./application/ports/metrics.js";
 export { NoopMetricsCollector } from "./application/ports/metrics.js";
 export type { SecretDetectorPort } from "./application/ports/secret-detector.js";
+export type { TextCompletionPort, TextCompletionInput, TextCompletionResult } from "./application/ports/text-completion.js";
+export type { MediaUnderstandingPort, MediaUnderstandingInput, MediaUnderstandingResult, FetchedAttachment } from "./application/ports/media-understanding.js";
+export type { AttachmentFetcherPort } from "./application/ports/attachment-fetcher.js";
+export { AttachmentFetchError } from "./application/ports/attachment-fetcher.js";
+export type { MediaUnderstandingCachePort } from "./application/ports/media-understanding-cache.js";
+export { NoopMediaUnderstandingCache } from "./application/ports/media-understanding-cache.js";
+export { MediaUnderstandingService, DEFAULT_MEDIA_UNDERSTANDING_LIMITS } from "./application/services/media-understanding-service.js";
+export type { MediaUnderstandingLimits, MediaUnderstandingOutcome } from "./application/services/media-understanding-service.js";
+export { MediaUnderstandingRouter } from "./application/services/media-understanding-router.js";
+export { WindowRedactionService } from "./application/services/window-redaction-service.js";
+export type { WindowRedactionResult } from "./application/services/window-redaction-service.js";
 export type { AppConfigRepositoryPort } from "./application/ports/app-config-repository.js";
 export type { RedactionPolicyProvider } from "./application/ports/redaction-policy-provider.js";
 export type { SuggestionRepositoryPort } from "./application/ports/suggestion-repository.js";
@@ -73,6 +97,7 @@ export type {
 export { ConversationSummaryService } from "./domain/memory/conversation-summary.js";
 export type { CreateConversationSummaryInput } from "./domain/memory/conversation-summary.js";
 export type { BufferedMessage } from "./domain/assistant/buffered-message.js";
+export { isQuarantined } from "./domain/assistant/buffered-message.js";
 export {
   DEFAULT_GROUP_ASSISTANT_SETTINGS,
   createGroupAssistantSettings,
@@ -195,23 +220,39 @@ export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarning
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
 export { ConfigurableSecretDetector } from "./infrastructure/security/configurable-secret-detector.js";
 export { BUILT_IN_SECRET_PATTERNS } from "./infrastructure/security/built-in-secret-patterns.js";
-export { redactWithPatterns } from "./infrastructure/security/redaction-engine.js";
-export type { CompiledSecretPattern } from "./infrastructure/security/redaction-engine.js";
+export { redactWithPatterns, redactLiterals, MINIMUM_LITERAL_SECRET_LENGTH } from "./infrastructure/security/redaction-engine.js";
+export type { CompiledSecretPattern, LiteralSecretMatch } from "./infrastructure/security/redaction-engine.js";
+export { LlmSecretDetector, SecretGuardUnavailableError, guardSystemPrompt } from "./infrastructure/security/llm-secret-detector.js";
+export type { LlmSecretDetectorConfig } from "./infrastructure/security/llm-secret-detector.js";
+export { GuardedSecretDetector } from "./infrastructure/security/guarded-secret-detector.js";
+export type { GuardedSecretDetectorConfig, SecretGuardFailurePolicy } from "./infrastructure/security/guarded-secret-detector.js";
 export { AnthropicMemoryGraphAnalyzer } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 export type { AnthropicMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/anthropic-memory-graph-analyzer.js";
 export { NvidiaMemoryGraphAnalyzer, NVIDIA_DEFAULT_BASE_URL } from "./infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
 export type { NvidiaMemoryGraphAnalyzerConfig } from "./infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
 export {
+  AI_MODEL_ROLES,
   AI_PROVIDERS,
   DEFAULT_AI_PROVIDER_ID,
+  aiModelEnvKeys,
+  aiModelRoleIds,
   aiProviderEnvKeys,
   aiProviderIds,
+  aiProviderRoleSupport,
   aiProviderSecretEnvKeys,
+  aiRoleProviderEnvKeys,
+  findAiModelRole,
   findAiProvider,
   normalizeAiProviderId,
+  providersForRole,
   requiredAiProviderEnvKeys,
 } from "./application/config/ai-provider-catalog.js";
-export type { AiProviderDescriptor } from "./application/config/ai-provider-catalog.js";
+export type {
+  AiModelRole,
+  AiModelRoleDescriptor,
+  AiProviderDescriptor,
+  AiProviderRoleSupport,
+} from "./application/config/ai-provider-catalog.js";
 export { AesGcmEncryption } from "./infrastructure/security/aes-gcm-encryption.js";
 export { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-file-store.js";
 export { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
@@ -249,6 +290,15 @@ export type {
   TelegramWebhookInfo,
 } from "./application/ports/telegram-client.js";
 export { TelegramHttpClient } from "./infrastructure/messaging/telegram/telegram-http-client.js";
+export { TelegramAttachmentFetcher } from "./infrastructure/messaging/telegram/telegram-attachment-fetcher.js";
+export { NvidiaOmniMediaUnderstanding } from "./infrastructure/reasoning/nvidia-omni-media-understanding.js";
+export type { NvidiaOmniMediaUnderstandingConfig } from "./infrastructure/reasoning/nvidia-omni-media-understanding.js";
+export { GeminiMediaUnderstanding } from "./infrastructure/reasoning/gemini-media-understanding.js";
+export type { GeminiMediaUnderstandingConfig } from "./infrastructure/reasoning/gemini-media-understanding.js";
+export { OpenAiCompatibleTextCompletion } from "./infrastructure/reasoning/openai-compatible-text-completion.js";
+export { GeminiTextCompletion } from "./infrastructure/reasoning/gemini-text-completion.js";
+export { AnthropicTextCompletion } from "./infrastructure/reasoning/anthropic-text-completion.js";
+export { SqliteMediaUnderstandingCache } from "./infrastructure/sqlite/sqlite-media-understanding-cache.js";
 export { Router } from "./interfaces/http/router.js";
 export type { JsonHandler, JsonResult, RequestContext } from "./interfaces/http/router.js";
 export { createStaticHandler } from "./interfaces/http/create-static-handler.js";

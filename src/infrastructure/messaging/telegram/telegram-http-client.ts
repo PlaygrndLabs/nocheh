@@ -1,6 +1,7 @@
 import type {
   TelegramBotInfo,
   TelegramClientPort,
+  TelegramFileInfo,
   TelegramWebhookInfo,
 } from "../../../application/ports/telegram-client.js";
 
@@ -46,6 +47,46 @@ export class TelegramHttpClient implements TelegramClientPort {
       ...(result.pending_update_count === undefined ? {} : { pendingUpdateCount: result.pending_update_count }),
       ...(result.last_error_message === undefined ? {} : { lastErrorMessage: result.last_error_message }),
     };
+  }
+
+  public async getFile(token: string, fileId: string): Promise<TelegramFileInfo> {
+    const result = await this.call<{ file_id: string; file_path?: string; file_size?: number }>(
+      token,
+      "getFile",
+      { file_id: fileId },
+    );
+    if (result.file_path === undefined || result.file_path.length === 0) {
+      throw new Error(`Telegram getFile returned no file_path for ${fileId}`);
+    }
+    return {
+      fileId: result.file_id,
+      path: result.file_path,
+      ...(result.file_size === undefined ? {} : { sizeBytes: result.file_size }),
+    };
+  }
+
+  /**
+   * File bytes live on a different host path than the API methods and are not
+   * JSON, so this deliberately bypasses `call`.
+   */
+  public async downloadFile(token: string, path: string, maxBytes: number): Promise<Uint8Array> {
+    const response = await this.fetchImpl(`${this.baseUrl}/file/bot${token}/${path}`);
+    if (!response.ok) {
+      throw new Error(`Telegram file download failed with status ${response.status}`);
+    }
+
+    // Trust the advertised length when present so an oversized file is rejected
+    // before any of it is buffered.
+    const advertised = Number(response.headers.get("content-length") ?? Number.NaN);
+    if (Number.isFinite(advertised) && advertised > maxBytes) {
+      throw new Error(`Telegram file is ${advertised} bytes, above the ${maxBytes} byte limit`);
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) {
+      throw new Error(`Telegram file is ${bytes.byteLength} bytes, above the ${maxBytes} byte limit`);
+    }
+    return bytes;
   }
 
   private async call<T>(token: string, method: string, body?: Record<string, unknown>): Promise<T> {

@@ -12,6 +12,7 @@ import type { MemoryRecord, MemoryRecordType } from "../src/domain/memory/memory
 import { projectIdFromName } from "../src/domain/memory/memory-record.js";
 import type { ProcessingAuditRecord } from "../src/domain/observability/audit.js";
 import type { Task, TaskId } from "../src/domain/tasks/task.js";
+import type { SecretDetectorPort } from "../src/application/ports/secret-detector.js";
 import { RegexSecretDetector } from "../src/infrastructure/security/regex-secret-detector.js";
 import { ProcessIncomingMessageUseCase } from "../src/application/use-cases/process-incoming-message.js";
 import { InMemoryMetricsCollector } from "../src/infrastructure/observability/in-memory-metrics-collector.js";
@@ -513,3 +514,145 @@ test("executeNote treats a note as an authoritative window and offers open tasks
   assert.equal(memory.records.some((record) => record.type === "Deadline"), true);
   assert.ok(noteAnalyzer.lastInput !== undefined);
 });
+
+test("fails closed when the secret guard is unavailable: nothing is analysed or persisted", async () => {
+  const analyzer = new StubAnalyzer(() => EMPTY_ANALYSIS);
+  const taskRepository = new InMemoryTaskRepository();
+  const memoryRepository = new InMemoryMemoryRepository();
+  const auditRepository = new InMemoryAuditRepository();
+  const failingGuard: SecretDetectorPort = {
+    redact: async () => {
+      throw guardError();
+    },
+    redactMany: async () => {
+      throw guardError();
+    },
+  };
+  const useCase = new ProcessIncomingMessageUseCase(
+    failingGuard,
+    analyzer,
+    taskRepository,
+    memoryRepository,
+    new InMemorySyncRepository(),
+    new RecordingTaskProvider(),
+    new FixedClock(),
+    new SilentLogger(),
+    auditRepository,
+    new InMemoryMetricsCollector(),
+  );
+
+  await assert.rejects(useCase.execute({
+    platform: "telegram",
+    conversationId: "chat-1",
+    messageId: "42",
+    senderId: "7",
+    text: "the wifi password is bluebird77",
+    occurredAt: new Date("2026-06-19T11:59:00.000Z"),
+  }), /Secret guard model call failed/);
+
+  // The analysis model never saw the text, and no knowledge was written.
+  assert.equal(analyzer.lastInput, undefined);
+  assert.equal(taskRepository.tasks.size, 0);
+  assert.equal(memoryRepository.records.length, 0);
+
+  // The stall is audited, so a stuck conversation is visible rather than silent.
+  assert.equal(auditRepository.records.length, 1);
+  const record = auditRepository.records[0];
+  assert.equal(record?.steps.find((step) => step.name === "secret_detection")?.status, "failed");
+  assert.equal(record?.steps.find((step) => step.name === "redaction")?.status, "skipped");
+  assert.equal(record?.steps.some((step) => step.name === "analysis"), false);
+  // The preview must not leak the unredacted text it failed to guard.
+  assert.doesNotMatch(record?.redactedContentPreview ?? "", /bluebird77/);
+});
+
+test("attachment descriptions reach the analysis model and are redacted first", async () => {
+  const analyzer = new StubAnalyzer(() => EMPTY_ANALYSIS);
+  const useCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(),
+    analyzer,
+    new InMemoryTaskRepository(),
+    new InMemoryMemoryRepository(),
+    new InMemorySyncRepository(),
+    new RecordingTaskProvider(),
+    new FixedClock(),
+    new SilentLogger(),
+    new InMemoryAuditRepository(),
+    new InMemoryMetricsCollector(),
+  );
+
+  await useCase.execute({
+    platform: "telegram",
+    conversationId: "chat-1",
+    messageId: "42",
+    senderId: "7",
+    text: "",
+    occurredAt: new Date("2026-06-19T11:59:00.000Z"),
+    attachments: [{
+      kind: "image",
+      fileUniqueId: "u-1",
+      fileId: "file-1",
+      understanding: {
+        description: "A screenshot with sk_live_abcdefghijklmnopqrstuvwxyz visible.",
+        confidence: 0.9,
+        provider: "stub",
+        model: "stub",
+      },
+    }],
+  });
+
+  const described = analyzer.lastInput?.window.messages[0]?.attachments?.[0]?.understanding?.description ?? "";
+  assert.match(described, /\[REDACTED:api_key\]/);
+  assert.doesNotMatch(described, /sk_live/);
+});
+
+test("a media-only message is still processed instead of being treated as empty", async () => {
+  const analyzer = new StubAnalyzer((input) => ({
+    ...EMPTY_ANALYSIS,
+    tasks: [{
+      title: "Follow up on the whiteboard plan",
+      confidence: 0.8,
+      extractionReason: "From the image description.",
+      sourceMessageId: input.window.messages[0]?.messageId ?? "unknown",
+    }],
+  }));
+  const taskRepository = new InMemoryTaskRepository();
+  const useCase = new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(),
+    analyzer,
+    taskRepository,
+    new InMemoryMemoryRepository(),
+    new InMemorySyncRepository(),
+    new RecordingTaskProvider(),
+    new FixedClock(),
+    new SilentLogger(),
+  );
+
+  const result = await useCase.execute({
+    platform: "telegram",
+    conversationId: "chat-1",
+    messageId: "42",
+    senderId: "7",
+    text: "",
+    occurredAt: new Date("2026-06-19T11:59:00.000Z"),
+    attachments: [{
+      kind: "image",
+      fileUniqueId: "u-1",
+      fileId: "file-1",
+      understanding: {
+        description: "A whiteboard listing next steps for the partner deal.",
+        confidence: 0.9,
+        provider: "stub",
+        model: "stub",
+      },
+    }],
+  });
+
+  assert.equal(result.createdTaskIds.length, 1);
+  assert.equal(taskRepository.tasks.size, 1);
+});
+
+function guardError(): Error {
+  const error = new Error("Secret guard model call failed: provider down");
+  error.name = "SecretGuardUnavailableError";
+  return error;
+}

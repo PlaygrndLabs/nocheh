@@ -12,6 +12,13 @@ export interface TelegramWebhookInfo {
   readonly lastErrorMessage?: string;
 }
 
+/** A file handle resolved by getFile. `path` expires roughly an hour after issue. */
+export interface TelegramFileInfo {
+  readonly fileId: string;
+  readonly path: string;
+  readonly sizeBytes?: number;
+}
+
 /** Outbound boundary for the Telegram Bot API calls the client needs. */
 export interface TelegramClientPort {
   /** Validates a token and returns the bot identity. Throws on an invalid token. */
@@ -20,4 +27,11 @@ export interface TelegramClientPort {
   setWebhook(token: string, url: string): Promise<void>;
   /** Returns the current webhook registration. */
   getWebhookInfo(token: string): Promise<TelegramWebhookInfo>;
+  /** Resolves a file_id to a download path. The path is short-lived; download immediately. */
+  getFile(token: string, fileId: string): Promise<TelegramFileInfo>;
+  /**
+   * Downloads file bytes. Rejects once maxBytes is exceeded rather than buffering
+   * an unbounded upload.
+   */
+  downloadFile(token: string, path: string, maxBytes: number): Promise<Uint8Array>;
 }

@@ -1,10 +1,15 @@
 import {
+  AI_MODEL_ROLES,
   AI_PROVIDERS,
+  aiModelEnvKeys,
   aiProviderEnvKeys,
   aiProviderSecretEnvKeys,
+  aiRoleProviderEnvKeys,
   findAiProvider,
   normalizeAiProviderId,
+  providersForRole,
   requiredAiProviderEnvKeys,
+  type AiModelRole,
   type AiProviderDescriptor,
 } from "../../../application/config/ai-provider-catalog.js";
 import type { EnvStorePort } from "../../../application/ports/env-store.js";
@@ -12,7 +17,7 @@ import type { JsonHandler } from "../router.js";
 
 /** Environment keys the client is allowed to write. Provider keys come from the catalog. */
 export const WRITABLE_ENV_KEYS = [
-  "AI_PROVIDER",
+  ...aiRoleProviderEnvKeys(),
   ...aiProviderEnvKeys(),
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_WEBHOOK_URL",
@@ -27,6 +32,10 @@ export const WRITABLE_ENV_KEYS = [
   "MAX_RECENT_MESSAGES",
   "SUMMARY_EVERY_MESSAGES",
   "SUMMARY_EVERY_MINUTES",
+  "MEDIA_MAX_ATTACHMENTS_PER_WINDOW",
+  "MEDIA_MAX_DOWNLOAD_BYTES",
+  "MEDIA_MAX_INLINE_BYTES",
+  "SECRET_GUARD_MAX_ATTEMPTS",
 ] as const;
 
 const SECRET_KEYS = [...aiProviderSecretEnvKeys(), "TELEGRAM_BOT_TOKEN"];
@@ -34,7 +43,7 @@ const SECRET_KEYS = [...aiProviderSecretEnvKeys(), "TELEGRAM_BOT_TOKEN"];
 const STATUS_PRESENCE_KEYS = [
   ...new Set([
     ...SECRET_KEYS,
-    ...AI_PROVIDERS.map((provider) => provider.modelEnvKey),
+    ...aiModelEnvKeys(),
     "TELEGRAM_WEBHOOK_URL",
     "LOCAL_ENCRYPTION_SECRET",
   ]),
@@ -81,25 +90,52 @@ export function createSetupRoutes(envStore: EnvStorePort): SetupRoutes {
     getStatus: async () => {
       const presence = await envStore.presence(STATUS_PRESENCE_KEYS);
       const values = await envStore.read();
-      const providerId = normalizeAiProviderId(values.AI_PROVIDER);
-      const provider = findAiProvider(providerId);
-      const providerReady = provider !== undefined
-        && requiredAiProviderEnvKeys(provider).every((key) => presence[key] ?? false);
+      const roles = AI_MODEL_ROLES.map((role) => {
+        const providerId = normalizeAiProviderId(values[role.providerEnvKey]);
+        const provider = findAiProvider(providerId);
+        const supportsRole = provider !== undefined && provider.roles[role.id] !== undefined;
+        const ready = supportsRole
+          && requiredAiProviderEnvKeys(provider, role.id).every((key) => presence[key] ?? false);
+        return {
+          id: role.id,
+          label: role.label,
+          purpose: role.purpose,
+          whenUnset: role.whenUnset,
+          providerEnvKey: role.providerEnvKey,
+          provider: providerId ?? "none",
+          // A provider selected for a role it cannot fill is a misconfiguration, not readiness.
+          supported: supportsRole,
+          ready,
+          model: roleModel(provider, role.id, values),
+          providers: providersForRole(role.id).map((candidate) => ({
+            id: candidate.id,
+            label: candidate.label,
+            apiKeyEnvKey: candidate.apiKeyEnvKey,
+            modelEnvKey: candidate.roles[role.id]?.modelEnvKey,
+            defaultModel: candidate.roles[role.id]?.defaultModel,
+            modelRequired: candidate.roles[role.id]?.defaultModel === undefined,
+            notes: candidate.roles[role.id]?.notes ?? candidate.notes,
+          })),
+        };
+      });
+      const textRole = roles.find((role) => role.id === "text_analysis");
       return {
         status: 200,
         body: {
           ok: true,
-          hasAiKey: providerReady,
-          aiProvider: providerId ?? "none",
-          aiModel: aiModel(provider, values),
+          // Kept for the existing dashboard contract: text analysis is the primary role.
+          hasAiKey: textRole?.ready ?? false,
+          aiProvider: textRole?.provider ?? "none",
+          aiModel: textRole?.model,
+          roles,
           providers: AI_PROVIDERS.map((candidate) => ({
             id: candidate.id,
             label: candidate.label,
             apiKeyEnvKey: candidate.apiKeyEnvKey,
-            modelEnvKey: candidate.modelEnvKey,
-            defaultModel: candidate.defaultModel,
-            modelRequired: candidate.defaultModel === undefined,
+            // Presence only. The credential itself is never read back.
+            hasApiKey: presence[candidate.apiKeyEnvKey] ?? false,
             notes: candidate.notes,
+            roles: Object.keys(candidate.roles),
           })),
           hasBotToken: presence.TELEGRAM_BOT_TOKEN ?? false,
           botConnected: (presence.TELEGRAM_BOT_TOKEN ?? false) && (presence.TELEGRAM_WEBHOOK_URL ?? false),
@@ -112,10 +148,15 @@ export function createSetupRoutes(envStore: EnvStorePort): SetupRoutes {
 }
 
 /** Model ids are not secrets, so the active one can be echoed back to the dashboard. */
-function aiModel(provider: AiProviderDescriptor | undefined, values: Record<string, string>): string | undefined {
-  if (provider === undefined) {
+function roleModel(
+  provider: AiProviderDescriptor | undefined,
+  role: AiModelRole,
+  values: Record<string, string>,
+): string | undefined {
+  const support = provider?.roles[role];
+  if (support === undefined) {
     return undefined;
   }
-  const configured = values[provider.modelEnvKey]?.trim();
-  return configured === undefined || configured.length === 0 ? provider.defaultModel : configured;
+  const configured = values[support.modelEnvKey]?.trim();
+  return configured === undefined || configured.length === 0 ? support.defaultModel : configured;
 }

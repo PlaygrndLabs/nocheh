@@ -346,14 +346,33 @@ export function validateTemporalRange(validFrom: Date | undefined, validUntil: D
   }
 }
 
+/**
+ * Validates a source reference.
+ *
+ * Source identifiers come from the platform, not from Nocheh, so they only have to be
+ * present and unambiguous. The graph-id minimum length does not apply: a Telegram
+ * `message_id` starts at 1 in every chat, so requiring three characters would make
+ * the first hundred messages of any conversation unpersistable.
+ */
 function validateGraphSource(source: MemoryGraphSource): MemoryGraphSource {
-  normalizeGraphId(source.platform, "Memory graph source platform");
-  normalizeGraphId(source.conversationId, "Memory graph source conversationId");
-  normalizeGraphId(source.messageId, "Memory graph source messageId");
+  normalizeSourceIdentifier(source.platform, "Memory graph source platform");
+  normalizeSourceIdentifier(source.conversationId, "Memory graph source conversationId");
+  normalizeSourceIdentifier(source.messageId, "Memory graph source messageId");
   if (Number.isNaN(source.occurredAt.getTime())) {
     throw new Error("Memory graph source occurredAt must be a valid date.");
   }
   return source;
+}
+
+function normalizeSourceIdentifier(value: string, fieldName: string): string {
+  const id = value.trim();
+  if (id.length === 0) {
+    throw new Error(`${fieldName} must not be empty.`);
+  }
+  if (/\s/.test(id)) {
+    throw new Error(`${fieldName} must not contain whitespace.`);
+  }
+  return id;
 }
 
 function normalizeAliases(aliases: readonly string[]): readonly string[] {

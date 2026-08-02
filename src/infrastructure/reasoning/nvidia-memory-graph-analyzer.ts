@@ -13,6 +13,7 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_MINIMUM_CONFIDENCE,
 } from "./memory-graph-analysis-mapping.js";
+import { DEFAULT_MODEL_REQUEST_TIMEOUT_MS, fetchWithTimeout } from "../http/fetch-with-timeout.js";
 
 const PROVIDER = "nvidia";
 
@@ -22,6 +23,12 @@ export const NVIDIA_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1/chat
 /** Low temperature: analysis is extraction, not creative writing. */
 const DEFAULT_TEMPERATURE = 0.2;
 const DEFAULT_TOP_P = 0.7;
+/**
+ * Analysis needs a far longer budget than the other roles. Measured: a two-message
+ * window with media descriptions took ~240s, which also exceeds Node's own default
+ * socket timeout, so this must stay explicit.
+ */
+const ANALYSIS_REQUEST_TIMEOUT_MS = 280_000;
 
 export interface NvidiaMemoryGraphAnalyzerConfig {
   readonly apiKey: string;
@@ -37,6 +44,11 @@ export interface NvidiaMemoryGraphAnalyzerConfig {
    * GLM-5.2 advertises structured output. Disable if the endpoint rejects it.
    */
   readonly jsonResponseFormat?: boolean;
+  /**
+   * Request timeout in milliseconds. Analysis is the slowest call in the pipeline:
+   * a real window against z-ai/glm-5.2 measured over 200 seconds.
+   */
+  readonly timeoutMs?: number;
 }
 
 interface OpenAiCompatibleResponse {
@@ -69,6 +81,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   private readonly temperature: number;
   private readonly topP: number;
   private readonly jsonResponseFormat: boolean;
+  private readonly timeoutMs: number;
 
   public constructor(config: NvidiaMemoryGraphAnalyzerConfig) {
     this.apiKey = config.apiKey;
@@ -79,6 +92,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     this.temperature = config.temperature ?? DEFAULT_TEMPERATURE;
     this.topP = config.topP ?? DEFAULT_TOP_P;
     this.jsonResponseFormat = config.jsonResponseFormat ?? true;
+    this.timeoutMs = config.timeoutMs ?? ANALYSIS_REQUEST_TIMEOUT_MS;
   }
 
   public async analyze(input: ConversationAnalysisInput): Promise<MemoryGraphAnalysis> {
@@ -95,7 +109,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       ],
     });
 
-    const response = await fetch(this.baseUrl, {
+    const response = await fetchWithTimeout(fetch, this.baseUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -103,7 +117,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
         authorization: `Bearer ${this.apiKey}`,
       },
       body,
-    });
+    }, { timeoutMs: this.timeoutMs, label: "NVIDIA analysis" });
 
     const text = await response.text();
     if (!response.ok) {
@@ -116,6 +130,8 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       rawOutput: this.parseOutput(parsed),
       provider: PROVIDER,
       minimumConfidence: this.minimumConfidence,
+      // Source references are resolved from the window, never taken from the model.
+      window: input.window,
       ...(usage === undefined ? {} : { tokenUsage: usage }),
     });
   }

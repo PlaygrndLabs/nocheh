@@ -18,4 +18,9 @@ export class RegexSecretDetector implements SecretDetectorPort {
       (kind) => renderPlaceholder(DEFAULT_REDACTION_PLACEHOLDER, kind),
     );
   }
+
+  /** Pattern matching is local and cheap, so there is nothing to batch. */
+  public async redactMany(texts: readonly string[]): Promise<readonly RedactedContent[]> {
+    return texts.map((text) => this.redact(text));
+  }
 }
