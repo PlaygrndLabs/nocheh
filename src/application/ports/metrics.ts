@@ -1,3 +1,5 @@
+import type { AiTokenUsage } from "../../domain/observability/audit.js";
+
 /** Aggregated processing metrics exposed to internal tooling. */
 export interface MetricsSnapshot {
   readonly messagesProcessed: number;
@@ -7,6 +9,13 @@ export interface MetricsSnapshot {
   readonly averageConfidence: number;
   readonly redactionEvents: number;
   readonly averageProcessingLatencyMs: number;
+  /** Model calls whose usage was reported, across every role. */
+  readonly aiCalls: number;
+  readonly aiInputTokens: number;
+  readonly aiOutputTokens: number;
+  /** Tokens spent thinking and then discarded. Zero for non-reasoning models. */
+  readonly aiReasoningTokens: number;
+  readonly aiTotalTokens: number;
 }
 
 /** Collects operational metrics for the processing pipeline. */
@@ -17,6 +26,13 @@ export interface MetricsCollectorPort {
   recordSyncOutcome(success: boolean): void;
   recordConfidence(confidence: number): void;
   recordRedactionEvents(count: number): void;
+  /**
+   * Records one model call's token usage.
+   *
+   * Cost is a feature, so it has to be visible somewhere other than a single audit
+   * record. Called for every role that reports usage, not just analysis.
+   */
+  recordAiTokenUsage(usage: AiTokenUsage): void;
   snapshot(): MetricsSnapshot;
 }
 
@@ -28,6 +44,7 @@ export class NoopMetricsCollector implements MetricsCollectorPort {
   public recordSyncOutcome(): void {}
   public recordConfidence(): void {}
   public recordRedactionEvents(): void {}
+  public recordAiTokenUsage(): void {}
   public snapshot(): MetricsSnapshot {
     return {
       messagesProcessed: 0,
@@ -37,6 +54,11 @@ export class NoopMetricsCollector implements MetricsCollectorPort {
       averageConfidence: 0,
       redactionEvents: 0,
       averageProcessingLatencyMs: 0,
+      aiCalls: 0,
+      aiInputTokens: 0,
+      aiOutputTokens: 0,
+      aiReasoningTokens: 0,
+      aiTotalTokens: 0,
     };
   }
 }

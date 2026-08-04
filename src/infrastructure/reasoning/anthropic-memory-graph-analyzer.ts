@@ -14,6 +14,7 @@ import {
   DEFAULT_MINIMUM_CONFIDENCE,
 } from "./memory-graph-analysis-mapping.js";
 import { fetchWithTimeout } from "../http/fetch-with-timeout.js";
+import { NoopLogger, type LoggerPort } from "../../application/ports/logger.js";
 
 const PROVIDER = "anthropic";
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
@@ -29,6 +30,8 @@ export interface AnthropicMemoryGraphAnalyzerConfig {
   readonly maxTokens?: number;
   /** Request timeout in milliseconds. Analysis windows can be slow. */
   readonly timeoutMs?: number;
+  /** Optional. Records per-call latency, prompt size, and throughput. */
+  readonly logger?: LoggerPort;
 }
 
 interface AnthropicClaudeResponse {
@@ -51,6 +54,7 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   private readonly minimumConfidence: number;
   private readonly maxTokens: number;
   private readonly timeoutMs: number;
+  private readonly logger: LoggerPort;
 
   public constructor(config: AnthropicMemoryGraphAnalyzerConfig) {
     this.apiKey = config.apiKey;
@@ -60,19 +64,23 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     this.minimumConfidence = config.minimumConfidence ?? DEFAULT_MINIMUM_CONFIDENCE;
     this.maxTokens = config.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
     this.timeoutMs = config.timeoutMs ?? ANALYSIS_REQUEST_TIMEOUT_MS;
+    this.logger = config.logger ?? new NoopLogger();
   }
 
   public async analyze(input: ConversationAnalysisInput): Promise<MemoryGraphAnalysis> {
+    const system = analysisSystemPrompt(this.minimumConfidence);
+    const user = analysisUserPrompt(input);
     const body = JSON.stringify({
       model: this.model,
       max_tokens: this.maxTokens,
-      system: analysisSystemPrompt(this.minimumConfidence),
+      system,
       messages: [{
         role: "user",
-        content: [{ type: "text", text: analysisUserPrompt(input) }],
+        content: [{ type: "text", text: user }],
       }],
     });
 
+    const startedAt = Date.now();
     const response = await fetchWithTimeout(fetch, this.baseUrl, {
       method: "POST",
       headers: {
@@ -90,6 +98,17 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
 
     const parsed = JSON.parse(text) as AnthropicClaudeResponse;
     const usage = tokenUsage(parsed, this.model);
+    const latencyMs = Date.now() - startedAt;
+    this.logger.info("Anthropic analysis completed", {
+      model: this.model,
+      latencyMs,
+      promptChars: system.length + user.length,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      outputTokensPerSecond: latencyMs <= 0
+        ? 0
+        : Math.round(((usage?.outputTokens ?? 0) / latencyMs) * 1000 * 10) / 10,
+    });
     return buildMemoryGraphAnalysis({
       rawOutput: parseAnalysisJson(outputText(parsed), "Anthropic Claude"),
       provider: PROVIDER,

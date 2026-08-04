@@ -96,6 +96,8 @@ Implemented:
   text cache keyed on `file_unique_id`, per-window caps, bytes never persisted
 - Secret guard: model detects literals, masking is local; fail closed with
   quarantine after repeated failures; interval-driven flush sweep
+- Cost and latency observability: per-call latency, prompt size, output throughput and
+  reasoning tokens are logged; token counters across every role are in `/api/metrics`
 - Analysis contract generated from the domain: the prompt renders every vocabulary
   from `as const` arrays, the mapping layer validates against the same arrays, and
   each rejected item lands in the audit record's `errorLogs` with a reason
@@ -118,8 +120,12 @@ Gaps to respect when planning:
   `analysisSystemPrompt()` from `as const` arrays in the domain, and the mapping layer
   rejects anything outside them. Verified by tests only; no real window has been run
   since. First item in `TASK.md`.
-- Analysis takes 189-240s per window against `z-ai/glm-5.2`, which is longer than a
-  Telegram webhook should block. The flush still runs in the request path.
+- Analysis takes 189-240s per window against `z-ai/glm-5.2`. The webhook no longer waits
+  for it: in batch mode it buffers and the flush sweep owns analysis, so
+  `FLUSH_SWEEP_INTERVAL_SECONDS` is the worst-case delay before a due batch is analysed.
+  Whether that latency is the free tier or reasoning overhead is now measurable but not
+  yet measured; `MESSAGE_ANALYSIS_MODE=immediate` still blocks the request and is
+  testing-only.
 - The perception model reproduces credentials it is told to omit (verified on a
   photographed password), so the secret guard is load-bearing, not belt-and-braces.
 - NVIDIA wire formats are verified: audio uses `audio_url`, **not** the OpenAI

@@ -1,4 +1,5 @@
 import type { MetricsCollectorPort, MetricsSnapshot } from "../../application/ports/metrics.js";
+import type { AiTokenUsage } from "../../domain/observability/audit.js";
 
 /** In-process metrics collector for local Phase 1.5 observability. */
 export class InMemoryMetricsCollector implements MetricsCollectorPort {
@@ -12,6 +13,10 @@ export class InMemoryMetricsCollector implements MetricsCollectorPort {
   private confidenceCount = 0;
   private redactionEvents = 0;
   private latencyTotalMs = 0;
+  private aiCalls = 0;
+  private aiInputTokens = 0;
+  private aiOutputTokens = 0;
+  private aiReasoningTokens = 0;
 
   /** Records one processed message and its end-to-end latency. */
   public recordMessageProcessed(latencyMs: number): void {
@@ -51,6 +56,14 @@ export class InMemoryMetricsCollector implements MetricsCollectorPort {
     this.redactionEvents += count;
   }
 
+  /** Records one model call's reported token usage. */
+  public recordAiTokenUsage(usage: AiTokenUsage): void {
+    this.aiCalls += 1;
+    this.aiInputTokens += usage.inputTokens;
+    this.aiOutputTokens += usage.outputTokens;
+    this.aiReasoningTokens += usage.reasoningTokens ?? 0;
+  }
+
   /** Returns a point-in-time metrics snapshot. */
   public snapshot(): MetricsSnapshot {
     return {
@@ -61,6 +74,11 @@ export class InMemoryMetricsCollector implements MetricsCollectorPort {
       averageConfidence: ratio(this.confidenceTotal, this.confidenceCount),
       redactionEvents: this.redactionEvents,
       averageProcessingLatencyMs: ratio(this.latencyTotalMs, this.messagesProcessed),
+      aiCalls: this.aiCalls,
+      aiInputTokens: this.aiInputTokens,
+      aiOutputTokens: this.aiOutputTokens,
+      aiReasoningTokens: this.aiReasoningTokens,
+      aiTotalTokens: this.aiInputTokens + this.aiOutputTokens,
     };
   }
 }

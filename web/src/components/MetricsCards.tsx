@@ -9,6 +9,9 @@ export function MetricsCards({ metrics }: { metrics: MetricsSnapshot }): JSX.Ele
     ["Avg Confidence", metrics.averageConfidence.toFixed(2)],
     ["Redactions", String(metrics.redactionEvents)],
     ["Avg Latency", `${metrics.averageProcessingLatencyMs.toFixed(0)} ms`],
+    ["AI Calls", String(metrics.aiCalls)],
+    ["Tokens", compact(metrics.aiTotalTokens)],
+    ["Thinking", compact(metrics.aiReasoningTokens)],
   ];
 
   return (
@@ -25,4 +28,12 @@ export function MetricsCards({ metrics }: { metrics: MetricsSnapshot }): JSX.Ele
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+/** Token counts get large fast, so thousands are abbreviated. */
+function compact(value: number): string {
+  if (value < 1000) {
+    return String(value);
+  }
+  return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`;
 }
