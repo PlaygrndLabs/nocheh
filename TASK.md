@@ -2,25 +2,21 @@
 
 Open work only. Delivered work lives in the code and in `docs/adr/`.
 
-## Now: Populate The Graph From Real Output
+## Now: Confirm The Graph Populates Against A Live Model
 
-The pipeline runs end-to-end against live models, but `nodes`, `edges`,
-`strategicSuggestions` and `actionSuggestions` are **dropped on every real run**.
-The analysis prompt documents the value shape for `tasks`, `memories` and
-`statusUpdates` and for nothing else, so GLM-5.2 invents plausible non-conforming
-shapes: `{type, title, project}` for a node where the domain wants
-`{id, kind, label, scope, payload}`, and a bare string for a suggestion where the
-domain wants `{kind, title, rationale}`. Each item is dropped with the reason
-recorded in the audit trail. The memory graph is the product, so this is the top
-priority.
+The analysis contract is now generated from the domain vocabularies, so the prompt
+names every node kind, relation, scope, payload kind and suggestion kind, and the
+mapping layer refuses anything outside them instead of casting it through. Drop
+reasons reach the audit record's `errorLogs`, and a dangling edge is discarded before
+SQLite's foreign key can abort the window. Covered by
+`test/memory-graph-analysis-mapping.test.ts`; not yet observed against a real model.
 
-- [ ] Give `MemoryNodeKind`, `MemoryRelation`, node scopes, expanded payload kinds
-      and the suggestion kinds runtime `as const` arrays, deriving the existing
-      union types from them (`typeof KINDS[number]`).
-- [ ] Document every value shape in `analysisSystemPrompt()`, generated from those
-      arrays so the prompt cannot drift from the domain.
-- [ ] Add a test asserting the prompt lists exactly the domain vocabularies.
-- [ ] Re-run a real window and confirm nodes, edges and suggestions land.
+- [ ] Run a real window and confirm nodes, edges and suggestions land in SQLite.
+- [ ] Read `errorLogs` on that run: anything still dropped is either a prompt gap or a
+      vocabulary gap, and the reason string says which.
+- [ ] Decide whether to also send the vocabularies as NVIDIA `response_format:
+      json_schema`, generated from the same arrays. Prompt-only is working in tests;
+      a schema would make it structural.
 
 ## Now: Decide Where Analysis Runs
 

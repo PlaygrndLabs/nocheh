@@ -66,7 +66,7 @@ export class AnthropicMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     const body = JSON.stringify({
       model: this.model,
       max_tokens: this.maxTokens,
-      system: analysisSystemPrompt(),
+      system: analysisSystemPrompt(this.minimumConfidence),
       messages: [{
         role: "user",
         content: [{ type: "text", text: analysisUserPrompt(input) }],
