@@ -104,7 +104,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       stream: false,
       ...(this.jsonResponseFormat ? { response_format: { type: "json_object" } } : {}),
       messages: [
-        { role: "system", content: analysisSystemPrompt() },
+        { role: "system", content: analysisSystemPrompt(this.minimumConfidence) },
         { role: "user", content: analysisUserPrompt(input) },
       ],
     });

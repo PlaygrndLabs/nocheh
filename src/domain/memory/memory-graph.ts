@@ -3,75 +3,165 @@ import type { SourceReference } from "../tasks/task.js";
 export type MemoryNodeId = string;
 export type MemoryEdgeId = string;
 
-export type MemoryGraphStatus = "active" | "superseded" | "archived" | "deleted";
+/**
+ * The graph vocabularies exist at runtime, not only in the type system.
+ *
+ * Two consumers need the members as values: the analysis prompt, which must tell a
+ * model exactly which kinds and relations are allowed, and the mapping layer, which
+ * must reject anything outside them. Deriving the unions with `typeof X[number]`
+ * keeps one source of truth, so the prompt cannot drift from the domain.
+ */
+export const MEMORY_GRAPH_STATUSES = ["active", "superseded", "archived", "deleted"] as const;
 
-export type MemoryGraphScope = "user" | "conversation" | "project" | "global";
+export type MemoryGraphStatus = typeof MEMORY_GRAPH_STATUSES[number];
 
-export type MemoryNodeKind =
-  | "person"
-  | "project"
-  | "conversation"
-  | "task"
-  | "decision"
-  | "goal"
-  | "idea"
-  | "routine"
-  | "area"
-  | "resource"
-  | "skill"
-  | "asset"
-  | "risk"
-  | "content_plan"
-  | "learning_plan"
-  | "investment_thesis"
-  | "concept";
+export const MEMORY_GRAPH_SCOPES = ["user", "conversation", "project", "global"] as const;
 
-export type MemoryRelation =
-  | "PERSON_WORKS_ON_PROJECT"
-  | "PERSON_OWNS_TASK"
-  | "PROJECT_HAS_DECISION"
-  | "PROJECT_HAS_DEADLINE"
-  | "PROJECT_HAS_BLOCKER"
-  | "TASK_BLOCKED_BY_PERSON"
-  | "GOAL_HAS_PROJECT"
-  | "GOAL_HAS_ROUTINE"
-  | "IDEA_SUPPORTS_GOAL"
-  | "IDEA_BECAME_PROJECT"
-  | "ROUTINE_SUPPORTS_AREA"
-  | "PREFERENCE_GUIDES_STYLE"
-  | "SKILL_SUPPORTS_TASK"
-  | "PARTNER_WORKS_ON_STARTUP"
-  | "CLIENT_OWNS_PROJECT"
-  | "CONTENT_PLAN_SUPPORTS_GOAL"
-  | "LEARNING_PLAN_BUILDS_SKILL"
-  | "ASSET_BELONGS_TO_PROJECT"
-  | "INVESTMENT_THESIS_HAS_RISK"
-  | "RISK_AFFECTS_GOAL";
+export type MemoryGraphScope = typeof MEMORY_GRAPH_SCOPES[number];
+
+export const MEMORY_NODE_KINDS = [
+  "person",
+  "project",
+  "conversation",
+  "task",
+  "decision",
+  "goal",
+  "idea",
+  "routine",
+  "area",
+  "resource",
+  "skill",
+  "asset",
+  "risk",
+  "content_plan",
+  "learning_plan",
+  "investment_thesis",
+  "concept",
+] as const;
+
+export type MemoryNodeKind = typeof MEMORY_NODE_KINDS[number];
+
+export const MEMORY_RELATIONS = [
+  "PERSON_WORKS_ON_PROJECT",
+  "PERSON_OWNS_TASK",
+  "PROJECT_HAS_DECISION",
+  "PROJECT_HAS_DEADLINE",
+  "PROJECT_HAS_BLOCKER",
+  "TASK_BLOCKED_BY_PERSON",
+  "GOAL_HAS_PROJECT",
+  "GOAL_HAS_ROUTINE",
+  "IDEA_SUPPORTS_GOAL",
+  "IDEA_BECAME_PROJECT",
+  "ROUTINE_SUPPORTS_AREA",
+  "PREFERENCE_GUIDES_STYLE",
+  "SKILL_SUPPORTS_TASK",
+  "PARTNER_WORKS_ON_STARTUP",
+  "CLIENT_OWNS_PROJECT",
+  "CONTENT_PLAN_SUPPORTS_GOAL",
+  "LEARNING_PLAN_BUILDS_SKILL",
+  "ASSET_BELONGS_TO_PROJECT",
+  "INVESTMENT_THESIS_HAS_RISK",
+  "RISK_AFFECTS_GOAL",
+] as const;
+
+export type MemoryRelation = typeof MEMORY_RELATIONS[number];
 
 export type MemoryGraphPayload = Readonly<Record<string, unknown>>;
 
-export type MemoryPayloadKind =
-  | "person"
-  | "preference"
-  | "style_rule"
-  | "personal_rule"
-  | "skill"
-  | "goal"
-  | "idea"
-  | "opportunity"
-  | "insight"
-  | "routine"
-  | "routine_experiment"
-  | "asset"
-  | "risk"
-  | "content_plan"
-  | "learning_plan"
-  | "investment_thesis";
+export const MEMORY_PAYLOAD_KINDS = [
+  "person",
+  "preference",
+  "style_rule",
+  "personal_rule",
+  "skill",
+  "goal",
+  "idea",
+  "opportunity",
+  "insight",
+  "routine",
+  "routine_experiment",
+  "asset",
+  "risk",
+  "content_plan",
+  "learning_plan",
+  "investment_thesis",
+] as const;
 
-export type GoalStatus = "suggested" | "active" | "paused" | "completed" | "dropped";
-export type IdeaStatus = "suggested" | "exploring" | "accepted" | "rejected" | "converted";
-export type RoutineCadence = "daily" | "weekly" | "monthly" | "custom";
-export type RiskLevel = "low" | "medium" | "high";
+export type MemoryPayloadKind = typeof MEMORY_PAYLOAD_KINDS[number];
+
+export const GOAL_STATUSES = ["suggested", "active", "paused", "completed", "dropped"] as const;
+export type GoalStatus = typeof GOAL_STATUSES[number];
+
+export const IDEA_STATUSES = ["suggested", "exploring", "accepted", "rejected", "converted"] as const;
+export type IdeaStatus = typeof IDEA_STATUSES[number];
+
+export const ROUTINE_CADENCES = ["daily", "weekly", "monthly", "custom"] as const;
+export type RoutineCadence = typeof ROUTINE_CADENCES[number];
+
+export const RISK_LEVELS = ["low", "medium", "high"] as const;
+export type RiskLevel = typeof RISK_LEVELS[number];
+
+export const SKILL_LEVELS = ["learning", "working", "strong"] as const;
+export type SkillLevel = typeof SKILL_LEVELS[number];
+
+export const ASSET_TYPES = ["cash", "crypto", "equity", "domain", "content", "other"] as const;
+export type AssetType = typeof ASSET_TYPES[number];
+
+export const CONTENT_PLATFORMS = ["x", "linkedin", "blog", "newsletter", "other"] as const;
+export type ContentPlatform = typeof CONTENT_PLATFORMS[number];
+
+export const INVESTMENT_MARKETS = ["crypto", "equity", "startup", "other"] as const;
+export type InvestmentMarket = typeof INVESTMENT_MARKETS[number];
+
+/**
+ * The fields each expanded payload kind must carry, as a value the prompt can render.
+ *
+ * Typed as an exhaustive `Record<MemoryPayloadKind, ...>` so adding a payload kind to
+ * `MEMORY_PAYLOAD_KINDS` without documenting its shape is a compile error. Enum-valued
+ * fields spell out their options inline, because a model told only "status" invents one.
+ */
+export const MEMORY_PAYLOAD_FIELD_SPECS: Readonly<Record<MemoryPayloadKind, readonly string[]>> = {
+  person: ["role?", "relationship?", "timezone?", "communicationNotes?[]"],
+  preference: ["area", "preference"],
+  style_rule: ["rule", "examples?[]"],
+  personal_rule: ["rule", "reason?"],
+  skill: [`level?(${SKILL_LEVELS.join("|")})`, "evidence?[]", "targetLevel?"],
+  goal: [`status(${GOAL_STATUSES.join("|")})`, "desiredOutcome", "horizon?", "successMetric?"],
+  idea: [`status(${IDEA_STATUSES.join("|")})`, "hypothesis", "nextStep?"],
+  opportunity: ["opportunity", "upside?", "constraints?[]"],
+  insight: ["insight", "implication?"],
+  routine: [`cadence(${ROUTINE_CADENCES.join("|")})`, "habit", "target?"],
+  routine_experiment: ["hypothesis", "durationDays(number)", "measurement"],
+  asset: [`assetType(${ASSET_TYPES.join("|")})`, "description"],
+  risk: [`level(${RISK_LEVELS.join("|")})`, "risk", "mitigation?"],
+  content_plan: [`platform(${CONTENT_PLATFORMS.join("|")})`, "audience", "angle"],
+  learning_plan: ["topic", "targetOutcome", "currentLevel?"],
+  investment_thesis: [`market(${INVESTMENT_MARKETS.join("|")})`, "thesis", "invalidationSignal?"],
+};
+
+export function isMemoryGraphStatus(value: unknown): value is MemoryGraphStatus {
+  return includesValue(MEMORY_GRAPH_STATUSES, value);
+}
+
+export function isMemoryGraphScope(value: unknown): value is MemoryGraphScope {
+  return includesValue(MEMORY_GRAPH_SCOPES, value);
+}
+
+export function isMemoryNodeKind(value: unknown): value is MemoryNodeKind {
+  return includesValue(MEMORY_NODE_KINDS, value);
+}
+
+export function isMemoryRelation(value: unknown): value is MemoryRelation {
+  return includesValue(MEMORY_RELATIONS, value);
+}
+
+export function isMemoryPayloadKind(value: unknown): value is MemoryPayloadKind {
+  return includesValue(MEMORY_PAYLOAD_KINDS, value);
+}
+
+function includesValue(vocabulary: readonly string[], value: unknown): boolean {
+  return typeof value === "string" && vocabulary.includes(value);
+}
 
 export interface PersonMemoryPayload extends MemoryGraphPayload {
   readonly payloadKind: "person";
@@ -101,7 +191,7 @@ export interface PersonalRuleMemoryPayload extends MemoryGraphPayload {
 
 export interface SkillMemoryPayload extends MemoryGraphPayload {
   readonly payloadKind: "skill";
-  readonly level?: "learning" | "working" | "strong";
+  readonly level?: SkillLevel;
   readonly evidence?: readonly string[];
   readonly targetLevel?: string;
 }
@@ -150,7 +240,7 @@ export interface RoutineExperimentMemoryPayload extends MemoryGraphPayload {
 
 export interface AssetMemoryPayload extends MemoryGraphPayload {
   readonly payloadKind: "asset";
-  readonly assetType: "cash" | "crypto" | "equity" | "domain" | "content" | "other";
+  readonly assetType: AssetType;
   readonly description: string;
 }
 
@@ -163,7 +253,7 @@ export interface RiskMemoryPayload extends MemoryGraphPayload {
 
 export interface ContentPlanMemoryPayload extends MemoryGraphPayload {
   readonly payloadKind: "content_plan";
-  readonly platform: "x" | "linkedin" | "blog" | "newsletter" | "other";
+  readonly platform: ContentPlatform;
   readonly audience: string;
   readonly angle: string;
 }
@@ -177,7 +267,7 @@ export interface LearningPlanMemoryPayload extends MemoryGraphPayload {
 
 export interface InvestmentThesisMemoryPayload extends MemoryGraphPayload {
   readonly payloadKind: "investment_thesis";
-  readonly market: "crypto" | "equity" | "startup" | "other";
+  readonly market: InvestmentMarket;
   readonly thesis: string;
   readonly invalidationSignal?: string;
 }

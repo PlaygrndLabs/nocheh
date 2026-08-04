@@ -16,6 +16,9 @@ import type { SecretDetectorPort } from "../src/application/ports/secret-detecto
 import { RegexSecretDetector } from "../src/infrastructure/security/regex-secret-detector.js";
 import { ProcessIncomingMessageUseCase } from "../src/application/use-cases/process-incoming-message.js";
 import { InMemoryMetricsCollector } from "../src/infrastructure/observability/in-memory-metrics-collector.js";
+import type { MemoryGraphRepositoryPort } from "../src/application/ports/memory-graph-repository.js";
+import type { MemoryEdge, MemoryNode } from "../src/domain/memory/memory-graph.js";
+import { createMemoryEdge, createMemoryNode } from "../src/domain/memory/memory-graph.js";
 
 class FixedClock implements ClockPort {
   public now(): Date {
@@ -656,3 +659,195 @@ function guardError(): Error {
   error.name = "SecretGuardUnavailableError";
   return error;
 }
+
+/**
+ * A graph store that mimics the real SQLite foreign key on `memory_edges`: an edge
+ * whose endpoints are not present throws, exactly as `foreign_keys = ON` makes it.
+ */
+class ForeignKeyMemoryGraphRepository implements MemoryGraphRepositoryPort {
+  public readonly nodes = new Map<string, MemoryNode>();
+  public readonly edges = new Map<string, MemoryEdge>();
+
+  public async saveNode(node: MemoryNode): Promise<void> {
+    this.nodes.set(node.id, node);
+  }
+
+  public async saveEdge(edge: MemoryEdge): Promise<void> {
+    if (!this.nodes.has(edge.fromNodeId) || !this.nodes.has(edge.toNodeId)) {
+      throw new Error("FOREIGN KEY constraint failed");
+    }
+    this.edges.set(edge.id, edge);
+  }
+
+  public async findNodeById(id: string): Promise<MemoryNode | undefined> {
+    return this.nodes.get(id);
+  }
+
+  public async findEdgeById(id: string): Promise<MemoryEdge | undefined> {
+    return this.edges.get(id);
+  }
+
+  public async listNodes(): Promise<readonly MemoryNode[]> {
+    return [...this.nodes.values()];
+  }
+
+  public async listEdgesForNode(nodeId: string): Promise<readonly MemoryEdge[]> {
+    return [...this.edges.values()].filter((edge) => edge.fromNodeId === nodeId || edge.toNodeId === nodeId);
+  }
+
+  public async listEdgesByRelation(relation: MemoryEdge["relation"]): Promise<readonly MemoryEdge[]> {
+    return [...this.edges.values()].filter((edge) => edge.relation === relation);
+  }
+
+  public async findNodesBySourceMessageId(messageId: string): Promise<readonly MemoryNode[]> {
+    return [...this.nodes.values()].filter((node) => node.source.messageId === messageId);
+  }
+}
+
+const graphSource = {
+  platform: "telegram",
+  conversationId: "chat-1",
+  messageId: "77",
+  occurredAt: new Date("2026-06-19T11:59:00.000Z"),
+};
+
+function graphMessage() {
+  return {
+    platform: "telegram",
+    conversationId: "chat-1",
+    messageId: "77",
+    senderId: "7",
+    text: "Acme needs a launch decision this week.",
+    occurredAt: graphSource.occurredAt,
+  };
+}
+
+function graphUseCase(
+  analyzer: StubAnalyzer,
+  graphRepository: MemoryGraphRepositoryPort,
+  auditRepository: AuditRepositoryPort,
+): ProcessIncomingMessageUseCase {
+  return new ProcessIncomingMessageUseCase(
+    new RegexSecretDetector(),
+    analyzer,
+    new InMemoryTaskRepository(),
+    new InMemoryMemoryRepository(),
+    new InMemorySyncRepository(),
+    new RecordingTaskProvider(),
+    new FixedClock(),
+    new SilentLogger(),
+    auditRepository,
+    new InMemoryMetricsCollector(),
+    graphRepository,
+  );
+}
+
+test("analysis warnings reach the audit trail, not just a count", async () => {
+  const analyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    warnings: [
+      "Dropped graph node: node kind must be one of: person, project. Received \"startup\".",
+      "Could not tell which project the deadline belongs to.",
+    ],
+  }));
+  const auditRepository = new InMemoryAuditRepository();
+  await graphUseCase(analyzer, new ForeignKeyMemoryGraphRepository(), auditRepository)
+    .execute(graphMessage());
+
+  const record = auditRepository.records[0];
+  assert.equal(record?.steps.find((entry) => entry.name === "analysis")?.metadata.warningCount, 2);
+  assert.deepEqual(record?.errorLogs, [
+    "Analysis warning: Dropped graph node: node kind must be one of: person, project. Received \"startup\".",
+    "Analysis warning: Could not tell which project the deadline belongs to.",
+  ]);
+});
+
+test("an edge pointing at a node nobody created is dropped, and the window still audits", async () => {
+  const project = createMemoryNode({
+    id: "project:acme",
+    kind: "project",
+    label: "Acme site",
+    scope: "project",
+    source: graphSource,
+    confidence: 0.9,
+  });
+  const goodEdge = createMemoryEdge({
+    id: "edge:acme-decision",
+    fromNodeId: "project:acme",
+    toNodeId: "project:acme",
+    relation: "PROJECT_HAS_DECISION",
+    fact: "Acme has a launch decision",
+    source: graphSource,
+    confidence: 0.9,
+  });
+  const danglingEdge = createMemoryEdge({
+    id: "edge:acme-ghost",
+    fromNodeId: "project:acme",
+    toNodeId: "person:ghost",
+    relation: "CLIENT_OWNS_PROJECT",
+    fact: "A person nobody described owns Acme",
+    source: graphSource,
+    confidence: 0.9,
+  });
+  const analyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    nodes: [project],
+    // Order matters: the dangling edge comes first, so a thrown error would abort
+    // before the good edge and before the audit record was written.
+    edges: [danglingEdge, goodEdge],
+  }));
+  const graphRepository = new ForeignKeyMemoryGraphRepository();
+  const auditRepository = new InMemoryAuditRepository();
+
+  const result = await graphUseCase(analyzer, graphRepository, auditRepository).execute(graphMessage());
+
+  assert.deepEqual(result.createdMemoryGraphNodeIds, ["project:acme"]);
+  assert.deepEqual(result.createdMemoryGraphEdgeIds, ["edge:acme-decision"]);
+  assert.equal(graphRepository.edges.has("edge:acme-ghost"), false);
+  const record = auditRepository.records[0];
+  assert.equal(auditRepository.records.length, 1, "the audit record survives a bad edge");
+  const graphStep = record?.steps.find((entry) => entry.name === "graph_persistence");
+  assert.equal(graphStep?.status, "succeeded");
+  assert.equal(graphStep?.metadata.edgeCount, 1);
+  assert.equal(graphStep?.metadata.droppedEdgeCount, 1);
+  assert.match(record?.errorLogs.join("\n") ?? "", /Graph edge edge:acme-ghost dropped: unknown node person:ghost\./);
+});
+
+test("an edge onto a node stored by an earlier window is kept", async () => {
+  const graphRepository = new ForeignKeyMemoryGraphRepository();
+  await graphRepository.saveNode(createMemoryNode({
+    id: "person:mak",
+    kind: "person",
+    label: "Mak",
+    scope: "user",
+    source: graphSource,
+    confidence: 1,
+  }));
+  const project = createMemoryNode({
+    id: "project:acme",
+    kind: "project",
+    label: "Acme site",
+    scope: "project",
+    source: graphSource,
+    confidence: 0.9,
+  });
+  const analyzer = new StubAnalyzer(() => ({
+    ...EMPTY_ANALYSIS,
+    nodes: [project],
+    edges: [createMemoryEdge({
+      id: "edge:mak-acme",
+      fromNodeId: "person:mak",
+      toNodeId: "project:acme",
+      relation: "PERSON_WORKS_ON_PROJECT",
+      fact: "Mak works on the Acme site",
+      source: graphSource,
+      confidence: 0.9,
+    })],
+  }));
+  const auditRepository = new InMemoryAuditRepository();
+
+  const result = await graphUseCase(analyzer, graphRepository, auditRepository).execute(graphMessage());
+
+  assert.deepEqual(result.createdMemoryGraphEdgeIds, ["edge:mak-acme"]);
+  assert.deepEqual(auditRepository.records[0]?.errorLogs, []);
+});

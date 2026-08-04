@@ -96,6 +96,9 @@ Implemented:
   text cache keyed on `file_unique_id`, per-window caps, bytes never persisted
 - Secret guard: model detects literals, masking is local; fail closed with
   quarantine after repeated failures; interval-driven flush sweep
+- Analysis contract generated from the domain: the prompt renders every vocabulary
+  from `as const` arrays, the mapping layer validates against the same arrays, and
+  each rejected item lands in the audit record's `errorLogs` with a reason
 - SQLite with encrypted payload columns, per-step audit records, token usage
 - Password-gated dashboard (`/app`), configurable redaction policy
 
@@ -110,10 +113,11 @@ Gaps to respect when planning:
 - Reactions bypass the secret detector; they carry synthetic text, not user content.
 - Telegram Desktop history imports skip media: export entries reference local file
   paths, not `file_id`s.
-- **Graph nodes, edges, and suggestions are dropped on every real run.** The analysis
-  prompt documents the value shape for `tasks`, `memories`, and `statusUpdates` only,
-  so the model invents non-conforming shapes for the rest and each item is dropped
-  with a reason in the audit trail. Top priority in `TASK.md`.
+- **The graph contract is generated but unverified against a live model.** Every node
+  kind, relation, scope, payload kind and suggestion kind is rendered into
+  `analysisSystemPrompt()` from `as const` arrays in the domain, and the mapping layer
+  rejects anything outside them. Verified by tests only; no real window has been run
+  since. First item in `TASK.md`.
 - Analysis takes 189-240s per window against `z-ai/glm-5.2`, which is longer than a
   Telegram webhook should block. The flush still runs in the request path.
 - The perception model reproduces credentials it is told to omit (verified on a

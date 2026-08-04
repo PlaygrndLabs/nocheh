@@ -31,7 +31,7 @@ import { WindowRedactionService, type WindowRedactionResult } from "../services/
 import { describeAttachment } from "../../domain/messaging/message-attachment.js";
 import { Task } from "../../domain/tasks/task.js";
 import type { SourceReference } from "../../domain/tasks/task.js";
-import { createMemoryEdge, createMemoryNode } from "../../domain/memory/memory-graph.js";
+import { createMemoryEdge, createMemoryNode, type MemoryEdge } from "../../domain/memory/memory-graph.js";
 import type { MemoryRecord } from "../../domain/memory/memory-record.js";
 import type { AiTokenUsage, AuditedExtractedTask, ProcessingAuditStep, ProcessingStepName, ProcessingStepStatus } from "../../domain/observability/audit.js";
 import { TaskValidationService } from "../../domain/tasks/task-validation.js";
@@ -227,6 +227,13 @@ export class ProcessIncomingMessageUseCase {
       outputTokens: analysis.tokenUsage?.outputTokens ?? 0,
       totalTokens: analysis.tokenUsage?.totalTokens ?? 0,
     }));
+    // Step metadata cannot hold an array, so the reasons themselves go to errorLogs.
+    // A count alone is not debuggable: when a model returns a shape the contract does
+    // not accept, "12 warnings" and "12 nodes dropped: node kind must be one of…" are
+    // the difference between a mystery and a fix.
+    for (const warning of analysis.warnings) {
+      errorLogs.push(`Analysis warning: ${warning}`);
+    }
 
     const memoryPersistenceStartedAt = this.clock.now();
     for (const memory of analysis.memories) {
@@ -240,17 +247,41 @@ export class ProcessIncomingMessageUseCase {
 
     if (this.memoryGraphRepository !== undefined) {
       const graphPersistenceStartedAt = this.clock.now();
+      const savedNodeIds = new Set<string>();
       for (const node of analysis.nodes) {
-        await this.memoryGraphRepository.saveNode(node);
-        createdMemoryGraphNodeIds.push(node.id);
+        try {
+          await this.memoryGraphRepository.saveNode(node);
+          savedNodeIds.add(node.id);
+          createdMemoryGraphNodeIds.push(node.id);
+        } catch (error) {
+          errorLogs.push(`Graph node ${node.id} not stored: ${messageOf(error)}`);
+        }
       }
+      // memory_edges has real foreign keys to memory_nodes and foreign_keys is ON, so
+      // an edge whose endpoint the model invented raises a constraint error. Left
+      // unhandled that error escaped this method after nodes were already written and
+      // before the audit record was saved, so one bad edge destroyed the whole
+      // window's trail. Endpoints are checked first, then each save is isolated.
+      let droppedEdgeCount = 0;
       for (const edge of analysis.edges) {
-        await this.memoryGraphRepository.saveEdge(edge);
-        createdMemoryGraphEdgeIds.push(edge.id);
+        const missing = await this.missingEdgeEndpoints(edge, savedNodeIds);
+        if (missing.length > 0) {
+          droppedEdgeCount += 1;
+          errorLogs.push(`Graph edge ${edge.id} dropped: unknown node ${missing.join(" and ")}.`);
+          continue;
+        }
+        try {
+          await this.memoryGraphRepository.saveEdge(edge);
+          createdMemoryGraphEdgeIds.push(edge.id);
+        } catch (error) {
+          droppedEdgeCount += 1;
+          errorLogs.push(`Graph edge ${edge.id} not stored: ${messageOf(error)}`);
+        }
       }
       steps.push(step("graph_persistence", "succeeded", graphPersistenceStartedAt, this.clock.now(), {
-        nodeCount: analysis.nodes.length,
-        edgeCount: analysis.edges.length,
+        nodeCount: createdMemoryGraphNodeIds.length,
+        edgeCount: createdMemoryGraphEdgeIds.length,
+        droppedEdgeCount,
       }));
     } else {
       steps.push(step("graph_persistence", "skipped", this.clock.now(), this.clock.now(), {
@@ -262,11 +293,15 @@ export class ProcessIncomingMessageUseCase {
     if (this.suggestionRepository !== undefined) {
       const suggestionPersistenceStartedAt = this.clock.now();
       for (const suggestion of analysis.suggestions) {
-        await this.suggestionRepository.save(suggestion);
-        createdSuggestionIds.push(suggestion.id);
+        try {
+          await this.suggestionRepository.save(suggestion);
+          createdSuggestionIds.push(suggestion.id);
+        } catch (error) {
+          errorLogs.push(`Suggestion ${suggestion.id} not stored: ${messageOf(error)}`);
+        }
       }
       steps.push(step("suggestion_persistence", "succeeded", suggestionPersistenceStartedAt, this.clock.now(), {
-        suggestionCount: analysis.suggestions.length,
+        suggestionCount: createdSuggestionIds.length,
       }));
     } else {
       steps.push(step("suggestion_persistence", "skipped", this.clock.now(), this.clock.now(), {
@@ -555,6 +590,34 @@ export class ProcessIncomingMessageUseCase {
     });
   }
 
+  /**
+   * Names the edge endpoints that do not exist, so the edge can be dropped before the
+   * database rejects it.
+   *
+   * Nodes written earlier in this same window count, and so does anything already in
+   * the graph — an edge onto `person:mak` from a previous run is legitimate. Only ids
+   * with no node anywhere are missing.
+   */
+  private async missingEdgeEndpoints(
+    edge: MemoryEdge,
+    savedNodeIds: ReadonlySet<string>,
+  ): Promise<readonly string[]> {
+    const repository = this.memoryGraphRepository;
+    if (repository === undefined) {
+      return [];
+    }
+    const missing: string[] = [];
+    for (const nodeId of new Set([edge.fromNodeId, edge.toNodeId])) {
+      if (savedNodeIds.has(nodeId)) {
+        continue;
+      }
+      if (await repository.findNodeById(nodeId) === undefined) {
+        missing.push(nodeId);
+      }
+    }
+    return missing;
+  }
+
   private sourceFor(window: ConversationWindow, messageId: string): SourceReference {
     const match = window.messages.find((message) => message.messageId === messageId) ?? windowAnchor(window);
     return {
@@ -735,6 +798,11 @@ function memoryPayload(candidate: ExtractedMemoryCandidate) {
     case "Summary":
       return { summary: candidate.summary };
   }
+}
+
+/** Uniform error text for audit logs, whether or not the throw was an Error. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function step(

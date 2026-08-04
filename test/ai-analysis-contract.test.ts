@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateAiAnalysisOutput } from "../src/application/services/ai-analysis-contract.js";
+import { validateAiAnalysisOutput, validateAiAnalysisOutputDetailed } from "../src/application/services/ai-analysis-contract.js";
 import type { MemoryGraphSource } from "../src/domain/memory/memory-graph.js";
 
 const source: MemoryGraphSource = {
@@ -75,3 +75,39 @@ function envelope(value: Readonly<Record<string, unknown>>, confidence = 0.8) {
     value,
   };
 }
+
+test("skip mode keeps good items and names every dropped one", () => {
+  const result = validateAiAnalysisOutputDetailed({
+    memories: [],
+    nodes: [
+      envelope({ id: "goal:english", kind: "goal", label: "English growth" }),
+      "not an envelope",
+      { source, confidence: 0.9, reason: "No key.", value: {} },
+      { idempotencyKey: "k", source, confidence: 0.2, reason: "Too unsure.", value: {} },
+      { idempotencyKey: "k", source, confidence: 0.9, reason: "No value.", value: "a string" },
+    ],
+    edges: [],
+    strategicSuggestions: [],
+    actionSuggestions: [],
+    warnings: [],
+  }, { minimumConfidence: 0.55, onInvalidItem: "skip" });
+
+  assert.ok(result.ok);
+  assert.equal(result.value.output.nodes.length, 1);
+  assert.deepEqual(result.value.skipped, [
+    "AI analysis nodes item must be an object.",
+    "AI analysis nodes item requires idempotencyKey.",
+    "AI analysis nodes item confidence must be between 0.55 and 1.",
+    "AI analysis nodes item requires value.",
+  ]);
+});
+
+test("skip mode still rejects a structural problem, because the window shape is not negotiable", () => {
+  const result = validateAiAnalysisOutputDetailed(
+    { memories: [], nodes: {}, edges: [], strategicSuggestions: [], actionSuggestions: [], warnings: [] },
+    { onInvalidItem: "skip" },
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error.message, /nodes must be an array/);
+});

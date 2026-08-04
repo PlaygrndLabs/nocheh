@@ -12,25 +12,59 @@ import {
 
 export type SuggestionId = string;
 
-export type SuggestionStatus = "pending" | "accepted" | "rejected" | "archived" | "converted";
+/**
+ * Suggestion vocabularies are runtime values for the same reason the graph ones are:
+ * the analysis prompt renders them and the mapping layer validates against them.
+ */
+export const SUGGESTION_STATUSES = ["pending", "accepted", "rejected", "archived", "converted"] as const;
 
-export type SuggestionRiskLevel = "low" | "medium" | "high";
+export type SuggestionStatus = typeof SUGGESTION_STATUSES[number];
 
-export type StrategicSuggestionKind =
-  | "goal"
-  | "idea"
-  | "opportunity"
-  | "routine_experiment"
-  | "hypothesis"
-  | "recommendation";
+export const SUGGESTION_RISK_LEVELS = ["low", "medium", "high"] as const;
 
-export type ExternalActionKind =
-  | "send_message"
-  | "create_task"
-  | "publish_content"
-  | "update_asset_record"
-  | "place_trade"
-  | "call_webhook";
+export type SuggestionRiskLevel = typeof SUGGESTION_RISK_LEVELS[number];
+
+export const STRATEGIC_SUGGESTION_KINDS = [
+  "goal",
+  "idea",
+  "opportunity",
+  "routine_experiment",
+  "hypothesis",
+  "recommendation",
+] as const;
+
+export type StrategicSuggestionKind = typeof STRATEGIC_SUGGESTION_KINDS[number];
+
+export const EXTERNAL_ACTION_KINDS = [
+  "send_message",
+  "create_task",
+  "publish_content",
+  "update_asset_record",
+  "place_trade",
+  "call_webhook",
+] as const;
+
+export type ExternalActionKind = typeof EXTERNAL_ACTION_KINDS[number];
+
+export function isStrategicSuggestionKind(value: unknown): value is StrategicSuggestionKind {
+  return includesValue(STRATEGIC_SUGGESTION_KINDS, value);
+}
+
+export function isExternalActionKind(value: unknown): value is ExternalActionKind {
+  return includesValue(EXTERNAL_ACTION_KINDS, value);
+}
+
+export function isSuggestionRiskLevel(value: unknown): value is SuggestionRiskLevel {
+  return includesValue(SUGGESTION_RISK_LEVELS, value);
+}
+
+export function isSuggestionStatus(value: unknown): value is SuggestionStatus {
+  return includesValue(SUGGESTION_STATUSES, value);
+}
+
+function includesValue(vocabulary: readonly string[], value: unknown): boolean {
+  return typeof value === "string" && vocabulary.includes(value);
+}
 
 export interface CreateStrategicSuggestionInput {
   readonly kind: StrategicSuggestionKind;

@@ -12,11 +12,17 @@ import type { IncomingMessage } from "../../application/dto/incoming-message.js"
 import {
   createMemoryEdge,
   createMemoryNode,
+  isMemoryPayloadKind,
+  MEMORY_GRAPH_SCOPES,
+  MEMORY_GRAPH_STATUSES,
+  MEMORY_NODE_KINDS,
+  MEMORY_PAYLOAD_FIELD_SPECS,
+  MEMORY_PAYLOAD_KINDS,
+  MEMORY_RELATIONS,
   type CreateMemoryEdgeInput,
   type CreateMemoryNodeInput,
   type MemoryGraphSource,
   type MemoryEdge,
-  type MemoryGraphStatus,
   type MemoryNode,
   type MemoryNodeId,
 } from "../../domain/memory/memory-graph.js";
@@ -24,6 +30,9 @@ import { projectIdFromName } from "../../domain/memory/memory-record.js";
 import {
   createActionSuggestion,
   createStrategicSuggestion,
+  EXTERNAL_ACTION_KINDS,
+  STRATEGIC_SUGGESTION_KINDS,
+  SUGGESTION_RISK_LEVELS,
   type CreateActionSuggestionInput,
   type CreateStrategicSuggestionInput,
   type Suggestion,
@@ -45,9 +54,17 @@ export const DEFAULT_MINIMUM_CONFIDENCE = 0.55;
 /** Default output budget for a single analysis call. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 4000;
 
-const MEMORY_TYPES = new Set(["Project", "Decision", "Deadline", "Blocker", "Summary"]);
-const TASK_STATUSES = new Set<TaskStatus>(["open", "in_progress", "completed", "cancelled"]);
-const TASK_PRIORITIES = new Set<TaskPriority>(["low", "medium", "high", "urgent"]);
+const MEMORY_TYPES = ["Project", "Decision", "Deadline", "Blocker", "Summary"] as const;
+const TASK_STATUSES: readonly TaskStatus[] = ["open", "in_progress", "completed", "cancelled"];
+const TASK_PRIORITIES: readonly TaskPriority[] = ["low", "medium", "high", "urgent"];
+
+/**
+ * Minimum id length and the no-whitespace rule the graph domain enforces.
+ *
+ * `normalizeGraphId` throws on anything shorter or containing a space, so a model that
+ * answers `"my project"` loses the node. The prompt has to say so up front.
+ */
+const GRAPH_ID_RULE = "at least 3 characters, no whitespace";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -65,8 +82,16 @@ export interface BuildMemoryGraphAnalysisOptions {
   readonly window?: ConversationWindow;
 }
 
-/** Shared system instructions. Identical across providers so output stays comparable. */
-export function analysisSystemPrompt(): string {
+/**
+ * Shared system instructions. Identical across providers so output stays comparable.
+ *
+ * Every value vocabulary is rendered from the domain arrays rather than written by
+ * hand. The four graph and suggestion arrays used to be undocumented here, so models
+ * invented plausible shapes (`{type, title, project}` for a node, a bare string for a
+ * suggestion) and every item was discarded. Generating the contract from the domain is
+ * what stops that from silently recurring.
+ */
+export function analysisSystemPrompt(minimumConfidence: number = DEFAULT_MINIMUM_CONFIDENCE): string {
   return [
     "You are Nocheh's memory graph analyzer and second-brain.",
     "You receive an ordered window of already-redacted chat messages from ONE conversation, plus optional grounding context.",
@@ -85,10 +110,29 @@ export function analysisSystemPrompt(): string {
     "Every item must include idempotencyKey, source, confidence, reason, and value. Warnings use message instead of value.",
     "source is exactly { \"messageId\": \"<id of the window message this came from>\" } and nothing else.",
     "Never invent a messageId. Use one of the ids listed in messages, so knowledge stays traceable.",
+    `Only return an item when confidence is at least ${minimumConfidence}. Anything below that is discarded, so a guess costs knowledge rather than adding it.`,
+    `Every id you supply (node id, edge id, suggestion id) must be ${GRAPH_ID_RULE}: use slug form such as project:acme-site, person:mak, or edge:mak-owns-task-14. Labels, facts, titles, and rationales must be at least 2 characters.`,
+    "",
+    "Value shapes. A trailing ? marks an optional field, [] marks an array, and (a|b) lists the only accepted values.",
     "tasks[].value: { title, description?, priority?(low|medium|high|urgent), dueAt?(ISO), assignee? }.",
     "statusUpdates[].value: { targetMessageId, status(open|in_progress|completed|cancelled) } to change an EXISTING task/node derived from that message (e.g. closing a task after a done reaction).",
-    "memories[].value: { type(Project|Decision|Deadline|Blocker|Summary), ...typed fields } for durable structured memory.",
+    `memories[].value: { type(${MEMORY_TYPES.join("|")}), ...typed fields } for durable structured memory. Project needs name; Decision needs title and outcome; Deadline needs title (dueAt? ISO); Blocker needs description (status?(open|resolved), owner?); Summary needs title and summary.`,
+    `nodes[].value: { id, kind(${MEMORY_NODE_KINDS.join("|")}), label, scope?(${MEMORY_GRAPH_SCOPES.join("|")}), status?(${MEMORY_GRAPH_STATUSES.join("|")}), summary?, aliases?[], payload? }.`,
+    `A node payload, when present, must be { payloadKind(${MEMORY_PAYLOAD_KINDS.join("|")}), ...fields for that kind }.`,
+    `Payload fields by payloadKind: ${payloadFieldContract()}.`,
+    `edges[].value: { id, fromNodeId, toNodeId, relation(${MEMORY_RELATIONS.join("|")}), fact, status?, validFrom?(ISO), validUntil?(ISO) }.`,
+    "Use those relation names exactly; an invented relation is discarded. Both endpoints must be ids you also return in nodes or ids listed in existingKnowledge — an edge pointing at an unknown node is discarded.",
+    `strategicSuggestions[].value: { id, kind(${STRATEGIC_SUGGESTION_KINDS.join("|")}), title, rationale, riskLevel?(${SUGGESTION_RISK_LEVELS.join("|")}), expectedValue?, evidenceNodeIds?[] } for things Mak might decide to do.`,
+    `actionSuggestions[].value: { id, kind(${EXTERNAL_ACTION_KINDS.join("|")}), title, rationale, riskLevel?(${SUGGESTION_RISK_LEVELS.join("|")}), target, preview } for external effects. target is who or what it acts on; preview is the exact content that would be sent or written. These always wait for Mak's approval.`,
+    "warnings[].message: a short note about something you refused, could not resolve, or found contradictory.",
   ].join("\n");
+}
+
+/** Renders `MEMORY_PAYLOAD_FIELD_SPECS` compactly: one `kind -> fields` clause per kind. */
+function payloadFieldContract(): string {
+  return MEMORY_PAYLOAD_KINDS
+    .map((kind) => `${kind} -> ${MEMORY_PAYLOAD_FIELD_SPECS[kind].join(", ")}`)
+    .join("; ");
 }
 
 /** Serializes the analysis window into the provider-neutral user prompt. */
@@ -198,18 +242,28 @@ export function buildMemoryGraphAnalysis(options: BuildMemoryGraphAnalysisOption
         "action suggestion",
       ) as readonly Suggestion[],
     ];
-    const memories = output.memories.flatMap((item) => {
-      const candidate = memoryCandidate(item.value, item.confidence, item.reason);
-      return candidate === undefined ? [] : [{ sourceMessageId: item.source.messageId, candidate }];
-    }) as readonly AnalyzedMemoryCandidate[];
-    const tasks = output.tasks.flatMap((item) => {
-      const task = taskCandidate(item.value, item.source.messageId, item.confidence, item.reason);
-      return task === undefined ? [] : [task];
-    }) as readonly AnalyzedTaskCandidate[];
-    const statusUpdates = output.statusUpdates.flatMap((item) => {
-      const update = statusUpdate(item.value, item.source.messageId, item.confidence, item.reason);
-      return update === undefined ? [] : [update];
-    }) as readonly AnalyzedStatusUpdate[];
+    // memories, tasks and statusUpdates go through the same mapKept path as the graph
+    // arrays. They used to be mapped with flatMap and dropped silently on an unknown
+    // type or a missing title, while a non-object value threw out to the catch below
+    // and rejected the entire window — the exact opposite of the documented policy.
+    const memories = mapKept(
+      output.memories,
+      (item) => ({
+        sourceMessageId: item.source.messageId,
+        candidate: memoryCandidate(item.value, item.confidence, item.reason),
+      }),
+      "memory",
+    ) as readonly AnalyzedMemoryCandidate[];
+    const tasks = mapKept(
+      output.tasks,
+      (item) => taskCandidate(item.value, item.source.messageId, item.confidence, item.reason),
+      "task",
+    ) as readonly AnalyzedTaskCandidate[];
+    const statusUpdates = mapKept(
+      output.statusUpdates,
+      (item) => statusUpdate(item.value, item.source.messageId, item.confidence, item.reason),
+      "status update",
+    ) as readonly AnalyzedStatusUpdate[];
 
     return {
       memories,
@@ -332,17 +386,35 @@ function describeMessage(message: IncomingMessage): JsonRecord {
 function nodeInput(value: unknown, source: MemoryGraphSource, confidence: number): CreateMemoryNodeInput {
   const record = requireRecord(value, "node value");
   return {
-    kind: requiredString(record.kind, "node kind") as CreateMemoryNodeInput["kind"],
+    kind: requiredEnum(record.kind, "node kind", MEMORY_NODE_KINDS),
     label: requiredString(record.label, "node label"),
-    scope: (optionalString(record.scope) ?? "user") as CreateMemoryNodeInput["scope"],
+    scope: optionalEnum(record.scope, "node scope", MEMORY_GRAPH_SCOPES, "user"),
     source: hydrateSource(source),
     confidence,
     ...(optionalString(record.id) === undefined ? {} : { id: requiredString(record.id, "node id") }),
     ...(optionalString(record.summary) === undefined ? {} : { summary: requiredString(record.summary, "node summary") }),
     aliases: arrayOfStrings(record.aliases),
-    payload: objectValue(record.payload),
-    status: (optionalString(record.status) ?? "active") as MemoryGraphStatus,
+    payload: nodePayload(record.payload),
+    status: optionalEnum(record.status, "node status", MEMORY_GRAPH_STATUSES, "active"),
   };
+}
+
+/**
+ * Keeps a free-form payload but rejects an unknown `payloadKind`.
+ *
+ * An absent payload is fine — plenty of nodes are just a label. A payload tagged with
+ * a kind the domain does not know is worse than none: the expanded payload interfaces
+ * and every reader that switches on `payloadKind` (accepted-rule detection, context
+ * building) will silently ignore it, so the node would look stored but carry nothing.
+ */
+function nodePayload(value: unknown): Readonly<Record<string, unknown>> {
+  const payload = objectValue(value);
+  if (payload.payloadKind !== undefined && !isMemoryPayloadKind(payload.payloadKind)) {
+    throw new Error(
+      `node payload payloadKind must be one of: ${MEMORY_PAYLOAD_KINDS.join(", ")}. Received ${describeValue(payload.payloadKind)}.`,
+    );
+  }
+  return payload;
 }
 
 function edgeInput(value: unknown, source: MemoryGraphSource, confidence: number): CreateMemoryEdgeInput {
@@ -350,25 +422,27 @@ function edgeInput(value: unknown, source: MemoryGraphSource, confidence: number
   return {
     fromNodeId: requiredString(record.fromNodeId, "edge fromNodeId"),
     toNodeId: requiredString(record.toNodeId, "edge toNodeId"),
-    relation: requiredString(record.relation, "edge relation") as CreateMemoryEdgeInput["relation"],
+    relation: requiredEnum(record.relation, "edge relation", MEMORY_RELATIONS),
     fact: requiredString(record.fact, "edge fact"),
     source: hydrateSource(source),
     confidence,
     payload: objectValue(record.payload),
-    status: (optionalString(record.status) ?? "active") as MemoryGraphStatus,
+    status: optionalEnum(record.status, "edge status", MEMORY_GRAPH_STATUSES, "active"),
     ...(optionalString(record.id) === undefined ? {} : { id: requiredString(record.id, "edge id") }),
+    ...(optionalDate(record.validFrom) === undefined ? {} : { validFrom: optionalDate(record.validFrom) as Date }),
+    ...(optionalDate(record.validUntil) === undefined ? {} : { validUntil: optionalDate(record.validUntil) as Date }),
   };
 }
 
 function strategicSuggestionInput(value: unknown, source: MemoryGraphSource, confidence: number): CreateStrategicSuggestionInput {
   const record = requireRecord(value, "strategic suggestion value");
   return {
-    kind: requiredString(record.kind, "strategic suggestion kind") as CreateStrategicSuggestionInput["kind"],
+    kind: requiredEnum(record.kind, "strategic suggestion kind", STRATEGIC_SUGGESTION_KINDS),
     title: requiredString(record.title, "strategic suggestion title"),
     rationale: requiredString(record.rationale, "strategic suggestion rationale"),
     source: hydrateSource(source),
     confidence,
-    riskLevel: (optionalString(record.riskLevel) ?? "medium") as CreateStrategicSuggestionInput["riskLevel"],
+    riskLevel: optionalEnum(record.riskLevel, "strategic suggestion riskLevel", SUGGESTION_RISK_LEVELS, "medium"),
     ...(optionalString(record.expectedValue) === undefined ? {} : { expectedValue: requiredString(record.expectedValue, "strategic suggestion expectedValue") }),
     evidenceNodeIds: arrayOfStrings(record.evidenceNodeIds) as readonly MemoryNodeId[],
     ...(optionalString(record.id) === undefined ? {} : { id: requiredString(record.id, "strategic suggestion id") }),
@@ -378,12 +452,12 @@ function strategicSuggestionInput(value: unknown, source: MemoryGraphSource, con
 function actionSuggestionInput(value: unknown, source: MemoryGraphSource, confidence: number): CreateActionSuggestionInput {
   const record = requireRecord(value, "action suggestion value");
   return {
-    kind: requiredString(record.kind, "action suggestion kind") as CreateActionSuggestionInput["kind"],
+    kind: requiredEnum(record.kind, "action suggestion kind", EXTERNAL_ACTION_KINDS),
     title: requiredString(record.title, "action suggestion title"),
     rationale: requiredString(record.rationale, "action suggestion rationale"),
     source: hydrateSource(source),
     confidence,
-    riskLevel: (optionalString(record.riskLevel) ?? "medium") as CreateActionSuggestionInput["riskLevel"],
+    riskLevel: optionalEnum(record.riskLevel, "action suggestion riskLevel", SUGGESTION_RISK_LEVELS, "medium"),
     target: requiredString(record.target, "action suggestion target"),
     preview: requiredString(record.preview, "action suggestion preview"),
     ...(optionalString(record.id) === undefined ? {} : { id: requiredString(record.id, "action suggestion id") }),
@@ -395,12 +469,9 @@ function taskCandidate(
   sourceMessageId: string,
   confidence: number,
   reason: string,
-): AnalyzedTaskCandidate | undefined {
+): AnalyzedTaskCandidate {
   const record = requireRecord(value, "task value");
-  const title = optionalString(record.title);
-  if (title === undefined) {
-    return undefined;
-  }
+  const title = requiredString(record.title, "task title");
   const priority = optionalString(record.priority) as TaskPriority | undefined;
   const dueAt = optionalDate(record.dueAt);
   const description = optionalString(record.description);
@@ -412,7 +483,7 @@ function taskCandidate(
     sourceMessageId,
     ...(description === undefined ? {} : { description }),
     ...(assignee === undefined ? {} : { assignee }),
-    ...(priority !== undefined && TASK_PRIORITIES.has(priority) ? { priority } : {}),
+    ...(priority !== undefined && TASK_PRIORITIES.includes(priority) ? { priority } : {}),
     ...(dueAt === undefined ? {} : { dueAt }),
   };
 }
@@ -422,29 +493,20 @@ function statusUpdate(
   sourceMessageId: string,
   confidence: number,
   reason: string,
-): AnalyzedStatusUpdate | undefined {
+): AnalyzedStatusUpdate {
   const record = requireRecord(value, "status update value");
-  const status = optionalString(record.status) as TaskStatus | undefined;
-  if (status === undefined || !TASK_STATUSES.has(status)) {
-    return undefined;
-  }
+  const status = requiredEnum(record.status, "status update status", TASK_STATUSES);
   const targetMessageId = optionalString(record.targetMessageId) ?? sourceMessageId;
   return { targetMessageId, status, reason, confidence };
 }
 
-function memoryCandidate(value: unknown, confidence: number, reason: string): ExtractedMemoryCandidate | undefined {
+function memoryCandidate(value: unknown, confidence: number, reason: string): ExtractedMemoryCandidate {
   const record = requireRecord(value, "memory value");
-  const type = optionalString(record.type);
-  if (type === undefined || !MEMORY_TYPES.has(type)) {
-    return undefined;
-  }
+  const type = requiredEnum(record.type, "memory type", MEMORY_TYPES);
   const base = { confidence, extractionReason: reason };
   switch (type) {
     case "Project": {
-      const name = optionalString(record.name) ?? optionalString(record.title);
-      if (name === undefined) {
-        return undefined;
-      }
+      const name = optionalString(record.name) ?? requiredString(record.title, "memory Project name");
       const description = optionalString(record.description);
       const status = optionalString(record.status);
       return {
@@ -459,11 +521,8 @@ function memoryCandidate(value: unknown, confidence: number, reason: string): Ex
       };
     }
     case "Decision": {
-      const title = optionalString(record.title);
-      const outcome = optionalString(record.outcome);
-      if (title === undefined || outcome === undefined) {
-        return undefined;
-      }
+      const title = requiredString(record.title, "memory Decision title");
+      const outcome = requiredString(record.outcome, "memory Decision outcome");
       const rationale = optionalString(record.rationale);
       return {
         type: "Decision",
@@ -472,10 +531,7 @@ function memoryCandidate(value: unknown, confidence: number, reason: string): Ex
       };
     }
     case "Deadline": {
-      const title = optionalString(record.title);
-      if (title === undefined) {
-        return undefined;
-      }
+      const title = requiredString(record.title, "memory Deadline title");
       const dueAt = optionalDate(record.dueAt);
       const description = optionalString(record.description);
       return {
@@ -489,10 +545,7 @@ function memoryCandidate(value: unknown, confidence: number, reason: string): Ex
       };
     }
     case "Blocker": {
-      const description = optionalString(record.description);
-      if (description === undefined) {
-        return undefined;
-      }
+      const description = requiredString(record.description, "memory Blocker description");
       const status = optionalString(record.status) === "resolved" ? "resolved" : "open";
       const owner = optionalString(record.owner);
       return {
@@ -502,19 +555,14 @@ function memoryCandidate(value: unknown, confidence: number, reason: string): Ex
       };
     }
     case "Summary": {
-      const title = optionalString(record.title);
-      const summaryText = optionalString(record.summary);
-      if (title === undefined || summaryText === undefined) {
-        return undefined;
-      }
+      const title = requiredString(record.title, "memory Summary title");
+      const summaryText = requiredString(record.summary, "memory Summary summary");
       return {
         type: "Summary",
         ...base,
         summary: { title, summary: summaryText, coveredRecordIds: [] },
       };
     }
-    default:
-      return undefined;
   }
 }
 
@@ -537,6 +585,42 @@ function requiredString(value: unknown, label: string): string {
     throw new Error(`${label} must be a non-empty string.`);
   }
   return value.trim();
+}
+
+/**
+ * Jointly enforces "is a string" and "is in the domain vocabulary".
+ *
+ * These fields used to be cast straight through, so an invented relation such as
+ * `MENTIONS` was written to SQLite and only failed later, at read time, as a value no
+ * `MemoryRelation` switch handles. Failing here turns it into one skipped item with a
+ * reason a human can read.
+ */
+function requiredEnum<T extends string>(value: unknown, label: string, vocabulary: readonly T[]): T {
+  const text = requiredString(value, label);
+  if (!(vocabulary as readonly string[]).includes(text)) {
+    throw new Error(`${label} must be one of: ${vocabulary.join(", ")}. Received ${describeValue(text)}.`);
+  }
+  return text as T;
+}
+
+/** Same check, but an absent value falls back instead of failing. */
+function optionalEnum<T extends string>(value: unknown, label: string, vocabulary: readonly T[], fallback: T): T {
+  const text = optionalString(value);
+  if (text === undefined) {
+    return fallback;
+  }
+  if (!(vocabulary as readonly string[]).includes(text)) {
+    throw new Error(`${label} must be one of: ${vocabulary.join(", ")}. Received ${describeValue(text)}.`);
+  }
+  return text as T;
+}
+
+/** Short, quoted rendering of a rejected value so the audit reason is actionable. */
+function describeValue(value: unknown): string {
+  if (typeof value === "string") {
+    return `"${value.length > 40 ? `${value.slice(0, 40)}…` : value}"`;
+  }
+  return typeof value;
 }
 
 function optionalString(value: unknown): string | undefined {
