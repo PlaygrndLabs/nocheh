@@ -14,6 +14,7 @@ import {
   DEFAULT_MINIMUM_CONFIDENCE,
 } from "./memory-graph-analysis-mapping.js";
 import { DEFAULT_MODEL_REQUEST_TIMEOUT_MS, fetchWithTimeout } from "../http/fetch-with-timeout.js";
+import { NoopLogger, type LoggerPort } from "../../application/ports/logger.js";
 
 const PROVIDER = "nvidia";
 
@@ -49,6 +50,11 @@ export interface NvidiaMemoryGraphAnalyzerConfig {
    * a real window against z-ai/glm-5.2 measured over 200 seconds.
    */
   readonly timeoutMs?: number;
+  /**
+   * Optional. Records per-call latency, prompt size, and reasoning tokens.
+   * Without it those numbers are unobservable, and a slow window has no explanation.
+   */
+  readonly logger?: LoggerPort;
 }
 
 interface OpenAiCompatibleResponse {
@@ -63,6 +69,10 @@ interface OpenAiCompatibleResponse {
   readonly usage?: {
     readonly prompt_tokens?: number;
     readonly completion_tokens?: number;
+    /** OpenAI-compatible reasoning accounting; NVIDIA does not always send it. */
+    readonly completion_tokens_details?: {
+      readonly reasoning_tokens?: number;
+    };
   };
 }
 
@@ -82,6 +92,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   private readonly topP: number;
   private readonly jsonResponseFormat: boolean;
   private readonly timeoutMs: number;
+  private readonly logger: LoggerPort;
 
   public constructor(config: NvidiaMemoryGraphAnalyzerConfig) {
     this.apiKey = config.apiKey;
@@ -93,9 +104,12 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     this.topP = config.topP ?? DEFAULT_TOP_P;
     this.jsonResponseFormat = config.jsonResponseFormat ?? true;
     this.timeoutMs = config.timeoutMs ?? ANALYSIS_REQUEST_TIMEOUT_MS;
+    this.logger = config.logger ?? new NoopLogger();
   }
 
   public async analyze(input: ConversationAnalysisInput): Promise<MemoryGraphAnalysis> {
+    const system = analysisSystemPrompt(this.minimumConfidence);
+    const user = analysisUserPrompt(input);
     const body = JSON.stringify({
       model: this.model,
       max_tokens: this.maxTokens,
@@ -104,11 +118,12 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       stream: false,
       ...(this.jsonResponseFormat ? { response_format: { type: "json_object" } } : {}),
       messages: [
-        { role: "system", content: analysisSystemPrompt(this.minimumConfidence) },
-        { role: "user", content: analysisUserPrompt(input) },
+        { role: "system", content: system },
+        { role: "user", content: user },
       ],
     });
 
+    const startedAt = Date.now();
     const response = await fetchWithTimeout(fetch, this.baseUrl, {
       method: "POST",
       headers: {
@@ -126,6 +141,18 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
 
     const parsed = JSON.parse(text) as OpenAiCompatibleResponse;
     const usage = tokenUsage(parsed, this.model);
+    // Throughput is the number that decides whether a slow window is the endpoint or
+    // the model: 3194 output tokens in 240s is 13 tokens/second, which no prompt change
+    // will fix. Logged per call because it cannot be reconstructed after the fact.
+    this.logger.info("NVIDIA analysis completed", {
+      model: this.model,
+      latencyMs: Date.now() - startedAt,
+      promptChars: system.length + user.length,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      reasoningTokens: usage?.reasoningTokens ?? 0,
+      outputTokensPerSecond: throughput(usage?.outputTokens ?? 0, Date.now() - startedAt),
+    });
     return buildMemoryGraphAnalysis({
       rawOutput: this.parseOutput(parsed),
       provider: PROVIDER,
@@ -168,5 +195,32 @@ function tokenUsage(response: OpenAiCompatibleResponse, model: string): AiTokenU
   if (usage === undefined) {
     return undefined;
   }
-  return createTokenUsage(PROVIDER, model, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0);
+  return createTokenUsage(
+    PROVIDER,
+    model,
+    usage.prompt_tokens ?? 0,
+    usage.completion_tokens ?? 0,
+    reasoningTokens(response),
+  );
+}
+
+/**
+ * Reads reported reasoning tokens, falling back to a length estimate.
+ *
+ * `completion_tokens_details.reasoning_tokens` is exact when present. When it is not,
+ * `reasoning_content` still shows how much thinking happened, so it is estimated at
+ * the usual four characters per token — approximate on purpose, and better than
+ * reporting zero for a model that clearly thought.
+ */
+function reasoningTokens(response: OpenAiCompatibleResponse): number | undefined {
+  const reported = response.usage?.completion_tokens_details?.reasoning_tokens;
+  if (typeof reported === "number" && reported > 0) {
+    return reported;
+  }
+  const trace = response.choices?.[0]?.message?.reasoning_content;
+  return typeof trace === "string" && trace.length > 0 ? Math.ceil(trace.length / 4) : undefined;
+}
+
+function throughput(outputTokens: number, elapsedMs: number): number {
+  return elapsedMs <= 0 ? 0 : Math.round((outputTokens / elapsedMs) * 1000 * 10) / 10;
 }

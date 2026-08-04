@@ -138,7 +138,13 @@ test("buffers live messages until the configured interval elapses", async () => 
   assert.doesNotMatch(bufferRepository.messages[0]?.text ?? "", /sk_live/);
 
   clock.current = new Date("2026-06-19T12:01:01.000Z");
-  const result = await service.execute(message("2", "Decision: ship smaller batches"));
+  // A second message does not trigger analysis even though the batch is now due:
+  // the webhook path only buffers, and the sweep owns analysis.
+  const arrival = await service.execute(message("2", "Decision: ship smaller batches"));
+  assert.equal(arrival.flushedMessageCount, 0);
+  assert.equal(processor.windows.length, 0);
+
+  const result = { flushedMessageCount: await service.flushDue() };
 
   assert.equal(result.flushedMessageCount, 2);
   assert.equal(bufferRepository.messages.length, 0);
@@ -211,6 +217,7 @@ test("carries attachments through the buffer and into the flushed window", async
 
   clock.current = new Date("2026-06-19T12:01:01.000Z");
   await service.execute(message("2", "that is the plan"));
+  await service.flushDue();
 
   const flushed = processor.windows[0]?.messages[0];
   assert.equal(flushed?.text, "");
@@ -241,9 +248,10 @@ test("a guard outage keeps the batch buffered instead of losing or analysing it"
 
   await service.execute(message("1", "first"));
   clock.current = new Date("2026-06-19T12:01:01.000Z");
-  const result = await service.execute(message("2", "second"));
+  await service.execute(message("2", "second"));
+  const result = await service.flushWithResult("chat-1");
 
-  // Nothing analysed, nothing lost, and no throw so the webhook can still ack.
+  // Nothing analysed, nothing lost, and no throw so the sweep keeps going.
   assert.equal(result.flushedMessageCount, 0);
   assert.equal(result.guardUnavailable, true);
   assert.equal(bufferRepository.messages.length, 2);
@@ -400,3 +408,132 @@ function message(messageId: string, text: string): IncomingMessage {
     occurredAt: new Date("2026-06-19T12:00:00.000Z"),
   };
 }
+
+/** Blocks inside `executeWindow` so a second, overlapping flush can be attempted. */
+class BlockingProcessor extends RecordingProcessor {
+  public started = 0;
+  private release: (() => void) | undefined;
+  private readonly gate = new Promise<void>((resolve) => {
+    this.release = resolve;
+  });
+
+  public override async executeWindow(window: ConversationWindow): Promise<void> {
+    this.started += 1;
+    await this.gate;
+    await super.executeWindow(window);
+  }
+
+  public finish(): void {
+    this.release?.();
+  }
+}
+
+test("the webhook path never analyses, even when the batch is already full", async () => {
+  const clock = new MutableClock();
+  const settingsRepository = new InMemorySettingsRepository();
+  await settingsRepository.save(createGroupAssistantSettings({
+    conversationId: "chat-1",
+    analysisMode: "batch",
+    analysisIntervalSeconds: 300,
+    maxMessagesPerBatch: 2,
+  }, clock.now()));
+  const bufferRepository = new InMemoryBufferRepository();
+  const processor = new RecordingProcessor();
+  const service = new LiveMessageBufferService(
+    bufferRepository,
+    settingsRepository,
+    processor,
+    new RegexSecretDetector(),
+    clock,
+    new SilentLogger(),
+  );
+
+  // maxMessagesPerBatch is 2, so the old code flushed inside this second call and made
+  // Telegram wait out the whole analysis.
+  await service.execute(message("1", "first"));
+  const result = await service.execute(message("2", "second"));
+
+  assert.equal(result.flushedMessageCount, 0);
+  assert.equal(result.processedImmediately, false);
+  assert.equal(processor.windows.length, 0, "analysis must not run on the request path");
+  assert.equal(bufferRepository.messages.length, 2);
+
+  // The sweep still sees it as due and analyses it.
+  assert.equal(await service.flushDue(), 2);
+  assert.equal(processor.windows.length, 1);
+});
+
+test("a second flush of the same conversation is refused while the first is running", async () => {
+  const clock = new MutableClock();
+  const settingsRepository = new InMemorySettingsRepository();
+  await settingsRepository.save(createGroupAssistantSettings({
+    conversationId: "chat-1",
+    analysisMode: "batch",
+    analysisIntervalSeconds: 1,
+    maxMessagesPerBatch: 10,
+  }, clock.now()));
+  const bufferRepository = new InMemoryBufferRepository();
+  const processor = new BlockingProcessor();
+  const service = new LiveMessageBufferService(
+    bufferRepository,
+    settingsRepository,
+    processor,
+    new RegexSecretDetector(),
+    clock,
+    new SilentLogger(),
+  );
+
+  await service.execute(message("1", "first"));
+  clock.current = new Date("2026-06-19T12:00:02.000Z");
+
+  // Analysis outlives the sweep interval, so a later tick overlaps it. Buffer rows are
+  // only removed after the window succeeds, so without a guard the same window is
+  // analysed and paid for twice.
+  const first = service.flushWithResult("chat-1");
+  await Promise.resolve();
+  const second = await service.flushWithResult("chat-1");
+
+  assert.equal(second.alreadyRunning, true);
+  assert.equal(second.flushedMessageCount, 0);
+  assert.equal(processor.started, 1, "the window must be analysed exactly once");
+
+  processor.finish();
+  assert.equal((await first).flushedMessageCount, 1);
+  assert.equal(processor.windows.length, 1);
+  assert.equal(bufferRepository.messages.length, 0);
+
+  // Once the first finished, the guard is released again.
+  assert.equal((await service.flushWithResult("chat-1")).alreadyRunning, undefined);
+});
+
+test("an overlapping sweep does not re-analyse a conversation that is still running", async () => {
+  const clock = new MutableClock();
+  const settingsRepository = new InMemorySettingsRepository();
+  await settingsRepository.save(createGroupAssistantSettings({
+    conversationId: "chat-1",
+    analysisMode: "batch",
+    analysisIntervalSeconds: 1,
+    maxMessagesPerBatch: 10,
+  }, clock.now()));
+  const bufferRepository = new InMemoryBufferRepository();
+  const processor = new BlockingProcessor();
+  const service = new LiveMessageBufferService(
+    bufferRepository,
+    settingsRepository,
+    processor,
+    new RegexSecretDetector(),
+    clock,
+    new SilentLogger(),
+  );
+
+  await service.execute(message("1", "first"));
+  clock.current = new Date("2026-06-19T12:00:02.000Z");
+
+  const firstSweep = service.flushDue();
+  await Promise.resolve();
+  assert.equal(await service.flushDue(), 0, "the overlapping sweep flushes nothing");
+  assert.equal(processor.started, 1);
+
+  processor.finish();
+  assert.equal(await firstSweep, 1);
+});

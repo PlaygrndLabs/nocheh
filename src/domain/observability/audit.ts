@@ -6,6 +6,15 @@ export interface AiTokenUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
+  /**
+   * Tokens a reasoning model spent thinking before answering.
+   *
+   * Paid for and waited on, then discarded: the trace is never durable output. This is
+   * the field that tells you whether a slow analysis is a slow endpoint or a model
+   * thinking at length, so it is worth recording even though it buys nothing.
+   * Absent when the provider does not report it.
+   */
+  readonly reasoningTokens?: number;
 }
 
 /** Pipeline step names tracked for each processed conversation window. */

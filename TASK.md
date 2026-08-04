@@ -18,26 +18,33 @@ SQLite's foreign key can abort the window. Covered by
       json_schema`, generated from the same arrays. Prompt-only is working in tests;
       a schema would make it structural.
 
-## Now: Decide Where Analysis Runs
+## Now: Choose The Text Model From Measurements
 
-Measured: a two-message window takes 189-240s against `z-ai/glm-5.2`. In batch mode
-the flush runs inside the Telegram webhook request, so Telegram's own timeout fires
-and it retries while the first flush is still running. Nothing is lost or duplicated
-in storage (the buffer upserts on `(conversation_id, message_id)`) but the analysis
-call can be paid for twice.
+The flush is off the request path: the webhook buffers, the sweep analyses, one flush
+per conversation at a time, one sweep at a time. Each analysis call now logs latency,
+prompt size, output throughput and reasoning tokens, and `/api/metrics` totals tokens
+across every role. What remains is reading those numbers on a real run and deciding.
 
-- [ ] Move the flush off the request path: ack Telegram, let
-      `FLUSH_SWEEP_INTERVAL_SECONDS` drive analysis. The sweep already exists.
+One prior data point: 3194 output tokens in 189-240s is 13-17 tokens/second. That is a
+throughput problem, not a prompt problem, so the question is which of the two causes it
+is — a queued free tier, or a reasoning model whose trace is paid for and discarded.
+
+- [ ] Run real windows and read `reasoningTokens` and `outputTokensPerSecond` from the
+      logs. A large reasoning count means the model is the cost; a small one with the
+      same wall time means the endpoint is.
 - [ ] Decide whether a faster text model is worth the quality trade for noisy groups
       (`docs/research/0003-model-selection-cost-reasoning.md`).
+- [ ] Set `FLUSH_SWEEP_INTERVAL_SECONDS` deliberately once analysis latency is known:
+      it is the delay a due batch waits, and a sweep slower than its own interval
+      skips ticks.
 
 ## Next: Prove Quality And Cost
 
 - [ ] Run real conversations through the pipeline and grade extraction
       quality: memories, graph nodes, edges, suggestions, safety refusals.
-- [ ] Record token cost per analysis window and project a monthly cost from real
-      message volume. One measured window: 2198 perception + ~950 guard + 3194
-      analysis tokens.
+- [ ] Project a monthly cost from real message volume using `/api/metrics` token
+      totals. One measured window: 2198 perception + ~950 guard + 3194 analysis tokens,
+      and the analysis system prompt is now ~1534 input tokens on every call.
 - [ ] Grade guard recall and precision on a larger set. So far
       `nvidia/nvidia-nemotron-nano-9b-v2` caught every planted secret with no false
       positives, while `nvidia/nemotron-3-nano-30b-a3b` returned `{"segments":[]}`

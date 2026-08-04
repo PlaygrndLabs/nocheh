@@ -178,6 +178,7 @@ export function createTokenUsage(
   model: string,
   inputTokens: number,
   outputTokens: number,
+  reasoningTokens?: number,
 ): AiTokenUsage {
   return {
     provider,
@@ -185,6 +186,7 @@ export function createTokenUsage(
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
+    ...(reasoningTokens === undefined || reasoningTokens <= 0 ? {} : { reasoningTokens }),
   };
 }
 

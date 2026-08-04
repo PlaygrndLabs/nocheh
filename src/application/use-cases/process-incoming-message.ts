@@ -223,10 +223,14 @@ export class ProcessIncomingMessageUseCase {
       taskCount: analysis.tasks.length,
       statusUpdateCount: analysis.statusUpdates.length,
       warningCount: analysis.warnings.length,
+      reasoningTokens: analysis.tokenUsage?.reasoningTokens ?? 0,
       inputTokens: analysis.tokenUsage?.inputTokens ?? 0,
       outputTokens: analysis.tokenUsage?.outputTokens ?? 0,
       totalTokens: analysis.tokenUsage?.totalTokens ?? 0,
     }));
+    if (analysis.tokenUsage !== undefined) {
+      this.metrics.recordAiTokenUsage(analysis.tokenUsage);
+    }
     // Step metadata cannot hold an array, so the reasons themselves go to errorLogs.
     // A count alone is not debuggable: when a model returns a shape the contract does
     // not accept, "12 warnings" and "12 nodes dropped: node kind must be one of…" are
@@ -496,10 +500,14 @@ export class ProcessIncomingMessageUseCase {
       targetMessageId: event.targetMessageId,
       candidateCount: candidateTargets.length,
       statusUpdateCount: analysis.statusUpdates.length,
+      reasoningTokens: analysis.tokenUsage?.reasoningTokens ?? 0,
       inputTokens: analysis.tokenUsage?.inputTokens ?? 0,
       outputTokens: analysis.tokenUsage?.outputTokens ?? 0,
       totalTokens: analysis.tokenUsage?.totalTokens ?? 0,
     }));
+    if (analysis.tokenUsage !== undefined) {
+      this.metrics.recordAiTokenUsage(analysis.tokenUsage);
+    }
 
     const statusUpdateCount = await this.applyStatusUpdates(analysis.statusUpdates, steps, errorLogs);
     await this.saveReactionAudit(event, steps, errorLogs, startedAt, analysis.tokenUsage);
@@ -767,6 +775,11 @@ export class ProcessIncomingMessageUseCase {
           totalTokens: outcome.tokenUsage?.totalTokens ?? 0,
         },
       ));
+      if (outcome.tokenUsage !== undefined) {
+        // Perception is a separate role with its own budget; counted alongside analysis
+        // so the snapshot shows total spend, not analysis spend.
+        this.metrics.recordAiTokenUsage(outcome.tokenUsage);
+      }
       errorLogs.push(...outcome.errors);
       return outcome.window;
     } catch (error) {

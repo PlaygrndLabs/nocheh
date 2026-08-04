@@ -214,6 +214,12 @@ if (!sessionAuth.isConfigured()) {
   logger.warn("App auth is not configured. Set APP_AUTH_USERNAME and APP_AUTH_PASSWORD before testing private data.");
 }
 
+if (envAnalysisMode() === "immediate") {
+  logger.warn(
+    "MESSAGE_ANALYSIS_MODE=immediate analyses inside the webhook request. Analysis can take minutes, so Telegram will time out and retry. Use batch unless you are testing.",
+  );
+}
+
 server.listen(port, host, () => {
   const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
   logger.info("Dev server listening", {
@@ -225,22 +231,37 @@ server.listen(port, host, () => {
 });
 
 /**
- * Flush sweep.
+ * Flush sweep: the only thing that runs analysis in batch mode.
  *
- * Without this, a batch only flushes when the next message arrives, so the analysis
- * interval never fires in a quiet conversation and a window that failed the secret
- * guard is never retried.
+ * The webhook used to flush inline, which meant Telegram's own timeout fired during a
+ * 200s analysis and it retried the same update. Now the webhook only buffers and this
+ * timer owns analysis, so `FLUSH_SWEEP_INTERVAL_SECONDS` is also the worst-case delay
+ * between a due batch and its analysis.
+ *
+ * One sweep at a time. `flushDue` walks conversations sequentially and the buffer
+ * service refuses a second flush of the same conversation, but a slow sweep would still
+ * overlap the next tick and start concurrent model calls across conversations. For a
+ * single owner, serialising is cheaper and keeps clear of provider rate limits.
  */
 const flushSweepSeconds = numberEnv("FLUSH_SWEEP_INTERVAL_SECONDS", 60);
+let sweepRunning = false;
 const flushSweep = setInterval(() => {
+  if (sweepRunning) {
+    logger.warn("Flush sweep still running; skipping this tick.", { intervalSeconds: flushSweepSeconds });
+    return;
+  }
+  sweepRunning = true;
+  const startedAt = Date.now();
   void liveProcessor.flushDue().then((flushed) => {
     if (flushed > 0) {
-      logger.info("Flush sweep processed due batches", { flushed });
+      logger.info("Flush sweep processed due batches", { flushed, durationMs: Date.now() - startedAt });
     }
   }).catch((error: unknown) => {
     logger.error("Flush sweep failed", {
       error: error instanceof Error ? error.message : String(error),
     });
+  }).finally(() => {
+    sweepRunning = false;
   });
 }, flushSweepSeconds * 1000);
 // Never hold the process open for the timer alone.
@@ -341,12 +362,13 @@ function createMemoryGraphAnalyzer(): MemoryGraphAnalyzerPort {
         apiKey,
         model,
         maxTokens,
+        logger,
         ...(baseUrl === undefined ? {} : { baseUrl }),
         ...(process.env.NVIDIA_JSON_RESPONSE_FORMAT === "false" ? { jsonResponseFormat: false } : {}),
       });
     }
     case "anthropic":
-      return new AnthropicMemoryGraphAnalyzer({ apiKey, model, maxTokens });
+      return new AnthropicMemoryGraphAnalyzer({ apiKey, model, maxTokens, logger });
     default:
       logger.warn("AI provider has a catalog entry but no text-analysis adapter. Running in dry-run mode.", {
         provider: provider.id,

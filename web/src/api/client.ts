@@ -79,6 +79,12 @@ export interface MetricsSnapshot {
   averageConfidence: number;
   redactionEvents: number;
   averageProcessingLatencyMs: number;
+  aiCalls: number;
+  aiInputTokens: number;
+  aiOutputTokens: number;
+  /** Tokens a reasoning model spent thinking and then discarded. */
+  aiReasoningTokens: number;
+  aiTotalTokens: number;
 }
 
 export interface AuditStep {

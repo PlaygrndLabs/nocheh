@@ -27,6 +27,8 @@ export interface LiveMessageBufferResult {
   readonly flushedMessageCount: number;
   /** True when the flush was abandoned because the secret guard was unavailable. */
   readonly guardUnavailable?: boolean;
+  /** True when a flush for this conversation was already running and this call did nothing. */
+  readonly alreadyRunning?: boolean;
 }
 
 /** How many guard failures a message tolerates before it is set aside. */
@@ -34,6 +36,17 @@ export const DEFAULT_MAX_GUARD_ATTEMPTS = 5;
 
 /** Buffers live group messages and flushes them into the pipeline as one conversation window. */
 export class LiveMessageBufferService implements IncomingMessageProcessorPort {
+  /**
+   * Conversations with a flush in progress.
+   *
+   * Analysis can take minutes while the sweep ticks every minute, so without this a
+   * second sweep reads the same still-unremoved rows and pays for the same window
+   * twice. Buffer rows are only deleted after `executeWindow` returns, which is
+   * deliberate — losing the window would be worse — so overlap has to be prevented
+   * here rather than by the storage layer.
+   */
+  private readonly flushing = new Set<string>();
+
   public constructor(
     private readonly bufferRepository: LiveMessageBufferRepositoryPort,
     private readonly settingsRepository: GroupAssistantSettingsRepositoryPort,
@@ -45,6 +58,14 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
     private readonly maxGuardAttempts: number = DEFAULT_MAX_GUARD_ATTEMPTS,
   ) {}
 
+  /**
+   * Accepts a message and returns. In batch mode it never analyses.
+   *
+   * Analysis takes minutes; a Telegram webhook has seconds. Flushing here meant
+   * Telegram timed out, retried the same update, and a second analysis was paid for
+   * while the first was still running. The flush sweep owns analysis now, so this path
+   * is a settings lookup, a pattern redaction, and an append.
+   */
   public async execute(message: IncomingMessage): Promise<LiveMessageBufferResult> {
     const settings = await this.settingsRepository.findByConversationId(message.conversationId)
       ?? createGroupAssistantSettings({ conversationId: message.conversationId, ...this.defaultSettings }, this.clock.now());
@@ -63,12 +84,7 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
       bufferedAt: this.clock.now(),
     });
 
-    const buffered = await this.bufferRepository.findByConversationId(message.conversationId);
-    if (!this.shouldFlush(buffered.filter((entry) => !isQuarantined(entry)), settings.analysisIntervalSeconds, settings.maxMessagesPerBatch)) {
-      return { processedImmediately: false, flushedMessageCount: 0 };
-    }
-
-    return this.flushWithResult(message.conversationId);
+    return { processedImmediately: false, flushedMessageCount: 0 };
   }
 
   /** Reactions are not buffered; they are interpreted immediately against prior knowledge. */
@@ -111,7 +127,26 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
     return flushed;
   }
 
-  private async flushWithResult(conversationId: string): Promise<LiveMessageBufferResult> {
+  /**
+   * Flushes one conversation and reports why nothing happened when nothing did.
+   *
+   * `flush` returns only a count, which cannot distinguish "buffer empty" from "guard
+   * down" or "already running". Callers that need to react to those need this.
+   */
+  public async flushWithResult(conversationId: string): Promise<LiveMessageBufferResult> {
+    if (this.flushing.has(conversationId)) {
+      this.logger.info("Flush skipped: one is already running for this conversation", { conversationId });
+      return { processedImmediately: false, flushedMessageCount: 0, alreadyRunning: true };
+    }
+    this.flushing.add(conversationId);
+    try {
+      return await this.runFlush(conversationId);
+    } finally {
+      this.flushing.delete(conversationId);
+    }
+  }
+
+  private async runFlush(conversationId: string): Promise<LiveMessageBufferResult> {
     const settings = await this.settingsRepository.findByConversationId(conversationId)
       ?? createGroupAssistantSettings({ conversationId, ...this.defaultSettings }, this.clock.now());
     const buffered = [...await this.bufferRepository.findByConversationId(conversationId)]

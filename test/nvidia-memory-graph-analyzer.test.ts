@@ -325,3 +325,92 @@ test("the analysis prompt asks for a messageId-only source", async () => {
     },
   );
 });
+
+test("reported reasoning tokens are recorded, because they are paid for and discarded", async () => {
+  await withStubbedFetch(
+    () => jsonResponse({
+      choices: [{
+        index: 0,
+        finish_reason: "stop",
+        message: {
+          role: "assistant",
+          content: JSON.stringify(analysisOutput),
+          reasoning_content: "Thinking about the English routine…",
+        },
+      }],
+      usage: {
+        prompt_tokens: 1534,
+        completion_tokens: 3194,
+        completion_tokens_details: { reasoning_tokens: 2100 },
+      },
+    }),
+    async () => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({ apiKey: "nvapi-test", model: "z-ai/glm-5.2" });
+      const result = await analyzer.analyze(analysisInput);
+
+      // The exact count wins over the length estimate when the provider reports one.
+      assert.equal(result.tokenUsage?.reasoningTokens, 2100);
+      assert.equal(result.tokenUsage?.outputTokens, 3194);
+    },
+  );
+});
+
+test("an unreported reasoning trace is estimated from its length rather than reported as zero", async () => {
+  const trace = "x".repeat(400);
+  await withStubbedFetch(
+    () => jsonResponse({
+      choices: [{
+        index: 0,
+        finish_reason: "stop",
+        message: { role: "assistant", content: JSON.stringify(analysisOutput), reasoning_content: trace },
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    }),
+    async () => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({ apiKey: "nvapi-test", model: "z-ai/glm-5.2" });
+      const result = await analyzer.analyze(analysisInput);
+
+      assert.equal(result.tokenUsage?.reasoningTokens, 100);
+    },
+  );
+});
+
+test("a model with no reasoning trace reports no reasoning tokens at all", async () => {
+  await withStubbedFetch(
+    () => jsonResponse(chatCompletion(JSON.stringify(analysisOutput))),
+    async () => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({ apiKey: "nvapi-test", model: "z-ai/glm-5.2" });
+      const result = await analyzer.analyze(analysisInput);
+
+      assert.equal(result.tokenUsage?.reasoningTokens, undefined);
+      assert.equal("reasoningTokens" in (result.tokenUsage ?? {}), false);
+    },
+  );
+});
+
+test("per-call latency and throughput are logged, so a slow window has an explanation", async () => {
+  const logged: { readonly message: string; readonly context?: Record<string, unknown> }[] = [];
+  await withStubbedFetch(
+    () => jsonResponse(chatCompletion(JSON.stringify(analysisOutput))),
+    async () => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({
+        apiKey: "nvapi-test",
+        model: "z-ai/glm-5.2",
+        logger: {
+          info: (message, context) => logged.push({ message, ...(context === undefined ? {} : { context }) }),
+          warn: () => {},
+          error: () => {},
+        },
+      });
+      await analyzer.analyze(analysisInput);
+
+      const entry = logged.find((item) => item.message === "NVIDIA analysis completed");
+      assert.notEqual(entry, undefined);
+      assert.equal(entry?.context?.outputTokens, 222);
+      assert.equal(typeof entry?.context?.latencyMs, "number");
+      assert.equal(typeof entry?.context?.outputTokensPerSecond, "number");
+      // Prompt size is the other half of the cost question.
+      assert.ok((entry?.context?.promptChars as number) > 0);
+    },
+  );
+});
