@@ -10,6 +10,7 @@ import {
   MEMORY_NODE_KINDS,
   MEMORY_PAYLOAD_KINDS,
   MEMORY_RELATIONS,
+  requiredMemoryPayloadFields,
 } from "../src/domain/memory/memory-graph.js";
 import {
   EXTERNAL_ACTION_KINDS,
@@ -295,4 +296,96 @@ test("a structurally broken root still rejects the whole window", () => {
     }),
     /test analysis output rejected: AI analysis output memories must be an array\./,
   );
+});
+
+/**
+ * The contract is paid for on every analysis call, so its size is a budget, not an
+ * accident. This does not exist to shrink the prompt — every vocabulary in it earns its
+ * place, and omitting them is what made the graph drop 100% of items. It exists so a
+ * casual edit cannot quietly double the standing input cost of every window.
+ *
+ * Raise it deliberately when the contract genuinely needs to grow, and say why here.
+ */
+const PROMPT_BUDGET_CHARS = 5800;
+
+test("the analysis contract stays inside its input-token budget", () => {
+  const prompt = analysisSystemPrompt();
+  assert.ok(
+    prompt.length <= PROMPT_BUDGET_CHARS,
+    `analysisSystemPrompt() is ${prompt.length} chars (~${Math.ceil(prompt.length / 4)} tokens), over the ${PROMPT_BUDGET_CHARS} budget. Every call pays this.`,
+  );
+});
+
+test("no vocabulary is enumerated twice, because each copy is paid for every call", () => {
+  const prompt = analysisSystemPrompt();
+  // The payload field spec doubles as the list of valid payloadKind values, so a
+  // separate enumeration of them would be pure duplicated cost.
+  for (const kind of MEMORY_PAYLOAD_KINDS) {
+    const occurrences = prompt.split(`${kind}(`).length - 1;
+    assert.equal(occurrences, 1, `payloadKind ${kind} is declared ${occurrences} times`);
+  }
+  assert.equal(prompt.split("payloadKind fields:").length - 1, 1);
+});
+
+test("required payload fields are enforced in code, so the prompt need not pay for them", () => {
+  // The exact failure a type system cannot catch: payload is Record<string, unknown>, so
+  // a goal whose status was left on the node instead of inside the payload validates.
+  const analysis = build({
+    nodes: [envelope({
+      id: "goal:english",
+      kind: "goal",
+      label: "English growth",
+      status: "active",
+      payload: { payloadKind: "goal", desiredOutcome: "Speak fluently" },
+    })],
+  });
+
+  assert.equal(analysis.nodes.length, 1, "the node itself is still knowledge worth keeping");
+  assert.equal(analysis.nodes[0]?.label, "English growth");
+  assert.deepEqual(analysis.nodes[0]?.payload, {}, "the half-built payload is not stored");
+  assert.match(analysis.warnings[0] ?? "", /Dropped goal payload: missing status\. Node kept without it\./);
+});
+
+test("a complete payload survives untouched", () => {
+  const analysis = build({
+    nodes: [envelope({
+      id: "routine:english-daily",
+      kind: "routine",
+      label: "Daily English practice",
+      payload: { payloadKind: "routine", cadence: "daily", habit: "20 minutes of reading", target: "fluency" },
+    })],
+  });
+
+  assert.deepEqual(analysis.warnings, []);
+  assert.deepEqual(analysis.nodes[0]?.payload, {
+    payloadKind: "routine",
+    cadence: "daily",
+    habit: "20 minutes of reading",
+    target: "fluency",
+  });
+});
+
+test("optional payload fields are never required", () => {
+  const analysis = build({
+    nodes: [envelope({
+      id: "person:sam",
+      kind: "person",
+      label: "Sam",
+      // Every person field is optional, so a bare tag is complete.
+      payload: { payloadKind: "person" },
+    })],
+  });
+
+  assert.deepEqual(analysis.warnings, []);
+  assert.deepEqual(analysis.nodes[0]?.payload, { payloadKind: "person" });
+});
+
+test("required payload fields are derived from the spec the prompt renders", () => {
+  // One source of truth: if these drift, the prompt is describing a different contract
+  // than the mapper enforces.
+  assert.deepEqual(requiredMemoryPayloadFields("goal"), ["status", "desiredOutcome"]);
+  assert.deepEqual(requiredMemoryPayloadFields("routine"), ["cadence", "habit"]);
+  assert.deepEqual(requiredMemoryPayloadFields("person"), []);
+  assert.deepEqual(requiredMemoryPayloadFields("routine_experiment"), ["hypothesis", "durationDays", "measurement"]);
+  assert.deepEqual(requiredMemoryPayloadFields("style_rule"), ["rule"]);
 });

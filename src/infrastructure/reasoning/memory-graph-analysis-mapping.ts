@@ -13,6 +13,7 @@ import {
   createMemoryEdge,
   createMemoryNode,
   isMemoryPayloadKind,
+  requiredMemoryPayloadFields,
   MEMORY_GRAPH_SCOPES,
   MEMORY_GRAPH_STATUSES,
   MEMORY_NODE_KINDS,
@@ -108,31 +109,34 @@ export function analysisSystemPrompt(minimumConfidence: number = DEFAULT_MINIMUM
     "Never suggest automatic crypto trading. Crypto support is thesis, risk, journal, and decision support only.",
     "The JSON root must contain arrays: memories, nodes, edges, strategicSuggestions, actionSuggestions, tasks, statusUpdates, warnings.",
     "Every item must include idempotencyKey, source, confidence, reason, and value. Warnings use message instead of value.",
-    "source is exactly { \"messageId\": \"<id of the window message this came from>\" } and nothing else.",
-    "Never invent a messageId. Use one of the ids listed in messages, so knowledge stays traceable.",
-    `Only return an item when confidence is at least ${minimumConfidence}. Anything below that is discarded, so a guess costs knowledge rather than adding it.`,
-    `Every id you supply (node id, edge id, suggestion id) must be ${GRAPH_ID_RULE}: use slug form such as project:acme-site, person:mak, or edge:mak-owns-task-14. Labels, facts, titles, and rationales must be at least 2 characters.`,
+    "source is exactly { \"messageId\": \"<id of a window message>\" } and nothing else. Never invent a messageId: knowledge must stay traceable.",
+    `Only return items you are at least ${minimumConfidence} confident in; the rest are discarded.`,
+    `Every id must be ${GRAPH_ID_RULE}, in slug form like project:acme-site. Labels, facts, titles, and rationales need at least 2 characters.`,
     "",
-    "Value shapes. A trailing ? marks an optional field, [] marks an array, and (a|b) lists the only accepted values.",
+    "Value shapes. ? marks optional, [] an array, (a|b) the only accepted values; anything outside them is discarded.",
     "tasks[].value: { title, description?, priority?(low|medium|high|urgent), dueAt?(ISO), assignee? }.",
-    "statusUpdates[].value: { targetMessageId, status(open|in_progress|completed|cancelled) } to change an EXISTING task/node derived from that message (e.g. closing a task after a done reaction).",
-    `memories[].value: { type(${MEMORY_TYPES.join("|")}), ...typed fields } for durable structured memory. Project needs name; Decision needs title and outcome; Deadline needs title (dueAt? ISO); Blocker needs description (status?(open|resolved), owner?); Summary needs title and summary.`,
-    `nodes[].value: { id, kind(${MEMORY_NODE_KINDS.join("|")}), label, scope?(${MEMORY_GRAPH_SCOPES.join("|")}), status?(${MEMORY_GRAPH_STATUSES.join("|")}), summary?, aliases?[], payload? }.`,
-    `A node payload, when present, must be { payloadKind(${MEMORY_PAYLOAD_KINDS.join("|")}), ...fields for that kind }.`,
-    `Payload fields by payloadKind: ${payloadFieldContract()}.`,
-    `edges[].value: { id, fromNodeId, toNodeId, relation(${MEMORY_RELATIONS.join("|")}), fact, status?, validFrom?(ISO), validUntil?(ISO) }.`,
-    "Use those relation names exactly; an invented relation is discarded. Both endpoints must be ids you also return in nodes or ids listed in existingKnowledge — an edge pointing at an unknown node is discarded.",
-    `strategicSuggestions[].value: { id, kind(${STRATEGIC_SUGGESTION_KINDS.join("|")}), title, rationale, riskLevel?(${SUGGESTION_RISK_LEVELS.join("|")}), expectedValue?, evidenceNodeIds?[] } for things Mak might decide to do.`,
-    `actionSuggestions[].value: { id, kind(${EXTERNAL_ACTION_KINDS.join("|")}), title, rationale, riskLevel?(${SUGGESTION_RISK_LEVELS.join("|")}), target, preview } for external effects. target is who or what it acts on; preview is the exact content that would be sent or written. These always wait for Mak's approval.`,
-    "warnings[].message: a short note about something you refused, could not resolve, or found contradictory.",
+    "statusUpdates[].value: { targetMessageId, status(open|in_progress|completed|cancelled) } changes an EXISTING task/node from that message, e.g. closing a task after a done reaction.",
+    `memories[].value: { type(${MEMORY_TYPES.join("|")}), ...fields }. Project needs name; Decision title+outcome; Deadline title, dueAt?(ISO); Blocker description, status?(open|resolved), owner?; Summary title+summary.`,
+    `nodes[].value: { id, kind(${MEMORY_NODE_KINDS.join("|")}), label, scope?(${MEMORY_GRAPH_SCOPES.join("|")}), status?(${MEMORY_GRAPH_STATUSES.join("|")}), summary?, aliases?[], payload?{ payloadKind, ...fields for that kind } }.`,
+    `payloadKind fields: ${payloadFieldContract()}.`,
+    `edges[].value: { id, fromNodeId, toNodeId, relation(${MEMORY_RELATIONS.join("|")}), fact, status?, validFrom?(ISO), validUntil?(ISO) }. Both endpoints must be ids you return in nodes or ids in existingKnowledge.`,
+    `strategicSuggestions[].value: { id, kind(${STRATEGIC_SUGGESTION_KINDS.join("|")}), title, rationale, riskLevel?(${SUGGESTION_RISK_LEVELS.join("|")}), expectedValue?, evidenceNodeIds?[] }: things Mak might decide to do.`,
+    `actionSuggestions[].value: { id, kind(${EXTERNAL_ACTION_KINDS.join("|")}), title, rationale, riskLevel?(${SUGGESTION_RISK_LEVELS.join("|")}), target, preview }: external effects awaiting Mak's approval. target is who or what it acts on; preview is the exact content that would be sent or written.`,
+    "warnings[].message: a short note about anything you refused, could not resolve, or found contradictory.",
   ].join("\n");
 }
 
-/** Renders `MEMORY_PAYLOAD_FIELD_SPECS` compactly: one `kind -> fields` clause per kind. */
+/**
+ * Renders `MEMORY_PAYLOAD_FIELD_SPECS` as `kind(field,field) kind(field)`.
+ *
+ * The single largest line in the prompt, so the notation is terse on purpose. It also
+ * doubles as the list of valid `payloadKind` values, which is why no separate
+ * enumeration of them is sent.
+ */
 function payloadFieldContract(): string {
   return MEMORY_PAYLOAD_KINDS
-    .map((kind) => `${kind} -> ${MEMORY_PAYLOAD_FIELD_SPECS[kind].join(", ")}`)
-    .join("; ");
+    .map((kind) => `${kind}(${MEMORY_PAYLOAD_FIELD_SPECS[kind].join(",")})`)
+    .join(" ");
 }
 
 /** Serializes the analysis window into the provider-neutral user prompt. */
@@ -209,6 +213,10 @@ export function buildMemoryGraphAnalysis(options: BuildMemoryGraphAnalysisOption
   // Items that validated but cannot be mapped into the domain are dropped the same
   // way, so a shape the prompt did not pin down degrades instead of failing.
   const mappingWarnings: string[] = [...validated.value.skipped];
+  /** Records a problem that degraded an item without discarding it. */
+  const warn = (message: string): void => {
+    mappingWarnings.push(message);
+  };
   function mapKept<T>(items: readonly T[], map: (item: T) => unknown, label: string): readonly unknown[] {
     const mapped: unknown[] = [];
     for (const item of items) {
@@ -224,7 +232,7 @@ export function buildMemoryGraphAnalysis(options: BuildMemoryGraphAnalysisOption
   try {
     const nodes = mapKept(
       output.nodes,
-      (item) => createMemoryNode(nodeInput(item.value, item.source, item.confidence)),
+      (item) => createMemoryNode(nodeInput(item.value, item.source, item.confidence, warn)),
       "graph node",
     ) as readonly MemoryNode[];
     const edges = mapKept(
@@ -385,7 +393,12 @@ function describeMessage(message: IncomingMessage): JsonRecord {
   };
 }
 
-function nodeInput(value: unknown, source: MemoryGraphSource, confidence: number): CreateMemoryNodeInput {
+function nodeInput(
+  value: unknown,
+  source: MemoryGraphSource,
+  confidence: number,
+  warn: (message: string) => void,
+): CreateMemoryNodeInput {
   const record = requireRecord(value, "node value");
   return {
     kind: requiredEnum(record.kind, "node kind", MEMORY_NODE_KINDS),
@@ -396,25 +409,41 @@ function nodeInput(value: unknown, source: MemoryGraphSource, confidence: number
     ...(optionalString(record.id) === undefined ? {} : { id: requiredString(record.id, "node id") }),
     ...(optionalString(record.summary) === undefined ? {} : { summary: requiredString(record.summary, "node summary") }),
     aliases: arrayOfStrings(record.aliases),
-    payload: nodePayload(record.payload),
+    payload: nodePayload(record.payload, warn),
     status: optionalEnum(record.status, "node status", MEMORY_GRAPH_STATUSES, "active"),
   };
 }
 
 /**
- * Keeps a free-form payload but rejects an unknown `payloadKind`.
+ * Keeps a free-form payload, refuses an unknown `payloadKind`, and discards a payload
+ * that does not carry the fields its kind requires.
  *
- * An absent payload is fine — plenty of nodes are just a label. A payload tagged with
- * a kind the domain does not know is worse than none: the expanded payload interfaces
- * and every reader that switches on `payloadKind` (accepted-rule detection, context
- * building) will silently ignore it, so the node would look stored but carry nothing.
+ * An absent payload is fine — plenty of nodes are just a label. A payload tagged with a
+ * kind the domain does not know is worse than none: every reader that switches on
+ * `payloadKind` would ignore it, so the node would look stored while carrying nothing.
+ *
+ * A payload missing required fields is the quiet case. `MemoryGraphPayload` is
+ * `Record<string, unknown>`, so `{ payloadKind: "goal" }` with the status left on the
+ * node satisfies every type and silently produces a goal with no goal in it. The node
+ * still has value — a label and a kind are real knowledge — so it is kept and only the
+ * payload is dropped, with a reason.
  */
-function nodePayload(value: unknown): Readonly<Record<string, unknown>> {
+function nodePayload(value: unknown, warn: (message: string) => void): Readonly<Record<string, unknown>> {
   const payload = objectValue(value);
-  if (payload.payloadKind !== undefined && !isMemoryPayloadKind(payload.payloadKind)) {
+  const kind = payload.payloadKind;
+  if (kind === undefined) {
+    return payload;
+  }
+  if (!isMemoryPayloadKind(kind)) {
     throw new Error(
-      `node payload payloadKind must be one of: ${MEMORY_PAYLOAD_KINDS.join(", ")}. Received ${describeValue(payload.payloadKind)}.`,
+      `node payload payloadKind must be one of: ${MEMORY_PAYLOAD_KINDS.join(", ")}. Received ${describeValue(kind)}.`,
     );
+  }
+
+  const missing = requiredMemoryPayloadFields(kind).filter((field) => payload[field] === undefined);
+  if (missing.length > 0) {
+    warn(`Dropped ${kind} payload: missing ${missing.join(", ")}. Node kept without it.`);
+    return {};
   }
   return payload;
 }

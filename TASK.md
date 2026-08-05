@@ -44,7 +44,11 @@ is — a queued free tier, or a reasoning model whose trace is paid for and disc
       quality: memories, graph nodes, edges, suggestions, safety refusals.
 - [ ] Project a monthly cost from real message volume using `/api/metrics` token
       totals. One measured window: 2198 perception + ~950 guard + 3194 analysis tokens,
-      and the analysis system prompt is now ~1534 input tokens on every call.
+      and the analysis system prompt is ~1352 input tokens on every call (budget pinned
+      by `test/memory-graph-analysis-mapping.test.ts`).
+- [ ] Read the warning count on real runs. Warnings are output tokens the model spent on
+      items that were then discarded, which is the one case where more prompt text is
+      cheaper than less. Only add contract prose for a failure the mapper sees often.
 - [ ] Grade guard recall and precision on a larger set. So far
       `nvidia/nvidia-nemotron-nano-9b-v2` caught every planted secret with no false
       positives, while `nvidia/nemotron-3-nano-30b-a3b` returned `{"segments":[]}`

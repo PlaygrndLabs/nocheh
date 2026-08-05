@@ -159,6 +159,21 @@ export function isMemoryPayloadKind(value: unknown): value is MemoryPayloadKind 
   return includesValue(MEMORY_PAYLOAD_KINDS, value);
 }
 
+/**
+ * The payload fields a kind cannot do without, derived from the same spec the prompt
+ * renders.
+ *
+ * Checking these locally is free, while telling a model about them costs input tokens on
+ * every call forever. It also catches the one failure a validator can otherwise miss:
+ * a payload is `Record<string, unknown>`, so a goal whose `status` was put on the node
+ * instead of inside the payload validates cleanly and silently loses its status.
+ */
+export function requiredMemoryPayloadFields(kind: MemoryPayloadKind): readonly string[] {
+  return MEMORY_PAYLOAD_FIELD_SPECS[kind]
+    .filter((field) => !field.includes("?"))
+    .map((field) => field.split("(")[0] ?? field);
+}
+
 function includesValue(vocabulary: readonly string[], value: unknown): boolean {
   return typeof value === "string" && vocabulary.includes(value);
 }
