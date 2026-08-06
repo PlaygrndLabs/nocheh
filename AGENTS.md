@@ -81,6 +81,7 @@ Model roles, configured and degrading independently (ADR-0010):
 | `image_understanding` | `AI_IMAGE_PROVIDER` | Images recorded, not described |
 | `audio_understanding` | `AI_AUDIO_PROVIDER` | Voice notes recorded, not transcribed |
 | `secret_guard` | `AI_GUARD_PROVIDER` | Pattern rules only |
+| `embedding` | `AI_EMBEDDING_PROVIDER` | Recall falls back to word overlap |
 
 Credentials are per provider; model ids are per role.
 
@@ -98,6 +99,9 @@ Implemented:
   quarantine after repeated failures; interval-driven flush sweep
 - Cost and latency observability: per-call latency, prompt size, output throughput and
   reasoning tokens are logged; token counters across every role are in `/api/metrics`
+- Embedding recall: `embedding` model role, NVIDIA and Gemini adapters, normalised
+  vectors in SQLite (encrypted), hybrid vector + word-overlap scoring, write-through
+  indexing and an explicit `POST /api/memory/reindex` backfill (ADR-0011)
 - Analysis contract generated from the domain: the prompt renders every vocabulary
   from `as const` arrays, the mapping layer validates against the same arrays, and
   each rejected item lands in the audit record's `errorLogs` with a reason
@@ -106,7 +110,8 @@ Implemented:
 
 Gaps to respect when planning:
 
-- Retrieval is lexical, not embedding-based.
+- Nothing reads memory back into a prompt yet. Embedding recall exists and is tested;
+  `AssistantContextBuilder` is still unwired, so `contextText` is never populated.
 - Suggestion approval exists in the API and domain, not in the UI.
 - Nocheh never sends outbound messages.
 - Telegram is the only live channel.

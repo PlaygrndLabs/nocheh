@@ -53,6 +53,8 @@ export { NoopMemoryExtractor } from "./application/ports/memory-extractor.js";
 export type { MemoryRecordRepositoryPort } from "./application/ports/memory-record-repository.js";
 export type { MemoryGraphRepositoryPort } from "./application/ports/memory-graph-repository.js";
 export type { MemoryQuery, MemoryRetrievalPort, MemorySearchResult } from "./application/ports/memory-retrieval.js";
+export type { EmbeddingKind, EmbeddingPort, EmbeddingRequest, EmbeddingResult } from "./application/ports/embedding.js";
+export type { MemoryEmbedding, MemoryEmbeddingRepositoryPort } from "./application/ports/memory-embedding-repository.js";
 export type { MetricsCollectorPort, MetricsSnapshot } from "./application/ports/metrics.js";
 export { NoopMetricsCollector } from "./application/ports/metrics.js";
 export type { SecretDetectorPort } from "./application/ports/secret-detector.js";
@@ -289,6 +291,21 @@ export { EncryptedJsonFileStore } from "./infrastructure/memory/encrypted-json-f
 export { LocalTaskRepository } from "./infrastructure/memory/local-task-repository.js";
 export { LocalMemoryRecordRepository } from "./infrastructure/memory/local-memory-record-repository.js";
 export { SemanticMemoryRetrievalService } from "./infrastructure/memory/semantic-memory-retrieval-service.js";
+export { lexicalScore } from "./infrastructure/memory/lexical-score.js";
+export {
+  HybridMemoryRetrievalService,
+  DEFAULT_LEXICAL_WEIGHT,
+  DEFAULT_SIMILARITY_FLOOR,
+} from "./infrastructure/memory/hybrid-memory-retrieval-service.js";
+export { NvidiaEmbedding, NVIDIA_DEFAULT_EMBEDDING_URL } from "./infrastructure/memory/nvidia-embedding.js";
+export { GeminiEmbedding } from "./infrastructure/memory/gemini-embedding.js";
+export { SqliteMemoryEmbeddingRepository } from "./infrastructure/sqlite/sqlite-memory-embedding-repository.js";
+export {
+  EmbeddingIndexingMemoryRecordRepository,
+  DEFAULT_BACKFILL_BATCH_SIZE,
+} from "./application/services/memory-embedding-indexer.js";
+export type { MemoryEmbeddingBackfillResult } from "./application/services/memory-embedding-indexer.js";
+export { dotProduct, normalizeVector } from "./shared/vector.js";
 export { LocalTaskSyncRepository } from "./infrastructure/memory/local-task-sync-repository.js";
 export { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
 export { LocalAuditRepository } from "./infrastructure/observability/local-audit-repository.js";

@@ -52,6 +52,12 @@ import { SqliteGroupAssistantSettingsRepository } from "./infrastructure/sqlite/
 import { SqliteLiveMessageBufferRepository } from "./infrastructure/sqlite/sqlite-live-message-buffer-repository.js";
 import { SqliteMemoryGraphRepository } from "./infrastructure/sqlite/sqlite-memory-graph-repository.js";
 import { SqliteMemoryRecordRepository } from "./infrastructure/sqlite/sqlite-memory-record-repository.js";
+import { SqliteMemoryEmbeddingRepository } from "./infrastructure/sqlite/sqlite-memory-embedding-repository.js";
+import { EmbeddingIndexingMemoryRecordRepository } from "./application/services/memory-embedding-indexer.js";
+import { HybridMemoryRetrievalService } from "./infrastructure/memory/hybrid-memory-retrieval-service.js";
+import { NvidiaEmbedding } from "./infrastructure/memory/nvidia-embedding.js";
+import { GeminiEmbedding } from "./infrastructure/memory/gemini-embedding.js";
+import type { EmbeddingPort } from "./application/ports/embedding.js";
 import { SqliteSuggestionRepository } from "./infrastructure/sqlite/sqlite-suggestion-repository.js";
 import { SqliteTaskRepository } from "./infrastructure/sqlite/sqlite-task-repository.js";
 import { SqliteTaskSyncRepository } from "./infrastructure/sqlite/sqlite-task-sync-repository.js";
@@ -98,7 +104,32 @@ const envStore = new DotenvFileStore(join(process.cwd(), ".env"));
 const telegramClient = new TelegramHttpClient();
 
 const taskRepository = new SqliteTaskRepository(database, encryption);
-const memoryRepository = new SqliteMemoryRecordRepository(database, encryption);
+const memoryRecordStore = new SqliteMemoryRecordRepository(database, encryption);
+const memoryEmbeddingRepository = new SqliteMemoryEmbeddingRepository(database, encryption, clock);
+const embedder = createEmbedding();
+// Retrieval is built before the write path so the indexer can drop its vector cache.
+const memoryRetrieval = new HybridMemoryRetrievalService(
+  memoryRecordStore,
+  memoryEmbeddingRepository,
+  embedder,
+  logger,
+);
+/**
+ * Writes go through the indexer only when an embedding model is configured.
+ *
+ * With no embedding role this is the plain SQLite repository and retrieval falls back to
+ * word overlap, so the feature is absent rather than half-present.
+ */
+const memoryEmbeddingIndexer = embedder === undefined
+  ? undefined
+  : new EmbeddingIndexingMemoryRecordRepository(
+    memoryRecordStore,
+    memoryEmbeddingRepository,
+    embedder,
+    logger,
+    () => { memoryRetrieval.invalidate(); },
+  );
+const memoryRepository = memoryEmbeddingIndexer ?? memoryRecordStore;
 const memoryGraphRepository = new SqliteMemoryGraphRepository(database, encryption);
 const suggestionRepository = new SqliteSuggestionRepository(database, encryption);
 const syncRepository = new SqliteTaskSyncRepository(database, encryption);
@@ -168,6 +199,7 @@ const apiRouter = registerApiRoutes(new Router(), {
   metrics,
   clock,
   auth: sessionAuth,
+  ...(memoryEmbeddingIndexer === undefined ? {} : { memoryEmbeddingIndexer }),
 });
 
 const webDistDir = process.env.WEB_DIST_DIR ?? join(process.cwd(), "web", "dist");
@@ -212,6 +244,23 @@ const server = createServer(async (request, response) => {
 
 if (!sessionAuth.isConfigured()) {
   logger.warn("App auth is not configured. Set APP_AUTH_USERNAME and APP_AUTH_PASSWORD before testing private data.");
+}
+
+if (memoryEmbeddingIndexer !== undefined) {
+  // Reported, never done automatically: a backfill is one paid model call per record, so
+  // switching the role on must not quietly spend money at boot.
+  const [records, indexed] = await Promise.all([
+    memoryRecordStore.findAll(),
+    memoryEmbeddingRepository.indexedRecordIds(),
+  ]);
+  const pending = records.length - indexed.length;
+  if (pending > 0) {
+    logger.warn("Memory records have no embedding yet; recall falls back to word overlap for them.", {
+      pending,
+      indexed: indexed.length,
+      action: "POST /api/memory/reindex",
+    });
+  }
 }
 
 if (envAnalysisMode() === "immediate") {
@@ -445,6 +494,37 @@ function createMediaUnderstandingService(): MediaUnderstandingService | undefine
     },
     new SqliteMediaUnderstandingCache(database, encryption),
   );
+}
+
+/** Builds the embedding client for memory recall, or undefined when the role is unset. */
+function createEmbedding(): EmbeddingPort | undefined {
+  // resolveAiRole already reports an unset role and its consequence from the catalog.
+  const resolved = resolveAiRole("embedding");
+  if (resolved === undefined) {
+    return undefined;
+  }
+
+  const { provider, model, apiKey } = resolved;
+  switch (provider.id) {
+    case "nvidia": {
+      const baseUrl = trimmedEnv("NVIDIA_EMBEDDING_BASE_URL");
+      return new NvidiaEmbedding({
+        apiKey,
+        model,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+        ...(process.env.NVIDIA_EMBEDDING_INPUT_TYPE === "false" ? { sendInputType: false } : {}),
+      });
+    }
+    case "gemini": {
+      const baseUrl = trimmedEnv("GEMINI_BASE_URL");
+      return new GeminiEmbedding({ apiKey, model, ...(baseUrl === undefined ? {} : { baseUrl }) });
+    }
+    default:
+      logger.warn("Embedding provider has a catalog entry but no adapter; recall uses word overlap only.", {
+        provider: provider.id,
+      });
+      return undefined;
+  }
 }
 
 /** Builds a provider-agnostic single-turn completion client for a role, if configured. */

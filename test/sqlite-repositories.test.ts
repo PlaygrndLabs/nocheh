@@ -11,6 +11,7 @@ import { SqliteLiveMessageBufferRepository } from "../src/infrastructure/sqlite/
 import { SqliteMediaUnderstandingCache } from "../src/infrastructure/sqlite/sqlite-media-understanding-cache.js";
 import { SqliteMemoryGraphRepository } from "../src/infrastructure/sqlite/sqlite-memory-graph-repository.js";
 import { SqliteMemoryRecordRepository } from "../src/infrastructure/sqlite/sqlite-memory-record-repository.js";
+import { SqliteMemoryEmbeddingRepository } from "../src/infrastructure/sqlite/sqlite-memory-embedding-repository.js";
 import { SqliteSuggestionRepository } from "../src/infrastructure/sqlite/sqlite-suggestion-repository.js";
 import { SqliteTaskRepository } from "../src/infrastructure/sqlite/sqlite-task-repository.js";
 import { SqliteTaskSyncRepository } from "../src/infrastructure/sqlite/sqlite-task-sync-repository.js";
@@ -366,3 +367,63 @@ function auditRecord(taskId: string): ProcessingAuditRecord {
     totalLatencyMs: 1,
   };
 }
+
+test("memory embeddings round-trip as encrypted vectors and cascade with their record", async () => {
+  const database = await testDatabase();
+  try {
+    const records = new SqliteMemoryRecordRepository(database, encryption);
+    const embeddings = new SqliteMemoryEmbeddingRepository(database, encryption, { now: () => now });
+    await records.save({
+      id: "mem-embed-1",
+      type: "Summary",
+      source,
+      timestamp: now,
+      confidence: 0.9,
+      summary: { title: "Sleep", summary: "Sleep and energy routine", coveredRecordIds: [] },
+    });
+
+    const vector = [0.5, -0.25, 0.125, 0];
+    await embeddings.save({ recordId: "mem-embed-1", model: "test-embed-v1", vector });
+
+    const stored = await embeddings.findAll();
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0]?.model, "test-embed-v1");
+    // Float32 is the precision embedding APIs serve, so these values survive exactly.
+    assert.deepEqual(stored[0]?.vector, vector);
+    assert.deepEqual(await embeddings.indexedRecordIds(), ["mem-embed-1"]);
+
+    // The vector column must never hold readable numbers.
+    const row = database
+      .prepare("SELECT vector, dimensions FROM memory_embeddings WHERE record_id = ?")
+      .get("mem-embed-1") as { readonly vector: string; readonly dimensions: number };
+    assert.match(row.vector, /^v1\./);
+    assert.doesNotMatch(row.vector, /0\.125/);
+    // Dimensions stay plaintext so a model mismatch is detectable without decrypting.
+    assert.equal(row.dimensions, 4);
+
+    // Re-indexing the same record replaces the vector instead of duplicating it.
+    await embeddings.save({ recordId: "mem-embed-1", model: "test-embed-v2", vector: [1, 0, 0, 0] });
+    const reindexed = await embeddings.findAll();
+    assert.equal(reindexed.length, 1);
+    assert.equal(reindexed[0]?.model, "test-embed-v2");
+
+    // A deleted memory record must not leave an orphan vector behind.
+    database.prepare("DELETE FROM memory_records WHERE id = ?").run("mem-embed-1");
+    assert.deepEqual(await embeddings.indexedRecordIds(), []);
+  } finally {
+    database.close();
+  }
+});
+
+test("an embedding cannot be stored for a record that does not exist", async () => {
+  const database = await testDatabase();
+  try {
+    const embeddings = new SqliteMemoryEmbeddingRepository(database, encryption, { now: () => now });
+    await assert.rejects(
+      () => embeddings.save({ recordId: "mem-missing", model: "m", vector: [1, 0] }),
+      /FOREIGN KEY constraint failed/,
+    );
+  } finally {
+    database.close();
+  }
+});

@@ -98,8 +98,11 @@ at boot, so provider changes need a restart (the dashboard reports
   or Google Gemini, selectable per role
 - Validated AI output contract (source ref, confidence, reason, idempotency key)
 - 6 memory record types, 17 graph node kinds, 20 relation types, 16 payload kinds
+- Embedding-backed associative recall: memory is found by meaning, not shared words,
+  blended with word overlap so exact names and slugs still win. Falls back to word
+  overlap when no embedding model is set
 - Bounded assistant context: recent window + retrieved memory + graph neighborhood
-  + accepted rules + high-value pending suggestions
+  + accepted rules + high-value pending suggestions (built, not yet wired to a prompt)
 - Pending suggestions with an approve/reject/archive/convert domain lifecycle
 - SQLite persistence with encrypted payload columns; per-step audit records
 - Token usage recorded per analysis run
@@ -108,7 +111,8 @@ at boot, so provider changes need a restart (the dashboard reports
 
 ## Not Yet
 
-- Embedding-backed vector search (retrieval is lexical scoring)
+- Recall reaching a prompt: embeddings are written and queryable, but
+  `AssistantContextBuilder` is not wired in, so nothing reads memory back yet
 - Approval controls in the UI (the suggestion API exists; no buttons wired)
 - Outbound messages: Nocheh never writes to Telegram, ingestion only
 - Any channel other than Telegram, mock, note, and history import
@@ -144,6 +148,10 @@ NVIDIA_JSON_RESPONSE_FORMAT=true  # false if the endpoint rejects json_object
 # AI_PROVIDER=anthropic; ANTHROPIC_API_KEY=sk-ant-...; ANTHROPIC_MODEL=<required>
 # Gemini is an alternative for any role:
 # AI_AUDIO_PROVIDER=gemini; GEMINI_API_KEY=...; GEMINI_AUDIO_MODEL=<required>
+
+AI_EMBEDDING_PROVIDER=            # blank means recall uses word overlap only
+NVIDIA_EMBEDDING_MODEL=           # e.g. nvidia/llama-3.2-nv-embedqa-1b-v2
+NVIDIA_EMBEDDING_INPUT_TYPE=true  # false if the endpoint rejects input_type
 
 MESSAGE_ANALYSIS_MODE=batch       # or immediate
 LIVE_ANALYSIS_INTERVAL_SECONDS=300

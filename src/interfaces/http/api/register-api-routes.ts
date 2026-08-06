@@ -14,6 +14,7 @@ import { createAuthRoutes } from "./create-auth-routes.js";
 import { createBrainRoutes } from "./create-brain-routes.js";
 import { createConfigRoutes } from "./create-config-routes.js";
 import { createHistoryRoutes } from "./create-history-routes.js";
+import { createMemoryRoutes } from "./create-memory-routes.js";
 import { createMockRoutes } from "./create-mock-routes.js";
 import { createNoteRoutes } from "./create-note-routes.js";
 import { createObservabilityRoutes } from "./create-observability-routes.js";
@@ -21,6 +22,7 @@ import { createSettingsRoutes } from "./create-settings-routes.js";
 import { createSetupRoutes } from "./create-setup-routes.js";
 import { createTelegramRoutes } from "./create-telegram-routes.js";
 import type { SessionAuth } from "../auth/session-auth.js";
+import type { EmbeddingIndexingMemoryRecordRepository } from "../../../application/services/memory-embedding-indexer.js";
 
 /** Dependencies the UI API needs, supplied from the composition root. */
 export interface ApiDependencies {
@@ -36,6 +38,8 @@ export interface ApiDependencies {
   readonly metrics: MetricsCollectorPort;
   readonly clock: ClockPort;
   readonly auth: SessionAuth;
+  /** Absent when no embedding model is configured; the memory routes then report that. */
+  readonly memoryEmbeddingIndexer?: EmbeddingIndexingMemoryRecordRepository;
 }
 
 /** Registers every `/api/*` route on the given router. */
@@ -50,6 +54,7 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
   const observability = createObservabilityRoutes(deps.auditRepository, deps.metrics);
   const brain = createBrainRoutes(deps.memoryGraphRepository, deps.suggestionRepository);
   const note = createNoteRoutes(deps.liveProcessor);
+  const memory = createMemoryRoutes(deps.memoryEmbeddingIndexer);
 
   router
     .get("/api/auth/status", auth.status)
@@ -80,7 +85,9 @@ export function registerApiRoutes(router: Router, deps: ApiDependencies): Router
     .post("/api/brain/suggestions/:id/approve", brain.approveSuggestion)
     .post("/api/brain/suggestions/:id/reject", brain.rejectSuggestion)
     .post("/api/brain/suggestions/:id/archive", brain.archiveSuggestion)
-    .put("/api/brain/suggestions/:id", brain.editSuggestion);
+    .put("/api/brain/suggestions/:id", brain.editSuggestion)
+    .get("/api/memory/index", memory.status)
+    .post("/api/memory/reindex", memory.reindex);
 
   return router;
 }

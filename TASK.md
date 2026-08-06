@@ -57,6 +57,22 @@ is — a queued free tier, or a reasoning model whose trace is paid for and disc
       summary rather than near-verbatim OCR, given it reproduces credentials it was
       told to omit.
 
+## Next: Verify Recall Against Real Models
+
+Embedding recall is built and tested but never run against a live embedding API, and
+nothing reads it yet.
+
+- [ ] Verify the NVIDIA wire format: `input_type` on `/v1/embeddings`, and the model id.
+      ADR-0010 records that NVIDIA's audio format deviated from OpenAI's, so assume
+      nothing. `NVIDIA_EMBEDDING_INPUT_TYPE=false` exists as the escape hatch.
+- [ ] Verify Gemini `batchEmbedContents` with `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`.
+- [ ] Measure the real cosine distribution and tune `DEFAULT_SIMILARITY_FLOOR` (0.3) and
+      `DEFAULT_LEXICAL_WEIGHT` (0.25). Both are guesses until then.
+- [ ] Record embedding cost per record and per backfill in `/api/metrics`. Embedding
+      token usage is returned by the adapters but not yet counted.
+- [ ] Wire `AssistantContextBuilder` so recall reaches a prompt. Until then embeddings
+      are written and never read.
+
 ## Next: Close The Loop
 
 - [ ] Wire approve / edit / reject / archive controls into the dashboard. The API
@@ -71,8 +87,6 @@ is — a queued free tier, or a reasoning model whose trace is paid for and disc
 
 ## Later
 
-- [ ] Embedding-backed retrieval to replace lexical scoring in
-      `SemanticMemoryRetrievalService`.
 - [ ] Document understanding (PDF, docx). Documents are recorded today but never
       sent to a model.
 - [ ] Media in Telegram Desktop history imports. Export entries reference local

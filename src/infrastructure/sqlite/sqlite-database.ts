@@ -16,6 +16,7 @@ export function openSqliteDatabase(databasePath: string): SqliteDatabase {
   applyMemoryGraphSchema(database);
   applyAppConfigSchema(database);
   applyMediaUnderstandingSchema(database);
+  applyMemoryEmbeddingSchema(database);
   applyIncrementalColumns(database);
   return database;
 }
@@ -217,5 +218,31 @@ function applyMediaUnderstandingSchema(database: SqliteDatabase): void {
       payload TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+  `);
+}
+
+/**
+ * Vectors for memory records, used for associative recall.
+ *
+ * The vector is an encrypted payload like every other derived content column. An
+ * embedding can be partially inverted back towards its source text, so it is treated as
+ * derived content under the redaction-first rule rather than as opaque numbers. That also
+ * settles the storage question: an encrypted blob is invisible to a vector index, so
+ * scoring happens in process and no native extension is involved.
+ *
+ * `model` is stored because vectors from different models share no space and must never
+ * be compared; `dimensions` makes a mismatch cheap to detect without decrypting.
+ */
+function applyMemoryEmbeddingSchema(database: SqliteDatabase): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS memory_embeddings (
+      record_id TEXT PRIMARY KEY,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      vector TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (record_id) REFERENCES memory_records(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_embeddings_model ON memory_embeddings(model);
   `);
 }
