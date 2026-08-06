@@ -11,7 +11,12 @@
  */
 
 /** A distinct job a model is selected for. */
-export type AiModelRole = "text_analysis" | "image_understanding" | "audio_understanding" | "secret_guard";
+export type AiModelRole =
+  | "text_analysis"
+  | "image_understanding"
+  | "audio_understanding"
+  | "secret_guard"
+  | "embedding";
 
 export interface AiModelRoleDescriptor {
   readonly id: AiModelRole;
@@ -55,6 +60,13 @@ export const AI_MODEL_ROLES: readonly AiModelRoleDescriptor[] = [
     providerEnvKey: "AI_GUARD_PROVIDER",
     purpose: "Finds secrets that pattern rules miss, such as a password written in prose or spoken aloud.",
     whenUnset: "Redaction falls back to built-in pattern rules only.",
+  },
+  {
+    id: "embedding",
+    label: "Memory embeddings",
+    providerEnvKey: "AI_EMBEDDING_PROVIDER",
+    purpose: "Turns structured memory into vectors so recall finds related knowledge that shares no words with the question.",
+    whenUnset: "Retrieval falls back to word-overlap scoring, which cannot surface a memory phrased differently.",
   },
 ];
 
@@ -109,6 +121,10 @@ export const AI_PROVIDERS: readonly AiProviderDescriptor[] = [
         modelEnvKey: "NVIDIA_GUARD_MODEL",
         notes: "Model id is required. Prefer a small, fast model: the guard runs once per window.",
       },
+      embedding: {
+        modelEnvKey: "NVIDIA_EMBEDDING_MODEL",
+        notes: "Retrieval model, for example nvidia/llama-3.2-nv-embedqa-1b-v2. The nv-embedqa family is asymmetric, so queries and stored text are embedded with different input types. Verify the model id and wire format against the live catalog.",
+      },
     },
   },
   {
@@ -138,6 +154,10 @@ export const AI_PROVIDERS: readonly AiProviderDescriptor[] = [
       secret_guard: {
         modelEnvKey: "GEMINI_GUARD_MODEL",
         notes: "Prefer a small, fast model: the guard runs once per window.",
+      },
+      embedding: {
+        modelEnvKey: "GEMINI_EMBEDDING_MODEL",
+        notes: "For example gemini-embedding-001. Uses embedContent with a task type, so queries and stored text are embedded differently.",
       },
     },
   },
