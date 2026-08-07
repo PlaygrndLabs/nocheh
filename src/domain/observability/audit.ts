@@ -24,6 +24,7 @@ export type ProcessingStepName =
   | "media_understanding"
   | "secret_detection"
   | "redaction"
+  | "context_build"
   | "analysis"
   | "memory_extraction"
   | "memory_persistence"

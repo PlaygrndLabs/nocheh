@@ -175,6 +175,8 @@ export const STEP_TO_STAGE: Record<string, StageId> = {
   media_understanding: "receive",
   secret_detection: "protect",
   redaction: "protect",
+  // Recall runs before analysis and only feeds it, so it animates as part of the brain.
+  context_build: "ai_brain",
   // Current backend: one combined LLM pass over the conversation window.
   analysis: "ai_brain",
   memory_persistence: "memory",

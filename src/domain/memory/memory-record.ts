@@ -79,8 +79,19 @@ export function projectIdFromName(name: string): string {
 
 /** Builds searchable text from structured fields only. */
 export function memoryRecordText(record: MemoryRecord): string {
+  // Type first, then the summary. Vectors were computed from exactly this string, so its
+  // composition is storage format: changing it invalidates every stored embedding.
+  return [record.type, memoryRecordSummary(record)].filter((part) => part.length > 0).join(" ");
+}
+
+/**
+ * The same structured fields without the type.
+ *
+ * For rendering, where the type is already a label. `"- Decision: Decision API platform"`
+ * pays for the word twice and reads like a bug.
+ */
+export function memoryRecordSummary(record: MemoryRecord): string {
   const parts = [
-    record.type,
     record.project?.name,
     record.task?.title,
     record.task?.description,

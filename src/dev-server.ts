@@ -7,6 +7,7 @@ import { SystemIdGenerator } from "./application/ports/id-generator.js";
 import { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 import type { Task } from "./domain/tasks/task.js";
 import { HistoryImportService } from "./application/services/history-import-service.js";
+import { AssistantContextBuilder } from "./application/services/assistant-context-builder.js";
 import { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 import { ConsoleLogger } from "./infrastructure/logger/console-logger.js";
 import { InMemoryMetricsCollector } from "./infrastructure/observability/in-memory-metrics-collector.js";
@@ -57,6 +58,7 @@ import { EmbeddingIndexingMemoryRecordRepository } from "./application/services/
 import { HybridMemoryRetrievalService } from "./infrastructure/memory/hybrid-memory-retrieval-service.js";
 import { NvidiaEmbedding } from "./infrastructure/memory/nvidia-embedding.js";
 import { GeminiEmbedding } from "./infrastructure/memory/gemini-embedding.js";
+import { MeteredEmbedding } from "./infrastructure/memory/metered-embedding.js";
 import type { EmbeddingPort } from "./application/ports/embedding.js";
 import { SqliteSuggestionRepository } from "./infrastructure/sqlite/sqlite-suggestion-repository.js";
 import { SqliteTaskRepository } from "./infrastructure/sqlite/sqlite-task-repository.js";
@@ -139,6 +141,17 @@ const liveBufferRepository = new SqliteLiveMessageBufferRepository(database, enc
 
 const taskProvider = createTaskProvider();
 const mediaUnderstanding = createMediaUnderstandingService();
+/**
+ * The read path: every window becomes a recall query before it is analysed.
+ *
+ * Built after the graph and suggestion repositories because it reads all three. Recall
+ * degrades on its own (word overlap with no embedding role, nothing with an empty
+ * window), so this is always wired rather than gated on a provider.
+ */
+const assistantContextBuilder = new AssistantContextBuilder(memoryRetrieval, {
+  graphRepository: memoryGraphRepository,
+  suggestionRepository,
+});
 // The buffer path keeps pattern redaction (cheap, on the webhook ack path); the
 // analysis gate uses the guard model with patterns as its emergency fallback.
 const guardDetector = createGuardedSecretDetector();
@@ -157,6 +170,7 @@ const useCase = new ProcessIncomingMessageUseCase(
   suggestionRepository,
   idGenerator,
   mediaUnderstanding,
+  assistantContextBuilder,
 );
 
 const liveProcessor = new LiveMessageBufferService(
@@ -498,6 +512,13 @@ function createMediaUnderstandingService(): MediaUnderstandingService | undefine
 
 /** Builds the embedding client for memory recall, or undefined when the role is unset. */
 function createEmbedding(): EmbeddingPort | undefined {
+  const adapter = createEmbeddingAdapter();
+  // Wrapped here, not at each call site, so recall, write-through indexing and backfill
+  // are all counted in /api/metrics without any of them knowing about metrics.
+  return adapter === undefined ? undefined : new MeteredEmbedding(adapter, metrics);
+}
+
+function createEmbeddingAdapter(): EmbeddingPort | undefined {
   // resolveAiRole already reports an unset role and its consequence from the catalog.
   const resolved = resolveAiRole("embedding");
   if (resolved === undefined) {

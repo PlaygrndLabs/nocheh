@@ -101,18 +101,19 @@ at boot, so provider changes need a restart (the dashboard reports
 - Embedding-backed associative recall: memory is found by meaning, not shared words,
   blended with word overlap so exact names and slugs still win. Falls back to word
   overlap when no embedding model is set
-- Bounded assistant context: recent window + retrieved memory + graph neighborhood
-  + accepted rules + high-value pending suggestions (built, not yet wired to a prompt)
+- Grounded analysis: every window is first a recall query, and the recalled memory,
+  accepted rules and graph neighborhood are sent with it as `groundingContext`. Graph
+  expansion starts from the messages the recalled memories came from
 - Pending suggestions with an approve/reject/archive/convert domain lifecycle
 - SQLite persistence with encrypted payload columns; per-step audit records
-- Token usage recorded per analysis run
+- Token usage recorded across every model role, embeddings included
 - One-time Telegram history import
 - Notion MCP task sync adapter
 
 ## Not Yet
 
-- Recall reaching a prompt: embeddings are written and queryable, but
-  `AssistantContextBuilder` is not wired in, so nothing reads memory back yet
+- Verified recall quality: both embedding wire formats and the similarity floor are
+  unmeasured against a live API, and they now cost something on every window
 - Approval controls in the UI (the suggestion API exists; no buttons wired)
 - Outbound messages: Nocheh never writes to Telegram, ingestion only
 - Any channel other than Telegram, mock, note, and history import

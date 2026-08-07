@@ -44,8 +44,9 @@ is — a queued free tier, or a reasoning model whose trace is paid for and disc
       quality: memories, graph nodes, edges, suggestions, safety refusals.
 - [ ] Project a monthly cost from real message volume using `/api/metrics` token
       totals. One measured window: 2198 perception + ~950 guard + 3194 analysis tokens,
-      and the analysis system prompt is ~1352 input tokens on every call (budget pinned
-      by `test/memory-graph-analysis-mapping.test.ts`).
+      and the analysis system prompt is ~1412 input tokens on every call (budget pinned
+      by `test/memory-graph-analysis-mapping.test.ts`). Grounding adds one embedding call
+      plus its rendered tokens per window.
 - [ ] Read the warning count on real runs. Warnings are output tokens the model spent on
       items that were then discarded, which is the one case where more prompt text is
       cheaper than less. Only add contract prose for a failure the mapper sees often.
@@ -59,8 +60,8 @@ is — a queued free tier, or a reasoning model whose trace is paid for and disc
 
 ## Next: Verify Recall Against Real Models
 
-Embedding recall is built and tested but never run against a live embedding API, and
-nothing reads it yet.
+Recall now grounds every analysed window (ADR-0012), so the two unmeasured constants and
+the two unverified wire formats are paid for on every window instead of never.
 
 - [ ] Verify the NVIDIA wire format: `input_type` on `/v1/embeddings`, and the model id.
       ADR-0010 records that NVIDIA's audio format deviated from OpenAI's, so assume
@@ -68,10 +69,11 @@ nothing reads it yet.
 - [ ] Verify Gemini `batchEmbedContents` with `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`.
 - [ ] Measure the real cosine distribution and tune `DEFAULT_SIMILARITY_FLOOR` (0.3) and
       `DEFAULT_LEXICAL_WEIGHT` (0.25). Both are guesses until then.
-- [ ] Record embedding cost per record and per backfill in `/api/metrics`. Embedding
-      token usage is returned by the adapters but not yet counted.
-- [ ] Wire `AssistantContextBuilder` so recall reaches a prompt. Until then embeddings
-      are written and never read.
+- [ ] Read `context_build` on real runs: `memoryCount` of 0 with a populated corpus means
+      the floor is too high, and `approxTokens` near `tokenBudget` means grounding is
+      crowding out the window.
+- [ ] Grade whether grounding actually prevents duplicates. The contract now forbids
+      extracting from `groundingContext`; whether `z-ai/glm-5.2` obeys is unobserved.
 
 ## Next: Close The Loop
 

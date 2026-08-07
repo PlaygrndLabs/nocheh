@@ -4,7 +4,7 @@ import type { MemoryRetrievalPort } from "../ports/memory-retrieval.js";
 import type { SuggestionRepositoryPort } from "../ports/suggestion-repository.js";
 import type { GroupAssistantSettings } from "../../domain/assistant/group-assistant-settings.js";
 import type { MemoryEdge, MemoryNode, MemoryNodeId } from "../../domain/memory/memory-graph.js";
-import { memoryRecordText, type MemoryRecord } from "../../domain/memory/memory-record.js";
+import { memoryRecordSummary, type MemoryRecord } from "../../domain/memory/memory-record.js";
 import type { Suggestion } from "../../domain/memory/strategic-suggestion.js";
 
 export interface AssistantContext {
@@ -17,6 +17,14 @@ export interface AssistantContext {
   readonly pendingSuggestions: readonly Suggestion[];
   readonly tokenBudget: number;
   readonly text: string;
+  /**
+   * The same context without the current messages.
+   *
+   * The analyzer already sends the window as structured `messages`, so grounding it with
+   * `text` would pay for every message twice. Callers that send the window themselves use
+   * this; callers that need one self-contained blob use `text`.
+   */
+  readonly groundingText: string;
 }
 
 export interface AssistantContextBuilderDependencies {
@@ -25,9 +33,22 @@ export interface AssistantContextBuilderDependencies {
 }
 
 export interface AssistantContextBuildOptions {
+  /**
+   * Explicit graph starting points. Omit to let the builder seed them from what recall
+   * returned: a memory found by meaning names the message it came from, and that message
+   * names the graph nodes born with it.
+   */
   readonly graphCenterNodeIds?: readonly MemoryNodeId[];
   readonly graphDepth?: number;
 }
+
+/**
+ * How many source messages the builder will expand into graph nodes.
+ *
+ * Each one is a repository lookup, and the graph neighborhood is token-capped anyway, so
+ * expanding all 12 recalled memories plus all 30 recent messages buys nothing.
+ */
+const MAX_GRAPH_SEED_LOOKUPS = 16;
 
 /** Builds small AI-ready context from current messages plus retrieved structured memory. */
 export class AssistantContextBuilder {
@@ -52,9 +73,14 @@ export class AssistantContextBuilder {
       });
 
     const memoryRecords = memories.map((result) => result.record);
-    const graph = await this.graphContext(options.graphCenterNodeIds ?? [], options.graphDepth ?? 1);
+    const centerNodeIds = options.graphCenterNodeIds
+      ?? await this.seedGraphCenters(memoryRecords, currentMessages);
+    const graph = await this.graphContext(centerNodeIds, options.graphDepth ?? 1);
     const acceptedRules = graph.nodes.filter((node) => isAcceptedRule(node));
     const pendingSuggestions = await this.pendingSuggestions();
+    const budget = settings.maxAiContextTokens;
+    const grounding = this.renderGrounding(memoryRecords, graph.nodes, graph.edges, acceptedRules, pendingSuggestions);
+    const messageSection = this.renderMessages(currentMessages);
 
     return {
       conversationId: settings.conversationId,
@@ -64,9 +90,53 @@ export class AssistantContextBuilder {
       graphEdges: graph.edges,
       acceptedRules,
       pendingSuggestions,
-      tokenBudget: settings.maxAiContextTokens,
-      text: this.render(currentMessages, memoryRecords, graph.nodes, graph.edges, acceptedRules, pendingSuggestions, settings.maxAiContextTokens),
+      tokenBudget: budget,
+      text: trimToApproxTokens([...grounding, "", ...messageSection].join("\n"), budget),
+      groundingText: trimToApproxTokens(grounding.join("\n"), budget),
     };
+  }
+
+  /**
+   * Turns recalled memory into graph starting points.
+   *
+   * This is the associative step: recall finds a memory by meaning, the memory names its
+   * source message, and `findNodesBySourceMessageId` names the nodes that message created.
+   * Expanding one hop from there reaches knowledge that shares no words with the query.
+   * Current messages are seeded too, so a note or correction about an earlier message
+   * lands on the knowledge that message already produced.
+   */
+  private async seedGraphCenters(
+    memories: readonly MemoryRecord[],
+    messages: readonly IncomingMessage[],
+  ): Promise<readonly MemoryNodeId[]> {
+    const repository = this.dependencies.graphRepository;
+    if (repository === undefined) {
+      return [];
+    }
+
+    // Recalled memories first: they are score-ordered, and the cap is a budget.
+    const sourceMessageIds: string[] = [];
+    for (const messageId of [
+      ...memories.map((record) => record.source.messageId),
+      ...[...messages].reverse().map((message) => message.messageId),
+    ]) {
+      if (!sourceMessageIds.includes(messageId)) {
+        sourceMessageIds.push(messageId);
+      }
+      if (sourceMessageIds.length >= MAX_GRAPH_SEED_LOOKUPS) {
+        break;
+      }
+    }
+
+    const centers = new Set<MemoryNodeId>();
+    for (const messageId of sourceMessageIds) {
+      for (const node of await repository.findNodesBySourceMessageId(messageId)) {
+        if (node.status === "active") {
+          centers.add(node.id);
+        }
+      }
+    }
+    return [...centers];
   }
 
   private async graphContext(
@@ -127,20 +197,18 @@ export class AssistantContextBuilder {
       .slice(0, 5);
   }
 
-  private render(
-    messages: readonly IncomingMessage[],
+  private renderGrounding(
     memories: readonly MemoryRecord[],
     graphNodes: readonly MemoryNode[],
     graphEdges: readonly MemoryEdge[],
     acceptedRules: readonly MemoryNode[],
     pendingSuggestions: readonly Suggestion[],
-    maxTokens: number,
-  ): string {
-    const sections = [
+  ): readonly string[] {
+    return [
       "Relevant structured memory:",
       memories.length === 0
         ? "none"
-        : memories.map((record) => `- ${record.type}: ${memoryRecordText(record)}`).join("\n"),
+        : memories.map((record) => `- ${record.type}: ${memoryRecordSummary(record)}`).join("\n"),
       "",
       "Accepted preferences and personal rules:",
       acceptedRules.length === 0
@@ -159,12 +227,14 @@ export class AssistantContextBuilder {
       pendingSuggestions.length === 0
         ? "none"
         : pendingSuggestions.map((suggestion) => `- ${suggestion.kind} [${suggestion.riskLevel}/${suggestion.confidence}]: ${suggestion.title}`).join("\n"),
-      "",
+    ];
+  }
+
+  private renderMessages(messages: readonly IncomingMessage[]): readonly string[] {
+    return [
       "Current messages:",
       messages.map((message) => `- ${message.occurredAt.toISOString()} ${message.senderDisplayName ?? message.senderId}: ${message.text}`).join("\n"),
     ];
-
-    return trimToApproxTokens(sections.join("\n"), maxTokens);
   }
 }
 

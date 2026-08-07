@@ -188,7 +188,7 @@ export class LiveMessageBufferService implements IncomingMessageProcessorPort {
     };
 
     try {
-      await this.downstream.executeWindow(window);
+      await this.downstream.executeWindow(window, settings);
     } catch (error) {
       if (!isSecretGuardUnavailable(error)) {
         throw error;

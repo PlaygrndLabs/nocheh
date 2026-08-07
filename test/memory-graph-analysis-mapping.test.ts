@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   analysisSystemPrompt,
+  analysisUserPrompt,
   buildMemoryGraphAnalysis,
 } from "../src/infrastructure/reasoning/memory-graph-analysis-mapping.js";
 import {
@@ -97,6 +98,32 @@ test("the prompt names every domain vocabulary, so it cannot drift from the grap
   for (const risk of SUGGESTION_RISK_LEVELS) {
     assert.ok(prompt.includes(risk), `prompt is missing risk level ${risk}`);
   }
+});
+
+test("the contract forbids extracting knowledge out of the grounding context", () => {
+  // Grounding exists to stop the brain re-deriving what it already knows. Told nothing,
+  // a model reads groundingContext as more chatter and extracts it again, so this line is
+  // the difference between recall preventing duplicates and recall causing them.
+  const prompt = analysisSystemPrompt();
+  assert.match(prompt, /groundingContext/);
+  assert.match(prompt, /Never extract memories, nodes, edges, tasks, or suggestions from it/);
+});
+
+test("the user prompt carries grounding without repeating the window", () => {
+  const payload = JSON.parse(analysisUserPrompt({
+    window,
+    contextText: "Relevant structured memory:\n- Decision: Charge a monthly retainer",
+  })) as { groundingContext?: string; messages: readonly unknown[] };
+
+  assert.match(payload.groundingContext ?? "", /monthly retainer/);
+  // Messages stay a structured array; grounding must not smuggle a second copy of them in.
+  assert.equal(payload.messages.length, window.messages.length);
+  assert.doesNotMatch(payload.groundingContext ?? "", /Current messages/);
+});
+
+test("no grounding context means no key at all, so a dry window pays nothing extra", () => {
+  const payload = JSON.parse(analysisUserPrompt({ window })) as Record<string, unknown>;
+  assert.equal("groundingContext" in payload, false);
 });
 
 test("the prompt documents a value shape for every envelope array", () => {

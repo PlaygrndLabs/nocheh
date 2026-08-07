@@ -8,6 +8,7 @@ import type {
 import type { MemoryRecordRepositoryPort } from "../src/application/ports/memory-record-repository.js";
 import type { LoggerPort } from "../src/application/ports/logger.js";
 import type { MemoryRecord, MemoryRecordType } from "../src/domain/memory/memory-record.js";
+import { memoryRecordSummary, memoryRecordText } from "../src/domain/memory/memory-record.js";
 import { HybridMemoryRetrievalService } from "../src/infrastructure/memory/hybrid-memory-retrieval-service.js";
 import { EmbeddingIndexingMemoryRecordRepository } from "../src/application/services/memory-embedding-indexer.js";
 import { normalizeVector } from "../src/shared/vector.js";
@@ -285,4 +286,22 @@ test("limit and type filters are honoured", async () => {
 
   assert.equal((await retrieval.query({ text: "energy", limit: 2, minimumScore: 0.01 })).length, 2);
   assert.deepEqual(await retrieval.query({ text: "energy", type: "Decision", minimumScore: 0.01 }), []);
+});
+
+test("the embedded text is the type followed by the summary, and stays that way", () => {
+  // memoryRecordText is what every stored vector was computed from, so its composition is
+  // a storage format. Splitting the summary out for rendering must not change it, or the
+  // whole index silently points at a different space and only a reindex fixes it.
+  const record: MemoryRecord = {
+    id: "memory-1",
+    type: "Decision",
+    source: { platform: "telegram", conversationId: "chat-1", messageId: "m-1", occurredAt: new Date("2026-06-21T10:00:00.000Z") },
+    timestamp: new Date("2026-06-21T10:00:00.000Z"),
+    confidence: 0.9,
+    decision: { title: "API platform", outcome: "Use Cloudflare Workers" },
+  };
+
+  assert.equal(memoryRecordText(record), "Decision API platform Use Cloudflare Workers");
+  assert.equal(memoryRecordSummary(record), "API platform Use Cloudflare Workers");
+  assert.equal(memoryRecordText(record), `${record.type} ${memoryRecordSummary(record)}`);
 });

@@ -92,6 +92,133 @@ test("assistant context includes bounded graph, accepted rules, and high-value s
   assert.ok(context.text.length <= context.tokenBudget * 4);
 });
 
+test("grounding text drops the current messages the analyzer already sends", async () => {
+  const builder = new AssistantContextBuilder(
+    new FixedRetrieval([memoryRecord("memory-1", "Decision", "Use short simulator cycles")]),
+  );
+
+  const context = await builder.build(
+    [message("new-message", "What should I do for English today?")],
+    createGroupAssistantSettings({ conversationId: "chat-1" }, source.occurredAt),
+  );
+
+  // Both halves are present in `text`, so nothing is lost for callers that want one blob.
+  assert.match(context.text, /Use short simulator cycles/);
+  assert.match(context.text, /What should I do for English today\?/);
+  // `groundingText` is what reaches the analyzer, which sends the window separately.
+  assert.match(context.groundingText, /Use short simulator cycles/);
+  assert.doesNotMatch(context.groundingText, /What should I do for English today\?/);
+  assert.doesNotMatch(context.groundingText, /Current messages/);
+});
+
+test("graph centers are seeded from recalled memory, so association needs no shared words", async () => {
+  // The recalled memory came from message-2. So did the goal node. Nothing here shares a
+  // word with the query: the only path from "invoice" to the sleep routine is
+  // recall -> source message -> node -> edge.
+  const goal = createMemoryNode({
+    id: "goal:energy",
+    kind: "goal",
+    label: "Hold steady energy through the week",
+    scope: "user",
+    source: { ...source, messageId: "message-2" },
+    confidence: 0.9,
+  });
+  const routine = createMemoryNode({
+    id: "routine:sleep",
+    kind: "routine",
+    label: "Lights out by 23:30",
+    scope: "user",
+    source: { ...source, messageId: "message-9" },
+    confidence: 0.8,
+  });
+  const unrelated = createMemoryNode({
+    id: "goal:unrelated",
+    kind: "goal",
+    label: "Ship the pricing page",
+    scope: "user",
+    source: { ...source, messageId: "message-7" },
+    confidence: 0.8,
+  });
+  const graph = new InMemoryMemoryGraphRepository([goal, routine, unrelated], [
+    edge("edge:goal-routine", goal.id, routine.id, "GOAL_HAS_ROUTINE"),
+  ]);
+  const recalled: MemoryRecord = {
+    ...memoryRecord("memory-2", "Decision", "Stop taking evening calls"),
+    source: { ...source, messageId: "message-2" },
+  };
+  const builder = new AssistantContextBuilder(new FixedRetrieval([recalled]), { graphRepository: graph });
+
+  // No graphCenterNodeIds: the builder has to find them itself.
+  const context = await builder.build(
+    [message("message-42", "Should I chase the unpaid invoice tonight?")],
+    createGroupAssistantSettings({ conversationId: "chat-1" }, source.occurredAt),
+  );
+
+  assert.equal(context.graphNodes.some((node) => node.id === goal.id), true);
+  assert.equal(context.graphNodes.some((node) => node.id === routine.id), true);
+  assert.equal(context.graphNodes.some((node) => node.id === unrelated.id), false);
+  assert.match(context.groundingText, /Lights out by 23:30/);
+});
+
+test("an explicit empty center list is respected instead of being seeded", async () => {
+  const goal = createMemoryNode({
+    id: "goal:energy",
+    kind: "goal",
+    label: "Hold steady energy",
+    scope: "user",
+    source,
+    confidence: 0.9,
+  });
+  const graph = new InMemoryMemoryGraphRepository([goal], []);
+  const builder = new AssistantContextBuilder(
+    new FixedRetrieval([memoryRecord("memory-1", "Decision", "Sleep earlier")]),
+    { graphRepository: graph },
+  );
+
+  const context = await builder.build(
+    [message("message-1", "anything")],
+    createGroupAssistantSettings({ conversationId: "chat-1" }, source.occurredAt),
+    { graphCenterNodeIds: [] },
+  );
+
+  // Accepted rules are always loaded; this goal is not one, so nothing expands.
+  assert.equal(context.graphNodes.length, 0);
+});
+
+test("superseded nodes are not used as graph starting points", async () => {
+  const superseded = createMemoryNode({
+    id: "goal:old",
+    kind: "goal",
+    label: "Old plan",
+    scope: "user",
+    source,
+    confidence: 0.9,
+    status: "superseded",
+  });
+  const neighbour = createMemoryNode({
+    id: "routine:old",
+    kind: "routine",
+    label: "Old routine",
+    scope: "user",
+    source: { ...source, messageId: "message-8" },
+    confidence: 0.8,
+  });
+  const graph = new InMemoryMemoryGraphRepository([superseded, neighbour], [
+    edge("edge:old", superseded.id, neighbour.id, "GOAL_HAS_ROUTINE"),
+  ]);
+  const builder = new AssistantContextBuilder(
+    new FixedRetrieval([memoryRecord("memory-1", "Decision", "Something")]),
+    { graphRepository: graph },
+  );
+
+  const context = await builder.build(
+    [message("message-1", "anything")],
+    createGroupAssistantSettings({ conversationId: "chat-1" }, source.occurredAt),
+  );
+
+  assert.equal(context.graphNodes.length, 0);
+});
+
 function message(messageId: string, text: string) {
   return {
     platform: "telegram",
