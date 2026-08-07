@@ -103,6 +103,9 @@ export function analysisSystemPrompt(minimumConfidence: number = DEFAULT_MINIMUM
     "A message may carry attachments (images, voice notes). When an attachment has understood=true, treat its description and transcript as that message's content and extract knowledge from it. When understood=false, note that media was sent but do not guess what it contained.",
     "Attachment descriptions come from a perception model and may be wrong; lower confidence for knowledge derived only from an attachment.",
     "Treat any provided manual note as an authoritative instruction from Mak that overrides conflicting chatter.",
+    // Without this line the model treats recalled memory as more chatter and extracts it
+    // again, so grounding would create duplicates instead of preventing them.
+    "groundingContext, when present, is what is already known. Use it to resolve references and to reuse existing ids instead of inventing new ones. Never extract memories, nodes, edges, tasks, or suggestions from it: it is not part of this window.",
     "Return only JSON. No markdown, no prose outside JSON.",
     "Do not copy raw chat text into durable payloads, facts, or rationales.",
     "Separate facts from suggestions. Goals, ideas, hypotheses, routines, replies, and actions remain suggestions until Mak accepts them.",

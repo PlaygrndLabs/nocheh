@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NvidiaEmbedding } from "../src/infrastructure/memory/nvidia-embedding.js";
 import { GeminiEmbedding } from "../src/infrastructure/memory/gemini-embedding.js";
+import { MeteredEmbedding } from "../src/infrastructure/memory/metered-embedding.js";
+import { InMemoryMetricsCollector } from "../src/infrastructure/observability/in-memory-metrics-collector.js";
+import type { EmbeddingPort, EmbeddingRequest, EmbeddingResult } from "../src/application/ports/embedding.js";
+import type { AiTokenUsage } from "../src/domain/observability/audit.js";
 
 interface Call {
   readonly url: string;
@@ -156,3 +160,41 @@ test("a short Gemini response fails rather than misaligning records", async () =
     /returned 1 vectors for 2 inputs/,
   );
 });
+
+test("embedding token usage reaches the metrics snapshot", async () => {
+  // Recall embeds a query on every analysed window, so an uncounted embedding call is a
+  // recurring cost that never shows up anywhere. The decorator is what makes it visible.
+  const metrics = new InMemoryMetricsCollector();
+  const embedder = new MeteredEmbedding(
+    new FakeEmbedding({ provider: "fake", model: "fake-embed", inputTokens: 40, outputTokens: 0, totalTokens: 40 }),
+    metrics,
+  );
+
+  await embedder.embed({ texts: ["a question"], kind: "query" });
+  await embedder.embed({ texts: ["a stored fact"], kind: "document" });
+
+  assert.equal(metrics.snapshot().aiCalls, 2);
+  assert.equal(metrics.snapshot().aiInputTokens, 80);
+  assert.equal(metrics.snapshot().aiTotalTokens, 80);
+});
+
+test("an embedding provider that reports no usage is not counted as a call", async () => {
+  const metrics = new InMemoryMetricsCollector();
+  const embedder = new MeteredEmbedding(new FakeEmbedding(undefined), metrics);
+
+  await embedder.embed({ texts: ["a question"], kind: "query" });
+
+  assert.equal(metrics.snapshot().aiCalls, 0);
+});
+
+class FakeEmbedding implements EmbeddingPort {
+  public constructor(private readonly tokenUsage: AiTokenUsage | undefined) {}
+
+  public async embed(request: EmbeddingRequest): Promise<EmbeddingResult> {
+    return {
+      model: "fake-embed",
+      vectors: request.texts.map(() => [1, 0, 0]),
+      ...(this.tokenUsage === undefined ? {} : { tokenUsage: this.tokenUsage }),
+    };
+  }
+}

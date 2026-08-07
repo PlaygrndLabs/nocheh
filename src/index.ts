@@ -79,7 +79,11 @@ export type { TaskSyncRepositoryPort } from "./application/ports/task-sync-repos
 export { ProcessIncomingMessageUseCase } from "./application/use-cases/process-incoming-message.js";
 export type { ProcessIncomingMessageResult } from "./application/use-cases/process-incoming-message.js";
 export { AssistantContextBuilder } from "./application/services/assistant-context-builder.js";
-export type { AssistantContext } from "./application/services/assistant-context-builder.js";
+export type {
+  AssistantContext,
+  AssistantContextBuildOptions,
+  AssistantContextBuilderDependencies,
+} from "./application/services/assistant-context-builder.js";
 export { HistoryImportService } from "./application/services/history-import-service.js";
 export type { HistoryImportMessage, HistoryImportOptions, HistoryImportResult } from "./application/services/history-import-service.js";
 export { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
@@ -110,7 +114,7 @@ export type {
   GroupAssistantSettings,
   MessageAnalysisMode,
 } from "./domain/assistant/group-assistant-settings.js";
-export { memoryRecordText, projectIdFromName } from "./domain/memory/memory-record.js";
+export { memoryRecordSummary, memoryRecordText, projectIdFromName } from "./domain/memory/memory-record.js";
 export type {
   BlockerMemory,
   DeadlineMemory,
@@ -299,6 +303,7 @@ export {
 } from "./infrastructure/memory/hybrid-memory-retrieval-service.js";
 export { NvidiaEmbedding, NVIDIA_DEFAULT_EMBEDDING_URL } from "./infrastructure/memory/nvidia-embedding.js";
 export { GeminiEmbedding } from "./infrastructure/memory/gemini-embedding.js";
+export { MeteredEmbedding } from "./infrastructure/memory/metered-embedding.js";
 export { SqliteMemoryEmbeddingRepository } from "./infrastructure/sqlite/sqlite-memory-embedding-repository.js";
 export {
   EmbeddingIndexingMemoryRecordRepository,

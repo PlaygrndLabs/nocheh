@@ -27,6 +27,7 @@ import type { TaskProviderPort } from "../ports/task-provider.js";
 import type { TaskRepositoryPort } from "../ports/task-repository.js";
 import type { TaskSyncRepositoryPort } from "../ports/task-sync-repository.js";
 import type { MediaUnderstandingService } from "../services/media-understanding-service.js";
+import type { AssistantContextBuilder } from "../services/assistant-context-builder.js";
 import { WindowRedactionService, type WindowRedactionResult } from "../services/window-redaction-service.js";
 import { describeAttachment } from "../../domain/messaging/message-attachment.js";
 import { Task } from "../../domain/tasks/task.js";
@@ -34,6 +35,7 @@ import type { SourceReference } from "../../domain/tasks/task.js";
 import { createMemoryEdge, createMemoryNode, type MemoryEdge } from "../../domain/memory/memory-graph.js";
 import type { MemoryRecord } from "../../domain/memory/memory-record.js";
 import type { AiTokenUsage, AuditedExtractedTask, ProcessingAuditStep, ProcessingStepName, ProcessingStepStatus } from "../../domain/observability/audit.js";
+import { createGroupAssistantSettings, type GroupAssistantSettings } from "../../domain/assistant/group-assistant-settings.js";
 import { TaskValidationService } from "../../domain/tasks/task-validation.js";
 
 /** Result of processing one conversation window through the pipeline. */
@@ -71,6 +73,13 @@ export class ProcessIncomingMessageUseCase {
     private readonly idGenerator: IdGeneratorPort = new SystemIdGenerator(),
     /** Absent when no perception model is configured: attachments then stay undescribed. */
     private readonly mediaUnderstanding?: MediaUnderstandingService,
+    /**
+     * Absent when the brain should analyse a window with no memory of its own.
+     *
+     * Present, it turns each window into a recall query and grounds analysis in what is
+     * already known, which is the whole point of keeping structured memory.
+     */
+    private readonly assistantContextBuilder?: AssistantContextBuilder,
   ) {
     this.windowRedaction = new WindowRedactionService(secretDetector);
   }
@@ -81,8 +90,14 @@ export class ProcessIncomingMessageUseCase {
   }
 
   /** Batch-mode entry point: processes an ordered conversation window in a single analysis pass. */
-  public async executeWindow(window: ConversationWindow): Promise<ProcessIncomingMessageResult> {
-    return this.processWindow(window, { analysisStepName: "analysis" });
+  public async executeWindow(
+    window: ConversationWindow,
+    settings?: GroupAssistantSettings,
+  ): Promise<ProcessIncomingMessageResult> {
+    return this.processWindow(window, {
+      analysisStepName: "analysis",
+      ...(settings === undefined ? {} : { settings }),
+    });
   }
 
   /**
@@ -112,6 +127,55 @@ export class ProcessIncomingMessageUseCase {
     return this.processWindow(window, { analysisStepName: "note_analysis", candidateTargets });
   }
 
+  /**
+   * Builds the grounding context for one window, or returns undefined.
+   *
+   * Never fatal. A window with no context is analysed worse; a window that is not analysed
+   * at all is lost. So a recall failure is audited and stepped over, unlike the secret
+   * guard, whose failure is the one thing worth stopping for.
+   */
+  private async buildGroundingContext(
+    window: ConversationWindow,
+    settings: GroupAssistantSettings | undefined,
+    steps: ProcessingAuditStep[],
+    errorLogs: string[],
+  ): Promise<string | undefined> {
+    const builder = this.assistantContextBuilder;
+    if (builder === undefined) {
+      return undefined;
+    }
+
+    const startedAt = this.clock.now();
+    try {
+      const context = await builder.build(
+        window.messages,
+        settings ?? createGroupAssistantSettings({ conversationId: window.conversationId }, startedAt),
+      );
+      // The analyzer sends the window as structured messages, so grounding with the full
+      // text would pay for every message twice.
+      const text = context.groundingText;
+      steps.push(step("context_build", "succeeded", startedAt, this.clock.now(), {
+        memoryCount: context.memories.length,
+        graphNodeCount: context.graphNodes.length,
+        graphEdgeCount: context.graphEdges.length,
+        acceptedRuleCount: context.acceptedRules.length,
+        pendingSuggestionCount: context.pendingSuggestions.length,
+        approxTokens: Math.ceil(text.length / 4),
+        tokenBudget: context.tokenBudget,
+      }));
+      return text;
+    } catch (error) {
+      const message = messageOf(error);
+      steps.push(step("context_build", "failed", startedAt, this.clock.now(), {}, message));
+      errorLogs.push(`Context build failed; window analysed without memory: ${message}`);
+      this.logger.warn("Assistant context build failed; analysing without grounding.", {
+        conversationId: window.conversationId,
+        error: message,
+      });
+      return undefined;
+    }
+  }
+
   private async openTaskTargets(): Promise<readonly AnalysisCandidateTarget[]> {
     const openTasks = await this.taskRepository.findOpen();
     return openTasks.map((task) => ({
@@ -125,7 +189,11 @@ export class ProcessIncomingMessageUseCase {
 
   private async processWindow(
     window: ConversationWindow,
-    options: { readonly analysisStepName: ProcessingStepName; readonly candidateTargets?: readonly AnalysisCandidateTarget[] },
+    options: {
+      readonly analysisStepName: ProcessingStepName;
+      readonly candidateTargets?: readonly AnalysisCandidateTarget[];
+      readonly settings?: GroupAssistantSettings;
+    },
   ): Promise<ProcessIncomingMessageResult> {
     const startedAt = this.clock.now();
     const steps: ProcessingAuditStep[] = [];
@@ -209,9 +277,15 @@ export class ProcessIncomingMessageUseCase {
     this.metrics.recordRedactionEvents(redactionFindingCount);
     const redactedPreview = preview(sanitizedMessages.map((message) => describeForPreview(message)).join("\n"));
 
+    // Recall runs on the sanitized window, never the raw one. The query text is sent to
+    // an embedding provider, so it is an external call like any other and sits behind
+    // the same gate the analyzer does.
+    const contextText = await this.buildGroundingContext(sanitizedWindow, options.settings, steps, errorLogs);
+
     const analysisStartedAt = this.clock.now();
     const analysisInput: ConversationAnalysisInput = {
       window: sanitizedWindow,
+      ...(contextText === undefined ? {} : { contextText }),
       ...(options.candidateTargets === undefined ? {} : { candidateTargets: options.candidateTargets }),
     };
     const analysis = await this.memoryGraphAnalyzer.analyze(analysisInput);

@@ -68,6 +68,7 @@ Telegram webhook | mock | note | history import
   -> pattern redaction -> LiveMessageBufferService (batch or immediate)
   -> [flush] media fetch -> perception model -> description + transcript
   -> secret guard over ALL text (typed, described, transcribed), fail closed
+  -> AssistantContextBuilder: recall + graph neighborhood -> groundingContext
   -> MemoryGraphAnalyzerPort (NVIDIA glm-5.2 | Anthropic | noop dry-run)
   -> validated AI contract -> memory records + graph nodes/edges + tasks
   -> pending suggestions
@@ -91,8 +92,9 @@ Implemented:
 - Graph: 17 node kinds, 20 relations, 16 expanded payload kinds, status lifecycle
   (`active`/`superseded`/`archived`/`deleted`), scopes, temporal validity
 - Suggestions: strategic + action, `pending`/`accepted`/`rejected`/`archived`/`converted`
-- `AssistantContextBuilder`: recent window + retrieved memory + bounded graph
-  neighborhood + accepted rules + high-value pending suggestions, token-capped
+- Grounded analysis: every window is a recall query, built after the guard and before
+  analysis, audited as `context_build`. Graph centers are seeded from the source messages
+  of recalled memories, so association needs no shared words (ADR-0012)
 - Image and voice ingestion: attachment variants, per-kind model routing, derived
   text cache keyed on `file_unique_id`, per-window caps, bytes never persisted
 - Secret guard: model detects literals, masking is local; fail closed with
@@ -101,7 +103,8 @@ Implemented:
   reasoning tokens are logged; token counters across every role are in `/api/metrics`
 - Embedding recall: `embedding` model role, NVIDIA and Gemini adapters, normalised
   vectors in SQLite (encrypted), hybrid vector + word-overlap scoring, write-through
-  indexing and an explicit `POST /api/memory/reindex` backfill (ADR-0011)
+  indexing and an explicit `POST /api/memory/reindex` backfill (ADR-0011). Every
+  embedding call is counted in `/api/metrics` by a `MeteredEmbedding` decorator
 - Analysis contract generated from the domain: the prompt renders every vocabulary
   from `as const` arrays, the mapping layer validates against the same arrays, and
   each rejected item lands in the audit record's `errorLogs` with a reason
@@ -110,14 +113,18 @@ Implemented:
 
 Gaps to respect when planning:
 
-- Nothing reads memory back into a prompt yet. Embedding recall exists and is tested;
-  `AssistantContextBuilder` is still unwired, so `contextText` is never populated.
+- Grounding is wired and verified against fake endpoints, not a live model. Whether
+  `z-ai/glm-5.2` obeys "never extract from groundingContext" is unobserved, and a model
+  that ignores it will duplicate knowledge instead of reusing it.
+- The similarity floor (0.3) and lexical weight (0.25) are still guesses, and they now
+  affect every window rather than nothing.
 - Suggestion approval exists in the API and domain, not in the UI.
 - Nocheh never sends outbound messages.
 - Telegram is the only live channel.
 - Only image and audio are understood. Documents, video, and stickers are recorded
   but never sent to a model.
-- Reactions bypass the secret detector; they carry synthetic text, not user content.
+- Reactions bypass the secret detector and grounding alike; they carry synthetic text,
+  not user content, so neither a guard call nor an embedding call is worth paying for.
 - Telegram Desktop history imports skip media: export entries reference local file
   paths, not `file_id`s.
 - **The graph contract is generated but unverified against a live model.** Every node
