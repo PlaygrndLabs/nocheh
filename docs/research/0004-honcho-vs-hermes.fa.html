@@ -1,0 +1,1112 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نوچه در برابر Honcho و Hermes — بساز، بخر، یا قرض بگیر</title>
+<style>
+:root{
+  --bg:#0c0d10; --bg2:#12141a; --bg3:#171a21; --line:#242832;
+  --fg:#e7e9ee; --dim:#9aa1ad; --dim2:#6b7280;
+  --nocheh:#7dd3fc; --honcho:#a78bfa; --hermes:#fbbf24;
+  --ok:#4ade80; --bad:#f87171; --warn:#fb923c;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --fa:"Vazirmatn","IRANSansX","IRANSans","Segoe UI",Tahoma,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font-family:var(--fa);font-size:15.5px;line-height:1.9;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{display:grid;grid-template-columns:255px minmax(0,1fr);max-width:1500px;margin:0 auto}
+/* nav */
+nav{
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+  padding:26px 18px 60px;border-left:1px solid var(--line);background:var(--bg);
+}
+nav .brand{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim2);margin-bottom:8px;direction:ltr;text-align:right}
+nav .lang{display:block;margin:0 0 18px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;color:var(--nocheh);text-decoration:none;text-align:center}
+nav .lang:hover{background:var(--bg2)}
+nav a.s{
+  display:block;padding:6px 10px;margin:1px 0;border-radius:6px;
+  color:var(--dim);text-decoration:none;font-size:13.5px;border-right:2px solid transparent
+}
+nav a.s:hover{color:var(--fg);background:var(--bg2)}
+nav a.s.on{color:var(--fg);background:var(--bg2);border-right-color:var(--nocheh)}
+nav .grp{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim2);margin:18px 10px 6px;direction:ltr;text-align:right}
+main{padding:38px 50px 140px;min-width:0}
+/* type */
+h1{font-size:32px;line-height:1.45;margin:0 0 12px;font-weight:700}
+h2{font-size:23px;margin:56px 0 14px;padding-top:16px;font-weight:700;border-top:1px solid var(--line);line-height:1.6}
+h2:first-of-type{border-top:none}
+h3{font-size:17px;margin:30px 0 10px;font-weight:700}
+h4{font-size:14.5px;margin:20px 0 6px;font-weight:700;color:var(--dim)}
+p{margin:12px 0}
+ul,ol{margin:12px 0;padding-right:24px;padding-left:0}
+li{margin:6px 0}
+code{
+  font-family:var(--mono);font-size:12.5px;background:var(--bg3);
+  padding:1.5px 5px;border-radius:4px;color:#c4b5fd;
+  direction:ltr;unicode-bidi:isolate;display:inline-block
+}
+a{color:var(--nocheh)}
+.lede{font-size:17px;color:var(--dim);max-width:78ch}
+.sub{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim2);direction:ltr;text-align:right}
+small{color:var(--dim2);font-size:13px;line-height:1.85}
+/* blocks */
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:16px 0}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(310px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.verdict{border-right:3px solid var(--ok);background:linear-gradient(270deg,rgba(74,222,128,.06),transparent 60%)}
+.danger{border-right:3px solid var(--bad);background:linear-gradient(270deg,rgba(248,113,113,.06),transparent 60%)}
+.caution{border-right:3px solid var(--warn);background:linear-gradient(270deg,rgba(251,146,60,.06),transparent 60%)}
+.info{border-right:3px solid var(--honcho);background:linear-gradient(270deg,rgba(167,139,250,.06),transparent 60%)}
+.card h3,.card h4{margin-top:0}
+.tag{
+  display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;padding:2.5px 8px;border-radius:20px;border:1px solid var(--line);
+  color:var(--dim);vertical-align:middle;direction:ltr
+}
+.t-n{color:var(--nocheh);border-color:rgba(125,211,252,.35);background:rgba(125,211,252,.08)}
+.t-h{color:var(--honcho);border-color:rgba(167,139,250,.35);background:rgba(167,139,250,.08)}
+.t-x{color:var(--hermes);border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}
+.t-ok{color:var(--ok);border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.08)}
+/* table */
+.tw{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:660px;line-height:1.8}
+th,td{text-align:right;padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--bg3);font-size:11.5px;letter-spacing:.04em;color:var(--dim);font-weight:700;position:sticky;top:0}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:rgba(255,255,255,.017)}
+td.c,th.c{text-align:center}
+.yes{color:var(--ok);font-weight:700}
+.no{color:var(--bad);font-weight:700}
+.part{color:var(--warn);font-weight:700}
+.sec{background:var(--bg3);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);direction:ltr;text-align:right}
+/* code / diagrams stay LTR */
+pre{
+  font-family:var(--mono);font-size:12.5px;line-height:1.65;
+  background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:16px 18px;overflow-x:auto;margin:16px 0;color:#cbd5e1;
+  direction:ltr;text-align:left
+}
+pre b{color:var(--nocheh);font-weight:600}
+pre i{color:var(--honcho);font-style:normal}
+pre u{color:var(--hermes);text-decoration:none}
+pre s{color:var(--bad);text-decoration:none}
+pre em{color:var(--dim2);font-style:normal}
+.legend{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13.5px;margin:14px 0}
+.legend dt{font-family:var(--mono);font-size:12px;color:var(--nocheh);white-space:nowrap;direction:ltr;text-align:right}
+.legend dd{margin:0;color:var(--dim)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:13.5px;margin:12px 0}
+.kv dt{font-family:var(--mono);color:var(--dim2);font-size:12px;white-space:nowrap;direction:ltr;text-align:right}
+.kv dd{margin:0}
+.fp{font-family:var(--mono);font-size:11.5px;color:var(--dim2);direction:ltr;unicode-bidi:isolate;display:inline-block}
+.score{display:flex;align-items:baseline;gap:8px;direction:ltr;justify-content:flex-end}
+.score b{font-size:30px;font-weight:700}
+.bar{height:5px;border-radius:3px;background:var(--bg3);overflow:hidden;margin-top:7px}
+.bar span{display:block;height:100%;border-radius:3px}
+.q{border-right:2px solid var(--honcho);padding:2px 16px 2px 0;margin:16px 0;color:var(--dim)}
+.q b{color:var(--fg)}
+hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+.pill-row{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+ol.steps{counter-reset:s;list-style:none;padding-right:0}
+ol.steps>li{counter-increment:s;position:relative;padding-right:40px;margin:20px 0}
+ol.steps>li::before{
+  content:counter(s);position:absolute;right:0;top:2px;width:26px;height:26px;
+  display:grid;place-items:center;border-radius:50%;background:var(--bg3);
+  border:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--nocheh)
+}
+@media(max-width:940px){
+  .wrap{grid-template-columns:1fr}
+  nav{position:static;height:auto;border-left:none;border-bottom:1px solid var(--line)}
+  main{padding:26px 20px 90px}
+  h1{font-size:25px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">Nocheh · decision doc</div>
+  <a class="lang" href="./0004-honcho-vs-hermes.html">Read in English ↗</a>
+  <a class="s" href="#hokm">حکم نهایی</a>
+  <a class="s" href="#category">خطای دسته‌بندی</a>
+  <div class="grp">سه سیستم</div>
+  <a class="s" href="#nocheh">نوچه، امروز</a>
+  <a class="s" href="#honcho">Honcho</a>
+  <a class="s" href="#hermes">Hermes Agent</a>
+  <div class="grp">مقایسه</div>
+  <a class="s" href="#matrix">ماتریس توانایی‌ها</a>
+  <a class="s" href="#gain">جاهایی که Honcho می‌بَرد</a>
+  <a class="s" href="#lose">جاهایی که نمی‌تواند</a>
+  <a class="s" href="#conflict">تضاد طراحی</a>
+  <div class="grp">جریان کار تو</div>
+  <a class="s" href="#flow">فلو، خط به خط</a>
+  <a class="s" href="#seam">درز درست کجاست</a>
+  <div class="grp">تصمیم</div>
+  <a class="s" href="#options">چهار گزینه</a>
+  <a class="s" href="#plugin">پلاگین یا رَپِر؟</a>
+  <a class="s" href="#plan">نقشهٔ پیاده‌سازی</a>
+  <a class="s" href="#cost">مدل هزینه</a>
+  <div class="grp">پایان</div>
+  <a class="s" href="#goals">دامنه‌های هدف تو</a>
+  <a class="s" href="#borrow">قرض بگیر، وابسته نشو</a>
+  <a class="s" href="#risk">ریسک‌ها و نقاط چرخش</a>
+  <a class="s" href="#tldr">خلاصهٔ یک‌صفحه‌ای</a>
+</nav>
+
+<main>
+
+<div class="sub">Research note 0004 · build / buy / borrow</div>
+<h1>نوچه در برابر Honcho و Hermes Agent</h1>
+<p class="lede">
+اینکه آیا این دو ابزار مسئلهٔ حافظه را بهتر از نوچه حل می‌کنند، و اینکه نوچه باید
+<b>مشتری</b> یکی از آن‌ها بشود، <b>پلاگین</b>، <b>رَپِر</b>، یا دقیقاً همان چیزی بماند که هست.
+همه‌چیز بر پایهٔ کد واقعی نوچه (۱۳٬۵۵۳ خط در <code>src/</code>، ۴۱ فایل تست، ۱۲ ADR) و مستندات
+خودِ آن دو محصول.
+</p>
+
+<!-- ================= -->
+<h2 id="hokm">اول از همه: حکم نهایی</h2>
+
+<div class="card verdict">
+<h3>سه پاسخ برای سه پرسش</h3>
+
+<p><b>۱. کدام بهتر است؟</b> — این مقایسه از پایه غلط است.
+<span class="tag t-h">Honcho</span> یک <b>سرویس حافظه</b> است.
+<span class="tag t-x">Hermes</span> یک <b>هارنس</b> است که <i>برای حافظه، خودش Honcho را صدا می‌زند</i>.
+پس در پرسش حافظه، Honcho به‌طور پیش‌فرض برنده است: همان چیزی است که Hermes وقتی حافظهٔ خوب
+می‌خواهد به آن پناه می‌برد. حافظهٔ بومی خودِ Hermes چند فایل <code>MEMORY.md</code> و
+<code>USER.md</code> است به‌همراه جست‌وجوی FTS5 روی SQLite — یعنی به‌طور قطع ضعیف‌تر از آنچه
+تو تا امروز ساخته‌ای.</p>
+
+<p><b>۲. آیا بهتر است در اپ خودت از آن‌ها استفاده کنی؟</b> —
+<b>Honcho: بله، اما جزئی، self-hosted، و پشت یک پورت تازه.</b>
+این ابزار واقعاً لایهٔ بازیابی (recall) تو را شکست می‌دهد، و لایهٔ بازیابی — به گواهی
+<span class="fp">TASK.md</span> خودت — ضعیف‌ترین و کم‌راستی‌آزمایی‌شده‌ترین بخش نوچه است.
+اما گرافِ تو، تسک‌ها، چرخهٔ تأیید و مسیر حسابرسی را <b>جایگزین نمی‌کند</b> — و ادعایش را هم
+ندارد. <b>Hermes: نه.</b> نه به‌عنوان وابستگی، نه به‌عنوان میزبان.</p>
+
+<p><b>۳. پلاگین یا رَپِر؟</b> — <b>هیچ‌کدام. آداپتور.</b>
+نوچه همان ریشهٔ ترکیب‌بندی می‌مانَد (<span class="fp">src/dev-server.ts</span>) و ترتیب
+پایپ‌لاین را خودش در دست دارد. Honcho تبدیل می‌شود به یک آداپتور دیگر پشت یک پورت دیگر — همان‌طور
+که امروز NVIDIA و Gemini هستند. پلاگین‌شدن در Hermes یعنی واگذاشتنِ تنها چیزی که هرگز نباید واگذار
+کنی: <b>کنترل بر آنچه پیش از دیدن متن توسط مدل رخ می‌دهد.</b></p>
+</div>
+
+<div class="grid g3">
+  <div class="card">
+    <div class="sub">Honcho — پذیرش به‌عنوان قطعه</div>
+    <div class="score"><span style="color:var(--dim)">/10 تناسب</span><b style="color:var(--ok)">7.5</b></div>
+    <div class="bar"><span style="width:75%;background:var(--ok)"></span></div>
+    <p style="font-size:13.5px;color:var(--dim);margin-bottom:0">قوی، دقیقاً روی همان محوری که
+    تو ضعیفی. برای گرافِ تو شکل نامناسبی دارد. برای حفظ قانون ۲ باید self-host شود.</p>
+  </div>
+  <div class="card">
+    <div class="sub">Hermes — به‌عنوان وابستگی</div>
+    <div class="score"><span style="color:var(--dim)">/10 تناسب</span><b style="color:var(--bad)">2</b></div>
+    <div class="bar"><span style="width:20%;background:var(--bad)"></span></div>
+    <p style="font-size:13.5px;color:var(--dim);margin-bottom:0">یک مونولیت پایتونی که حلقه را
+    خودش مالک است. ساختاراً با «اول پاک‌سازی، بعد هر کار دیگر» ناسازگار است.</p>
+  </div>
+  <div class="card">
+    <div class="sub">Hermes — به‌عنوان مرجع</div>
+    <div class="score"><span style="color:var(--dim)">/10 ارزش</span><b style="color:var(--ok)">8</b></div>
+    <div class="bar"><span style="width:80%;background:var(--ok)"></span></div>
+    <p style="font-size:13.5px;color:var(--dim);margin-bottom:0">با مجوز MIT، ۲۵+ آداپتور کانال،
+    طراحی cron، استخراج سند. بخوانش، ایده‌ها را بردار، هیچ خطی را import نکن.</p>
+  </div>
+</div>
+
+<!-- ================= -->
+<h2 id="category">خطای دسته‌بندی‌ای که باید اصلاح شود</h2>
+
+<p>تو این دو را دو گزینهٔ جایگزین توصیف کردی که «بخش حافظه را بهتر حل می‌کنند». اما این‌ها در
+دو لایهٔ متفاوت می‌نشینند و یکی دیگری را در خود دارد:</p>
+
+<pre>
+                 ┌────────────────────────────────────────────────┐
+   HARNESS       │  <u>Hermes Agent</u>   ·   <b>Nocheh</b>   ·  OpenClaw  ·  Codex │
+                 │  loop · prompts · tools · channels · scheduling │
+                 └───────────────────────┬────────────────────────┘
+                                         │ writes messages, reads context
+                 ┌───────────────────────▼────────────────────────┐
+   MEMORY        │  <i>Honcho</i>  ·  Mem0  ·  Zep  ·  <b>Nocheh's own graph</b>     │
+                 │  ingest → reason → store → retrieve            │
+                 └───────────────────────┬────────────────────────┘
+                                         │
+                 ┌───────────────────────▼────────────────────────┐
+   MODEL         │  NVIDIA · Anthropic · Gemini · OpenAI          │
+                 └────────────────────────────────────────────────┘
+</pre>
+
+<p><b>Hermes و نوچه هم‌ردهٔ یکدیگرند. Honcho زیر هر دو می‌نشیند.</b>
+«حافظهٔ بهترِ» Hermes در واقع <i>خودِ Honcho</i> است — این یک ادغام مستندشده است، نه یک
+پیاده‌سازی رقیب.</p>
+
+<div class="card info">
+<p style="margin:0"><b>نتیجه:</b> پرسش «Hermes یا Honcho؟» به دو تصمیم مستقل تجزیه می‌شود.
+<b>الف)</b> هارنسم را عوض کنم؟ — نه، هارنس تو <i>خودِ محصول</i> است.
+<b>ب)</b> درونِ لایهٔ حافظه‌ام را عوض کنم؟ — جزئاً، و از این دو، Honcho تنها گزینهٔ واقعی است.</p>
+</div>
+
+<!-- ================= -->
+<h2 id="nocheh">نوچه، امروز — آنچه واقعاً در دست داری</h2>
+
+<p>صریح می‌نویسم، چون بیشترِ این فهرست در هیچ‌کدام از آن دو محصول معادلی ندارد.</p>
+
+<dl class="kv">
+  <dt>شکل</dt><dd>پایپ‌لاین بلع داده + گراف دانشِ نوع‌دار + جریان کار تأیید. تک‌مالک. TypeScript ESM با یک وابستگی رانتایم (<code>better-sqlite3</code>).</dd>
+  <dt>اندازه</dt><dd>۱۳٬۵۵۳ خط <code>src/</code> · ۵٬۵۷۹ خط <code>web/src</code> · ۷٬۷۷۰ خط تست در ۴۱ فایل · ۱۲ ADR پذیرفته‌شده</dd>
+  <dt>گراف</dt><dd>۱۷ نوع گره · ۲۰ رابطه · ۱۶ نوع payload گسترده · ۴ وضعیت · ۴ scope · اعتبار زمانی — همه به‌صورت آرایه‌های <code>as const</code> در <span class="fp">src/domain/memory/memory-graph.ts</span></dd>
+  <dt>رکوردها</dt><dd>۶ نوع: <code>Task</code> <code>Decision</code> <code>Project</code> <code>Deadline</code> <code>Blocker</code> <code>Summary</code></dd>
+  <dt>پیشنهادها</dt><dd>چرخهٔ ۵ وضعیتی <code>pending→accepted/rejected/archived→converted</code>، ۶ نوع استراتژیک، ۶ نوع اقدام بیرونی، همه با <code>requiresApproval: true</code></dd>
+  <dt>امنیت</dt><dd>دو مرحله‌ای: قواعد regex هنگام نوشتن در بافر، سپس نگهبان مدل یک‌بار برای هر پنجره. نگهبان فقط «رشتهٔ عین» را تشخیص می‌دهد؛ ماسک‌گذاری محلی و قطعی است. در خطا مسیر بسته می‌شود و پس از ۵ تلاش قرنطینه رخ می‌دهد.</dd>
+  <dt>حسابرسی</dt><dd>۱۹ گام نام‌دار برای هر پنجره، payload رمزنگاری‌شده، شمارش توکن و تأخیر برای هر فراخوانی</dd>
+  <dt>بازیابی</dt><dd>ترکیبی: کسینوس بازمقیاس‌شده از کف ۰٫۳، آمیختهٔ <code>(sim + 0.25·lexical)/1.25</code>، ضرب‌در اطمینان رکورد</dd>
+</dl>
+
+<div class="card caution">
+<h4>بخش‌هایی که خودت به‌عنوان «راستی‌آزمایی‌نشده» علامت زده‌ای</h4>
+<p>از <span class="fp">TASK.md</span> و <span class="fp">AGENTS.md</span>، به بیان خودت:</p>
+<ul style="margin-bottom:0">
+<li>قرارداد گراف <b>تولید شده اما هرگز روی مدل واقعی اجرا نشده است.</b> فقط تست.</li>
+<li><code>DEFAULT_SIMILARITY_FLOOR = 0.3</code> و <code>DEFAULT_LEXICAL_WEIGHT = 0.25</code>
+<b>«هر دو تا آن زمان حدس‌اند»</b> — و از ADR-0012 به بعد روی <i>هر</i> پنجره اثر می‌گذارند.</li>
+<li>تحلیل هر پنجره <b>۱۸۹ تا ۲۴۰ ثانیه</b> طول می‌کشد، با ۱۳ تا ۱۷ توکن خروجی در ثانیه روی <code>z-ai/glm-5.2</code>.</li>
+<li>زمینه‌سازی (grounding) در برابر endpoint جعلی راستی‌آزمایی شده، نه مدل واقعی. اینکه glm-5.2
+دستور «هرگز از groundingContext استخراج نکن» را رعایت می‌کند یا نه، <b>مشاهده نشده است</b>.</li>
+<li>تأیید پیشنهادها در API و دامنه هست، <b>در رابط کاربری نیست</b>. نوچه هرگز پیام بیرونی نمی‌فرستد.</li>
+</ul>
+</div>
+
+<!-- ================= -->
+<h2 id="honcho">Honcho — دقیقاً چیست</h2>
+
+<p><b>حافظه به‌عنوان استدلال، نه حافظه به‌عنوان انبار.</b> ساختِ Plastic Labs. هستهٔ AGPL-3.0،
+پلتفرم میزبانی‌شده، قابل self-host. سرور و worker پایتونی، PostgreSQL با pgvector، Redis.
+SDK برای TypeScript و Python.</p>
+
+<h3>مدل داده</h3>
+<pre>
+Workspace ──has──> Peers      (any entity: you, an agent, an NPC, a client)
+     │
+     └───has──> Sessions ──has──> Messages
+                    ▲
+                    └── Peers ⟷ Sessions is many-to-many
+
+Scopes = named sets of Sessions that bound recall visibility
+</pre>
+
+<h3>چطور پردازش می‌کند</h3>
+<ol class="steps">
+<li><b>نوشتن (همگام، سریع).</b> پیام در Postgres ذخیره می‌شود، تسک استدلال در صف می‌رود، و
+درخواست فوراً برمی‌گردد. هیچ‌چیز منتظر LLM نمی‌ماند. تا ۱۰۰ پیام در هر فراخوانی دسته‌ای.</li>
+<li><b>Deriver (نا‌همگام، به‌ازای هر پیام).</b> ابتدا <i>مقدمه‌های صریح</i> و سپس
+<i>استنتاج‌های قیاسی</i> را بیرون می‌کشد — منطق صوری، با مدل‌های اختصاصی
+(Neuromancer و Neuromancer XR).</li>
+<li><b>Summarizer (ناهمگام).</b> خلاصهٔ کوتاه هر ~۲۰ پیام، خلاصهٔ بلند هر ~۶۰ پیام.</li>
+<li><b>Dreamer (دوره‌ای).</b> به استنتاج‌های ذخیره‌شده برمی‌گردد: موارد تکراری را ادغام می‌کند،
+کهنه‌ها را می‌اندازد، <i>استنتاج استقرایی</i> روی الگوها می‌سازد، تناقض‌ها را حل می‌کند و
+peer card را به‌روز می‌کند. <b>این همان بخشی است که در نوچه هیچ معادلی ندارد.</b></li>
+<li><b>خواندن — <code>context()</code>.</b> حدود ۲۰۰ میلی‌ثانیه، نامحدود، مجانی. خلاصه + پیام‌ها
+را برمی‌گرداند و به‌اختیار: نمایندگی peer، peer card، و استنتاج‌های جست‌وجوشدهٔ معنایی — همه
+درون بودجهٔ توکنی که تو تعیین می‌کنی.</li>
+<li><b>خواندن — <code>chat()</code>.</b> یک عامل Dialectic راه می‌اندازد که استنتاج‌ها را
+می‌جوید، پیام‌های پشتیبان را می‌کشد، هر استنتاج را تا مقدمه‌هایش پی می‌گیرد و بعد پاسخ را
+سنتز می‌کند. پنج ردهٔ استدلال با قیمت متفاوت. از <code>response_format</code> با Zod/Pydantic
+برای JSON نوع‌دار پشتیبانی می‌کند.</li>
+</ol>
+
+<h3>چه چیزهایی تولید می‌کند</h3>
+<div class="pill-row">
+<span class="tag t-h">مقدمه‌های صریح</span>
+<span class="tag t-h">استنتاج قیاسی</span>
+<span class="tag t-h">استنتاج استقرایی</span>
+<span class="tag t-h">استنتاج ابداکتیو</span>
+<span class="tag t-h">خلاصهٔ کوتاه و بلند</span>
+<span class="tag t-h">peer card</span>
+<span class="tag t-h">نمایندگی جهت‌دار</span>
+</div>
+<p><small>به آنچه در این فهرست <b>نیست</b> دقت کن: گرهٔ نوع‌دار، رابطهٔ نوع‌دار، تسک، ددلاین،
+وضعیت، حالت تأیید. استنتاج‌ها متنِ روان با منبع‌اند و در بردار ایندکس می‌شوند — نه سطرهایی در
+اسکیمایی که تو تعریف کرده‌ای.</small></p>
+
+<h3>عملکرد ادعایی</h3>
+<div class="tw"><table>
+<thead><tr><th>بنچمارک</th><th>امتیاز</th><th>معنا</th></tr></thead>
+<tbody>
+<tr><td>LoCoMo</td><td><b>۸۹٫۹٪</b></td><td>پرسش‌وپاسخ روی گفت‌وگوی طولانی</td></tr>
+<tr><td>LongMem S</td><td><b>۹۰٫۴٪</b></td><td>حافظهٔ بلندمدت</td></tr>
+<tr><td>BEAM ۱۰۰K / ۵۰۰K / ۱M / ۱۰M</td><td>۰٫۶۳۰ / ۰٫۶۴۶ / ۰٫۶۱۸ / ۰٫۴۰۹</td><td>با بزرگ‌شدن پیکره افت می‌کند، که طبیعی است</td></tr>
+<tr><td>صرفه‌جویی توکن</td><td>۶۰ تا ۹۰٪</td><td>در برابر چپاندن تاریخ خام</td></tr>
+<tr><td>تأخیر <code>context()</code></td><td>~۲۰۰ms</td><td>برای هر نوبت به‌اندازهٔ کافی سریع</td></tr>
+</tbody></table></div>
+<p><small>این بنچمارک‌ها را خودِ سازنده منتشر کرده، هرچند مخزنش باز است
+(<code>plastic-labs/honcho-benchmarks</code>). آن‌ها را جهت‌نما بدان، نه تضمین — روی پیکرهٔ
+تلگرامیِ فارسی‌‑انگلیسیِ تو هیچ‌چیز اندازه‌گیری نشده است.</small></p>
+
+<h3>قیمت</h3>
+<div class="tw"><table>
+<thead><tr><th>ردیف</th><th>قیمت</th><th>توضیح</th></tr></thead>
+<tbody>
+<tr><td>بلع داده (ذخیره + استدلال)</td><td>۲ دلار به‌ازای هر میلیون توکن</td><td>تنها هزینهٔ وابسته به حجم</td></tr>
+<tr><td><code>context()</code></td><td><span class="yes">نامحدود و مجانی</span></td><td>«داده‌ی خودت است»</td></tr>
+<tr><td>Dreaming</td><td>شامل پلن پایه</td><td>ردهٔ پیشرفته‌تر هزینه دارد</td></tr>
+<tr><td><code>chat()</code> از minimal تا max</td><td>۰٫۰۰۱ تا ۰٫۵ دلار برای هر پرس‌وجو</td><td>۵ رده؛ high و max ناهمگام‌اند</td></tr>
+<tr><td>اعتبار رایگان</td><td>۱۰۰ دلار در ثبت‌نام</td><td>برای یک ارزیابی جدی کافی است</td></tr>
+<tr><td>self-host</td><td>زیرساخت + کلید LLM خودت</td><td>AGPL-3.0، داکر، Postgres+pgvector+Redis</td></tr>
+</tbody></table></div>
+
+<!-- ================= -->
+<h2 id="hermes">Hermes Agent — دقیقاً چیست</h2>
+
+<p><b>یک هارنس عامل، با مجوز MIT، ساختِ Nous Research.</b> پایتون. اپ دسکتاپ برای
+macOS/Windows/Linux به‌همراه CLI، TUI، gateway، ACP، batch runner و API server. حدود ۲۵٬۰۰۰ تست
+در ~۱٬۲۵۰ فایل. این نرم‌افزار بزرگ، بالغ و خوش‌ساخت است — و <i>رقیب نقشِ هارنسِ نوچه</i> است،
+نه قطعه‌ای برای آن.</p>
+
+<div class="grid g2">
+<div class="card">
+<h4>چیزهایی که دارد و تو نداری</h4>
+<ul style="margin-bottom:0">
+<li><b>۲۵+ آداپتور پلتفرم</b> — تلگرام، دیسکورد، اسلک، واتساپ، سیگنال، Matrix، ایمیل، SMS، IRC، Teams، Feishu و بیشتر، همه از پیش بسته‌بندی‌شده</li>
+<li><b>۷۰+ ابزار در ~۲۸ toolset</b> — جست‌وجوی وب، خودکارسازی مرورگر، بینایی، TTS، تولید تصویر</li>
+<li><b>۷ بک‌اند ترمینال</b> — local، Docker، SSH، Daytona، Modal، Singularity، Vercel Sandbox</li>
+<li><b>Cron</b> به‌عنوان تسک درجه‌یکِ عامل، نه تسک شل، با تحویل به هر پلتفرم</li>
+<li><b>واگذاری به زیرعامل</b> با گفت‌وگوی مجزا و Python RPC</li>
+<li><b>استخراج سند</b> — همان شکاف PDF/docx تو، حل‌شده</li>
+<li><b>فشرده‌سازی کانتکست</b> با موتورهای جایگزین‌پذیر و کشِ پیشوندی Anthropic</li>
+<li><b>سیستم Skill</b>، پلاگین از سه منبع کشف، تشخیص LSP</li>
+</ul>
+</div>
+<div class="card">
+<h4>چیزهایی که ندارد و تو لازم داری</h4>
+<ul style="margin-bottom:0">
+<li><b>گراف دانشِ نوع‌دار ندارد.</b> حافظهٔ بومی‌اش فایل‌های <code>MEMORY.md</code> و <code>USER.md</code> است به‌همراه جست‌وجوی FTS5.</li>
+<li><b>رکورد حافظهٔ ساخت‌یافته ندارد.</b> Decision و Deadline و Blocker به‌عنوان موجودیت وجود ندارند.</li>
+<li><b>چرخهٔ تأیید ندارد.</b> تشخیص فرمان خطرناک و callback تأیید دارد، اما برای <i>ابزار</i>، نه یک ماشین وضعیت pending/accepted/converted برای <i>پیشنهاد</i>.</li>
+<li><b>دروازهٔ پاک‌سازی ندارد.</b> هیچ چیزی شبیه نگهبان اسرار تو، سیاست fail-closed، یا قرنطینه.</li>
+<li><b>مسیر حسابرسی گام‌به‌گام ندارد</b> از آن جنسی که <code>/api/audit</code> بیرون می‌دهد.</li>
+<li><b>ستونِ payload رمزنگاری‌شده در حالت سکون ندارد.</b></li>
+<li><b>پاسخ می‌دهد؛ بلع نمی‌کند.</b> یک عامل گفت‌وگویی با ابزار است. محصول تو یک پایپ‌لاین پس‌زمینه است که یک زندگی را می‌خواند و ساخت‌یافته می‌کند.</li>
+</ul>
+</div>
+</div>
+
+<div class="card danger">
+<h4>خلاصهٔ صادقانهٔ حافظهٔ Hermes</h4>
+<p style="margin-bottom:0">روایت حافظهٔ Hermes همین است: <b>«Honcho را نصب کن.»</b>
+مستندات خودشان حافظهٔ بومی را با Honcho مقایسه می‌کند و Honcho در هر ردیف برنده است، جز
+پایداری فایل‌محور و جست‌وجوی FTS5. اگر Hermes را <i>برای حافظه</i> برداری، در واقع Honcho را
+برداشته‌ای با یک عامل پایتونی بزرگ دورش — و برای رسیدن به آن، گراف و نگهبان و مسیر حسابرسی و
+مدل تأیید را دور ریخته‌ای.</p>
+</div>
+
+<!-- ================= -->
+<h2 id="matrix">ماتریس توانایی‌ها</h2>
+
+<p>ستونی که اهمیت دارد ستون آخر است: چه کسی <i>باید</i> مالکش باشد.</p>
+
+<div class="tw"><table>
+<thead><tr>
+<th>توانایی</th>
+<th class="c">نوچه</th>
+<th class="c">Honcho</th>
+<th class="c">Hermes</th>
+<th>مالک درست</th>
+</tr></thead>
+<tbody>
+
+<tr><td colspan="5" class="sec">بلع داده</td></tr>
+<tr><td>وب‌هوک تلگرام + لیست مجاز</td><td class="c yes">✓</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> انجام‌شده، مَپِر ۳۲۷ خطی</td></tr>
+<tr><td>کانال‌های دیگر (دیسکورد، اسلک، ایمیل…)</td><td class="c no">—</td><td class="c no">—</td><td class="c yes">✓ ۲۵+</td><td><span class="tag t-n">Nocheh</span> خودت بنویس؛ شکل آداپتور Hermes را قرض بگیر</td></tr>
+<tr><td>پنجره‌بندی دسته‌ای / جاروی flush</td><td class="c yes">✓</td><td class="c part">~</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> کنترل هزینه‌ات همین‌جاست</td></tr>
+<tr><td>درک تصویر</td><td class="c yes">✓</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> مسیریابی به‌ازای نوع، کش، سقف</td></tr>
+<tr><td>رونویسی صدا</td><td class="c yes">✓</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> فرمت سیمِ <code>audio_url</code> راستی‌آزمایی‌شده</td></tr>
+<tr><td>استخراج PDF / docx / متن</td><td class="c no">—</td><td class="c part">~ آپلود</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> رویکرد Hermes را قرض بگیر</td></tr>
+<tr><td>ورود تاریخ گفت‌وگو</td><td class="c yes">✓</td><td class="c part">~ session تک‌peer</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+
+<tr><td colspan="5" class="sec">امنیت — غیرقابل‌مذاکره</td></tr>
+<tr><td>پاک‌سازی الگویی پیش از هر ذخیره</td><td class="c yes">✓</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> <b>باید بالادستِ همه‌چیز بماند</b></td></tr>
+<tr><td>نگهبان اسرار مدل‌محور، ماسک محلی</td><td class="c yes">✓</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> هیچ‌کس دیگری این را ندارد</td></tr>
+<tr><td>fail-closed + قرنطینه</td><td class="c yes">✓</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>payload رمزنگاری‌شده در سکون</td><td class="c yes">✓</td><td class="c no">Postgres خام</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> در self-host باید دیسک رمزنگاری شود</td></tr>
+
+<tr><td colspan="5" class="sec">حافظه و دانش</td></tr>
+<tr><td>گراف نوع‌دار: ۱۷ نوع، ۲۰ رابطه</td><td class="c yes">✓</td><td class="c no">آگاهانه رد شده</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> <b>این خودِ محصول است</b></td></tr>
+<tr><td>اعتبار زمانی، جانشینی، scope</td><td class="c yes">✓</td><td class="c part">~ ادغام</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>رکورد ساخت‌یافته با اطمینان و منبع</td><td class="c yes">✓</td><td class="c part">~ متن + منبع</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>کیفیت بازیابی معنایی</td><td class="c part">~ ثابت‌های حدسی</td><td class="c yes">✓ SOTA</td><td class="c part">~ از طریق Honcho</td><td><span class="tag t-h">Honcho</span> <b>تنها جابه‌جایی روشن</b></td></tr>
+<tr><td>بازیابی چندزبانه (فارسی + انگلیسی)</td><td class="c part">~ lexical صفر</td><td class="c yes">✓</td><td class="c part">~</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>استنتاج استقرایی / ابداکتیو</td><td class="c no">—</td><td class="c yes">✓</td><td class="c no">—</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>ادغام پس‌زمینه (Dreaming)</td><td class="c no">—</td><td class="c yes">✓</td><td class="c no">—</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>خلاصه‌سازی غلتان</td><td class="c part">~ یک نوع رکورد</td><td class="c yes">✓ خودکار</td><td class="c part">~ فشرده‌سازی</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>مسیر نوشتن ناهمگام (بی‌انتظار LLM)</td><td class="c part">~ جاروی ۱۸۹–۲۴۰s</td><td class="c yes">✓ آنی</td><td class="c no">—</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>مدل‌سازی چند‌موجودیتی (کلاینت، شریک)</td><td class="c yes">✓ نوع گره</td><td class="c yes">✓ peers</td><td class="c part">~</td><td><span class="tag t-n">Nocheh</span> + <span class="tag t-h">peers</span></td></tr>
+
+<tr><td colspan="5" class="sec">اقدام و جریان کار</td></tr>
+<tr><td>تسک با وضعیت، اولویت، ددلاین</td><td class="c yes">✓</td><td class="c no">—</td><td class="c part">~ cron</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>چرخهٔ تأیید پیشنهاد</td><td class="c yes">✓ ۵ وضعیت</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>دروازهٔ اقدام بیرونی (تأیید انسان)</td><td class="c yes">✓</td><td class="c no">—</td><td class="c part">~ تأیید ابزار</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>همگام‌سازی با Notion</td><td class="c yes">✓ MCP</td><td class="c no">—</td><td class="c yes">✓ کلاینت MCP</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>زمان‌بندی / گزارش دوره‌ای</td><td class="c no">—</td><td class="c no">—</td><td class="c yes">✓ cron</td><td><span class="tag t-n">Nocheh</span> طراحی را قرض بگیر</td></tr>
+<tr><td>پیام خروجی</td><td class="c no">—</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> مشروط به تأیید</td></tr>
+
+<tr><td colspan="5" class="sec">عملیات</td></tr>
+<tr><td>مسیر حسابرسی گام‌به‌گام</td><td class="c yes">✓ ۱۹ گام</td><td class="c part">~ صف و وب‌هوک</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>حساب توکن و هزینه به‌ازای نقش</td><td class="c yes">✓</td><td class="c part">~ صورت‌حساب</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>داشبورد مالک</td><td class="c yes">✓ <code>/app</code></td><td class="c yes">✓ مالِ خودشان</td><td class="c yes">✓ مالِ خودشان</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>استقرار تقریباً تک‌فایل</td><td class="c yes">✓ SQLite</td><td class="c no">PG+Redis+worker</td><td class="c part">~ پایتون</td><td><span class="tag t-n">Nocheh</span> هزینهٔ واقعی پذیرش Honcho</td></tr>
+</tbody></table></div>
+
+<p><small>ردیف‌های <span class="tag t-n">Nocheh</span> را بشمار. از حدود ۳۰ توانایی، Honcho باید
+مالک تقریباً هفت مورد باشد، و همه در یک جا خوشه بسته‌اند: <b>کیفیت بازیابی و استنتاج.</b>
+این شکلِ یک تصمیمِ «قطعه» است، نه تصمیمِ «مهاجرت».</small></p>
+
+<!-- ================= -->
+<h2 id="gain">جاهایی که Honcho واقعاً می‌بَرد — شش مورد</h2>
+
+<div class="card">
+<h4>۱. کیفیت بازیابی‌ای که نتوانسته‌ای تنظیمش کنی</h4>
+<p>امتیازدهندهٔ ترکیبی تو <code>(similarity + 0.25·lexical)/1.25</code> را در اطمینان رکورد ضرب
+می‌کند، پس از بازمقیاس کسینوس از کف ۰٫۳. خودِ <span class="fp">TASK.md</span> می‌گوید هر دو
+ثابت حدس‌اند، و ADR-0012 بازیابی را به <i>هر</i> پنجره وصل کرد — پس یک کفِ غلط الان هر تحلیل را
+تخریب می‌کند، نه هیچ‌چیز را. Honcho یک پشتهٔ بازیابیِ تنظیم‌شده با بنچمارک منتشرشده می‌دهد.
+خریدنِ یک جست‌وجوی پارامترِ حل‌شده، دلیل مشروعی برای خریدن است.</p>
+</div>
+
+<div class="card">
+<h4>۲. بازیابی چندزبانه — یک باگ مشخص که خودت مستندش کرده‌ای</h4>
+<p><span class="fp">src/infrastructure/memory/lexical-score.ts:19</span> روی
+<code>/[^a-z0-9]+/</code> تقسیم می‌کند. کامنت خودت در خط ۸ همین را می‌گوید:
+<i>«متن غیرلاتین به هیچ توکنی تجزیه نمی‌شود… و همین دلیلی است که امتیاز واژگانی تنها، هرگز برای
+یک مالکِ چندزبانه کافی نبود.»</i> پس برای ورودی فارسی، ۲۵٪ از امتیاز ترکیبی تو ساختاراً صفر است
+و تو فقط روی امبدینگ می‌دوی — امبدینگی که کفش یک حدس است. بازیابی Honcho از بنیاد
+زبان‌بی‌طرف است.</p>
+</div>
+
+<div class="card">
+<h4>۳. ادغامی که هیچ سازوکاری برایش نداری</h4>
+<p>تو <code>superseded</code> را به‌عنوان وضعیت داری و <code>applyStatusUpdates()</code> را برای
+ست‌کردنش — اما فقط وقتی مدل تصادفاً برای یک پنجره یک به‌روزرسانی وضعیت بیرون بدهد. هیچ‌چیز کل
+گراف را جارو نمی‌کند تا تناقض، افزونگی و استنتاج کهنه را پیدا کند. Dreamer در Honcho دقیقاً همین
+کار را زمان‌بندی‌شده انجام می‌دهد: ادغام، حل تناقض، وزن‌دهی استنتاج، استقرا روی الگوها.
+در طول یک سال ترافیک روزانهٔ تلگرام، این همان تفاوت بین حافظه‌ای است که <i>غنی‌تر</i> می‌شود و
+حافظه‌ای که فقط <i>بزرگ‌تر</i> می‌شود.</p>
+</div>
+
+<div class="card">
+<h4>۴. تأخیر، در سطح معماری</h4>
+<p>مسیر نوشتن تو این است: بافر → جاروی flush → ۱۸۹ تا ۲۴۰ ثانیه تحلیل. بدترین تأخیر پیش از
+تحلیلِ یک دستهٔ سررسیده، <code>FLUSH_SWEEP_INTERVAL_SECONDS</code> به‌علاوهٔ چهار دقیقه زمان مدل
+است. نوشتن در Honcho فوراً برمی‌گردد و خواندن <code>context()</code> حدود ۲۰۰ میلی‌ثانیه است.
+اگر روزی بخواهی نوچه به تو <i>پاسخ بدهد</i> — نه فقط چیزها را بایگانی کند — به یک مسیر خواندنِ
+زیرثانیه نیاز داری، و نداری.</p>
+</div>
+
+<div class="card">
+<h4>۵. استنتاج، فراتر از استخراج</h4>
+<p>قرارداد تو از مدل می‌خواهد آنچه <i>در</i> یک پنجره هست را <i>استخراج</i> کند. Honcho علاوه بر
+آن، بین پنجره‌ها <i>استقرا</i> می‌کند («مکرراً ددلاین را می‌گوید، به‌ندرت سرگرمی → تحت فشار
+زمان») و ساده‌ترین توضیح‌ها را <i>ابداکشن</i> می‌کند. برای کوچینگ، روتین‌ها و تولید ایده — چهار
+مورد از دامنه‌های خودت — همان لایهٔ استنتاجی ارزش واقعی است، و پایپ‌لاین تو هیچ گامی که آن را
+تولید کند ندارد.</p>
+</div>
+
+<div class="card">
+<h4>۶. همان انبار پیامِ خامی را می‌دهد که خودت خواسته‌ای</h4>
+<p>تو فلوی آرمانی‌ات را این‌طور گفتی: <i>«importer که همهٔ دادهٔ خالص را در دیتابیس ذخیره کند.»</i>
+Honcho دقیقاً همان است: پیام‌ها عیناً و دائمی در Postgres، با لایهٔ استدلال روی آن‌ها. این
+کشمکش بین «می‌خواهم لاگ خام را داشته باشم» و «قانون ۱ چت خام را به‌عنوان حافظهٔ بلندمدت ممنوع
+کرده» را حل می‌کند — <b>به‌شرطی که</b> self-hosted باشد و پس از پاک‌سازی. به
+<a href="#conflict">بخش تضاد طراحی</a> نگاه کن.</p>
+</div>
+
+<!-- ================= -->
+<h2 id="lose">کارهایی که Honcho برایت نمی‌کند — نُه مورد</h2>
+
+<div class="tw"><table>
+<thead><tr><th>نیاز تو</th><th>موضع Honcho</th><th>پیامد</th></tr></thead>
+<tbody>
+<tr>
+<td><b>گراف نوع‌دار</b> — ۱۷ نوع گره، ۲۰ رابطه، ۱۶ نوع payload، اعتبارسنجی‌شده با آرایه‌های <code>as const</code></td>
+<td>صریحاً خارج از دامنه. استنتاج را به‌صورت متن در بردار ذخیره می‌کند.</td>
+<td><span class="fp">memory-graph.ts</span> و لایهٔ mapping را نگه دار. غیرقابل‌مذاکره.</td>
+</tr>
+<tr>
+<td><b>پاک‌سازی پیش از هر کار</b></td>
+<td>هیچ نوع پاک‌سازی ندارد. هرچه بفرستی، همان را می‌گیرد.</td>
+<td>نگهبان تو باید <i>بالادستِ</i> هر نوشتن در Honcho بنشیند. ساختاراً مشکلی نیست — همین‌جا هست.</td>
+</tr>
+<tr>
+<td><b>Task / Deadline / Blocker</b> به‌عنوان موجودیت درجه‌یک با وضعیت و اولویت</td>
+<td>سیستم تسک نیست.</td>
+<td><code>TaskRepositoryPort</code>، <code>TaskValidationService</code> و سینک Notion را نگه دار.</td>
+</tr>
+<tr>
+<td><b>چرخهٔ تأیید</b> — pending/accepted/rejected/archived/converted و <code>requiresApproval</code></td>
+<td>موتور جریان کار نیست.</td>
+<td>کل دامنهٔ پیشنهاد را نگه دار. این قانون ۳ و قانون ۴ است.</td>
+</tr>
+<tr>
+<td><b>حسابرسی گام‌به‌گام</b> — ۱۹ گام نام‌دار با متادیتا، تأخیر، شمارش توکن</td>
+<td>فقط وضعیت صف و وب‌هوک.</td>
+<td><code>AuditRepositoryPort</code> را نگه دار. نام گام <code>honcho_write</code> و <code>honcho_recall</code> اضافه کن.</td>
+</tr>
+<tr>
+<td><b>payload رمزنگاری‌شده در سکون</b></td>
+<td>Postgres خام. پیام و بردار رمزنگاری‌نشده.</td>
+<td>روی والیوم رمزنگاری‌شده self-host کن. مدل <code>LOCAL_ENCRYPTION_SECRET</code> تو به آن‌جا نمی‌رسد.</td>
+</tr>
+<tr>
+<td><b>درک تصویر و صدا</b></td>
+<td>آپلود فایل: PDF، متن، JSON. مدل ادراکی ندارد.</td>
+<td><code>MediaUnderstandingService</code> را نگه دار و متنِ مشتق‌شده و نگهبانی‌شده را به Honcho بده.</td>
+</tr>
+<tr>
+<td><b>سادگی استقرار</b> — یک فایل SQLite، یک وابستگی</td>
+<td>سرور API + worker + Postgres/pgvector + Redis + یک کلید LLM.</td>
+<td>سطح عملیاتی تو حدوداً سه برابر می‌شود. این هزینهٔ واقعی و بی‌جلال ماجراست.</td>
+</tr>
+<tr>
+<td><b>قطعیتی که بتوانی تست کنی</b> — ۴۱ فایل تست که رفتار دقیق را میخ می‌کنند</td>
+<td>سرویسی استدلالی که خروجی‌اش با بهتر شدن مدل‌هایشان تغییر می‌کند.</td>
+<td>نمی‌توانی استنتاج‌های Honcho را unit-test کنی. آداپتور را contract-test کن و سرویس را fake کن.</td>
+</tr>
+</tbody></table></div>
+
+<!-- ================= -->
+<h2 id="conflict">تضاد طراحی، به زبان خودشان</h2>
+
+<p>این مهم‌ترین پاراگراف کل این سند است. از
+<span class="fp">honcho.dev/docs/v3/documentation/core-concepts/reasoning</span>:</p>
+
+<div class="q">
+«سیستم‌های RAG سنتی حافظه را انبار ساکن می‌بینند…
+<b>راه‌حل‌های دیگر به‌جای تو تصمیم می‌گیرند چه چیزی مهم است که ذخیره شود، خواه با واقعیت‌های
+ساخت‌یافته در دیتابیس، خواه با گراف‌های دانشِ پیش‌تعریف‌شده.</b>
+Honcho رویکرد دیگری دارد: ما با استدلال روی همه‌چیز، تمام اطلاعات نهفته را بیرون می‌کشیم تا
+هر وقت لازم شد آن‌جا باشد. کار ما تولید استوارترین استدلال ممکن است —
+<b>و این کارِ تو به‌عنوان توسعه‌دهنده است که تصمیم بگیری چه چیزی برای مورد استفاده‌ات مرتبط
+است.</b>»
+</div>
+
+<p>این را یک <b>مرزبندی</b> بخوان، نه یک انتقاد. Honcho در عبارت «گراف‌های دانشِ پیش‌تعریف‌شده»
+دارد نوچه را توصیف می‌کند، و می‌گوید که چنین چیزی نخواهد ساخت. در همان جمله، تقسیم کار درست را
+هم به تو می‌گوید:</p>
+
+<div class="card verdict">
+<p style="margin:0;font-size:16px"><b>Honcho استدلال می‌کند. تو تصمیم می‌گیری چه چیزی مرتبط است.</b><br>
+<span style="color:var(--dim)">Honcho استنتاج تولید می‌کند. قرارداد نوچه تصمیم می‌گیرد کدام‌یک
+تبدیل به یک <code>Decision</code> شود، کدام به یک یال <code>PERSON_OWNS_TASK</code>، کدام به یک
+پیشنهاد <code>pending</code> در انتظار تأیید تو، و کدام دور ریخته شود. این هم‌پوشانی نیست.
+این یک واسط تمیز میان دو لایه است.</span></p>
+</div>
+
+<div class="card caution">
+<h4>تضاد دوم: قانون ۲ در برابر یک سرویس میزبانی‌شده</h4>
+<p>قانون ۲ می‌گوید پاک‌سازی پیش از «بافرکردن، تحلیل، ذخیره، لاگ، ساخت کانتکست، یا سینک بیرونی».
+نوشتن در Honcho <b>سینک بیرونی</b> است. دو پیامد:</p>
+<ul>
+<li><b>ترتیب از قبل درست است.</b> نگهبان تو در
+<span class="fp">process-incoming-message.ts:233</span> اجرا می‌شود، پیش از زمینه‌سازی و تحلیل.
+نوشتنی که بعد از آن قرار بگیرد، این تضمین را مجانی به ارث می‌برد. از
+<code>LiveMessageBufferService.execute()</code> در Honcho <b>ننویس</b> — آن‌جا فقط قواعد regex
+اجرا شده‌اند.</li>
+<li><b>میزبانی‌شده در برابر self-hosted، یک تصمیم قانون‌۲ است، نه تصمیم هزینه.</b>
+Honcho ابری یعنی کل پیکرهٔ زندگی‌ات — استارتاپ‌ها، کلاینت‌ها، کوچینگ، دارایی‌ها، تزهای کریپتو —
+دائمی و بدون رمزنگاری روی Postgres یک شخص ثالث می‌نشیند. نگهبان، کلیدها را حذف می‌کند؛ این
+واقعیت را حذف نمی‌کند که تو داری کل پیکره را می‌فرستی. <b>Self-host کن.</b></li>
+</ul>
+<p style="margin-bottom:0"><b>دربارهٔ AGPL-3.0:</b> اجرای یک Honchoِ <i>دست‌نخورده</i> به‌عنوان
+پروسهٔ جدا و صداکردنش روی HTTP، «تجمیع» است نه «اشتقاق». مجوز خود نوچه دست‌نخورده می‌ماند.
+کوپی‌لفت فقط وقتی دندان نشان می‌دهد که سورس Honcho را تغییر بدهی <i>و</i> همان نسخهٔ تغییریافته
+را روی شبکه عرضه کنی. تغییراتت را صفر نگه دار و این مسئله‌ای نیست؛ منطقت را در آداپتور خودت
+بنویس، نه در مخزن آن‌ها.</p>
+</div>
+
+<!-- ================= -->
+<h2 id="flow">فلوی تو، خط به خط</h2>
+
+<p>تو خودت فلوی مهم را نام بردی. این‌جا با جای ممکنِ هر ابزار، روی مسیرهای واقعی فایل:</p>
+
+<pre>
+<b>①  TELEGRAM</b>  →  <span class="fp">create-telegram-webhook-handler.ts:19</span>
+                 │
+<b>②  PATTERN REDACTION</b>  →  <span class="fp">live-message-buffer-service.ts:80</span>
+                 │
+<b>③  BUFFER</b>  →  <span class="fp">sqlite-live-message-buffer-repository.ts</span>
+    <s>✗ do NOT write to Honcho here — the guard has not run yet</s>
+                 │
+     ┌───────────┴──── flush sweep, every FLUSH_SWEEP_INTERVAL_SECONDS
+     │
+<b>④  MEDIA → TEXT</b>  →  <span class="fp">media-understanding-service.ts:74</span>
+                 │
+<b>⑤  SECRET GUARD</b>  →  <span class="fp">window-redaction-service.ts:38</span>   ⟵ <b>THE GATE</b>
+                 │
+    ══════════ everything below sees only guarded text ══════════
+                 │
+<b>⑥  GROUNDING</b>  →  <span class="fp">assistant-context-builder.ts:60</span>
+    <i>◆ HONCHO READS HERE   session.context({ tokens, peerTarget, searchQuery })</i>
+                 │
+<b>⑦  ANALYSIS</b>  →  <span class="fp">nvidia-memory-graph-analyzer.ts:110</span>
+                 │
+<b>⑧  PERSIST</b>  records · nodes · edges · suggestions · tasks
+    <i>◆ HONCHO WRITES HERE  session.addMessages([...guarded window...])</i>
+                 │
+<b>⑨  WORKFLOWS</b>  validation → Notion sync → status updates → audit (19 steps)
+</pre>
+
+<dl class="legend">
+<dt>①</dt><dd>لیست مجاز، فرمان <code>/note</code>، تبدیل update به <code>IncomingMessage</code>. Hermes این‌جا ۲۵ آداپتور دارد، تو یکی. شکل را قرض بگیر، کد را نه.</dd>
+<dt>②</dt><dd>فقط regex. ارزان، همگام، اجتناب‌ناپذیر. پیش از <b>هر</b> ذخیره‌سازی اجرا می‌شود.</dd>
+<dt>③</dt><dd>همان «importer / انبار دادهٔ خالص» تو. آگاهانه <b>موقت</b> است — قانون ۱.</dd>
+<dt>④</dt><dd>بایت را می‌گیرد ← مدل ادراکی ← توضیح و رونویسی ← بایت را می‌اندازد. Honcho معادلی ندارد؛ Hermes بینایی دارد. مالِ خودت را نگه دار، راستی‌آزمایی شده است.</dd>
+<dt>⑤</dt><dd>مدل «رشتهٔ عین» را تشخیص می‌دهد · ماسک محلی · در خطا مسیر بسته · قرنطینه در تلاش پنجم. هیچ‌کدام از آن دو محصول این را ندارند. مالِ تو می‌ماند و همین‌جا می‌ماند.</dd>
+<dt>⑥</dt><dd>بازیابی (سقف ۱۲، حداقل امتیاز ۰٫۰۳) + پیمایش گراف با عمق ۱ + قواعد پذیرفته‌شده. <b>Honcho این‌جا به‌عنوان یک منبع زمینه‌سازیِ اضافه می‌نشیند.</b></dd>
+<dt>⑦</dt><dd>قرارداد تولیدشده ← ۱۷ نوع / ۲۰ رابطه / ۱۶ payload. ۱۸۹–۲۴۰ ثانیه · ۳٬۱۹۴ توکن خروجی · ~۱٬۴۱۲ توکن ورودی پرامپت سیستم. مالِ تو می‌ماند؛ این‌جا «چه چیزی مهم است» تعیین می‌شود.</dd>
+<dt>⑧</dt><dd>نوشتن در Honcho همین‌جا شلیک می‌شود: بفرست‌و‌فراموش‌کن، هرگز کشنده نیست.</dd>
+<dt>⑨</dt><dd>مالِ تو می‌ماند. تأیید، اقدام بیرونی، حساب هزینه.</dd>
+</dl>
+
+<div class="card info">
+<h4>دوباره به نمودار نگاه کن — ببین چه چیزی عوض شد</h4>
+<p style="margin-bottom:0"><b>دو نقطهٔ اتصال. هر دو افزودنی. هیچ‌کدام تخریبی نیست.</b>
+یک نوشتن در ⑧ و یک خواندن در ⑥. ترتیب پایپ‌لاین، دروازه، قرارداد، گراف و مسیر حسابرسی، همه
+دست‌نخورده. اگر Honcho بالا نباشد، ⑥ به <code>HybridMemoryRetrievalService</code> برمی‌گردد و ⑧
+رد می‌شود — دقیقاً همان وضعِ خطایی که ADR-0012 برای بازیابی تثبیت کرده است: «شکست بازیابی، برخلاف
+نگهبان اسرار، کشنده نیست».</p>
+</div>
+
+<!-- ================= -->
+<h2 id="seam">درز درست کجاست — و کجا نیست</h2>
+
+<p>حرکت بدیهی این است که یک آداپتور Honcho برای <code>MemoryRetrievalPort</code> بنویسی.
+این اشتباه است، و ارزش دارد که دقیق بگویم چرا.</p>
+
+<pre>
+<span class="fp">src/application/ports/memory-retrieval.ts</span>
+
+export interface MemorySearchResult {
+  readonly record: <b>MemoryRecord</b>;   ⟵ a typed record: type, source, confidence,
+  readonly score: number;                  project?, decision?, deadline?, blocker?…
+}
+</pre>
+
+<p>Honcho <code>MemoryRecord</code> برنمی‌گرداند. استنتاجِ متنی، نمایندگی peer، peer card و
+خلاصه برمی‌گرداند. فشار دادن این‌ها به داخل <code>MemoryRetrievalPort</code> یعنی جعلِ
+<code>MemoryRecord</code>های قلابی با نوع و شناسهٔ ساختگی — و آلوده‌کردن دامنه‌ات با اشیائی که
+هیچ سطری در <code>memory_records</code> و هیچ جایی در گراف ندارند.
+<b>این همان جنس میان‌بری است که بی‌صدا یک معماری را نابود می‌کند.</b></p>
+
+<div class="card verdict">
+<h4>درز درست: یک پورت تازه و باریک</h4>
+<pre style="margin-bottom:0;background:var(--bg3)">
+<span class="fp">src/application/ports/peer-representation.ts</span>
+
+export interface RepresentationQuery {
+  readonly conversationId: string;
+  readonly text: string;              <em>// the window, for search_query</em>
+  readonly tokenBudget: number;
+}
+
+export interface PeerRepresentation {
+  readonly summary?: string;
+  readonly card: readonly string[];        <em>// stable biographical facts</em>
+  readonly conclusions: readonly string[]; <em>// prose, with provenance</em>
+  readonly tokenUsage?: AiTokenUsage;      <em>// feed /api/metrics</em>
+}
+
+/** Narrative context about the owner. NOT structured memory. */
+export interface PeerRepresentationPort {
+  recall(query: RepresentationQuery): Promise&lt;PeerRepresentation&gt;;
+  observe(window: ConversationWindow): Promise&lt;void&gt;;  <em>// fire-and-forget</em>
+}
+
+export const NoopPeerRepresentation: PeerRepresentationPort = { … };
+</pre>
+</div>
+
+<p><b>چرا این شکل کار می‌کند:</b></p>
+<ul>
+<li><b>رشته برمی‌گرداند، نه موجودیت دامنه</b> — یک علامت صادقانه که این «کانتکست روایی» است، نه
+حافظهٔ ساخت‌یافته. هیچ آلودگی‌ای رخ نمی‌دهد.</li>
+<li><code>AssistantContextBuilder.renderGrounding()</code> از قبل پنج بخش برچسب‌دار را کنار هم
+می‌چیند. این می‌شود بخش ششم: <code>"What Honcho concludes about the owner:"</code>. یک تابع،
+یک بخش تازه.</li>
+<li><code>tokenUsage</code> را حمل می‌کند، پس هزینهٔ Honcho هم در <code>/api/metrics</code> کنار
+بقیهٔ نقش‌ها می‌نشیند — سازگار با سابقهٔ <code>MeteredEmbedding</code> در ADR-0011.</li>
+<li>یک پیاده‌سازی <code>Noop</code> یعنی <b>حالت dry-run مجانی می‌ماند</b>، مطابق الگوی
+<code>whenUnset</code> در هر پنج نقش مدلِ موجود.</li>
+<li><code>observe()</code> از <code>recall()</code> جدا است، چون نوشتن «بفرست‌و‌فراموش‌کن» است و
+خواندن روی مسیر بحرانی. معناهای خطای متفاوت، متدهای متفاوت می‌خواهند.</li>
+<li>از <span class="fp">test/core-layer-portability.test.ts</span> عبور می‌کند — هیچ
+<code>node:*</code> در پورت؛ ترابری در <code>src/infrastructure/memory/honcho-*.ts</code>.</li>
+</ul>
+
+<!-- ================= -->
+<h2 id="options">چهار گزینه، با قیمت</h2>
+
+<div class="tw"><table>
+<thead><tr><th>گزینه</th><th>تلاش</th><th>برگشت‌پذیر؟</th><th>چه می‌گیری</th><th>چه ریسکی</th></tr></thead>
+<tbody>
+<tr>
+<td><b>الف. فعلاً هیچ‌کاری نکن.</b> <span class="fp">TASK.md</span> را تمام کن: یک پنجرهٔ واقعی اجرا کن، کف را تنظیم کن، زمینه‌سازی را راستی‌آزمایی کن.</td>
+<td>۱ تا ۲ هفته</td>
+<td class="yes">—</td>
+<td>می‌فهمی بازیابی‌ات واقعاً بد است یا نه. الان نمی‌دانی.</td>
+<td>هفته‌ها صرفِ جست‌وجوی پارامتری که دیگری قبلاً انجامش داده.</td>
+</tr>
+<tr style="background:rgba(74,222,128,.045)">
+<td><b>ب. Honcho به‌عنوان قطعه.</b> <span class="tag t-ok">پیشنهادی</span> self-hosted، پشت <code>PeerRepresentationPort</code>، افزودنی در ⑥ و ⑧.</td>
+<td>۳ تا ۵ روز<br><small>+ عملیات</small></td>
+<td class="yes">کامل — یک آداپتور را پاک کن</td>
+<td>بازیابی SOTA، چندزبانه، Dreaming، خلاصه، خواندن سریع، لاگ پیام خام. گراف/نگهبان/حسابرسی/تأیید دست‌نخورده.</td>
+<td>Postgres و Redis و worker برای نگه‌داری. دو سیستم حافظه که باید هم‌زمان بفهمی.</td>
+</tr>
+<tr>
+<td><b>ج. Honcho جای لایهٔ حافظه‌ات.</b> گراف، آنالایزر و پشتهٔ امبدینگ را حذف کن.</td>
+<td>۲ تا ۳ هفته<br><small>حذف کردن</small></td>
+<td class="no">نه</td>
+<td>کد بسیار کمتر. یک سیستم.</td>
+<td class="no">محصول را حذف می‌کند. نه گراف نوع‌دار، نه تسک، نه تأیید، نه حسابرسی. Honcho صریحاً این‌ها را پس نمی‌دهد.</td>
+</tr>
+<tr>
+<td><b>د. مهاجرت روی Hermes</b>، نوچه می‌شود یک پلاگین memory-provider.</td>
+<td>۴ تا ۸ هفته</td>
+<td class="no">نه</td>
+<td>۲۵ کانال، cron، ابزار، سندباکس، اپ دسکتاپ، مجانی.</td>
+<td class="no">بازنویسی پایتونی. ترتیب پایپ‌لاین دیگر دست تو نیست — <a href="#plugin">قانون ۲ غیرقابل‌اجرا می‌شود</a>.</td>
+</tr>
+</tbody></table></div>
+
+<div class="card verdict">
+<h4>ترتیب پیشنهادی: الف ← ب</h4>
+<p style="margin-bottom:0"><b>اول الف</b> را انجام بده و در یک هفته محدودش کن. تو الان
+<i>یک</i> نقطه‌دادهٔ تأخیر و <i>صفر</i> اجرای گراف واقعی داری. پذیرفتن یک سرویس حافظه برای درمان
+مشکل بازیابی‌ای که هرگز اندازه نگرفته‌ای، یعنی خریدنِ دارو پیش از تشخیص. بعد <b>ب</b> را انجام
+بده — و چون ب افزودنی و برگشت‌پذیر است، می‌توانی هر دو مسیر بازیابی را روی یک پنجره اجرا کنی و
+تفاضل را در متادیتای <code>context_build</code> بخوانی. این یک آزمایش واقعی است، و مسیر
+حسابرسی تو از قبل برای ثبتش ساخته شده.</p>
+</div>
+
+<!-- ================= -->
+<h2 id="plugin">پلاگین، رَپِر، یا مشتری؟</h2>
+
+<p>تو مشخصاً همین را پرسیدی. پاسخ <b>مشتری</b> است، و دلیلش سلیقه نیست.</p>
+
+<div class="grid g3">
+<div class="card danger">
+<h4>✗ نوچه به‌عنوان پلاگین Hermes</h4>
+<p><b>سدِ اصلی:</b> فلوی gateway در Hermes این است:
+<code>Platform event → authorize → resolve session → create AIAgent → run_conversation</code>.
+پیام خام <i>درونِ</i> همان حلقه در پرامپت می‌رود و به مدل فرستاده می‌شود. یک پلاگین
+memory-provider برای خواندن و نوشتن <i>پیرامون</i> حلقه صدا زده می‌شود، نه پیش از آن.</p>
+<p style="margin-bottom:0"><b>پس قانون ۲ تو — «اول پاک‌سازی، بعد هر کار دیگر» — غیرقابل‌اجرا
+می‌شود.</b> چیزی را که ترتیبش را تعیین نمی‌کنی نمی‌توانی دروازه‌بندی کنی. باقی مسائل (پایتون،
+مالکیت پرامپت، پایداری کش به‌عنوان یک اصل طراحیِ اعلام‌شده) در برابر این فرعی‌اند.</p>
+</div>
+
+<div class="card danger">
+<h4>✗ نوچه به‌عنوان رَپِر دور Hermes</h4>
+<p>یک عامل پایتونی بزرگ را از بیرون صدا می‌زنی، بعد تلاش می‌کنی ساختار را از پاسخ‌های متنِ آزادش
+بازسازی کنی. درخت وابستگی‌اش، resolution ارائه‌دهنده‌اش، انبار session و ریتم ارتقایش را
+به ارث می‌بری.</p>
+<p style="margin-bottom:0">در عوض، ابزارهایی می‌گیری که خودت با کسری از این کد می‌توانستی
+بنویسی. <b>پیچیدن دور چیزی بزرگ‌تر از خودت برای استفاده از یک برشش، همان‌طوری است که یک معماری
+تمیز می‌میرد.</b></p>
+</div>
+
+<div class="card verdict">
+<h4>✓ نوچه به‌عنوان مشتری Honcho</h4>
+<p>دقیقاً همان نسبتی که از قبل با NVIDIA و Anthropic و Gemini و Notion MCP داری: یک پورت در
+<code>src/application/ports</code>، یک آداپتور در <code>src/infrastructure</code>، و یک‌بار
+سیم‌کشی در <span class="fp">src/dev-server.ts</span>.</p>
+<p style="margin-bottom:0"><b>قانون ۷ از قبل همین را گفته:</b> <i>«ارائه‌دهنده‌ها پشت پورت
+می‌مانند. ترابری در آداپتور؛ پرامپت، قرارداد خروجی و نگاشت دامنه مشترک می‌مانند.»</i>
+Honcho یک ارائه‌دهنده است. مثل یکی از آن‌ها با آن رفتار کن.</p>
+</div>
+</div>
+
+<div class="card caution">
+<p style="margin:0"><b>یک عدم‌تقارن دیگر که ارزش نام‌بردن دارد.</b> ادغام Honcho در Hermes شامل
+<code>pinUserPeer</code>، <code>userPeerAliases</code> و <code>runtimePeerPrefix</code> است — یک
+لایهٔ کامل نگاشت هویت که تنها کارش تبدیل شناسه‌های رانتایم تلگرام/دیسکورد/اسلک به peer درست است،
+با یک تلهٔ مستندشده دربارهٔ بی‌صاحب‌شدن حافظهٔ مشترک وقتی <code>pinUserPeer</code> را برمی‌گردانی.
+نوچه <b>تک‌مالک</b> است. تمام آن پیچیدگی را مجانی می‌بری، فقط با نداشتنش. یک مسئلهٔ هویت
+چندمستأجری که نداری را وارد نکن.</p>
+</div>
+
+<!-- ================= -->
+<h2 id="plan">نقشهٔ پیاده‌سازی گزینهٔ ب</h2>
+
+<ol class="steps">
+
+<li><h4>یک Honchoِ self-hosted بالا بیاور</h4>
+<pre style="margin:8px 0">uv tool install honcho-cli
+honcho start --setup basic     <em># Docker: API + deriver + Postgres + Redis</em>
+<em># http://127.0.0.1:8000</em></pre>
+<p><code>DERIVER_MODEL_CONFIG__*</code> را به یک endpoint سازگار با OpenAI بده — همان base URL
+انویدیای فعلی‌ات کار می‌کند، به‌شرطی که مدل از tool calling پشتیبانی کند. والیوم را روی دیسک
+رمزنگاری‌شده بگذار؛ Honcho پیام‌ها را بدون رمز در Postgres می‌گذارد و
+<code>LOCAL_ENCRYPTION_SECRET</code> تو تا آن‌جا دست نمی‌رساند.
+<b>کلیدهای env تازه:</b> <code>HONCHO_BASE_URL</code>، <code>HONCHO_API_KEY</code>،
+<code>HONCHO_WORKSPACE_ID</code>، <code>HONCHO_PEER_ID</code>. تنظیم‌نشده ⇒
+<code>NoopPeerRepresentation</code>، مثل هر نقش دیگری.</p></li>
+
+<li><h4>پورت و Noop را اضافه کن</h4>
+<p><span class="fp">src/application/ports/peer-representation.ts</span> — همان interfaceِ
+<a href="#seam">بخش درز</a>. فقط تایپ، بدون <code>node:*</code>. مطابق قراردادهای خودت از
+<span class="fp">src/index.ts</span> دوباره export کن.</p></li>
+
+<li><h4>آداپتور را بنویس</h4>
+<p><span class="fp">src/infrastructure/memory/honcho-peer-representation.ts</span>. از
+<code>@honcho-ai/sdk</code> استفاده کن — یا اگر می‌خواهی انضباط «یک وابستگی رانتایم» را حفظ کنی،
+با <code>fetch</code> ساده از طریق <span class="fp">fetch-with-timeout.ts</span> (سطح REST کوچک
+است: <code>addMessages</code>، <code>context</code>، <code>chat</code>).</p>
+<ul>
+<li><b>نگاشت peer:</b> یک peer برای تو، یکی برای نوچه. بعدها به‌اختیار یک peer برای هر گرهٔ
+<code>person</code> — همان‌جا که مدل peer در Honcho برای کلاینت‌ها و شریک‌ها جالب می‌شود.</li>
+<li><b>نگاشت session:</b> <code>conversationId</code> تلگرام ← شناسهٔ session در Honcho. مستقیم.</li>
+<li><b>تایم‌اوت:</b> <code>recall()</code> حداکثر ۳ ثانیه و در تایم‌اوت افت کن — روی مسیر بحرانی
+است. <code>observe()</code> همان ۱۲۰ ثانیهٔ پیش‌فرض را بگیرد و هرگز بلاک نکند.</li>
+</ul></li>
+
+<li><h4><code>observe()</code> را بعد از نگهبان سیم‌کشی کن، نه قبلش</h4>
+<p>در <span class="fp">process-incoming-message.ts</span>، پس از موفقیت
+<code>windowRedaction.execute()</code>. یک گام <code>honcho_write</code> به
+<code>ProcessingStepName</code> اضافه کن. خطا باید <code>skipped</code> باشد و هرگز کشنده نباشد —
+همان وضعِ <code>understandMedia()</code> در خط ۲۲۶، نه وضعِ نگهبان در خط ۲۳۳.</p>
+<div class="card danger" style="margin:10px 0">
+<p style="margin:0"><b>تنها اشتباهی که قانون ۲ را می‌شکند:</b> نوشتن در Honcho از داخل
+<code>LiveMessageBufferService.execute()</code>، چون راحت است و پیام همان‌جا در دست است. در آن
+نقطه فقط الگوهای regex اجرا شده‌اند. نگهبان — همان چیزی که طبق ADR-0010
+<i>یک رمز عبورِ عکس‌گرفته‌شده از تخته‌وایت‌برد</i> را گرفت، رمزی که مدل ادراکی عیناً رونویسی‌اش
+کرده بود — هنوز اجرا نشده. هرگز بالای خط ۲۳۳ در Honcho نَنویس.</p>
+</div></li>
+
+<li><h4><code>recall()</code> را به <code>AssistantContextBuilder</code> وصل کن</h4>
+<p>موازی با <code>retrieval.query()</code> و با <code>Promise.allSettled</code> صدایش بزن. یک
+بخش ششم به <code>renderGrounding()</code> اضافه کن. متادیتای حسابرسی <code>context_build</code>
+را با <code>honchoConclusionCount</code>، <code>honchoCardCount</code> و
+<code>honchoLatencyMs</code> گسترش بده — آن‌وقت یک رکورد A/B مجانی داری، در جدولی که از قبل
+کوئری می‌زنی.</p></li>
+
+<li><h4>قرارداد را دقیقاً یک جمله گسترش بده</h4>
+<p>ADR-0012 این قاعده را تثبیت کرد و با تست میخش کرد: به مدل بگو <code>groundingContext</code>
+چیست و <b>استخراج از آن را ممنوع کن</b>. استنتاج‌های Honcho «استنباط»اند نه «شهادت» — خطر اینکه
+مدل از حدسِ Honcho یک گرهٔ <code>Decision</code> ضرب کند واقعی است.
+<code>analysisSystemPrompt()</code> را در
+<span class="fp">memory-graph-analysis-mapping.ts:95</span> گسترش بده و assertion بودجهٔ توکن را
+در <span class="fp">test/memory-graph-analysis-mapping.test.ts</span> به‌روز کن.</p></li>
+
+<li><h4>Backfill، به‌صورت صریح</h4>
+<p><code>POST /api/memory/rebuild-representation</code>، آینهٔ
+<code>POST /api/memory/reindex</code>. استدلال ADR-0011 بی‌تغییر برقرار است: این کارِ پول‌دار
+به‌ازای هر رکورد است، پس یک دکمهٔ عامدانه است نه یک عارضهٔ راه‌اندازی. تاریخِ نگهبانی‌شده را از
+مسیر chunk کردنِ <code>HistoryImportService</code> بده، و وقتی اعتبارنامهٔ Honcho تنظیم نشده
+<code>409</code> برگردان — همان‌طور که reindex امروز می‌کند.</p></li>
+
+<li><h4>اندازه بگیر، بعد تصمیم بگیر</h4>
+<p>۲۰ تا ۳۰ پنجرهٔ واقعی با هر دو مسیرِ فعال اجرا کن. از <code>/api/audit</code> مقایسه کن: آیا
+استنتاج‌های Honcho ساختِ گرهٔ تکراری را کم کرد؟ گراف تمیزتر شد؟ تأخیر
+<code>context_build</code> قابل‌قبول ماند؟ <b>اگر پاسخ منفی است، یک فایل آداپتور و یک بلوک
+سیم‌کشی را پاک کن.</b> همین برگشت‌پذیری، تمام دلیل ساختنش به این شکل است.</p></li>
+</ol>
+
+<!-- ================= -->
+<h2 id="cost">مدل هزینه</h2>
+
+<p>با اعداد اندازه‌گیری‌شدهٔ خودت از <span class="fp">TASK.md</span> — یک پنجرهٔ مشاهده‌شده با
+۲٬۱۹۸ توکن ادراک + ~۹۵۰ نگهبان + ۳٬۱۹۴ تحلیل، و پرامپت سیستم تحلیل ~۱٬۴۱۲ توکن ورودی برای هر
+فراخوانی.</p>
+
+<div class="tw"><table>
+<thead><tr><th>سناریو</th><th>فرض حجم</th><th>بلع Honcho، ۲$/M</th><th>خواندن</th><th>ماهانه</th></tr></thead>
+<tbody>
+<tr><td>سبک — تلگرام شخصی</td><td>~۱۵۰ پیام/روز × ~۴۰ توکن = ۱۸۰K توکن/ماه</td><td>۰٫۳۶$</td><td>مجانی</td><td class="yes">~۰٫۴۰$</td></tr>
+<tr><td>متوسط — چند گروه</td><td>~۵۰۰ پیام/روز = ۶۰۰K توکن/ماه</td><td>۱٫۲۰$</td><td>مجانی</td><td class="yes">~۱٫۲۰$</td></tr>
+<tr><td>سنگین — گروه‌ها + backfill تاریخ</td><td>۳M توکن در ماه اول</td><td>۶٫۰۰$</td><td>مجانی</td><td class="yes">~۶$ یک‌بار</td></tr>
+<tr><td>+ گزارش روزانه با <code>chat()</code></td><td>۳۰ × ردهٔ medium، ۰٫۰۵$</td><td>—</td><td>۱٫۵۰$</td><td>+۱٫۵۰$</td></tr>
+<tr><td>+ بازبینی عمیق هفتگی</td><td>۴ × ردهٔ high، ۰٫۱۰$</td><td>—</td><td>۰٫۴۰$</td><td>+۰٫۴۰$</td></tr>
+<tr><td><b>یا self-hosted</b></td><td>VPS خودت + کلید LLM خودت</td><td>۰$ به Plastic Labs</td><td>۰$</td><td><b>زیرساخت + توکن</b></td></tr>
+</tbody></table></div>
+
+<div class="card">
+<p style="margin:0"><b>این جدول را صادقانه بخوان: هزینه عامل تعیین‌کننده نیست.</b> چند دلار در ماه
+برای یک مغز شخصی، نوفه است، و ۱۰۰ دلار اعتبار ثبت‌نام یک ارزیابی کامل را پوشش می‌دهد. هزینهٔ
+واقعی <b>عملیاتی</b> است (Postgres و Redis و یک worker که باید نگه‌داری‌شان کنی)،
+<b>معماری</b> است (دو سیستم حافظه که باید دربارهٔ اختلافشان فکر کنی)، و
+<b>حریم خصوصی</b> است (میزبانی‌شده = کل پیکرهٔ زندگی‌ات روی دیسک شخص دیگری، بدون رمز).
+قانون ۶ می‌گوید «هزینه یک ویژگی است» — و ویژگی‌ای که این‌جا باید محافظت شود دلار نیست،
+<b>تعداد قطعات متحرکی است که هنوز می‌توانی در ذهنت نگه داری.</b></p>
+</div>
+
+<!-- ================= -->
+<h2 id="goals">دامنه‌های هدف تو — چه کسی هرکدام را سرویس می‌دهد</h2>
+
+<p>از دامنه‌های عملیاتی <span class="fp">AGENTS.md</span>، نگاشته‌شده به لایه‌ها.</p>
+
+<div class="tw"><table>
+<thead><tr><th>دامنه</th><th>نیازش چیست</th><th>مالک</th></tr></thead>
+<tbody>
+<tr><td><b>استارتاپ‌ها و شریک‌ها</b></td><td><code>project</code>، <code>person</code>، <code>PARTNER_WORKS_ON_STARTUP</code>، تصمیم با منبع</td><td><span class="tag t-n">گراف</span> · Honcho «سبک ارتباطی این شریک» را اضافه می‌کند</td></tr>
+<tr><td><b>کلاینت‌های فریلنس</b></td><td><code>CLIENT_OWNS_PROJECT</code>، ددلاین، تحویل‌دادنی، وضعیت فاکتور</td><td><span class="tag t-n">گراف + تسک</span> Honcho هیچ چیز ساختاری اضافه نمی‌کند</td></tr>
+<tr><td><b>کوچینگ و رشد</b></td><td>الگو در طول ماه‌ها، تناقض، بازتاب صادقانه</td><td><span class="tag t-h">Honcho</span> <b>قوی‌ترین مورد.</b> استقرا + ابداکشن + Dreaming دقیقاً همین است</td></tr>
+<tr><td><b>پروژه‌ها و تسک‌ها</b></td><td>وضعیت، اولویت، ددلاین، سینک Notion، بلاکر</td><td><span class="tag t-n">فقط نوچه</span></td></tr>
+<tr><td><b>یادگیری انگلیسی</b></td><td><code>learning_plan</code>، <code>skill</code>، الگوی خطا در زمان، سختی تطبیقی</td><td><span class="tag t-n">گراف</span> + <span class="tag t-h">Honcho</span> برای کشف خطاهای تکرارشونده</td></tr>
+<tr><td><b>رشد در X</b></td><td><code>content_plan</code>، <code>CONTENT_PLAN_SUPPORTS_GOAL</code>، پیش‌نویس در انتظار تأیید</td><td><span class="tag t-n">نوچه</span> — قانون ۳ همین‌جا زندگی می‌کند</td></tr>
+<tr><td><b>رهگیری دارایی</b></td><td>payload <code>asset</code>، ۶ نوع دارایی، ارزش‌گذاری</td><td><span class="tag t-n">فقط نوچه</span> — اسکیما می‌خواهد، نه متن</td></tr>
+<tr><td><b>پشتیبانی تصمیم کریپتو</b></td><td><code>investment_thesis</code>، <code>risk</code>، <code>INVESTMENT_THESIS_HAS_RISK</code>، <b>بدون معاملهٔ خودکار</b></td><td><span class="tag t-n">فقط نوچه</span> — قانون ۵ یک تضمین در سطح کد است، نه یک پرامپت</td></tr>
+<tr><td><b>مشاورهٔ زمینه‌مند</b></td><td>بازیابی + قواعد پذیرفته + اهداف + روتین‌ها، ترکیب‌شده در کانتکست</td><td><span class="tag t-n">builder</span> + <span class="tag t-h">Honcho</span> به‌عنوان بخش ششم</td></tr>
+</tbody></table></div>
+
+<p><small>الگو روشن است: <b>هر چیزی که باید شماره‌پذیر، حسابرسی‌پذیر یا تأییدپذیر باشد در نوچه
+می‌ماند.</b> هر چیزی که «مرا در طول زمان بهتر بفهم» است، همان‌جایی است که Honcho جایش را به دست
+می‌آورد. دو دامنه از نُه دامنه به Honcho متمایل‌اند، و یکی از آن‌ها — کوچینگ — به‌شدت.</small></p>
+
+<!-- ================= -->
+<h2 id="borrow">از Hermes قرض بگیر، بی‌آنکه وابسته شوی</h2>
+
+<p>Hermes مجوز MIT دارد و چهار مورد از فهرست «بعداً»ی <span class="fp">TASK.md</span> تو را حل
+کرده است. کد را بخوان، طراحی را بردار، TypeScript را خودت بنویس.</p>
+
+<div class="tw"><table>
+<thead><tr><th>شکاف تو</th><th>Hermes کجا حلش کرده</th><th>چه چیزی را بردار</th></tr></thead>
+<tbody>
+<tr><td>«یک کانال ورودی دوم»</td><td><code>gateway/platforms/</code> و <code>plugins/platforms/</code></td><td>شکل interfaceِ آداپتور: <code>on_message() → MessageEvent</code>، نرمال‌شده پیش از مسیریابی. تو از قبل این را به‌شکل <code>TelegramUpdateMapper → IncomingMessage</code> داری. یعنی تأییدی بر اینکه درزت درست است.</td></tr>
+<tr><td>«درک سند (PDF/docx)»</td><td><code>features/document-extraction</code></td><td>الگوی «استخراج پیش از مدل» — در روح، همان ADR-0010 خودت: «مدیا پیش از آنکه چیزی نگاهش کند متن می‌شود». <code>MediaUnderstandingPort</code> را به نوع <code>document</code> گسترش بده.</td></tr>
+<tr><td>گزارش و بازبینی زمان‌بندی‌شده</td><td><code>cron/jobs.py</code>، <code>cron/scheduler.py</code></td><td><b>«تسک درجه‌یکِ عامل، نه تسک شل.»</b> هر job یک پرامپت دارد، skill می‌چسباند، و به یک پلتفرم تحویل می‌دهد. بازهٔ <code>flushSweep</code> تو از قبل یک زمان‌بندِ ابتدایی است — تعمیمش بده.</td></tr>
+<tr><td>«پاسخ خروجی تأییدشده»</td><td><code>gateway/delivery.py</code>، <code>callbacks.py</code></td><td>جدا کردن <i>پیش‌نویس</i> از <i>تحویل</i>، تا تأیید بتواند وسطشان بنشیند. الگوی callback تأیید ابزارشان، شکل درستی برای تأیید پیشنهاد تو است.</td></tr>
+<tr><td>رابط کاربری تأیید پیشنهاد</td><td>داشبورد وب، TUI</td><td>کنترل‌های تأیید / ویرایش / رد / بایگانی — همان آیتم «بستن حلقه» در <span class="fp">TASK.md</span>.</td></tr>
+<tr><td>بودجهٔ کانتکست زیر فشار</td><td><code>agent/context_compressor.py</code> پشت یک ABC به‌نام <code>ContextEngine</code></td><td>فشرده‌سازی به‌عنوان یک <b>پورت جایگزین‌پذیر</b>، نه منطق درجا. <code>trimToApproxTokens()</code> تو یک برشِ سختِ <code>maxTokens × 4</code> کاراکتر است؛ یک پورت اجازه می‌دهد بعداً خلاصه‌سازی جایش بگذاری.</td></tr>
+</tbody></table></div>
+
+<!-- ================= -->
+<h2 id="risk">ریسک‌ها و نقاط چرخشی که باید نظرت را عوض کنند</h2>
+
+<div class="grid g2">
+<div class="card danger">
+<h4>ریسک‌های پذیرش Honcho</h4>
+<ul style="margin-bottom:0">
+<li><b>دو منبع حقیقت.</b> وقتی گراف یک چیز می‌گوید و یک استنتاج چیز دیگری، کدام برنده است؟
+<b>الان تصمیم بگیر:</b> گراف سند واقعیت است؛ Honcho کانتکست مشورتی. این را در پرامپت رمزگذاری کن.</li>
+<li><b>سطح عملیاتی سه برابر می‌شود.</b> از یک فایل SQLite به Postgres + pgvector + Redis + worker.
+پشتیبان، مایگریشن، ری‌استارت.</li>
+<li><b>وابستگی غیرقابل‌تست.</b> نمی‌توانی استنتاج‌هایش را در unit test میخ کنی. آداپتور را
+contract-test کن و سرویس را fake کن.</li>
+<li><b>مسیر سازنده.</b> هستهٔ AGPL قفل‌شدگی را کم می‌کند، اما مدل‌های میزبانی‌شده
+(Neuromancer) مالِ آن‌هاست. self-host با کلید LLM تو و با مدل‌هایی متفاوت از آن‌هایی که
+بنچمارک‌ها را ساخته‌اند اجرا می‌شود.</li>
+<li><b>بنچمارک، پیکرهٔ تو نیست.</b> LoCoMo و BEAM دیتاست گفت‌وگوی انگلیسی‌اند. پیکرهٔ تو
+تلگرامیِ گروهی، چندزبانه و مشتق‌شده از مدیا است.</li>
+<li><b>حریم خصوصی، اگر میزبانی‌شده باشد.</b> نگهبانی‌شده ≠ ناشناس. self-host کن.</li>
+</ul>
+</div>
+
+<div class="card caution">
+<h4>ریسک‌های نپذیرفتنش</h4>
+<ul style="margin-bottom:0">
+<li><b>هفته‌ها ثابت تنظیم می‌کنی</b> که دیگری قبلاً تنظیم کرده، و آخرش بدتر درمی‌آیی.</li>
+<li><b>هیچ مسیری برای ادغام نداری.</b> گراف انباشته می‌شود. تناقض جمع می‌شود. دو سال بعد
+بازیابی افت می‌کند و هیچ‌چیزی در طراحی درستش نمی‌کند.</li>
+<li><b>بازیابی فارسی نیمه‌کور می‌ماند</b> — ۲۵٪ از آمیخته ساختاراً صفر است، روی امبدینگی که
+کفش حدس است.</li>
+<li><b>سقف «فقط استخراج».</b> قرارداد تو تنها می‌تواند آنچه یک پنجره <i>می‌گوید</i> را بگیرد.
+کوچینگ به آنچه ماه‌ها پنجره <i>ایجاب می‌کند</i> نیاز دارد، و تو هیچ گامی که آن را تولید کند
+نداری.</li>
+<li><b>مسیر خواندن سریع نداری.</b> نوچه می‌تواند چیزها را بایگانی کند اما نمی‌تواند در زیر
+یک ثانیه به تو پاسخ بدهد.</li>
+</ul>
+</div>
+</div>
+
+<h3>نقاط چرخش</h3>
+<div class="tw"><table>
+<thead><tr><th>اگر این اتفاق افتاد…</th><th>…این کار را بکن</th></tr></thead>
+<tbody>
+<tr><td>پنجره‌های واقعی نشان دادند بازیابی حافظهٔ بی‌ربط برمی‌گرداند، یا با وجود زمینه‌سازی باز هم تکراری ساخته می‌شود</td><td>Honcho را بپذیر (گزینهٔ ب). گلوگاه واقعاً بازیابی است.</td></tr>
+<tr><td>پنجره‌های واقعی نشان دادند بازیابی بعد از تنظیم کف، درست کار می‌کند</td><td>روی الف بمان. شش ماه دیگر که پیکره ۱۰ برابر شد، بازبینی کن.</td></tr>
+<tr><td>می‌خواهی نوچه گفت‌وگویی <i>پاسخ بدهد</i>، نه فقط بلع کند</td><td>Honcho را بپذیر — به مسیر خواندن ~۲۰۰ میلی‌ثانیه‌ای <code>context()</code> نیاز داری.</td></tr>
+<tr><td>تناقض‌های گراف در <code>/app</code> به مشکلی دیدنی تبدیل شدند</td><td>Honcho را برای Dreaming بپذیر، یا جاروی ادغام خودت را بنویس. نادیده‌اش نگیر.</td></tr>
+<tr><td>فوراً به کانال دوم و سوم نیاز داری</td><td>آداپتورها را خودت با شکل‌های Hermes بنویس. باز هم مهاجرت نکن.</td></tr>
+<tr><td>نگه‌داری Postgres و Redis واقعاً بیش از آن است که بخواهی اجرا کنی</td><td>روی الف بمان. مغزی که واقعاً روشن نگه می‌داری، از مغزی با بازیابی بهتر که خاموش می‌شود بهتر است.</td></tr>
+<tr><td>دیدی داری وسوسه می‌شوی سورس Honcho را تغییر بدهی</td><td>بایست. بند ۱۳ از AGPL می‌چسبد. منطق را در آداپتور خودت بگذار.</td></tr>
+</tbody></table></div>
+
+<!-- ================= -->
+<h2 id="tldr">یک صفحه، اگر هیچ‌چیز دیگری نخواندی</h2>
+
+<div class="card verdict">
+<ol style="margin:0;font-size:15.5px">
+<li><b>Honcho یک سرویس حافظه است. Hermes یک هارنس است که Honcho را صدا می‌زند.</b>
+این‌ها جایگزین یکدیگر نیستند، و فقط یکی‌شان کاندید اپ تو است.</li>
+<li><b>Honcho از لایهٔ بازیابی تو بهتر است.</b> از گراف تو بهتر نیست — عامدانه از ساختنش
+امتناع می‌کند و در مستنداتش همین را می‌گوید.</li>
+<li><b>Hermes راه‌حل حافظه نیست.</b> حافظه‌اش چند فایل مارک‌داون به‌همراه FTS5 است. حافظهٔ
+خوبش <i>خودِ Honcho</i> است.</li>
+<li><b>پلاگین نشو.</b> درون حلقهٔ Hermes نمی‌توانی تضمین کنی پاک‌سازی اول اجرا می‌شود، و
+این قانون ۲ است. باقی همه‌چیز قابل‌مذاکره است؛ این نیست.</li>
+<li><b>دور Hermes رَپِر نپیچ.</b> به‌ارث بردن یک هارنس بزرگ پایتونی برای استفاده از یک برشش،
+معماری تمیزت را با ابزارهایی معاوضه می‌کند که خودت می‌توانستی بنویسی.</li>
+<li><b>مشتری باش.</b> پورت تازهٔ <code>PeerRepresentationPort</code>، آداپتور تازه، یک‌بار
+سیم‌کشی در <span class="fp">dev-server.ts</span>. دقیقاً همان‌طور که با NVIDIA و Gemini و
+Anthropic و Notion رفتار می‌کنی. قانون ۷ از قبل همین را گفته بود.</li>
+<li><b>Honcho را self-host کن.</b> نوشتن در آن، سینک بیرونی است. میزبانی‌شده یعنی کل پیکرهٔ
+زندگی‌ات، دائمی و بدون رمز، روی Postgres شخص دیگری.</li>
+<li><b>فقط در دو نقطه وصلش کن:</b> <code>observe()</code> بعد از نگهبان در
+<span class="fp">process-incoming-message.ts:233</span> و <code>recall()</code> داخل
+<code>AssistantContextBuilder</code>. هر دو افزودنی، هر دو غیرکشنده، هر دو در یک ساعت
+پاک‌شدنی.</li>
+<li><b>هرگز از بافر در Honcho نَنویس.</b> آن‌جا فقط regex اجرا شده. نگهبان دروازه است، و
+باربر است — رمزی را گرفت که یک مدل ادراکی از روی عکس خوانده بود.</li>
+<li><b>اول گزینهٔ الف را انجام بده، برای یک هفته.</b> تو یک نقطه‌دادهٔ تأخیر و صفر اجرای
+گراف واقعی داری. بازیابی‌ات را قبل از جایگزین‌کردنش اندازه بگیر.</li>
+<li><b>هر چیز حسابرسی‌پذیر، شماره‌پذیر و تأییدپذیر را در نوچه نگه دار.</b> گراف، تسک،
+پیشنهاد، اقدام بیرونی، حسابرسی، رمزنگاری. این خودِ محصول است. Honcho یک مغز بازیابیِ بهتر است
+که به آن بسته می‌شود — نه جایگزینی برای آن.</li>
+<li><b>از Hermes مجانی برداشت کن.</b> مجوزش MIT است. طراحی cron، شکل آداپتور کانال، استخراج
+سند، و جداسازی پیش‌نویس از تحویل را بردار. هیچ خطی را import نکن.</li>
+</ol>
+</div>
+
+<hr>
+<p><small>منابع: سورس نوچه در <code>/Users/owner/Develop/Personal/nocheh</code> —
+<span class="fp">AGENTS.md</span>، <span class="fp">TASK.md</span>،
+<span class="fp">docs/adr/0008, 0010, 0011, 0012</span>،
+<span class="fp">src/domain/memory/memory-graph.ts</span>،
+<span class="fp">src/application/services/assistant-context-builder.ts</span>،
+<span class="fp">src/infrastructure/memory/hybrid-memory-retrieval-service.ts</span>،
+<span class="fp">src/infrastructure/memory/lexical-score.ts</span>،
+<span class="fp">src/application/use-cases/process-incoming-message.ts</span>.
+Honcho: honcho.dev/docs نسخهٔ v3 — architecture، reasoning، representation، get-context،
+structured outputs، self-hosting، license، pricing.
+Hermes: hermes-agent.nousresearch.com/docs — developer-guide/architecture،
+features/honcho، features/memory-providers.
+بنچمارک‌ها و قیمت‌ها همان‌اند که سازنده منتشر کرده و روی دادهٔ تو راستی‌آزمایی نشده‌اند.</small></p>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav a.s'));
+  var targets = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  function sync(){
+    var y = window.scrollY + 130, best = 0;
+    targets.forEach(function(t,i){ if(t && t.offsetTop <= y) best = i; });
+    links.forEach(function(a,i){ a.classList.toggle('on', i === best); });
+  }
+  window.addEventListener('scroll', sync, {passive:true});
+  window.addEventListener('resize', sync);
+  sync();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1091 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nocheh vs Honcho vs Hermes — build, buy, or borrow</title>
+<style>
+:root{
+  --bg:#0c0d10; --bg2:#12141a; --bg3:#171a21; --line:#242832;
+  --fg:#e7e9ee; --dim:#9aa1ad; --dim2:#6b7280;
+  --nocheh:#7dd3fc; --honcho:#a78bfa; --hermes:#fbbf24;
+  --ok:#4ade80; --bad:#f87171; --warn:#fb923c;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{display:grid;grid-template-columns:250px minmax(0,1fr);max-width:1500px;margin:0 auto;gap:0}
+/* ---- nav ---- */
+nav{
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+  padding:28px 18px 60px;border-right:1px solid var(--line);background:var(--bg);
+}
+nav .brand{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim2);margin-bottom:8px}
+nav .lang{display:block;margin:0 0 18px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;color:var(--nocheh);text-decoration:none;text-align:center}
+nav .lang:hover{background:var(--bg2)}
+nav a{
+  display:block;padding:6px 10px;margin:1px 0;border-radius:6px;
+  color:var(--dim);text-decoration:none;font-size:13.5px;border-left:2px solid transparent
+}
+nav a:hover{color:var(--fg);background:var(--bg2)}
+nav a.on{color:var(--fg);background:var(--bg2);border-left-color:var(--nocheh)}
+nav .grp{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim2);margin:20px 0 6px 10px}
+main{padding:40px 52px 140px;min-width:0}
+/* ---- type ---- */
+h1{font-size:34px;line-height:1.2;letter-spacing:-.02em;margin:0 0 10px;font-weight:640}
+h2{font-size:23px;letter-spacing:-.01em;margin:56px 0 14px;padding-top:14px;font-weight:640;border-top:1px solid var(--line)}
+h2:first-of-type{border-top:none}
+h3{font-size:16.5px;margin:30px 0 10px;font-weight:620}
+h4{font-size:14px;margin:20px 0 6px;font-weight:620;color:var(--dim)}
+p{margin:11px 0}
+ul,ol{margin:11px 0;padding-left:22px}
+li{margin:5px 0}
+code{font-family:var(--mono);font-size:12.5px;background:var(--bg3);padding:1.5px 5px;border-radius:4px;color:#c4b5fd}
+a{color:var(--nocheh)}
+.lede{font-size:17px;color:var(--dim);max-width:74ch}
+.sub{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim2)}
+small{color:var(--dim2);font-size:12.5px}
+/* ---- blocks ---- */
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:16px 0}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.verdict{border-left:3px solid var(--ok);background:linear-gradient(90deg,rgba(74,222,128,.06),transparent 60%)}
+.danger{border-left:3px solid var(--bad);background:linear-gradient(90deg,rgba(248,113,113,.06),transparent 60%)}
+.caution{border-left:3px solid var(--warn);background:linear-gradient(90deg,rgba(251,146,60,.06),transparent 60%)}
+.info{border-left:3px solid var(--honcho);background:linear-gradient(90deg,rgba(167,139,250,.06),transparent 60%)}
+.card h3,.card h4{margin-top:0}
+.tag{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:2.5px 8px;border-radius:20px;border:1px solid var(--line);color:var(--dim);vertical-align:middle}
+.t-n{color:var(--nocheh);border-color:rgba(125,211,252,.35);background:rgba(125,211,252,.08)}
+.t-h{color:var(--honcho);border-color:rgba(167,139,250,.35);background:rgba(167,139,250,.08)}
+.t-x{color:var(--hermes);border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}
+.t-ok{color:var(--ok);border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.08)}
+.t-bad{color:var(--bad);border-color:rgba(248,113,113,.35);background:rgba(248,113,113,.08)}
+/* ---- table ---- */
+.tw{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
+th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--bg3);font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-weight:600;position:sticky;top:0}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:rgba(255,255,255,.017)}
+td.c,th.c{text-align:center}
+.yes{color:var(--ok);font-weight:700}
+.no{color:var(--bad);font-weight:700}
+.part{color:var(--warn);font-weight:700}
+/* ---- pipeline ---- */
+pre{
+  font-family:var(--mono);font-size:12.5px;line-height:1.62;
+  background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:16px 18px;overflow-x:auto;margin:16px 0;color:#cbd5e1
+}
+pre b{color:var(--nocheh);font-weight:600}
+pre i{color:var(--honcho);font-style:normal}
+pre u{color:var(--hermes);text-decoration:none}
+pre s{color:var(--bad);text-decoration:none}
+pre em{color:var(--dim2);font-style:normal}
+/* ---- misc ---- */
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13.5px;margin:12px 0}
+.kv dt{font-family:var(--mono);color:var(--dim2);font-size:12px;white-space:nowrap}
+.kv dd{margin:0}
+.score{display:flex;align-items:baseline;gap:8px}
+.score b{font-size:30px;font-weight:680;letter-spacing:-.02em}
+.bar{height:5px;border-radius:3px;background:var(--bg3);overflow:hidden;margin-top:7px}
+.bar span{display:block;height:100%;border-radius:3px}
+.q{border-left:2px solid var(--honcho);padding:2px 0 2px 16px;margin:16px 0;color:var(--dim);font-style:italic}
+.q b{color:var(--fg);font-style:normal}
+.fp{font-family:var(--mono);font-size:11.5px;color:var(--dim2)}
+hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+.pill-row{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+ol.steps{counter-reset:s;list-style:none;padding-left:0}
+ol.steps>li{counter-increment:s;position:relative;padding-left:38px;margin:18px 0}
+ol.steps>li::before{
+  content:counter(s);position:absolute;left:0;top:0;width:25px;height:25px;
+  display:grid;place-items:center;border-radius:50%;background:var(--bg3);
+  border:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--nocheh)
+}
+@media(max-width:940px){
+  .wrap{grid-template-columns:1fr}
+  nav{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}
+  main{padding:28px 20px 90px}
+  h1{font-size:27px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">Nocheh · decision doc</div>
+  <a class="lang" href="./0004-honcho-vs-hermes.fa.html">خواندن به فارسی ↗</a>
+  <a href="#verdict">The verdict</a>
+  <a href="#category">Category error</a>
+  <div class="grp">The three systems</div>
+  <a href="#nocheh">Nocheh today</a>
+  <a href="#honcho">Honcho</a>
+  <a href="#hermes">Hermes Agent</a>
+  <div class="grp">Comparison</div>
+  <a href="#matrix">Capability matrix</a>
+  <a href="#gain">What Honcho wins</a>
+  <a href="#lose">What Honcho can't do</a>
+  <a href="#conflict">The design conflict</a>
+  <div class="grp">Your flow</div>
+  <a href="#flow">Flow, annotated</a>
+  <a href="#seam">Where the seam is</a>
+  <div class="grp">Decision</div>
+  <a href="#options">Four options</a>
+  <a href="#plugin">Plugin vs wrapper</a>
+  <a href="#plan">Implementation plan</a>
+  <a href="#cost">Cost model</a>
+  <div class="grp">Closing</div>
+  <a href="#goals">Your goal domains</a>
+  <a href="#borrow">Borrow, don't adopt</a>
+  <a href="#risk">Risks &amp; triggers</a>
+  <a href="#tldr">One page summary</a>
+</nav>
+
+<main>
+
+<div class="sub">Research note 0004 · build / buy / borrow</div>
+<h1>Nocheh vs Honcho vs Hermes Agent</h1>
+<p class="lede">
+Whether either of these solves the memory problem better than Nocheh does, and whether Nocheh
+should become a client, a plugin, a wrapper, or stay exactly what it is. Grounded in Nocheh's
+actual code (13,553 lines across <code>src/</code>, 41 test files, 12 ADRs) and in both vendors'
+own documentation.
+</p>
+
+<!-- ============================================ -->
+<h2 id="verdict">The verdict, first</h2>
+
+<div class="card verdict">
+<h3>Three answers to three questions</h3>
+
+<p><b>1. Which is better?</b> — Wrong comparison. <span class="tag t-h">Honcho</span> is a memory
+service. <span class="tag t-x">Hermes</span> is a harness that <i>calls Honcho for memory</i>. So
+for the memory question, Honcho wins by default: it is the thing Hermes uses when Hermes wants
+memory. Hermes's own memory is <code>MEMORY.md</code> / <code>USER.md</code> files plus SQLite
+FTS5 — strictly weaker than what you already built.</p>
+
+<p><b>2. Is it better to use them in your app?</b> — <b>Honcho: yes, partially, self-hosted, and
+behind a new port.</b> It genuinely beats your recall layer, and your recall layer is the weakest,
+least-verified part of Nocheh by your own admission in <span class="fp">TASK.md</span>. It does
+<b>not</b> replace your graph, your tasks, your approval lifecycle, or your audit trail — nor
+does it claim to. <b>Hermes: no.</b> Not as a dependency, not as a host.</p>
+
+<p><b>3. Plugin or wrapper?</b> — <b>Neither. Adapter.</b> Nocheh stays the composition root
+(<span class="fp">src/dev-server.ts</span>) and owns the pipeline order. Honcho becomes one more
+adapter behind one more port, exactly like NVIDIA and Gemini are today. Becoming a Hermes plugin
+would hand away the one thing you cannot give away: <b>control over what happens before the
+model sees the text.</b></p>
+</div>
+
+<div class="grid g3">
+  <div class="card">
+    <div class="sub">Honcho — adopt as component</div>
+    <div class="score"><b style="color:var(--ok)">7.5</b><span style="color:var(--dim)">/10 fit</span></div>
+    <div class="bar"><span style="width:75%;background:var(--ok)"></span></div>
+    <p style="font-size:13.5px;color:var(--dim);margin-bottom:0">Strong on the exact axis you are
+    weak on. Wrong shape for your graph. Self-host to keep rule 2 intact.</p>
+  </div>
+  <div class="card">
+    <div class="sub">Hermes — as a dependency</div>
+    <div class="score"><b style="color:var(--bad)">2</b><span style="color:var(--dim)">/10 fit</span></div>
+    <div class="bar"><span style="width:20%;background:var(--bad)"></span></div>
+    <p style="font-size:13.5px;color:var(--dim);margin-bottom:0">Python monolith that owns the
+    loop. Structurally incompatible with redact-before-anything. Different product shape.</p>
+  </div>
+  <div class="card">
+    <div class="sub">Hermes — as a reference</div>
+    <div class="score"><b style="color:var(--ok)">8</b><span style="color:var(--dim)">/10 value</span></div>
+    <div class="bar"><span style="width:80%;background:var(--ok)"></span></div>
+    <p style="font-size:13.5px;color:var(--dim);margin-bottom:0">MIT-licensed, 25+ channel
+    adapters, cron design, document extraction. Read it, copy the ideas, import none of it.</p>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<h2 id="category">The category error worth fixing</h2>
+
+<p>You framed these as two alternatives that "solve the memory part better." They sit at different
+layers, and one contains the other:</p>
+
+<pre>
+                 ┌────────────────────────────────────────────────┐
+   HARNESS       │  <u>Hermes Agent</u>   ·   <b>Nocheh</b>   ·  OpenClaw  ·  Codex │
+   layer         │  loop · prompts · tools · channels · scheduling │
+                 └───────────────────────┬────────────────────────┘
+                                         │ writes messages, reads context
+                 ┌───────────────────────▼────────────────────────┐
+   MEMORY        │  <i>Honcho</i>  ·  Mem0  ·  Zep  ·  <b>Nocheh's own graph</b>     │
+   layer         │  ingest → reason → store → retrieve            │
+                 └───────────────────────┬────────────────────────┘
+                                         │
+                 ┌───────────────────────▼────────────────────────┐
+   MODEL         │  NVIDIA · Anthropic · Gemini · OpenAI          │
+   layer         └────────────────────────────────────────────────┘
+
+   <em>Hermes and Nocheh are peers. Honcho sits under both.
+   Hermes's "better memory" IS Honcho — that is a documented integration,
+   not a competing implementation.</em>
+</pre>
+
+<div class="card info">
+<p style="margin:0"><b>Consequence:</b> "Should I use Hermes or Honcho?" collapses into two
+independent decisions. <b>(a)</b> Do I replace my harness? — no, your harness <i>is</i> your
+product. <b>(b)</b> Do I replace my memory internals? — partially, and Honcho is the only real
+candidate of the two.</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="nocheh">Nocheh today — what you actually have</h2>
+
+<p>Stated plainly so the comparison is honest, because most of this has no equivalent in either
+product.</p>
+
+<dl class="kv">
+  <dt>shape</dt><dd>Ingestion pipeline + typed knowledge graph + approval workflow. Single-owner. TypeScript ESM, one runtime dependency (<code>better-sqlite3</code>).</dd>
+  <dt>size</dt><dd>13,553 lines <code>src/</code> · 5,579 lines <code>web/src</code> · 7,770 lines tests across 41 files · 12 accepted ADRs</dd>
+  <dt>graph</dt><dd>17 node kinds · 20 relations · 16 expanded payload kinds · 4 statuses · 4 scopes · temporal validity — all as <code>as const</code> arrays in <span class="fp">src/domain/memory/memory-graph.ts</span></dd>
+  <dt>records</dt><dd>6 types: <code>Task</code> <code>Decision</code> <code>Project</code> <code>Deadline</code> <code>Blocker</code> <code>Summary</code></dd>
+  <dt>suggestions</dt><dd>5-state lifecycle <code>pending→accepted/rejected/archived→converted</code>, 6 strategic kinds, 6 external action kinds, all <code>requiresApproval: true</code></dd>
+  <dt>security</dt><dd>Two-stage: regex patterns at buffer write, model guard once per window. Guard detects literals only; masking is local and deterministic. Fail-closed with quarantine after 5 attempts.</dd>
+  <dt>audit</dt><dd>19 named processing steps per window, encrypted payloads, per-call token and latency accounting</dd>
+  <dt>recall</dt><dd>Hybrid: cosine rescaled from a 0.3 floor, blended <code>(sim + 0.25·lexical)/1.25</code>, multiplied by record confidence</dd>
+</dl>
+
+<div class="card caution">
+<h4>The parts you already flagged as unverified</h4>
+<p>From <span class="fp">TASK.md</span> and <span class="fp">AGENTS.md</span>, in your own words:</p>
+<ul style="margin-bottom:0">
+<li>The graph contract is <b>generated but never run against a live model.</b> Tests only.</li>
+<li><code>DEFAULT_SIMILARITY_FLOOR = 0.3</code> and <code>DEFAULT_LEXICAL_WEIGHT = 0.25</code> are
+<b>"both guesses until then"</b> — and since ADR-0012 they affect <i>every</i> window.</li>
+<li>Analysis takes <b>189–240s per window</b> at 13–17 output tokens/sec against <code>z-ai/glm-5.2</code>.</li>
+<li>Grounding is verified against fake endpoints, not a live model. Whether glm-5.2 obeys
+"never extract from groundingContext" is <b>unobserved</b>.</li>
+<li>Suggestion approval exists in the API and domain, <b>not in the UI</b>. Nocheh never sends
+outbound messages.</li>
+</ul>
+</div>
+
+<!-- ============================================ -->
+<h2 id="honcho">Honcho — what it is, precisely</h2>
+
+<p><b>Memory as reasoning, not memory as storage.</b> By Plastic Labs. AGPL-3.0 core,
+hosted platform, self-hostable. Python server + worker, PostgreSQL with pgvector, Redis.
+TypeScript and Python SDKs.</p>
+
+<h3>Data model</h3>
+<pre>
+Workspace ──has──> Peers      (any entity: you, an agent, an NPC, a client)
+     │
+     └───has──> Sessions ──has──> Messages
+                    ▲
+                    └── Peers ⟷ Sessions is many-to-many
+
+Scopes = named sets of Sessions that bound recall visibility
+</pre>
+
+<h3>How it processes</h3>
+<ol class="steps">
+<li><b>Write (synchronous, fast).</b> Message stored in Postgres, reasoning task enqueued,
+request returns. Nothing waits on an LLM. Up to 100 messages per batch call.</li>
+<li><b>Deriver (async, per-message).</b> Extracts <i>explicit premises</i> then
+<i>deductive conclusions</i> — formal logic, custom models (Neuromancer / Neuromancer XR).</li>
+<li><b>Summarizer (async).</b> Short summaries every ~20 messages, long every ~60.</li>
+<li><b>Dreamer (periodic).</b> Revisits stored conclusions: consolidates redundant ones, drops
+stale ones, draws <i>inductive</i> conclusions across patterns, resolves contradictions, updates
+peer cards. <b>This is the part that has no analogue in Nocheh.</b></li>
+<li><b>Read — <code>context()</code>.</b> ~200ms, unlimited, free. Returns summary + messages,
+optionally the peer representation, peer card, and semantically searched conclusions, all inside
+a token budget you set.</li>
+<li><b>Read — <code>chat()</code>.</b> Spawns a Dialectic agent that searches conclusions, pulls
+supporting messages, traces conclusions back to premises, and synthesizes an answer. Five priced
+reasoning tiers. Supports Zod/Pydantic <code>response_format</code> for typed JSON.</li>
+</ol>
+
+<h3>Artifacts it produces</h3>
+<div class="pill-row">
+<span class="tag t-h">explicit premises</span>
+<span class="tag t-h">deductive conclusions</span>
+<span class="tag t-h">inductive conclusions</span>
+<span class="tag t-h">abductive conclusions</span>
+<span class="tag t-h">short + long summaries</span>
+<span class="tag t-h">peer cards</span>
+<span class="tag t-h">directional representations</span>
+</div>
+<p><small>Note what is <b>not</b> in that list: typed nodes, typed relations, tasks, deadlines,
+statuses, approval states. Conclusions are prose with provenance, indexed in vectors — not rows
+in a schema you defined.</small></p>
+
+<h3>Claimed performance</h3>
+<div class="tw"><table>
+<thead><tr><th>Benchmark</th><th>Score</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>LoCoMo</td><td><b>89.9%</b></td><td>Long-conversation QA</td></tr>
+<tr><td>LongMem S</td><td><b>90.4%</b></td><td>Long-term memory</td></tr>
+<tr><td>BEAM 100K / 500K / 1M / 10M</td><td>0.630 / 0.646 / 0.618 / 0.409</td><td>Degrades with corpus size, as expected</td></tr>
+<tr><td>Token savings</td><td>60–90%</td><td>vs stuffing raw history</td></tr>
+<tr><td><code>context()</code> latency</td><td>~200ms</td><td>Fast enough per turn</td></tr>
+</tbody></table></div>
+<p><small>Benchmarks are vendor-published with an open repo
+(<code>plastic-labs/honcho-benchmarks</code>). Treat as directional, not as a guarantee on your
+Persian-and-English mixed Telegram corpus. Nothing here is measured on your data.</small></p>
+
+<h3>Pricing</h3>
+<div class="tw"><table>
+<thead><tr><th>Line</th><th>Price</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>Ingestion (store + reasoning)</td><td>$2.00 / M tokens</td><td>The only volume cost</td></tr>
+<tr><td><code>context()</code></td><td><span class="yes">unlimited, free</span></td><td>"It's your data"</td></tr>
+<tr><td>Dreaming</td><td>included</td><td>Enhanced tiers extra</td></tr>
+<tr><td><code>chat()</code> minimal → max</td><td>$0.001 → $0.50 / query</td><td>5 tiers; high/max are async</td></tr>
+<tr><td>Free credits</td><td>$100 on signup</td><td>Enough for a long, honest evaluation</td></tr>
+<tr><td>Self-host</td><td>infra + your LLM key</td><td>AGPL-3.0, Docker, Postgres+pgvector+Redis</td></tr>
+</tbody></table></div>
+
+<!-- ============================================ -->
+<h2 id="hermes">Hermes Agent — what it is, precisely</h2>
+
+<p><b>An agent harness, MIT-licensed, by Nous Research.</b> Python. Desktop app for
+macOS/Windows/Linux plus CLI, TUI, gateway, ACP, batch runner, API server. ~25,000 tests across
+~1,250 files. This is a mature, large, well-engineered piece of software — and it is a
+<i>competitor to Nocheh's harness role</i>, not a component for it.</p>
+
+<div class="grid g2">
+<div class="card">
+<h4>What it has that you don't</h4>
+<ul style="margin-bottom:0">
+<li><b>25+ platform adapters</b> — Telegram, Discord, Slack, WhatsApp, Signal, Matrix, email, SMS, IRC, Teams, Feishu, and more, all bundled</li>
+<li><b>70+ tools / ~28 toolsets</b> — web search, browser automation, vision, TTS, image gen</li>
+<li><b>7 terminal backends</b> — local, Docker, SSH, Daytona, Modal, Singularity, Vercel Sandbox</li>
+<li><b>Cron</b> as first-class agent tasks, not shell tasks, delivering to any platform</li>
+<li><b>Subagent delegation</b> with isolated conversations and Python RPC</li>
+<li><b>Document extraction</b> — your PDF/docx gap, already solved</li>
+<li><b>Context compression</b> with pluggable engines and Anthropic prefix caching</li>
+<li><b>Skills system</b>, plugins from three discovery sources, LSP diagnostics</li>
+</ul>
+</div>
+<div class="card">
+<h4>What it lacks that you need</h4>
+<ul style="margin-bottom:0">
+<li><b>No typed knowledge graph.</b> Built-in memory is <code>MEMORY.md</code> / <code>USER.md</code> files plus FTS5 session search.</li>
+<li><b>No structured memory records.</b> No Decision, Deadline, Blocker as entities.</li>
+<li><b>No approval lifecycle.</b> It has dangerous-command detection and approval callbacks for <i>tools</i>, not a pending/accepted/converted state machine for <i>suggestions</i>.</li>
+<li><b>No redaction gate.</b> Nothing resembling your secret guard, fail-closed policy, or quarantine.</li>
+<li><b>No per-step audit trail</b> of the kind <code>/api/audit</code> exposes.</li>
+<li><b>No encrypted-at-rest payload columns.</b></li>
+<li><b>It answers; it doesn't ingest.</b> It is a conversational agent with tools. Your product is a background pipeline that reads and structures a life.</li>
+</ul>
+</div>
+</div>
+
+<div class="card danger">
+<h4>The honest summary of Hermes's memory</h4>
+<p style="margin-bottom:0">Hermes's memory story is <b>"install Honcho."</b> Their own docs
+compare built-in vs Honcho and Honcho wins every row except file-based persistence and FTS5
+search. If you adopt Hermes <i>for memory</i>, you are adopting Honcho with a large Python agent
+wrapped around it — and throwing away the graph, the guard, the audit trail, and the approval
+model to get there.</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="matrix">Capability matrix</h2>
+
+<p>The column that matters is the last one: who <i>should</i> own it.</p>
+
+<div class="tw"><table>
+<thead><tr>
+<th>Capability</th>
+<th class="c">Nocheh</th>
+<th class="c">Honcho</th>
+<th class="c">Hermes</th>
+<th>Who should own it</th>
+</tr></thead>
+<tbody>
+
+<tr><td colspan="5" style="background:var(--bg3);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">Ingestion</td></tr>
+<tr><td>Telegram webhook + allow-list</td><td class="c yes">✓</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> already done, 327-line mapper</td></tr>
+<tr><td>Other channels (Discord, Slack, email…)</td><td class="c no">—</td><td class="c no">—</td><td class="c yes">✓ 25+</td><td><span class="tag t-n">Nocheh</span> port your own; borrow Hermes's adapter shapes</td></tr>
+<tr><td>Batch windowing / flush sweep</td><td class="c yes">✓</td><td class="c part">~</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> your cost control lives here</td></tr>
+<tr><td>Image understanding</td><td class="c yes">✓</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> per-kind routing, cache, caps</td></tr>
+<tr><td>Audio transcription</td><td class="c yes">✓</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> <code>audio_url</code> wire format verified</td></tr>
+<tr><td>PDF / docx / text extraction</td><td class="c no">—</td><td class="c part">~ uploads</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> borrow Hermes's approach</td></tr>
+<tr><td>History import</td><td class="c yes">✓</td><td class="c part">~ single-peer session</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+
+<tr><td colspan="5" style="background:var(--bg3);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">Security — non-negotiable</td></tr>
+<tr><td>Pattern redaction before persistence</td><td class="c yes">✓</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> <b>must stay upstream of everything</b></td></tr>
+<tr><td>Model-backed secret guard, masking local</td><td class="c yes">✓</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> nobody else has this</td></tr>
+<tr><td>Fail-closed + quarantine</td><td class="c yes">✓</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Encrypted payloads at rest</td><td class="c yes">✓</td><td class="c no">plain Postgres</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> Honcho self-host needs disk encryption</td></tr>
+
+<tr><td colspan="5" style="background:var(--bg3);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">Memory &amp; knowledge</td></tr>
+<tr><td>Typed graph: 17 kinds, 20 relations</td><td class="c yes">✓</td><td class="c no">rejected by design</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span> <b>this is the product</b></td></tr>
+<tr><td>Temporal validity, supersession, scopes</td><td class="c yes">✓</td><td class="c part">~ consolidation</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Structured records w/ confidence + source</td><td class="c yes">✓</td><td class="c part">~ prose + provenance</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Semantic recall quality</td><td class="c part">~ guessed constants</td><td class="c yes">✓ SOTA</td><td class="c part">~ via Honcho</td><td><span class="tag t-h">Honcho</span> <b>the one clear swap</b></td></tr>
+<tr><td>Multilingual recall (Persian + English)</td><td class="c part">~ lexical = 0</td><td class="c yes">✓</td><td class="c part">~</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>Inductive / abductive inference</td><td class="c no">—</td><td class="c yes">✓</td><td class="c no">—</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>Background consolidation (Dreaming)</td><td class="c no">—</td><td class="c yes">✓</td><td class="c no">—</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>Rolling summaries</td><td class="c part">~ a record type</td><td class="c yes">✓ auto</td><td class="c part">~ compression</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>Async write path (no wait on LLM)</td><td class="c part">~ 189–240s sweep</td><td class="c yes">✓ instant</td><td class="c no">—</td><td><span class="tag t-h">Honcho</span></td></tr>
+<tr><td>Multi-entity modelling (clients, partners)</td><td class="c yes">✓ node kinds</td><td class="c yes">✓ peers</td><td class="c part">~</td><td><span class="tag t-n">Nocheh</span> + <span class="tag t-h">Honcho</span> peers</td></tr>
+
+<tr><td colspan="5" style="background:var(--bg3);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">Action &amp; workflow</td></tr>
+<tr><td>Tasks with status, priority, due date</td><td class="c yes">✓</td><td class="c no">—</td><td class="c part">~ cron jobs</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Suggestion approval lifecycle</td><td class="c yes">✓ 5 states</td><td class="c no">—</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>External action gating (human approval)</td><td class="c yes">✓</td><td class="c no">—</td><td class="c part">~ tool approval</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Notion / external task sync</td><td class="c yes">✓ MCP</td><td class="c no">—</td><td class="c yes">✓ MCP client</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Scheduling / recurring briefings</td><td class="c no">—</td><td class="c no">—</td><td class="c yes">✓ cron</td><td><span class="tag t-n">Nocheh</span> borrow the design</td></tr>
+<tr><td>Outbound messages</td><td class="c no">—</td><td class="c no">—</td><td class="c yes">✓</td><td><span class="tag t-n">Nocheh</span> gated by approval</td></tr>
+
+<tr><td colspan="5" style="background:var(--bg3);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">Operations</td></tr>
+<tr><td>Per-step audit trail</td><td class="c yes">✓ 19 steps</td><td class="c part">~ queue status, webhooks</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Token / cost accounting per role</td><td class="c yes">✓</td><td class="c part">~ billing</td><td class="c no">—</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Owner dashboard</td><td class="c yes">✓ <code>/app</code></td><td class="c yes">✓ theirs</td><td class="c yes">✓ theirs</td><td><span class="tag t-n">Nocheh</span></td></tr>
+<tr><td>Single-binary-ish deploy</td><td class="c yes">✓ SQLite</td><td class="c no">PG+Redis+worker</td><td class="c part">~ Python</td><td><span class="tag t-n">Nocheh</span> real cost of adopting Honcho</td></tr>
+</tbody></table></div>
+
+<p><small>Count the <span class="tag t-n">Nocheh</span> rows. Of ~30 capabilities, Honcho should own
+roughly seven, all of them clustered in one place: <b>recall and inference quality.</b> That is
+the shape of a component decision, not a migration decision.</small></p>
+
+<!-- ============================================ -->
+<h2 id="gain">What Honcho genuinely wins — six things</h2>
+
+<div class="card">
+<h4>1. Recall quality you have not been able to tune</h4>
+<p>Your hybrid scorer multiplies <code>(similarity + 0.25·lexical)/1.25</code> by record
+confidence, after rescaling cosine from a 0.3 floor. <span class="fp">TASK.md</span> says both
+constants are guesses, and ADR-0012 wired recall into <i>every</i> window — so a bad floor now
+degrades every analysis, not nothing. Honcho ships a tuned retrieval stack with published
+benchmarks. Buying a solved parameter-search is a legitimate reason to buy.</p>
+</div>
+
+<div class="card">
+<h4>2. Multilingual recall — a concrete bug you already documented</h4>
+<p><span class="fp">src/infrastructure/memory/lexical-score.ts:19</span> splits on
+<code>/[^a-z0-9]+/</code>. Your own comment on line 8 says it: <i>"non-Latin text tokenises to
+nothing… the reason lexical scoring alone was never enough for a multilingual owner."</i> So for
+Persian input, 25% of your blended score is structurally zero and you are running on embeddings
+alone — embeddings whose floor is a guess. Honcho's retrieval is language-agnostic by
+construction.</p>
+</div>
+
+<div class="card">
+<h4>3. Consolidation you have no mechanism for</h4>
+<p>You have <code>superseded</code> as a status and <code>applyStatusUpdates()</code> to set it —
+but only when a model happens to emit a status update for a window. Nothing sweeps the whole
+graph looking for contradictions, redundancy, or stale conclusions. Honcho's Dreamer does exactly
+that on a schedule: consolidation, conflict resolution, conclusion weighting, induction across
+patterns. Over a year of daily Telegram traffic, this is the difference between memory that gets
+<i>richer</i> and memory that just gets <i>bigger</i>.</p>
+</div>
+
+<div class="card">
+<h4>4. Latency, at the architectural level</h4>
+<p>Your write path is: buffer → flush sweep → 189–240s analysis. Worst-case delay before a due
+batch is analysed is <code>FLUSH_SWEEP_INTERVAL_SECONDS</code> plus four minutes of model time.
+Honcho's write returns immediately and its <code>context()</code> read is ~200ms. If you ever
+want Nocheh to <i>answer</i> you — not just file things away — you need a sub-second read path,
+and you don't have one.</p>
+</div>
+
+<div class="card">
+<h4>5. Inference beyond extraction</h4>
+<p>Your contract asks a model to <i>extract</i> what is in a window. Honcho additionally
+<i>induces</i> across windows ("frequently mentions deadlines, rarely hobbies → time-constrained")
+and <i>abduces</i> simplest explanations. For coaching, routines, and idea generation — four of
+your stated domains — that inferential layer is the actual value, and your pipeline has no step
+that produces it.</p>
+</div>
+
+<div class="card">
+<h4>6. It gives you the raw-message store you said you wanted</h4>
+<p>You described your ideal flow as <i>"importer (store all pure data in db)."</i> Honcho is
+precisely that: messages stored verbatim in Postgres, permanently, with reasoning layered on top.
+It resolves the tension between wanting the raw log and rule 1 forbidding raw chat as long-term
+memory — <b>if</b> and only if it is self-hosted and post-redaction. See
+<a href="#conflict">the design conflict</a>.</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="lose">What Honcho cannot do for you — nine things</h2>
+
+<div class="tw"><table>
+<thead><tr><th>You need</th><th>Honcho's position</th><th>Consequence</th></tr></thead>
+<tbody>
+<tr>
+<td><b>A typed graph</b> — 17 node kinds, 20 relations, 16 payload kinds, validated against <code>as const</code> arrays</td>
+<td>Explicitly out of scope. Stores prose conclusions in vectors.</td>
+<td>Keep <span class="fp">memory-graph.ts</span> and the mapping layer. Non-negotiable.</td>
+</tr>
+<tr>
+<td><b>Redaction before anything</b></td>
+<td>No redaction of any kind. You send it what you send it.</td>
+<td>Your guard must sit <i>upstream</i> of every Honcho write. Structurally fine — that is already where it is.</td>
+</tr>
+<tr>
+<td><b>Tasks / Deadlines / Blockers</b> as first-class entities with status and priority</td>
+<td>Not a task system.</td>
+<td>Keep <code>TaskRepositoryPort</code>, <code>TaskValidationService</code>, Notion sync.</td>
+</tr>
+<tr>
+<td><b>Approval lifecycle</b> — pending/accepted/rejected/archived/converted, <code>requiresApproval</code></td>
+<td>Not a workflow engine.</td>
+<td>Keep the suggestion domain entirely. This is rule 3 and rule 4.</td>
+</tr>
+<tr>
+<td><b>Per-step audit</b> — 19 named steps with metadata, latency, token counts</td>
+<td>Queue status and webhooks only.</td>
+<td>Keep <code>AuditRepositoryPort</code>. Add a <code>honcho_write</code> / <code>honcho_recall</code> step name.</td>
+</tr>
+<tr>
+<td><b>Encrypted payloads at rest</b></td>
+<td>Plain Postgres. Vectors and messages unencrypted.</td>
+<td>Self-host on an encrypted volume. Your <code>LOCAL_ENCRYPTION_SECRET</code> model does not extend into it.</td>
+</tr>
+<tr>
+<td><b>Image / audio understanding</b></td>
+<td>File uploads: PDF, text, JSON. No perception model.</td>
+<td>Keep <code>MediaUnderstandingService</code> and send Honcho the derived, guarded text.</td>
+</tr>
+<tr>
+<td><b>Deployment simplicity</b> — one SQLite file, one dependency</td>
+<td>API server + worker + Postgres/pgvector + Redis + an LLM key.</td>
+<td>Your ops surface roughly triples. This is the real, unglamorous cost.</td>
+</tr>
+<tr>
+<td><b>Determinism you can test</b> — 41 test files pinning exact behaviour</td>
+<td>A reasoning service whose outputs change as their models improve.</td>
+<td>You cannot unit-test Honcho's conclusions. Contract-test the adapter, fake the service.</td>
+</tr>
+</tbody></table></div>
+
+<!-- ============================================ -->
+<h2 id="conflict">The design conflict, stated in their words</h2>
+
+<p>This is the single most important paragraph in this document. From
+<span class="fp">honcho.dev/docs/v3/documentation/core-concepts/reasoning</span>:</p>
+
+<div class="q">
+"Traditional RAG systems treat memory as static storage… <b>Other solutions take an opinion for
+you on what's important to store, whether through structured facts in databases or predefined
+knowledge graphs.</b> Honcho takes a different approach: we extract all latent information by
+reasoning about everything, so it's there when you need it. Our job is to produce the most robust
+reasoning possible — <b>it's your job as a developer to decide what's relevant for your use
+case.</b>"
+</div>
+
+<p>Read that as a boundary, not a criticism. Honcho is describing Nocheh in the phrase
+"predefined knowledge graphs," and it is declining to build one. It also tells you exactly what
+the division of labour should be:</p>
+
+<div class="card verdict">
+<p style="margin:0;font-size:16px"><b>Honcho reasons. You decide what's relevant.</b><br>
+<span style="color:var(--dim)">Honcho produces conclusions. Nocheh's contract decides which of
+them become a <code>Decision</code>, which become a <code>PERSON_OWNS_TASK</code> edge, which
+become a <code>pending</code> suggestion awaiting your approval, and which get thrown away. That
+is not overlap. That is a clean interface between two layers.</span></p>
+</div>
+
+<div class="card caution">
+<h4>The second conflict: rule 2 vs a hosted service</h4>
+<p>Rule 2 says redact before "buffering, analysis, persistence, logs, context building, or
+external sync." A Honcho write is <b>external sync</b>. Two consequences:</p>
+<ul>
+<li><b>Ordering is already correct.</b> Your guard runs at
+<span class="fp">process-incoming-message.ts:233</span>, before grounding and analysis. A Honcho
+write placed after that inherits the guarantee for free. Do <b>not</b> write to Honcho from
+<code>LiveMessageBufferService.execute()</code> — only pattern rules have run there.</li>
+<li><b>Hosted vs self-hosted is a rule-2 decision, not a cost decision.</b> Honcho cloud means
+your entire life corpus — startups, clients, coaching, finances, crypto theses — lives on a third
+party's Postgres, in plaintext, permanently. The guard removes credentials; it does not remove
+the fact that you are shipping the corpus. <b>Self-host.</b></li>
+</ul>
+<p style="margin-bottom:0"><b>On AGPL-3.0:</b> running an <i>unmodified</i> Honcho as a separate
+process and calling it over HTTP is aggregation, not derivation. Nocheh's own licence is
+unaffected. The copyleft bites only if you modify Honcho's source <i>and</i> expose that modified
+version over a network. Keep your changes to zero and this is a non-issue; write your logic in
+your adapter, not in their repo.</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="flow">Your flow, annotated</h2>
+
+<p>You named the flow that matters. Here it is with each tool's possible position marked, against
+real file paths.</p>
+
+<pre>
+<b>①  TELEGRAM</b>  →  <span class="fp">create-telegram-webhook-handler.ts:19</span>
+    allow-list, <code>/note</code> command, update → <code>IncomingMessage</code>
+    <em>Hermes has 25 adapters here. You have one. Borrow shapes, import nothing.</em>
+                 │
+<b>②  PATTERN REDACTION</b>  →  <span class="fp">live-message-buffer-service.ts:80</span>
+    <em>regex only. Cheap, synchronous, unavoidable. Runs before ANY persistence.</em>
+                 │
+<b>③  BUFFER</b>  →  <span class="fp">sqlite-live-message-buffer-repository.ts</span>
+    <em>Your "importer / pure data store". Deliberately TEMPORARY — rule 1.</em>
+    <s>✗ do NOT write to Honcho here — guard has not run yet</s>
+                 │
+     ┌───────────┴──── flush sweep, every FLUSH_SWEEP_INTERVAL_SECONDS
+     │
+<b>④  MEDIA → TEXT</b>  →  <span class="fp">media-understanding-service.ts:74</span>
+    fetch bytes → perception model → description + transcript → drop bytes
+    <em>Honcho: no equivalent. Hermes: has vision. Keep yours — it is verified.</em>
+                 │
+<b>⑤  SECRET GUARD</b>  →  <span class="fp">window-redaction-service.ts:38</span>  ⟵ <b>THE GATE</b>
+    model detects literals · masking local · fail closed · quarantine at 5
+    <em>Neither product has this. It stays yours, and it stays here.</em>
+                 │
+    ══════════ everything below sees only guarded text ══════════
+                 │
+<b>⑥  GROUNDING</b>  →  <span class="fp">assistant-context-builder.ts:60</span>
+    recall (limit 12, minScore 0.03) + graph BFS depth 1 + accepted rules
+    <i>◆ HONCHO SLOTS IN HERE — as an additional grounding source</i>
+    <i>  session.context({ tokens, peerTarget, searchQuery })  ~200ms</i>
+                 │
+<b>⑦  ANALYSIS</b>  →  <span class="fp">nvidia-memory-graph-analyzer.ts:110</span>
+    generated contract → 17 kinds / 20 relations / 16 payloads
+    189–240s · 3194 output tokens · ~1412 input tokens of system prompt
+    <em>Stays yours. This is where "what matters" is decided.</em>
+                 │
+<b>⑧  PERSIST</b>  records · nodes · edges · suggestions · tasks
+    <i>◆ HONCHO WRITE FIRES HERE TOO — fire-and-forget, non-fatal</i>
+    <i>  session.addMessages([...guarded window...])   returns immediately</i>
+                 │
+<b>⑨  WORKFLOWS</b>  validation → Notion sync → status updates → audit (19 steps)
+    <em>Stays yours. Approval, external actions, cost accounting.</em>
+</pre>
+
+<div class="card info">
+<h4>Read the diagram again — notice what changed</h4>
+<p style="margin-bottom:0"><b>Two insertion points. Both additive. Neither destructive.</b>
+A write at ⑧ and a read at ⑥. Your pipeline order, your gate, your contract, your graph, your
+audit trail, all untouched. If Honcho is down, ⑥ falls back to
+<code>HybridMemoryRetrievalService</code> and ⑧ is skipped — exactly the failure posture ADR-0012
+already established for recall ("a recall failure is not fatal, unlike the secret guard").</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="seam">Where the seam actually is — and where it isn't</h2>
+
+<p>The obvious move is to write a Honcho adapter for <code>MemoryRetrievalPort</code>. That is
+wrong, and it is worth being precise about why.</p>
+
+<pre>
+<span class="fp">src/application/ports/memory-retrieval.ts</span>
+
+export interface MemorySearchResult {
+  readonly record: <b>MemoryRecord</b>;   ⟵ a typed record: type, source, confidence,
+  readonly score: number;         project?, decision?, deadline?, blocker?…
+}
+</pre>
+
+<p>Honcho does not return <code>MemoryRecord</code>s. It returns prose conclusions, a peer
+representation, a peer card, and summaries. Forcing that through
+<code>MemoryRetrievalPort</code> would mean fabricating fake <code>MemoryRecord</code>s with
+invented types and ids — polluting your domain with objects that have no row in
+<code>memory_records</code> and no place in the graph. <b>That is the kind of shortcut that
+quietly destroys an architecture.</b></p>
+
+<div class="card verdict">
+<h4>The right seam: a new, narrow port</h4>
+<pre style="margin-bottom:0;background:var(--bg3)">
+<span class="fp">src/application/ports/peer-representation.ts</span>
+
+export interface RepresentationQuery {
+  readonly conversationId: string;
+  readonly text: string;              <em>// the window, for search_query</em>
+  readonly tokenBudget: number;
+}
+
+export interface PeerRepresentation {
+  readonly summary?: string;
+  readonly card: readonly string[];        <em>// stable biographical facts</em>
+  readonly conclusions: readonly string[]; <em>// prose, with provenance</em>
+  readonly tokenUsage?: AiTokenUsage;      <em>// feed /api/metrics</em>
+}
+
+/** Narrative context about the owner. NOT structured memory. */
+export interface PeerRepresentationPort {
+  recall(query: RepresentationQuery): Promise&lt;PeerRepresentation&gt;;
+  observe(window: ConversationWindow): Promise&lt;void&gt;;  <em>// fire-and-forget</em>
+}
+
+export const NoopPeerRepresentation: PeerRepresentationPort = { … };
+</pre>
+</div>
+
+<p><b>Why this shape works:</b></p>
+<ul>
+<li>It returns <b>strings, not domain entities</b> — an honest signal that this is narrative
+context, not structured memory. No pollution.</li>
+<li><code>AssistantContextBuilder.renderGrounding()</code> already composes five labelled
+sections. This becomes a sixth: <code>"What Honcho concludes about the owner:"</code>. One
+function, one new section.</li>
+<li>It carries <code>tokenUsage</code>, so Honcho's cost lands in <code>/api/metrics</code>
+alongside every other role — consistent with the <code>MeteredEmbedding</code> precedent from
+ADR-0011.</li>
+<li>A <code>Noop</code> implementation means <b>dry-run stays free</b>, matching the
+<code>whenUnset</code> degradation pattern of all five existing model roles.</li>
+<li><code>observe()</code> is separate from <code>recall()</code> because writes are
+fire-and-forget and reads are on the critical path. Different failure semantics deserve
+different methods.</li>
+<li>It obeys <span class="fp">test/core-layer-portability.test.ts</span> — no <code>node:*</code>
+in the port, transport lives in <code>src/infrastructure/memory/honcho-*.ts</code>.</li>
+</ul>
+
+<!-- ============================================ -->
+<h2 id="options">Four options, priced</h2>
+
+<div class="tw"><table>
+<thead><tr><th>Option</th><th>Effort</th><th>Reversible</th><th>What you gain</th><th>What you risk</th></tr></thead>
+<tbody>
+<tr>
+<td><b>A. Do nothing yet.</b> Finish <span class="fp">TASK.md</span>: run a live window, tune the floor, verify grounding.</td>
+<td>1–2 weeks</td>
+<td class="yes">n/a</td>
+<td>You learn whether your recall is actually bad. Right now you don't know.</td>
+<td>Spend weeks tuning a parameter search someone else already ran.</td>
+</tr>
+<tr style="background:rgba(74,222,128,.045)">
+<td><b>B. Honcho as a component.</b> <span class="tag t-ok">recommended</span> Self-hosted, behind <code>PeerRepresentationPort</code>, additive at ⑥ and ⑧.</td>
+<td>3–5 days<br><small>+ ops</small></td>
+<td class="yes">fully — delete one adapter</td>
+<td>SOTA recall, multilingual, Dreaming, summaries, fast reads, raw message log. Graph/guard/audit/approval untouched.</td>
+<td>Postgres + Redis + worker to operate. Two memory systems to reason about.</td>
+</tr>
+<tr>
+<td><b>C. Honcho replaces your memory layer.</b> Drop the graph, the analyzer, the embedding stack.</td>
+<td>2–3 weeks<br><small>of deletion</small></td>
+<td class="no">no</td>
+<td>Much less code. One system.</td>
+<td class="no">Deletes the product. No typed graph, no tasks, no approval, no audit. Honcho explicitly won't give these back.</td>
+</tr>
+<tr>
+<td><b>D. Migrate onto Hermes</b>, Nocheh becomes a memory-provider plugin.</td>
+<td>4–8 weeks</td>
+<td class="no">no</td>
+<td>25 channels, cron, tools, sandboxes, desktop app for free.</td>
+<td class="no">Python rewrite. You no longer control pipeline order — <a href="#plugin">rule 2 becomes unenforceable</a>.</td>
+</tr>
+</tbody></table></div>
+
+<div class="card verdict">
+<h4>Recommended sequence: A → B</h4>
+<p style="margin-bottom:0">Do <b>A first</b>, and timebox it to one week. You currently have
+<i>one</i> latency data point and <i>zero</i> live graph runs. Adopting a memory service to fix a
+recall problem you have never measured is buying a cure before the diagnosis. Then do <b>B</b> —
+and because B is additive and reversible, you can run both retrieval paths against the same
+window and read the difference in <code>context_build</code> metadata. That is a real experiment,
+and your audit trail is already built to record it.</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="plugin">Plugin, wrapper, or client?</h2>
+
+<p>You asked specifically. The answer is <b>client</b>, and the reason is not preference.</p>
+
+<div class="grid g3">
+<div class="card danger">
+<h4>✗ Nocheh as a Hermes plugin</h4>
+<p><b>The blocker:</b> Hermes's gateway flow is
+<code>Platform event → authorize → resolve session → create AIAgent → run_conversation</code>.
+The raw message is in the prompt and sent to the model <i>inside</i> that loop. A memory-provider
+plugin is called for reads and writes <i>around</i> the loop, not before it.</p>
+<p style="margin-bottom:0"><b>So your rule 2 — "redact before anything else" — becomes
+unenforceable.</b> You cannot gate what you do not sequence. Everything else (Python, prompt
+ownership, cache stability as a stated design principle) is secondary to that.</p>
+</div>
+
+<div class="card danger">
+<h4>✗ Nocheh as a wrapper around Hermes</h4>
+<p>You'd shell out to a large Python agent, then try to reconstruct structure from its
+free-text answers. You inherit its dependency tree, its provider resolution, its session
+storage, and its upgrade cadence.</p>
+<p style="margin-bottom:0">In exchange you get tools you could add yourself in a fraction of the
+code. <b>Wrapping something bigger than you to use a slice of it is how a clean architecture
+dies.</b></p>
+</div>
+
+<div class="card verdict">
+<h4>✓ Nocheh as a Honcho client</h4>
+<p>Exactly the relationship you already have with NVIDIA, Anthropic, Gemini and Notion MCP: a
+port in <code>src/application/ports</code>, an adapter in <code>src/infrastructure</code>, wired
+once in <span class="fp">src/dev-server.ts</span>.</p>
+<p style="margin-bottom:0"><b>Rule 7 already tells you to do this:</b> <i>"Providers stay behind
+ports. Transport in the adapter; prompt, output contract, and domain mapping stay shared."</i>
+Honcho is a provider. Treat it like one.</p>
+</div>
+</div>
+
+<div class="card caution">
+<p style="margin:0"><b>One more asymmetry worth naming.</b> Hermes's Honcho integration includes
+<code>pinUserPeer</code>, <code>userPeerAliases</code>, <code>runtimePeerPrefix</code> — an entire
+identity-mapping layer whose only job is to collapse Telegram/Discord/Slack runtime IDs onto the
+right Honcho peer, with a documented footgun about orphaning pooled memory when you flip
+<code>pinUserPeer</code>. Nocheh is <b>single-owner</b>. You get all of that complexity for free
+by not having it. Do not import a multi-tenant identity problem you do not have.</p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="plan">Implementation plan for option B</h2>
+
+<ol class="steps">
+
+<li><h4>Stand up self-hosted Honcho</h4>
+<pre style="margin:8px 0">uv tool install honcho-cli
+honcho start --setup basic     <em># Docker: API + deriver + Postgres + Redis</em>
+<em># talk to it at http://127.0.0.1:8000</em></pre>
+<p>Point <code>DERIVER_MODEL_CONFIG__*</code> at an OpenAI-compatible endpoint — your existing
+NVIDIA base URL works, models must support tool calling. Put the volume on an encrypted disk;
+Honcho stores messages in plaintext Postgres and your <code>LOCAL_ENCRYPTION_SECRET</code> does
+not reach into it. <b>New env keys:</b> <code>HONCHO_BASE_URL</code>,
+<code>HONCHO_API_KEY</code>, <code>HONCHO_WORKSPACE_ID</code>, <code>HONCHO_PEER_ID</code>.
+Unset ⇒ <code>NoopPeerRepresentation</code>, same as every other role.</p></li>
+
+<li><h4>Add the port and the Noop</h4>
+<p><span class="fp">src/application/ports/peer-representation.ts</span> — the interface from
+<a href="#seam">the seam section</a>. Pure types, no <code>node:*</code>. Re-export from
+<span class="fp">src/index.ts</span> per your conventions.</p></li>
+
+<li><h4>Write the adapter</h4>
+<p><span class="fp">src/infrastructure/memory/honcho-peer-representation.ts</span>. Use
+<code>@honcho-ai/sdk</code> — or plain <code>fetch</code> through
+<span class="fp">fetch-with-timeout.ts</span> if you want to preserve your one-runtime-dependency
+discipline (the REST surface is small: <code>addMessages</code>, <code>context</code>,
+<code>chat</code>).</p>
+<ul>
+<li><b>Peer mapping:</b> one peer for you, one for Nocheh. Optionally a peer per
+<code>person</code> node later — that is where Honcho's peer model gets interesting for clients
+and partners.</li>
+<li><b>Session mapping:</b> Telegram <code>conversationId</code> → Honcho session id. Direct.</li>
+<li><b>Timeouts:</b> <code>recall()</code> ≤ 3s and degrade on timeout — it is on the
+critical path. <code>observe()</code> gets the default 120s and never blocks.</li>
+</ul></li>
+
+<li><h4>Wire <code>observe()</code> after the guard, not before</h4>
+<p>In <span class="fp">process-incoming-message.ts</span>, after
+<code>windowRedaction.execute()</code> succeeds. Add a <code>honcho_write</code> step to
+<code>ProcessingStepName</code>. Failure is <code>skipped</code>, never fatal — mirroring
+<code>understandMedia()</code>'s posture at line 226, not the guard's at 233.</p>
+<div class="card danger" style="margin:10px 0">
+<p style="margin:0"><b>The one mistake that breaks rule 2:</b> writing to Honcho from
+<code>LiveMessageBufferService.execute()</code> because it is convenient and the message is right
+there. At that point only regex patterns have run. The guard — the thing that caught a
+<i>photographed whiteboard password</i> the perception model transcribed verbatim, per ADR-0010 —
+has not. Never write to Honcho above line 233.</p>
+</div></li>
+
+<li><h4>Wire <code>recall()</code> into <code>AssistantContextBuilder</code></h4>
+<p>Call it in parallel with <code>retrieval.query()</code> via <code>Promise.allSettled</code>.
+Add a sixth section to <code>renderGrounding()</code>. Extend the <code>context_build</code>
+audit metadata with <code>honchoConclusionCount</code>, <code>honchoCardCount</code>,
+<code>honchoLatencyMs</code> — you now have an A/B record for free, in a table you already
+query.</p></li>
+
+<li><h4>Extend the contract by exactly one sentence</h4>
+<p>ADR-0012 established the rule and pinned it with a test: tell the model what
+<code>groundingContext</code> is and <b>forbid extracting from it</b>. Honcho conclusions are
+inference, not testimony — the risk of a model minting a <code>Decision</code> node out of
+Honcho's guess is real. Extend <code>analysisSystemPrompt()</code> in
+<span class="fp">memory-graph-analysis-mapping.ts:95</span> and update the token-budget assertion
+in <span class="fp">test/memory-graph-analysis-mapping.test.ts</span>.</p></li>
+
+<li><h4>Backfill, explicitly</h4>
+<p><code>POST /api/memory/rebuild-representation</code>, mirroring
+<code>POST /api/memory/reindex</code>. ADR-0011's reasoning applies unchanged: it is paid work per
+record, so it is a deliberate button, not a startup side effect. Feed it guarded history through
+<code>HistoryImportService</code>'s chunking, and return <code>409</code> when no Honcho
+credentials are configured — same as reindex does today.</p></li>
+
+<li><h4>Measure, then decide</h4>
+<p>Run 20–30 real windows with both paths active. Compare from
+<code>/api/audit</code>: did Honcho's conclusions reduce duplicate node creation? Did the graph
+get cleaner? Did <code>context_build</code> latency stay acceptable? <b>If the answer is no,
+delete one adapter file and one wiring block.</b> That reversibility is the whole reason to
+structure it this way.</p></li>
+</ol>
+
+<!-- ============================================ -->
+<h2 id="cost">Cost model</h2>
+
+<p>Using your own measured numbers from <span class="fp">TASK.md</span> — one window observed at
+2,198 perception + ~950 guard + 3,194 analysis tokens, analysis system prompt ~1,412 input tokens
+per call.</p>
+
+<div class="tw"><table>
+<thead><tr><th>Scenario</th><th>Volume assumption</th><th>Honcho ingestion @ $2/M</th><th>Reads</th><th>Monthly</th></tr></thead>
+<tbody>
+<tr><td>Light — personal Telegram</td><td>~150 msg/day @ ~40 tok = 180K tok/mo</td><td>$0.36</td><td>free</td><td class="yes">~$0.40</td></tr>
+<tr><td>Moderate — a few groups</td><td>~500 msg/day = 600K tok/mo</td><td>$1.20</td><td>free</td><td class="yes">~$1.20</td></tr>
+<tr><td>Heavy — groups + history backfill</td><td>3M tok in month one</td><td>$6.00</td><td>free</td><td class="yes">~$6 once</td></tr>
+<tr><td>+ daily <code>chat()</code> briefing</td><td>30 × medium tier @ $0.05</td><td>—</td><td>$1.50</td><td>+$1.50</td></tr>
+<tr><td>+ weekly deep review</td><td>4 × high tier @ $0.10</td><td>—</td><td>$0.40</td><td>+$0.40</td></tr>
+<tr><td><b>Self-hosted instead</b></td><td>your VPS + your LLM key</td><td>$0 to Plastic Labs</td><td>$0</td><td><b>infra + tokens</b></td></tr>
+</tbody></table></div>
+
+<div class="card">
+<p style="margin:0"><b>Read that table honestly: cost is not the deciding factor.</b> A few dollars a
+month for a personal brain is noise, and $100 in signup credits covers a thorough evaluation.
+The real costs are <b>operational</b> (Postgres + Redis + a worker you now babysit),
+<b>architectural</b> (two memory systems whose disagreements you must reason about), and
+<b>privacy</b> (hosted = your whole life corpus on someone else's disk in plaintext). Rule 6 says
+"cost is a feature" — here the feature to protect is not dollars, it is <b>the number of moving
+parts you can still hold in your head.</b></p>
+</div>
+
+<!-- ============================================ -->
+<h2 id="goals">Your goal domains — who serves each</h2>
+
+<p>From <span class="fp">AGENTS.md</span>'s operating domains, mapped to layers.</p>
+
+<div class="tw"><table>
+<thead><tr><th>Domain</th><th>What it needs</th><th>Owner</th></tr></thead>
+<tbody>
+<tr><td><b>Startups &amp; partners</b></td><td><code>project</code>, <code>person</code>, <code>PARTNER_WORKS_ON_STARTUP</code>, decisions with provenance</td><td><span class="tag t-n">graph</span> · Honcho adds "how this partner communicates"</td></tr>
+<tr><td><b>Freelance clients</b></td><td><code>CLIENT_OWNS_PROJECT</code>, deadlines, deliverables, invoice state</td><td><span class="tag t-n">graph + tasks</span> Honcho contributes nothing structural</td></tr>
+<tr><td><b>Coaching &amp; growth</b></td><td>patterns over months, contradictions, honest reflection</td><td><span class="tag t-h">Honcho</span> <b>strongest case.</b> Induction + abduction + Dreaming is exactly this</td></tr>
+<tr><td><b>Projects &amp; tasks</b></td><td>status, priority, due dates, Notion sync, blockers</td><td><span class="tag t-n">Nocheh only</span></td></tr>
+<tr><td><b>English learning</b></td><td><code>learning_plan</code>, <code>skill</code>, error patterns over time, adaptive difficulty</td><td><span class="tag t-n">graph</span> + <span class="tag t-h">Honcho</span> for recurring-mistake detection</td></tr>
+<tr><td><b>X / Twitter growth</b></td><td><code>content_plan</code>, <code>CONTENT_PLAN_SUPPORTS_GOAL</code>, drafts pending approval</td><td><span class="tag t-n">Nocheh</span> — rule 3 lives here</td></tr>
+<tr><td><b>Asset tracking</b></td><td><code>asset</code> payloads, 6 asset types, valuations</td><td><span class="tag t-n">Nocheh only</span> — needs a schema, not prose</td></tr>
+<tr><td><b>Crypto decision support</b></td><td><code>investment_thesis</code>, <code>risk</code>, <code>INVESTMENT_THESIS_HAS_RISK</code>, <b>no auto-trading</b></td><td><span class="tag t-n">Nocheh only</span> — rule 5 is a code-level guarantee, not a prompt</td></tr>
+<tr><td><b>Grounded advice</b></td><td>recall + accepted rules + goals + routines composed into context</td><td><span class="tag t-n">builder</span> + <span class="tag t-h">Honcho</span> as a sixth section</td></tr>
+</tbody></table></div>
+
+<p><small>Pattern: <b>everything that must be enumerable, auditable, or approvable stays in
+Nocheh.</b> Everything that is "understand me better over time" is where Honcho earns its place.
+Two of nine domains lean Honcho, and one of them — coaching — leans hard.</small></p>
+
+<!-- ============================================ -->
+<h2 id="borrow">Borrow from Hermes without depending on it</h2>
+
+<p>Hermes is MIT-licensed and solves four of your <span class="fp">TASK.md</span> "Later" items.
+Read the code, take the design, write the TypeScript.</p>
+
+<div class="tw"><table>
+<thead><tr><th>Your gap</th><th>Where Hermes solved it</th><th>What to take</th></tr></thead>
+<tbody>
+<tr><td>"A second input channel"</td><td><code>gateway/platforms/</code> + <code>plugins/platforms/</code></td><td>The adapter interface shape: <code>on_message() → MessageEvent</code> normalised before routing. You already have this as <code>TelegramUpdateMapper → IncomingMessage</code>. Confirmation that your seam is right.</td></tr>
+<tr><td>"Document understanding (PDF/docx)"</td><td><code>features/document-extraction</code></td><td>Extraction-before-model pattern — identical in spirit to your ADR-0010 "media becomes text before anything looks at it." Extend <code>MediaUnderstandingPort</code> to <code>document</code> kind.</td></tr>
+<tr><td>Scheduled briefings / reviews</td><td><code>cron/jobs.py</code>, <code>cron/scheduler.py</code></td><td><b>"First-class agent tasks, not shell tasks."</b> Jobs carry a prompt, attach skills, deliver to a platform. Your <code>flushSweep</code> interval is already a primitive scheduler — generalise it.</td></tr>
+<tr><td>"Approved outbound replies"</td><td><code>gateway/delivery.py</code>, <code>callbacks.py</code></td><td>Separate <i>drafting</i> from <i>delivery</i> so approval can sit between. Their tool-approval callback pattern is the right shape for your suggestion approval.</td></tr>
+<tr><td>Suggestion approval UI</td><td>web dashboard, TUI</td><td>Approve / edit / reject / archive affordances — your <span class="fp">TASK.md</span> "Close the loop" item.</td></tr>
+<tr><td>Context budget under pressure</td><td><code>agent/context_compressor.py</code> behind a <code>ContextEngine</code> ABC</td><td>Compression as a <b>pluggable port</b>, not inline logic. Your <code>trimToApproxTokens()</code> is a hard truncate at <code>maxTokens × 4</code> chars; a port lets you swap in summarisation later.</td></tr>
+</tbody></table></div>
+
+<!-- ============================================ -->
+<h2 id="risk">Risks and the triggers that should change your mind</h2>
+
+<div class="grid g2">
+<div class="card danger">
+<h4>Risks of adopting Honcho</h4>
+<ul style="margin-bottom:0">
+<li><b>Two sources of truth.</b> When the graph says one thing and a conclusion says another, which wins? <b>Decide now:</b> the graph is the record of fact; Honcho is advisory context. Encode it in the prompt.</li>
+<li><b>Ops surface triples.</b> SQLite file → Postgres + pgvector + Redis + worker. Backups, migrations, restarts.</li>
+<li><b>Untestable dependency.</b> You cannot pin its conclusions in a unit test. Contract-test the adapter, fake the service.</li>
+<li><b>Vendor trajectory.</b> AGPL core mitigates lock-in, but the hosted models (Neuromancer) are theirs. Self-hosting uses your LLM key and different models than their benchmarks measured.</li>
+<li><b>Benchmarks aren't your corpus.</b> LoCoMo and BEAM are English conversation datasets. Your corpus is mixed-language, media-derived, group-chat Telegram.</li>
+<li><b>Privacy, if hosted.</b> Guarded ≠ anonymous. Self-host.</li>
+</ul>
+</div>
+
+<div class="card caution">
+<h4>Risks of not adopting it</h4>
+<ul style="margin-bottom:0">
+<li><b>You tune constants for weeks</b> that someone else already tuned, and end up worse.</li>
+<li><b>No consolidation path.</b> The graph accretes. Contradictions accumulate. In two years, recall degrades and nothing in the design fixes it.</li>
+<li><b>Persian recall stays half-blind</b> — 25% of the blend is structurally zero, on embeddings whose floor is a guess.</li>
+<li><b>Extraction-only ceiling.</b> Your contract can only capture what a window <i>says</i>. Coaching needs what months of windows <i>imply</i>, and you have no step that produces it.</li>
+<li><b>No fast read path.</b> Nocheh can file things away but cannot answer you in under a second.</li>
+</ul>
+</div>
+</div>
+
+<h3>Triggers</h3>
+<div class="tw"><table>
+<thead><tr><th>If this happens…</th><th>…do this</th></tr></thead>
+<tbody>
+<tr><td>Live windows show recall returning irrelevant memories, or duplicates keep appearing despite grounding</td><td>Adopt Honcho (option B). Your recall really is the bottleneck.</td></tr>
+<tr><td>Live windows show recall working fine after tuning the floor</td><td>Stay on A. Revisit in six months when the corpus is 10× larger.</td></tr>
+<tr><td>You want Nocheh to <i>answer</i> conversationally, not just ingest</td><td>Adopt Honcho — you need the ~200ms <code>context()</code> read path.</td></tr>
+<tr><td>Graph contradictions become a visible problem in <code>/app</code></td><td>Adopt Honcho for Dreaming, or build your own consolidation sweep. Do not ignore it.</td></tr>
+<tr><td>You need a second and third channel urgently</td><td>Write the adapters yourself using Hermes's shapes. Still do not migrate.</td></tr>
+<tr><td>Operating Postgres + Redis is genuinely more than you want to run</td><td>Stay on A. A brain you actually keep running beats one with better recall that you don't.</td></tr>
+<tr><td>You catch yourself wanting to modify Honcho's source</td><td>Stop. AGPL §13 attaches. Put the logic in your adapter.</td></tr>
+</tbody></table></div>
+
+<!-- ============================================ -->
+<h2 id="tldr">One page, if you read nothing else</h2>
+
+<div class="card verdict">
+<ol style="margin:0;font-size:15.5px">
+<li><b>Honcho is a memory service. Hermes is a harness that calls Honcho.</b> They are not
+alternatives to each other, and only one is a candidate for your app.</li>
+<li><b>Honcho is better than your recall layer.</b> Not better than your graph — it deliberately
+refuses to build one and says so in its own docs.</li>
+<li><b>Hermes is not a memory solution.</b> Its memory is markdown files plus FTS5. Its good
+memory <i>is</i> Honcho.</li>
+<li><b>Do not become a plugin.</b> Inside Hermes's loop you cannot guarantee redaction runs
+first, and that is rule 2. Everything else is negotiable; that isn't.</li>
+<li><b>Do not wrap Hermes.</b> Inheriting a large Python harness to use a slice of it trades your
+clean architecture for tools you could write yourself.</li>
+<li><b>Be a client.</b> New port <code>PeerRepresentationPort</code>, new adapter, wired once in
+<span class="fp">dev-server.ts</span>. Exactly how you already treat NVIDIA, Gemini, Anthropic
+and Notion. Rule 7 already told you this.</li>
+<li><b>Self-host Honcho.</b> A write to it is external sync. Hosted means your entire life corpus
+sits in someone else's plaintext Postgres, permanently.</li>
+<li><b>Insert at two points only:</b> <code>observe()</code> after the guard at
+<span class="fp">process-incoming-message.ts:233</span>, <code>recall()</code> inside
+<code>AssistantContextBuilder</code>. Both additive, both non-fatal, both deletable in an hour.</li>
+<li><b>Never write to Honcho from the buffer.</b> Only regex has run there. The guard is the gate,
+and it is load-bearing — it caught a password a perception model read off a photograph.</li>
+<li><b>Do option A first, for one week.</b> You have one latency data point and zero live graph
+runs. Measure your recall before you replace it.</li>
+<li><b>Keep everything auditable, enumerable, and approvable in Nocheh.</b> Graph, tasks,
+suggestions, external actions, audit, encryption. That is the product. Honcho is a better
+retrieval brain bolted to it — not a replacement for it.</li>
+<li><b>Mine Hermes for free.</b> MIT-licensed. Take the cron design, the channel-adapter shapes,
+document extraction, and the draft/deliver split. Import none of it.</li>
+</ol>
+</div>
+
+<hr>
+<p><small>Sources: Nocheh source at <code>/Users/owner/Develop/Personal/nocheh</code> —
+<span class="fp">AGENTS.md</span>, <span class="fp">TASK.md</span>, <span class="fp">docs/adr/0008,
+0010, 0011, 0012</span>, <span class="fp">src/domain/memory/memory-graph.ts</span>,
+<span class="fp">src/application/services/assistant-context-builder.ts</span>,
+<span class="fp">src/infrastructure/memory/hybrid-memory-retrieval-service.ts</span>,
+<span class="fp">src/infrastructure/memory/lexical-score.ts</span>,
+<span class="fp">src/application/use-cases/process-incoming-message.ts</span>.
+Honcho: honcho.dev/docs v3 — architecture, reasoning, representation, get-context, structured
+outputs, self-hosting, license, pricing. Hermes: hermes-agent.nousresearch.com/docs —
+developer-guide/architecture, features/honcho, features/memory-providers.
+Vendor benchmarks and prices are as published and unverified on your data.</small></p>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav a[href^="#"]'));
+  var targets = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  function sync(){
+    var y = window.scrollY + 130, best = 0;
+    targets.forEach(function(t,i){ if(t && t.offsetTop <= y) best = i; });
+    links.forEach(function(a,i){ a.classList.toggle('on', i === best); });
+  }
+  window.addEventListener('scroll', sync, {passive:true});
+  window.addEventListener('resize', sync);
+  sync();
+})();
+</script>
+</body>
+</html>
