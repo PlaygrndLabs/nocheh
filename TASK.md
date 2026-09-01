@@ -44,7 +44,7 @@ answer keys are never committed.
 - [ ] Write 60–100 owner-graded questions: factual recall, Persian, corrections over time,
       contradictions, multi-hop links, tasks/deadlines, preferences and long-range coaching
       patterns. Keep retrieval grading separate from answer-model grading.
-- [ ] Build a deterministic non-personal scale fixture at 1k, 10k and 100k messages with
+- [x] Build a deterministic non-personal scale fixture at 1k, 10k and 100k messages with
       seeded facts, corrections, duplicates and known answers.
 - [ ] Run 20–30 live Nocheh windows. Confirm nodes, edges, suggestions and tasks land; inspect
       `errorLogs`, grounding duplication, `reasoningTokens`, throughput and `context_build`.

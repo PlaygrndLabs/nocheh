@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "id": "REPLACE_BEFORE_FREEZE",
+  "frozenAt": "REPLACE_WITH_ISO_TIMESTAMP",
+  "corpus": {
+    "id": "REPLACE_BEFORE_FREEZE",
+    "kind": "private_quality",
+    "messageCount": 1000,
+    "occurredAtStart": "REPLACE_WITH_FIRST_MESSAGE_TIMESTAMP",
+    "occurredAtEnd": "REPLACE_WITH_LAST_MESSAGE_TIMESTAMP",
+    "saltedSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "hashSalt": "REPLACE_WITH_RANDOM_SALT"
+  },
+  "systems": [
+    {
+      "id": "nocheh-current",
+      "version": "PIN_BEFORE_RUN",
+      "configuration": {
+        "similarityFloor": 0.3,
+        "lexicalWeight": 0.25,
+        "graphDepth": 1
+      },
+      "modelIds": {
+        "textAnalysis": "PIN_BEFORE_RUN",
+        "embedding": "PIN_BEFORE_RUN",
+        "secretGuard": "PIN_BEFORE_RUN"
+      },
+      "networkDestinations": [
+        "PIN_BEFORE_RUN"
+      ],
+      "backgroundJobs": [
+        "flush-sweep"
+      ]
+    },
+    {
+      "id": "honcho-self-hosted",
+      "version": "PIN_BEFORE_RUN",
+      "configuration": {
+        "reasoningEnabled": true
+      },
+      "modelIds": {
+        "representation": "PIN_BEFORE_RUN",
+        "dialectic": "PIN_BEFORE_RUN",
+        "embedding": "PIN_BEFORE_RUN"
+      },
+      "networkDestinations": [
+        "PIN_BEFORE_RUN"
+      ],
+      "backgroundJobs": [
+        "PIN_BEFORE_RUN"
+      ]
+    }
+  ],
+  "answerModel": {
+    "provider": "PIN_BEFORE_RUN",
+    "modelId": "PIN_BEFORE_RUN",
+    "version": "PIN_BEFORE_RUN"
+  },
+  "contextTokenBudget": 4000,
+  "qualityTieMargin": 0.03,
+  "maximumAcceptableMonthlyCostUsd": 0,
+  "thresholds": {
+    "minimumSourceValidRecall": 0,
+    "minimumAnswerAccuracy": 0,
+    "minimumPersianRecall": 0,
+    "minimumMultiHopRecall": 0,
+    "maximumStaleFactRate": 0,
+    "maximumDuplicateRate": 0,
+    "maximumP95RetrievalLatencyMs": 1,
+    "maximumContextTokens": 4000,
+    "maximumQueueLagMs": 1
+  }
+}
