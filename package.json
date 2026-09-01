@@ -13,6 +13,7 @@
     "graphify:extract": "graphify extract . --no-cluster --out .",
     "graphify:report": "graphify cluster-only . --no-label",
     "graphify:update": "graphify update .",
+    "benchmark:memory": "npm run build && node dist/src/interfaces/cli/memory-benchmark.js",
     "test": "npm run build && node scripts/run-tests.mjs",
     "test:web": "npm --prefix web test"
   },

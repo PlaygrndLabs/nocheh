@@ -53,6 +53,7 @@ export { NoopMemoryExtractor } from "./application/ports/memory-extractor.js";
 export type { MemoryRecordRepositoryPort } from "./application/ports/memory-record-repository.js";
 export type { MemoryGraphRepositoryPort } from "./application/ports/memory-graph-repository.js";
 export type { MemoryQuery, MemoryRetrievalPort, MemorySearchResult } from "./application/ports/memory-retrieval.js";
+export type { MemoryBenchmarkBackendPort } from "./application/ports/memory-benchmark-backend.js";
 export type { EmbeddingKind, EmbeddingPort, EmbeddingRequest, EmbeddingResult } from "./application/ports/embedding.js";
 export type { MemoryEmbedding, MemoryEmbeddingRepositoryPort } from "./application/ports/memory-embedding-repository.js";
 export type { MetricsCollectorPort, MetricsSnapshot } from "./application/ports/metrics.js";
@@ -89,6 +90,8 @@ export type { HistoryImportMessage, HistoryImportOptions, HistoryImportResult } 
 export { LiveMessageBufferService } from "./application/services/live-message-buffer-service.js";
 export type { LiveMessageBufferResult } from "./application/services/live-message-buffer-service.js";
 export { MemoryGraphQueryService } from "./application/services/memory-graph-query-service.js";
+export { MemoryBenchmarkService, createMemoryBenchmarkReport } from "./application/services/memory-benchmark-service.js";
+export type { MemoryBenchmarkRunInput } from "./application/services/memory-benchmark-service.js";
 export type { MemoryGraphNeighborhood } from "./application/services/memory-graph-query-service.js";
 export { MemoryQueryService } from "./application/services/memory-query-service.js";
 export { SuggestionService } from "./application/services/suggestion-service.js";
@@ -127,6 +130,29 @@ export type {
   ProjectReference,
   SummaryMemory,
 } from "./domain/memory/memory-record.js";
+export {
+  MEMORY_BENCHMARK_CATEGORIES,
+  isMemoryBenchmarkCategory,
+  validateMemoryBenchmarkCorpus,
+  validateMemoryBenchmarkManifest,
+  validateMemoryBenchmarkQuestions,
+} from "./domain/evaluation/memory-benchmark.js";
+export type {
+  MemoryBenchmarkCategory,
+  MemoryBenchmarkCategoryScore,
+  MemoryBenchmarkEvidence,
+  MemoryBenchmarkManifest,
+  MemoryBenchmarkMessage,
+  MemoryBenchmarkPreparation,
+  MemoryBenchmarkQuestion,
+  MemoryBenchmarkQuestionScore,
+  MemoryBenchmarkRecall,
+  MemoryBenchmarkReport,
+  MemoryBenchmarkSystemManifest,
+  MemoryBenchmarkThresholds,
+  MemoryBenchmarkUsage,
+  PercentileSummary,
+} from "./domain/evaluation/memory-benchmark.js";
 export {
   createMemoryEdge,
   createMemoryNode,
@@ -255,6 +281,12 @@ export type { ExtractedTaskCandidate } from "./domain/tasks/task-extraction.js";
 export { TaskValidationService, normalizeTaskTitle } from "./domain/tasks/task-validation.js";
 export type { TaskValidationResult, TaskValidationWarning, TaskValidationWarningCode } from "./domain/tasks/task-validation.js";
 export { RegexSecretDetector } from "./infrastructure/security/regex-secret-detector.js";
+export {
+  createSyntheticMemoryBenchmarkFixture,
+  memoryBenchmarkManifestSha256,
+  saltedMemoryBenchmarkCorpusSha256,
+} from "./infrastructure/evaluation/memory-benchmark-fixture.js";
+export type { SyntheticMemoryBenchmarkFixture } from "./infrastructure/evaluation/memory-benchmark-fixture.js";
 export { ConfigurableSecretDetector } from "./infrastructure/security/configurable-secret-detector.js";
 export { BUILT_IN_SECRET_PATTERNS } from "./infrastructure/security/built-in-secret-patterns.js";
 export { redactWithPatterns, redactLiterals, MINIMUM_LITERAL_SECRET_LENGTH } from "./infrastructure/security/redaction-engine.js";
