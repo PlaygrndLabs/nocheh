@@ -484,7 +484,12 @@ async function runNocheh(args: readonly string[]): Promise<void> {
         logger,
         { onFailure: "fail_closed" },
       ),
-      new NvidiaMemoryGraphAnalyzer({ apiKey, model: stringModelId(system.modelIds, "textAnalysis"), logger }),
+      new NvidiaMemoryGraphAnalyzer({
+        apiKey,
+        model: stringModelId(system.modelIds, "textAnalysis"),
+        maxTokens: numberConfiguration(system.configuration, "analysisMaxOutputTokens", 4000),
+        logger,
+      }),
       tasks,
       records,
       new SqliteTaskSyncRepository(database, encryption),
