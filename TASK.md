@@ -3,19 +3,23 @@
 Open work only. Delivered work lives in the code and in `docs/adr/`.
 
 The refactor to MVP is phased below. Decisions behind it: ADR-0013 (importer core),
-ADR-0014 (Postgres, plaintext, `owner_id`), ADR-0015 (no Honcho), ADR-0016 (answer path
-and amended rule 3).
+ADR-0014 (Postgres, plaintext, `owner_id`), ADR-0015 (the constraints Honcho must satisfy),
+ADR-0016 (answer path and amended rule 3), and ADR-0017 (choose the memory backend from an
+early bake-off, not from assumption).
 
 ## How These Phases Are Sequenced
 
 **One phase at a time, each shipping alone on `main`, each with `npm test` and
-`npm run test:web` green.** Three of these phases are independently capable of breaking
-everything — the model swap, the storage swap, and the pipeline inversion — and doing any
-two at once makes a failure unattributable.
+`npm run test:web` green.** The provider swap, storage swap, pipeline inversion and selected
+memory implementation can each break the system independently; combining them would make a
+failure unattributable.
 
-Phase order is not preference. Phase 1 changes the numbers every later estimate depends on.
-Phase 2 is the only cheap moment to add `owner_id`. Phase 3 needs Phase 2's schema. Phase 5
-is the MVP and needs nothing from Phase 3, so if time runs out, ship Phase 5 and stop.
+Phase order is not preference. Phase 0 freezes the corpus, rubric and cost ceiling before
+results can move them. Phase 1 changes the provider numbers, reruns Nocheh fairly, and closes
+the memory decision with a new ADR. **Phase 2 does not start without that ADR.** Phase 2 is
+the only cheap moment to add `owner_id`; Phase 3 needs its schema; Phase 4 implements only
+the selected memory branch. Phase 5 is the MVP. It can precede Phase 3 only when the selected
+memory backend can consume the existing post-guard path without weakening the gate.
 
 Rules in `AGENTS.md` that change, and when: rule 1 in Phase 3 (guarded chat becomes
 long-term memory, bytes still never persisted), rule 3 in Phase 5 (bounded autonomous
@@ -24,26 +28,45 @@ untouched — in particular the guard still runs before anything, it just runs e
 
 ---
 
-## Phase 0: Measure What Exists — one afternoon, no code
+## Phase 0: Prove The Memory Choice — 3–5 days, evaluation only
 
-Everything below is estimated from numbers that do not exist yet: zero live graph runs, one
-latency data point, two constants documented as guesses. This is the cheapest information in
-the project.
+ADR-0017. The current Nocheh memory and Honcho are both unproven on the owner's long-term,
+mixed Persian/English Telegram corpus. This phase creates evidence before production work
+deepens either bet. Evaluation code may be temporary; private corpus content and personal
+answer keys are never committed.
 
-- [ ] Run 20–30 real windows. Confirm nodes, edges, suggestions and tasks land in SQLite.
-- [ ] Read `errorLogs` on those runs. Anything dropped is a prompt gap or a vocabulary gap,
-      and the reason string says which.
-- [ ] Read `reasoningTokens` and `outputTokensPerSecond`. A large reasoning count means the
-      model is the cost; a small one with the same wall time means the endpoint is.
-- [ ] Read `context_build`: `memoryCount` of 0 against a populated corpus means the floor is
-      too high; `approxTokens` near `tokenBudget` means grounding is crowding out the window.
-- [ ] Grade whether grounding prevents duplicates — whether the model obeys "never extract
-      from `groundingContext`" is still unobserved.
-- [ ] Project a monthly cost from `/api/metrics` token totals at real message volume.
+- [ ] Write the benchmark manifest **before running either system**: exact versions, model
+      ids, configuration, context budget, quality margin, maximum acceptable monthly cost,
+      one salted aggregate corpus hash, network destinations and numeric pass thresholds.
+- [ ] Build a private chronological quality corpus, targeting at least 1,000 guarded messages
+      across at least three months when the export contains that much. No pre-guard text and
+      no media bytes may enter either system.
+- [ ] Write 60–100 owner-graded questions: factual recall, Persian, corrections over time,
+      contradictions, multi-hop links, tasks/deadlines, preferences and long-range coaching
+      patterns. Keep retrieval grading separate from answer-model grading.
+- [ ] Build a deterministic non-personal scale fixture at 1k, 10k and 100k messages with
+      seeded facts, corrections, duplicates and known answers.
+- [ ] Run 20–30 live Nocheh windows. Confirm nodes, edges, suggestions and tasks land; inspect
+      `errorLogs`, grounding duplication, `reasoningTokens`, throughput and `context_build`.
+- [ ] Run the quality corpus through the current Nocheh stack and a pinned self-hosted Honcho
+      stack in strict chronological order. Record the Honcho server version, model setup and
+      every enabled background job.
+- [ ] Compare both retrieval outputs under the same token budget and answer model. Report a
+      separate native Honcho context/chat run rather than mixing its answer model into the
+      retrieval score.
+- [ ] Measure source-valid recall, answer accuracy, stale facts, duplicates, contradictions,
+      Persian, multi-hop and coaching quality; p50/p95/max context tokens and retrieval
+      latency; queue lag; ingest/query/maintenance calls, tokens and cost; database/index
+      growth; replay, deletion/export, backup/restore and provider/worker failure recovery.
+- [ ] Derive 10k/100k reasoning cost from measured representative batches and exact call/token
+      counts. Do not pay to send 100k private messages through a model merely to estimate it.
+- [ ] Produce a provisional three-column result: owned Nocheh, Honcho-primary, hybrid. Do not
+      write a production Honcho adapter and do not delete the graph during the spike.
 
-**Done when:** the four numbers above are written into this file, and Phase 1's before/after
-comparison has a baseline. **If the graph turns out to be empty or the contract is widely
-violated, the analyzer rewrite moves ahead of Phase 2.**
+**Done when:** the frozen manifest, aggregate result table and raw measurement method are
+recorded without private content. Phase 1 owes the final OpenAI-backed Nocheh rerun and the
+decision ADR. **If the graph is empty, the contract is widely violated, or either system
+crosses the secret gate, stop; later refactors cannot make that result trustworthy.**
 
 ---
 
@@ -58,8 +81,9 @@ calling. It is a day of work that changes every later estimate, which is why it 
       `image_understanding`, `audio_understanding`, `secret_guard`, `embedding`.
 - [ ] Adapters: chat completions with `response_format: json_schema` generated from the same
       `as const` vocabularies the prompt renders, vision, transcription, embeddings.
-- [ ] Re-run Phase 0's measurements against OpenAI. Compare latency, throughput, warning
-      count, and dropped-item count directly.
+- [ ] Re-run Phase 0's complete Nocheh quality and cost pack against OpenAI. Compare recall,
+      grounded answers, latency, throughput, warning count and dropped-item count directly;
+      do not rerun Honcho unless its pinned configuration changed.
 - [ ] Decide whether `response_format: json_schema` replaces prompt-only vocabulary
       enforcement. Prompt-only works in tests; a schema makes it structural.
 - [ ] Re-grade the guard. `nvidia/nvidia-nemotron-nano-9b-v2` caught every planted secret
@@ -67,10 +91,14 @@ calling. It is a day of work that changes every later estimate, which is why it 
       and must not be used. Whatever fills the role must pass the same planted-secret set.
 - [ ] Decide whether the perception model should return a confidence-weighted summary rather
       than near-verbatim OCR, given it reproduces credentials it was told to omit.
+- [ ] Apply ADR-0017's frozen gates to the final result and write the follow-up ADR selecting
+      exactly one production branch: owned memory, Honcho-primary semantic memory, or hybrid.
+      State which graph responsibilities remain and which are retired; do not leave two
+      implicit sources of truth.
 
 **Done when:** a role-by-role table of latency, throughput and cost for both providers is in
-this file, and `FLUSH_SWEEP_INTERVAL_SECONDS` is set deliberately from the measured analysis
-latency rather than left at its default.
+this file, `FLUSH_SWEEP_INTERVAL_SECONDS` is set deliberately from measured analysis latency,
+and the memory-selection ADR is accepted. **Phase 2 is blocked until all three exist.**
 
 ---
 
@@ -141,24 +169,42 @@ visible and retryable rather than stuck.
 
 ---
 
-## Phase 4: Recall On pgvector, And Persian That Tokenises — 2–3 days
+## Phase 4: Implement The Selected Memory Backend — 2–5 days
 
-ADR-0015 puts the retrieval bet on owned rows. `lexical-score.ts` splits on
-`/[^a-z0-9]+/`, so Persian tokenises to nothing and 25% of the blended score is structurally
-zero for a multilingual owner. Both scoring constants are still guesses.
+ADR-0017 and the Phase 1 decision ADR choose this implementation. Do **not** implement all
+branches. Every branch has the same invariant: corpus growth may increase storage and index
+work, but it must not increase prompt context beyond the configured budget.
 
-- [ ] Vectors into pgvector, plaintext, with model id and dimension per row. Dimension is
-      not pinned by the schema — re-embedding is a replay.
-- [ ] Persian normalisation before both embedding and lexical scoring: ZWNJ, Arabic versus
-      Persian ye and kaf, digit forms, diacritics. Applied identically at index and query
-      time or the two will never match.
-- [ ] Measure the real cosine distribution over the corpus and set `DEFAULT_SIMILARITY_FLOOR`
-      (currently 0.3) and `DEFAULT_LEXICAL_WEIGHT` (currently 0.25) from data.
-- [ ] `POST /api/memory/reindex` becomes a replay of the embedding projection.
-- [ ] Assert a non-zero lexical score for a Farsi query against Farsi content.
+Common work:
 
-**Done when:** both constants are justified by a measured distribution written into this
-file, and a Farsi recall test passes that fails today.
+- [ ] Define the selected memory read/write ports in `src/application` before its adapter.
+      Keep provider types and Honcho SDK types out of the domain.
+- [ ] Give recent messages, typed facts/rules and optional narrative memory explicit context
+      sub-budgets. Trim within sections; never let a large memory section cut off the current
+      question by slicing one concatenated string.
+- [ ] Apply Persian normalisation consistently at ingest and query time: ZWNJ, Arabic versus
+      Persian ye and kaf, digit forms and diacritics.
+- [ ] Emit retrieval latency, returned-source count, context tokens, queue lag where relevant,
+      provider calls/tokens and estimated cost through the existing metrics and audit ports.
+- [ ] Preserve source ids in the answer context. Narrative conclusions may be labelled as
+      advisory, but they may not masquerade as stored `MemoryRecord`s.
+
+Only the selected branch:
+
+- [ ] **Owned:** vectors into pgvector with model id and dimension; measure the cosine
+      distribution before setting `DEFAULT_SIMILARITY_FLOOR` and `DEFAULT_LEXICAL_WEIGHT`;
+      make `POST /api/memory/reindex` a replay of the embedding projection.
+- [ ] **Honcho-primary:** add `PeerRepresentationPort` and a pinned self-hosted adapter;
+      map owner/person to peers and `conversation_id` to sessions; `observe` consumes only
+      guarded log rows and `recall` returns labelled conclusions plus every available remote
+      source/conclusion id. Add timeouts, queue-health metrics and a no-op fallback.
+- [ ] **Hybrid:** implement both adapters with fixed separate budgets. Typed Nocheh state wins
+      factual conflicts; Honcho remains advisory; surface disagreement instead of silently
+      choosing or writing Honcho conclusions into the graph.
+
+**Done when:** the selected branch passes Phase 0's Persian, temporal, contradiction and
+source-valid recall gates; p95 retrieval and maximum context stay inside the frozen limits at
+the 1k and 10k fixture sizes; and measured/projected cost stays inside the owner's ceiling.
 
 ---
 
@@ -166,11 +212,14 @@ file, and a Farsi recall test passes that fails today.
 
 ADR-0016. Nothing answers today: no `sendMessage`, `AssistantAiPort` unimplemented,
 `AssistantReplyMode` branched on by nothing, no reply field in any contract, no scheduler.
-This phase depends on Phase 1 and Phase 2 only, and can ship before Phase 3 if needed.
+This phase depends on the Phase 1 memory decision and Phase 2. It may ship before Phase 3
+only if the selected backend can consume the existing post-guard path without bypassing the
+secret gate or creating an unreplayable second source of truth.
 
 - [ ] `AnswerQuestionUseCase`: grounding under a token budget → its own small reply contract
       → answer text, source ids, confidence, explicit "I don't know". Never writes memory.
-- [ ] Answers cite the record and node ids they were built from.
+- [ ] Answers cite the local record/node ids and any remote conclusion/source ids they were
+      built from. Advisory narrative context is visibly distinguished from typed fact.
 - [ ] `TelegramClientPort.sendMessage`.
 - [ ] `OutboundDeliveryService` as the single egress. Every send writes an audit record with
       what, to whom, why, which policy allowed it, and whether a human approved it.
@@ -213,34 +262,56 @@ egress with the model provider unreachable.
 
 ---
 
-## Phase 8: Consolidation Sweep — 3–5 days
+## Phase 8: Maintain The Selected Memory — 3–5 days
 
-ADR-0015 accepted this as owned work. Without it the graph accretes: `superseded` exists as
-a status and is only ever set when a model happens to emit a status update for a window.
-Nothing sweeps for contradictions, redundancy, or staleness.
+The long-term side effects depend on the Phase 1 choice. Maintenance is incremental,
+budgeted and observable; no backend receives permission to rescan an unbounded corpus on a
+schedule without a cursor, candidate selector and cost ceiling.
 
-- [ ] Scheduled projection over the graph: contradiction detection, duplicate merging,
-      supersession **with history preserved**, confidence decay.
-- [ ] Every consolidation writes an audit record and is reversible.
-- [ ] Surface contradictions in the dashboard rather than resolving them silently.
+- [ ] **Owned:** scheduled projection over affected graph neighborhoods for contradiction
+      detection, duplicate merging, supersession **with history preserved** and confidence
+      decay. Do not full-scan the graph on every run.
+- [ ] **Honcho-primary:** monitor derivation/dream queue age, last successful maintenance,
+      duplicate/stale conclusion rate, provider failures and per-run tokens/cost. Verify
+      export, deletion and rebuild procedures against the pinned version.
+- [ ] **Hybrid:** run the owned typed-fact maintenance and Honcho health checks; detect and
+      surface cross-backend contradictions with the typed graph taking factual precedence.
+- [ ] Every local consolidation is audited and reversible. Any irreversible remote mutation
+      is rejected or preceded by an auditable snapshot/reference that permits rebuild from
+      the guarded log.
+- [ ] Enforce daily and per-run model-call/token ceilings. Exceeding a ceiling pauses
+      maintenance and raises visible lag; it never silently starts a second run.
+- [ ] Surface contradictions, stale memory, projection/worker lag and last successful run in
+      the dashboard rather than resolving or hiding them silently.
+
+**Done when:** a maintenance run changes only its selected candidates, a repeated run is
+idempotent, failure leaves replayable state, and the monthly maintenance projection remains
+inside the Phase 0 cost ceiling.
 
 ---
 
-## Phase 9: The Honcho Spike — 2 days, conditional
+## Phase 9: Long-Horizon Proof — 2–3 days
 
-Only if Phase 4 shows recall is still poor after tuning, or coaching visibly needs inference
-across months rather than extraction within a window. Gated by ADR-0015's named test.
+Phase 0 selected an architecture using prototypes. This phase tests the production
+implementation before it is called durable.
 
-- [ ] Scratch self-hosted instance. Import ~300 real Farsi messages from the log in
-      chronological order.
-- [ ] Read `POST /conclusions/list` and `POST /conclusions/query` directly and answer three
-      questions: are conclusions in Farsi or silently translated, are they self-contained,
-      does a Farsi query retrieve them.
-- [ ] Verify the endpoint supports OpenAI tool calling — the Dreamer and Dialectic require
-      it, and without the Dreamer only flat `explicit` extraction remains.
-- [ ] If all pass: `PeerRepresentationPort` returning strings, wired as one projection
-      (`observe`) plus one grounding section (`recall`). The graph stays the record of fact;
-      conclusions are advisory. If any fails: delete the spike, ADR-0015 stands.
+- [ ] Replay the full available guarded history and the deterministic 1k/10k fixtures through
+      every selected projection. Load the 100k fixture through storage/index/retrieval and
+      measure representative projection batches instead of paying to reason over all 100k.
+      Do not send private fixtures to a hosted service.
+- [ ] Re-run the frozen Phase 0 question set and report quality deltas, not only the final
+      score. Investigate every stale correction, invalid source and new duplicate.
+- [ ] Assert that maximum prompt context is unchanged across corpus sizes and that p95
+      retrieval, queue lag, database/index size and projected monthly ingest/query/
+      maintenance cost remain inside the frozen gates.
+- [ ] Rehearse a model/embedding change, bounded replay, tombstone/delete, backup restore and
+      optional-memory outage. Verify no input is lost and no unsafe outbound send occurs.
+- [ ] Write the operating limits and failure runbook into `docs/deploy.md`: capacity,
+      expected lag, cost alarms, replay estimate, backup/restore and rollback procedure.
+
+**Done when:** the production memory passes the same predeclared gates that selected it,
+restore/replay has been demonstrated, and the owner has one measured monthly cost rather
+than an extrapolation from constants.
 
 ---
 

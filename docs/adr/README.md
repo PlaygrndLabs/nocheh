@@ -19,5 +19,6 @@ supersedes an earlier one.
 | [0012](0012-wiring-recall-into-analysis.md) | Recall grounds analysis: context built post-guard, graph seeded from recalled memory | Yes, extends 0011 and 0004 |
 | [0013](0013-importer-core-message-log-projections.md) | Importer core: one guarded append-only message log, replayable projections with cursors | Yes, replaces the buffer from 0004 |
 | [0014](0014-postgres-plaintext-at-rest-owner-column.md) | Postgres + pgvector, plaintext `jsonb` payloads, encryption kept only for credentials, `owner_id` everywhere | Yes, supersedes 0005 on engine and encryption |
-| [0015](0015-not-adopting-honcho-as-memory-layer.md) | Honcho rejected as the memory layer on evidence; own recall and own consolidation; spike gated by a named test | Yes |
+| [0015](0015-not-adopting-honcho-as-memory-layer.md) | Honcho rejected as the memory layer on evidence; own recall and own consolidation; spike gated by a named test | Current safe default; evaluation timing amended by 0017 |
 | [0016](0016-answer-path-outbound-delivery-approval-rule.md) | Reply contract, single audited egress, scheduler, rule 3 amended to bounded autonomous sending | Yes, amends rule 3 |
+| [0017](0017-memory-backend-evidence-gate.md) | Choose owned, Honcho-primary, or hybrid memory from an early frozen bake-off; the guarded log remains owned in every outcome | Yes, amends 0015 sequencing |
