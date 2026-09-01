@@ -24,6 +24,11 @@ export const BUILT_IN_SECRET_PATTERNS: readonly CompiledSecretPattern[] = [
   { kind: "access_token", regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
   { kind: "access_token", regex: /\b\d{8,10}:[A-Za-z0-9_-]{32,48}\b/g },
   { kind: "access_token", regex: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/gi },
+  // Generic secret-bearing environment assignments used by local tooling.
+  { kind: "access_token", regex: /\b[A-Z][A-Z0-9_]*(?:API_KEY|AUTH_TOKEN|AUTHTOKEN|ACCESS_TOKEN|TOKEN)\s*=\s*['"]?[^'"\s]+/g },
+  // A standalone short numeric message is commonly an OTP or pairing code. Losing an
+  // occasional numeric-only fact is safer than retaining an authentication token.
+  { kind: "access_token", regex: /^\s*\d{4,8}\s*$/g },
 
   // Connection secrets: DB/broker URIs, any credentials-in-URL, and inbound webhooks.
   { kind: "connection_secret", regex: /\b(?:postgres|postgresql|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqps?|mssql|sqlserver|clickhouse):\/\/[^\s]+/gi },
@@ -32,7 +37,7 @@ export const BUILT_IN_SECRET_PATTERNS: readonly CompiledSecretPattern[] = [
   { kind: "connection_secret", regex: /\bhttps:\/\/discord(?:app)?\.com\/api\/webhooks\/[A-Za-z0-9/_-]+/gi },
 
   // Passwords, passphrases, and client secrets given as key/value assignments.
-  { kind: "password", regex: /\b(?:password|passwd|pwd|passphrase|secret|client[_-]?secret)\s*[:=]\s*['"]?[^'"\s]{6,}/gi },
+  { kind: "password", regex: /\b(?:password|passwd|pwd|pass|passphrase|secret|client[_-]?secret)\s*[:=]\s*['"]?[^'"\s]+/gi },
 
   // Crypto seed / recovery phrases (11-23 words after the label).
   { kind: "seed_phrase", regex: /\b(?:seed phrase|mnemonic|(?:secret )?recovery phrase)\s*[:=]\s*(?:[a-z]+[\s,]+){11,23}[a-z]+\b/gi },

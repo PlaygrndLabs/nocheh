@@ -16,6 +16,22 @@ answer model.
 
 ## Build The Pack
 
+Keep the raw Telegram export outside the repository. Prepare a guarded text-only corpus with
+the configured secret-guard provider (or an explicit temporary model id):
+
+```bash
+npm run benchmark:memory -- prepare-telegram \
+  /absolute/path/to/result.json \
+  data/memory-benchmark/private-v1 \
+  nvidia/nemotron-3.5-lightning-30b-a3b
+```
+
+The command ignores every referenced media file, applies deterministic patterns before the
+provider call, checks Persian password and recovery-phrase canaries, retries bounded batches,
+and writes nothing until every batch validates. It records only guarded `corpus.jsonl` plus
+secret-free preparation metadata. Run `probe-guard <model-id>` to test a replacement model
+without sending private corpus text.
+
 Copy `memory-benchmark-manifest.template.json` into the ignored private directory. Replace
 every placeholder and choose the cost and quality thresholds before the first run. Then add:
 

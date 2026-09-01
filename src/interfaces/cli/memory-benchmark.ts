@@ -1,8 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { TextCompletionPort } from "../../application/ports/text-completion.js";
 import { createMemoryBenchmarkReport } from "../../application/services/memory-benchmark-service.js";
 import { MemoryBenchmarkService } from "../../application/services/memory-benchmark-service.js";
+import {
+  aiProviderRoleSupport,
+  findAiModelRole,
+  findAiProvider,
+} from "../../application/config/ai-provider-catalog.js";
 import type {
   MemoryBenchmarkManifest,
   MemoryBenchmarkMessage,
@@ -21,6 +27,14 @@ import {
   saltedMemoryBenchmarkCorpusSha256,
 } from "../../infrastructure/evaluation/memory-benchmark-fixture.js";
 import { RegexSecretDetector } from "../../infrastructure/security/regex-secret-detector.js";
+import { LlmSecretDetector } from "../../infrastructure/security/llm-secret-detector.js";
+import { DEFAULT_REDACTION_POLICY } from "../../domain/security/redaction-policy.js";
+import { ConsoleLogger } from "../../infrastructure/logger/console-logger.js";
+import { DotenvFileStore } from "../../infrastructure/config/dotenv-file-store.js";
+import { OpenAiCompatibleTextCompletion } from "../../infrastructure/reasoning/openai-compatible-text-completion.js";
+import { GeminiTextCompletion } from "../../infrastructure/reasoning/gemini-text-completion.js";
+import { AnthropicTextCompletion } from "../../infrastructure/reasoning/anthropic-text-completion.js";
+import { prepareTelegramMemoryBenchmarkCorpus } from "../../infrastructure/evaluation/telegram-memory-benchmark-preparer.js";
 import {
   HonchoMemoryBenchmarkBackend,
   SdkHonchoBenchmarkClient,
@@ -33,6 +47,12 @@ interface CapturedBenchmarkRun {
   readonly completedAt: string;
   readonly preparation: MemoryBenchmarkPreparation;
   readonly recalls: readonly MemoryBenchmarkRecall[];
+}
+
+interface GuardCompletionRuntime {
+  readonly completion: TextCompletionPort;
+  readonly providerId: string;
+  readonly modelId: string;
 }
 
 export async function runMemoryBenchmarkCli(args: readonly string[]): Promise<void> {
@@ -50,15 +70,206 @@ export async function runMemoryBenchmarkCli(args: readonly string[]): Promise<vo
     case "run-honcho":
       await runHoncho(rest);
       return;
+    case "prepare-telegram":
+      await prepareTelegram(rest);
+      return;
+    case "probe-guard":
+      await probeGuard(rest);
+      return;
     default:
       throw new Error([
         "Usage:",
+        "  memory-benchmark prepare-telegram <telegram-result.json> <output-directory> [guard-model-id]",
+        "  memory-benchmark probe-guard <guard-model-id>",
         "  memory-benchmark generate-scale <1000|10000|100000> [output-directory]",
         "  memory-benchmark validate <manifest.json> <corpus.jsonl> <questions.json>",
         "  memory-benchmark score <manifest.json> <corpus.jsonl> <questions.json> <captured-run.json> <report.json>",
         "  memory-benchmark run-honcho <manifest.json> <corpus.jsonl> <questions.json> <report.json> [system-id]",
       ].join("\n"));
   }
+}
+
+async function prepareTelegram(args: readonly string[]): Promise<void> {
+  if (args.length !== 2 && args.length !== 3) {
+    throw new Error(`Expected 2 paths and an optional guard model id, received ${args.length} arguments`);
+  }
+  const exportPath = requiredPath(args, 0);
+  const outputDirectory = requiredPath(args, 1);
+  const guardModelOverride = args[2];
+  const rawExport = parseJson<unknown>(await readFile(exportPath, "utf8"), exportPath);
+  const fileEnv = await new DotenvFileStore(resolve(".env")).read();
+  const logger = new ConsoleLogger();
+  const guardRuntime = createRequiredGuardCompletion(fileEnv, guardModelOverride);
+  const guard = new LlmSecretDetector(
+    guardRuntime.completion,
+    { currentRedactionPolicy: () => DEFAULT_REDACTION_POLICY },
+    logger,
+    {
+      maxInputCharacters: positiveEnvNumber(fileEnv, "SECRET_GUARD_MAX_INPUT_CHARACTERS", 24_000),
+      maxOutputTokens: positiveEnvNumber(fileEnv, "SECRET_GUARD_MAX_OUTPUT_TOKENS", 4000),
+    },
+  );
+  await assertSecretGuardCanary(guard);
+  const preparation = await prepareTelegramMemoryBenchmarkCorpus(
+    rawExport,
+    new RegexSecretDetector(),
+    guard,
+  );
+  const first = preparation.messages[0];
+  const last = preparation.messages[preparation.messages.length - 1];
+  if (first === undefined || last === undefined) {
+    throw new Error("Telegram export contains no text-bearing messages");
+  }
+
+  await mkdir(outputDirectory, { recursive: true });
+  const corpusPath = join(outputDirectory, "corpus.jsonl");
+  const metadataPath = join(outputDirectory, "preparation.json");
+  await writeFile(corpusPath, `${preparation.messages.map((message) => JSON.stringify(message)).join("\n")}\n`, "utf8");
+  await writeFile(metadataPath, `${JSON.stringify({
+    schemaVersion: 1,
+    kind: "telegram_private_pilot",
+    messageCount: preparation.messages.length,
+    occurredAtStart: first.occurredAt,
+    occurredAtEnd: last.occurredAt,
+    patternFindingCount: preparation.patternFindingCount,
+    guardFindingCount: preparation.guardFindingCount,
+    guardProviderId: guardRuntime.providerId,
+    guardModelId: guardRuntime.modelId,
+    mediaBytesRead: 0,
+  }, null, 2)}\n`, "utf8");
+  process.stdout.write(`${JSON.stringify({ corpusPath, metadataPath, messageCount: preparation.messages.length }, null, 2)}\n`);
+}
+
+async function assertSecretGuardCanary(guard: LlmSecretDetector): Promise<void> {
+  const password = "bluebird77";
+  const seedPhrase = "apple bridge candle drift eagle forest garden harbor island jungle kitten lemon";
+  const clean = "The project name is Nocheh and the deadline is Friday.";
+  const results = await guard.redactMany([
+    `رمز وای‌فای ${password} است`,
+    `My recovery words are ${seedPhrase}`,
+    clean,
+  ]);
+  if (results.length !== 3) throw new Error("Secret guard canary returned the wrong result count");
+  if (results[0]?.text.includes(password) !== false || results[0].findings.length === 0) {
+    throw new Error("Secret guard canary missed a prose password; refusing private corpus preparation");
+  }
+  if (results[1]?.text.includes(seedPhrase) !== false || results[1].findings.length === 0) {
+    throw new Error("Secret guard canary missed a recovery phrase; refusing private corpus preparation");
+  }
+  if (results[2]?.text !== clean || results[2].findings.length !== 0) {
+    throw new Error("Secret guard canary altered clean text; refusing private corpus preparation");
+  }
+}
+
+async function probeGuard(args: readonly string[]): Promise<void> {
+  if (args.length !== 1) throw new Error("Expected one guard model id");
+  const model = args[0];
+  if (model === undefined || model.trim().length === 0) throw new Error("Guard model id cannot be empty");
+  const fileEnv = await new DotenvFileStore(resolve(".env")).read();
+  const guardRuntime = createRequiredGuardCompletion(fileEnv, model);
+  const guard = new LlmSecretDetector(
+    guardRuntime.completion,
+    { currentRedactionPolicy: () => DEFAULT_REDACTION_POLICY },
+    new ConsoleLogger(),
+    { maxInputCharacters: 24_000, maxOutputTokens: 4000 },
+  );
+  const probes = [
+    { id: "english_password", text: "The wifi password is bluebird77", literal: "bluebird77", kind: "password" },
+    { id: "persian_password", text: "رمز وای‌فای من آبی‌پرنده۷۷ است", literal: "آبی‌پرنده۷۷", kind: "password" },
+    { id: "seed_phrase", text: "My recovery words are apple bridge candle dream eagle forest garden harbor island jungle kitten lemon", literal: "apple bridge candle dream eagle forest garden harbor island jungle kitten lemon", kind: "seed_phrase" },
+    { id: "clean_prose", text: "The project deadline is Friday and the budget is twenty dollars", literal: "", kind: "" },
+  ] as const;
+  const results = await guard.redactMany(probes.map((probe) => probe.text));
+  assertProbeResultCount(results.length, probes.length);
+  const failures = probes.flatMap((probe, index) => {
+    const result = results[index];
+    if (result === undefined) return [probe.id];
+    if (probe.literal.length === 0) return result.findings.length === 0 ? [] : [probe.id];
+    const expectedPlaceholder = `[REDACTED:${probe.kind}]`;
+    return !result.text.includes(probe.literal) && result.text.includes(expectedPlaceholder) ? [] : [probe.id];
+  });
+  process.stdout.write(`${JSON.stringify({ model, passed: failures.length === 0, failedProbeIds: failures }, null, 2)}\n`);
+  if (failures.length > 0) process.exitCode = 1;
+}
+
+function assertProbeResultCount(actual: number, expected: number): void {
+  if (actual !== expected) throw new Error(`Guard returned ${actual} probe results for ${expected} inputs`);
+}
+
+function createRequiredGuardCompletion(
+  fileEnv: Readonly<Record<string, string>>,
+  modelOverride?: string,
+): GuardCompletionRuntime {
+  const role = findAiModelRole("secret_guard");
+  if (role === undefined) throw new Error("Secret guard role is missing from the provider catalog");
+  const providerId = environmentValue(fileEnv, role.providerEnvKey);
+  const provider = findAiProvider(providerId);
+  if (provider === undefined) {
+    throw new Error("AI_GUARD_PROVIDER must select a configured provider before preparing private data");
+  }
+  const support = aiProviderRoleSupport(provider, role.id);
+  if (support === undefined) throw new Error(`Provider ${provider.id} cannot fill the secret guard role`);
+  const apiKey = environmentValue(fileEnv, provider.apiKeyEnvKey);
+  const model = modelOverride?.trim() || (environmentValue(fileEnv, support.modelEnvKey) ?? support.defaultModel);
+  if (apiKey === undefined || model === undefined) {
+    throw new Error(`Secret guard ${provider.id} requires ${provider.apiKeyEnvKey} and ${support.modelEnvKey}`);
+  }
+  const maxTokens = positiveEnvNumber(fileEnv, "SECRET_GUARD_MAX_OUTPUT_TOKENS", 4000);
+  const timeoutMs = positiveEnvNumber(fileEnv, "SECRET_GUARD_TIMEOUT_MS", 300_000);
+
+  switch (provider.id) {
+    case "nvidia": {
+      const baseUrl = environmentValue(fileEnv, "NVIDIA_BASE_URL");
+      return {
+        providerId: provider.id,
+        modelId: model,
+        completion: new OpenAiCompatibleTextCompletion({
+          provider: provider.id,
+          apiKey,
+          model,
+          maxTokens,
+          timeoutMs,
+          ...(baseUrl === undefined ? {} : { baseUrl }),
+        }),
+      };
+    }
+    case "gemini": {
+      const baseUrl = environmentValue(fileEnv, "GEMINI_BASE_URL");
+      return {
+        providerId: provider.id,
+        modelId: model,
+        completion: new GeminiTextCompletion({
+          apiKey,
+          model,
+          maxTokens,
+          timeoutMs,
+          ...(baseUrl === undefined ? {} : { baseUrl }),
+        }),
+      };
+    }
+    case "anthropic":
+      return {
+        providerId: provider.id,
+        modelId: model,
+        completion: new AnthropicTextCompletion({ apiKey, model, maxTokens, timeoutMs }),
+      };
+    default:
+      throw new Error(`Provider ${provider.id} has no secret guard adapter`);
+  }
+}
+
+function environmentValue(fileEnv: Readonly<Record<string, string>>, name: string): string | undefined {
+  const value = process.env[name]?.trim() || fileEnv[name]?.trim();
+  return value === undefined || value.length === 0 ? undefined : value;
+}
+
+function positiveEnvNumber(
+  fileEnv: Readonly<Record<string, string>>,
+  name: string,
+  fallback: number,
+): number {
+  const value = Number(environmentValue(fileEnv, name));
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 async function generateScale(args: readonly string[]): Promise<void> {
