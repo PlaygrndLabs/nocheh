@@ -294,6 +294,8 @@ export type {
   NochehMemoryBenchmarkBackendDependencies,
   NochehMemoryBenchmarkBackendOptions,
 } from "./infrastructure/evaluation/nocheh-memory-benchmark-backend.js";
+export { prepareTelegramMemoryBenchmarkCorpus } from "./infrastructure/evaluation/telegram-memory-benchmark-preparer.js";
+export type { TelegramMemoryBenchmarkPreparation } from "./infrastructure/evaluation/telegram-memory-benchmark-preparer.js";
 export { ConfigurableSecretDetector } from "./infrastructure/security/configurable-secret-detector.js";
 export { BUILT_IN_SECRET_PATTERNS } from "./infrastructure/security/built-in-secret-patterns.js";
 export { redactWithPatterns, redactLiterals, MINIMUM_LITERAL_SECRET_LENGTH } from "./infrastructure/security/redaction-engine.js";
@@ -396,7 +398,7 @@ export type { JsonHandler, JsonResult, RequestContext } from "./interfaces/http/
 export { createStaticHandler } from "./interfaces/http/create-static-handler.js";
 export { registerApiRoutes } from "./interfaces/http/api/register-api-routes.js";
 export type { ApiDependencies } from "./interfaces/http/api/register-api-routes.js";
-export { parseTelegramExport } from "./interfaces/http/api/create-history-routes.js";
+export { parseTelegramExport } from "./infrastructure/messaging/telegram/telegram-export-parser.js";
 export { createBrainRoutes } from "./interfaces/http/api/create-brain-routes.js";
 export { createConfigRoutes } from "./interfaces/http/api/create-config-routes.js";
 export { createNoteRoutes } from "./interfaces/http/api/create-note-routes.js";

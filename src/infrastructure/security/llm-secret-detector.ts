@@ -127,7 +127,10 @@ export class LlmSecretDetector implements SecretDetectorPort {
     try {
       parsed = JSON.parse(stripFence(response.trim()));
     } catch (error) {
-      throw new SecretGuardUnavailableError("Secret guard model returned output that is not JSON.", { cause: error });
+      parsed = extractSegmentsJsonObject(response);
+      if (parsed === undefined) {
+        throw new SecretGuardUnavailableError("Secret guard model returned output that is not JSON.", { cause: error });
+      }
     }
 
     if (typeof parsed !== "object" || parsed === null) {
@@ -192,6 +195,44 @@ function truncate(text: string, maxLength: number): string {
 function stripFence(text: string): string {
   const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
   return match?.[1] ?? text;
+}
+
+/** Accepts a balanced contract object surrounded by provider reasoning, without logging it. */
+function extractSegmentsJsonObject(text: string): unknown | undefined {
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === "\"") inString = false;
+        continue;
+      }
+      if (character === "\"") {
+        inString = true;
+        continue;
+      }
+      if (character === "{") depth += 1;
+      if (character !== "}") continue;
+      depth -= 1;
+      if (depth !== 0) continue;
+      try {
+        const candidate = JSON.parse(text.slice(start, index + 1)) as unknown;
+        if (typeof candidate === "object" && candidate !== null
+          && Array.isArray((candidate as { readonly segments?: unknown }).segments)) {
+          return candidate;
+        }
+      } catch {
+        // Continue looking for another balanced object; provider reasoning may use braces.
+      }
+      break;
+    }
+  }
+  return undefined;
 }
 
 export function guardSystemPrompt(kinds: readonly SensitiveFindingKind[]): string {

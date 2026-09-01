@@ -182,6 +182,21 @@ test("a fenced JSON reply is accepted", async () => {
   assert.equal(result?.text, "password is [REDACTED:password]");
 });
 
+test("a balanced contract object after provider reasoning is accepted", async () => {
+  const { detector: guard } = detector([
+    "<think>Check each segment carefully without repeating its contents.</think>",
+    '{"segments":[{"id":0,"findings":[{"kind":"password","value":"bluebird77"}]}]}',
+  ].join("\n"));
+
+  const [result] = await guard.redactMany(["password is bluebird77"]);
+  assert.equal(result?.text, "password is [REDACTED:password]");
+});
+
+test("an unrelated JSON object does not replace the required guard contract", async () => {
+  const { detector: guard } = detector('analysis {"status":"done"} but no guard contract');
+  await assert.rejects(guard.redactMany(["text"]), /not JSON/);
+});
+
 test("disabling every category skips the call entirely", async () => {
   const provider = new StubPolicyProvider();
   provider.policy = {

@@ -67,6 +67,33 @@ test("redacts bearer authorization headers", () => {
   assert.doesNotMatch(result.text, /abcdefghijklmnopqrstuvwxyz123456/);
 });
 
+test("redacts short pass fields used by local development accounts", () => {
+  const detector = new RegexSecretDetector();
+
+  const result = detector.redact("user: demo@example.test\npass: a");
+
+  assert.equal(result.findings[0]?.kind, "password");
+  assert.equal(result.text, "user: demo@example.test\n[REDACTED:password]");
+});
+
+test("redacts generic token environment assignments", () => {
+  const detector = new RegexSecretDetector();
+
+  const result = detector.redact("NGROK_AUTHTOKEN=fake_token_value_123456");
+
+  assert.equal(result.findings[0]?.kind, "access_token");
+  assert.equal(result.text, "[REDACTED:access_token]");
+});
+
+test("redacts a standalone one-time code", () => {
+  const detector = new RegexSecretDetector();
+
+  const result = detector.redact("274307");
+
+  assert.equal(result.findings[0]?.kind, "access_token");
+  assert.equal(result.text, "[REDACTED:access_token]");
+});
+
 test("redacts database URIs with embedded credentials", () => {
   const detector = new RegexSecretDetector();
   const secret = "postgres://admin:s3cr3tpw@db.example.com:5432/app";
