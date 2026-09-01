@@ -16,6 +16,8 @@ export type MemoryBenchmarkCategory = typeof MEMORY_BENCHMARK_CATEGORIES[number]
 export interface MemoryBenchmarkMessage {
   readonly id: string;
   readonly conversationId: string;
+  readonly senderId: string;
+  readonly senderDisplayName?: string;
   readonly occurredAt: string;
   readonly text: string;
   readonly language: "en" | "fa" | "mixed";
@@ -80,6 +82,9 @@ export interface MemoryBenchmarkManifest {
 }
 
 export interface MemoryBenchmarkEvidence {
+  /** Stable local/remote memory item id, used to detect duplicate retrieval results. */
+  readonly evidenceId: string;
+  /** Original guarded corpus message id. Empty when a backend cannot prove provenance. */
   readonly sourceId: string;
   readonly text: string;
 }
@@ -112,6 +117,8 @@ export interface MemoryBenchmarkPreparation {
   readonly databaseBytes: number;
   readonly indexBytes: number;
   readonly usage: MemoryBenchmarkUsage;
+  /** Backend-specific numeric diagnostics with no private content. */
+  readonly observations: Readonly<Record<string, number>>;
   /** Derived from measured representative batches and declared workload, never guessed. */
   readonly projectedMonthlyCostUsd?: number;
 }
@@ -215,6 +222,9 @@ export function validateMemoryBenchmarkManifest(manifest: MemoryBenchmarkManifes
       if (typeof value === "string" && looksLikeSecret(value)) {
         issues.push(`systems[${index}].configuration.${key} looks like a secret value`);
       }
+      if (typeof value === "string") {
+        rejectPlaceholder(value, `systems[${index}].configuration.${key}`, issues);
+      }
     }
     for (const [key, value] of Object.entries(system.modelIds)) {
       requiredText(value, `systems[${index}].modelIds.${key}`, issues);
@@ -268,6 +278,7 @@ export function validateMemoryBenchmarkCorpus(
   for (const [index, message] of messages.entries()) {
     requiredText(message.id, `messages[${index}].id`, issues);
     requiredText(message.conversationId, `messages[${index}].conversationId`, issues);
+    requiredText(message.senderId, `messages[${index}].senderId`, issues);
     requiredText(message.text, `messages[${index}].text`, issues);
     if (message.language !== "en" && message.language !== "fa" && message.language !== "mixed") {
       issues.push(`messages[${index}].language is invalid`);

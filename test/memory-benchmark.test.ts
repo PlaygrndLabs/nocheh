@@ -31,6 +31,7 @@ class CapturedBackend implements MemoryBenchmarkBackendPort {
       databaseBytes: 1_024,
       indexBytes: 512,
       usage: zeroUsage,
+      observations: {},
       projectedMonthlyCostUsd: 4,
     };
   }
@@ -39,9 +40,9 @@ class CapturedBackend implements MemoryBenchmarkBackendPort {
     return {
       questionId: question.id,
       evidence: [
-        { sourceId: "m-current", text: "بودجه فعلی 20000 USD است و گزارش باید کوتاه و فارسی باشد." },
-        { sourceId: "m-current", text: "duplicate transport result" },
-        { sourceId: "invented", text: "untraceable but otherwise harmless" },
+        { evidenceId: "record-1", sourceId: "m-current", text: "بودجه فعلی 20000 USD است و گزارش باید کوتاه و فارسی باشد." },
+        { evidenceId: "record-1", sourceId: "m-current", text: "duplicate transport result" },
+        { evidenceId: "record-2", sourceId: "invented", text: "untraceable but otherwise harmless" },
       ],
       context: "not copied into report",
       contextTokens: 120,
@@ -109,6 +110,7 @@ test("runner keeps raw private content out of its report and scores provenance s
   const report = await new MemoryBenchmarkService(new RegexSecretDetector()).run({
     manifest: baseManifest(),
     manifestSha256: "a".repeat(64),
+    corpusSaltedSha256: baseManifest().corpus.saltedSha256,
     messages,
     questions: [{
       id: "q-budget",
@@ -153,6 +155,7 @@ test("runner stops before a backend sees corpus text that fails the local secret
     new MemoryBenchmarkService(new RegexSecretDetector()).run({
       manifest,
       manifestSha256: "b".repeat(64),
+      corpusSaltedSha256: manifest.corpus.saltedSha256,
       messages,
       questions: [{
         id: "q-1",
@@ -173,6 +176,7 @@ function baseMessages(): readonly MemoryBenchmarkMessage[] {
     {
       id: "m-old",
       conversationId: "private-1",
+      senderId: "owner",
       occurredAt: "2026-01-01T00:00:00.000Z",
       text: "old private text",
       language: "en",
@@ -180,6 +184,7 @@ function baseMessages(): readonly MemoryBenchmarkMessage[] {
     {
       id: "m-current",
       conversationId: "private-1",
+      senderId: "owner",
       occurredAt: "2026-02-01T00:00:00.000Z",
       text: "current private text",
       language: "mixed",

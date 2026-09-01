@@ -45,6 +45,8 @@ export function saltedMemoryBenchmarkCorpusSha256(
     hash.update(JSON.stringify([
       message.id,
       message.conversationId,
+      message.senderId,
+      message.senderDisplayName ?? null,
       message.occurredAt,
       message.language,
       message.text,
@@ -68,6 +70,8 @@ function syntheticMessage(index: number, seed: string): MemoryBenchmarkMessage {
   const base = {
     id: sourceId(block, position),
     conversationId: `synthetic-${block % 4}`,
+    senderId: "synthetic-owner",
+    senderDisplayName: "Synthetic Owner",
     occurredAt,
   } as const;
 

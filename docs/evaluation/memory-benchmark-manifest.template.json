@@ -36,7 +36,12 @@
       "id": "honcho-self-hosted",
       "version": "PIN_BEFORE_RUN",
       "configuration": {
-        "reasoningEnabled": true
+        "reasoningEnabled": true,
+        "baseUrl": "http://127.0.0.1:8000",
+        "workspaceId": "REPLACE_WITH_FRESH_WORKSPACE_ID",
+        "ingestBatchSize": 100,
+        "searchLimit": 20,
+        "queueTimeoutMs": 600000
       },
       "modelIds": {
         "representation": "PIN_BEFORE_RUN",
