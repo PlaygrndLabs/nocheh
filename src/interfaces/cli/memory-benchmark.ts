@@ -450,8 +450,11 @@ async function runNocheh(args: readonly string[]): Promise<void> {
   const system = manifest.systems.find((candidate) => candidate.id === requestedSystemId);
   if (system === undefined) throw new Error(`System ${requestedSystemId} is absent from the frozen manifest`);
   const fileEnv = await new DotenvFileStore(resolve(".env")).read();
-  const provider = findAiProvider(environmentValue(fileEnv, "AI_PROVIDER"));
-  if (provider?.id !== "nvidia") throw new Error("run-nocheh currently requires AI_PROVIDER=nvidia");
+  const provider = findAiProvider(optionalStringConfiguration(system.configuration, "analysisProvider")
+    ?? environmentValue(fileEnv, "AI_PROVIDER"));
+  if (provider?.id !== "nvidia" && provider?.id !== "openai") {
+    throw new Error("run-nocheh requires analysisProvider nvidia or openai");
+  }
   const apiKey = environmentValue(fileEnv, provider.apiKeyEnvKey);
   if (apiKey === undefined) throw new Error(`${provider.apiKeyEnvKey} is required to run Nocheh`);
   const logger = new ConsoleLogger();
@@ -486,9 +489,13 @@ async function runNocheh(args: readonly string[]): Promise<void> {
       ),
       new NvidiaMemoryGraphAnalyzer({
         apiKey,
+        provider: provider.id,
         model: stringModelId(system.modelIds, "textAnalysis"),
         maxTokens: analysisOutputTokenLimit(system.configuration),
         logger,
+        ...(provider.id === "openai"
+          ? { baseUrl: environmentValue(fileEnv, "OPENAI_BASE_URL") ?? "https://api.openai.com/v1/chat/completions" }
+          : {}),
       }),
       tasks,
       records,
@@ -591,6 +598,14 @@ function stringModelId(modelIds: Readonly<Record<string, string>>, key: string):
     throw new Error(`Nocheh system modelIds requires configured ${key}`);
   }
   return value;
+}
+
+function optionalStringConfiguration(
+  configuration: Readonly<Record<string, string | number | boolean>>,
+  key: string,
+): string | undefined {
+  const value = configuration[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function analysisOutputTokenLimit(configuration: Readonly<Record<string, string | number | boolean>>): number {

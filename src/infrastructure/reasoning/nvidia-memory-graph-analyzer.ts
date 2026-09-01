@@ -16,7 +16,7 @@ import {
 import { DEFAULT_MODEL_REQUEST_TIMEOUT_MS, fetchWithTimeout } from "../http/fetch-with-timeout.js";
 import { NoopLogger, type LoggerPort } from "../../application/ports/logger.js";
 
-const PROVIDER = "nvidia";
+const DEFAULT_PROVIDER = "nvidia";
 
 /** NVIDIA API catalog is OpenAI-compatible. */
 export const NVIDIA_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -33,6 +33,8 @@ const ANALYSIS_REQUEST_TIMEOUT_MS = 280_000;
 
 export interface NvidiaMemoryGraphAnalyzerConfig {
   readonly apiKey: string;
+  /** Labels token usage and errors when another OpenAI-compatible API is selected. */
+  readonly provider?: string;
   /** Model id as listed by GET /v1/models, for example z-ai/glm-5.2. */
   readonly model: string;
   readonly baseUrl?: string;
@@ -84,6 +86,7 @@ interface OpenAiCompatibleResponse {
  */
 export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   private readonly apiKey: string;
+  private readonly provider: string;
   private readonly model: string;
   private readonly baseUrl: string;
   private readonly minimumConfidence: number;
@@ -96,6 +99,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
 
   public constructor(config: NvidiaMemoryGraphAnalyzerConfig) {
     this.apiKey = config.apiKey;
+    this.provider = config.provider ?? DEFAULT_PROVIDER;
     this.model = config.model;
     this.baseUrl = config.baseUrl ?? NVIDIA_DEFAULT_BASE_URL;
     this.minimumConfidence = config.minimumConfidence ?? DEFAULT_MINIMUM_CONFIDENCE;
@@ -132,19 +136,19 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
         authorization: `Bearer ${this.apiKey}`,
       },
       body,
-    }, { timeoutMs: this.timeoutMs, label: "NVIDIA analysis" });
+    }, { timeoutMs: this.timeoutMs, label: `${providerLabel(this.provider)} analysis` });
 
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`NVIDIA response failed with status ${response.status}: ${text}`);
+      throw new Error(`${providerLabel(this.provider)} response failed with status ${response.status}: ${text}`);
     }
 
     const parsed = JSON.parse(text) as OpenAiCompatibleResponse;
-    const usage = tokenUsage(parsed, this.model);
+    const usage = tokenUsage(parsed, this.provider, this.model);
     // Throughput is the number that decides whether a slow window is the endpoint or
     // the model: 3194 output tokens in 240s is 13 tokens/second, which no prompt change
     // will fix. Logged per call because it cannot be reconstructed after the fact.
-    this.logger.info("NVIDIA analysis completed", {
+    this.logger.info(`${providerLabel(this.provider)} analysis completed`, {
       model: this.model,
       latencyMs: Date.now() - startedAt,
       promptChars: system.length + user.length,
@@ -155,7 +159,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     });
     return buildMemoryGraphAnalysis({
       rawOutput: this.parseOutput(parsed),
-      provider: PROVIDER,
+      provider: this.provider,
       minimumConfidence: this.minimumConfidence,
       // Source references are resolved from the window, never taken from the model.
       window: input.window,
@@ -173,7 +177,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     const content = choice?.message?.content ?? "";
     const truncated = choice?.finish_reason === "length";
     const budgetError = new Error(
-      `NVIDIA response hit the ${this.maxTokens} output token limit before completing its JSON. Raise MAX_AI_OUTPUT_TOKENS or shrink the analysis window.`,
+      `${providerLabel(this.provider)} response hit the ${this.maxTokens} output token limit before completing its JSON. Raise MAX_AI_OUTPUT_TOKENS or shrink the analysis window.`,
     );
 
     if (content.trim().length === 0 && truncated) {
@@ -190,13 +194,13 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   }
 }
 
-function tokenUsage(response: OpenAiCompatibleResponse, model: string): AiTokenUsage | undefined {
+function tokenUsage(response: OpenAiCompatibleResponse, provider: string, model: string): AiTokenUsage | undefined {
   const usage = response.usage;
   if (usage === undefined) {
     return undefined;
   }
   return createTokenUsage(
-    PROVIDER,
+    provider,
     model,
     usage.prompt_tokens ?? 0,
     usage.completion_tokens ?? 0,
@@ -223,4 +227,8 @@ function reasoningTokens(response: OpenAiCompatibleResponse): number | undefined
 
 function throughput(outputTokens: number, elapsedMs: number): number {
   return elapsedMs <= 0 ? 0 : Math.round((outputTokens / elapsedMs) * 1000 * 10) / 10;
+}
+
+function providerLabel(provider: string): string {
+  return provider === "nvidia" ? "NVIDIA" : provider;
 }

@@ -430,6 +430,17 @@ function createMemoryGraphAnalyzer(): MemoryGraphAnalyzerPort {
         ...(process.env.NVIDIA_JSON_RESPONSE_FORMAT === "false" ? { jsonResponseFormat: false } : {}),
       });
     }
+    case "openai": {
+      const baseUrl = trimmedEnv("OPENAI_BASE_URL") ?? "https://api.openai.com/v1/chat/completions";
+      return new NvidiaMemoryGraphAnalyzer({
+        apiKey,
+        provider: provider.id,
+        model,
+        maxTokens,
+        logger,
+        baseUrl,
+      });
+    }
     case "anthropic":
       return new AnthropicMemoryGraphAnalyzer({ apiKey, model, maxTokens, logger });
     default:

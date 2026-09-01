@@ -128,6 +128,20 @@ export const AI_PROVIDERS: readonly AiProviderDescriptor[] = [
     },
   },
   {
+    id: "openai",
+    label: "OpenAI API",
+    apiKeyEnvKey: "OPENAI_API_KEY",
+    optionalEnvKeys: ["OPENAI_BASE_URL"],
+    notes: "OpenAI Chat Completions API. Use GPT-5 mini for bounded, cost-sensitive structured extraction pilots.",
+    roles: {
+      text_analysis: {
+        modelEnvKey: "OPENAI_MODEL",
+        defaultModel: "gpt-5-mini",
+        notes: "Balanced structured extraction model for the guarded benchmark pilot.",
+      },
+    },
+  },
+  {
     id: "anthropic",
     label: "Anthropic Claude",
     apiKeyEnvKey: "ANTHROPIC_API_KEY",
