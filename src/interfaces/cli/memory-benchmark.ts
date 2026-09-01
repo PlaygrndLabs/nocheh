@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createMemoryBenchmarkReport } from "../../application/services/memory-benchmark-service.js";
+import { MemoryBenchmarkService } from "../../application/services/memory-benchmark-service.js";
 import type {
   MemoryBenchmarkManifest,
   MemoryBenchmarkMessage,
@@ -20,6 +21,10 @@ import {
   saltedMemoryBenchmarkCorpusSha256,
 } from "../../infrastructure/evaluation/memory-benchmark-fixture.js";
 import { RegexSecretDetector } from "../../infrastructure/security/regex-secret-detector.js";
+import {
+  HonchoMemoryBenchmarkBackend,
+  SdkHonchoBenchmarkClient,
+} from "../../infrastructure/evaluation/honcho-memory-benchmark-backend.js";
 
 interface CapturedBenchmarkRun {
   readonly backendId: string;
@@ -42,12 +47,16 @@ export async function runMemoryBenchmarkCli(args: readonly string[]): Promise<vo
     case "score":
       await scoreCapturedRun(rest);
       return;
+    case "run-honcho":
+      await runHoncho(rest);
+      return;
     default:
       throw new Error([
         "Usage:",
         "  memory-benchmark generate-scale <1000|10000|100000> [output-directory]",
         "  memory-benchmark validate <manifest.json> <corpus.jsonl> <questions.json>",
         "  memory-benchmark score <manifest.json> <corpus.jsonl> <questions.json> <captured-run.json> <report.json>",
+        "  memory-benchmark run-honcho <manifest.json> <corpus.jsonl> <questions.json> <report.json> [system-id]",
       ].join("\n"));
   }
 }
@@ -140,6 +149,54 @@ async function scoreCapturedRun(args: readonly string[]): Promise<void> {
   process.stdout.write(`${reportPath}\n`);
 }
 
+async function runHoncho(args: readonly string[]): Promise<void> {
+  if (args.length !== 4 && args.length !== 5) {
+    throw new Error(`Expected 4 paths and an optional system id, received ${args.length} arguments`);
+  }
+  const manifestPath = requiredPath(args, 0);
+  const corpusPath = requiredPath(args, 1);
+  const questionsPath = requiredPath(args, 2);
+  const reportPath = requiredPath(args, 3);
+  const requestedSystemId = args[4] ?? "honcho-self-hosted";
+  const manifestText = await readFile(manifestPath, "utf8");
+  const manifest = parseJson<MemoryBenchmarkManifest>(manifestText, manifestPath);
+  const messages = await readJsonLines<MemoryBenchmarkMessage>(corpusPath);
+  const questions = parseJson<readonly MemoryBenchmarkQuestion[]>(await readFile(questionsPath, "utf8"), questionsPath);
+  assertValidPack(manifest, messages, questions);
+  const actualCorpusHash = saltedMemoryBenchmarkCorpusSha256(messages, manifest.corpus.hashSalt);
+  if (actualCorpusHash !== manifest.corpus.saltedSha256) {
+    throw new Error("Corpus hash does not match the frozen manifest; refusing to run Honcho");
+  }
+  const system = manifest.systems.find((candidate) => candidate.id === requestedSystemId);
+  if (system === undefined) throw new Error(`System ${requestedSystemId} is absent from the frozen manifest`);
+  const baseUrl = stringConfiguration(system.configuration, "baseUrl");
+  const workspaceId = stringConfiguration(system.configuration, "workspaceId");
+  const client = new SdkHonchoBenchmarkClient({
+    baseUrl,
+    workspaceId,
+    ...(process.env.HONCHO_API_KEY === undefined ? {} : { apiKey: process.env.HONCHO_API_KEY }),
+    allowRemoteHost: process.env.HONCHO_BENCHMARK_ALLOW_REMOTE === "true",
+  });
+  const backend = new HonchoMemoryBenchmarkBackend(client, {
+    id: system.id,
+    version: system.version,
+    ingestBatchSize: numberConfiguration(system.configuration, "ingestBatchSize", 100),
+    searchLimit: numberConfiguration(system.configuration, "searchLimit", 20),
+    queueTimeoutMs: numberConfiguration(system.configuration, "queueTimeoutMs", 600_000),
+  });
+  const report = await new MemoryBenchmarkService(new RegexSecretDetector()).run({
+    manifest,
+    manifestSha256: memoryBenchmarkManifestSha256(manifestText),
+    corpusSaltedSha256: actualCorpusHash,
+    messages,
+    questions,
+    backend,
+  });
+  await mkdir(dirname(reportPath), { recursive: true });
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  process.stdout.write(`${reportPath}\n`);
+}
+
 async function readJsonLines<T>(path: string): Promise<readonly T[]> {
   const text = await readFile(path, "utf8");
   return text.split(/\r?\n/)
@@ -158,6 +215,43 @@ function findPatternSecretQuestionIds(questions: readonly MemoryBenchmarkQuestio
     const texts = [question.prompt, ...question.expectedFacts, ...(question.forbiddenFacts ?? [])];
     return texts.some((text) => detector.redact(text).findings.length > 0) ? [question.id] : [];
   });
+}
+
+function assertValidPack(
+  manifest: MemoryBenchmarkManifest,
+  messages: readonly MemoryBenchmarkMessage[],
+  questions: readonly MemoryBenchmarkQuestion[],
+): void {
+  const issues = [
+    ...validateMemoryBenchmarkManifest(manifest),
+    ...validateMemoryBenchmarkCorpus(messages, manifest.corpus.messageCount),
+    ...validateMemoryBenchmarkQuestions(questions),
+  ];
+  const unsafeMessageIds = findPatternSecretMessageIds(messages);
+  if (unsafeMessageIds.length > 0) issues.push(`local secret gate found sensitive patterns in message ids: ${unsafeMessageIds.join(", ")}`);
+  const unsafeQuestionIds = findPatternSecretQuestionIds(questions);
+  if (unsafeQuestionIds.length > 0) issues.push(`local secret gate found sensitive patterns in question ids: ${unsafeQuestionIds.join(", ")}`);
+  if (issues.length > 0) throw new Error(`Invalid benchmark pack:\n${issues.map((issue) => `- ${issue}`).join("\n")}`);
+}
+
+function stringConfiguration(
+  configuration: Readonly<Record<string, string | number | boolean>>,
+  key: string,
+): string {
+  const value = configuration[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Honcho system configuration requires string ${key}`);
+  }
+  return value;
+}
+
+function numberConfiguration(
+  configuration: Readonly<Record<string, string | number | boolean>>,
+  key: string,
+  fallback: number,
+): number {
+  const value = configuration[key];
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function parseJson<T>(text: string, label: string): T {

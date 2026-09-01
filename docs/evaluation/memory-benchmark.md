@@ -59,8 +59,29 @@ npm run benchmark:memory -- score \
   docs/evaluation/results/nocheh-report.json
 ```
 
-The next implementation slice adds the two live adapters. The Nocheh adapter must feed the
-existing post-guard processing path and measure graph/task/suggestion persistence. The Honcho
-adapter must pin its server version and jobs, map conversations to sessions, and receive only
-the same guarded chronological messages. Neither adapter may become a production dependency
-during Phase 0.
+Both live adapters now exist under `src/infrastructure/evaluation/`. The Nocheh adapter preserves
+every original message id by processing chronological windows directly; using the old history
+importer would collapse a chunk into one synthetic id and invalidate provenance scoring. Its
+composition must use an inert task provider so a benchmark cannot sync tasks externally.
+
+The Honcho adapter is pinned to `@honcho-ai/sdk` 2.4.0. Private corpora are loopback-only by
+default, each source id is stored as message metadata, and scoring uses Honcho message search
+under the shared token budget. It waits for the asynchronous reasoning queue to drain first.
+Honcho's native dialectic `chat` is exposed separately and must not be mixed into the shared
+retrieval score. Provider token/cost and database-size gates remain failed until the self-hosted
+stack exposes those measurements; the report marks that telemetry as missing rather than zero.
+
+Run the pinned self-hosted adapter after the pack validates and the fresh Honcho workspace is
+running:
+
+```bash
+npm run benchmark:memory -- run-honcho \
+  data/memory-benchmark/private-v1/manifest.json \
+  data/memory-benchmark/private-v1/corpus.jsonl \
+  data/memory-benchmark/private-v1/questions.json \
+  docs/evaluation/results/honcho-report.json
+```
+
+The command refuses a non-loopback `baseUrl`. A remote host requires the explicit
+`HONCHO_BENCHMARK_ALLOW_REMOTE=true` override and should never be used for private data without
+separate approval of that destination.

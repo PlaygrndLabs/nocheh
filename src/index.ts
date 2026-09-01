@@ -287,6 +287,13 @@ export {
   saltedMemoryBenchmarkCorpusSha256,
 } from "./infrastructure/evaluation/memory-benchmark-fixture.js";
 export type { SyntheticMemoryBenchmarkFixture } from "./infrastructure/evaluation/memory-benchmark-fixture.js";
+export { NochehMemoryBenchmarkBackend } from "./infrastructure/evaluation/nocheh-memory-benchmark-backend.js";
+export type {
+  NochehBenchmarkCostModel,
+  NochehBenchmarkStorageProbe,
+  NochehMemoryBenchmarkBackendDependencies,
+  NochehMemoryBenchmarkBackendOptions,
+} from "./infrastructure/evaluation/nocheh-memory-benchmark-backend.js";
 export { ConfigurableSecretDetector } from "./infrastructure/security/configurable-secret-detector.js";
 export { BUILT_IN_SECRET_PATTERNS } from "./infrastructure/security/built-in-secret-patterns.js";
 export { redactWithPatterns, redactLiterals, MINIMUM_LITERAL_SECRET_LENGTH } from "./infrastructure/security/redaction-engine.js";

@@ -20,6 +20,7 @@ import {
 export interface MemoryBenchmarkRunInput {
   readonly manifest: MemoryBenchmarkManifest;
   readonly manifestSha256: string;
+  readonly corpusSaltedSha256: string;
   readonly messages: readonly MemoryBenchmarkMessage[];
   readonly questions: readonly MemoryBenchmarkQuestion[];
   readonly backend: MemoryBenchmarkBackendPort;
@@ -31,11 +32,29 @@ export class MemoryBenchmarkService {
   public constructor(private readonly patternSecretDetector: SecretDetectorPort) {}
 
   public async run(input: MemoryBenchmarkRunInput): Promise<MemoryBenchmarkReport> {
+    const corpusIds = new Set(input.messages.map((message) => message.id));
     const issues = [
       ...validateMemoryBenchmarkManifest(input.manifest),
       ...validateMemoryBenchmarkCorpus(input.messages, input.manifest.corpus.messageCount),
       ...validateMemoryBenchmarkQuestions(input.questions),
     ];
+    if (!/^[a-f0-9]{64}$/i.test(input.manifestSha256)) {
+      issues.push("manifestSha256 must be a SHA-256 hex digest");
+    }
+    if (input.corpusSaltedSha256 !== input.manifest.corpus.saltedSha256) {
+      issues.push("corpusSaltedSha256 does not match the frozen manifest");
+    }
+    if (input.messages[0]?.occurredAt !== input.manifest.corpus.occurredAtStart) {
+      issues.push("corpus start does not match the frozen manifest");
+    }
+    if (input.messages[input.messages.length - 1]?.occurredAt !== input.manifest.corpus.occurredAtEnd) {
+      issues.push("corpus end does not match the frozen manifest");
+    }
+    for (const question of input.questions) {
+      for (const sourceId of question.expectedSourceIds) {
+        if (!corpusIds.has(sourceId)) issues.push(`question ${question.id} references unknown source id ${sourceId}`);
+      }
+    }
     const system = input.manifest.systems.find((candidate) => candidate.id === input.backend.id);
     if (system === undefined) issues.push(`backend ${input.backend.id} is absent from the frozen manifest`);
     if (system !== undefined && system.version !== input.backend.version) {
@@ -202,7 +221,10 @@ function scoreQuestion(
     retrievedSourceValidity: ratio(retrievedIds.filter((id) => validSourceIds.has(id)).length, retrievedIds.length),
     expectedFactRecall: phraseRecall(question.expectedFacts, evidenceText),
     staleFactRate: phraseRecall(question.forbiddenFacts ?? [], `${evidenceText}\n${recall.answer?.text ?? ""}`),
-    duplicateRate: ratio(retrievedIds.length - uniqueRetrievedIds.size, retrievedIds.length),
+    duplicateRate: ratio(
+      recall.evidence.length - new Set(recall.evidence.map((item) => item.evidenceId)).size,
+      recall.evidence.length,
+    ),
     answerAccuracy,
     contextTokens: recall.contextTokens,
     retrievalLatencyMs: recall.retrievalLatencyMs,
