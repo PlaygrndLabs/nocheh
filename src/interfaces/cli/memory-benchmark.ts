@@ -4,6 +4,10 @@ import { pathToFileURL } from "node:url";
 import type { TextCompletionPort } from "../../application/ports/text-completion.js";
 import { createMemoryBenchmarkReport } from "../../application/services/memory-benchmark-service.js";
 import { MemoryBenchmarkService } from "../../application/services/memory-benchmark-service.js";
+import { AssistantContextBuilder } from "../../application/services/assistant-context-builder.js";
+import { ProcessIncomingMessageUseCase } from "../../application/use-cases/process-incoming-message.js";
+import { SystemClock } from "../../application/ports/clock.js";
+import { SystemIdGenerator } from "../../application/ports/id-generator.js";
 import {
   aiProviderRoleSupport,
   findAiModelRole,
@@ -39,6 +43,20 @@ import {
   HonchoMemoryBenchmarkBackend,
   SdkHonchoBenchmarkClient,
 } from "../../infrastructure/evaluation/honcho-memory-benchmark-backend.js";
+import { NochehMemoryBenchmarkBackend } from "../../infrastructure/evaluation/nocheh-memory-benchmark-backend.js";
+import { GuardedSecretDetector } from "../../infrastructure/security/guarded-secret-detector.js";
+import { AesGcmEncryption } from "../../infrastructure/security/aes-gcm-encryption.js";
+import { openSqliteDatabase } from "../../infrastructure/sqlite/sqlite-database.js";
+import { SqliteAuditRepository } from "../../infrastructure/sqlite/sqlite-audit-repository.js";
+import { SqliteMemoryGraphRepository } from "../../infrastructure/sqlite/sqlite-memory-graph-repository.js";
+import { SqliteMemoryRecordRepository } from "../../infrastructure/sqlite/sqlite-memory-record-repository.js";
+import { SqliteMemoryEmbeddingRepository } from "../../infrastructure/sqlite/sqlite-memory-embedding-repository.js";
+import { SqliteSuggestionRepository } from "../../infrastructure/sqlite/sqlite-suggestion-repository.js";
+import { SqliteTaskRepository } from "../../infrastructure/sqlite/sqlite-task-repository.js";
+import { SqliteTaskSyncRepository } from "../../infrastructure/sqlite/sqlite-task-sync-repository.js";
+import { HybridMemoryRetrievalService } from "../../infrastructure/memory/hybrid-memory-retrieval-service.js";
+import { InMemoryMetricsCollector } from "../../infrastructure/observability/in-memory-metrics-collector.js";
+import { NvidiaMemoryGraphAnalyzer } from "../../infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
 
 interface CapturedBenchmarkRun {
   readonly backendId: string;
@@ -70,6 +88,9 @@ export async function runMemoryBenchmarkCli(args: readonly string[]): Promise<vo
     case "run-honcho":
       await runHoncho(rest);
       return;
+    case "run-nocheh":
+      await runNocheh(rest);
+      return;
     case "prepare-telegram":
       await prepareTelegram(rest);
       return;
@@ -84,6 +105,7 @@ export async function runMemoryBenchmarkCli(args: readonly string[]): Promise<vo
         "  memory-benchmark generate-scale <1000|10000|100000> [output-directory]",
         "  memory-benchmark validate <manifest.json> <corpus.jsonl> <questions.json>",
         "  memory-benchmark score <manifest.json> <corpus.jsonl> <questions.json> <captured-run.json> <report.json>",
+        "  memory-benchmark run-nocheh <manifest.json> <corpus.jsonl> <questions.json> <report.json> [system-id]",
         "  memory-benchmark run-honcho <manifest.json> <corpus.jsonl> <questions.json> <report.json> [system-id]",
       ].join("\n"));
   }
@@ -408,6 +430,99 @@ async function runHoncho(args: readonly string[]): Promise<void> {
   process.stdout.write(`${reportPath}\n`);
 }
 
+/** Runs the live Nocheh pipeline in an encrypted in-memory database with all external effects disabled. */
+async function runNocheh(args: readonly string[]): Promise<void> {
+  if (args.length !== 4 && args.length !== 5) {
+    throw new Error(`Expected 4 paths and an optional system id, received ${args.length} arguments`);
+  }
+  const manifestPath = requiredPath(args, 0);
+  const corpusPath = requiredPath(args, 1);
+  const questionsPath = requiredPath(args, 2);
+  const reportPath = requiredPath(args, 3);
+  const requestedSystemId = args[4] ?? "nocheh-current";
+  const manifestText = await readFile(manifestPath, "utf8");
+  const manifest = parseJson<MemoryBenchmarkManifest>(manifestText, manifestPath);
+  const messages = await readJsonLines<MemoryBenchmarkMessage>(corpusPath);
+  const questions = parseJson<readonly MemoryBenchmarkQuestion[]>(await readFile(questionsPath, "utf8"), questionsPath);
+  assertValidPack(manifest, messages, questions);
+  const corpusSaltedSha256 = saltedMemoryBenchmarkCorpusSha256(messages, manifest.corpus.hashSalt);
+  if (corpusSaltedSha256 !== manifest.corpus.saltedSha256) throw new Error("Corpus hash does not match the frozen manifest");
+  const system = manifest.systems.find((candidate) => candidate.id === requestedSystemId);
+  if (system === undefined) throw new Error(`System ${requestedSystemId} is absent from the frozen manifest`);
+  const fileEnv = await new DotenvFileStore(resolve(".env")).read();
+  const provider = findAiProvider(environmentValue(fileEnv, "AI_PROVIDER"));
+  if (provider?.id !== "nvidia") throw new Error("run-nocheh currently requires AI_PROVIDER=nvidia");
+  const apiKey = environmentValue(fileEnv, provider.apiKeyEnvKey);
+  if (apiKey === undefined) throw new Error(`${provider.apiKeyEnvKey} is required to run Nocheh`);
+  const logger = new ConsoleLogger();
+  const clock = new SystemClock();
+  const metrics = new InMemoryMetricsCollector();
+  const database = openSqliteDatabase(":memory:");
+  const encryption = new AesGcmEncryption("nocheh-benchmark-isolated-store");
+  try {
+    const records = new SqliteMemoryRecordRepository(database, encryption);
+    const graph = new SqliteMemoryGraphRepository(database, encryption);
+    const suggestions = new SqliteSuggestionRepository(database, encryption);
+    const tasks = new SqliteTaskRepository(database, encryption);
+    const audits = new SqliteAuditRepository(database, encryption);
+    const retrieval = new HybridMemoryRetrievalService(
+      records,
+      new SqliteMemoryEmbeddingRepository(database, encryption, clock),
+      undefined,
+      logger,
+      {
+        similarityFloor: numberConfiguration(system.configuration, "similarityFloor", 0.3),
+        lexicalWeight: numberConfiguration(system.configuration, "lexicalWeight", 0.25),
+      },
+    );
+    const contextBuilder = new AssistantContextBuilder(retrieval, { graphRepository: graph, suggestionRepository: suggestions });
+    const guardRuntime = createRequiredGuardCompletion(fileEnv, stringModelId(system.modelIds, "secretGuard"));
+    const processor = new ProcessIncomingMessageUseCase(
+      new GuardedSecretDetector(
+        new LlmSecretDetector(guardRuntime.completion, { currentRedactionPolicy: () => DEFAULT_REDACTION_POLICY }, logger),
+        new RegexSecretDetector(),
+        logger,
+        { onFailure: "fail_closed" },
+      ),
+      new NvidiaMemoryGraphAnalyzer({ apiKey, model: stringModelId(system.modelIds, "textAnalysis"), logger }),
+      tasks,
+      records,
+      new SqliteTaskSyncRepository(database, encryption),
+      { async upsertTask() { throw new Error("External effects are disabled for memory benchmarks"); } },
+      clock,
+      logger,
+      audits,
+      metrics,
+      graph,
+      suggestions,
+      new SystemIdGenerator(),
+      undefined,
+      contextBuilder,
+    );
+    const backend = new NochehMemoryBenchmarkBackend({
+      externalEffects: "disabled", processor, contextBuilder, memoryRecords: records, graph, suggestions, tasks, audits, metrics,
+    }, {
+      id: system.id,
+      version: system.version,
+      windowMessageCount: numberConfiguration(system.configuration, "windowMessageCount", 20),
+      maxRetrievedMemories: numberConfiguration(system.configuration, "maxRetrievedMemories", 12),
+    });
+    const report = await new MemoryBenchmarkService(new RegexSecretDetector()).run({
+      manifest,
+      manifestSha256: memoryBenchmarkManifestSha256(manifestText),
+      corpusSaltedSha256,
+      messages,
+      questions,
+      backend,
+    });
+    await mkdir(dirname(reportPath), { recursive: true });
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    process.stdout.write(`${reportPath}\n`);
+  } finally {
+    database.close();
+  }
+}
+
 async function readJsonLines<T>(path: string): Promise<readonly T[]> {
   const text = await readFile(path, "utf8");
   return text.split(/\r?\n/)
@@ -463,6 +578,14 @@ function numberConfiguration(
 ): number {
   const value = configuration[key];
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function stringModelId(modelIds: Readonly<Record<string, string>>, key: string): string {
+  const value = modelIds[key];
+  if (value === undefined || value.trim().length === 0 || value.startsWith("none:")) {
+    throw new Error(`Nocheh system modelIds requires configured ${key}`);
+  }
+  return value;
 }
 
 function parseJson<T>(text: string, label: string): T {
