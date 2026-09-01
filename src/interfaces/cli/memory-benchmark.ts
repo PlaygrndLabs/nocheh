@@ -487,7 +487,7 @@ async function runNocheh(args: readonly string[]): Promise<void> {
       new NvidiaMemoryGraphAnalyzer({
         apiKey,
         model: stringModelId(system.modelIds, "textAnalysis"),
-        maxTokens: numberConfiguration(system.configuration, "analysisMaxOutputTokens", 4000),
+        maxTokens: analysisOutputTokenLimit(system.configuration),
         logger,
       }),
       tasks,
@@ -591,6 +591,15 @@ function stringModelId(modelIds: Readonly<Record<string, string>>, key: string):
     throw new Error(`Nocheh system modelIds requires configured ${key}`);
   }
   return value;
+}
+
+function analysisOutputTokenLimit(configuration: Readonly<Record<string, string | number | boolean>>): number {
+  switch (configuration.analysisOutputProfile) {
+    case "extended_8000": return 8000;
+    case "standard_4000":
+    case undefined: return 4000;
+    default: throw new Error("analysisOutputProfile must be standard_4000 or extended_8000");
+  }
 }
 
 function parseJson<T>(text: string, label: string): T {
