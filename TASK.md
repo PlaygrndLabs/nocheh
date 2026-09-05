@@ -26,6 +26,21 @@ long-term memory, bytes still never persisted), rule 3 in Phase 5 (bounded auton
 sending), the encryption line in the Memory Policy in Phase 2. Rules 2, 4, 5, 6, 7 and 8 are
 untouched — in particular the guard still runs before anything, it just runs earlier.
 
+### Provisional private pilot — 2026-09-06
+
+The first same-manifest run covered 161 guarded messages and 34 questions. Honcho raw-message
+search beat Nocheh structured-memory retrieval on source-valid recall (67.65% vs 47.30%) and
+expected-fact recall (69.12% vs 21.57%), while Nocheh was faster at p95 (923 ms vs 1,593 ms).
+Honcho's p95 context was smaller (1,367 vs 2,417 tokens), but its queue took 426 seconds and
+its provider cost was not observable. Honcho also derived 60 source-linked explicit documents,
+but the winning score came from raw-message search, not from querying those documents. Full
+aggregate results and the selection rule are in
+`docs/evaluation/results/2026-09-06-private-memory-bakeoff.md`.
+
+This makes **owned guarded-source retrieval** the required third arm. No production memory
+backend is selected yet: the sample is below the frozen target, answer accuracy is unmeasured,
+and Honcho cost/recovery telemetry is missing.
+
 ---
 
 ## Phase 0: Prove The Memory Choice — 3–5 days, evaluation only
@@ -35,25 +50,31 @@ mixed Persian/English Telegram corpus. This phase creates evidence before produc
 deepens either bet. Evaluation code may be temporary; private corpus content and personal
 answer keys are never committed.
 
-- [ ] Write the benchmark manifest **before running either system**: exact versions, model
+- [x] Write the pilot benchmark manifest **before running either system**: exact versions, model
       ids, configuration, context budget, quality margin, maximum acceptable monthly cost,
       one salted aggregate corpus hash, network destinations and numeric pass thresholds.
-- [ ] Build a private chronological quality corpus, targeting at least 1,000 guarded messages
+- [ ] Expand the private chronological quality corpus from 161 to at least 1,000 guarded messages
       across at least three months when the export contains that much. No pre-guard text and
       no media bytes may enter either system.
-- [ ] Write 60–100 owner-graded questions: factual recall, Persian, corrections over time,
+- [ ] Expand the 34 owner-graded questions to 60–100: factual recall, Persian, corrections over time,
       contradictions, multi-hop links, tasks/deadlines, preferences and long-range coaching
       patterns. Keep retrieval grading separate from answer-model grading.
 - [x] Build a deterministic non-personal scale fixture at 1k, 10k and 100k messages with
       seeded facts, corrections, duplicates and known answers.
 - [ ] Run 20–30 live Nocheh windows. Confirm nodes, edges, suggestions and tasks land; inspect
       `errorLogs`, grounding duplication, `reasoningTokens`, throughput and `context_build`.
-- [ ] Run the quality corpus through the current Nocheh stack and a pinned self-hosted Honcho
+- [x] Run the pilot corpus through the current Nocheh stack and a pinned self-hosted Honcho
       stack in strict chronological order. Record the Honcho server version, model setup and
       every enabled background job.
-- [ ] Compare both retrieval outputs under the same token budget and answer model. Report a
+- [x] Compare both retrieval outputs under the same token budget, with answer-model grading
+      explicitly disabled for the pilot. Report a
       separate native Honcho context/chat run rather than mixing its answer model into the
       retrieval score.
+- [ ] Add an evaluation-only owned guarded-message PostgreSQL/pgvector arm with the same
+      OpenAI embedding model, Persian normalisation, source ids, and 4,000-token budget.
+- [ ] Score Honcho's derived documents separately from raw-message search. Record document
+      source coverage and extraction yield; do not describe message-search quality as
+      conclusion quality.
 - [ ] Measure source-valid recall, answer accuracy, stale facts, duplicates, contradictions,
       Persian, multi-hop and coaching quality; p50/p95/max context tokens and retrieval
       latency; queue lag; ingest/query/maintenance calls, tokens and cost; database/index
@@ -72,15 +93,14 @@ crosses the secret gate, stop; later refactors cannot make that result trustwort
 
 ## Phase 1: One Provider For All Five Roles — 1–2 days
 
-There is no `openai` provider in the catalog: `nvidia`, `anthropic`, `gemini` only. Adding
-one plausibly closes three open questions at once — the 13–17 tokens/second throughput
-problem, the unverified NVIDIA embedding wire format, and whether the endpoint supports tool
-calling. It is a day of work that changes every later estimate, which is why it is first.
+OpenAI now exists for `text_analysis` and `embedding`; the pilot used GPT-5 mini and
+`text-embedding-3-small`. Image, audio, and secret-guard roles still need provider coverage
+before OpenAI can be the single provider for all five roles.
 
-- [ ] Add `openai` to `ai-provider-catalog.ts` for all five roles: `text_analysis`,
-      `image_understanding`, `audio_understanding`, `secret_guard`, `embedding`.
-- [ ] Adapters: chat completions with `response_format: json_schema` generated from the same
-      `as const` vocabularies the prompt renders, vision, transcription, embeddings.
+- [x] Add `openai` catalog and adapters for `text_analysis` and `embedding`.
+- [ ] Add OpenAI `image_understanding`, `audio_understanding`, and `secret_guard` adapters.
+- [ ] Decide whether chat completions should use `response_format: json_schema` generated
+      from the same `as const` vocabularies the prompt renders.
 - [ ] Re-run Phase 0's complete Nocheh quality and cost pack against OpenAI. Compare recall,
       grounded answers, latency, throughput, warning count and dropped-item count directly;
       do not rerun Honcho unless its pinned configuration changed.

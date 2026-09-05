@@ -246,9 +246,9 @@ test("Honcho SDK client is loopback-only for private corpora unless explicitly a
     () => new SdkHonchoBenchmarkClient({ baseUrl: "https://api.honcho.dev", workspaceId: "private" }),
     /loopback Honcho host/,
   );
-  assert.doesNotThrow(
-    () => new SdkHonchoBenchmarkClient({ baseUrl: "http://127.0.0.1:8000", workspaceId: "private" }),
-  );
+  const client = new SdkHonchoBenchmarkClient({ baseUrl: "http://127.0.0.1:18080", workspaceId: "private" });
+  const sdk = client as unknown as { readonly client: { readonly baseURL: string } };
+  assert.equal(sdk.client.baseURL, "http://127.0.0.1:18080");
 });
 
 function message(id: string, conversationId: string, minute: number): MemoryBenchmarkMessage {

@@ -52,7 +52,6 @@ export class SdkHonchoBenchmarkClient implements HonchoBenchmarkClientPort {
     this.client = new Honcho({
       baseURL: options.baseUrl,
       workspaceId: options.workspaceId,
-      environment: "local",
       timeout: options.timeoutMs ?? 60_000,
       maxRetries: 0,
       ...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
