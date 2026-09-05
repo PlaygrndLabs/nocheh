@@ -43,7 +43,13 @@ import {
   HonchoMemoryBenchmarkBackend,
   SdkHonchoBenchmarkClient,
 } from "../../infrastructure/evaluation/honcho-memory-benchmark-backend.js";
-import { NochehMemoryBenchmarkBackend } from "../../infrastructure/evaluation/nocheh-memory-benchmark-backend.js";
+import {
+  NochehMemoryBenchmarkBackend,
+} from "../../infrastructure/evaluation/nocheh-memory-benchmark-backend.js";
+import {
+  maximumOpenAiBenchmarkRunCostUsd,
+  openAiMiniBenchmarkCostModel,
+} from "../../infrastructure/evaluation/openai-memory-benchmark-cost.js";
 import { GuardedSecretDetector } from "../../infrastructure/security/guarded-secret-detector.js";
 import { AesGcmEncryption } from "../../infrastructure/security/aes-gcm-encryption.js";
 import { openSqliteDatabase } from "../../infrastructure/sqlite/sqlite-database.js";
@@ -457,6 +463,24 @@ async function runNocheh(args: readonly string[]): Promise<void> {
   }
   const apiKey = environmentValue(fileEnv, provider.apiKeyEnvKey);
   if (apiKey === undefined) throw new Error(`${provider.apiKeyEnvKey} is required to run Nocheh`);
+  const analysisModel = stringModelId(system.modelIds, "textAnalysis");
+  const windowMessageCount = numberConfiguration(system.configuration, "windowMessageCount", 20);
+  const analysisMaxTokens = analysisOutputTokenLimit(system.configuration);
+  const costModel = provider.id === "openai" ? openAiMiniBenchmarkCostModel(analysisModel) : undefined;
+  if (costModel !== undefined) {
+    const costCapUsd = numberConfiguration(system.configuration, "maximumRunCostUsd", 0);
+    if (costCapUsd <= 0) throw new Error("OpenAI benchmark configuration requires maximumRunCostUsd");
+    const maximumCostUsd = maximumOpenAiBenchmarkRunCostUsd(messages, windowMessageCount, analysisMaxTokens);
+    if (maximumCostUsd > costCapUsd) {
+      throw new Error(`OpenAI worst-case cost $${maximumCostUsd.toFixed(4)} exceeds the $${costCapUsd.toFixed(2)} run cap`);
+    }
+    process.stdout.write(`${JSON.stringify({
+      openAiPreflight: "passed",
+      model: analysisModel,
+      maximumCostUsd,
+      costCapUsd,
+    })}\n`);
+  }
   const logger = new ConsoleLogger();
   const clock = new SystemClock();
   const metrics = new InMemoryMetricsCollector();
@@ -490,8 +514,8 @@ async function runNocheh(args: readonly string[]): Promise<void> {
       new NvidiaMemoryGraphAnalyzer({
         apiKey,
         provider: provider.id,
-        model: stringModelId(system.modelIds, "textAnalysis"),
-        maxTokens: analysisOutputTokenLimit(system.configuration),
+        model: analysisModel,
+        maxTokens: analysisMaxTokens,
         logger,
         ...(provider.id === "openai"
           ? { baseUrl: environmentValue(fileEnv, "OPENAI_BASE_URL") ?? "https://api.openai.com/v1/chat/completions" }
@@ -513,10 +537,11 @@ async function runNocheh(args: readonly string[]): Promise<void> {
     );
     const backend = new NochehMemoryBenchmarkBackend({
       externalEffects: "disabled", processor, contextBuilder, memoryRecords: records, graph, suggestions, tasks, audits, metrics,
+      ...(costModel === undefined ? {} : { costModel }),
     }, {
       id: system.id,
       version: system.version,
-      windowMessageCount: numberConfiguration(system.configuration, "windowMessageCount", 20),
+      windowMessageCount,
       maxRetrievedMemories: numberConfiguration(system.configuration, "maxRetrievedMemories", 12),
     });
     const report = await new MemoryBenchmarkService(new RegexSecretDetector()).run({

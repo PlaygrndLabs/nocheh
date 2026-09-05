@@ -42,6 +42,8 @@ export interface NvidiaMemoryGraphAnalyzerConfig {
   readonly maxTokens?: number;
   readonly temperature?: number;
   readonly topP?: number;
+  /** OpenAI GPT-5 reasoning budget. Ignored by NVIDIA-compatible endpoints. */
+  readonly reasoningEffort?: "minimal" | "low" | "medium" | "high";
   /**
    * Sends response_format: { type: "json_object" }. Enabled by default because
    * GLM-5.2 advertises structured output. Disable if the endpoint rejects it.
@@ -93,6 +95,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
   private readonly maxTokens: number;
   private readonly temperature: number;
   private readonly topP: number;
+  private readonly reasoningEffort: "minimal" | "low" | "medium" | "high";
   private readonly jsonResponseFormat: boolean;
   private readonly timeoutMs: number;
   private readonly logger: LoggerPort;
@@ -106,6 +109,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     this.maxTokens = config.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
     this.temperature = config.temperature ?? DEFAULT_TEMPERATURE;
     this.topP = config.topP ?? DEFAULT_TOP_P;
+    this.reasoningEffort = config.reasoningEffort ?? "minimal";
     this.jsonResponseFormat = config.jsonResponseFormat ?? true;
     this.timeoutMs = config.timeoutMs ?? ANALYSIS_REQUEST_TIMEOUT_MS;
     this.logger = config.logger ?? new NoopLogger();
@@ -116,9 +120,13 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
     const user = analysisUserPrompt(input);
     const body = JSON.stringify({
       model: this.model,
-      max_tokens: this.maxTokens,
-      temperature: this.temperature,
-      top_p: this.topP,
+      ...(this.provider === "openai"
+        ? {
+            max_completion_tokens: this.maxTokens,
+            reasoning_effort: this.reasoningEffort,
+            store: false,
+          }
+        : { max_tokens: this.maxTokens, temperature: this.temperature, top_p: this.topP }),
       stream: false,
       ...(this.jsonResponseFormat ? { response_format: { type: "json_object" } } : {}),
       messages: [
@@ -184,7 +192,7 @@ export class NvidiaMemoryGraphAnalyzer implements MemoryGraphAnalyzerPort {
       throw budgetError;
     }
     try {
-      return parseAnalysisJson(content, `NVIDIA ${this.model}`);
+      return parseAnalysisJson(content, `${providerLabel(this.provider)} ${this.model}`);
     } catch (error) {
       if (truncated) {
         throw budgetError;
@@ -230,5 +238,7 @@ function throughput(outputTokens: number, elapsedMs: number): number {
 }
 
 function providerLabel(provider: string): string {
-  return provider === "nvidia" ? "NVIDIA" : provider;
+  if (provider === "nvidia") return "NVIDIA";
+  if (provider === "openai") return "OpenAI";
+  return provider;
 }

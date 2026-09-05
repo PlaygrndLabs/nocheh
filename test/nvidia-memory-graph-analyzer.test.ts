@@ -150,6 +150,31 @@ test("NVIDIA GLM analyzer posts an OpenAI-compatible request and maps the analys
   );
 });
 
+test("OpenAI GPT-5 mini uses bounded minimal reasoning without storing the response", async () => {
+  await withStubbedFetch(
+    () => jsonResponse(chatCompletion(JSON.stringify(analysisOutput))),
+    async (calls) => {
+      const analyzer = new NvidiaMemoryGraphAnalyzer({
+        apiKey: "sk-test",
+        provider: "openai",
+        model: "gpt-5-mini-2025-08-07",
+        baseUrl: "https://api.openai.com/v1/chat/completions",
+        maxTokens: 8000,
+      });
+      const result = await analyzer.analyze(analysisInput);
+      assert.equal(result.tokenUsage?.provider, "openai");
+
+      const request = JSON.parse(calls[0]?.init.body as string) as Record<string, unknown>;
+      assert.equal(request.max_completion_tokens, 8000);
+      assert.equal(request.reasoning_effort, "minimal");
+      assert.equal(request.store, false);
+      assert.equal("max_tokens" in request, false);
+      assert.equal("temperature" in request, false);
+      assert.equal("top_p" in request, false);
+    },
+  );
+});
+
 test("NVIDIA GLM analyzer tolerates fenced JSON and ignores reasoning traces", async () => {
   await withStubbedFetch(
     () => jsonResponse({
