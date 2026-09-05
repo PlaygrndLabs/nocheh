@@ -136,7 +136,7 @@ export const AI_PROVIDERS: readonly AiProviderDescriptor[] = [
     roles: {
       text_analysis: {
         modelEnvKey: "OPENAI_MODEL",
-        defaultModel: "gpt-5-mini",
+        defaultModel: "gpt-5-mini-2025-08-07",
         notes: "Balanced structured extraction model for the guarded benchmark pilot.",
       },
     },
