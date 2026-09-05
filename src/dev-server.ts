@@ -58,6 +58,7 @@ import { EmbeddingIndexingMemoryRecordRepository } from "./application/services/
 import { HybridMemoryRetrievalService } from "./infrastructure/memory/hybrid-memory-retrieval-service.js";
 import { NvidiaEmbedding } from "./infrastructure/memory/nvidia-embedding.js";
 import { GeminiEmbedding } from "./infrastructure/memory/gemini-embedding.js";
+import { OpenAiEmbedding } from "./infrastructure/memory/openai-embedding.js";
 import { MeteredEmbedding } from "./infrastructure/memory/metered-embedding.js";
 import type { EmbeddingPort } from "./application/ports/embedding.js";
 import { SqliteSuggestionRepository } from "./infrastructure/sqlite/sqlite-suggestion-repository.js";
@@ -550,6 +551,10 @@ function createEmbeddingAdapter(): EmbeddingPort | undefined {
     case "gemini": {
       const baseUrl = trimmedEnv("GEMINI_BASE_URL");
       return new GeminiEmbedding({ apiKey, model, ...(baseUrl === undefined ? {} : { baseUrl }) });
+    }
+    case "openai": {
+      const baseUrl = trimmedEnv("OPENAI_EMBEDDING_BASE_URL");
+      return new OpenAiEmbedding({ apiKey, model, ...(baseUrl === undefined ? {} : { baseUrl }) });
     }
     default:
       logger.warn("Embedding provider has a catalog entry but no adapter; recall uses word overlap only.", {

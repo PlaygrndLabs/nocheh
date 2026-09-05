@@ -153,6 +153,18 @@ test("each content type can point at a different provider", async () => {
   assert.equal(role(body, "audio_understanding").ready, true);
 });
 
+test("OpenAI embedding role uses its low-cost default model", async () => {
+  const body = await status({
+    AI_EMBEDDING_PROVIDER: "openai",
+    OPENAI_API_KEY: "sk-test",
+  });
+
+  const embedding = role(body, "embedding");
+  assert.equal(embedding.ready, true);
+  assert.equal(embedding.provider, "openai");
+  assert.equal(embedding.model, "text-embedding-3-small");
+});
+
 test("a role reports unsupported when the chosen provider cannot fill it", async () => {
   // Anthropic has no media adapter, so selecting it for images is a misconfiguration.
   const body = await status({ AI_IMAGE_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant-test" });
