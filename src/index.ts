@@ -344,6 +344,7 @@ export {
 } from "./infrastructure/memory/hybrid-memory-retrieval-service.js";
 export { NvidiaEmbedding, NVIDIA_DEFAULT_EMBEDDING_URL } from "./infrastructure/memory/nvidia-embedding.js";
 export { GeminiEmbedding } from "./infrastructure/memory/gemini-embedding.js";
+export { OpenAiEmbedding, OPENAI_DEFAULT_EMBEDDING_URL } from "./infrastructure/memory/openai-embedding.js";
 export { MeteredEmbedding } from "./infrastructure/memory/metered-embedding.js";
 export { SqliteMemoryEmbeddingRepository } from "./infrastructure/sqlite/sqlite-memory-embedding-repository.js";
 export {

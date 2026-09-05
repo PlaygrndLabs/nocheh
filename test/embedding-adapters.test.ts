@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NvidiaEmbedding } from "../src/infrastructure/memory/nvidia-embedding.js";
 import { GeminiEmbedding } from "../src/infrastructure/memory/gemini-embedding.js";
+import { OpenAiEmbedding } from "../src/infrastructure/memory/openai-embedding.js";
 import { MeteredEmbedding } from "../src/infrastructure/memory/metered-embedding.js";
 import { InMemoryMetricsCollector } from "../src/infrastructure/observability/in-memory-metrics-collector.js";
 import type { EmbeddingPort, EmbeddingRequest, EmbeddingResult } from "../src/application/ports/embedding.js";
@@ -120,6 +121,51 @@ test("an empty batch costs no request at all", async () => {
 
   assert.deepEqual((await embedding.embed({ texts: [], kind: "document" })).vectors, []);
   assert.equal(calls.length, 0);
+});
+
+test("OpenAI embedding batches inputs without provider-specific input types", async () => {
+  const { calls, fetchImpl } = stubFetch(() => jsonResponse({
+    data: [
+      { index: 1, embedding: [0, 1] },
+      { index: 0, embedding: [1, 0] },
+    ],
+    usage: { prompt_tokens: 9, total_tokens: 9 },
+  }));
+  const embedding = new OpenAiEmbedding({ apiKey: "sk-test", model: "text-embedding-3-small" }, fetchImpl);
+
+  const result = await embedding.embed({ texts: ["first", "second"], kind: "document" });
+
+  assert.equal(calls[0]?.url, "https://api.openai.com/v1/embeddings");
+  assert.equal((calls[0]?.init.headers as Record<string, string>).authorization, "Bearer sk-test");
+  assert.deepEqual(body(calls[0]), {
+    model: "text-embedding-3-small",
+    input: ["first", "second"],
+    encoding_format: "float",
+  });
+  assert.deepEqual(result.vectors, [[1, 0], [0, 1]]);
+  assert.deepEqual(result.tokenUsage, {
+    provider: "openai",
+    model: "text-embedding-3-small",
+    inputTokens: 9,
+    outputTokens: 0,
+    totalTokens: 9,
+  });
+});
+
+test("OpenAI embedding surfaces malformed and failed responses", async () => {
+  const short = stubFetch(() => jsonResponse({ data: [] }));
+  const failed = stubFetch(() => jsonResponse({ error: { message: "bad model" } }, 400));
+
+  await assert.rejects(
+    () => new OpenAiEmbedding({ apiKey: "k", model: "m" }, short.fetchImpl)
+      .embed({ texts: ["x"], kind: "query" }),
+    /returned 0 vectors for 1 inputs/,
+  );
+  await assert.rejects(
+    () => new OpenAiEmbedding({ apiKey: "k", model: "bad" }, failed.fetchImpl)
+      .embed({ texts: ["x"], kind: "query" }),
+    /OpenAI embedding failed with status 400.*bad model/s,
+  );
 });
 
 test("Gemini embedding uses batchEmbedContents with a retrieval task type", async () => {

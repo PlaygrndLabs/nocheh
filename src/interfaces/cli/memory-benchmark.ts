@@ -2,9 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { TextCompletionPort } from "../../application/ports/text-completion.js";
+import type { EmbeddingPort } from "../../application/ports/embedding.js";
 import { createMemoryBenchmarkReport } from "../../application/services/memory-benchmark-service.js";
 import { MemoryBenchmarkService } from "../../application/services/memory-benchmark-service.js";
 import { AssistantContextBuilder } from "../../application/services/assistant-context-builder.js";
+import { EmbeddingIndexingMemoryRecordRepository } from "../../application/services/memory-embedding-indexer.js";
 import { ProcessIncomingMessageUseCase } from "../../application/use-cases/process-incoming-message.js";
 import { SystemClock } from "../../application/ports/clock.js";
 import { SystemIdGenerator } from "../../application/ports/id-generator.js";
@@ -19,6 +21,7 @@ import type {
   MemoryBenchmarkPreparation,
   MemoryBenchmarkQuestion,
   MemoryBenchmarkRecall,
+  MemoryBenchmarkSystemManifest,
 } from "../../domain/evaluation/memory-benchmark.js";
 import {
   validateMemoryBenchmarkCorpus,
@@ -61,6 +64,10 @@ import { SqliteSuggestionRepository } from "../../infrastructure/sqlite/sqlite-s
 import { SqliteTaskRepository } from "../../infrastructure/sqlite/sqlite-task-repository.js";
 import { SqliteTaskSyncRepository } from "../../infrastructure/sqlite/sqlite-task-sync-repository.js";
 import { HybridMemoryRetrievalService } from "../../infrastructure/memory/hybrid-memory-retrieval-service.js";
+import { NvidiaEmbedding } from "../../infrastructure/memory/nvidia-embedding.js";
+import { GeminiEmbedding } from "../../infrastructure/memory/gemini-embedding.js";
+import { OpenAiEmbedding } from "../../infrastructure/memory/openai-embedding.js";
+import { MeteredEmbedding } from "../../infrastructure/memory/metered-embedding.js";
 import { InMemoryMetricsCollector } from "../../infrastructure/observability/in-memory-metrics-collector.js";
 import { NvidiaMemoryGraphAnalyzer } from "../../infrastructure/reasoning/nvidia-memory-graph-analyzer.js";
 
@@ -488,20 +495,31 @@ async function runNocheh(args: readonly string[]): Promise<void> {
   const encryption = new AesGcmEncryption("nocheh-benchmark-isolated-store");
   try {
     const records = new SqliteMemoryRecordRepository(database, encryption);
+    const embeddings = new SqliteMemoryEmbeddingRepository(database, encryption, clock);
     const graph = new SqliteMemoryGraphRepository(database, encryption);
     const suggestions = new SqliteSuggestionRepository(database, encryption);
     const tasks = new SqliteTaskRepository(database, encryption);
     const audits = new SqliteAuditRepository(database, encryption);
+    const embedder = createBenchmarkEmbedding(fileEnv, system, metrics);
     const retrieval = new HybridMemoryRetrievalService(
       records,
-      new SqliteMemoryEmbeddingRepository(database, encryption, clock),
-      undefined,
+      embeddings,
+      embedder,
       logger,
       {
         similarityFloor: numberConfiguration(system.configuration, "similarityFloor", 0.3),
         lexicalWeight: numberConfiguration(system.configuration, "lexicalWeight", 0.25),
       },
     );
+    const memoryRepository = embedder === undefined
+      ? records
+      : new EmbeddingIndexingMemoryRecordRepository(
+        records,
+        embeddings,
+        embedder,
+        logger,
+        () => { retrieval.invalidate(); },
+      );
     const contextBuilder = new AssistantContextBuilder(retrieval, { graphRepository: graph, suggestionRepository: suggestions });
     const guardRuntime = createRequiredGuardCompletion(fileEnv, stringModelId(system.modelIds, "secretGuard"));
     const processor = new ProcessIncomingMessageUseCase(
@@ -522,7 +540,7 @@ async function runNocheh(args: readonly string[]): Promise<void> {
           : {}),
       }),
       tasks,
-      records,
+      memoryRepository,
       new SqliteTaskSyncRepository(database, encryption),
       { async upsertTask() { throw new Error("External effects are disabled for memory benchmarks"); } },
       clock,
@@ -536,7 +554,7 @@ async function runNocheh(args: readonly string[]): Promise<void> {
       contextBuilder,
     );
     const backend = new NochehMemoryBenchmarkBackend({
-      externalEffects: "disabled", processor, contextBuilder, memoryRecords: records, graph, suggestions, tasks, audits, metrics,
+      externalEffects: "disabled", processor, contextBuilder, memoryRecords: memoryRepository, graph, suggestions, tasks, audits, metrics,
       ...(costModel === undefined ? {} : { costModel }),
     }, {
       id: system.id,
@@ -558,6 +576,57 @@ async function runNocheh(args: readonly string[]): Promise<void> {
   } finally {
     database.close();
   }
+}
+
+/** Builds the manifest-selected embedding role without reading production provider settings. */
+function createBenchmarkEmbedding(
+  fileEnv: Readonly<Record<string, string>>,
+  system: MemoryBenchmarkSystemManifest,
+  metrics: InMemoryMetricsCollector,
+): EmbeddingPort | undefined {
+  const model = system.modelIds.embedding;
+  if (model === undefined || model.trim().length === 0 || model.startsWith("none:")) {
+    return undefined;
+  }
+
+  const providerId = optionalStringConfiguration(system.configuration, "embeddingProvider");
+  const provider = findAiProvider(providerId);
+  if (provider === undefined || aiProviderRoleSupport(provider, "embedding") === undefined) {
+    throw new Error("Configured benchmark embeddingProvider does not support embeddings");
+  }
+  const apiKey = environmentValue(fileEnv, provider.apiKeyEnvKey);
+  if (apiKey === undefined) {
+    throw new Error(`${provider.apiKeyEnvKey} is required for benchmark embeddings`);
+  }
+
+  let adapter: EmbeddingPort;
+  switch (provider.id) {
+    case "openai": {
+      const baseUrl = environmentValue(fileEnv, "OPENAI_EMBEDDING_BASE_URL");
+      adapter = new OpenAiEmbedding({ apiKey, model, ...(baseUrl === undefined ? {} : { baseUrl }) });
+      break;
+    }
+    case "nvidia": {
+      const baseUrl = environmentValue(fileEnv, "NVIDIA_EMBEDDING_BASE_URL");
+      adapter = new NvidiaEmbedding({
+        apiKey,
+        model,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+        ...(environmentValue(fileEnv, "NVIDIA_EMBEDDING_INPUT_TYPE") === "false"
+          ? { sendInputType: false }
+          : {}),
+      });
+      break;
+    }
+    case "gemini": {
+      const baseUrl = environmentValue(fileEnv, "GEMINI_BASE_URL");
+      adapter = new GeminiEmbedding({ apiKey, model, ...(baseUrl === undefined ? {} : { baseUrl }) });
+      break;
+    }
+    default:
+      throw new Error(`No benchmark embedding adapter exists for ${provider.id}`);
+  }
+  return new MeteredEmbedding(adapter, metrics);
 }
 
 async function readJsonLines<T>(path: string): Promise<readonly T[]> {

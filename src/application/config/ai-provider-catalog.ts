@@ -131,13 +131,18 @@ export const AI_PROVIDERS: readonly AiProviderDescriptor[] = [
     id: "openai",
     label: "OpenAI API",
     apiKeyEnvKey: "OPENAI_API_KEY",
-    optionalEnvKeys: ["OPENAI_BASE_URL"],
-    notes: "OpenAI Chat Completions API. Use GPT-5 mini for bounded, cost-sensitive structured extraction pilots.",
+    optionalEnvKeys: ["OPENAI_BASE_URL", "OPENAI_EMBEDDING_BASE_URL"],
+    notes: "OpenAI API. Use GPT-5 mini for bounded structured extraction pilots and text-embedding-3-small for low-cost recall.",
     roles: {
       text_analysis: {
         modelEnvKey: "OPENAI_MODEL",
         defaultModel: "gpt-5-mini-2025-08-07",
         notes: "Balanced structured extraction model for the guarded benchmark pilot.",
+      },
+      embedding: {
+        modelEnvKey: "OPENAI_EMBEDDING_MODEL",
+        defaultModel: "text-embedding-3-small",
+        notes: "Small, low-cost semantic retrieval model. Uses the OpenAI embeddings endpoint.",
       },
     },
   },
