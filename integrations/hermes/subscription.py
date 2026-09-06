@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 
 
+class DetectorContractError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class SubscriptionCredentials:
     access_token: str = field(repr=False)
@@ -51,7 +55,9 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str)
     """Return validated literal candidates, never rewritten text."""
     import json
 
-    response = _call_subscription(credentials, model, [
+    from integrations.hermes.request_boundary import trusted_detector
+    with trusted_detector():
+        response = _call_subscription(credentials, model, [
             {"role": "system", "content": (
                 'Find secret values in the supplied data. Return only JSON: {"literals":["exact value"]}. '
                 "Include passwords, access codes, API tokens and private keys. Return exact literal "
@@ -61,12 +67,15 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str)
             )},
             {"role": "user", "content": text},
         ])
-    parsed = json.loads(response.choices[0].message.content)
+    try:
+        parsed = json.loads(response.choices[0].message.content)
+    except (ValueError, TypeError):
+        raise DetectorContractError('detector_json_rejected') from None
     if not isinstance(parsed, dict) or set(parsed) != {"literals"}:
-        raise ValueError("Detector contract rejected")
+        raise DetectorContractError('detector_shape_rejected')
     candidates = parsed["literals"]
     if not isinstance(candidates, list) or any(
         not isinstance(value, str) or not value or value not in text for value in candidates
     ):
-        raise ValueError("Detector returned a nonliteral candidate")
+        raise DetectorContractError('detector_literal_rejected')
     return candidates
