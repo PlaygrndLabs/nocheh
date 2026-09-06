@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
 import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
-import { authorize, HttpError, json, readJson } from './http.js';
+import { HttpError, json, readJson, object } from './http.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
 import { startWorker } from './worker.js';
+import { reader, admin } from './access.js';
+import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 
 const config = settings();
 // Each service owns its connection pool; an outage must be visible in health.
@@ -15,12 +17,31 @@ timer.unref();
 const stopWorker = config.service === 'worker' ? startWorker(pool, config) : () => {};
 
 const server = createServer((req, res) => { void (async () => {
-  const path = new URL(req.url ?? '/', 'http://local').pathname;
+  const url = new URL(req.url ?? '/', 'http://local'), path=url.pathname;
   if (req.method === 'GET' && path === '/health') {
     await pool.query('SELECT 1');
     return json(res, 200, {ok: true, service: config.service, database: 'ready'});
   }
-  authorize(req, config.token);
+  const principal=reader(req, config.token);
+  if (config.service === 'archive' && req.method === 'GET') {
+    if (path==='/v1/search') return json(res,200,await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))));
+    const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
+    if (event?.[1]) return json(res,200,await readEvent(pool,principal,event[1]));
+    const artifact=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
+    if (artifact?.[1]) {
+      const bytes=await readArtifact(pool,principal,config.dataDir,artifact[1]);
+      res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store','content-length':bytes.length});
+      return res.end(bytes);
+    }
+  }
+  admin(principal);
+  if (config.service === 'archive') {
+    if (req.method==='GET' && path==='/v1/export') return json(res,200,await exportPage(pool,url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit'))));
+    if (req.method==='POST' && path==='/v1/import') return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024)));
+    if (req.method==='POST' && path==='/v1/replay') return json(res,200,await replay(pool,object(await readJson(req)).event_ids));
+    const upload=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
+    if (req.method==='POST' && upload?.[1]) return json(res,200,await uploadArtifact(pool,config.dataDir,upload[1],await readJson(req,70*1024*1024)));
+  }
   if (req.method === 'GET' && path === '/v1/status') {
     const {rows} = await pool.query<{service: string; seen_at: Date}>('SELECT service, seen_at FROM service_heartbeats ORDER BY service');
     return json(res, 200, {service: config.service, guard_mode: config.guardMode, services: rows, archive: await archiveStatus(pool)});

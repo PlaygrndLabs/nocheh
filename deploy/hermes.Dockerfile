@@ -30,5 +30,6 @@ RUN /usr/sbin/useradd --uid ${LOCAL_UID} --create-home nocheh && mkdir -p /works
 WORKDIR /workspace
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} integrations ./integrations
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/fixtures ./compatibility/fixtures
+COPY --chown=${LOCAL_UID}:${LOCAL_GID} scripts ./scripts
 USER nocheh
 CMD ["python", "-m", "integrations.hermes.runtime"]

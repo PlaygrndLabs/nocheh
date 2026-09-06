@@ -9,8 +9,8 @@ Old persisted data requires no migration.
 | 0 | Preserve baseline and record architecture | Complete: `add2341` |
 | 1 | Prove subscription compatibility | Complete locally; VPS deferred by owner in ADR-0019 |
 | 2 | Bootstrap replacement runtime | Complete: `9d72c32` |
-| 3 | Durable capture and archive | Complete: Compose acceptance, actual database outage and native capture tests pass |
-| 4 | Import, retrieval, export, replay | Pending |
+| 3 | Durable capture and archive | Complete: `d29dbab` |
+| 4 | Import, retrieval, export, replay | Complete: final Compose acceptance passes |
 | 5 | Optional guard on every model attempt | Pending |
 | 6 | Scoped assistant and transcription | Pending |
 | 7 | Isolated Honcho comparison, maximum $5 | Pending; live portion needs temporary key |
@@ -32,5 +32,11 @@ One container HTTP acceptance test and 21 subscription contract tests pass.
 No VPS has been provisioned or tested. Phase 3 evidence: [archive behavior and acceptance](docs/archive.md). Three
 TypeScript tests (including isolated real PostgreSQL) and six native-integration
 tests pass. A real database stop/start recovered the unchanged original exactly
-once. Live Telegram and assistant dispatch remain Phase 6 checks. Continue with
-Phase 4.
+once. Live Telegram and assistant dispatch remain Phase 6 checks.
+
+Phase 4: five TypeScript/PostgreSQL tests and nine Python integration tests pass
+in the final Compose acceptance suite (2026-09-07). The local CLI rehearsal
+imports Telegram Desktop data and supplied media idempotently and exports/reimports
+originals without historical replies. Transcript search has matching scope checks;
+export preserves derived content, source references and provenance. The earlier
+permission-review timeout is resolved. Continue with Phase 5.

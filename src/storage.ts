@@ -56,7 +56,9 @@ export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref
   try {
     locked=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803301) AS locked')).rows[0]?.locked ?? false;
     if (!locked) return;
-    const rows=await client.query<{id:string;source_ref:string}> (`SELECT id,source_ref FROM artifacts WHERE state<>'ready' AND next_attempt<=now() ORDER BY next_attempt LIMIT 10`);
+    const rows=await client.query<{id:string;source_ref:string}> (`SELECT id,source_ref FROM artifacts WHERE state<>'ready'
+      AND source_ref NOT LIKE 'desktop:%' AND error_code IS DISTINCT FROM 'import_bytes_pending'
+      AND next_attempt<=now() ORDER BY next_attempt LIMIT 10`);
     for (const artifact of rows.rows) {
       try {
         const bytes=await fetchFile(artifact.source_ref);
