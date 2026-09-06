@@ -1,27 +1,36 @@
 # Nocheh
 
 A personal assistant built around Hermes, with an independent archive of original
-messages, events, files, and transcripts. Source data remains portable when the
-agent or memory system changes.
+messages, events, files and separately recorded transcripts. Source data stays
+portable when the agent or memory system changes.
 
-**Status:** rebuild in progress on `codex/hermes-rebuild`. The legacy implementation
-is preserved on `codex/legacy-nocheh`. The source/runtime has not been replaced yet;
-Phase 1 must prove subscription chat and transcription first.
+**Status:** phased rebuild on `codex/hermes-rebuild`; see [TASK.md](TASK.md) for
+completed behavior. Legacy code is preserved on `codex/legacy-nocheh`.
 
-## Accepted direction
+## Local development and automated startup
 
-- Hermes supplies the Telegram adapter, agent, tools, and built-in memory.
-- Nocheh supplies durable capture, importing, original-data storage, scoped search,
-  export/replay, and optional deterministic secret masking.
-- PostgreSQL and a file store hold originals. Derived text and guarded caches do
-  not overwrite them. Hermes keeps its native runtime state.
-- ChatGPT subscription authentication powers production; no local models or paid
-  model-provider API keys. Subscription transcription must pass live checks.
-- Group replies use group-local memory; the owner's DM can search the archive.
-- Honcho is an isolated optional experiment with a $5 maximum API budget.
+Install Docker with Compose and Python 3, then run:
 
-See [the phased plan and flow diagram](docs/rebuild-plan.md),
-[actual progress](TASK.md), and [the decision](docs/adr/0018-hermes-owned-archive-subscription-rebuild.md).
+```bash
+./scripts/nocheh up       # build, start in the background, wait for health checks
+./scripts/nocheh dev      # the same services with source watching and restart
+./scripts/nocheh status
+./scripts/nocheh test     # build and test the TypeScript services inside Docker
+./scripts/nocheh verify   # live synthetic subscription checks; consumes quota
+./scripts/nocheh down     # stop services; retain data
+```
 
-The previous bootstrap scripts and app commands still belong to the legacy code.
-Replacement startup instructions will ship with Phase 2 after the feasibility gate.
+`make up`, `make dev`, `make test` and the other matching Make targets are aliases.
+The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services are
+not exposed on the host. Health checks use `/health`. Authenticated status uses
+`/v1/status` and the generated service token.
+
+Bootstrap creates credentials and writable state under ignored `data/local/`.
+It transfers an existing dedicated compatibility login into the runtime once.
+For a new installation, start the services and run `./scripts/nocheh login`.
+No production model-provider API keys or local inference models are required.
+
+See [operations and configuration](docs/deploy.md),
+[architecture and phase diagram](docs/rebuild-plan.md), and
+[subscription evidence](compatibility/findings.md). VPS setup is deferred; local
+Compose is the current development and acceptance target (ADR-0019).

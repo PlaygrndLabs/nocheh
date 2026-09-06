@@ -1,279 +1,85 @@
-# Deploy
+# Local Compose operations
 
-Target: one small VPS, Docker, SQLite on a mounted volume, Cloudflare Tunnel for
-public HTTPS. Same image runs locally.
+Local Docker Compose is the current target. It is used for normal unattended
+operation, development and acceptance. No VPS is required.
 
-## Bootstrap
-
-Two manual things first, because neither can be scripted:
-
-1. **Cloudflare Tunnel token.** one.dash.cloudflare.com → Networks → Tunnels →
-   Create a tunnel → Cloudflared. Copy the token out of the install command.
-   Then Public Hostname → your subdomain → Service type **HTTP**, URL
-   `nocheh:3000` (the compose service name; cloudflared resolves it on the
-   internal network). Do not put a Cloudflare Access policy on that hostname, or
-   Telegram's webhook POSTs get blocked.
-2. **Bot token.** Telegram → @BotFather → `/newbot`, then
-   `/mybots → Bot Settings → Group Privacy → Turn off`. Privacy must be off or
-   the bot only sees messages that mention it.
-
-Then, on the VPS:
+## Start and develop
 
 ```bash
-git clone <repo> ~/nocheh && cd ~/nocheh
-bash scripts/bootstrap.sh
+./scripts/nocheh up
+./scripts/nocheh status
+./scripts/nocheh dev
 ```
 
-It installs Docker and the compose plugin, adds swap when RAM is under ~2 GB,
-optionally enables ufw (allowing the SSH ports it finds), writes `.env` with
-freshly generated secrets, starts the stack behind the tunnel, waits for
-`/health`, then validates the bot token and registers the webhook. It prompts
-only for the things above plus a username and an AI key.
+`up` builds pinned images, starts PostgreSQL before its dependents, and waits for
+service health. Services restart automatically while the Docker engine is running.
+Docker must itself be configured to start at login/boot for unattended operation.
 
-Safe to re-run: existing secrets are never regenerated, and previous answers
-become the prompt defaults.
+`dev` overlays `docker-compose.dev.yml`. TypeScript source changes synchronize into
+the development images, rebuild and restart affected services. Python integration
+changes restart Hermes. Dependencies and Dockerfile changes rebuild images.
+Both modes use the same persistent database, files, spool and Hermes state.
+See Docker's [Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/)
+and [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/) docs.
 
-```bash
-bash scripts/bootstrap.sh --help
-bash scripts/bootstrap.sh --bot-only        # only re-register the webhook
-bash scripts/bootstrap.sh --env-only        # only write .env (no Docker)
-bash scripts/bootstrap.sh --skip-system     # Docker already set up
-```
+## Configuration and credentials
 
-Unattended, every answer from the environment:
+Bootstrap is idempotent: it creates missing secrets, never regenerates existing
+ones. The old repository `.env` is not used by this stack.
 
-```bash
-APP_AUTH_USERNAME=owner \
-PUBLIC_HOSTNAME=nocheh.example.com \
-CLOUDFLARE_TUNNEL_TOKEN=... \
-AI_PROVIDER=nvidia NVIDIA_API_KEY=nvapi-... \
-TELEGRAM_BOT_TOKEN=... \
-bash scripts/bootstrap.sh --non-interactive
-```
-
-Without a terminal and without `--non-interactive` the script fails instead of
-writing a half-configured `.env`.
-
-## Manual Setup
-
-Skip this if `scripts/bootstrap.sh` worked.
-
-```bash
-cp .env.example .env
-```
-
-Required:
-
-```bash
-LOCAL_ENCRYPTION_SECRET=<long, stable, never rotate casually>
-APP_AUTH_USERNAME=<username>
-APP_AUTH_PASSWORD=<strong-password>
-```
-
-Public HTTPS deploys also need:
-
-```bash
-CLOUDFLARE_TUNNEL_TOKEN=<tunnel-token>
-PUBLIC_HOSTNAME=<hostname routed by the tunnel>
-APP_AUTH_SECURE_COOKIE=true
-```
-
-Optional model roles. Each is independent: a blank role disables only that role.
-Credentials are per provider; model ids are per role.
-
-```bash
-AI_PROVIDER=nvidia            # text analysis. blank = dry-run
-AI_IMAGE_PROVIDER=nvidia      # blank = images recorded, not described
-AI_AUDIO_PROVIDER=nvidia      # blank = voice notes recorded, not transcribed
-AI_GUARD_PROVIDER=            # blank = pattern redaction only
-NVIDIA_API_KEY=nvapi-...
-```
-
-Optional bot allow-lists — when either is set, the webhook drops everything else:
-
-```bash
-TELEGRAM_ALLOWED_CHAT_IDS=-1001234567890
-TELEGRAM_ALLOWED_USER_IDS=123456789
-```
-
-## Run
-
-Local, built image (app only, no tunnel):
-
-```bash
-docker compose up -d --build          # http://127.0.0.1:3000/app
-HOST_PORT=8080 docker compose up -d --build
-```
-
-VPS, with tunnel ingress:
-
-```bash
-docker compose --profile tunnel up -d --build
-```
-
-The app port is bound to `127.0.0.1` on the host, so the tunnel is the only
-public path. `.env` must exist before `up`: it is bind-mounted into the container
-so config the dashboard writes survives rebuilds, and Docker would otherwise
-create a directory in its place.
-
-Local dev with hot reload (Vite HMR + `tsc --watch`):
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-# UI  http://127.0.0.1:5173/app   (proxies /api to the backend)
-# API http://127.0.0.1:3000
-```
-
-Without Docker:
-
-```bash
-npm install && npm run build:all && npm run dev
-```
-
-## First Run
-
-The bootstrap script covers steps 1–3. What is left:
-
-1. Open `/app`, log in with `APP_AUTH_*`.
-2. **Setup** — confirm encryption is configured and the provider is ready.
-3. **Connect bot** — token and webhook `https://<hostname>/telegram/webhook`.
-4. Add the bot to the group, with BotFather group privacy off.
-5. Send a message, then read the chat id off the **Conversations** tab (the
-   conversation id *is* the Telegram chat id) and paste it into the allow-list.
-6. **Settings** — `batch` for real groups, `immediate` for testing.
-7. Check **Conversations** for the audit trace and **Knowledge graph** for output.
-
-Verify:
-
-```bash
-docker compose ps
-docker compose logs -f nocheh
-curl http://127.0.0.1:3000/health
-```
-
-
-## Provider and Cost
-
-Default: NVIDIA API Catalog, `z-ai/glm-5.2` (key from
-<https://build.nvidia.com/z-ai/glm-5.2>). OpenAI-compatible endpoint, 1M context,
-`response_format: json_object` for the structured analysis contract.
-
-Alternative behind the same port:
-
-```bash
-AI_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=<explicit-model-id>
-```
-
-Cost rules:
-
-- Keep `MESSAGE_ANALYSIS_MODE=batch`. Windows drive calls, not messages.
-- A window now costs `1 + N_media + 1 guard` calls. Bound the media term with
-  `MEDIA_MAX_ATTACHMENTS_PER_WINDOW`; the understanding cache makes a resent file
-  free.
-- `MAX_AI_OUTPUT_TOKENS` caps output; truncation fails loudly.
-- Watch `aiTokenUsage` (provider, model, token counts per run) in the pipeline
-  trace before widening usage.
-- Reasoning behind the choice: `docs/research/0003-model-selection-cost-reasoning.md`.
-
-## Image, Voice, and the Secret Guard
-
-Full reasoning: [ADR-0010](adr/0010-multimodal-ingestion-model-roles-secret-guard.md).
-
-Media bytes are fetched, turned into text, and dropped. Only derived text is
-cached, keyed on Telegram's `file_unique_id`.
-
-`MEDIA_MAX_INLINE_BYTES` (default 5MB) is a latency guard, not a protocol limit: the
-catalog endpoint accepted 10.7MB of base64 in testing. Keep it above Telegram's photo
-sizes, because downscaling costs OCR accuracy on whiteboards and screenshots.
-
-Telegram voice notes are OGG/Opus and the NVIDIA omni model transcribes them directly,
-so no ffmpeg is needed. Gemini is available as an alternative for any role:
-
-```bash
-AI_AUDIO_PROVIDER=gemini
-GEMINI_API_KEY=...
-GEMINI_AUDIO_MODEL=<explicit-model-id>
-```
-
-Pick the guard model deliberately. `nvidia/nvidia-nemotron-nano-9b-v2` caught every
-planted secret with no false positives; `nvidia/nemotron-3-nano-30b-a3b` returned an
-empty result for the same input. A guard that silently finds nothing is worse than
-none, so evaluate a candidate before trusting it.
-
-Expect analysis to dominate latency: 189-240s per window against `z-ai/glm-5.2`, versus
-~8s for perception and ~8s for the guard. Adapters carry explicit timeouts and name the
-call that gave up.
-
-The secret guard catches credentials pattern rules cannot, such as "the wifi
-password is bluebird77". It is off unless `AI_GUARD_PROVIDER` is set. With it on,
-the default failure policy is **fail closed**: a guard outage leaves the window
-buffered and unanalysed rather than sending unguarded text to the analysis model.
-
-```bash
-SECRET_GUARD_ON_FAILURE=fail_closed        # default
-# SECRET_GUARD_ON_FAILURE=degrade_to_patterns   # availability over strictness
-SECRET_GUARD_MAX_ATTEMPTS=5                # then the message is quarantined
-```
-
-Operational notes:
-
-- A quarantined message is kept for inspection, excluded from future windows, and
-  reported only in the logs today (`Messages quarantined after repeated secret
-  guard failures`). Grep for it after a provider incident.
-- `FLUSH_SWEEP_INTERVAL_SECONDS` drives retries. Without the sweep a batch only
-  flushes when the next message arrives, so a stalled window in a quiet
-  conversation would never be retried.
-- A guard failure returns `200` to Telegram on purpose. The buffer already holds
-  the message, and a non-2xx would make Telegram retry the same update and hammer
-  an already-failing guard.
-
-## Import Telegram History
-
-Bots cannot read old group history. Export the group as JSON from Telegram
-Desktop, then paste it into **Import history**. Nocheh chunks, redacts, and
-processes it into structured memory. Do not import sensitive exports before you
-trust the redaction policy in **Settings**.
-
-## Backup
-
-```bash
-mkdir -p backups
-cp data/nocheh.sqlite "backups/nocheh-$(date +%Y%m%d-%H%M%S).sqlite"
-```
-
-Back up `.env` separately. **If `LOCAL_ENCRYPTION_SECRET` changes, every
-encrypted payload becomes unreadable.**
-
-## Update
-
-```bash
-git pull
-npm test && npm run test:web
-docker compose --profile tunnel up -d --build   # drop --profile locally
-```
-
-Config the dashboard wrote (provider key, bot token) lives in the host `.env`
-through the bind mount, so it survives the rebuild.
-
-## Troubleshooting
-
-| Symptom | Check |
+| Path | Purpose |
 | --- | --- |
-| `/app` blank or 404 | `web/dist` was not built: `npm run build:all` (Docker builds it) |
-| All `/api/*` return 503 | `APP_AUTH_USERNAME` / `APP_AUTH_PASSWORD` unset |
-| Cannot log in over HTTPS | Correct is `APP_AUTH_SECURE_COOKIE=true`. Over a plain-HTTP forwarded port some browsers reject the Secure cookie; use the tunnel hostname |
-| A `.env` **directory** appeared | `up` ran before `.env` existed. Remove it, create the file, start again |
-| No Telegram messages | Public HTTPS webhook, bot in group, privacy mode, allow-lists, `docker compose logs -f nocheh` |
-| Webhook 403 / Access denied | A Cloudflare Access policy covers the hostname; bypass `/telegram/webhook` |
-| No analysis output | **Setup** shows provider not ready, or boot log warns about missing env; restart after saving; check the `analysis` step in the trace |
-| Bot token gone after an update | The `./.env:/app/.env` mount is missing from `docker-compose.yml` |
-| Build killed / OOM | Under ~2 GB RAM, add swap (the bootstrap script does this) |
-| Notion sync failed | Tasks still persist locally; set `NOTION_MCP_COMMAND` and `NOTION_DATABASE_ID` only if you want sync |
+| `data/local/compose.env` | UID/GID, host port, model and guard mode |
+| `data/local/secrets/database_password` | PostgreSQL password |
+| `data/local/secrets/service_token` | Internal service and owner API authentication |
+| `data/local/hermes/` | Hermes-owned subscription login and native runtime state |
+| `data/local/files/` | Original attachment bytes |
+| `data/local/spool/` | Durable capture and retry data |
+| `data/local/reports/` | Local validation reports |
+| Compose `postgres_data` volume | Nocheh archive database |
 
-## Limits
+The host port defaults to 8780, bound only to loopback. PostgreSQL has no host port,
+so it can coexist with other local databases. Service credentials are Compose
+secrets, not command-line arguments. Runtime data and credentials are ignored by Git.
 
-- Suggestions are approved through the API, not yet through UI buttons.
-- Nocheh never sends Telegram messages; it only ingests.
-- Crypto support is decision support. No auto-trading, ever.
+The bootstrap transfers the dedicated Phase 1 login into the runtime once. It does
+not share the Codex desktop application's token store. For a new login:
+
+```bash
+./scripts/nocheh login
+./scripts/nocheh verify
+```
+
+If requested by OpenAI, enable device-code authorization in ChatGPT Security
+settings, then restart login for a fresh code. Verification uses only synthetic
+input; it consumes subscription quota. It exercises token refresh, native chat,
+literal detection and Ogg/Opus transcription inside the running Hermes container.
+
+## Daily commands
+
+```bash
+./scripts/nocheh test
+./scripts/nocheh logs archive
+./scripts/nocheh status
+./scripts/nocheh down
+./scripts/nocheh up
+```
+
+`down` retains all persistent state. Do not add `--volumes` unless intentionally
+resetting the database. Direct Compose commands must use the generated env file:
+
+```bash
+docker compose --env-file data/local/compose.env ps
+```
+
+For an isolated rehearsal, set `NOCHEH_STATE_DIR` to a separate absolute directory
+and `COMPOSE_PROJECT_NAME` to a separate project name. A fresh environment requires
+its own login; do not duplicate a refresh token between concurrently running stacks.
+
+## Later VPS deployment
+
+Use the same Compose files and scripts on a Linux host with Docker and Python 3.
+Transfer owned data using backup/restore, assign the proper host UID/GID, and run
+container acceptance there before enabling the bot. Keep the API on loopback unless
+an authenticated transport is intentionally configured. VPS provisioning and its
+live checks are deferred until a server exists.

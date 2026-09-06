@@ -1,29 +1,26 @@
 {
-  "name": "@nocheh/core",
-  "version": "0.1.0",
+  "name": "@nocheh/services",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "build:web": "npm --prefix web install && npm --prefix web run build",
-    "build:all": "npm run build && npm run build:web",
-    "dev": "npm run build && node dist/src/dev-server.js",
-    "dev:watch": "npm run build && (tsc -p tsconfig.json --watch --preserveWatchOutput --watchFile priorityPollingInterval --watchDirectory dynamicPriorityPolling & node --watch dist/src/dev-server.js)",
-    "dev:web": "npm --prefix web run dev",
+    "build": "node scripts/build.mjs",
+    "start": "node dist/src/main.js",
+    "dev": "npm run build && npm start",
+    "test": "npm run build && node --test dist/test/*.test.js",
     "graphify:extract": "graphify extract . --no-cluster --out .",
     "graphify:report": "graphify cluster-only . --no-label",
-    "graphify:update": "graphify update .",
-    "benchmark:memory": "npm run build && node dist/src/interfaces/cli/memory-benchmark.js",
-    "test": "npm run build && node scripts/run-tests.mjs",
-    "test:web": "npm --prefix web test"
-  },
-  "devDependencies": {
-    "@honcho-ai/sdk": "2.4.0",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^22.15.30",
-    "typescript": "^5.8.3"
+    "graphify:update": "graphify update ."
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1"
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/pg": "8.23.1",
+    "typescript": "5.9.3"
   }
 }

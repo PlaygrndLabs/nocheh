@@ -8,7 +8,7 @@ Old persisted data requires no migration.
 | --- | --- | --- |
 | 0 | Preserve baseline and record architecture | Complete: `add2341` |
 | 1 | Prove subscription compatibility | Complete locally; VPS deferred by owner in ADR-0019 |
-| 2 | Bootstrap replacement runtime | In progress: shared local-development and automated Compose stack |
+| 2 | Bootstrap replacement runtime | Complete: local Compose, native subscription, empty-state startup and development reload verified |
 | 3 | Durable capture and archive | Pending |
 | 4 | Import, retrieval, export, replay | Pending |
 | 5 | Optional guard on every model attempt | Pending |
@@ -24,5 +24,9 @@ Phase 1 evidence and reproduction: [compatibility/README.md](compatibility/READM
 21 offline tests pass. Hermes-owned login and live refresh are verified; the
 refreshed credentials pass chat, detection and transcription with the pinned
 upstreams. ADR-0019 removes the unavailable VPS from this rebuild's acceptance gate.
-Continue automatically with local Compose, including live container checks. No VPS
-has been provisioned or tested.
+Container refresh, native chat, literal detection and Ogg/Opus transcription pass
+in [the Compose report](compatibility/results/2026-09-06-compose.json). All five
+services start healthy from empty state. Development edits synchronize and restart
+both TypeScript and Python services; normal operation retains that same state.
+One container HTTP acceptance test and 21 subscription contract tests pass.
+No VPS has been provisioned or tested. Continue with Phase 3.
