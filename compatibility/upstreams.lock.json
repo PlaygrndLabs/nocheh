@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "python": "3.11.16",
+  "uv_tested": "0.12.7",
+  "hermes": {
+    "repository": "https://github.com/NousResearch/hermes-agent.git",
+    "revision": "7166071fcaadb36df26f6d753dda97da6b5d699e",
+    "version": "0.21.0",
+    "dependencies": "uv.lock from the pinned revision"
+  },
+  "codex_asr": {
+    "repository": "https://github.com/Wangnov/codex-asr.git",
+    "revision": "479f6a7a3db81fe2a23d4755b0ccbeb4400317d4",
+    "image": "ghcr.io/wangnov/codex-asr@sha256:8fd68262922d4b8348be4f71ed7638b03577842d8b06d323d28b564e68860808"
+  },
+  "model": "gpt-5.6-sol",
+  "note": "Pins identify candidates under test. See the evidence report for actual compatibility results."
+}

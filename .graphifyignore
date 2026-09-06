@@ -8,3 +8,5 @@
 *.yaml
 *.yml
 docs/
+data/
+compatibility/fixtures/
