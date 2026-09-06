@@ -136,9 +136,10 @@ class SubscriptionContracts(unittest.TestCase):
         self.assertEqual(report_exit_code(report), 2)
         self.assertFalse(report["phase1_live_ready"])
         report["checks"]["native_credential_refresh_live"] = {"status": "passed"}
-        report["checks"]["vps_verification"] = {"status": "pending"}
+        report["checks"]["target_verification"] = {"status": "pending"}
         self.assertEqual(report_exit_code(report), 2)
-        report["checks"]["vps_verification"] = {"status": "passed"}
+        report["checks"]["target_verification"] = {"status": "passed", "environment": "local"}
+        report["checks"]["vps_verification"] = {"status": "deferred"}
         self.assertEqual(report_exit_code(report), 0)
 
     def test_fixture_has_actual_opus_frames(self):

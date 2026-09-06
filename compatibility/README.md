@@ -1,14 +1,15 @@
 # Subscription compatibility gate
 
-Phase 1 is **in progress**. A fresh Hermes-owned login, live token refresh, native
+Phase 1 is **complete locally**. A fresh Hermes-owned login, live token refresh, native
 chat, literal detection and Ogg/Opus transcription pass locally with the owner's
-ChatGPT subscription. Target-VPS verification remains pending.
+ChatGPT subscription. ADR-0019 defers VPS verification and selects local Compose
+for development and acceptance. Phase 2 rechecks these paths in containers.
 
 See [Hermes-owned login results](results/2026-09-06-hermes-local.json),
 [initial access-token results](results/2026-09-06-local.json) and
 [findings](findings.md). These checks establish compatibility, not production
-readiness or general secret-detection accuracy. The legacy application remains
-in place until this gate passes.
+readiness or general secret-detection accuracy. Earlier reports retain their
+original pending-VPS status; ADR-0019 changes the gate, not those observations.
 
 ## Reproduce locally
 
@@ -49,7 +50,7 @@ Exit codes:
 
 | Code | Meaning |
 | --- | --- |
-| 0 | All required Phase 1 live checks passed on the operator-selected VPS |
+| 0 | All required Phase 1 live checks passed on the selected local or VPS target |
 | 1 | A check failed |
 | 2 | No selected check failed, but required checks remain pending or unselected |
 
