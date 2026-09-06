@@ -1,7 +1,9 @@
 # ADRs
 
 Decision history, oldest first. Accepted ADRs are not rewritten — a later ADR
-supersedes an earlier one.
+supersedes an earlier one. **ADR-0018 is the active rebuild direction and supersedes
+conflicting decisions and sequencing below. Older status entries describe their
+status before the rebuild.**
 
 | ADR | Decision | Still current |
 | --- | --- | --- |
@@ -22,3 +24,4 @@ supersedes an earlier one.
 | [0015](0015-not-adopting-honcho-as-memory-layer.md) | Honcho rejected as the memory layer on evidence; own recall and own consolidation; spike gated by a named test | Current safe default; evaluation timing amended by 0017 |
 | [0016](0016-answer-path-outbound-delivery-approval-rule.md) | Reply contract, single audited egress, scheduler, rule 3 amended to bounded autonomous sending | Yes, amends rule 3 |
 | [0017](0017-memory-backend-evidence-gate.md) | Choose owned, Honcho-primary, or hybrid memory from an early frozen bake-off; the guarded log remains owned in every outcome | Yes, amends 0015 sequencing |
+| [0018](0018-hermes-owned-archive-subscription-rebuild.md) | Hermes rebuild, owned originals, optional guard, subscription production, isolated Honcho trial | Active direction |
