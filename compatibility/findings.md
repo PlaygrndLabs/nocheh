@@ -1,17 +1,17 @@
 # Phase 1 findings — 2026-09-06
 
-**Status:** three core subscription paths pass locally; Phase 1 remains open for
-Hermes-owned live refresh and VPS verification. No runtime replacement or merge
-into `main` has occurred.
+**Status:** Hermes-owned device login, live refresh and all three core subscription
+paths pass locally. Phase 1 remains open for VPS verification. No runtime
+replacement or merge into `main` has occurred.
 
 | Check | Actual result |
 | --- | --- |
-| Native Hermes `AIAgent`, `gpt-5.6-sol`, no tools | Live pass; sentinel matched, one API call, 9.44 s |
-| Literal detection via Hermes `CodexAuxiliaryClient` | Live pass; planted password found exactly and clean prose produced no matches, two requests together 7.54 s |
-| Native plugin discovery → native STT dispatcher → pinned codex-asr image | Live pass; 7.25 s Ogg/Opus fixture transcribed, expected spoken terms present, 6.31 s including process startup |
-| Offline contracts against pinned native interfaces | 19 tests passed; failures/quota/refresh responses are simulated |
+| Native Hermes `AIAgent`, `gpt-5.6-sol`, no tools | Live pass with refreshed Hermes credentials; sentinel matched, one API call, 6.40 s |
+| Literal detection via Hermes `CodexAuxiliaryClient` | Live pass with refreshed credentials; planted password found exactly and clean prose produced no matches, two requests together 6.14 s |
+| Native plugin discovery → native STT dispatcher → pinned codex-asr image | Live pass with refreshed credentials; 7.25 s Ogg/Opus fixture transcribed, expected spoken terms present, 5.91 s including process startup |
+| Offline contracts against pinned native interfaces | 21 tests passed; failure/quota responses are simulated |
 | Dependency setup | Passed locally with pinned source, dependency lock and image digest |
-| Hermes-owned refresh against live auth endpoint | Pending browser device login |
+| Hermes-owned refresh against live auth endpoint | Live pass; native refresh and persistence completed in 1.63 s, then all three model paths passed |
 | Target VPS | Pending host/user/application directory and access |
 
 The local run used macOS arm64 for Hermes and the pinned Linux transcription
@@ -33,6 +33,11 @@ examples do not establish detection recall or prove that every secret is found.
    `CodexAuxiliaryClient` with an explicitly authenticated SDK client and native
    request identity headers. No custom wire protocol, paid key or upstream patch
    was needed for this compatibility check.
+4. The first completed device login exposed a helper bug: Hermes returns a
+   metadata envelope, while its persistence helper expects the nested token map.
+   Corrected that mapping and repaired the saved login without another sign-in.
+   Regression tests verify native credential reads and protect existing credentials
+   from an incomplete login response. The repaired credentials refreshed live.
 
 Native code inspected at the pin:
 
@@ -45,9 +50,10 @@ Native code inspected at the pin:
 ## Remaining scope
 
 No real quota exhaustion was deliberately induced. Actual malformed/unsupported
-requests produced HTTP 400; rate limits, expired authentication, transient errors
-and refresh rotation were exercised with offline transport responses. Live
-refresh must still prove that newly issued Hermes-owned credentials work.
+requests produced HTTP 400; rate limits, expired authentication and transient
+errors were exercised with offline transport responses. Live refresh and requests
+with the refreshed Hermes-owned credentials now pass. See the
+[sanitized report](results/2026-09-06-hermes-local.json).
 
 The archive, optional guard enforcement, Telegram capture, group scoping, retry
 worker and VPS deployment are not implemented by this checkpoint. The Honcho
