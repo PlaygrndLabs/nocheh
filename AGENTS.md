@@ -8,8 +8,8 @@ owned source data, useful memory, and reasoning are the product.
 The accepted implementation plan is [docs/rebuild-plan.md](docs/rebuild-plan.md).
 [ADR-0018](docs/adr/0018-hermes-owned-archive-subscription-rebuild.md) supersedes
 the previous implementation direction. Check `TASK.md` for actual phase status.
-During Phase 1, the source tree still contains the legacy implementation; do not
-mistake the target architecture for completed behavior.
+ADR-0019 makes local Docker Compose the current development and acceptance target;
+VPS work is deferred. Do not mistake planned phases for completed behavior.
 
 ## Product rules
 
@@ -50,7 +50,8 @@ mistake the target architecture for completed behavior.
 - Complete and verify each phase, commit it, report its hash, and continue
   automatically. Do not ask for repeated permission for authorized phase work.
 - Phase 1 proves subscription chat, detection, transcription, refresh/failure
-  handling, and VPS compatibility. If transcription fails, retain evidence and
+  handling locally. Phase 2 rechecks compatibility inside Compose. VPS validation
+  is deferred by the owner (ADR-0019). If transcription fails, retain evidence and
   stop dependent release work. Missing credentials are pending checks, not passes.
 - Continue independent work when possible; do not claim an unfinished phase is
   complete. The optional Honcho live comparison does not block production.

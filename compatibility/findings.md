@@ -1,8 +1,8 @@
 # Phase 1 findings — 2026-09-06
 
 **Status:** Hermes-owned device login, live refresh and all three core subscription
-paths pass locally. Phase 1 remains open for VPS verification. No runtime
-replacement or merge into `main` has occurred.
+paths pass locally. Phase 1 is complete under ADR-0019: the owner chose local
+Compose and deferred VPS verification. Container acceptance follows in Phase 2.
 
 | Check | Actual result |
 | --- | --- |
@@ -12,7 +12,7 @@ replacement or merge into `main` has occurred.
 | Offline contracts against pinned native interfaces | 21 tests passed; failure/quota responses are simulated |
 | Dependency setup | Passed locally with pinned source, dependency lock and image digest |
 | Hermes-owned refresh against live auth endpoint | Live pass; native refresh and persistence completed in 1.63 s, then all three model paths passed |
-| Target VPS | Pending host/user/application directory and access |
+| Target VPS | Deferred by owner; local Compose is the current target (ADR-0019) |
 
 The local run used macOS arm64 for Hermes and the pinned Linux transcription
 container. Timings are individual observations, not performance benchmarks. The

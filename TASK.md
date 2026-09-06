@@ -7,8 +7,8 @@ Old persisted data requires no migration.
 | Phase | Work | Status |
 | --- | --- | --- |
 | 0 | Preserve baseline and record architecture | Complete: `add2341` |
-| 1 | Prove subscription compatibility | In progress: owned login, live refresh, chat/detection/STT pass locally; VPS pending |
-| 2 | Bootstrap replacement runtime | Pending Phase 1 |
+| 1 | Prove subscription compatibility | Complete locally; VPS deferred by owner in ADR-0019 |
+| 2 | Bootstrap replacement runtime | In progress: shared local-development and automated Compose stack |
 | 3 | Durable capture and archive | Pending |
 | 4 | Import, retrieval, export, replay | Pending |
 | 5 | Optional guard on every model attempt | Pending |
@@ -23,6 +23,6 @@ The release remains blocked if required subscription transcription does not work
 Phase 1 evidence and reproduction: [compatibility/README.md](compatibility/README.md).
 21 offline tests pass. Hermes-owned login and live refresh are verified; the
 refreshed credentials pass chat, detection and transcription with the pinned
-upstreams. This is not target-VPS validation. Resume by supplying the VPS host/user
-and application directory, then run the required checks there. Keep the legacy
-runtime until the phase gate passes.
+upstreams. ADR-0019 removes the unavailable VPS from this rebuild's acceptance gate.
+Continue automatically with local Compose, including live container checks. No VPS
+has been provisioned or tested.

@@ -3,6 +3,8 @@
 Accepted 2026-09-06. Execution progresses automatically: complete a phase, validate
 its acceptance criteria, commit, report the hash, then continue. See `TASK.md` for
 actual status. Never mark unavailable credentials or unrun live tests as passes.
+Amended by ADR-0019: the owner has no VPS; use local Docker Compose for development,
+automated operation and release acceptance. VPS verification is deferred.
 
 ## Production flow
 
@@ -37,7 +39,7 @@ normal guard policy. Historical import/replay never sends old replies.
 | Phase | Deliverable and acceptance | Commit |
 | --- | --- | --- |
 | 0 | Preserve legacy baseline; record accepted architecture and active instructions | `docs: record Hermes rebuild architecture` |
-| 1 | Reproducible native Hermes subscription chat, literal-secret detection, Ogg/Opus transcription, refresh/failure/quota tests, and VPS verification; pin tested upstreams | `test: verify subscription inference and transcription` |
+| 1 | Reproducible native Hermes subscription chat, literal-secret detection, Ogg/Opus transcription and refresh/failure/quota tests locally; pin tested upstreams | `test: verify subscription inference and transcription` |
 | 2 | Replace legacy app with TypeScript services and thin Python integration; fresh Docker Compose startup, PostgreSQL, files, internal auth/config/health, local and VPS instructions | `build: bootstrap Nocheh services and Hermes` |
 | 3 | Capture before acknowledgment; durable spool, idempotent archive commit, revisions/identities/timestamps/raw events, attachment preservation, derived provenance, outbound results and retry states; pass crash/outage/dedup tests | `feat: archive Telegram events and attachments durably` |
 | 4 | Telegram Desktop import including supplied media, bounded lexical search, authenticated read/artifact/export/replay interfaces and native Hermes tools; unchanged export/reimport and silent historical replay | `feat: add portable import export and archive retrieval` |
@@ -49,7 +51,7 @@ normal guard policy. Historical import/replay never sends old replies.
 ## Release and test rules
 
 - Phase 1 is a feasibility gate: subscription transcription must work on the
-  account and VPS. If it fails, retain evidence and stop dependent release work;
+  account locally, with container verification in Phase 2. If it fails, retain evidence and stop dependent release work;
   no silent API-key or local-model fallback. Continue independent work if possible.
 - Use `codex/legacy-nocheh` for preservation and `codex/hermes-rebuild` for changes.
   No old-data migration. Keep unrelated work and credentials out of commits.
@@ -66,4 +68,5 @@ normal guard policy. Historical import/replay never sends old replies.
 - Honcho is optional and isolated. If no temporary key is supplied, commit the
   runnable experiment and mark live evaluation pending; it does not block release.
 - Cutover and merge require passing production checks and no release blocker.
-  Do not describe a partial implementation or untested VPS deployment as complete.
+  Do not describe a partial implementation as complete. Local Compose is the current
+  release target; VPS deployment and verification remain deferred.

@@ -111,7 +111,7 @@ def validate_audio(path: Path):
 
 def report_exit_code(report):
     checks = report["checks"]
-    required = ("chat", "detector", "transcription", "native_credential_refresh_live", "vps_verification")
+    required = ("chat", "detector", "transcription", "native_credential_refresh_live", "target_verification")
     failed = any(check["status"] == "failed" for check in checks.values())
     report["phase1_live_ready"] = not failed and all(checks.get(name, {}).get("status") == "passed" for name in required)
     if failed:
@@ -252,12 +252,11 @@ def run_probes(args):
     for name, fn in (("chat", chat), ("detector", detector), ("transcription", transcription)):
         if args.only in ("all", name):
             run_case(report, name, fn)
-    if args.environment == "vps" and args.only == "all":
-        passed = all(report["checks"].get(name, {}).get("status") == "passed" for name in
-                     ("chat", "detector", "transcription", "native_credential_refresh_live"))
-        report["checks"]["vps_verification"] = {"status": "passed" if passed else "pending", "reason": "Executed on the operator-selected target Linux host"}
-    else:
-        report["checks"]["vps_verification"] = {"status": "pending", "reason": "Full probe must run on the target VPS"}
+    passed = args.only == "all" and all(report["checks"].get(name, {}).get("status") == "passed" for name in
+                 ("chat", "detector", "transcription", "native_credential_refresh_live"))
+    report["checks"]["target_verification"] = {"status": "passed" if passed else "pending", "environment": args.environment}
+    report["checks"]["vps_verification"] = (report["checks"]["target_verification"] if args.environment == "vps"
+        else {"status": "deferred", "reason": "Owner selected local Compose; ADR-0019"})
     exit_code = report_exit_code(report)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
