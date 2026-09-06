@@ -31,8 +31,11 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE TABLE IF NOT EXISTS derived_artifacts (
   id text PRIMARY KEY, event_id text NOT NULL REFERENCES events(id), artifact_id text REFERENCES artifacts(id),
   kind text NOT NULL, content bytea NOT NULL, provenance jsonb NOT NULL,
+  search_text text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE derived_artifacts ADD COLUMN IF NOT EXISTS search_text text NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS derived_lexical ON derived_artifacts USING gin(to_tsvector('simple',search_text));
 CREATE TABLE IF NOT EXISTS dispatches (
   event_id text PRIMARY KEY REFERENCES events(id),
   state text NOT NULL CHECK(state IN ('pending','running','done','failed','ambiguous','suppressed')),
@@ -53,6 +56,7 @@ export interface Envelope {
 }
 export function envelope(value: unknown): Envelope {
   const v = object(value);
+  if (Object.keys(v).some(k=>!['version','key','origin','bot_id','kind','scope','source_id','revision','occurred_at','payload','text','wire_base64'].includes(k))) throw new HttpError(400,'unknown_envelope_field');
   if (v.version !== 1 || !['live','import','generated'].includes(String(v.origin))) throw new HttpError(400, 'invalid_envelope');
   for (const key of ['key','bot_id','kind','scope','source_id','revision']) if (!string(v[key],1024)) throw new HttpError(400,'empty_identity');
   if (v.text !== null) string(v.text, 2000000);
@@ -73,7 +77,7 @@ export function attachmentRefs(payload: Record<string, unknown>): {kind:string; 
   visit(payload, 'file', 0); return [...refs.values()];
 }
 
-export async function ingest(pool: pg.Pool, value: Envelope): Promise<{id:string; duplicate:boolean}> {
+export async function ingest(pool: pg.Pool, value: Envelope, dispatch=true): Promise<{id:string; duplicate:boolean}> {
   const id = digest(value.key), payload = Buffer.from(canonical(value.payload));
   // Identity metadata is included: reuse of a key cannot silently move a source to another scope.
   const contentHash = digest(canonical({...value, wire_base64: undefined}));
@@ -94,7 +98,7 @@ export async function ingest(pool: pg.Pool, value: Envelope): Promise<{id:string
           [digest(`${id}:${ref.ref}`),id,ref.kind,ref.ref,JSON.stringify(ref.metadata)]);
       }
       await client.query('INSERT INTO dispatches(event_id,state) VALUES($1,$2)',
-        [id, value.origin === 'live' && value.kind === 'telegram_update' ? 'pending' : 'suppressed']);
+        [id, dispatch && value.origin === 'live' && value.kind === 'telegram_update' ? 'pending' : 'suppressed']);
     }
     await client.query('COMMIT'); return {id, duplicate: !added.rowCount};
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }

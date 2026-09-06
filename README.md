@@ -15,7 +15,7 @@ Install Docker with Compose and Python 3, then run:
 ./scripts/nocheh up       # build, start in the background, wait for health checks
 ./scripts/nocheh dev      # the same services with source watching and restart
 ./scripts/nocheh status
-./scripts/nocheh test     # build and test the TypeScript services inside Docker
+./scripts/nocheh test     # PostgreSQL, TypeScript and native Python integration tests
 ./scripts/nocheh verify   # live synthetic subscription checks; consumes quota
 ./scripts/nocheh down     # stop services; retain data
 ```
@@ -31,6 +31,7 @@ For a new installation, start the services and run `./scripts/nocheh login`.
 No production model-provider API keys or local inference models are required.
 
 See [operations and configuration](docs/deploy.md),
+[durable archive behavior](docs/archive.md), [portable import/export](docs/import-export.md),
 [architecture and phase diagram](docs/rebuild-plan.md), and
 [subscription evidence](compatibility/findings.md). VPS setup is deferred; local
 Compose is the current development and acceptance target (ADR-0019).
