@@ -3,3 +3,5 @@ dist/
 data/
 .env
 graphify-out/
+__pycache__/
+*.py[cod]

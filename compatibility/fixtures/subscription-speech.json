@@ -1,0 +1,11 @@
+{
+  "source": "Synthetic macOS Samantha speech generated for this compatibility test; no private recording",
+  "spoken_text": "Nocheh compatibility test. Project Juniper has a deadline on Friday. The test access code is seven six four two.",
+  "file": "subscription-speech.ogg",
+  "sha256": "cecf31e5a40208eed6847d1ac1cab4887f890a14363f1fb9b9488800116f6977",
+  "codec": "opus",
+  "container": "ogg",
+  "channels": 1,
+  "duration_seconds": 7.246167,
+  "conversion": "ffmpeg -i subscription-speech.aiff -ac 1 -ar 24000 -c:a libopus subscription-speech.ogg"
+}
