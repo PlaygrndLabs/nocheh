@@ -2,6 +2,8 @@ import type pg from 'pg';
 import type { Settings } from './config.js';
 import { drainSpool, fetchAttachments } from './storage.js';
 import { HttpError, object, string } from './http.js';
+import { dispatchCommitted } from './assistant.js';
+import { executeApproved } from './actions.js';
 
 export async function hermesCall(config: Settings, path:string, body:unknown, timeout=120000):Promise<Record<string,unknown>> {
   const response=await fetch(`${config.hermesUrl}${path}`, {method:'POST',
@@ -28,6 +30,8 @@ export function startWorker(pool:pg.Pool,config:Settings):()=>void {
         const result=await hermesCall(config,'/internal/file',{file_id:ref});
         return Buffer.from(string(result.bytes_base64,70*1024*1024),'base64');
       });
+      await dispatchCommitted(pool,config,(path,body,timeout)=>hermesCall(config,path,body,timeout));
+      if(config.assistant.enabled)await executeApproved(pool,(path,body,timeout)=>hermesCall(config,path,body,timeout));
     } catch { console.error(JSON.stringify({event:'worker_cycle_failed'})); }
     finally { busy=false; }
   };

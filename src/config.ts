@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { DEFAULT_TRUSTED, DETECTOR_VERSION } from './guard.js';
+import { assistantPolicy } from './assistant-policy.js';
 
 export function secret(name: string): string {
   const path = process.env[`${name}_FILE`];
@@ -23,6 +24,7 @@ export function settings() {
     hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
     guardMode: mode as 'off' | 'on' | 'auto',
     guardTrusted:trusted as string[],detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_MODEL ?? 'gpt-5.6-sol'}`,
+    assistant:assistantPolicy(process.env.ASSISTANT_POLICY_FILE),
   };
 }
 export type Settings = ReturnType<typeof settings>;

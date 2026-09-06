@@ -6,14 +6,24 @@ import os
 import urllib.request
 
 ARCHIVE_CREDENTIAL = contextvars.ContextVar('nocheh_archive_credential', default=None)
+_PROCESS_CREDENTIAL = None
 
 
-def request(path):
-    credential = ARCHIVE_CREDENTIAL.get()
+def bind_process_credential(credential):
+    """Trusted child startup binds once; tool arguments cannot replace the scope."""
+    global _PROCESS_CREDENTIAL
+    if _PROCESS_CREDENTIAL is not None or not isinstance(credential,str) or not credential.startswith(('scope.','turn.')):
+        raise RuntimeError('invalid_process_scope_binding')
+    _PROCESS_CREDENTIAL=credential
+
+
+def request(path,body=None):
+    credential = _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()
     if not credential:
         raise RuntimeError('archive_scope_not_bound')
     req = urllib.request.Request(os.environ.get('ARCHIVE_URL','http://archive:8780') + path,
-                                 headers={'Authorization': 'Bearer ' + credential})
+                                 data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
+                                 headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     with urllib.request.urlopen(req,timeout=15) as response:
         data=response.read(2*1024*1024+1)
         if len(data)>2*1024*1024:
@@ -59,7 +69,14 @@ def register(ctx):
          {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],search_tool),
         ('nocheh_archive_read','Read an archived source. Originals and generated artifacts have distinct provenance.',
          {'id':{'type':'string'}},['id'],read_tool),
+        ('nocheh_action_request','Propose an external Telegram message. Nothing is sent until the owner reviews and approves the exact action in their private DM.',
+         {'destination':{'type':'string','description':'Numeric Telegram chat ID'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
     ):
         ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
             handler=handler)
+
+
+def action_tool(args,**kwargs):
+    try:return json.dumps(request('/v1/action-requests',{'destination':args['destination'],'text':args['text']}),ensure_ascii=False)
+    except Exception:return json.dumps({'error':'action_request_unavailable'})
