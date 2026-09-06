@@ -26,6 +26,7 @@ CALL_LOCK = threading.RLock()
 DETECTOR_LOCK = threading.RLock()
 CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
+ASSISTANT = None
 
 
 def configure():
@@ -88,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.reply(404, {"error": "not_found"})
         return self.reply(200, {"ok": True, "service": "hermes", "model": MODEL,
-                                "login_present": (PROFILE_HOME / "auth.json").is_file(), "telegram": "not_started"})
+                                "login_present": (PROFILE_HOME / "auth.json").is_file(), "telegram": ASSISTANT.status if ASSISTANT else 'not_started'})
 
     def do_POST(self):
         if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), ("Bearer " + TOKEN).encode()):
@@ -121,6 +122,12 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path == '/internal/action':
+            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
+            return ASSISTANT.action(body)
+        if self.path == '/internal/dispatch':
+            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
+            return ASSISTANT.call(body)
         if self.path == '/internal/status':
             from integrations.hermes.request_boundary import FAILURES, COUNTS
             return {'guard_failures':list(FAILURES),'model_boundary':dict(COUNTS),'chat':dict(CHAT_STATUS),'errors':list(ERRORS)}
@@ -168,6 +175,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global ASSISTANT
     if len(TOKEN) < 24:
         raise SystemExit("Service token is missing or too short")
     logging.disable(logging.CRITICAL)
@@ -176,10 +184,18 @@ def main():
     install()
     from integrations.hermes.compatibility_patch import install as install_native_gate
     install_native_gate()
+    from integrations.hermes.assistant_gateway import AssistantGateway
+    from integrations.hermes.scopes import Scopes
+    policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
+    bot_path=os.environ.get('TELEGRAM_BOT_TOKEN_FILE')
+    bot_token=Path(bot_path).read_text().strip() if bot_path else ''
+    ASSISTANT=AssistantGateway(PROFILE_HOME,os.environ.get('NOCHEH_SPOOL_DIR','/data/spool'),policy,bot_token,MODEL,resolve_credentials)
+    ASSISTANT.start()
     server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8781"))), Handler)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"event": "ready", "service": "hermes"}), flush=True)
     server.serve_forever()
+    ASSISTANT.stop()
 
 
 if __name__ == "__main__":

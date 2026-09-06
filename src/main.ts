@@ -5,6 +5,7 @@ import { HttpError, json, readJson, object } from './http.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
 import { startWorker, hermesCall } from './worker.js';
 import { guardPayload } from './guard.js';
+import { requestAction } from './actions.js';
 import { reader, admin } from './access.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 
@@ -24,6 +25,7 @@ const server = createServer((req, res) => { void (async () => {
     return json(res, 200, {ok: true, service: config.service, database: 'ready'});
   }
   const principal=reader(req, config.token);
+  if(config.service==='archive' && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
   if (config.service === 'archive' && req.method === 'GET') {
     if (path==='/v1/search') return json(res,200,await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))));
     const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);

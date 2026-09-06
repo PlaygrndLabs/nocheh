@@ -11,8 +11,8 @@ Old persisted data requires no migration.
 | 2 | Bootstrap replacement runtime | Complete: `9d72c32` |
 | 3 | Durable capture and archive | Complete: `d29dbab` |
 | 4 | Import, retrieval, export, replay | Complete: `aa39e60` |
-| 5 | Optional guard on every model attempt | Complete: 9 TypeScript/PostgreSQL, 16 Python integration, 21 subscription contract tests; live synthetic guard check passed |
-| 6 | Scoped assistant and transcription | Pending |
+| 5 | Optional guard on every model attempt | Complete: `eb6d319` |
+| 6 | Scoped assistant and transcription | Implemented and offline/native-memory verified; live Telegram acceptance pending credentials |
 | 7 | Isolated Honcho comparison, maximum $5 | Pending; live portion needs temporary key |
 | 8 | Validate, cut over, merge into main | Pending |
 
@@ -51,3 +51,18 @@ Their transient root cause was not established; required failures remain visible
 and fail closed. See [guard operation and limits](docs/guard.md).
 The saved default `auto` mode is restored after the required-guard rehearsal.
 Continue with Phase 6; the Telegram token and owner/group IDs are not configured.
+
+Phase 6 implementation: native Telegram decoding/formatting/sending with durable
+dispatch receipts; separate native Hermes memory/session processes per profile;
+signed archive capabilities; explicit safe tool set; cross-profile session-search
+paths disabled; derived voice transcript persistence/retries; owner-DM-only action
+approval. 12 TypeScript/PostgreSQL and 21 Python tests pass, including native PTB
+batching/delivery against a fixture transport. Live synthetic memory store, recall
+after process restart and other-group isolation pass in the [report](compatibility/results/2026-09-07-assistant-memory.json).
+Recall took up to 152 seconds in that run; this is not a latency guarantee.
+
+The Telegram token file remains empty and the conversation policy is disabled.
+Actual DM/group/voice/approval delivery and reconnect acceptance are not run, so
+Phase 6 is not complete and merging remains blocked. [Setup](docs/telegram.md)
+includes capture-only ID discovery without Telegram sends. Continue independent
+experiment/operations work while waiting for these credentials.

@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import secrets
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -24,6 +25,10 @@ def bootstrap():
     bot = STATE / 'secrets/telegram_bot_token'
     if not bot.exists():
         bot.touch(mode=0o600)
+    policy=STATE/'assistant.json'
+    if not policy.exists():
+        policy.write_text(json.dumps({'enabled':False,'owner_id':None,'group_ids':[]},indent=2)+'\n')
+        policy.chmod(0o600)
     env = STATE / "compose.env"
     if not env.exists():
         env.write_text(f"NOCHEH_UID={os.getuid()}\nNOCHEH_GID={os.getgid()}\nNOCHEH_PORT=8780\nNOCHEH_MODEL=gpt-5.6-sol\nNOCHEH_GUARD_MODE=auto\n")
@@ -39,9 +44,18 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config"))
+    parser.add_argument("command", choices=("up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram"))
     args, rest = parser.parse_known_args()
     bootstrap()
+    if args.command=='configure-telegram':
+        config_parser=argparse.ArgumentParser(description='Enable the owner DM and explicitly selected groups; token stays in its secret file.')
+        config_parser.add_argument('--owner-id',required=True)
+        config_parser.add_argument('--group-id',action='append',default=[])
+        selected=config_parser.parse_args(rest)
+        if not re.fullmatch(r'[1-9]\d{0,18}',selected.owner_id) or any(not re.fullmatch(r'-\d{1,19}',g) for g in selected.group_id):config_parser.error('Use numeric Telegram IDs; group IDs are negative.')
+        if not (STATE/'secrets/telegram_bot_token').read_text().strip():config_parser.error('The Telegram token file is empty.')
+        (STATE/'assistant.json').write_text(json.dumps({'enabled':True,'owner_id':selected.owner_id,'group_ids':list(dict.fromkeys(selected.group_id))},indent=2)+'\n')
+        print('Telegram policy saved. Run ./scripts/nocheh up to apply it.');return 0
     env = dict(os.environ, NOCHEH_STATE_DIR=str(STATE))
     command = ["docker", "compose", "--env-file", str(STATE / "compose.env"), "-f", str(ROOT / "docker-compose.yml")]
     if args.command in ("dev", "test"):
@@ -53,6 +67,7 @@ def main():
         "test": ["run", "--rm", "--build", "--no-deps", "archive", "npm", "test"],
         "verify": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.verify", "--live"],
         "config": ["config", "--quiet"],
+        "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.discover_telegram"],
         "login": ["exec", "hermes", "python", "-c",
             "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
     }

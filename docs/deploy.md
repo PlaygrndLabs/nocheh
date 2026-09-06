@@ -30,9 +30,10 @@ ones. The old repository `.env` is not used by this stack.
 | Path | Purpose |
 | --- | --- |
 | `data/local/compose.env` | UID/GID, host port, model and guard mode |
+| `data/local/assistant.json` | Disabled by default; owner ID and selected Telegram groups |
 | `data/local/secrets/database_password` | PostgreSQL password |
 | `data/local/secrets/service_token` | Internal service and owner API authentication |
-| `data/local/secrets/telegram_bot_token` | Optional bot token; empty until locally configured |
+| `data/local/secrets/telegram_bot_token` | Bot token; empty until locally configured |
 | `data/local/hermes/` | Hermes-owned subscription login and native runtime state |
 | `data/local/files/` | Original attachment bytes |
 | `data/local/spool/` | Durable capture and retry data |

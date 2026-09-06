@@ -50,6 +50,18 @@ CREATE TABLE IF NOT EXISTS guarded_cache (
   cache_key text PRIMARY KEY, payload bytea NOT NULL, spans integer NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS transcription_jobs (
+  artifact_id text PRIMARY KEY REFERENCES artifacts(id),
+  state text NOT NULL CHECK(state IN ('pending','running','done','failed')) DEFAULT 'pending',
+  attempts integer NOT NULL DEFAULT 0, next_attempt timestamptz NOT NULL DEFAULT now(), error_code text
+);
+CREATE TABLE IF NOT EXISTS action_requests (
+  id text PRIMARY KEY, event_id text NOT NULL REFERENCES events(id), scope text NOT NULL,
+  destination text NOT NULL, original_text bytea NOT NULL,
+  state text NOT NULL CHECK(state IN ('proposed','approved','rejected','running','done','ambiguous')) DEFAULT 'proposed',
+  decision_event_id text REFERENCES events(id), error_code text,
+  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 export interface Envelope {
@@ -112,6 +124,8 @@ export async function archiveStatus(pool:pg.Pool) {
   const events = await pool.query<{count:string}>('SELECT count(*) FROM events');
   const artifacts = await pool.query('SELECT state,count(*)::integer AS count FROM artifacts GROUP BY state');
   const dispatches = await pool.query('SELECT state,count(*)::integer AS count FROM dispatches GROUP BY state');
+  const transcriptions = await pool.query('SELECT state,count(*)::integer AS count FROM transcription_jobs GROUP BY state');
+  const dispatchFailures = await pool.query("SELECT event_id,state,error_code,attempts FROM dispatches WHERE error_code IS NOT NULL ORDER BY updated_at DESC LIMIT 50");
   const failures = await pool.query('SELECT file_name, attempts, error_code, seen_at FROM spool_failures ORDER BY seen_at DESC LIMIT 100');
-  return {events:Number(events.rows[0]?.count),artifacts:artifacts.rows,dispatches:dispatches.rows,spool_failures:failures.rows};
+  return {events:Number(events.rows[0]?.count),artifacts:artifacts.rows,dispatches:dispatches.rows,transcriptions:transcriptions.rows,dispatch_failures:dispatchFailures.rows,spool_failures:failures.rows};
 }

@@ -23,8 +23,10 @@ x-service: &service
     NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-auto}
     GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex"]}
+    ASSISTANT_POLICY_FILE: /run/nocheh/assistant.json
   secrets: [database_password, service_token]
   volumes:
+    - ${NOCHEH_STATE_DIR:-./data/local}/assistant.json:/run/nocheh/assistant.json:ro
     - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files
     - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
   healthcheck:
@@ -91,6 +93,7 @@ services:
       SERVICE_TOKEN_FILE: /run/secrets/service_token
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       NOCHEH_CAPTURE_ENABLED: '1'
+      ASSISTANT_POLICY_FILE: /run/nocheh/assistant.json
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-auto}
       GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex"]}
       NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
@@ -98,6 +101,7 @@ services:
       GUARD_URL: http://guard:8780
     secrets: [service_token, telegram_bot_token]
     volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/assistant.json:/run/nocheh/assistant.json:ro
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes:/workspace/data/local/hermes
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
       - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
