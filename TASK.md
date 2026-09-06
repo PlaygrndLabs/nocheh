@@ -8,8 +8,8 @@ Old persisted data requires no migration.
 | --- | --- | --- |
 | 0 | Preserve baseline and record architecture | Complete: `add2341` |
 | 1 | Prove subscription compatibility | Complete locally; VPS deferred by owner in ADR-0019 |
-| 2 | Bootstrap replacement runtime | Complete: local Compose, native subscription, empty-state startup and development reload verified |
-| 3 | Durable capture and archive | Pending |
+| 2 | Bootstrap replacement runtime | Complete: `9d72c32` |
+| 3 | Durable capture and archive | Complete: Compose acceptance, actual database outage and native capture tests pass |
 | 4 | Import, retrieval, export, replay | Pending |
 | 5 | Optional guard on every model attempt | Pending |
 | 6 | Scoped assistant and transcription | Pending |
@@ -29,4 +29,8 @@ in [the Compose report](compatibility/results/2026-09-06-compose.json). All five
 services start healthy from empty state. Development edits synchronize and restart
 both TypeScript and Python services; normal operation retains that same state.
 One container HTTP acceptance test and 21 subscription contract tests pass.
-No VPS has been provisioned or tested. Continue with Phase 3.
+No VPS has been provisioned or tested. Phase 3 evidence: [archive behavior and acceptance](docs/archive.md). Three
+TypeScript tests (including isolated real PostgreSQL) and six native-integration
+tests pass. A real database stop/start recovered the unchanged original exactly
+once. Live Telegram and assistant dispatch remain Phase 6 checks. Continue with
+Phase 4.

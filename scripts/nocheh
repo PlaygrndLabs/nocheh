@@ -20,7 +20,10 @@ def bootstrap():
         if not path.exists():
             with path.open("x") as file:
                 file.write(secrets.token_hex(32) + "\n")
-            path.chmod(0o600)
+        path.chmod(0o600)
+    bot = STATE / 'secrets/telegram_bot_token'
+    if not bot.exists():
+        bot.touch(mode=0o600)
     env = STATE / "compose.env"
     if not env.exists():
         env.write_text(f"NOCHEH_UID={os.getuid()}\nNOCHEH_GID={os.getgid()}\nNOCHEH_PORT=8780\nNOCHEH_MODEL=gpt-5.6-sol\nNOCHEH_GUARD_MODE=auto\n")
@@ -53,7 +56,16 @@ def main():
         "login": ["exec", "hermes", "python", "-c",
             "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
     }
-    return subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
+    if args.command == 'test':
+        ready = subprocess.call(command + ['up', '-d', '--wait', 'postgres'], cwd=ROOT, env=env)
+        if ready:
+            return ready
+    result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
+    if args.command == 'test' and result == 0:
+        return subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
+            '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes', 'python', '-m', 'unittest',
+            'discover', '-s', 'integrations/hermes', '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
+    return result
 
 
 if __name__ == "__main__":

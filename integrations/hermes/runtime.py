@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import contextlib
 import hmac
 import io
@@ -102,6 +103,25 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path == '/internal/file':
+            from telegram import Bot
+            token_path = os.environ.get('TELEGRAM_BOT_TOKEN_FILE')
+            bot_token = Path(token_path).read_text().strip() if token_path else ''
+            if not bot_token:
+                raise RuntimeError('telegram_not_configured')
+            ref = body['file_id']
+            if not isinstance(ref, str) or not ref or len(ref) > 1024:
+                raise ValueError('invalid_file_id')
+            async def download():
+                async with Bot(bot_token) as bot:
+                    file = await bot.get_file(ref)
+                    if file.file_size and file.file_size > 50*1024*1024:
+                        raise ValueError('attachment_size_limit')
+                    return await file.download_as_bytearray()
+            raw = asyncio.run(download())
+            if len(raw) > 50*1024*1024:
+                raise ValueError('attachment_size_limit')
+            return {'bytes_base64': base64.b64encode(raw).decode()}
         if self.path == "/internal/refresh":
             from hermes_cli.auth_codex import _read_codex_tokens, _save_codex_tokens, refresh_codex_oauth_pure
             tokens = _read_codex_tokens()["tokens"]
