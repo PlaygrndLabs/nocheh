@@ -7,7 +7,14 @@ export async function hermesCall(config: Settings, path:string, body:unknown, ti
   const response=await fetch(`${config.hermesUrl}${path}`, {method:'POST',
     headers:{authorization:`Bearer ${config.token}`,'content-type':'application/json'},
     body:JSON.stringify(body),signal:AbortSignal.timeout(timeout)});
-  if (!response.ok) throw new HttpError(response.status,response.status===429?'quota_paused':'hermes_unavailable');
+  if (!response.ok) {
+    let code=response.status===429?'quota_paused':'hermes_unavailable';
+    if (path==='/internal/detect') {
+      const error=await response.json().catch(()=>null) as {error?:string}|null;
+      if (error?.error==='detector_contract_rejected') code=error.error;
+    }
+    throw new HttpError(response.status,code);
+  }
   return object(await response.json());
 }
 export function startWorker(pool:pg.Pool,config:Settings):()=>void {

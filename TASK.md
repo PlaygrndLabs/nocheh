@@ -10,8 +10,8 @@ Old persisted data requires no migration.
 | 1 | Prove subscription compatibility | Complete locally; VPS deferred by owner in ADR-0019 |
 | 2 | Bootstrap replacement runtime | Complete: `9d72c32` |
 | 3 | Durable capture and archive | Complete: `d29dbab` |
-| 4 | Import, retrieval, export, replay | Complete: final Compose acceptance passes |
-| 5 | Optional guard on every model attempt | Pending |
+| 4 | Import, retrieval, export, replay | Complete: `aa39e60` |
+| 5 | Optional guard on every model attempt | Complete: 9 TypeScript/PostgreSQL, 16 Python integration, 21 subscription contract tests; live synthetic guard check passed |
 | 6 | Scoped assistant and transcription | Pending |
 | 7 | Isolated Honcho comparison, maximum $5 | Pending; live portion needs temporary key |
 | 8 | Validate, cut over, merge into main | Pending |
@@ -39,4 +39,15 @@ in the final Compose acceptance suite (2026-09-07). The local CLI rehearsal
 imports Telegram Desktop data and supplied media idempotently and exports/reimports
 originals without historical replies. Transcript search has matching scope checks;
 export preserves derived content, source references and provenance. The earlier
-permission-review timeout is resolved. Continue with Phase 5.
+permission-review timeout is resolved.
+
+Phase 5: exact-span masking, destination trust, database caching and the pinned
+mandatory HTTPX boundary are implemented. Native synchronous/asynchronous SDK
+tests cover retries, route changes, redirects and zero protected sends on guard
+failure. Subscription contract tests remain passing. The final live synthetic
+check passed all three detector fixtures and native guarded chat; earlier live
+detector failures/timeouts are retained in the [report](compatibility/results/2026-09-07-guard.json).
+Their transient root cause was not established; required failures remain visible
+and fail closed. See [guard operation and limits](docs/guard.md).
+The saved default `auto` mode is restored after the required-guard rehearsal.
+Continue with Phase 6; the Telegram token and owner/group IDs are not configured.

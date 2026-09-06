@@ -3,7 +3,8 @@ import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object } from './http.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
-import { startWorker } from './worker.js';
+import { startWorker, hermesCall } from './worker.js';
+import { guardPayload } from './guard.js';
 import { reader, admin } from './access.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 
@@ -35,6 +36,12 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
+  if (config.service==='guard' && req.method==='POST' && path==='/v1/guard') {
+    const body=object(await readJson(req,1024*1024));
+    if (typeof body.destination!=='string') throw new HttpError(400,'invalid_destination');
+    return json(res,200,await guardPayload(body.payload,{mode:config.guardMode,trusted:config.guardTrusted,detectorVersion:config.detectorVersion},body.destination,
+      async(text)=>(await hermesCall(config,'/internal/detect',{text})).literals,pool));
+  }
   if (config.service === 'archive') {
     if (req.method==='GET' && path==='/v1/export') return json(res,200,await exportPage(pool,url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit'))));
     if (req.method==='POST' && path==='/v1/import') return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024)));

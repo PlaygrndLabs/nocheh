@@ -12,16 +12,20 @@ import os
 import signal
 import tempfile
 import threading
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .subscription import resolve_credentials, detect_literals
+from .subscription import resolve_credentials, detect_literals, DetectorContractError
 
 MODEL = os.environ.get("NOCHEH_MODEL", "gpt-5.6-sol")
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
 TOKEN = Path(os.environ["SERVICE_TOKEN_FILE"]).read_text().strip()
 CALL_LOCK = threading.RLock()
+DETECTOR_LOCK = threading.RLock()
+CHAT_STATUS = {'stage':'idle'}
+ERRORS = deque(maxlen=20)
 
 
 def configure():
@@ -43,6 +47,7 @@ def configure():
 
 
 def chat(text: str):
+    CHAT_STATUS.update(stage='initializing')
     from run_agent import AIAgent
     credentials = resolve_credentials()
     agent = AIAgent(
@@ -53,9 +58,14 @@ def chat(text: str):
         quiet_mode=True, save_trajectories=False, reasoning_config={"effort": "low"},
     )
     try:
+        CHAT_STATUS.update(stage='running')
         result = agent.run_conversation(text)
         if result.get("failed") or not result.get("final_response"):
+            from agent.error_surface import build_error_surface_from_result
+            surface=build_error_surface_from_result(result) or {}
+            CHAT_STATUS.update(stage='failed', api_calls=result.get('api_calls'), failure_kind=surface.get('reason','unknown'))
             raise RuntimeError("native_chat_failed")
+        CHAT_STATUS.update(stage='passed',api_calls=result.get('api_calls'))
         return {"text": result["final_response"], "model": MODEL, "api_calls": result.get("api_calls")}
     finally:
         agent.close()
@@ -91,18 +101,29 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.reply(400, {"error": "expected_object"})
             # Hermes writes some diagnostics to stdout even in quiet mode.
-            with CALL_LOCK, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            # Detection can be requested by the main model's guard while its
+            # conversation lock is held. A separate lock prevents that deadlock.
+            lock = contextlib.nullcontext() if self.path == '/internal/status' else DETECTOR_LOCK if self.path == '/internal/detect' else CALL_LOCK
+            with lock, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 result = self.dispatch(body)
             self.reply(200, result)
+        except DetectorContractError as error:
+            ERRORS.append({'route':'/internal/detect','kind':str(error)})
+            self.reply(503, {'error':'detector_contract_rejected'})
         except (ValueError, KeyError, TypeError):
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/transcribe','/internal/file') else 'unknown','kind':'invalid_request'})
             self.reply(400, {"error": "invalid_request"})
         except Exception as error:
             status = getattr(error, "status_code", 503)
             status = status if isinstance(status, int) and status in (401, 403, 429, 503) else 503
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/refresh','/internal/transcribe','/internal/file') else 'unknown','kind':type(error).__name__,'status':status})
             self.reply(status, {"error": "quota_paused" if status == 429 else "subscription_unavailable",
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path == '/internal/status':
+            from integrations.hermes.request_boundary import FAILURES, COUNTS
+            return {'guard_failures':list(FAILURES),'model_boundary':dict(COUNTS),'chat':dict(CHAT_STATUS),'errors':list(ERRORS)}
         if self.path == '/internal/file':
             from telegram import Bot
             token_path = os.environ.get('TELEGRAM_BOT_TOKEN_FILE')
@@ -151,6 +172,10 @@ def main():
         raise SystemExit("Service token is missing or too short")
     logging.disable(logging.CRITICAL)
     configure()
+    from integrations.hermes.request_boundary import install
+    install()
+    from integrations.hermes.compatibility_patch import install as install_native_gate
+    install_native_gate()
     server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8781"))), Handler)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"event": "ready", "service": "hermes"}), flush=True)

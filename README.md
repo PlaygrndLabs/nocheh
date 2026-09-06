@@ -32,6 +32,7 @@ No production model-provider API keys or local inference models are required.
 
 See [operations and configuration](docs/deploy.md),
 [durable archive behavior](docs/archive.md), [portable import/export](docs/import-export.md),
+[optional outgoing guarding](docs/guard.md),
 [architecture and phase diagram](docs/rebuild-plan.md), and
 [subscription evidence](compatibility/findings.md). VPS setup is deferred; local
 Compose is the current development and acceptance target (ADR-0019).
