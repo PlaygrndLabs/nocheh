@@ -190,6 +190,28 @@ class SubscriptionContracts(unittest.TestCase):
         stored = json.loads((self.home / "auth.json").read_text())
         self.assertEqual(stored["providers"]["openai-codex"]["tokens"]["refresh_token"], "refresh-new")
 
+    def test_native_device_login_envelope_is_saved_as_readable_credentials(self):
+        from compatibility.login import save_login_result
+        from hermes_cli.auth_codex import _read_codex_tokens
+        save_login_result({
+            "tokens": {"access_token": "synthetic-access", "refresh_token": "synthetic-refresh"},
+            "base_url": "https://chatgpt.com/backend-api/codex", "auth_mode": "chatgpt",
+            "last_refresh": "2026-09-06T00:00:00Z", "source": "device-code",
+        })
+        stored = _read_codex_tokens()
+        self.assertEqual(stored["tokens"]["access_token"], "synthetic-access")
+        self.assertEqual(stored["tokens"]["refresh_token"], "synthetic-refresh")
+        self.assertEqual(stored["last_refresh"], "2026-09-06T00:00:00Z")
+
+    def test_incomplete_device_login_cannot_overwrite_credentials(self):
+        from compatibility.login import save_login_result
+        from hermes_cli.auth_codex import _save_codex_tokens
+        _save_codex_tokens({"access_token": "existing", "refresh_token": "existing-refresh"})
+        before = (self.home / "auth.json").read_bytes()
+        with self.assertRaises(ValueError):
+            save_login_result({"auth_mode": "chatgpt", "tokens": {"access_token": "incomplete"}})
+        self.assertEqual((self.home / "auth.json").read_bytes(), before)
+
     def test_native_refresh_quota_retains_credentials_and_requests_pause(self):
         import httpx
         from hermes_cli.auth import AuthError

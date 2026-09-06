@@ -1,10 +1,11 @@
 # Subscription compatibility gate
 
-Phase 1 is **in progress**. Native Hermes chat, literal detection and Ogg/Opus
-transcription pass locally with the owner's ChatGPT subscription. A fresh
-Hermes-owned live refresh and target-VPS verification remain pending.
+Phase 1 is **in progress**. A fresh Hermes-owned login, live token refresh, native
+chat, literal detection and Ogg/Opus transcription pass locally with the owner's
+ChatGPT subscription. Target-VPS verification remains pending.
 
-See [measured results](results/2026-09-06-local.json) and
+See [Hermes-owned login results](results/2026-09-06-hermes-local.json),
+[initial access-token results](results/2026-09-06-local.json) and
 [findings](findings.md). These checks establish compatibility, not production
 readiness or general secret-detection accuracy. The legacy application remains
 in place until this gate passes.
@@ -68,6 +69,10 @@ uses Hermes's native device flow and token store. The probe then calls Hermes's
 native token-refresh and persistence functions before exercising the refreshed
 credential in chat, detection and STT. It does not use the generic resolver's
 legacy fallback to another application's credential store.
+
+If OpenAI asks to enable device-code authorization, enable it in ChatGPT's
+Security settings and restart the login helper for a new code. Once this profile
+has a login, run the probe directly; another browser login is not required.
 
 The production plugin delegates ongoing credential resolution/refresh to Hermes.
 In the eventual container, mount only its owned profile; do not share the Codex
