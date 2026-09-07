@@ -33,9 +33,9 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
       });
       if (!response.ok) {
         let code = response.status === 429 ? 'quota_paused' : 'runtime_unavailable';
-        if (operation === 'guard.detect') {
+        if (operation === 'guard.detect' || operation === 'config.write' || operation === 'config.read') {
           const error = await response.json().catch(() => null) as {error?: string} | null;
-          if (error?.error === 'detector_contract_rejected') code = error.error;
+          if (error?.error && ['detector_contract_rejected','configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference'].includes(error.error)) code = error.error;
         }
         throw new HttpError(response.status, code);
       }

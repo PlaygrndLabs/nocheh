@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import signal
+import subprocess
+import sys
 import tempfile
 import threading
 from collections import deque
@@ -29,6 +31,7 @@ TRANSCRIPTION_LOCK = threading.RLock()
 CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
 ASSISTANT = None
+ADMIN = None
 
 
 def configure():
@@ -91,7 +94,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.reply(404, {"error": "not_found"})
         return self.reply(200, {"ok": True, "service": "hermes", "model": MODEL,
-                                "login_present": (PROFILE_HOME / "auth.json").is_file(), "telegram": ASSISTANT.status if ASSISTANT else 'not_started'})
+                                "login_present": (PROFILE_HOME / "auth.json").is_file(), "telegram": ASSISTANT.status if ASSISTANT else 'not_started',
+                                "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable"})
 
     def do_POST(self):
         if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), ("Bearer " + TOKEN).encode()):
@@ -113,7 +117,13 @@ class Handler(BaseHTTPRequestHandler):
         except DetectorContractError as error:
             ERRORS.append({'route':'/internal/detect','kind':str(error)})
             self.reply(503, {'error':'detector_contract_rejected'})
-        except (ValueError, KeyError, TypeError):
+        except ValueError as error:
+            if self.path == '/internal/manage':
+                code = str(error) if str(error) in ('configuration_conflict', 'unsupported_preference',
+                    'profile_scope_denied', 'invalid_preference') else 'invalid_management_request'
+                return self.reply(409 if code == 'configuration_conflict' else 400, {'error': code})
+            self.reply(400, {'error': 'invalid_request'})
+        except (KeyError, TypeError):
             ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/transcribe','/internal/file') else 'unknown','kind':'invalid_request'})
             self.reply(400, {"error": "invalid_request"})
         except Exception as error:
@@ -178,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ASSISTANT
+    global ASSISTANT, ADMIN
     if len(TOKEN) < 24:
         raise SystemExit("Service token is missing or too short")
     logging.disable(logging.CRITICAL)
@@ -199,8 +209,13 @@ def main():
     # redirects race and can restore another request's secret-bearing output.
     with open(os.devnull,'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
         ASSISTANT.start()
-        server.serve_forever()
-        ASSISTANT.stop()
+        ADMIN = admin = subprocess.Popen([sys.executable, '-m', 'integrations.hermes.native_admin'], stdout=quiet, stderr=quiet)
+        try: server.serve_forever()
+        finally:
+            admin.terminate()
+            try: admin.wait(timeout=10)
+            except subprocess.TimeoutExpired: admin.kill(); admin.wait()
+            ASSISTANT.stop()
 
 
 if __name__ == "__main__":

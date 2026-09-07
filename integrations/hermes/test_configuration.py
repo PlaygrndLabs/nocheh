@@ -50,3 +50,9 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(telegram_policy(),{'enabled':True,'owner_id':'42','group_ids':['-10','-20']})
             self.assertEqual(secret('TELEGRAM_BOT_TOKEN',required=False),'')
             with self.assertRaises(ValueError): secret('TELEGRAM_BOT_TOKEN')
+
+    def test_native_admin_port_follows_isolated_archive_port(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); values = initialize(state)
+            values['NOCHEH_PORT'] = '8795'; write_env(env_path(state), values)
+            self.assertEqual(compose_environment(state)['NOCHEH_NATIVE_ADMIN_PORT'], '8800')

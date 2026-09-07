@@ -27,7 +27,8 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
   });
   const nativePort=await listen(native),probe=createServer(),port=await listen(probe);await close(probe);
   await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),secret);
-  const child=spawn(process.execPath,[resolve('dist/src/management.js')],{stdio:'ignore',env:{...process.env,NOCHEH_STATE_DIR:state,NOCHEH_DASHBOARD_PORT:String(port),NOCHEH_DASHBOARD_NATIVE_PORT:String(nativePort)}});
+  await writeFile(join(state,'.env'),`NOCHEH_CONFIG_VERSION=1\nSERVICE_TOKEN=${secret}\n`);
+  const child=spawn(process.execPath,[resolve('dist/src/management.js')],{stdio:'ignore',env:{...process.env,NOCHEH_STATE_DIR:state,NOCHEH_DASHBOARD_PORT:String(port),NOCHEH_DASHBOARD_NATIVE_PORT:String(nativePort),NOCHEH_NATIVE_ADMIN_PORT:String(nativePort)}});
   const base=`http://127.0.0.1:${port}`;
   try{
     for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,40));}

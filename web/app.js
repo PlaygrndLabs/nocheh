@@ -58,8 +58,19 @@ import {fetchJSON,authedFetch} from './client.js';
     const [section,setSection]=useState('nocheh');
     return h('div',null,h('div',{className:'n-section-switch','aria-label':'Settings category'},
       h('button',{type:'button',onClick:()=>setSection('nocheh'),'aria-pressed':section==='nocheh',className:section==='nocheh'?'n-primary':''},'Nocheh settings'),
-      h('button',{type:'button',onClick:()=>setSection('hermes'),'aria-pressed':section==='hermes',className:section==='hermes'?'n-primary':''},'Hermes preferences')),
-      section==='nocheh'?h(NochehSettings,{notify}):h(HermesPreferences,{notify}));
+      h('button',{type:'button',onClick:()=>setSection('hermes'),'aria-pressed':section==='hermes',className:section==='hermes'?'n-primary':''},'Hermes preferences'),
+      h('button',{type:'button',onClick:()=>setSection('policy'),'aria-pressed':section==='policy',className:section==='policy'?'n-primary':''},'Policy defaults')),
+      section==='nocheh'?h(NochehSettings,{notify}):section==='policy'?h(PolicySettings,{notify}):h(HermesPreferences,{notify}));
+  }
+  function PolicySettings({notify}) {
+    const [tick,setTick]=useState(0),[data,error]=useLoad('/policy',tick),[changes,setChanges]=useState({}),[busy,setBusy]=useState(false);
+    const save=async e=>{e.preventDefault();setBusy(true);try{await call('/policy',{changes,revision:data.revision});setChanges({});setTick(v=>v+1);notify('Global preferences saved. Profiles that inherit them use them on the next turn.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    return h(Panel,{title:'Global preference defaults',note:'Profiles can inherit these values or keep an explicit override. Existing profile overrides are preserved.'},
+      error&&h('p',{role:'alert'},error),!data&&!error&&h('p',{role:'status'},'Loading policy…'),data&&h('form',{onSubmit:save},h('div',{className:'n-form'},...Object.entries(data.schema).map(([key,spec])=>{
+        const input={id:'policy-'+key,value:changes[key]??data.values[key],disabled:busy,onChange:e=>setChanges({...changes,[key]:spec.choices?e.target.value:Number(e.target.value)})};
+        return h('div',{className:'n-field',key},h('label',{htmlFor:input.id},({'agent.reasoning_effort':'Reasoning effort','agent.max_iterations':'Maximum agent steps','agent.run_budget_seconds':'Time per turn (seconds)','memory.memory_char_limit':'General memory limit (characters)','memory.user_char_limit':'User profile limit (characters)'})[key]||key),spec.choices?h('select',input,...spec.choices.map(v=>h('option',{value:v,key:v},v))):h('input',{...input,type:'number',min:spec.min,max:spec.max,required:true}),h('small',null,changes[key]===null?'Will use the built-in default after saving.':'Effective source: '+data.origins[key]),button('Use built-in default',()=>setChanges({...changes,[key]:null}),busy));
+      })),h('div',{className:'n-actions'},h('button',{className:'n-primary',disabled:busy||!Object.keys(changes).length},busy?'Saving…':'Save global preferences'),button('Discard edits',()=>setChanges({}),busy))),
+      h('p',{className:'n-muted'},'External actions currently require owner review. Broader tool policies become available with the tools phase; job overrides are stored for the scheduling phase.'));
   }
   function NochehSettings({notify}) {
     const [refresh,setRefresh]=useState(0),[data,error]=useLoad('/settings',refresh);
@@ -101,7 +112,7 @@ import {fetchJSON,authedFetch} from './client.js';
       problem&&h('p',{role:'alert'},problem),scope&&!problem&&prefs?.scope!==scope&&h('p',{role:'status'},'Loading this profile’s preferences…'),
       scope&&prefs?.scope===scope&&h('form',{onSubmit:save},h('div',{className:'n-form n-preferences'},...Object.entries(prefs.schema).map(([key,spec])=>{
         const input={id:key,value:changes[key]??prefs.values[key],disabled:busy,'aria-describedby':key+'-help',onChange:e=>setChanges({...changes,[key]:spec.choices?e.target.value:Number(e.target.value)})};
-        return h('div',{className:'n-field',key},h('label',{htmlFor:key},names[key]?.[0]||key),spec.choices?h('select',input,...spec.choices.map(v=>h('option',{key:v,value:v},v[0].toUpperCase()+v.slice(1)))):h('input',{...input,type:'number',min:spec.min,max:spec.max,required:true,step:1}),h('small',{id:key+'-help'},names[key]?.[1]));
+        return h('div',{className:'n-field',key},h('label',{htmlFor:key},names[key]?.[0]||key),spec.choices?h('select',input,...spec.choices.map(v=>h('option',{key:v,value:v},v[0].toUpperCase()+v.slice(1)))):h('input',{...input,type:'number',min:spec.min,max:spec.max,required:true,step:1}),h('small',{id:key+'-help'},changes[key]===null?'Will inherit the global value after saving.':(names[key]?.[1]||'')+' Effective source: '+(prefs.origins?.[key]||'profile')),button('Inherit global value',()=>setChanges({...changes,[key]:null}),busy));
       })),h('div',{className:'n-actions'},h('button',{disabled:busy||!Object.keys(changes).length,className:'n-primary'},busy?'Saving…':'Save Hermes preferences'),button('Discard edits',()=>setChanges({}),busy||!Object.keys(changes).length))),
       h('p',{className:'n-muted n-afterword'},'Model routing, enabled tools and access policy are managed by Nocheh. These are the supported native preferences, not the full Hermes configuration.'),h(RouteLink,{page:'memory'},'Read this installation’s Hermes memory →'));
   }
