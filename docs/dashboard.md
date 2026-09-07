@@ -10,30 +10,34 @@ then run:
 ./scripts/nocheh dashboard --stop
 ```
 
-The dashboard is at <http://127.0.0.1:8783/nocheh>. Its native Hermes shell runs in
-a separate Compose project, with a private presentation-only home and loopback
-backend port 8784. The TypeScript owner API runs locally; it does not expose a
-Docker socket to containers. The launcher builds the pinned native dashboard
-assets using the upstream npm lockfile. Stop and start to rebuild after updates.
+Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
+Open Hermes from the sidebar for its dedicated native dashboard at `/hermes/`;
+its return link brings you back to Nocheh. Old `/nocheh#…` bookmarks still work.
+
+The launcher starts Nocheh before building the optional native page. If Hermes is
+unavailable, the Nocheh archive/import/maintenance screens remain accessible.
+The owner API runs locally and does not expose a Docker socket to containers.
+Native assets use the pinned upstream lockfile. Stop and start to rebuild updates.
 
 ## Find the right page
 
 | Page | Use it for |
 | --- | --- |
 | Overview | Start common tasks and understand the archive, Hermes memory and Honcho. |
-| Original chats | Search original messages and generated transcripts, then open source records and files. |
-| Hermes memory | Read general notes, user profile notes and native conversation history for one chat. |
-| Evidence graph | Follow recorded relationships back to their source evidence. |
-| Import chats | Choose a Telegram export, review access and files, then start or resume an import. |
+| Archive | Search original messages and generated transcripts, then open source records and files. |
+| Memory | Read general notes, user profile notes and native conversation history for one chat. |
+| Graph | Follow recorded relationships back to their source evidence. |
+| Imports | Choose a Telegram export, review access and files, then start or resume an import. |
 | Settings → Nocheh settings | Manage Telegram access, model routing and guarding across the installation. Review, save, then apply to running services. |
 | Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
 | Maintenance | Check health, prepare archive downloads, create backups, restart or verify an inactive restore; inspect settings-apply results. |
+| Integrations | Inspect runtime status and capabilities, or open the native Hermes dashboard. |
 | Honcho lab | Check the optional experiment and browse its stored data when it is running. |
 
-This is Nocheh’s control panel on the native Hermes dashboard foundation. Hermes
-provides the Telegram adapter, assistant runtime, tools, profiles and memory;
-Nocheh provides archive capture, scope policy and guarding. The standard Hermes
-chat and administration screens are not exposed here.
+Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
+tools, profiles and memory through an integration. Nocheh owns capture, access rules,
+guarding and approvals. Native execution and administration remain restricted until
+their integration acceptance passes; see TASK.md for actual phase status.
 
 Original chats are preserved evidence. Native notes are generated working memory
 and may change. Imported messages become archive sources, not native sessions or
@@ -72,8 +76,10 @@ remain supported alongside these conveniences:
 Secret settings take a hidden prompt or piped stdin, never a value in argv.
 The dashboard owner session is separate from the archive service credential and
 Hermes OAuth. No remote login is implemented; ports bind only to localhost.
-The native shell's agent, gateway, filesystem, credential and configuration-write
-routes are blocked. Use the Nocheh pages for management.
+The browser receives a separate HttpOnly owner session and CSRF value. Native HTTP
+and one-use, 30-second WebSocket tickets are checked by Nocheh before proxying.
+Internal backend credentials are not injected into native pages. Existing CLI
+headers remain compatible; download-only cookies cannot administer settings.
 
 ## Native memory and Honcho
 

@@ -34,3 +34,16 @@ class DashboardCompatibilityTests(unittest.TestCase):
             self.assertEqual(client.request(method,path).status_code,403)
         self.assertFalse(calls)
         self.assertEqual(client.get('/api/dashboard/plugins').status_code,200)
+
+    def test_presentation_preferences_do_not_open_runtime_mutations(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from .dashboard_server import RestrictedDashboard
+        app=FastAPI()
+        @app.put('/{path:path}')
+        def backend(path): return {'ok': True}
+        client=TestClient(RestrictedDashboard(app))
+        self.assertEqual(client.put('/api/dashboard/theme',json={'name':'default'}).status_code,200)
+        self.assertEqual(client.put('/api/dashboard/font',json={'font':'default'}).status_code,200)
+        self.assertEqual(client.put('/api/config',json={}).status_code,403)
+        self.assertEqual(client.put('/api/profiles/owner',json={}).status_code,403)

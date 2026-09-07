@@ -182,8 +182,8 @@ remain active. Current uncommitted native-host work is superseded by this direct
 
 | Phase | Actual status |
 | --- | --- |
-| P1 — Ownership and runtime adapters | Complete; Compose regression and adapter contracts pass (commit follows) |
-| P2 — Independent Nocheh dashboard | Pending |
+| P1 — Ownership and runtime adapters | Complete: cbe3022; 30 JS/TS and 44 Python tests pass |
+| P2 — Independent Nocheh dashboard | Complete; independent root, native return page, desktop/mobile and 3D graph pass; 32 JS/TS and 44 Python tests pass |
 | P3 — Configuration and native administration | Pending |
 | P4 — Native browser chat | Pending |
 | P5 — Controlled broader tools and approvals | Pending |

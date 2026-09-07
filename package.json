@@ -18,7 +18,9 @@
     "graphify:update": "graphify update ."
   },
   "dependencies": {
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

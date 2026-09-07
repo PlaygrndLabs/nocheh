@@ -1,10 +1,16 @@
 {
   "name": "nocheh",
   "label": "Nocheh",
-  "description": "Owned archive, settings, imports and memory",
+  "description": "Return to the Nocheh owner dashboard",
   "icon": "Database",
-  "version": "1.0.0",
-  "tab": {"path": "/nocheh", "position": "before:config"},
+  "version": "2.0.0",
+  "tab": {
+    "path": "/nocheh",
+    "position": "before:config"
+  },
   "entry": "index.js",
-  "css": "style.css"
+  "css": "style.css",
+  "slots": [
+    "pre-main"
+  ]
 }

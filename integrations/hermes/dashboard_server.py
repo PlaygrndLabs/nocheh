@@ -16,7 +16,8 @@ class RestrictedDashboard:
             await send({'type': 'websocket.close', 'code': 1008}); return
         if scope['type'] == 'http':
             path = scope['path']
-            if scope['method'] != 'GET' or (path.startswith('/api/') and path not in READ_APIS):
+            presentation_write = scope['method'] == 'PUT' and path in ('/api/dashboard/theme', '/api/dashboard/font')
+            if not presentation_write and (scope['method'] != 'GET' or (path.startswith('/api/') and path not in READ_APIS)):
                 await JSONResponse({'error': 'managed_by_nocheh'}, status_code=403)(scope, receive, send)
                 return
         await self.app(scope, receive, send)
@@ -25,7 +26,8 @@ class RestrictedDashboard:
 def main():
     home = Path(os.environ['HERMES_HOME']); home.mkdir(parents=True, exist_ok=True)
     # This home contains dashboard presentation only, never native runtime state.
-    (home / 'config.yaml').write_text('plugins:\n  enabled: [nocheh]\nmemory:\n  provider: ""\n')
+    if not (home / 'config.yaml').exists():
+        (home / 'config.yaml').write_text('plugins:\n  enabled: [nocheh]\nmemory:\n  provider: ""\n')
     plugins = home / 'plugins'; plugins.mkdir(exist_ok=True)
     target = plugins / 'nocheh'
     if not target.exists(): target.symlink_to(Path(__file__).parent)

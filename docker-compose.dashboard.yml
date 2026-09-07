@@ -8,10 +8,10 @@ services:
     init: true
     restart: unless-stopped
     environment:
-      HERMES_HOME: /tmp/dashboard-home
+      HERMES_HOME: /dashboard-state/home
       NOCHEH_CAPTURE_ENABLED: '0'
     volumes:
-      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard:/dashboard-state:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard:/dashboard-state:rw
     ports: ["127.0.0.1:8784:9119"]
     read_only: true
     tmpfs: [/tmp]
