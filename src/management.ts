@@ -1,11 +1,14 @@
 import { createReadStream } from 'node:fs';
-import { createServer, request as httpRequest, type IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, open, stat, unlink, chmod } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { HttpError, json, object, readJson, string } from './http.js';
+import {DashboardSessions} from './dashboard-auth.js';
+import type {Duplex} from 'node:stream';
+import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -13,6 +16,7 @@ const JOBS = join(STATE, 'admin/jobs');
 const PORT = Number(process.env.NOCHEH_DASHBOARD_PORT ?? 8783);
 const NATIVE = Number(process.env.NOCHEH_DASHBOARD_NATIVE_PORT ?? 8784);
 const PREFIX = '/api/plugins/nocheh';
+const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
   mapping?: Record<string, unknown>; error?: string; result?: unknown};
@@ -143,28 +147,38 @@ export async function startManagement() {
   await mkdir(JOBS, {recursive: true, mode: 0o700});
   const token = (await readFile(join(STATE, 'admin/dashboard/token'), 'utf8')).trim();
   if (token.length < 32) throw new Error('dashboard_token_missing');
+  const sessions=new DashboardSessions();
+  const sockets=new Set<Duplex>();
   for (const job of await listJobs(Infinity)) if (['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
   }
   function authorized(req: IncomingMessage, download=false) {
     const cookie = download ? req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('nocheh_download='))?.slice('nocheh_download='.length) : undefined;
-    const actual = Buffer.from(String(req.headers['x-hermes-session-token'] ?? cookie ?? ''));
+    const actual = Buffer.from(String(req.headers['x-nocheh-session-token'] ?? req.headers['x-hermes-session-token'] ?? cookie ?? ''));
     const expected = Buffer.from(token);
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new HttpError(401, 'owner_session_required');
+    if (actual.length === expected.length && timingSafeEqual(actual, expected))return true;
+    sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
+    return false;
+  }
+  function checkOrigin(req:IncomingMessage) {
+    const authority = `127.0.0.1:${PORT}`;
+    if (![authority, `localhost:${PORT}`].includes(req.headers.host ?? '')) throw new HttpError(403, 'invalid_host');
+    if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
+    if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
   const server = createServer((req, res) => { void (async () => {
     const authority = `127.0.0.1:${PORT}`;
-    if (![authority, `localhost:${PORT}`].includes(req.headers.host ?? '')) throw new HttpError(403, 'invalid_host');
-    const origin = req.headers.origin;
-    if (origin && ![`http://${authority}`, `http://localhost:${PORT}`].includes(origin)) throw new HttpError(403, 'invalid_origin');
-    if (req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'cross_site_denied');
+    checkOrigin(req);
     const url = new URL(req.url ?? '/', `http://${authority}`), path = url.pathname;
-    if (path.startsWith(PREFIX + '/')) {
-      const route = path.slice(PREFIX.length);
-      authorized(req,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
+    const prefix=path.startsWith(PRIMARY+'/')?PRIMARY:PREFIX;
+    if (path.startsWith(prefix + '/')) {
+      const route = path.slice(prefix.length);
+      const legacy=authorized(req,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
-      res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${PREFIX}/`);
+      if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
+      if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
+      if (req.method==='POST' && route==='/ws-ticket')return json(res,200,{ticket:sessions.ticket(sessions.authorize(req)),ttl_seconds:30});
       if (req.method === 'POST' && route === '/shutdown') {
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         json(res, 200, {ok: true}); setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100); return;
@@ -256,23 +270,50 @@ export async function startManagement() {
       }
       throw new HttpError(404, 'not_found');
     }
-    if (path === '/') { res.writeHead(302, {location: '/nocheh'}); res.end(); return; }
-    // Native HTTP shell only. WebSockets and mutation APIs are denied upstream.
-    const proxy = httpRequest({hostname: '127.0.0.1', port: NATIVE, path: req.url, method: req.method,
-      headers: {...req.headers, host: `127.0.0.1:${NATIVE}`}}, response => {
-      res.writeHead(response.statusCode ?? 502, {...response.headers, 'cache-control': 'no-store',
-        'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer'}); response.pipe(res);
-    });
-    proxy.on('error', () => { if (!res.headersSent) json(res, 503, {error: 'dashboard_backend_unavailable'}); else res.end(); });
-    req.pipe(proxy);
+    res.setHeader('x-frame-options','DENY');res.setHeader('referrer-policy','no-referrer');res.setHeader('x-content-type-options','nosniff');
+    if(req.method==='GET'&&(path==='/nocheh'||path==='/nocheh/')){res.writeHead(308,{location:'/'+url.search});res.end();return;}
+    if(req.method==='GET'&&path==='/hermes'){res.writeHead(308,{location:'/hermes/'+url.search});res.end();return;}
+    if(req.method==='GET'&&path==='/') {
+      const session=sessions.page(req);
+      res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
+      const html=(await readFile(join(ROOT,'web/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`);
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
+    }
+    const asset=path.match(/^\/assets\/(app\.js|style\.css|graph-3d\.js)$/);
+    if(req.method==='GET'&&asset?.[1]) {
+      res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache'});
+      createReadStream(join(ROOT,'web/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;
+    }
+    if(path.startsWith('/hermes/')) {
+      if(req.method==='POST'&&path==='/hermes/api/auth/ws-ticket') {
+        // Native's ticket helper uses cookie + Origin, without a custom header.
+        if(!req.headers.origin)throw new HttpError(403,'origin_required');
+        return json(res,200,{ticket:sessions.ticket(sessions.authorize(req,false)),ttl_seconds:30});
+      }
+      const page=req.method==='GET'&&!path.startsWith('/hermes/api/')&&!path.startsWith('/hermes/assets/')&&!path.startsWith('/hermes/dashboard-plugins/');
+      const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
+      if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
+      proxyNative(req,res,NATIVE,token,session.csrf);return;
+    }
+    throw new HttpError(404,'not_found');
   })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,
     {error: error instanceof HttpError ? error.code : 'management_unavailable'}); else res.end(); }); });
   server.requestTimeout = 120000;
-  server.on('upgrade', (_req, socket) => socket.destroy());
-  server.listen(PORT, '127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/nocheh`));
+  server.on('upgrade', (req, socket, head) => {
+    try {
+      checkOrigin(req);if(!req.headers.origin)throw new HttpError(403,'origin_required');
+      const url=new URL(req.url??'','http://local');
+      if(!['/hermes/api/pty','/hermes/api/ws'].includes(url.pathname))throw new HttpError(403,'websocket_route_denied');
+      sessions.consume(req,url.searchParams.get('ticket')??'');
+      sockets.add(socket);socket.on('close',()=>sockets.delete(socket));
+      proxyNativeSocket(req,socket,head,NATIVE,token);
+    }catch{socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');}
+  });
+  server.listen(PORT, '127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`));
   let stopping=false;
   const stop = () => {
     if(stopping)return;stopping=true;
+    for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
     server.close(()=>{void Promise.allSettled([...runningTasks]).then(()=>process.exit(0));});
   };

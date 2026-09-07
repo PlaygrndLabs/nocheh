@@ -10,6 +10,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY scripts/build-dashboard.mjs ./scripts/build-dashboard.mjs
 COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
+COPY web ./web
 RUN npm run build:dashboard
 FROM hermes
 COPY --from=assets /opt/hermes/hermes_cli/web_dist /opt/hermes/hermes_cli/web_dist

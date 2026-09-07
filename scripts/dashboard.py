@@ -1,4 +1,4 @@
-"""Start the local native shell and TypeScript owner management service."""
+"""Start Nocheh independently, then make the optional native Hermes page available."""
 import argparse
 import json
 import os
@@ -44,7 +44,6 @@ def start(state, rest):
     except Exception: running = False
     if not running:
         subprocess.run(['npm', 'run', 'build'], cwd=ROOT, check=True)
-        subprocess.run(command + ['up', '-d', '--build', '--wait', '--wait-timeout', '180'], cwd=ROOT, env=env, check=True)
         log = directory / 'server.log'
         with log.open('ab') as output:
             log.chmod(0o600)
@@ -56,7 +55,17 @@ def start(state, rest):
                 if request(state, '/health').get('ok'): break
             except Exception: time.sleep(.25)
         else: raise RuntimeError('dashboard_start_timeout')
-    url = 'http://127.0.0.1:8783/nocheh'
-    print('Nocheh dashboard: ' + url)
+    # A failed or stopped Hermes dashboard must not prevent archive/import access.
+    url = 'http://127.0.0.1:8783/'
+    print('Nocheh dashboard: ' + url,flush=True)
     if not args.no_open: webbrowser.open(url)
+    native_log=directory/'native-build.log'
+    with native_log.open('ab') as output:
+        native_log.chmod(0o600)
+        try:
+            native=subprocess.run(command + ['up', '-d', '--build', '--wait', '--wait-timeout', '180'],cwd=ROOT,env=env,
+                                  stdin=subprocess.DEVNULL,stdout=output,stderr=output,timeout=600)
+            if native.returncode: print('The native Hermes page is unavailable. Nocheh remains running; check Maintenance.')
+        except (OSError,subprocess.TimeoutExpired):
+            print('The native Hermes page could not start. Nocheh remains running.')
     return 0

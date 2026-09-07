@@ -41,7 +41,7 @@ def dispatch(body):
         from urllib.parse import urlsplit
         import re
         path = body['path']; parsed = urlsplit(path)
-        if parsed.scheme or parsed.netloc or not (parsed.path in ('/v1/status', '/v1/search', '/v1/scopes') or re.fullmatch(r'/v1/events/[a-f0-9]{64}', parsed.path)):
+        if parsed.scheme or parsed.netloc or not (parsed.path in ('/v1/status', '/v1/runtime', '/v1/search', '/v1/scopes') or re.fullmatch(r'/v1/events/[a-f0-9]{64}', parsed.path)):
             raise ValueError('archive_route_denied')
         return API().call(path)
     if operation.startswith('settings.'):
