@@ -7,10 +7,12 @@
     "node": ">=22"
   },
   "scripts": {
+    "build:dashboard": "node scripts/build-dashboard.mjs",
+    "test:dashboard": "node --test test/dashboard-graph.test.mjs",
     "build": "node scripts/build.mjs",
     "start": "node dist/src/main.js",
     "dev": "npm run build && npm start",
-    "test": "npm run build && node --test dist/test/*.test.js",
+    "test": "npm run build && node --test dist/test/*.test.js test/dashboard-graph.test.mjs",
     "graphify:extract": "graphify extract . --no-cluster --out .",
     "graphify:report": "graphify cluster-only . --no-label",
     "graphify:update": "graphify update ."
@@ -21,6 +23,8 @@
   "devDependencies": {
     "@types/node": "24.13.3",
     "@types/pg": "8.23.1",
+    "esbuild": "0.25.10",
+    "three": "0.180.0",
     "typescript": "5.9.3"
   }
 }
