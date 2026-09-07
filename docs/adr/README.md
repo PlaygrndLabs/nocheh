@@ -35,3 +35,5 @@ status before the rebuild.**
 | [0025](0025-owner-dashboard-and-management-cli.md) | Native dashboard extension, shared owner operations and configuration ownership | Implementation in phases |
 | [0026](0026-three-dimensional-evidence-view.md) | Local 3D evidence space with accessible source inspection | Active dashboard presentation |
 | [0027](0027-native-hermes-dashboard-integration.md) | Nocheh product ownership and replaceable Hermes runtime, native dashboard and controlled operations | Active direction; see TASK.md |
+
+| [0030](0030-configurable-space-memory.md) | Owner-wide native recall, manual import review and versioned group/topic sharing | Current memory direction; see space-memory-plan.md for gates |

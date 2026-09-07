@@ -109,6 +109,8 @@ test('scope changes ignore a late graph response and never show old source nodes
   const a=deferred(),b=deferred();
   const view=componentDriver(path=>path.includes('/scopes?')?Promise.resolve({scopes:[{scope:'a',events:1},{scope:'b',events:1}]}):path.includes('scope=a')?a.promise:b.promise);
   await view.flush();
+  view.elements().find(node=>node.type==='select'&&node.props.value==='*').props.onChange({target:{value:'a'}});
+  await view.flush();
   view.elements().find(node=>node.type==='select'&&node.props.value==='a').props.onChange({target:{value:'b'}});
   await view.flush();a.resolve(page('a','Old scope'));await view.flush();
   assert.ok(!view.elements().some(node=>node.props.title==='message: Old scope'));

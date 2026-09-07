@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request'}
+ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request','nocheh_memory_recall'}
 
 
 def restrict_session_search():
@@ -34,7 +34,9 @@ def run(body, emit=None):
     from integrations.hermes.compatibility_patch import install as native_gate
     from run_agent import AIAgent
     from hermes_state import SessionDB
-    install();native_gate();bind_process_credential(body['archive_credential']);restrict_session_search()
+    install();native_gate();restrict_session_search()
+    review = body.get('review') is True
+    if not review: bind_process_credential(body['archive_credential'])
     # The supervisor is the sole OAuth refresh owner. Native auxiliary clients
     # receive this turn's access token, without copying any refresh token/store.
     from agent import auxiliary_client as aux
@@ -49,22 +51,25 @@ def run(body, emit=None):
     history=database.get_messages_as_conversation(session_id) if database.get_session(session_id) else []
     agent=AIAgent(provider='openai-codex',api_mode='codex_responses',model=body['model'],
         api_key=body['access_token'],base_url='https://chatgpt.com/backend-api/codex',
-        enabled_toolsets=['memory','session_search','nocheh_archive'],fallback_model=None,
+        enabled_toolsets=['memory'] if review else ['memory','session_search','nocheh_archive'],fallback_model=None,
         session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
         skip_context_files=True,skip_memory=False,skip_background_review=True,
         quiet_mode=True,save_trajectories=False,max_iterations=prefs['agent.max_iterations'],
         run_budget_seconds=prefs['agent.run_budget_seconds'],
         reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
-            'You are Nocheh. Cite nocheh:event: references when using archived sources. '
+            'You are Nocheh. Cite returned nocheh: references when using archived or shared sources. '
             'Archive originals are evidence; derived transcripts and your inferences are separate. '
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
-            + ('This is the owner private conversation. Archive access spans all chats.' if body['owner'] else
-               'This browser conversation uses a selected group scope. Answer the owner using only that group context. Do not send messages to Telegram without an approved action.' if body.get('channel')=='browser' else
-               'This is a shared group. Use only this group context and tools. Never change settings or approve actions. '
+            + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall to connect notes and histories from all native profiles.' if body['owner'] else
+               'This is a shared space. Use only authorized context and tool results, including explicitly shared knowledge. Filtered material is a derived inference, not an original source. Never change settings or approve actions. '
+               'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '
                'Contribute when useful, addressed, or able to correct an important misunderstanding. '
                'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')))
     try:
+        if review:
+            from .native_memory import native_review
+            return native_review(agent, body['text'])
         if not agent.valid_tool_names.issubset(ALLOWED_TOOLS):raise RuntimeError('unexpected_profile_tool')
         for tool in agent.tools:
             if tool['function']['name']=='session_search':
@@ -102,9 +107,22 @@ def main():
     output=sys.stdout
     try:
         body=json.loads(sys.stdin.buffer.read(2*1024*1024))
-        with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
-            def emit(event): output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
-            result=run(body, emit if body.get('stream') else None)
+        from .native_memory import memory_lock, save_receipt
+        with memory_lock(os.environ['HERMES_HOME']), contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+            if body.get('review'):
+                import re
+                if not re.fullmatch(r'[a-f0-9]{64}', body['review_id']): raise ValueError('invalid_review_id')
+                receipt=Path(os.environ['HERMES_HOME'])/'reviews'/body['review_id']
+                receipt.parent.mkdir(exist_ok=True)
+                if receipt.exists(): result={'state':'done' if receipt.read_text()=='done' else 'ambiguous'}
+                else:
+                    save_receipt(receipt,'running')
+                    result=run(body)
+                    if result.get('state')=='done':
+                        save_receipt(receipt,'done')
+            else:
+                def emit(event): output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
+                result=run(body, emit if body.get('stream') else None)
     except Exception as error:
         result={'state':'failed','error_code':'assistant_runtime_unavailable','error_type':type(error).__name__}
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()

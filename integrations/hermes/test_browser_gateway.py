@@ -100,7 +100,7 @@ class BrowserGatewayTests(unittest.TestCase):
         created=next(row for row in rows if row.get('id')==1)
         self.assertIn('session_id',created.get('result',{}),created)
         self.assertEqual(created['result']['info']['managed_execution'],'isolated_per_turn')
-        self.assertEqual(len(created['result']['info']['tools']['Nocheh']),5)
+        self.assertEqual(len(created['result']['info']['tools']['Nocheh']),6)
         self.assertIn('error',next(row for row in rows if row.get('id')==2))
         self.assertFalse((home/'auth.json').exists())
 

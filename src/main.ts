@@ -1,6 +1,8 @@
 import {captureInput,claimRun,finishRun,renewRun,prepareRun} from './managed-runs.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
+import { listSpaces, spacePolicy, saveSpace,parentSpace } from './spaces.js';
+import {approveLearning,listReviews,controlReview} from './learning.js';
 import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object } from './http.js';
@@ -10,7 +12,8 @@ import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import { guardPayload } from './guard.js';
 import { requestAction } from './actions.js';
-import { reader, admin } from './access.js';
+import { reader, admin,assertAudience } from './access.js';
+import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 
 const config = settings();
@@ -31,6 +34,51 @@ const server = createServer((req, res) => { void (async () => {
     return json(res, 200, {ok: true, service: config.service, database: 'ready'});
   }
   const principal=reader(req, config.token);
+  await assertAudience(pool,principal);
+  if(config.service==='archive' && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
+  if(config.service==='archive' && path==='/v1/memory/preview' && req.method==='GET') {
+    admin(principal);const policy=await spacePolicy(pool,url.searchParams.get('space')??'');
+    const preview={scope:parentSpace(policy.id)??policy.id,space:policy.id,revision:policy.revision,admin:false};
+    const q=url.searchParams.get('q')??'';
+    const originals=q.trim()?await search(pool,preview,q):[];
+    const shares=policy.effective.mode==='isolated'?[]:(await listShares(pool,policy.id)).filter(s=>!s.revoked_at).map(s=>({source:'nocheh:shared:'+s.id,text:s.content}));
+    await assertAudience(pool,preview);
+    return json(res,200,{policy,originals,shares,filtered_sources:policy.effective.mode==='filtered'?policy.effective.sources:[],filter_run:false});
+  }
+  if(config.service==='archive' && path==='/v1/memory/shares') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,await listShares(pool,url.searchParams.get('space')??''));
+    if(req.method==='POST')return json(res,200,await shareKnowledge(pool,await readJson(req)));
+  }
+  if(config.service==='archive' && path==='/v1/memory/shares/revoke' && req.method==='POST') {
+    admin(principal);const b=object(await readJson(req));return json(res,200,await revokeShare(pool,String(b.id),b.revision));
+  }
+  if(config.service==='archive' && path==='/v1/memory/context' && req.method==='GET')return json(res,200,await sharedContext(pool,principal,url.searchParams.get('q')??'',call));
+  const shared=path.match(/^\/v1\/memory\/(shared|filtered)\/([a-f0-9]{64})$/);
+  if(config.service==='archive' && shared && req.method==='GET')return json(res,200,await readShared(pool,principal,shared[1]!,shared[2]!));
+  if(config.service==='archive' && path==='/v1/memory/recall') {
+    if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
+    if(req.method==='POST')return json(res,200,await call('memory.recall',object(await readJson(req))));
+  }
+  if(config.service==='archive' && path==='/v1/memory/reviews') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,await listReviews(pool,url.searchParams.get('after')??''));
+    if(req.method==='POST')return json(res,200,await approveLearning(pool,await readJson(req)));
+  }
+  if(config.service==='archive' && path==='/v1/memory/reviews/control' && req.method==='POST') {
+    admin(principal);const b=object(await readJson(req));return json(res,200,await controlReview(pool,String(b.id),b.action));
+  }
+  if(config.service==='archive' && path==='/v1/memory/spaces') {
+    admin(principal);
+    if(req.method==='GET') {
+      if(url.searchParams.has('id')) {
+        const policy=await spacePolicy(pool,url.searchParams.get('id')!);
+        return json(res,200,{...policy,private_owner:policy.id===config.assistant.owner_id});
+      }
+      return json(res,200,{...await listSpaces(pool,url.searchParams.get('after')??''),owner_space:config.assistant.owner_id});
+    }
+    if(req.method==='POST'){const b=object(await readJson(req));return json(res,200,await saveSpace(pool,String(b.id),b.overrides,b.revision));}
+  }
   if(config.service==='archive' && req.method==='GET' && path==='/v1/scopes') {
     admin(principal);
     const {rows}=await pool.query('SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 GROUP BY scope ORDER BY scope LIMIT 101',[url.searchParams.get('after') ?? '']);

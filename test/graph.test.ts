@@ -35,5 +35,9 @@ test('real PostgreSQL: graph links refer to observed scoped sources, revisions a
     const mapped=await evidenceGraph(pool,{scope:null,admin:true},'-20');
     assert.equal(mapped.edges.filter(e=>e.kind==='same_source_revision').length,1,'mapped exports from different original chats never share a source identity');
     const focus=await evidenceGraph(pool,{scope:null,admin:true},'-20','',20,digest('private'));assert.equal(focus.nodes.length,1);
+    const all=await evidenceGraph(pool,{scope:null,admin:true},'*');
+    assert.ok(all.nodes.some(n=>n.id===digest('private')||n.id==='event:'+digest('private')));
+    assert.equal(all.edges.filter(e=>e.kind==='reply_to_source').length,2,'cross-chat source numbers do not create false reply links');
+    await assert.rejects(evidenceGraph(pool,{scope:'-20',admin:false},'*'),{code:'graph_scope_denied'});
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });
