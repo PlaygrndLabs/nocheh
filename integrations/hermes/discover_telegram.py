@@ -1,4 +1,6 @@
 """Read chat IDs through the native Bot API, fsync updates, send no messages."""
+
+from integrations.hermes.environment import secret as environment_secret
 import asyncio
 import json
 import os
@@ -13,8 +15,8 @@ async def main():
     with urllib.request.urlopen('http://127.0.0.1:8781/health',timeout=5) as response:status=json.load(response)
     if status.get('telegram') not in ('disabled','credentials_missing'):
         raise SystemExit('Stop assistant polling before discovering IDs; do not run two pollers.')
-    token=Path(os.environ['TELEGRAM_BOT_TOKEN_FILE']).read_text().strip()
-    if not token:raise SystemExit('Put the BotFather token in data/local/secrets/telegram_bot_token first.')
+    token=environment_secret('TELEGRAM_BOT_TOKEN',required=False)
+    if not token:raise SystemExit('Set TELEGRAM_BOT_TOKEN in .env first.')
     capture=Capture(Path(os.environ.get('NOCHEH_SPOOL_DIR','/data/spool')),token.split(':',1)[0])
     request=instrument_request(HTTPXRequest(),capture,polling=True)
     async with Bot(token,get_updates_request=request) as bot:

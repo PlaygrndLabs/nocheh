@@ -13,6 +13,9 @@ import urllib.request
 from datetime import datetime,timezone
 from pathlib import Path,PurePosixPath
 
+try: from .configuration import compose_environment, env_path, initialize, load, write_env
+except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env
+
 ROOT=Path(__file__).resolve().parents[1]
 SERVICES=['hermes','worker','guard','archive']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
@@ -20,12 +23,12 @@ TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'ev
 
 
 def compose(state,project=None):
-    result=['docker','compose','--env-file',str(state/'compose.env'),'-f',str(ROOT/'docker-compose.yml')]
+    result=['docker','compose','--env-file',str(env_path(state)),'-f',str(ROOT/'docker-compose.yml')]
     if project: result+=['-p',project]
     return result
 
 
-def environment(state): return dict(os.environ,NOCHEH_STATE_DIR=str(state))
+def environment(state): return compose_environment(state)
 
 
 def sha(path):
@@ -61,7 +64,7 @@ def backup(state,output,leave_stopped=False):
     try:
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
         for service in stopped: subprocess.run(command+['stop',service],env=env,check=True)
-        manifest={'version':1,'created_at':datetime.now(timezone.utc).isoformat(),
+        manifest={'version':2,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                   'files':{},'recreated_plugin_links':[]}
         manifest['tables']=fingerprints(command,env)
@@ -71,11 +74,11 @@ def backup(state,output,leave_stopped=False):
         dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
-            for name in ('compose.env','assistant.json','secrets','files','spool','hermes'):
-                base=state/name
+            for name in ('.env','files','spool','hermes'):
+                base=env_path(state) if name=='.env' else state/name
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
                 for path in candidates:
-                    relative=path.relative_to(state).as_posix()
+                    relative='.env' if name=='.env' else path.relative_to(state).as_posix()
                     if path.is_symlink():
                         if relative.endswith('plugins/nocheh'):
                             manifest['recreated_plugin_links'].append(relative);continue
@@ -98,7 +101,7 @@ def backup(state,output,leave_stopped=False):
 
 def validate_snapshot(snapshot):
     manifest=json.loads((snapshot/'manifest.json').read_text())
-    if manifest.get('version')!=1 or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
+    if manifest.get('version') not in (1,2) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
         raise ValueError('Backup checksum mismatch')
     seen=set()
     with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
@@ -133,12 +136,10 @@ def restore(snapshot,state,project,port):
     # Retain the saved settings, but don't activate duplicate bot/OAuth owners.
     auth=state/'hermes/auth.json'
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')
-    policy=json.loads((state/'assistant.json').read_text())
-    (state/'restored-assistant-policy.json').write_text(json.dumps(policy,indent=2)+'\n')
-    policy['enabled']=False;(state/'assistant.json').write_text(json.dumps(policy,indent=2)+'\n')
-    config={line.split('=',1)[0]:line.split('=',1)[1] for line in (state/'compose.env').read_text().splitlines() if '=' in line}
-    config.update(NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port))
-    (state/'compose.env').write_text(''.join(f'{key}={value}\n' for key,value in config.items()))
+    config=initialize(state) if manifest['version']==1 else load(state)
+    write_env(state/'restored.env',config)
+    config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port))
+    write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
     subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)
     with (snapshot/'archive.dump').open('rb') as file:
@@ -160,9 +161,9 @@ def main(command,state,rest):
         rows=subprocess.check_output(compose(state)+['ps','--format','json'],env=environment(state),text=True)
         containers=[json.loads(line) for line in rows.splitlines() if line.strip()]
         result={'containers':[{'service':row['Service'],'state':row['State'],'health':row.get('Health')} for row in containers]}
-        config=dict(line.split('=',1) for line in (state/'compose.env').read_text().splitlines() if '=' in line)
+        config=load(state)
         port=int(config.get('NOCHEH_PORT','8780'))
-        request=urllib.request.Request(f'http://127.0.0.1:{port}/v1/status',headers={'Authorization':'Bearer '+(state/'secrets/service_token').read_text().strip()})
+        request=urllib.request.Request(f'http://127.0.0.1:{port}/v1/status',headers={'Authorization':'Bearer '+config['SERVICE_TOKEN']})
         try:
             with urllib.request.urlopen(request,timeout=10) as response: result['archive']=json.load(response)
         except Exception as error: result['archive']={'error':type(error).__name__}

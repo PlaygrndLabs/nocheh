@@ -25,25 +25,37 @@ and [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/) d
 
 ## Configuration and credentials
 
-Bootstrap is idempotent: it creates missing secrets, never regenerates existing
-ones. The old repository `.env` is not used by this stack.
+Run `./scripts/nocheh init`, edit the root `.env`, then run `./scripts/nocheh up`.
+Initialization fills missing internal passwords; existing passwords stay unchanged.
+Only variables explicitly listed in Compose enter each service. The wrapper reads
+literal values without shell expansion and gives this file precedence over stale
+shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 
-| Path | Purpose |
+| Setting or path | Purpose |
 | --- | --- |
-| `data/local/compose.env` | UID/GID, host port, model and guard mode |
-| `data/local/assistant.json` | Disabled by default; owner ID and selected Telegram groups |
-| `data/local/secrets/database_password` | PostgreSQL password |
-| `data/local/secrets/service_token` | Internal service and owner API authentication |
-| `data/local/secrets/telegram_bot_token` | Bot token; empty until locally configured |
-| `data/local/hermes/` | Hermes-owned subscription login and native runtime state |
+| `.env` | Model, optional guard, port, Telegram settings and internal passwords |
+| `.env.example` | Committed template without credentials |
+| `data/local/hermes/` | Hermes-owned OAuth login, profiles, memory and session state |
 | `data/local/files/` | Original attachment bytes |
 | `data/local/spool/` | Durable capture and retry data |
 | `data/local/reports/` | Local validation reports |
 | Compose `postgres_data` volume | Nocheh archive database |
 
-The host port defaults to 8780, bound only to loopback. PostgreSQL has no host port,
-so it can coexist with other local databases. Service credentials are Compose
-secrets, not command-line arguments. Runtime data and credentials are ignored by Git.
+`TELEGRAM_ENABLED` defaults to `false`. Configure `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_OWNER_ID` and comma-separated negative `TELEGRAM_GROUP_IDS` before enabling.
+`NOCHEH_GUARD_MODE` is `off`, `on` or `auto`; explicit trusted endpoints are a JSON
+array in `NOCHEH_GUARD_TRUSTED_ENDPOINTS`. The default trusts the subscription route.
+The API binds only to loopback; PostgreSQL has no host port.
+
+The `.env` is ignored by Git, excluded from image builds and written with mode 0600.
+Environment values are visible to someone who can inspect Docker containers. The
+previous file-based Compose secrets were another storage choice, not encrypted
+storage or an architectural requirement. Hermes keeps OAuth in its native file
+because it persists refreshed tokens there. See [ADR-0024](adr/0024-single-environment-configuration.md).
+
+The one-time configuration update preserves the old root `.env` privately in
+`data/local/previous-configuration/legacy.env`; unrelated provider keys are not
+imported. Existing rebuild database and service credentials are retained.
 
 The bootstrap transfers the dedicated Phase 1 login into the runtime once. It does
 not share the Codex desktop application's token store. For a new login:
@@ -69,15 +81,15 @@ literal detection and Ogg/Opus transcription inside the running Hermes container
 ```
 
 `down` retains all persistent state. Do not add `--volumes` unless intentionally
-resetting the database. Direct Compose commands must use the generated env file:
+resetting the database. Direct Compose reads the root `.env` too; prefer the wrapper for validation and isolated state:
 
 ```bash
-docker compose --env-file data/local/compose.env ps
+docker compose ps
 ```
 
 For an isolated rehearsal, set `NOCHEH_STATE_DIR` to a separate absolute directory
 and `COMPOSE_PROJECT_NAME` to a separate project name. A fresh environment requires
-its own login; do not duplicate a refresh token between concurrently running stacks.
+its own `.env` in that state directory and its own login; do not duplicate a refresh token between concurrently running stacks.
 
 ## Backup and restore
 
@@ -114,8 +126,8 @@ NOCHEH_STATE_DIR="$PWD/data/restored" COMPOSE_PROJECT_NAME=nocheh-restored ./scr
 NOCHEH_STATE_DIR="$PWD/data/restored" COMPOSE_PROJECT_NAME=nocheh-restored ./scripts/nocheh login
 ```
 
-Review `restored-assistant-policy.json` before copying it to `assistant.json` and
-running `up` with those same variables. When recovering an older backup, reconcile
+Review the saved `restored.env` and edit the restored `.env` before enabling
+Telegram and running `up` with those same variables. When recovering an older backup, reconcile
 pending replies/actions against what happened after that snapshot before enabling
 Telegram. A backup cannot know about deliveries made after it was taken. Ordinary
 restarts use durable delivery receipts and never automatically resend ambiguous

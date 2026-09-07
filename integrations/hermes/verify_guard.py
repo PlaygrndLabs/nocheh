@@ -1,4 +1,6 @@
 """Synthetic live detector quality and native guarded-chat acceptance."""
+
+from integrations.hermes.environment import secret as environment_secret
 import json
 import os
 import time
@@ -9,7 +11,7 @@ from pathlib import Path
 
 def main():
     if os.environ.get('GUARD_MODE')!='on': raise SystemExit('Run with GUARD_MODE=on for this live check')
-    token=Path(os.environ['SERVICE_TOKEN_FILE']).read_text().strip()
+    token=environment_secret('SERVICE_TOKEN')
     def call(url,body):
         request=urllib.request.Request(url,data=json.dumps(body,ensure_ascii=False).encode(),headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
         with urllib.request.urlopen(request,timeout=180) as response: return json.load(response)

@@ -40,7 +40,8 @@ class Scopes:
 
     @classmethod
     def load(cls,path):
-        return cls(json.loads(Path(path).read_text()) if path else {'enabled':False,'owner_id':None,'group_ids':[]})
+        from .environment import telegram_policy
+        return cls(json.loads(Path(path).read_text()) if path else telegram_policy())
 
     @staticmethod
     def profile(chat):return 'nocheh-'+hashlib.sha256(chat.encode()).hexdigest()[:24]

@@ -1,7 +1,7 @@
 # Optional outgoing guard
 
 Set `NOCHEH_GUARD_MODE=off`, `on` or `auto` in the ignored
-`data/local/compose.env`, then run `./scripts/nocheh up`. The default is `auto`.
+`.env`, then run `./scripts/nocheh up`. The default is `auto`.
 `NOCHEH_GUARD_TRUSTED_ENDPOINTS` accepts a JSON array of exact URL prefixes;
 defaults trust only the official ChatGPT subscription Codex endpoint.
 
@@ -24,12 +24,14 @@ Run behavior acceptance with `./scripts/nocheh test`. To repeat the synthetic
 live detector and native chat checks with subscription authentication:
 
 ```sh
-NOCHEH_GUARD_MODE=on ./scripts/nocheh up
-docker compose --env-file data/local/compose.env exec -T hermes python -m integrations.hermes.verify_guard
+# Set NOCHEH_GUARD_MODE=on in .env first.
+./scripts/nocheh up
+docker compose exec -T hermes python -m integrations.hermes.verify_guard
+# Restore your desired NOCHEH_GUARD_MODE in .env.
 ./scripts/nocheh up
 ```
 
-The last command restores the mode saved in `compose.env`. The live report is
+The last command applies your restored `.env` setting. The live report is
 `data/local/reports/guard-compatibility.json`. Only synthetic fixtures, pass/fail
 results and content-free counters are recorded. Three fixtures are a small
 detection-quality sample, not a guarantee of complete secret detection.

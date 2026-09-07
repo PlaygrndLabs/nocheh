@@ -4,7 +4,7 @@ Phase 6 is under validation. Telegram stays disabled until a token, owner ID and
 explicit conversation policy are configured. No VPS is needed.
 
 1. Create or select your bot in [BotFather](https://t.me/BotFather).
-2. Put its token in `data/local/secrets/telegram_bot_token`. Keep it out of chat,
+2. Set `TELEGRAM_BOT_TOKEN` in `.env`, then run `./scripts/nocheh up`. Keep it out of chat,
    command-line arguments and Git.
 3. Open the bot's private chat and send a message. Add it to any group you want to
    select. Run `./scripts/nocheh discover-telegram` to see numeric chat/sender IDs.
@@ -18,8 +18,8 @@ explicit conversation policy are configured. No VPS is needed.
 ```
 
 Omit `--group-id` for DM only, or repeat it to select multiple groups. These IDs
-are examples; use the discovered values. The ignored `data/local/assistant.json`
-holds the policy. To disable the assistant, set `enabled` to `false` and run `up`.
+are examples; use the discovered values. The ignored `.env`
+holds the policy. To disable the assistant, set `TELEGRAM_ENABLED=false` and run `up`.
 
 For proactive group conversation, disable the bot's group privacy mode in
 BotFather or give it the appropriate group administrator role. Telegram otherwise
@@ -59,7 +59,7 @@ provenance and retry behavior, immutable action requests and owner-only approval
 The synthetic native memory rehearsal sends no Telegram messages:
 
 ```sh
-docker compose --env-file data/local/compose.env exec -T hermes python -m integrations.hermes.verify_assistant
+docker compose exec -T hermes python -m integrations.hermes.verify_assistant
 ```
 
 Before release, verify actual owner DM replies, selected-group replies and silence,

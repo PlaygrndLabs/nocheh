@@ -1,6 +1,8 @@
 """Small authenticated service around native Hermes and its mounted profile state."""
 from __future__ import annotations
 
+from integrations.hermes.environment import secret as environment_secret
+
 import base64
 import asyncio
 import contextlib
@@ -21,7 +23,7 @@ from .subscription import resolve_credentials, detect_literals, DetectorContract
 MODEL = os.environ.get("NOCHEH_MODEL", "gpt-5.6-sol")
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
-TOKEN = Path(os.environ["SERVICE_TOKEN_FILE"]).read_text().strip()
+TOKEN = environment_secret('SERVICE_TOKEN')
 CALL_LOCK = threading.RLock()
 DETECTOR_LOCK = threading.RLock()
 CHAT_STATUS = {'stage':'idle'}
@@ -133,8 +135,7 @@ class Handler(BaseHTTPRequestHandler):
             return {'guard_failures':list(FAILURES),'model_boundary':dict(COUNTS),'chat':dict(CHAT_STATUS),'errors':list(ERRORS)}
         if self.path == '/internal/file':
             from telegram import Bot
-            token_path = os.environ.get('TELEGRAM_BOT_TOKEN_FILE')
-            bot_token = Path(token_path).read_text().strip() if token_path else ''
+            bot_token = environment_secret('TELEGRAM_BOT_TOKEN', required=False)
             if not bot_token:
                 raise RuntimeError('telegram_not_configured')
             ref = body['file_id']
@@ -187,8 +188,7 @@ def main():
     from integrations.hermes.assistant_gateway import AssistantGateway
     from integrations.hermes.scopes import Scopes
     policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
-    bot_path=os.environ.get('TELEGRAM_BOT_TOKEN_FILE')
-    bot_token=Path(bot_path).read_text().strip() if bot_path else ''
+    bot_token=environment_secret('TELEGRAM_BOT_TOKEN', required=False)
     ASSISTANT=AssistantGateway(PROFILE_HOME,os.environ.get('NOCHEH_SPOOL_DIR','/data/spool'),policy,bot_token,MODEL,resolve_credentials)
     ASSISTANT.start()
     server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8781"))), Handler)

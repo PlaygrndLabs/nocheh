@@ -31,3 +31,4 @@ status before the rebuild.**
 | [0021](0021-scoped-native-assistant-processes.md) | Native per-profile assistant processes, scoped capabilities and owner-DM approval | Implemented; live Telegram acceptance pending |
 | [0022](0022-isolated-metered-honcho-experiment.md) | Synthetic Honcho comparison, separate subscription bridge and persistent $5 embedding budget | Optional experiment; live evaluation pending |
 | [0023](0023-consistent-backups-and-inactive-restore.md) | Quiesced snapshots, verified restore and inactive recovered credentials | Local rehearsal verified; cutover remains gated |
+| [0024](0024-single-environment-configuration.md) | One editable `.env`, native OAuth state and inactive environment restores | Active configuration |

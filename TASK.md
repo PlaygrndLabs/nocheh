@@ -61,7 +61,7 @@ batching/delivery against a fixture transport. Live synthetic memory store, reca
 after process restart and other-group isolation pass in the [report](compatibility/results/2026-09-07-assistant-memory.json).
 Recall took up to 152 seconds in that run; this is not a latency guarantee.
 
-The Telegram token file remains empty and the conversation policy is disabled.
+The Telegram token remains unconfigured and the conversation policy is disabled.
 Actual DM/group/voice/approval delivery and reconnect acceptance are not run, so
 Phase 6 is not complete and merging remains blocked. [Setup](docs/telegram.md)
 includes capture-only ID discovery without Telegram sends. Continue independent
@@ -96,3 +96,11 @@ documented in [operations](docs/deploy.md).
 The replacement services are running locally. This is an operations checkpoint,
 not a completed release: actual Telegram DM/group/voice/approval/reconnect checks
 remain unrun, no production bot has been activated, and `main` has not been merged.
+
+Configuration follow-up: root `.env` replaces separate Compose secret files,
+`compose.env` and `assistant.json`. Existing archive credentials are preserved;
+legacy provider settings are saved privately and not imported. 12 PostgreSQL/TS
+and 28 Python tests pass. Format-2 backup/restore matched all eight table
+fingerprints and 38 state files, with five healthy inactive restored services.
+The rehearsal was stopped afterward. [Evidence](compatibility/results/2026-09-07-environment.json).
+Live Telegram gates and the merge remain pending.

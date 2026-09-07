@@ -3,8 +3,12 @@ import { HttpError, object } from './http.js';
 
 export interface AssistantPolicy {enabled:boolean;owner_id:string|null;group_ids:string[]}
 export function assistantPolicy(path?:string):AssistantPolicy {
-  if (!path) return {enabled:false,owner_id:null,group_ids:[]};
-  const value=object(JSON.parse(readFileSync(path,'utf8')));
+  const enabled=process.env.TELEGRAM_ENABLED ?? 'false';
+  if (!path && !['true','false'].includes(enabled)) throw new Error('Invalid TELEGRAM_ENABLED');
+  const value=path ? object(JSON.parse(readFileSync(path,'utf8'))) : {
+    enabled:enabled==='true',owner_id:process.env.TELEGRAM_OWNER_ID || null,
+    group_ids:(process.env.TELEGRAM_GROUP_IDS ?? '').split(',').map(v=>v.trim()).filter(Boolean),
+  };
   if (typeof value.enabled!=='boolean' || (value.owner_id!==null && (typeof value.owner_id!=='string' || !/^[1-9]\d{0,18}$/.test(value.owner_id))) ||
       !Array.isArray(value.group_ids) || value.group_ids.some(v=>typeof v!=='string' || !/^-\d{1,19}$/.test(v)) ||
       (value.enabled && !value.owner_id)) throw new Error('Invalid assistant policy');

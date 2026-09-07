@@ -39,7 +39,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);secret='synthetic-service-token-123456789';(root/'token').write_text(secret)
             policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
-            with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN_FILE':str(root/'token')}):
+            with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN':secret}):
                 adapter=committed_adapter_class()(PlatformConfig(enabled=True,token='123456:synthetic',typing_indicator=False))
                 request=BotFixtureRequest();instrument_request(request,adapter.capture)
                 bot=ExtBot('123456:synthetic',request=request,get_updates_request=BotFixtureRequest())

@@ -23,10 +23,12 @@ def canonical(value):
 class API:
     def __init__(self):
         state=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local'))
-        config=dict(line.split('=',1) for line in (state/'compose.env').read_text().splitlines() if '=' in line)
-        port=os.environ.get('NOCHEH_PORT',config.get('NOCHEH_PORT','8780'))
+        try: from .configuration import load
+        except ImportError: from configuration import load
+        config=load(state)
+        port=config['NOCHEH_PORT']
         self.url='http://127.0.0.1:'+str(int(port))
-        self.token=(state/'secrets/service_token').read_text().strip()
+        self.token=config['SERVICE_TOKEN']
 
     def call(self,path,body=None,binary=False):
         req=urllib.request.Request(self.url+path,data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
