@@ -19,7 +19,9 @@ except ImportError: from configuration import compose_environment, env_path, ini
 ROOT=Path(__file__).resolve().parents[1]
 SERVICES=['hermes','worker','guard','archive']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
-        'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id'}
+        'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
+        'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
+        'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id'}
 
 
 def compose(state,project=None):
@@ -42,9 +44,12 @@ def sync(path):
     with path.open('rb') as file: os.fsync(file.fileno())
 
 
-def fingerprints(command,env):
+def fingerprints(command,env,tables=None):
     result={}
-    for table,key in TABLES.items():
+    selected=TABLES if tables is None else tables
+    if not set(selected)<=TABLES.keys(): raise ValueError('Unsupported backup table')
+    for table in selected:
+        key=TABLES[table]
         query=f'COPY (SELECT row_to_json(t) FROM (SELECT * FROM public.{table} ORDER BY {key}) t) TO STDOUT'
         process=subprocess.Popen(command+['exec','-T','postgres','psql','-X','-q','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',query],env=env,stdout=subprocess.PIPE)
         digest=hashlib.sha256()
@@ -64,7 +69,7 @@ def backup(state,output,leave_stopped=False):
     try:
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
         for service in stopped: subprocess.run(command+['stop',service],env=env,check=True)
-        manifest={'version':2,'created_at':datetime.now(timezone.utc).isoformat(),
+        manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                   'files':{},'recreated_plugin_links':[]}
         manifest['tables']=fingerprints(command,env)
@@ -74,8 +79,9 @@ def backup(state,output,leave_stopped=False):
         dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
-            for name in ('.env','files','spool','hermes'):
+            for name in ('.env','files','spool','hermes','admin/jobs'):
                 base=env_path(state) if name=='.env' else state/name
+                if name=='admin/jobs' and not base.exists(): continue
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
                 for path in candidates:
                     relative='.env' if name=='.env' else path.relative_to(state).as_posix()
@@ -101,7 +107,7 @@ def backup(state,output,leave_stopped=False):
 
 def validate_snapshot(snapshot):
     manifest=json.loads((snapshot/'manifest.json').read_text())
-    if manifest.get('version') not in (1,2) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
+    if manifest.get('version') not in (1,2,3) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
         raise ValueError('Backup checksum mismatch')
     seen=set()
     with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
@@ -144,7 +150,8 @@ def restore(snapshot,state,project,port):
     subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)
     with (snapshot/'archive.dump').open('rb') as file:
         subprocess.run(command+['exec','-T','postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
-    actual=fingerprints(command,env)
+    # Old snapshots predate the policy tables; verify exactly their recorded set.
+    actual=fingerprints(command,env,manifest['tables'])
     if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
     subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
