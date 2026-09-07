@@ -30,3 +30,4 @@ status before the rebuild.**
 | [0020](0020-mandatory-outgoing-request-guard.md) | Mandatory per-attempt guard at pinned HTTPX boundary, explicit trust and unsupported-transport rejection | Active guard implementation |
 | [0021](0021-scoped-native-assistant-processes.md) | Native per-profile assistant processes, scoped capabilities and owner-DM approval | Implemented; live Telegram acceptance pending |
 | [0022](0022-isolated-metered-honcho-experiment.md) | Synthetic Honcho comparison, separate subscription bridge and persistent $5 embedding budget | Optional experiment; live evaluation pending |
+| [0023](0023-consistent-backups-and-inactive-restore.md) | Quiesced snapshots, verified restore and inactive recovered credentials | Local rehearsal verified; cutover remains gated |

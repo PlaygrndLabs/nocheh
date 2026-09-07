@@ -7,14 +7,14 @@ Old persisted data requires no migration.
 | Phase | Work | Status |
 | --- | --- | --- |
 | 0 | Preserve baseline and record architecture | Complete: `add2341` |
-| 1 | Prove subscription compatibility | Complete locally; VPS deferred by owner in ADR-0019 |
+| 1 | Prove subscription compatibility | Complete locally: `8fd69cc`; VPS deferred by owner in ADR-0019 |
 | 2 | Bootstrap replacement runtime | Complete: `9d72c32` |
 | 3 | Durable capture and archive | Complete: `d29dbab` |
 | 4 | Import, retrieval, export, replay | Complete: `aa39e60` |
 | 5 | Optional guard on every model attempt | Complete: `eb6d319` |
 | 6 | Scoped assistant and transcription | Checkpoint `43eea5e`; offline/native-memory verified; live Telegram acceptance pending credentials |
-| 7 | Isolated Honcho comparison, maximum $5 | Runnable harness verified; live comparison pending temporary key and separate bridge login |
-| 8 | Validate, cut over, merge into main | Pending |
+| 7 | Isolated Honcho comparison, maximum $5 | Harness `2d27262` verified; live comparison pending temporary key and separate bridge login |
+| 8 | Validate, cut over, merge into main | Operations verified; live Telegram, cutover and merge remain pending |
 
 Complete acceptance checks, commit each phase, and proceed automatically. Missing
 credentials or unrun live checks must never be recorded as successful validation.
@@ -77,3 +77,22 @@ $0 in reservations. [Evidence](compatibility/results/2026-09-07-honcho-harness.j
 Live bridge compatibility, Honcho derivation and comparative recall remain
 pending. No temporary API key was supplied and no paid request was made. This
 optional pending evaluation does not block production; Phase 6 live acceptance does.
+
+Phase 8 operations: consistent backup and inactive restore are implemented. The
+fresh-project rehearsal matched all eight table fingerprints and all 42 saved
+state files, then started five healthy services with no active Telegram bot or
+OAuth login. The first startup had a connection timeout during a bridge build;
+the PostgreSQL readiness probe now requires TCP, and a complete fresh-project
+retry passed. The source runtime also has five healthy services and its dedicated
+login, with Telegram still disabled. [Evidence](compatibility/results/2026-09-07-operations.json).
+
+Final offline acceptance: 12 TypeScript/PostgreSQL tests and 24 Python tests pass,
+including action receipt backoff and backup corruption/path checks. Diagnostics
+show actual credential presence and job states separately from container health.
+Native session cursors are fsynced. Legacy environment examples were removed;
+old memory research is explicitly historical. Local backup/restore procedures are
+documented in [operations](docs/deploy.md).
+
+The replacement services are running locally. This is an operations checkpoint,
+not a completed release: actual Telegram DM/group/voice/approval/reconnect checks
+remain unrun, no production bot has been activated, and `main` has not been merged.

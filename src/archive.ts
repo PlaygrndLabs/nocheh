@@ -125,7 +125,8 @@ export async function archiveStatus(pool:pg.Pool) {
   const artifacts = await pool.query('SELECT state,count(*)::integer AS count FROM artifacts GROUP BY state');
   const dispatches = await pool.query('SELECT state,count(*)::integer AS count FROM dispatches GROUP BY state');
   const transcriptions = await pool.query('SELECT state,count(*)::integer AS count FROM transcription_jobs GROUP BY state');
+  const actions = await pool.query('SELECT state,count(*)::integer AS count FROM action_requests GROUP BY state');
   const dispatchFailures = await pool.query("SELECT event_id,state,error_code,attempts FROM dispatches WHERE error_code IS NOT NULL ORDER BY updated_at DESC LIMIT 50");
   const failures = await pool.query('SELECT file_name, attempts, error_code, seen_at FROM spool_failures ORDER BY seen_at DESC LIMIT 100');
-  return {events:Number(events.rows[0]?.count),artifacts:artifacts.rows,dispatches:dispatches.rows,transcriptions:transcriptions.rows,dispatch_failures:dispatchFailures.rows,spool_failures:failures.rows};
+  return {events:Number(events.rows[0]?.count),artifacts:artifacts.rows,dispatches:dispatches.rows,transcriptions:transcriptions.rows,actions:actions.rows,dispatch_failures:dispatchFailures.rows,spool_failures:failures.rows};
 }

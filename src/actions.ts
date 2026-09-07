@@ -51,7 +51,7 @@ export async function executeApproved(pool:pg.Pool,call:(path:string,body:unknow
   try {
     held=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803303) AS locked')).rows[0]!.locked;
     if(!held)return;
-    const row=(await client.query<{id:string;destination:string;original_text:Buffer}>("SELECT id,destination,original_text FROM action_requests WHERE state IN ('approved','running') AND decision_event_id IS NOT NULL ORDER BY updated_at LIMIT 1")).rows[0];
+    const row=(await client.query<{id:string;destination:string;original_text:Buffer}>("SELECT id,destination,original_text FROM action_requests WHERE (state='approved' OR (state='running' AND updated_at < now()-interval '30 seconds')) AND decision_event_id IS NOT NULL ORDER BY updated_at LIMIT 1")).rows[0];
     if(!row)return;
     await client.query("UPDATE action_requests SET state='running',updated_at=now() WHERE id=$1",[row.id]);
     try {
