@@ -6,54 +6,100 @@
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
   });
   const button = (label, onClick, disabled = false, className = '') => h('button', {type: 'button', onClick, disabled, className}, label);
-  const errorText = e => e.message || 'The operation could not finish. Try again.';
+  const errorText = e => ({configuration_conflict:'These settings changed elsewhere. Refresh this page and review your changes again.', operation_in_progress:'Another maintenance task is running. Wait for it to finish and try again.'})[e.message] || e.message || 'The operation could not finish. Try again.';
   const labels = {NOCHEH_PORT:'Archive port', NOCHEH_MODEL:'ChatGPT model', NOCHEH_GUARD_MODE:'Outgoing guard',
     NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Trusted destinations (JSON)', TELEGRAM_ENABLED:'Telegram enabled',
     TELEGRAM_BOT_TOKEN:'Telegram bot token', TELEGRAM_OWNER_ID:'Owner user ID', TELEGRAM_GROUP_IDS:'Selected group IDs',
     POSTGRES_PASSWORD:'Database credential', SERVICE_TOKEN:'Service credential', NOCHEH_CONFIG_VERSION:'Configuration version'};
   function Panel({title, children, note}) { return h('section', {className:'n-panel'}, h('h2', null, title), note && h('p', {className:'n-muted'}, note), children); }
   function Data({value}) { return h('pre', {className:'n-data', dir:'auto'}, typeof value === 'string' ? value : JSON.stringify(value, null, 2)); }
+  const friendlyState = value => ({ready:'Ready',running:'In progress',complete:'Complete',failed:'Needs attention',cancelled:'Stopped',interrupted:'Interrupted',uploading:'Uploading',pending:'Waiting'})[value] || String(value||'Unknown').replaceAll('_',' ');
+  const jobName = value => ({import:'Chat import','settings.apply':'Apply settings','operations.diagnose':'Service diagnostics','operations.export':'Archive export','operations.backup':'Full backup','operations.restart':'Service restart','operations.restore':'Inactive restore'})[value] || value;
+  const profileName = p => (p.owner?'Owner · private DM':'Group')+' · '+p.scope;
+  function Details({value,label='Technical details'}) { return h('details',null,h('summary',null,label),h(Data,{value})); }
+  function RouteLink({page,children}) { return h('a',{href:'#'+page,className:'n-text-link'},children); }
+  function Steps({items}) { return h('ol',{className:'n-steps'},...items.map((item,i)=>h('li',{key:item},h('span',{'aria-hidden':true},i+1),item))); }
   function useLoad(path, refresh = 0) {
     const [data,setData] = useState(null), [error,setError] = useState('');
     useEffect(() => { let alive=true; setError(''); if(!path)return()=>{alive=false;}; call(path).then(v => {if(alive)setData(v);}).catch(e => {if(alive)setError(errorText(e));}); return()=>{alive=false;}; }, [path,refresh]);
     return [data,error];
   }
+
   function Status({refresh}) {
     const [data,error] = useLoad('/status',refresh);
-    if(error)return h('p',{role:'alert'},error);
-    if(!data)return h('p',{role:'status'},'Connecting to your archive…');
     return h('div',null,
-      h('div',{className:'n-metrics'},
-        h(Panel,{title:'Archive'},h('strong',null,'Connected'),h('p',{className:'n-muted'},'Original messages and files stay in your owned archive.')),
-        h(Panel,{title:'Outgoing guard'},h('strong',null,data.guard_mode),h('p',{className:'n-muted'},'Trust is determined by destination policy.')),
-        h(Panel,{title:'Memory'},h('strong',null,'Hermes native'),h('p',{className:'n-muted'},'Separate profiles for the owner and selected groups.'))),
-      h(Panel,{title:'Services'},h('div',{className:'n-list'},...(data.services||[]).map(s=>h('div',{className:'n-row',key:s.service},h('b',null,s.service),h('span',null,'Last seen '+new Date(s.seen_at).toLocaleString()))))),
-      h(Panel,{title:'Archive work'},h('p',null,(data.archive?.events||0)+' original events preserved'),
-        ...['artifacts','dispatches','transcriptions','actions'].map(kind=>h('div',{className:'n-row',key:kind},
-          h('b',null,({artifacts:'Files',dispatches:'Assistant replies',transcriptions:'Transcripts',actions:'Approved actions'})[kind]),
-          h('span',null,data.archive?.[kind]?.length?data.archive[kind].map(s=>s.count+' '+s.state).join(' · '):'No work queued'))),
-        data.archive?.dispatch_failures?.length>0&&h('details',null,h('summary',null,'Inspect suppressed or failed work'),h(Data,{value:data.archive.dispatch_failures}))));
+      h('div',{className:'n-shortcuts'},...[
+        ['imports','Bring in a chat','Upload a Telegram export and choose who can use it.'],
+        ['memory','See what Hermes remembers','Read the notes and conversation history for a chat.'],
+        ['graph','Follow a connection','Explore links between messages, people and source evidence.']
+      ].map(([page,title,note])=>h('a',{href:'#'+page,key:page,className:'n-shortcut'},h('h2',null,title,h('span',{'aria-hidden':true},'↗')),h('p',null,note)))),
+      h(Panel,{title:'Where your information lives',note:'Three different jobs, each with its own place in the dashboard.'},
+        h('div',{className:'n-explain-grid'},
+          h('div',null,h('h3',null,'Original chats'),h('p',null,'Messages, files and revisions preserved in your archive. Search these when you need the original evidence.'),h(RouteLink,{page:'archive'},'Search original chats →')),
+          h('div',null,h('h3',null,'Hermes memory'),h('p',null,'Notes Hermes maintains while it works, with separate profiles for your DM and selected groups. Check important claims against their sources.'),h(RouteLink,{page:'memory'},'Read Hermes memory →')),
+          h('div',null,h('h3',null,'Honcho lab'),h('p',null,'An optional, isolated memory experiment. Its data and setup are separate from the Hermes memory used by your assistant.'),h(RouteLink,{page:'honcho'},'View experiment status →')))),
+      error&&h(Panel,{title:'Archive status unavailable'},h('p',{role:'alert'},error),h(RouteLink,{page:'operations'},'Open maintenance →')),
+      !data&&!error&&h('p',{role:'status'},'Connecting to your archive…'),
+      data&&h(Panel,{title:'Archive activity',note:'Recorded counts and service check-ins. Run diagnostics in Maintenance to check current service health.'},
+        h('div',{className:'n-summary-line'},h('div',null,h('strong',null,Number(data.archive?.events||0).toLocaleString()),h('small',null,'original events preserved')),h('div',null,h('span',{className:'n-badge'},'Guard: '+({auto:'Automatic',on:'On',off:'Off'})[data.guard_mode]),h('small',null,'Controls masking before outgoing model requests'))),
+        ...['artifacts','dispatches','transcriptions','actions'].map(kind=>h('div',{className:'n-row',key:kind},h('b',null,({artifacts:'Files',dispatches:'Assistant replies',transcriptions:'Transcripts',actions:'Approved actions'})[kind]),h('span',null,data.archive?.[kind]?.length?data.archive[kind].map(s=>s.count+' '+friendlyState(s.state).toLowerCase()).join(' · '):'None recorded'))),
+        h('p',{className:'n-muted n-afterword'},'Suppressed replies were deliberately skipped, for example for imported history. Open the details below to inspect recorded reasons.'),h('details',null,h('summary',null,'Service check-ins'),...(data.services||[]).map(s=>h('div',{className:'n-row',key:s.service},h('b',null,s.service),h('span',null,'Last seen '+new Date(s.seen_at).toLocaleString())))),
+        data.archive?.dispatch_failures?.length>0&&h(Details,{label:'Suppressed or failed replies',value:data.archive.dispatch_failures})),
+      h(Panel,{title:'How Nocheh and Hermes fit together'},h('div',{className:'n-explain-grid n-two'},
+        h('div',null,h('h3',null,'Hermes runs the assistant'),h('p',null,'We reuse its Telegram adapter, agent, tools, profiles and built-in memory. Nocheh adds archive capture, access rules and outgoing guarding.')),
+        h('div',null,h('h3',null,'Nocheh is this control panel'),h('p',null,'These pages manage your archive and integration. They run on the Hermes dashboard foundation; the standard Hermes chat and administration screens are not exposed here.'),h(RouteLink,{page:'settings'},'Manage Nocheh and Hermes settings →')))));
   }
+
   function Settings({notify}) {
+    const [section,setSection]=useState('nocheh');
+    return h('div',null,h('div',{className:'n-section-switch','aria-label':'Settings category'},
+      h('button',{type:'button',onClick:()=>setSection('nocheh'),'aria-pressed':section==='nocheh',className:section==='nocheh'?'n-primary':''},'Nocheh settings'),
+      h('button',{type:'button',onClick:()=>setSection('hermes'),'aria-pressed':section==='hermes',className:section==='hermes'?'n-primary':''},'Hermes preferences')),
+      section==='nocheh'?h(NochehSettings,{notify}):h(HermesPreferences,{notify}));
+  }
+  function NochehSettings({notify}) {
     const [refresh,setRefresh]=useState(0),[data,error]=useLoad('/settings',refresh);
     const [changes,setChanges]=useState({}),[busy,setBusy]=useState(false),[review,setReview]=useState(false);
-    const save=async()=>{setBusy(true);try{await call('/settings',{revision:data.revision,changes});setChanges({});setReview(false);setRefresh(v=>v+1);notify('Settings saved. Apply them to update the running services.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
-    const apply=async()=>{setBusy(true);try{const job=await call('/settings/apply',{});notify('Apply started. Follow its result in Imports & jobs. Job '+job.id);}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    const save=async()=>{setBusy(true);try{await call('/settings',{revision:data.revision,changes});setChanges({});setReview(false);setRefresh(v=>v+1);notify('Nocheh settings saved. Apply saved settings when you are ready to update running services.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    const apply=async()=>{setBusy(true);try{await call('/settings/apply',{});notify('Applying saved settings. Follow the result in Maintenance.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     if(error)return h('p',{role:'alert'},error);
-    if(!data)return h('p',null,'Loading settings…');
-    return h(Panel,{title:'Configuration',note:'Nocheh settings are saved in .env. Saved changes take effect after Apply. Credentials are never displayed.'},
-      h('p',{className:'n-badge'},'Runtime configuration: '+data.apply_state),
-      h('form',{onSubmit:e=>{e.preventDefault();setReview(true);}},h('div',{className:'n-form'},...data.fields.map(f=>{
-        const value=changes[f.key]??f.value??'';
-        const attrs={id:f.key,disabled:busy||!f.editable,value,type:f.secret?'password':'text',autoComplete:'off',
-          onChange:e=>{setChanges({...changes,[f.key]:e.target.value});setReview(false);}};
-        let input;
-        if(f.key==='NOCHEH_GUARD_MODE'||f.key==='TELEGRAM_ENABLED') input=h('select',attrs,...(f.key==='NOCHEH_GUARD_MODE'?['auto','on','off']:['false','true']).map(v=>h('option',{key:v,value:v},v)));
-        else input=h('input',attrs);
-        return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]||f.key),input,
-          h('small',null,f.secret?(f.configured?(f.editable?'Configured. Enter a replacement to change it.':'Configured. Managed internally.'):'Not configured.'):(f.editable?'Source: '+f.source:'Managed automatically')));
-      })),h('div',{className:'n-actions'},h('button',{disabled:busy||!Object.keys(changes).length},'Review changes'),button('Apply saved settings',apply,busy))),
-      review&&h('div',{className:'n-review'},h('h3',null,'Review before saving'),...Object.entries(changes).map(([k,v])=>h('p',{key:k},(labels[k]||k)+': '+(data.fields.find(f=>f.key===k)?.secret?'Replace stored credential':v))),button('Save changes',save,busy,'n-primary')));
+    if(!data)return h('p',{role:'status'},'Loading settings…');
+    const hints={TELEGRAM_ENABLED:'Start or stop Telegram message handling when settings are applied.',TELEGRAM_OWNER_ID:'Your numeric Telegram user ID. Only the owner can administer Nocheh.',TELEGRAM_GROUP_IDS:'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',TELEGRAM_BOT_TOKEN:'The token from BotFather for the bot used by the native Hermes Telegram adapter.',NOCHEH_MODEL:'The model used through your ChatGPT subscription.',NOCHEH_GUARD_MODE:'Automatic follows destination trust. On requires masking; Off skips masking.',NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Explicitly trusted model destinations may receive original text in Automatic mode.',NOCHEH_PORT:'Local port used by the archive service.'};
+    const field=f=>{
+      const value=changes[f.key]??f.value??'';
+      const attrs={id:f.key,disabled:busy||!f.editable,value,type:f.secret?'password':'text',autoComplete:'off','aria-describedby':f.key+'-help',onChange:e=>{const next={...changes};if(f.secret&&!e.target.value)delete next[f.key];else next[f.key]=e.target.value;setChanges(next);setReview(false);}};
+      const options=f.key==='NOCHEH_GUARD_MODE'?[['auto','Automatic · follow trust policy'],['on','On · always guard'],['off','Off · no masking']]:[['false','Disabled'],['true','Enabled']];
+      return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]||f.key),
+        f.key==='NOCHEH_GUARD_MODE'||f.key==='TELEGRAM_ENABLED'?h('select',attrs,...options.map(([value,label])=>h('option',{key:value,value},label))):h('input',attrs),
+        h('small',{id:f.key+'-help'},hints[f.key],f.secret?' '+(f.configured?(f.editable?'Configured. Leave blank to keep it; enter a replacement to change it.':'Configured and managed internally.'):'Not configured.'):!f.editable?' Managed automatically.':''));
+    };
+    const group=(title,note,keys)=>h('fieldset',{className:'n-settings-group'},h('legend',null,title),h('p',{className:'n-muted'},note),h('div',{className:'n-form'},...data.fields.filter(f=>keys.includes(f.key)).map(field)));
+    return h(Panel,{title:'Nocheh settings',note:'Telegram access, model routing and privacy for the whole installation. Stored in Nocheh’s .env file.'},
+      h('p',{className:'n-badge'},({current:'Saved settings match the last successful apply',pending:'Saved changes are waiting to be applied',unverified:'Running settings have not been verified by this dashboard'})[data.apply_state]||data.apply_state),
+      h(Steps,{items:['Edit and review','Save configuration','Apply to running services']}),
+      h('form',{onSubmit:e=>{e.preventDefault();setReview(true);}},
+        group('Telegram access','Choose who can use the assistant and which groups it can participate in.',['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_BOT_TOKEN']),
+        group('Model and privacy','These rules apply to outgoing model requests. Hermes profile preferences are in the other settings section.',['NOCHEH_MODEL','NOCHEH_GUARD_MODE']),
+        h('details',{className:'n-advanced'},h('summary',null,'Advanced · destinations, connections and internal credentials'),h('div',{className:'n-form'},...data.fields.filter(f=>!['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_BOT_TOKEN','NOCHEH_MODEL','NOCHEH_GUARD_MODE'].includes(f.key)).map(field))),
+        h('div',{className:'n-actions'},h('button',{disabled:busy||!Object.keys(changes).length},'Review changes'),button('Discard edits',()=>{setChanges({});setReview(false);},busy||!Object.keys(changes).length))),
+      review&&h('div',{className:'n-review'},h('h3',null,'Review before saving'),h('p',null,'Saving changes the configuration file. Running services update only after Apply.'),...Object.entries(changes).map(([k,v])=>h('p',{key:k},(labels[k]||k)+': '+(data.fields.find(f=>f.key===k)?.secret?'Replace stored credential':v||'(empty)'))),button('Save changes',save,busy,'n-primary')),
+      h('div',{className:'n-apply'},h('h3',null,'Apply saved settings'),h('p',{className:'n-muted'},'Updates the running services and may briefly interrupt Telegram replies. Save or discard your current edits first.'),button('Apply saved settings',apply,busy||!!Object.keys(changes).length),h(RouteLink,{page:'operations'},'View apply results →')));
+  }
+  function HermesPreferences({notify}) {
+    const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[tick,setTick]=useState(0),[changes,setChanges]=useState({}),[busy,setBusy]=useState(false);
+    useEffect(()=>{if(!scope&&profiles?.profiles?.length)setScope(profiles.profiles[0].scope);},[profiles]);
+    const [prefs,problem]=useLoad(scope?'/memory/preferences?scope='+encodeURIComponent(scope):null,tick);
+    const names={'agent.reasoning_effort':['Reasoning effort','Higher effort allows more reasoning and can take longer.'],'agent.max_iterations':['Maximum agent steps','Maximum tool and reasoning iterations in one turn.'],'agent.run_budget_seconds':['Time per turn (seconds)','Upper time budget for one assistant turn.'],'memory.memory_char_limit':['General memory limit (characters)','Space available for Hermes’s general memory note.'],'memory.user_char_limit':['User profile limit (characters)','Space available for Hermes’s user profile note.']};
+    const save=async e=>{e.preventDefault();if(prefs?.scope!==scope)return;setBusy(true);try{await call('/memory/preferences',{scope,revision:prefs.revision,changes});setChanges({});setTick(v=>v+1);notify('Hermes preferences saved for this profile. They take effect on the next turn.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    return h(Panel,{title:'Hermes preferences',note:'Agent behavior and memory limits for one chat profile. Saved in that profile’s Hermes config.yaml and used on its next turn; no service restart needed.'},
+      error&&h('p',{role:'alert'},error),h('label',null,'Profile to configure',h('select',{value:scope,disabled:busy,onChange:e=>{setScope(e.target.value);setChanges({});}},...(profiles?.profiles||[]).map(p=>h('option',{value:p.scope,key:p.scope},profileName(p))))),
+      !profiles&&!error&&h('p',{role:'status'},'Loading profiles…'),profiles&&!profiles.profiles.length&&h('p',null,'Configure the Telegram owner and groups in Nocheh settings to make profiles available.'),
+      problem&&h('p',{role:'alert'},problem),scope&&!problem&&prefs?.scope!==scope&&h('p',{role:'status'},'Loading this profile’s preferences…'),
+      scope&&prefs?.scope===scope&&h('form',{onSubmit:save},h('div',{className:'n-form n-preferences'},...Object.entries(prefs.schema).map(([key,spec])=>{
+        const input={id:key,value:changes[key]??prefs.values[key],disabled:busy,'aria-describedby':key+'-help',onChange:e=>setChanges({...changes,[key]:spec.choices?e.target.value:Number(e.target.value)})};
+        return h('div',{className:'n-field',key},h('label',{htmlFor:key},names[key]?.[0]||key),spec.choices?h('select',input,...spec.choices.map(v=>h('option',{key:v,value:v},v[0].toUpperCase()+v.slice(1)))):h('input',{...input,type:'number',min:spec.min,max:spec.max,required:true,step:1}),h('small',{id:key+'-help'},names[key]?.[1]));
+      })),h('div',{className:'n-actions'},h('button',{disabled:busy||!Object.keys(changes).length,className:'n-primary'},busy?'Saving…':'Save Hermes preferences'),button('Discard edits',()=>setChanges({}),busy||!Object.keys(changes).length))),
+      h('p',{className:'n-muted n-afterword'},'Model routing, enabled tools and access policy are managed by Nocheh. These are the supported native preferences, not the full Hermes configuration.'),h(RouteLink,{page:'memory'},'Read this installation’s Hermes memory →'));
   }
   function Jobs({notify}) {
     const [tick,setTick]=useState(0),[jobs,error]=useLoad('/jobs',tick),[settings]=useLoad('/settings');
@@ -77,56 +123,71 @@
     };
     const run=async(job,action)=>{try{const result=await call('/jobs/'+job.id+'/'+action,action==='start'?{mapping:job.mapping||mapping}:{});setSelected(result);setTick(v=>v+1);notify(action==='cancel'?'Import stopped. Already archived messages are retained.':'Import started. Historical messages will not send replies.');}catch(e){notify(errorText(e),true);}};
     const current=jobs?.find(j=>j.id===selected?.id)||selected;
-    return h('div',null,h(Panel,{title:'Import chat history',note:'Export from Telegram Desktop as JSON. Select the export folder to include media, a ZIP, or a JSON file for text only.'},
-      h('div',{className:'n-actions'},h('label',{className:'n-file'},'Select JSON or ZIP',h('input',{type:'file',accept:'.json,.zip',disabled:busy,onChange:e=>upload([...e.target.files])})),
+    return h('div',null,h(Panel,{title:'1. Choose a Telegram export',note:'Export from Telegram Desktop as JSON. Select the export folder to include media, a ZIP, or a JSON file for text only.'},
+      h(Steps,{items:['Choose an export','Review access and files','Import and track progress']}),h('div',{className:'n-actions'},h('label',{className:'n-file'},'Select JSON or ZIP',h('input',{type:'file',accept:'.json,.zip',disabled:busy,onChange:e=>upload([...e.target.files])})),
         h('label',{className:'n-file'},'Select export folder',h('input',{type:'file',webkitdirectory:'',multiple:true,disabled:busy,onChange:e=>upload([...e.target.files])}))),
       h('p',{role:'status'},progress),h('p',{className:'n-muted'},'Limits: 32 MiB export JSON, 50 MiB per media file, 256 MiB ZIP upload, 512 MiB unpacked.')),
-      current?.preview&&h(Panel,{title:'Review import'},
+      !current?.preview&&h(Panel,{title:'2. Review access and files',note:'Choose an export above to preview message counts and missing files, then decide whether its history stays private or is shared with a selected group.'}),current?.preview&&h(Panel,{title:'2. Review access and files'},
         h('p',null,current.preview.messages+' messages · '+current.preview.supplied_files+' supplied files · '+current.preview.missing_files+' missing files'),
         ...current.preview.chats.map(c=>h('div',{className:'n-field',key:c.id},h('label',{htmlFor:'scope-'+c.id},c.name+' · '+c.messages+' messages'),
           h('select',{id:'scope-'+c.id,value:(current.mapping||mapping)[c.id]||'',disabled:current.state!=='ready',onChange:e=>{const next={...mapping};if(e.target.value)next[c.id]=e.target.value;else delete next[c.id];setMapping(next);}},
             h('option',{value:''},'Owner-only archive (default)'),...scopes.map(s=>h('option',{value:s,key:s},s===fields.TELEGRAM_OWNER_ID?'Owner DM · '+s:'Share with group · '+s))))),
         h('p',{className:'n-muted'},'Group mapping makes this history available to that group. Import stores originals; it does not automatically rewrite memory.'),
-        h('p',{role:'status'},current.state+' · '+current.completed+' / '+current.preview.messages+' messages · '+current.duplicates+' duplicates'),
+        h('p',{role:'status'},friendlyState(current.state)+' · '+current.completed+' / '+current.preview.messages+' messages · '+current.duplicates+' duplicates'),
         current.error&&h('p',{role:'alert'},current.error),
         ['ready','failed','cancelled','interrupted'].includes(current.state)&&button(current.completed?'Resume import':'Start import',()=>run(current,'start'),busy,'n-primary'),
         current.state==='running'&&button('Stop import',()=>run(current,'cancel'))),
-      h(Panel,{title:'Imports & jobs'},error&&h('p',{role:'alert'},error),jobs?.length?h('div',{className:'n-list'},...jobs.map(j=>h('div',{className:'n-job',key:j.id},
-        button(j.kind+' · '+new Date(j.created_at).toLocaleString(),()=>setSelected(j)),h('span',{className:'n-badge'},j.state),h('small',null,j.completed+' processed'),j.error&&h('p',{role:'alert'},j.error),
-        j.result&&j.kind!=='import'&&h('p',null,'Result: '+(j.result.status||j.state))))):h('p',{className:'n-muted'},'No jobs yet. Your first import will appear here.')));
+      h(Panel,{title:'3. Import history',note:'Select an import to inspect its progress or resume it. Maintenance and settings jobs appear in Maintenance.'},error&&h('p',{role:'alert'},error),jobs?.some(j=>j.kind==='import')?h('div',{className:'n-list'},...jobs.filter(j=>j.kind==='import').map(j=>h('div',{className:'n-job',key:j.id},
+        button(jobName(j.kind)+' · '+new Date(j.created_at).toLocaleString(),()=>setSelected(j)),h('span',{className:'n-badge'},friendlyState(j.state)),h('small',null,j.completed+' processed'),j.error&&h('p',{role:'alert'},j.error),
+        j.result&&j.kind!=='import'&&h('p',null,'Result: '+(j.result.status||j.state))))):h('p',{className:'n-muted'},jobs?'No imports yet. Your first import will appear here.':'Loading import history…')));
   }
   function Archive({notify}) {
     const [query,setQuery]=useState(''),[results,setResults]=useState(null),[record,setRecord]=useState(null),[busy,setBusy]=useState(false);
     const search=async e=>{e.preventDefault();setBusy(true);try{setResults(await call('/search?q='+encodeURIComponent(query)));setRecord(null);}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     const read=async id=>{try{setRecord(await call('/events/'+id));}catch(e){notify(errorText(e),true);}};
     const rows=Array.isArray(results)?results:results?.results||results?.items||[];
-    return h('div',null,h(Panel,{title:'Search your archive',note:'Search original messages and derived text. Owner access spans all chats.'},
+    return h('div',null,h(Panel,{title:'Find an original message',note:'Search preserved chat messages and generated text such as transcripts across all chats. Open a result to see its original source, files and provenance.'},
       h('form',{className:'n-actions',onSubmit:search},h('label',{className:'n-grow'},'Search terms',h('input',{value:query,onChange:e=>setQuery(e.target.value),required:true})),h('button',{disabled:busy},busy?'Searching…':'Search')),
-      results&&(!rows.length?h('p',null,'No matching messages.'):h('div',{className:'n-list'},...rows.map(r=>h('article',{className:'n-result',key:r.id||r.event_id},h('small',null,r.scope),h('p',{dir:'auto'},r.text||r.snippet||r.preview),button('Open source',()=>read(r.id||r.event_id))))))),
+      results===null&&h('p',{className:'n-empty'},'Search a word or phrase from a conversation. To add older history, use Import chats.'),results&&(!rows.length?h('p',null,'No matching messages.'):h('div',{className:'n-list'},...rows.map(r=>h('article',{className:'n-result',key:r.id||r.event_id},h('small',null,(r.derived_id?'Generated text match':'Original message')+' · '+r.scope),h('p',{dir:'auto'},r.text||r.snippet||r.preview),button('Open source',()=>read(r.id||r.event_id))))))),
       record&&h(Source,{record,notify}));
   }
-  function Memory({notify}) {
-    const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[session,setSession]=useState(''),[offset,setOffset]=useState(0),[tick,setTick]=useState(0),[changes,setChanges]=useState({});
+
+  function Memory() {
+    const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[session,setSession]=useState(''),[offset,setOffset]=useState(0);
     useEffect(()=>{if(!scope&&profiles?.profiles?.length)setScope(profiles.profiles[0].scope);},[profiles]);
-    const [data,problem]=useLoad(scope?'/memory?scope='+encodeURIComponent(scope)+'&session='+encodeURIComponent(session)+'&offset='+offset:null,tick);
-    const [prefs]=useLoad(scope?'/memory/preferences?scope='+encodeURIComponent(scope):null,tick);
-    const save=async()=>{try{await call('/memory/preferences',{scope,revision:prefs.revision,changes});setChanges({});setTick(v=>v+1);notify('Hermes preferences saved. They take effect on the next turn.');}catch(e){notify(errorText(e),true);}};
-    return h('div',null,h(Panel,{title:'Hermes memory',note:'Native notes are maintained by Hermes. An explicit source citation is needed to identify supporting evidence.'},
-      error&&h('p',{role:'alert'},error),h('label',null,'Chat profile',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setSession('');setOffset(0);setChanges({});}},...(profiles?.profiles||[]).map(p=>h('option',{value:p.scope,key:p.scope},(p.owner?'Owner DM':'Group')+' · '+p.scope)))),
-      scope&&problem&&h('p',{role:'alert'},problem),scope&&data?.scope===scope&&(data.memories||[]).map(m=>h('article',{key:m.name},h('h3',null,m.name),m.exists?h(Data,{value:m.text||'This note is empty.'}):h('p',{className:'n-muted'},'No note has been created yet.'),m.truncated&&h('p',null,'Showing the first 256 KiB.'),h('small',null,m.citations.length+' explicit source references')))),
-      scope&&prefs?.scope===scope&&h(Panel,{title:'Profile preferences',note:'Source: Hermes config.yaml. Changes take effect on the next turn. Routing and scope policy remain managed by Nocheh.'},
-        h('div',{className:'n-form'},...Object.entries(prefs.schema).map(([key,spec])=>h('label',{key},key.replaceAll('_',' ').replace('.',' · '),spec.choices?h('select',{value:changes[key]??prefs.values[key],onChange:e=>setChanges({...changes,[key]:e.target.value})},...spec.choices.map(v=>h('option',{key:v},v))):h('input',{type:'number',min:spec.min,max:spec.max,value:changes[key]??prefs.values[key],onChange:e=>setChanges({...changes,[key]:Number(e.target.value)})})))),button('Save profile preferences',save,!Object.keys(changes).length)),
-      scope&&data?.scope===scope&&h(Panel,{title:'Native sessions'},session&&button('Back to sessions',()=>{setSession('');setOffset(0);}),
-        !session&&!data.sessions.length&&h('p',{className:'n-muted'},'No sessions in this profile.'),
-        ...data.sessions.map(s=>h('div',{className:'n-row',key:s.id},button(s.title||s.id,()=>{setSession(s.id);setOffset(0);}),h('small',null,s.source))),
-        ...data.messages.map((m,i)=>h('article',{className:'n-result',key:m.id||i},h('b',null,m.role),h(Data,{value:m.content}),m.truncated&&h('small',null,'Message preview truncated.'))),
-        h('div',{className:'n-actions'},offset>0&&button('Previous page',()=>setOffset(Math.max(0,offset-50))),data.next_offset!==null&&button('Next page',()=>setOffset(data.next_offset)))));
+    const [data,problem]=useLoad(scope?'/memory?scope='+encodeURIComponent(scope)+'&session='+encodeURIComponent(session)+'&offset='+offset:null);
+    return h('div',null,h(Panel,{title:'Choose whose memory to read',note:'Your private DM and each selected group have separate Hermes profiles. These notes are maintained by the assistant and may change as it learns.'},
+      error&&h('p',{role:'alert'},error),h('label',null,'Chat profile',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setSession('');setOffset(0);}},...(profiles?.profiles||[]).map(p=>h('option',{value:p.scope,key:p.scope},profileName(p))))),
+      profiles&&!profiles.profiles.length&&h('p',null,'No configured profiles yet. Set up your Telegram owner and groups in Settings.'),h(RouteLink,{page:'settings'},'Change memory limits in Settings →')),
+      scope&&problem&&h('p',{role:'alert'},problem),(!profiles||scope&&data?.scope!==scope)&&!error&&!problem&&h('p',{role:'status'},'Loading Hermes memory…'),
+      scope&&data?.scope===scope&&h(Panel,{title:'Working notes',note:'General memory and user profile notes are generated knowledge. Explicit source references help you check the supporting evidence.'},
+        ...(data.memories||[]).map(m=>h('article',{className:'n-memory-note',key:m.name},h('h3',null,m.name==='MEMORY.md'?'General memory':m.name==='USER.md'?'User profile notes':m.name),h('small',null,'Native Hermes file · '+m.name),
+          m.exists&&m.text?h(Data,{value:m.text}):h('p',{className:'n-empty'},'No notes yet. Hermes fills this file when it saves useful information during conversations. Importing a chat alone does not create a note.'),
+          m.truncated&&h('p',null,'Showing the first 256 KiB.'),h('small',null,m.citations.length+' explicit source references')))),
+      scope&&data?.scope===scope&&h(Panel,{title:'Conversation history',note:'Sessions saved by Hermes while running the assistant. Imported originals are searchable in Original chats; they do not become Hermes sessions.'},session&&button('Back to conversations',()=>{setSession('');setOffset(0);}),
+        !session&&!data.sessions.length&&h('p',{className:'n-empty'},'No saved conversations in this profile yet. They appear after the assistant runs here.'),
+        !session&&data.sessions.map(s=>h('div',{className:'n-row',key:s.id},button(s.title||'Conversation '+s.id,()=>{setSession(s.id);setOffset(0);}),h('small',null,s.source))),
+        ...data.messages.map((m,i)=>h('article',{className:'n-result',key:m.id||i},h('b',null,({user:'User',assistant:'Hermes',tool:'Tool result',system:'System'})[m.role]||m.role),h(Data,{value:m.content}),m.truncated&&h('small',null,'Message preview truncated.'))),
+        h('div',{className:'n-actions'},offset>0&&button('Previous page',()=>setOffset(Math.max(0,offset-50))),data.next_offset!==null&&button('Next page',()=>setOffset(data.next_offset))),h(RouteLink,{page:'archive'},'Search original chats →')));
   }
+
   function Honcho({notify}) {
     const [status,error]=useLoad('/honcho/status'),[workspace,setWorkspace]=useState(''),[kind,setKind]=useState('workspace'),[data,setData]=useState(null),[busy,setBusy]=useState(false);
-    const query=async()=>{setBusy(true);try{setData(await call('/honcho/read',{args:kind==='workspace'?['workspace','list']:[kind,'list','-w',workspace]}));}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
-    return h(Panel,{title:'Honcho experiment',note:'Separate from production Hermes memory. Stored-data inspection makes no inference requests.'},error&&h('p',{role:'alert'},error),status&&h(Data,{value:status}),
-      h('div',{className:'n-form'},h('label',null,'Stored data',h('select',{value:kind,onChange:e=>setKind(e.target.value)},...['workspace','peer','session'].map(v=>h('option',{key:v,value:v},v+'s')))),kind!=='workspace'&&h('label',null,'Workspace ID',h('input',{value:workspace,onChange:e=>setWorkspace(e.target.value)}))),button('Load stored data',query,busy||!status?.running||(kind!=='workspace'&&!workspace)),data&&h(Data,{value:data}));
+    const query=async()=>{setBusy(true);setData(null);try{setData(await call('/honcho/read',{args:kind==='workspace'?['workspace','list']:[kind,'list','-w',workspace]}));}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    return h('div',null,h(Panel,{title:'Optional memory experiment',note:'Honcho is isolated from your assistant. Hermes remains the memory system used in production.'},
+      error&&h('p',{role:'alert'},error),!status&&!error&&h('p',{role:'status'},'Checking the experiment…'),status&&h('div',null,
+        h('p',{className:'n-badge'},status.running?'Experiment services running':'Experiment stopped'),
+        h('div',{className:'n-row'},h('b',null,'Live compatibility'),h('span',null,status.live_compatibility)),
+        h('div',{className:'n-row'},h('b',null,'Separate subscription login'),h('span',null,status.subscription_login?'Configured':'Not configured')),
+        h('div',{className:'n-row'},h('b',null,'Experiment embedding credential'),h('span',null,status.embedding_credential?'Configured':'Not configured')),
+        h('div',{className:'n-row'},h('b',null,'Metered API budget cap'),h('span',null,'$'+status.api_budget_usd+' · not a live spending balance')),
+        !status.running&&h('p',{className:'n-empty'},'Stored-data browsing becomes available when the isolated experiment is running. Setup and lifecycle controls currently use the Honcho CLI.'),
+        h(Details,{value:status,label:'Experiment version and technical status'}))),
+      h(Panel,{title:'Browse stored Honcho data',note:'Workspaces contain peers (people or agents) and sessions (conversations). These reads do not ask a model to generate new memory.'},
+        h('div',{className:'n-form'},h('label',null,'What to browse',h('select',{value:kind,onChange:e=>{setKind(e.target.value);setData(null);}},...['workspace','peer','session'].map(v=>h('option',{key:v,value:v},({workspace:'Workspaces',peer:'Peers · people and agents',session:'Sessions · conversations'})[v])))),kind!=='workspace'&&h('label',null,'Workspace ID',h('input',{value:workspace,onChange:e=>{setWorkspace(e.target.value);setData(null);}}))),
+        button(busy?'Loading…':'Load stored data',query,busy||!status?.running||(kind!=='workspace'&&!workspace.trim())),
+        data&&h('div',null,data.error?h('p',{role:'alert'},data.error):h('p',{className:'n-afterword'},data.complete?'Stored data loaded.':'Showing the returned page. More data may be available through the CLI.'),h(Data,{value:data})),
+        h('details',{className:'n-afterword'},h('summary',null,'CLI commands and setup'),h('p',{className:'n-muted'},'Use the existing terminal workflow to configure the isolated experiment or retrieve structured data.'),h(Data,{value:'./scripts/nocheh honcho doctor\n./scripts/nocheh honcho workspace list --json\n./scripts/nocheh honcho peer list -w WORKSPACE_ID --json'}))));
   }
   function download(path,name) {
     const a=document.createElement('a');a.href=base+path+'?name='+encodeURIComponent(name);a.download=name;document.body.appendChild(a);a.click();a.remove();
@@ -223,25 +284,40 @@
         h('p',{className:'n-muted'},'Observed relationships and explicit memory citations. This view makes no model calls.'),
         record&&h('div',{ref:source,id:'n-graph-source'},h(Source,{record,notify}))));
   }
-  function Operations({notify}){
-    const [tick,setTick]=useState(0),[listing]=useLoad('/operations',tick),[jobs]=useLoad('/jobs',tick),[review,setReview]=useState(''),[backup,setBackup]=useState(''),[port,setPort]=useState(8795),[busy,setBusy]=useState(false);
-    useEffect(()=>{const timer=setInterval(()=>setTick(v=>v+1),3000);return()=>clearInterval(timer);},[]);
-    const run=async action=>{setBusy(true);try{const job=await call('/operations',{action,options:action==='restore'?{backup,port}:undefined});setReview('');setTick(v=>v+1);notify('Operation started. Its result will appear below. Job '+job.id);}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
-    const descriptions={backup:'Pause running archive writers, take a consistent database and file snapshot, then resume those services.',restart:'Restart Hermes and the archive workers with their configured shutdown grace periods, then check readiness.',restore:'Restore the selected backup into a new, separate Compose project. Telegram stays disabled and the copied subscription login stays inactive.'};
-    return h('div',null,h(Panel,{title:'Local operations',note:'Operations share durable job tracking. Wait for running imports before restarting or taking a backup.'},
-      h('div',{className:'n-actions'},button('Run diagnostics',()=>run('diagnose'),busy),button('Export archive',()=>run('export'),busy),button('Create backup',()=>setReview('backup'),busy),button('Restart services',()=>setReview('restart'),busy))),
-      h(Panel,{title:'Backups and restore',note:'Backup snapshots include private runtime state and credentials. They stay in your local state directory. Archive exports contain source records and files.'},
-        h('label',null,'Saved backup',h('select',{value:backup,onChange:e=>setBackup(e.target.value)},h('option',{value:''},'Choose a backup'),...(listing?.backups||[]).map(b=>h('option',{key:b.id,value:b.id},new Date(b.created_at).toLocaleString()+' · '+b.files+' files')))),
-        h('label',null,'Port for inactive restore',h('input',{type:'number',min:1024,max:65535,value:port,onChange:e=>setPort(Number(e.target.value))})),button('Review inactive restore',()=>setReview('restore'),!backup||busy)),
-      review&&h(Panel,{title:'Review '+review},h('p',null,descriptions[review]),review==='restore'&&h('p',null,'Backup '+backup+' · loopback port '+port),h('div',{className:'n-actions'},button('Confirm '+review,()=>run(review),busy,'n-primary'),button('Cancel',()=>setReview('')))),
-      h(Panel,{title:'Operation results'},...(jobs||[]).filter(j=>j.kind.startsWith('operations.')).map(j=>h('article',{className:'n-result',key:j.id},h('h3',null,j.kind.replace('operations.','')+' · '+j.state),h('small',null,new Date(j.created_at).toLocaleString()),j.error&&h('p',{role:'alert'},j.error),j.result&&h(Data,{value:j.result}),j.kind==='operations.export'&&j.state==='complete'&&button('Download archive ZIP',()=>download('/exports/'+j.id+'/download','nocheh-archive.zip',notify))))));
+
+  function OperationResult({result}) {
+    if(result.containers)return h('div',null,...result.containers.map(c=>h('div',{className:'n-row',key:c.service},h('b',null,c.service),h('span',null,(c.state==='running'?'Running':friendlyState(c.state))+(c.health?' · '+c.health:'')))),h(Details,{value:result,label:'Full diagnostics'}));
+    const messages={backed_up:'Full backup created.',restored_inactive:'Backup restored into a separate inactive installation. Telegram and the copied login remain disabled.',exported:'Portable archive ZIP ready to download.',restarted:'Services restarted and readiness checked.',applied:'Saved settings applied to running services.',apply_failed:result.rolled_back?'Applying settings failed. The previous configuration was restored.':'Applying settings failed. Check diagnostics before trying again.'};
+    return h('div',null,h('p',null,messages[result.status]||'Task finished. See details for its result.'),
+      result.status==='exported'&&h('p',{className:'n-muted'},result.events+' source records · '+result.files+' original files'),
+      result.status==='restored_inactive'&&h('p',{className:'n-muted'},(result.verified_tables?.length||0)+' tables verified · '+result.verified_state_files+' state files verified'),h(Details,{value:result}));
   }
-  const extensions = {graph:{label:'Graph',component:Graph},operations:{label:'Operations',component:Operations},memory:{label:'Memory',component:Memory},honcho:{label:'Honcho',component:Honcho}};
+  function Operations({notify}){
+    const [tick,setTick]=useState(0),[listing,listError]=useLoad('/operations',tick),[jobs,jobsError]=useLoad('/jobs',tick),[review,setReview]=useState(''),[backup,setBackup]=useState(''),[port,setPort]=useState(8795),[busy,setBusy]=useState(false);
+    useEffect(()=>{const timer=setInterval(()=>setTick(v=>v+1),3000);return()=>clearInterval(timer);},[]);
+    const run=async action=>{setBusy(true);try{await call('/operations',{action,options:action==='restore'?{backup,port}:undefined});setReview('');setTick(v=>v+1);notify('Task started. Follow its progress in Recent maintenance below.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    const descriptions={backup:'Pause archive writers, save a consistent database, files and runtime snapshot, then resume those services. This local backup includes private state and credentials.',restart:'Restart Hermes and the archive workers, then check readiness. Telegram replies may be briefly interrupted.',restore:'Restore the selected backup into a new, separate local installation. Telegram stays disabled and the copied subscription login stays inactive. Your current installation is not replaced.'};
+    const tasks=(jobs||[]).filter(j=>j.kind!=='import');
+    return h('div',null,h('div',{className:'n-operation-grid'},...[
+      ['diagnose','Check service health','Inspect containers and archive readiness without changing your data.','Run diagnostics'],
+      ['export','Download your archive','Create a portable ZIP of original source records and files.','Prepare archive ZIP'],
+      ['backup','Back up the installation','Save the database, files and Hermes runtime state, including credentials, locally.','Review full backup'],
+      ['restart','Restart services','Restart the assistant and workers. Wait for active imports to finish.','Review restart']
+    ].map(([action,title,note,label])=>h(Panel,{key:action,title,note},button(label,()=>['backup','restart'].includes(action)?setReview(action):run(action),busy)))),
+      h(Panel,{title:'Saved backups'},listError&&h('p',{role:'alert'},listError),!listing&&!listError&&h('p',{role:'status'},'Loading saved backups…'),listing&&h('p',{className:'n-muted'},listing.backups.length?listing.backups.length+' local backup'+(listing.backups.length===1?'':'s')+' available. Restore creates a separate installation for verification.':'No backups yet. Create a full backup above to enable an inactive restore.'),
+        h('details',null,h('summary',null,'Advanced · restore a backup into an inactive installation'),h('p',{className:'n-muted'},descriptions.restore),
+          h('div',{className:'n-form'},h('label',null,'Saved backup',h('select',{value:backup,onChange:e=>{setBackup(e.target.value);setReview('');}},h('option',{value:''},'Choose a backup'),...(listing?.backups||[]).map(b=>h('option',{key:b.id,value:b.id},new Date(b.created_at).toLocaleString()+' · '+b.files+' files')))),
+          h('label',null,'Local port for the inactive installation',h('input',{type:'number',min:1024,max:65535,value:port,onChange:e=>{setPort(Number(e.target.value));setReview('');}}))),button('Review inactive restore',()=>setReview('restore'),!backup||busy))),
+      review&&h(Panel,{title:'Review '+({backup:'full backup',restart:'service restart',restore:'inactive restore'})[review]},h('p',null,descriptions[review]),review==='restore'&&h('p',null,'Backup '+backup+' · local port '+port),h('div',{className:'n-actions'},button('Confirm '+review,()=>run(review),busy,'n-primary'),button('Cancel',()=>setReview('')))),
+      h(Panel,{title:'Recent maintenance',note:'Diagnostics, exports, backups, restarts, restores and settings applies. Results update automatically.'},jobsError&&h('p',{role:'alert'},jobsError),jobs&&!tasks.length&&h('p',{className:'n-empty'},'No maintenance tasks yet. Run diagnostics above to check the installation.'),
+        ...tasks.map(j=>h('article',{className:'n-result',key:j.id},h('div',{className:'n-result-heading'},h('h3',null,jobName(j.kind)),h('span',{className:'n-badge'},friendlyState(j.state))),h('small',null,new Date(j.created_at).toLocaleString()),j.error&&h('p',{role:'alert'},j.error),j.result&&h(OperationResult,{result:j.result}),j.kind==='operations.export'&&j.state==='complete'&&button('Download archive ZIP',()=>download('/exports/'+j.id+'/download','nocheh-archive.zip',notify))))));
+  }
+  const extensions = {graph:{label:'Evidence graph',component:Graph},operations:{label:'Maintenance',component:Operations},memory:{label:'Hermes memory',component:Memory},honcho:{label:'Honcho lab',component:Honcho}};
   window.__NOCHEH_PAGES__=extensions;
   function App() {
     const [page,setPage]=useState(location.hash.slice(1)||'overview'),[notice,setNotice]=useState(null),[tick,setTick]=useState(0);
-    const root=useRef(null);
-    useEffect(()=>{const change=()=>setPage(location.hash.slice(1)||'overview');addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
+    const root=useRef(null), main=useRef(null), heading=useRef(null);
+    useEffect(()=>{const change=()=>{setPage(location.hash.slice(1)||'overview');setNotice(null);main.current?.scrollTo(0,0);heading.current?.focus({preventScroll:true});};addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
     useEffect(()=>{
       // Keep the native shell mounted for its SDK; avoid unreachable background controls.
       const hidden=[];let node=root.current;
@@ -249,16 +325,19 @@
       return()=>hidden.forEach(([node,inert,visibility])=>{node.inert=inert;node.style.visibility=visibility;});
     },[]);
     const notify=(text,error=false)=>setNotice({text,error});
-    const pages={overview:'Overview',settings:'Settings',imports:'Imports & jobs',archive:'Archive',...Object.fromEntries(Object.entries(extensions).map(([k,v])=>[k,v.label]))};
+    const pages={overview:'Overview',settings:'Settings',imports:'Import chats',archive:'Original chats',...Object.fromEntries(Object.entries(extensions).map(([k,v])=>[k,v.label]))};
+    const descriptions={overview:'Your archive, assistant memory and controls, in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes and conversation history Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive without running a terminal command.',settings:'Configure the installation or tune Hermes behavior for an individual chat.',operations:'Check health, download data, back up and maintain the local installation.',honcho:'Inspect a separate memory experiment and its setup status.'};
+    const groups=[['Workspace',['overview']],['Explore',['archive','memory','graph']],['Manage',['imports','settings','operations']],['Experiments',['honcho']]];
     const Current=extensions[page]?.component;
     return h('div',{className:'nocheh-app'+(page==='graph'?' n-graph-active':''),ref:root},
-      h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'N'),h('div',null,'nocheh',h('small',null,'Your owned AI brain'))),
-        h('nav',{'aria-label':'Nocheh'},...Object.entries(pages).map(([key,label])=>h('a',{href:'#'+key,key,'aria-current':page===key?'page':undefined},label))),
-        h('div',{className:'n-sidebar-foot'},h('span',{className:'n-dot'}),'Local workspace',h('small',null,'Powered by Hermes'))),
-      h('main',{className:'n-main'},h('header',{className:'n-header'},h('div',null,h('p',{className:'n-eyebrow'},'PERSONAL WORKSPACE'),h('h1',null,pages[page]||'Overview')),button('Refresh',()=>setTick(v=>v+1))),
+      h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'N'),h('div',null,'nocheh',h('small',null,'Control panel'))),
+        h('nav',{'aria-label':'Nocheh'},...groups.map(([label,keys])=>h('div',{className:'n-nav-group',key:label},h('span',{className:'n-nav-label'},label),...keys.map(key=>h('a',{href:'#'+key,key,'aria-current':page===key?'page':undefined},pages[key]))))),
+        h('label',{className:'n-mobile-navigation'},'Go to page',h('select',{value:pages[page]?page:'overview',onChange:e=>{location.hash=e.target.value;}},...groups.map(([label,keys])=>h('optgroup',{key:label,label},...keys.map(key=>h('option',{key,value:key},pages[key])))))),
+        h('div',{className:'n-sidebar-foot'},h('span',{className:'n-dot'}),'Local workspace',h('small',null,'Nocheh tools · Hermes runtime'))),
+      h('main',{className:'n-main',ref:main},h('header',{className:'n-header'},h('div',null,h('p',{className:'n-eyebrow'},'PERSONAL WORKSPACE'),h('h1',{ref:heading,tabIndex:-1},pages[page]||'Overview'),h('p',{className:'n-page-description'},descriptions[page]||descriptions.overview)),button('Refresh',()=>setTick(v=>v+1))),
         notice&&h('div',{className:'n-notice '+(notice.error?'n-error':''),role:notice.error?'alert':'status'},notice.text,button('Dismiss',()=>setNotice(null))),
         h('div',{key:page+tick},page==='settings'?h(Settings,{notify}):page==='imports'?h(Jobs,{notify}):page==='archive'?h(Archive,{notify}):Current?h(Current,{notify,call,h,sdk}):h(Status,{refresh:tick})),
-        h('footer',null,'Originals are evidence. Memories and transcripts are separate views.')));
+        h('footer',null,'Owned archive · Native Hermes memory · Local administration')));
   }
   window.__HERMES_PLUGINS__.register('nocheh',App);
 })();

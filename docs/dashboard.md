@@ -16,6 +16,31 @@ backend port 8784. The TypeScript owner API runs locally; it does not expose a
 Docker socket to containers. The launcher builds the pinned native dashboard
 assets using the upstream npm lockfile. Stop and start to rebuild after updates.
 
+## Find the right page
+
+| Page | Use it for |
+| --- | --- |
+| Overview | Start common tasks and understand the archive, Hermes memory and Honcho. |
+| Original chats | Search original messages and generated transcripts, then open source records and files. |
+| Hermes memory | Read general notes, user profile notes and native conversation history for one chat. |
+| Evidence graph | Follow recorded relationships back to their source evidence. |
+| Import chats | Choose a Telegram export, review access and files, then start or resume an import. |
+| Settings → Nocheh settings | Manage Telegram access, model routing and guarding across the installation. Review, save, then apply to running services. |
+| Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
+| Maintenance | Check health, prepare archive downloads, create backups, restart or verify an inactive restore; inspect settings-apply results. |
+| Honcho lab | Check the optional experiment and browse its stored data when it is running. |
+
+This is Nocheh’s control panel on the native Hermes dashboard foundation. Hermes
+provides the Telegram adapter, assistant runtime, tools, profiles and memory;
+Nocheh provides archive capture, scope policy and guarding. The standard Hermes
+chat and administration screens are not exposed here.
+
+Original chats are preserved evidence. Native notes are generated working memory
+and may change. Imported messages become archive sources, not native sessions or
+automatically generated memory. Honcho remains separate from production memory.
+
+## Change configuration
+
 Settings show saved `.env` values with credential presence only. Review and Save
 validates the complete configuration. Apply is a background job that recreates
 affected Compose services and checks health; failed apply attempts restore the
@@ -52,8 +77,8 @@ routes are blocked. Use the Nocheh pages for management.
 
 ## Native memory and Honcho
 
-Memory selects only the configured owner/group profiles. Notes are read-only;
-preferences use the same locked resolver as assistant startup and take effect on
+Hermes memory selects only the configured owner/group profiles. Notes are read-only;
+preferences in Settings → Hermes preferences use the same locked resolver as assistant startup and take effect on
 the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show
 truncation. A note's presence does not establish source provenance.
@@ -127,7 +152,7 @@ generation provenance. Use the next cursor to retrieve additional graph pages:
 ./scripts/nocheh memory graph --scope CHAT_ID --after EVENT_ID --output next-page.json
 ```
 
-Operations provides diagnostics, portable archive ZIP export, consistent backup,
+Maintenance provides diagnostics, portable archive ZIP export, consistent backup,
 service restart, and restore into a new inactive Compose project. Backup and
 restart show a review step. Restore selects a locally generated backup ID and an
 unused loopback port; it cannot overwrite current state. Restored Telegram stays
