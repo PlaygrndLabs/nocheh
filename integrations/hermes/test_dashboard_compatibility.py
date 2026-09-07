@@ -20,3 +20,17 @@ class DashboardCompatibilityTests(unittest.TestCase):
             {'name': 'nocheh', 'source': 'user'}, {'nocheh'}, set()))
         self.assertIsNotNone(_plugin_api_mount_skip_reason(
             {'name': 'nocheh', 'source': 'user'}, set(), set()))
+
+    def test_restricted_shell_rejects_native_agent_and_mutation_routes(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from .dashboard_server import RestrictedDashboard
+        app=FastAPI(); calls=[]
+        @app.api_route('/{path:path}',methods=['GET','POST','PUT','DELETE'])
+        def backend(path):calls.append(path);return {'ok':True}
+        client=TestClient(RestrictedDashboard(app))
+        for method,path in [('POST','/api/gateway/start'),('PUT','/api/config'),('GET','/api/pty'),
+                            ('GET','/api/env'),('GET','/api/files'),('POST','/api/plugins/other/action')]:
+            self.assertEqual(client.request(method,path).status_code,403)
+        self.assertFalse(calls)
+        self.assertEqual(client.get('/api/dashboard/plugins').status_code,200)

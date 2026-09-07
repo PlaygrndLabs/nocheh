@@ -28,12 +28,25 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import"))
     args, rest = parser.parse_known_args()
     if args.command in ('backup','restore','diagnose'):
         from operations import main as operations
         return operations(args.command,STATE,rest)
     bootstrap()
+    if args.command in ('dashboard', 'jobs', 'import'):
+        sys.path.insert(0, str(ROOT))
+        if args.command == 'dashboard':
+            from scripts.dashboard import start
+            return start(STATE, rest)
+        if args.command == 'jobs':
+            from scripts.dashboard import request
+            if rest == ['list']: result = request(STATE, '/jobs')
+            elif len(rest) == 2 and rest[0] == 'show': result = request(STATE, '/jobs/' + rest[1])
+            else: parser.error('Use jobs list or jobs show JOB_ID.')
+            print(json.dumps(result, indent=2)); return 0
+        if not rest or rest[0] != 'telegram': parser.error('Use import telegram FILE [--scope ID].')
+        return subprocess.call([sys.executable, str(ROOT/'scripts/archive.py'), 'import-telegram'] + rest[1:], cwd=ROOT)
     if args.command == 'config' and rest:
         from settings import view, save, apply
         action, *parts = rest

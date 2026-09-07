@@ -8,13 +8,21 @@ is committed separately; these do not replace the production release gates below
 | Increment | Actual status |
 | --- | --- |
 | D1 — Compatibility and configuration | Complete: native preferences persist, validated config show/set/apply with redaction/conflict/recovery; 12 configuration/scope tests plus one pinned dashboard auth/extension test pass |
-| D2 — Dashboard and import jobs | Pending |
+| D2 — Dashboard and import jobs | Complete: local native dashboard extension, shared owner API, settings, archive search and durable manual imports; 16 TypeScript tests and 39 pinned Python tests pass |
 | D3 — Native memory and isolated Honcho CLI | Pending |
 | D4 — Source graph and operations | Pending |
 
 D1 also built the pinned upstream dashboard frontend successfully from its npm
 lockfile in a temporary directory. Packaging and serving it are D2 work. No live
 provider requests or production setting changes were required for D1 verification.
+
+D2 [dashboard instructions](docs/dashboard.md). The local browser renders live
+archive status, redacted settings and upload controls. HTTP acceptance verifies
+unauthorized/cross-site rejection and cancellation/restart/resume using isolated
+fixtures. ZIP traversal/symlink and changed-export failures pass. Existing real
+PostgreSQL import/export tests verify exact originals and silent replay. Native
+agent/mutation routes are denied at the dashboard ASGI boundary. Production
+Telegram/provider configuration was not changed by these dashboard checks.
 
 After the requested reset on 2026-09-07, a fresh Compose runtime was started with
 the supplied Telegram bot token and owner/group IDs in the ignored `.env`.
