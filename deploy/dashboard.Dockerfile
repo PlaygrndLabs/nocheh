@@ -4,6 +4,8 @@ WORKDIR /opt/hermes
 COPY --from=hermes /opt/hermes/package.json /opt/hermes/package-lock.json ./
 COPY --from=hermes /opt/hermes/web ./web
 COPY --from=hermes /opt/hermes/apps/shared ./apps/shared
+COPY scripts/patch-native-dashboard.py /tmp/patch-native-dashboard.py
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/* && python3 /tmp/patch-native-dashboard.py /opt/hermes
 RUN npm ci --workspace web --workspace apps/shared --ignore-scripts --no-audit --no-fund && npm run build --workspace web
 WORKDIR /opt/nocheh
 COPY package.json package-lock.json ./

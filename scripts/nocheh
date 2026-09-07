@@ -28,12 +28,16 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy"))
     args, rest = parser.parse_known_args()
     if args.command in ('backup','restore','diagnose'):
         from operations import main as operations
         return operations(args.command,STATE,rest)
     bootstrap()
+    if args.command in ('runtime', 'policy'):
+        sys.path.insert(0, str(ROOT))
+        from scripts.native import main as native
+        return native(STATE, args.command, rest)
     if args.command == 'honcho':
         sys.path.insert(0, str(ROOT))
         from scripts.honcho import main as honcho

@@ -120,9 +120,15 @@ def initialize(state):
     return values
 
 
+def native_admin_port(state):
+    port = int(load(state).get('NOCHEH_PORT', '8780'))
+    return port + 5 if port <= 65530 else port - 5
+
+
 def compose_environment(state):
     # Explicit settings win over stale shell exports. Only Compose's selected
     # variables enter service containers; the full host environment is not passed.
     result = dict(os.environ); result.update(load(state))
+    result['NOCHEH_NATIVE_ADMIN_PORT'] = str(native_admin_port(state))
     result['NOCHEH_STATE_DIR'] = str(Path(state).resolve())
     return result

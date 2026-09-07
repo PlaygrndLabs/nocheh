@@ -30,6 +30,9 @@ def atomic_yaml(path, value):
             yaml.safe_dump(value, file, allow_unicode=True, sort_keys=False)
             file.flush(); os.fsync(file.fileno())
         os.replace(name, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try: os.fsync(directory)
+        finally: os.close(directory)
     finally:
         if os.path.exists(name): os.unlink(name)
 
@@ -67,10 +70,33 @@ def revision(config):
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
 
 
+def policy_root(profile):
+    profile = Path(profile)
+    return Path(os.environ.get("NOCHEH_RUNTIME_HOME", profile.parent.parent if profile.parent.name == "profiles" else profile))
+
+
+def inherited_config(profile, config, job=None, policy=None):
+    from .policy_config import effective
+    result = json.loads(json.dumps(config))
+    values, origins = effective(policy_root(profile), config, job, policy)
+    for key, value in values.items():
+        section, field = key.split(".")
+        result.setdefault(section, {})[field] = value
+    result.setdefault("nocheh", {})["inherited_preferences"] = [key for key, origin in origins.items() if origin != "profile"]
+    return result, origins
+
+
+def profile_revision(config, policy):
+    return revision({"config": config, "policy": policy})
+
+
 def inspect_profile(profile, model):
+    from .policy_config import document
+    policy = document(policy_root(profile))
     original = read(Path(profile) / 'config.yaml')
-    result = resolved(original, model)
-    return {'revision': revision(original), 'values': preferences(result), 'schema': PREFERENCES,
+    inherited, origins = inherited_config(profile, original, policy=policy)
+    result = resolved(inherited, model)
+    return {'origins': origins, 'revision': profile_revision(original, policy), 'values': preferences(result), 'schema': PREFERENCES,
             'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
             'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'memory.provider']}
 
@@ -78,18 +104,29 @@ def inspect_profile(profile, model):
 def configure_profile(profile, model, changes=None, expected=None):
     profile = Path(profile); profile.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = profile / 'config.yaml'
-    with (profile / '.config.lock').open('a') as lock:
+    from .policy_config import document
+    with (profile / '.config.lock').open('a') as lock, (policy_root(profile) / '.policy.lock').open('a') as policy_lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        fcntl.flock(policy_lock, fcntl.LOCK_SH)
+        policy = document(policy_root(profile))
         original = read(path)
         if changes is not None:
-            if expected != revision(original): raise ValueError('configuration_conflict')
+            if expected != profile_revision(original, policy): raise ValueError('configuration_conflict')
             if not isinstance(changes, dict) or set(changes) - PREFERENCES.keys():
                 raise ValueError('unsupported_preference')
+            from .policy_config import validate
+            validate(changes)
+            inherited = set(original.get('nocheh', {}).get('inherited_preferences', []))
             for key, value in changes.items():
                 section, field = key.split('.')
-                original.setdefault(section, {})[field] = value
-        result = resolved(original, model)
+                if value is None:
+                    original.setdefault(section, {}).pop(field, None); inherited.add(key)
+                else:
+                    original.setdefault(section, {})[field] = value; inherited.discard(key)
+            original.setdefault('nocheh', {})['inherited_preferences'] = sorted(inherited)
+        inherited, origins = inherited_config(profile, original, policy=policy)
+        result = resolved(inherited, model)
         if not path.exists() or result != read(path): atomic_yaml(path, result)
-        return {'revision': revision(result), 'values': preferences(result), 'schema': PREFERENCES,
+        return {'origins': origins, 'revision': profile_revision(result, policy), 'values': preferences(result), 'schema': PREFERENCES,
                 'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
                 'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'memory.provider']}

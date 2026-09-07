@@ -182,3 +182,51 @@ it never activates the restored credentials automatically. Read/import subproces
 their cleanup before a graceful shutdown; dashboard stop refuses while one runs.
 An OS crash or forced kill can still leave interrupted work requiring diagnosis. Export
 and backup files are retained until the owner removes them.
+
+## Native administration and inherited preferences (P3)
+
+The native page now reads actual Hermes profiles and sessions from the running
+runtime. Its separate administration process owns no Telegram poller, scheduler,
+agent, or subscription refresh. Nocheh proxies its authenticated API separately from
+the presentation assets. The internal API binds on loopback at archive port + 5
+(8785 by default); restored installations derive their own port.
+
+Native Config and Nocheh Settings share the same writer for the five current agent
+and memory preferences. Config revisions include inherited policy state: a stale
+native form or CLI writer is rejected after either a profile or global change.
+Unknown native fields are retained; credentials are redacted and managed routing,
+tools, provider authentication and scope bindings cannot be changed by native forms.
+Raw YAML inspection is read-only. Nocheh Settings retains the deployment model,
+Telegram and guard/trust settings with its existing save/apply behavior.
+
+**Settings → Policy defaults** edits global preference defaults. **Hermes
+preferences** shows each effective value's origin and can remove a profile override
+with **Inherit global value**. Existing native values remain explicit overrides.
+Job preference overrides can be stored via CLI; scheduler execution is P6 work.
+Broader tool and approval policy controls are P5 work, not active capabilities yet.
+
+```sh
+./scripts/nocheh runtime profiles
+./scripts/nocheh runtime status
+./scripts/nocheh runtime show --profile PROFILE
+./scripts/nocheh policy show
+./scripts/nocheh policy show --profile PROFILE
+./scripts/nocheh policy set agent.max_iterations 8
+./scripts/nocheh policy inherit agent.max_iterations --profile PROFILE
+./scripts/nocheh policy set agent.max_iterations 4 --job JOB_ID
+```
+
+Pass `--revision REVISION` to conditional CLI writes. Native profiles created here
+are owner-private and do not clone credentials. Their rename and removal controls
+preserve managed Telegram bindings; removal retains their directory under
+`retired-profiles` for recovery. Session inspection and changes stay within the
+selected profile. Native file browsing/uploads are confined to that profile's
+workspace, including symlink checks. These workspace files are not chat imports;
+chat attachment capture is part of P4. Native session imports remain gated: use
+Nocheh Imports to preserve originals and provenance.
+
+Inspection does not bootstrap, migrate or auto-archive a session database. SQLite
+can create its normal WAL/locking sidecars during a read-only connection. It does
+not change session contents, notes or configuration. Missing stores list as empty.
+Unintegrated native operations return an explicit unavailable result until their
+managed execution phase passes acceptance.

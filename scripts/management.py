@@ -9,6 +9,16 @@ from .configuration import ROOT, load
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
+    if operation == 'policy.manage':
+        from .native import call
+        from urllib.parse import urlencode
+        request = body['request']
+        query = urlencode({key:request[key] for key in ('profile', 'job') if request.get(key)})
+        path = ('/api/nocheh/preferences' if request.get('profile') and not request.get('job') else '/api/nocheh/policy') + '?' + query
+        return call(state, path, request if body.get('write') else None, 'PUT' if body.get('write') else 'GET')
+    if operation == 'native.connection':
+        from .configuration import native_admin_port
+        return {'port': int(os.environ.get('NOCHEH_NATIVE_ADMIN_PORT') or native_admin_port(state)), 'token': load(state)['SERVICE_TOKEN']}
     if operation == 'operations.list':
         from .admin_operations import backups
         return {'backups':backups(state)}
@@ -35,7 +45,11 @@ def dispatch(body):
         if operation == 'honcho.read': return read(body['args'])
     if operation == 'hermes.manage':
         from .archive import API
-        return API().call('/v1/manage/hermes', body['request'])
+        import urllib.error
+        try: return API().call('/v1/manage/hermes', body['request'])
+        except urllib.error.HTTPError as error:
+            if error.code == 409: raise ValueError('configuration_conflict') from None
+            raise
     if operation == 'archive.read':
         from .archive import API
         from urllib.parse import urlsplit

@@ -84,7 +84,7 @@ function python(body: unknown, progress?: (value: Record<string, unknown>) => vo
     child.on('error', () => { clearTimeout(timer); reject(new HttpError(503, 'operation_unavailable')); });
     child.on('close', code => {
       clearTimeout(timer);
-      if (code || failure || result === undefined) reject(new HttpError(400, failure ?? 'operation_interrupted'));
+      if (code || failure || result === undefined) reject(new HttpError(failure==='configuration_conflict'?409:400, failure ?? 'operation_interrupted'));
       else accept(result);
     });
     child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(body));
@@ -207,6 +207,10 @@ export async function startManagement() {
           launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}});return json(res,202,job);
         }catch(error){operationBusy=false;throw error;}
       });
+      if (route === '/policy' && ['GET','POST'].includes(req.method??'')) {
+        const body=req.method==='POST'?object(await readJson(req)):{};
+        return json(res,200,await python({operation:'policy.manage',request:{...body,profile:url.searchParams.get('profile'),job:url.searchParams.get('job')},write:req.method==='POST'}));
+      }
       if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
       if (req.method === 'POST' && route === '/honcho/read') return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
@@ -293,6 +297,11 @@ export async function startManagement() {
       const page=req.method==='GET'&&!path.startsWith('/hermes/api/')&&!path.startsWith('/hermes/assets/')&&!path.startsWith('/hermes/dashboard-plugins/');
       const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
       if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
+      const presentation=path.startsWith('/hermes/api/dashboard/')||path==='/hermes/api/auth/me';
+      if(path.startsWith('/hermes/api/')&&!presentation) {
+        const connection=object(await python({operation:'native.connection'}));
+        proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf);return;
+      }
       proxyNative(req,res,NATIVE,token,session.csrf);return;
     }
     throw new HttpError(404,'not_found');

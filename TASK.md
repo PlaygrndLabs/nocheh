@@ -178,13 +178,13 @@ node picking, original sources, orbit/zoom, search, scope pagination and full sc
 
 Accepted [seven-phase plan](docs/runtime-platform-plan.md). Complete and verify each
 phase, commit separately, then continue automatically. Existing release gates above
-remain active. Current uncommitted native-host work is superseded by this direction.
+remain active. This direction supersedes the earlier Hermes-hosted presentation.
 
 | Phase | Actual status |
 | --- | --- |
 | P1 — Ownership and runtime adapters | Complete: cbe3022; 30 JS/TS and 44 Python tests pass |
-| P2 — Independent Nocheh dashboard | Complete; independent root, native return page, desktop/mobile and 3D graph pass; 32 JS/TS and 44 Python tests pass |
-| P3 — Configuration and native administration | Pending |
+| P2 — Independent Nocheh dashboard | Complete: 1438674; independent root, native return page, desktop/mobile and 3D graph pass; 32 JS/TS and 44 Python tests pass |
+| P3 — Configuration and native administration | Verified: actual native state, shared config revisions, preference inheritance, scoped sessions/files and private profile management; 32 JS/TS and 52 Python tests pass |
 | P4 — Native browser chat | Pending |
 | P5 — Controlled broader tools and approvals | Pending |
 | P6 — Native cron | Pending |
