@@ -69,7 +69,13 @@ const server = createServer((req, res) => { void (async () => {
   }
   if(config.service==='archive' && path==='/v1/memory/spaces') {
     admin(principal);
-    if(req.method==='GET')return json(res,200,url.searchParams.has('id')?await spacePolicy(pool,url.searchParams.get('id')!):await listSpaces(pool,url.searchParams.get('after')??''));
+    if(req.method==='GET') {
+      if(url.searchParams.has('id')) {
+        const policy=await spacePolicy(pool,url.searchParams.get('id')!);
+        return json(res,200,{...policy,private_owner:policy.id===config.assistant.owner_id});
+      }
+      return json(res,200,{...await listSpaces(pool,url.searchParams.get('after')??''),owner_space:config.assistant.owner_id});
+    }
     if(req.method==='POST'){const b=object(await readJson(req));return json(res,200,await saveSpace(pool,String(b.id),b.overrides,b.revision));}
   }
   if(config.service==='archive' && req.method==='GET' && path==='/v1/scopes') {

@@ -19,12 +19,14 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
   const state = await mkdtemp(join(tmpdir(), 'nocheh-management-'));
   const token = 'test-owner-token-'.repeat(4);
   const records = new Map<string, unknown>(); let uploads = 0, slow = false;
+  const reviews: any[] = [];
   const archive = createServer(async (req,res) => {
     let raw=''; for await(const chunk of req) raw+=chunk;
     const body=JSON.parse(raw || '{}');
     if(slow) await new Promise(r=>setTimeout(r,300));
     let result:unknown={};
     if(req.url==='/v1/import') {const duplicate=records.has(body.event.key);records.set(body.event.key,body);result={duplicate};}
+    else if(req.url==='/v1/memory/reviews') reviews.push(body);
     else if(req.url?.endsWith('/bytes')) uploads++;
     res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(result));
   });
@@ -68,16 +70,26 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     await request('/jobs/'+job.id+'/cancel',{});
     await wait(async()=>JSON.parse(await readFile(join(state,'admin/jobs',job.id,'job.json'),'utf8')).state==='cancelled');
     await stop();slow=false;await start();
+    assert.equal((await fetch(base+'/jobs/'+job.id+'/start',{method:'POST',headers,body:JSON.stringify({mapping:{},review_approved:true})})).status,409);
     await request('/jobs/'+job.id+'/start',{mapping:{}});
     await wait(async()=>(await request('/jobs/'+job.id)).state==='complete');
     const finished=await request('/jobs/'+job.id);
     assert.equal(finished.completed,12);assert.equal(finished.result.telegram_replies,0);
+    assert.equal(finished.review_approved,false);assert.equal(reviews.length,0,'an import alone never queues learning');
     assert.equal(records.size,13);assert.ok(uploads>=1);
     assert.ok(JSON.stringify([...records.values()]).includes('Exact متن  0'));
     assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers})).status,409);
     assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download='+token}})).status,409);
     assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download=wrong'}})).status,401);
     assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download='+token,Origin:'https://untrusted.example'}})).status,403);
+    const approved=await request('/jobs',{});
+    await fetch(base+'/jobs/'+approved.id+'/upload?name=result.json',{method:'PUT',headers,body:JSON.stringify(document)});
+    await request('/jobs/'+approved.id+'/preview',{});
+    await request('/jobs/'+approved.id+'/start',{mapping:{},review_approved:true});
+    await wait(async()=>(await request('/jobs/'+approved.id)).state==='complete');
+    assert.equal(reviews.length,1);assert.equal(reviews[0].approved,true);assert.equal(reviews[0].event_ids.length,12);
+    await stop();await start();
+    assert.equal((await request('/jobs/'+approved.id)).review_approved,true);
     const invalid=await request('/operations',{action:'restore',options:{backup:'../escape',port:19543}});
     await wait(async()=>(await request('/jobs/'+invalid.id)).state==='failed');
     assert.equal((await request('/jobs/'+invalid.id)).error,'invalid_operation_id');

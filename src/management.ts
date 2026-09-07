@@ -165,6 +165,10 @@ export async function startManagement() {
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
       res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${PREFIX}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
+      if(['/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview'].includes(route) && ['GET','POST'].includes(req.method??'')) {
+        return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
+          ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
+      }
       if (req.method === 'POST' && route === '/shutdown') {
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         json(res, 200, {ok: true}); setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100); return;
@@ -199,7 +203,7 @@ export async function startManagement() {
       if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'hermes.manage',request:{action:'profiles'}}));
       if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {
         return json(res,200,await python({operation:'hermes.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
-          scope:url.searchParams.get('scope'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
+          scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
       }
       if (req.method === 'POST' && route === '/memory/preferences') return exclusive('writer-start',async()=>{
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
