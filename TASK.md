@@ -4,9 +4,10 @@ After the requested reset on 2026-09-07, a fresh Compose runtime was started wit
 the supplied Telegram bot token and owner/group IDs in the ignored `.env`.
 All five services are healthy. Fresh Hermes sign-in and live subscription checks
 pass. Telegram is enabled: the owner's real `/start` was captured, dispatched and
-answered with confirmed Telegram delivery. The bot now belongs to the selected
-group, can send messages, and its membership updates are archived. Privacy mode
-is still enabled, limiting ordinary group-message visibility. The rebuild is
+answered with confirmed Telegram delivery. Four real text messages in the selected
+group were also captured and answered; no batch of older history arrived.
+An optional read-only pgweb browser is available with `./scripts/nocheh db`.
+The rebuild is
 **not released**: remaining Telegram acceptance,
 cutover and the merge to `main` remain pending.
 
@@ -22,7 +23,7 @@ No legacy data migration is required. VPS work is deferred by ADR-0019.
 | 3 — Durable capture and archive | Complete: `d29dbab` |
 | 4 — Import, search, export, replay | Complete: `aa39e60` |
 | 5 — Optional outgoing guard | Complete: `eb6d319` |
-| 6 — Scoped assistant and voice | Implemented at `43eea5e`; real owner DM capture/reply passes; group, voice, approval and reconnect checks pending |
+| 6 — Scoped assistant and voice | Implemented at `43eea5e`; real owner DM and four group replies pass; full group isolation/silence, voice, approval and reconnect checks pending |
 | 7 — Honcho comparison, maximum $5 | Runnable harness at `2d27262`; live comparison pending separate credentials; optional |
 | 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate, cutover and merge pending |
 
@@ -71,13 +72,30 @@ Fresh subscription refresh, chat, detector and Ogg/Opus checks also passed.
 [Content-free live evidence](compatibility/results/2026-09-07-telegram-dm.json).
 Selected-group membership and send permissions now pass; membership events are
 archived. [Access evidence](compatibility/results/2026-09-07-telegram-group-access.json).
-Full group-message visibility remains blocked by Telegram privacy mode. Configure
-that before proactive group acceptance. Credentials and IDs are already saved
+After the earlier privacy-mode check, four ordinary owner-authored group messages
+were delivered and answered. This proves those messages' capture/replies, not
+visibility of every group member's messages. Credentials and IDs are already saved
 locally. Follow [Telegram setup and acceptance](docs/telegram.md).
-Actual group replies/silence, private/group isolation, voice persistence,
+Intentional group silence, private/group isolation, voice persistence,
 owner-approved delivery and reconnect/restart checks remain **unrun**.
 Container health does not prove these.
 Do not merge until they pass; commit the completed phase and proceed automatically.
+
+## Local inspection and latency — 2026-09-07
+
+The [pgweb browser](docs/database-viewer.md) is running on loopback port 8782.
+UI queries and PostgreSQL read-only privileges were verified, including a denied
+zero-row update after disabling transaction read-only mode.
+[Viewer evidence](compatibility/results/2026-09-07-database-viewer.json).
+
+Four observed group replies took 16.55–35.17 seconds after archive receipt.
+Capture was about one second after Telegram's source timestamp. The slowest turn
+spent about 1 second queued, 4 seconds preparing Hermes, 28 seconds in the agent
+phase (two model rounds, two archive searches), and 2 seconds completing delivery.
+Archive searches themselves took about 0.1 seconds. Per-turn process startup,
+serial assistant dispatch, and non-streamed responses remain latency limitations.
+The trusted ChatGPT route bypasses guard detection under `auto`.
+This diagnosis does not claim a performance fix or a completed release gate.
 
 The optional [Honcho experiment](experiments/honcho/README.md) needs a separate
 bridge login and an explicitly supplied temporary key. Live compatibility,

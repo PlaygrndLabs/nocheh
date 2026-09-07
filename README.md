@@ -20,6 +20,7 @@ Install Docker with Compose and Python 3, then run:
 ./scripts/nocheh dev      # the same services with source watching and restart
 ./scripts/nocheh status
 ./scripts/nocheh diagnose # health, credentials presence, and archive job states
+./scripts/nocheh db       # optional read-only pgweb browser at 127.0.0.1:8782
 ./scripts/nocheh test     # PostgreSQL, TypeScript and native Python integration tests
 ./scripts/nocheh verify   # live synthetic subscription checks; consumes quota
 ./scripts/nocheh down     # stop services; retain data
@@ -29,6 +30,10 @@ Install Docker with Compose and Python 3, then run:
 The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services are
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.
+
+There is no Nocheh product dashboard yet. The optional database browser reuses
+pgweb and provides table browsing, SQL queries and CSV/JSON export. See
+[browsing the archive](docs/database-viewer.md) for readable message queries.
 
 Configuration is in the ignored root `.env`; `.env.example` documents its fields.
 Bootstrap generates missing internal passwords and creates writable state under
