@@ -161,3 +161,15 @@ node picking, original sources, orbit/zoom, search, scope pagination and full sc
   inactive; portable ZIP exported 65 records with manifest/count/integrity checks.
 - [x] Browser-native authenticated ZIP download verified; download-only HttpOnly
   cookie cannot access settings, and cross-origin downloads are denied.
+
+### Owner dashboard clarity — 2026-09-07
+
+- [x] Navigation grouped into Explore, Manage and Experiments, with purpose text
+  and an overview explaining Nocheh's controls and native Hermes responsibilities.
+- [x] Separate Nocheh settings and per-profile Hermes preferences; clear save/apply
+  timing, masked credential review, and empty secret edits preserve the saved value.
+- [x] Three-step import guidance, read-only memory explanations, readable Honcho
+  status and maintenance results, with technical details collapsed by default.
+- [x] Browser acceptance covers navigation, unchanged native preference save,
+  masked credential review/discard, diagnostics and responsive layout. Build and
+  owner-management HTTP regression pass; AST-only code graph refreshed.
