@@ -6,7 +6,7 @@ conflicting decisions and sequencing below; ADR-0019 makes local Compose the cur
 deployment target. Older status entries describe their
 status before the rebuild.**
 
-| ADR | Decision | Still current |
+| ADR | Decision | Recorded relationship (historical for 0001–0017) |
 | --- | --- | --- |
 | [0001](0001-phase-1-core-processing.md) | Clean architecture, Telegram -> redaction -> tasks -> Notion MCP | Yes |
 | [0002](0002-phase-1-5-validation-observability.md) | Per-step audit records, task validation, metrics port | Yes |
@@ -29,3 +29,4 @@ status before the rebuild.**
 | [0019](0019-local-compose-development-and-acceptance.md) | Local Compose for development, automation and acceptance; VPS deferred | Active deployment target |
 | [0020](0020-mandatory-outgoing-request-guard.md) | Mandatory per-attempt guard at pinned HTTPX boundary, explicit trust and unsupported-transport rejection | Active guard implementation |
 | [0021](0021-scoped-native-assistant-processes.md) | Native per-profile assistant processes, scoped capabilities and owner-DM approval | Implemented; live Telegram acceptance pending |
+| [0022](0022-isolated-metered-honcho-experiment.md) | Synthetic Honcho comparison, separate subscription bridge and persistent $5 embedding budget | Optional experiment; live evaluation pending |
