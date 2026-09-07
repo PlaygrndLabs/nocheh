@@ -3,6 +3,7 @@ import type { Settings } from './config.js';
 import { schema } from './archive.js';
 import { spaceSchema } from './spaces.js';
 import { learningSchema } from './learning.js';
+import { sharingSchema } from './sharing.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   const pool = new pg.Pool({
@@ -26,6 +27,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
     await client.query(schema);
     await client.query(spaceSchema);
     await client.query(learningSchema);
+    await client.query(sharingSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

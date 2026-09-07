@@ -38,7 +38,9 @@ def search_tool(args, **kwargs):
         if not isinstance(query,str) or not 0<len(query)<=2000:
             raise ValueError('invalid_query')
         rows=request('/v1/search?'+urlencode({'q':query,'limit':min(10,max(1,int(args.get('limit',5))))}))
-        return json.dumps({'sources':rows},ensure_ascii=False)
+        claims=json.loads(base64.urlsafe_b64decode((_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()).split('.')[1]+'==='))
+        shared=request('/v1/memory/context?'+urlencode({'q':query})) if claims.get('space') and claims.get('scope') is not None else {'sources':[]}
+        return json.dumps({'sources':rows+shared['sources'],'filter_status':shared.get('filter_status')},ensure_ascii=False)
     except Exception:
         return json.dumps({'error':'archive_search_unavailable'})
 
@@ -46,6 +48,8 @@ def search_tool(args, **kwargs):
 def read_tool(args, **kwargs):
     import re
     try:
+        match=re.fullmatch(r'nocheh:(shared|filtered):([a-f0-9]{64})',args.get('id',''))
+        if match:return json.dumps(request('/v1/memory/'+match[1]+'/'+match[2]),ensure_ascii=False)
         source=args.get('id','').removeprefix('nocheh:event:')
         if not re.fullmatch('[a-f0-9]{64}',source):
             raise ValueError('invalid_source')

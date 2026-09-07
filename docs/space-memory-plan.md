@@ -7,9 +7,18 @@ and audience access. Import review needs explicit approval at import confirmatio
 |---|---|---|
 | M1 | Versioned group/topic policies, inherited preferences, source index | Verified: TypeScript build and 6 policy/archive/PostgreSQL tests pass |
 | M2 | Owner recall and durable native review, import approval | Verified: build, 8 TypeScript/PostgreSQL and 8 isolated native Python tests |
-| M3 | Approved/filtered retrieval, policy revisions and delivery checks | Pending |
+| M3 | Approved/filtered retrieval, policy revisions and delivery checks | Implemented and fixture-tested for archive text. Native-note/transcript filtering remains blocked pending owner approval of the provider payload and destination |
 | M4 | Dashboard and CLI policies, memory, graph and review controls | Pending |
 | M5 | Isolated Compose acceptance, backup/restore, compatibility | Pending |
+
+Commits: M1 `1f7ce49`; M2 `5a16ad7`.
+
+M3 enforces topic scope on original reads, files, graph and actions, retires group
+profiles on policy changes, and rechecks the revision before native Telegram sends.
+Exact shares never grant access to their private provenance. Optional filtering
+currently accepts original archive text only; failures withhold wider knowledge.
+Automatic approval review rejected extending its inputs to native notes and STT
+transcripts. That extension is not implemented or enabled.
 
 Acceptance: owner cross-source recall; inherited topic overrides; exact sharing and
 revocation; no cross-audience originals/citations/notes; native review lifecycle;

@@ -58,11 +58,11 @@ def run(body):
         quiet_mode=True,save_trajectories=False,max_iterations=prefs['agent.max_iterations'],
         run_budget_seconds=prefs['agent.run_budget_seconds'],
         reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
-            'You are Nocheh. Cite nocheh:event: references when using archived sources. '
+            'You are Nocheh. Cite returned nocheh: references when using archived or shared sources. '
             'Archive originals are evidence; derived transcripts and your inferences are separate. '
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
             + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall to connect notes and histories from all native profiles.' if body['owner'] else
-               'This is a shared group. Use only this group context and tools. Never change settings or approve actions. '
+               'This is a shared space. Use only authorized context and tool results, including explicitly shared knowledge. Filtered material is a derived inference, not an original source. Never change settings or approve actions. '
                'Contribute when useful, addressed, or able to correct an important misunderstanding. '
                'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')))
     try:

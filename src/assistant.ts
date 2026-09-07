@@ -5,6 +5,7 @@ import type { Settings } from './config.js';
 import { digest } from './archive.js';
 import { conversationScope } from './assistant-policy.js';
 import { turnToken } from './access.js';
+import {eventSpace,spacePolicy} from './spaces.js';
 import { controlReply } from './actions.js';
 import { HttpError } from './http.js';
 import type { RuntimeCall } from './runtime.js';
@@ -73,11 +74,12 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call):
     const control=await controlReply(pool,config.assistant,event.id);
     await client.query("UPDATE dispatches SET state='running',attempts=$2,updated_at=now(),error_code=NULL WHERE event_id=$1",[event.id,attempt]);
     try {
+      const policy=await spacePolicy(pool,eventSpace(event.scope,payload));
       const result=await call('run.start',{channel:'telegram',event_id:event.id,source_key:event.source_key,scope:event.scope,payload,
         text:event.original_text?.toString() ?? null,transcripts,attempt,control_reply:control,
-        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id)},260000);
+        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision})},260000);
       if (!['done','failed','ambiguous','suppressed'].includes(String(result.state))) throw new Error('invalid_dispatch_receipt');
-      const allowedCodes=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted'];
+      const allowedCodes=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed'];
       await client.query(`UPDATE dispatches SET state=$2,error_code=$3,next_attempt=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1`,
         [event.id,result.state,allowedCodes.includes(String(result.error_code))?result.error_code:null]);
     } catch {
