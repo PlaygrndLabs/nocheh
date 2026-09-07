@@ -53,6 +53,8 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     assert.equal((await fetch(base+'/settings')).status,401);
     assert.equal((await fetch(base+'/settings',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);
     assert.equal((await fetch(base+'/settings',{headers:{...headers,'Sec-Fetch-Site':'cross-site'}})).status,403);
+    const health=await fetch(base+'/health',{headers});assert.match(health.headers.get('set-cookie')??'',/HttpOnly; SameSite=Strict/);
+    assert.equal((await fetch(base+'/settings',{headers:{Cookie:'nocheh_download='+token}})).status,401,'download cookies cannot administer settings');
     const settings=await request('/settings');assert.ok(!JSON.stringify(settings).includes('test-owner-token'));
     const job=await request('/jobs',{});
     const document={id:77,type:'private_group',name:'Synthetic export',messages:Array.from({length:12},(_,id)=>({id,type:'message',text:'Exact متن  '+id}))};
@@ -61,6 +63,8 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const preview=await request('/jobs/'+job.id+'/preview',{});assert.equal(preview.preview.messages,12);
     slow=true; await request('/jobs/'+job.id+'/start',{mapping:{}});
     await wait(async()=>records.size>0);
+    assert.equal((await fetch(base+'/operations',{method:'POST',headers,body:JSON.stringify({action:'backup'})})).status,409);
+    assert.equal((await fetch(base+'/operations',{method:'POST',headers,body:JSON.stringify({action:'shell'})})).status,400);
     await request('/jobs/'+job.id+'/cancel',{});
     await wait(async()=>JSON.parse(await readFile(join(state,'admin/jobs',job.id,'job.json'),'utf8')).state==='cancelled');
     await stop();slow=false;await start();
@@ -70,5 +74,12 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     assert.equal(finished.completed,12);assert.equal(finished.result.telegram_replies,0);
     assert.equal(records.size,13);assert.ok(uploads>=1);
     assert.ok(JSON.stringify([...records.values()]).includes('Exact متن  0'));
+    assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers})).status,409);
+    assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download='+token}})).status,409);
+    assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download=wrong'}})).status,401);
+    assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download='+token,Origin:'https://untrusted.example'}})).status,403);
+    const invalid=await request('/operations',{action:'restore',options:{backup:'../escape',port:19543}});
+    await wait(async()=>(await request('/jobs/'+invalid.id)).state==='failed');
+    assert.equal((await request('/jobs/'+invalid.id)).error,'invalid_operation_id');
   } finally {await stop();await new Promise<void>(r=>archive.close(()=>r()));await rm(state,{recursive:true,force:true});}
 });

@@ -67,6 +67,14 @@ def revision(config):
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
 
 
+def inspect_profile(profile, model):
+    original = read(Path(profile) / 'config.yaml')
+    result = resolved(original, model)
+    return {'revision': revision(original), 'values': preferences(result), 'schema': PREFERENCES,
+            'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
+            'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'memory.provider']}
+
+
 def configure_profile(profile, model, changes=None, expected=None):
     profile = Path(profile); profile.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = profile / 'config.yaml'

@@ -6,6 +6,7 @@ import secrets
 import subprocess
 import time
 import urllib.request
+import urllib.error
 import webbrowser
 from pathlib import Path
 from .configuration import ROOT, compose_environment, env_path
@@ -33,7 +34,11 @@ def start(state, rest):
     if args.stop:
         # Ask the authenticated owner process to stop itself; never trust a stale PID.
         try: request(state, '/shutdown', {})
-        except Exception: pass
+        except urllib.error.HTTPError as error:
+            if error.code == 409:
+                print('Wait for the active operation to finish before stopping the dashboard.'); return 1
+            raise
+        except (urllib.error.URLError, FileNotFoundError): pass
         return subprocess.call(command + ['down'], cwd=ROOT, env=env)
     try: running = request(state, '/health').get('ok') is True
     except Exception: running = False

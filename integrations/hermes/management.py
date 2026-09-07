@@ -3,7 +3,7 @@ import hashlib
 import re
 from pathlib import Path
 from .scopes import Scopes
-from .profile_config import configure_profile
+from .profile_config import configure_profile, inspect_profile
 
 
 def profile_path(root, chat, policy):
@@ -23,7 +23,8 @@ def dispatch(root, model, policy, body):
                 for chat in [policy.owner, *policy.groups] if chat]}
     path = profile_path(root, body.get('scope'), policy)
     if action == 'preferences':
-        return {'scope': body['scope'], **configure_profile(path, model, body.get('changes'), body.get('revision'))}
+        result = configure_profile(path, model, body['changes'], body.get('revision')) if 'changes' in body else inspect_profile(path, model)
+        return {'scope': body['scope'], **result}
     if action != 'memory': raise ValueError('unknown_management_action')
     memories = []
     for name in ('MEMORY.md', 'USER.md'):

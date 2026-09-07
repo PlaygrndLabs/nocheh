@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, open, stat, unlink, chmod } from 'node:fs/promises';
@@ -34,10 +35,10 @@ async function getJob(id: string): Promise<Job> {
   catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(404, 'job_not_found'); }
 }
 async function putJob(job: Job) { await atomic(join(jobPath(job.id), 'job.json'), job); }
-async function listJobs() {
+async function listJobs(max=200) {
   const result: Job[] = [];
   for (const id of await readdir(JOBS)) { try { result.push(await getJob(id)); } catch { /* partial creation */ } }
-  return result.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 200);
+  return result.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, max);
 }
 async function newJob(kind: string): Promise<Job> {
   const job: Job = {id: randomUUID(), kind, state: kind === 'import' ? 'uploading' : 'queued',
@@ -58,7 +59,9 @@ function python(body: unknown, progress?: (value: Record<string, unknown>) => vo
       {cwd: ROOT, env: {...process.env, NOCHEH_STATE_DIR: STATE}, stdio: ['pipe', 'pipe', 'ignore']});
     started?.(child);
     let buffer = '', result: unknown, failure: string | undefined;
-    const timer = setTimeout(() => child.kill('SIGKILL'), 15 * 60 * 1000);
+    // Lifecycle operations must finish their cleanup; do not kill a backup with writers paused.
+    const lifecycle = object(body).operation === 'operations.run' || object(body).operation === 'settings.apply';
+    const timer = lifecycle ? undefined : setTimeout(() => child.kill('SIGKILL'), 15 * 60 * 1000);
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       buffer += chunk;
@@ -90,9 +93,10 @@ async function exclusive<T>(id: string, run: () => Promise<T>): Promise<T> {
   if (locked.has(id)) throw new HttpError(409, 'job_busy');
   locked.add(id); try { return await run(); } finally { locked.delete(id); }
 }
+const runningTasks = new Set<Promise<void>>();
 function launch(job: Job, body: Record<string, unknown>) {
   let writes = Promise.resolve();
-  void python(body, value => {
+  const task = python(body, value => {
     if (typeof value.completed === 'number') job.completed = value.completed;
     if (typeof value.duplicates === 'number') job.duplicates = value.duplicates;
     const snapshot = {...job}; writes = writes.then(() => putJob(snapshot));
@@ -102,10 +106,12 @@ function launch(job: Job, body: Record<string, unknown>) {
   }).catch(async error => {
     await writes.catch(() => {});
     if (job.state !== 'cancelled') { job.state = 'failed'; job.error = error instanceof HttpError ? error.code : 'operation_failed'; }
-  }).finally(() => { active.delete(job.id); void putJob(job); });
+  }).finally(async () => { await putJob(job); active.delete(job.id); activeJobs.delete(job.id); if(job.kind.startsWith('operations.')||job.kind==='settings.apply') operationBusy=false; });
+  runningTasks.add(task); void task.finally(()=>runningTasks.delete(task)).catch(()=>{});
   activeJobs.set(job.id, job);
 }
 const activeJobs = new Map<string, Job>();
+let operationBusy = false;
 
 async function upload(req: IncomingMessage, job: Job, name: string) {
   if (job.state !== 'uploading' || job.files >= 10000) throw new HttpError(409, 'upload_closed');
@@ -137,11 +143,12 @@ export async function startManagement() {
   await mkdir(JOBS, {recursive: true, mode: 0o700});
   const token = (await readFile(join(STATE, 'admin/dashboard/token'), 'utf8')).trim();
   if (token.length < 32) throw new Error('dashboard_token_missing');
-  for (const job of await listJobs()) if (['running', 'queued'].includes(job.state)) {
+  for (const job of await listJobs(Infinity)) if (['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
   }
-  function authorized(req: IncomingMessage) {
-    const actual = Buffer.from(String(req.headers['x-hermes-session-token'] ?? ''));
+  function authorized(req: IncomingMessage, download=false) {
+    const cookie = download ? req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('nocheh_download='))?.slice('nocheh_download='.length) : undefined;
+    const actual = Buffer.from(String(req.headers['x-hermes-session-token'] ?? cookie ?? ''));
     const expected = Buffer.from(token);
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new HttpError(401, 'owner_session_required');
   }
@@ -153,12 +160,39 @@ export async function startManagement() {
     if (req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'cross_site_denied');
     const url = new URL(req.url ?? '/', `http://${authority}`), path = url.pathname;
     if (path.startsWith(PREFIX + '/')) {
-      authorized(req);
       const route = path.slice(PREFIX.length);
+      authorized(req,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
+      // Session cookie is accepted only by streaming download routes, never by settings or mutations.
+      res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${PREFIX}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
       if (req.method === 'POST' && route === '/shutdown') {
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         json(res, 200, {ok: true}); setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100); return;
       }
+      if (req.method === 'GET' && route === '/scopes') return json(res,200,await archive('/v1/scopes?after='+encodeURIComponent(url.searchParams.get('after')??'')));
+      if (req.method === 'GET' && route === '/graph') return json(res,200,await python({operation:'graph.read',scope:url.searchParams.get('scope')??'',after:url.searchParams.get('after')??'',focus:url.searchParams.get('focus')??''}));
+      const artifact=route.match(/^\/artifacts\/([a-f0-9]{64})\/download$/);
+      if(req.method==='GET' && artifact?.[1]) {
+        await python({operation:'archive.cache',id:artifact[1]});
+        res.writeHead(200,{'content-type':'application/octet-stream','content-disposition':"attachment; filename*=UTF-8''"+encodeURIComponent((url.searchParams.get('name')??artifact[1]).split(/[\\/]/).at(-1)!.slice(0,200)),'cache-control':'no-store'});
+        createReadStream(join(STATE,'admin/downloads',artifact[1])).on('error',()=>res.destroy()).pipe(res);return;
+      }
+      const exported=route.match(/^\/exports\/([a-f0-9-]{36})\/download$/);
+      if(req.method==='GET' && exported?.[1]) {
+        const job=await getJob(exported[1]);if(job.kind!=='operations.export'||job.state!=='complete')throw new HttpError(409,'export_not_ready');
+        res.writeHead(200,{'content-type':'application/zip','content-disposition':'attachment; filename="nocheh-archive.zip"','cache-control':'no-store'});
+        createReadStream(join(STATE,'admin/exports',job.id,'export.zip')).on('error',()=>res.destroy()).pipe(res);return;
+      }
+      if(req.method==='GET' && route==='/operations')return json(res,200,await python({operation:'operations.list'}));
+      if(req.method==='POST' && route==='/operations') return exclusive('writer-start', async () => {
+        const body=object(await readJson(req));const action=string(body.action,30);
+        if(!['diagnose','backup','restore','restart','export'].includes(action))throw new HttpError(400,'operation_denied');
+        if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
+        operationBusy=true;
+        try {const job=await newJob('operations.'+action);job.state='running';await putJob(job);
+          launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}});return json(res,202,job);
+        }catch(error){operationBusy=false;throw error;}
+      });
       if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
       if (req.method === 'POST' && route === '/honcho/read') return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
@@ -167,19 +201,23 @@ export async function startManagement() {
         return json(res,200,await python({operation:'hermes.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
           scope:url.searchParams.get('scope'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
       }
-      if (req.method === 'POST' && route === '/memory/preferences') {
+      if (req.method === 'POST' && route === '/memory/preferences') return exclusive('writer-start',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         const body=object(await readJson(req));
         return json(res,200,await python({operation:'hermes.manage',request:{action:'preferences',scope:body.scope,changes:body.changes,revision:body.revision}}));
-      }
-      if (req.method === 'POST' && route === '/settings') {
+      });
+      if (req.method === 'POST' && route === '/settings') return exclusive('writer-start',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         const body = object(await readJson(req));
         return json(res, 200, await python({operation: 'settings.save', changes: body.changes, revision: body.revision}));
-      }
-      if (req.method === 'POST' && route === '/settings/apply') {
-        if ([...activeJobs.values()].some(j => j.kind !== 'import' && j.state === 'running')) throw new HttpError(409, 'operation_busy');
-        const job = await newJob('settings.apply'); job.state = 'running'; await putJob(job);
-        launch(job, {operation: 'settings.apply'}); return json(res, 202, job);
-      }
+      });
+      if (req.method === 'POST' && route === '/settings/apply') return exclusive('writer-start', async () => {
+        if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
+        operationBusy=true;
+        try {const job = await newJob('settings.apply'); job.state = 'running'; await putJob(job);
+          launch(job, {operation: 'settings.apply'}); return json(res, 202, job);
+        }catch(error){operationBusy=false;throw error;}
+      });
       if (req.method === 'GET' && route === '/status') return json(res, 200, await archive('/v1/status'));
       if (req.method === 'GET' && route === '/search') return json(res, 200, await archive('/v1/search?' + url.searchParams.toString()));
       if (req.method === 'GET' && route.startsWith('/events/')) return json(res, 200, await archive('/v1' + route));
@@ -197,7 +235,8 @@ export async function startManagement() {
             job.preview = object(await python({operation: 'import.inspect', job: id}));
             job.state = 'ready'; await putJob(job); return json(res, 200, job);
           }
-          if (req.method === 'POST' && action === 'start') {
+          if (req.method === 'POST' && action === 'start') return exclusive('writer-start', async () => {
+            if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
             if (!job.preview || !['ready', 'failed', 'cancelled', 'interrupted'].includes(job.state) || active.has(id)) throw new HttpError(409, 'job_not_ready');
             const body = object(await readJson(req));
             const mapping = object(body.mapping ?? job.mapping ?? {});
@@ -205,7 +244,7 @@ export async function startManagement() {
             job.mapping = mapping; job.state = 'running'; delete job.error; await putJob(job);
             launch(job, {operation: 'import.run', job: id, mapping, after: job.completed});
             return json(res, 202, job);
-          }
+          });
           if (req.method === 'POST' && action === 'cancel') {
             if (job.kind !== 'import' || job.state !== 'running') throw new HttpError(409, 'job_not_cancellable');
             const running = activeJobs.get(id); if (running) running.state = 'cancelled';
@@ -231,7 +270,12 @@ export async function startManagement() {
   server.requestTimeout = 120000;
   server.on('upgrade', (_req, socket) => socket.destroy());
   server.listen(PORT, '127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/nocheh`));
-  const stop = () => { for (const child of active.values()) child.kill('SIGTERM'); server.close(() => process.exit(0)); };
+  let stopping=false;
+  const stop = () => {
+    if(stopping)return;stopping=true;
+    for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
+    server.close(()=>{void Promise.allSettled([...runningTasks]).then(()=>process.exit(0));});
+  };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
   return server;
 }
