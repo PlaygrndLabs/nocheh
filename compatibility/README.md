@@ -3,7 +3,9 @@
 Phase 1 is **complete locally**. A fresh Hermes-owned login, live token refresh, native
 chat, literal detection and Ogg/Opus transcription pass locally with the owner's
 ChatGPT subscription. ADR-0019 defers VPS verification and selects local Compose
-for development and acceptance. Phase 2 rechecks these paths in containers.
+for development and acceptance. These paths also passed inside Compose. For the
+current runtime, use `./scripts/nocheh verify`; the commands below reproduce the
+original isolated Phase 1 investigation. See [current status](../TASK.md).
 
 See [Hermes-owned login results](results/2026-09-06-hermes-local.json),
 [initial access-token results](results/2026-09-06-local.json) and
@@ -33,7 +35,7 @@ The default live probe reads only the current access token in `~/.codex/auth.jso
 It never copies or rotates that application's refresh token. Each run uses a
 temporary Hermes profile with only Nocheh enabled and no provider API keys.
 Native plugin discovery registers the STT provider; the probe substitutes a
-Docker runner for the eventual in-container `codex-asr` binary.
+Docker runner for the in-container `codex-asr` binary.
 
 The committed fixture contains synthetic English speech in a Telegram-style
 Ogg/Opus container. Its transcript, provenance and checksum are in
@@ -76,7 +78,7 @@ Security settings and restart the login helper for a new code. Once this profile
 has a login, run the probe directly; another browser login is not required.
 
 The production plugin delegates ongoing credential resolution/refresh to Hermes.
-In the eventual container, mount only its owned profile; do not share the Codex
+In Compose, mount only its owned profile; do not share the Codex
 desktop application's refresh-token file between processes.
 
 ## Verify on the target VPS
@@ -92,8 +94,8 @@ data/compat/hermes-venv/bin/python -u compatibility/login.py
 data/compat/hermes-venv/bin/python compatibility/probe.py --live --auth-source hermes --environment vps --output data/compat/vps-report.json
 ```
 
-Review and retain the sanitized report, then finish the Phase 1 checkpoint before
-starting dependent runtime replacement. A failed required transcription check
+VPS work remains deferred by ADR-0019. Retain a sanitized report when a VPS
+is available; do not report that future check as passed. A failed required transcription check
 blocks release; this harness never selects a paid API or local model as fallback.
 
 ## What the tests establish
@@ -109,4 +111,5 @@ blocks release; this harness never selects a paid API or local model as fallback
 
 The offline suite prevents socket connections. Its simulated failures and refresh
 tests are explicitly separate from live results. Retry queues, durable archive
-storage, complete-request guarding and group isolation belong to later phases.
+storage, complete-request guarding and group isolation have their own runtime
+acceptance tests under `./scripts/nocheh test`.

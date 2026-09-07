@@ -4,6 +4,7 @@ import { drainSpool, fetchAttachments } from './storage.js';
 import { HttpError, object, string } from './http.js';
 import { dispatchCommitted } from './assistant.js';
 import { executeApproved } from './actions.js';
+import { startLoops } from './worker-loops.js';
 
 export async function hermesCall(config: Settings, path:string, body:unknown, timeout=120000):Promise<Record<string,unknown>> {
   const response=await fetch(`${config.hermesUrl}${path}`, {method:'POST',
@@ -19,22 +20,14 @@ export async function hermesCall(config: Settings, path:string, body:unknown, ti
   }
   return object(await response.json());
 }
-export function startWorker(pool:pg.Pool,config:Settings):()=>void {
-  let busy=false,stopped=false;
-  const run=async()=>{
-    if (busy || stopped) return;
-    busy=true;
-    try {
-      await drainSpool(pool,config.dataDir);
-      await fetchAttachments(pool,config.dataDir,async(ref)=>{
+export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
+  return startLoops({
+    capture:()=>drainSpool(pool,config.dataDir),
+    attachments:()=>fetchAttachments(pool,config.dataDir,async(ref)=>{
         const result=await hermesCall(config,'/internal/file',{file_id:ref});
         return Buffer.from(string(result.bytes_base64,70*1024*1024),'base64');
-      });
-      await dispatchCommitted(pool,config,(path,body,timeout)=>hermesCall(config,path,body,timeout));
-      if(config.assistant.enabled)await executeApproved(pool,(path,body,timeout)=>hermesCall(config,path,body,timeout));
-    } catch { console.error(JSON.stringify({event:'worker_cycle_failed'})); }
-    finally { busy=false; }
-  };
-  const timer=setInterval(()=>{void run();},1000); void run();
-  return ()=>{stopped=true;clearInterval(timer);};
+    }),
+    assistant:()=>dispatchCommitted(pool,config,(path,body,timeout)=>hermesCall(config,path,body,timeout)),
+    actions:async()=>{if(config.assistant.enabled)await executeApproved(pool,(path,body,timeout)=>hermesCall(config,path,body,timeout));},
+  });
 }

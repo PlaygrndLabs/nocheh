@@ -1,106 +1,69 @@
 # Rebuild progress
 
+Local Compose is running. The rebuild is **not released**: real Telegram
+acceptance, cutover and the merge to `main` remain pending owner configuration.
+
 Accepted plan: [docs/rebuild-plan.md](docs/rebuild-plan.md).
-Baseline: `9dd0b58` on `codex/legacy-nocheh`. Work branch: `codex/hermes-rebuild`.
-Old persisted data requires no migration.
+Baseline: `9dd0b58` on `codex/legacy-nocheh`. Work: `codex/hermes-rebuild`.
+No legacy data migration is required. VPS work is deferred by ADR-0019.
 
-| Phase | Work | Status |
-| --- | --- | --- |
-| 0 | Preserve baseline and record architecture | Complete: `add2341` |
-| 1 | Prove subscription compatibility | Complete locally: `8fd69cc`; VPS deferred by owner in ADR-0019 |
-| 2 | Bootstrap replacement runtime | Complete: `9d72c32` |
-| 3 | Durable capture and archive | Complete: `d29dbab` |
-| 4 | Import, retrieval, export, replay | Complete: `aa39e60` |
-| 5 | Optional guard on every model attempt | Complete: `eb6d319` |
-| 6 | Scoped assistant and transcription | Checkpoint `43eea5e`; offline/native-memory verified; live Telegram acceptance pending credentials |
-| 7 | Isolated Honcho comparison, maximum $5 | Harness `2d27262` verified; live comparison pending temporary key and separate bridge login |
-| 8 | Validate, cut over, merge into main | Operations verified; live Telegram, cutover and merge remain pending |
+| Phase | Actual status |
+| --- | --- |
+| 0 — Preserve baseline and architecture | Complete: `add2341` |
+| 1 — Subscription compatibility | Complete locally: `8fd69cc` |
+| 2 — Compose runtime | Complete: `9d72c32` |
+| 3 — Durable capture and archive | Complete: `d29dbab` |
+| 4 — Import, search, export, replay | Complete: `aa39e60` |
+| 5 — Optional outgoing guard | Complete: `eb6d319` |
+| 6 — Scoped assistant and voice | Implemented at `43eea5e`; native/offline checks pass; real Telegram acceptance pending |
+| 7 — Honcho comparison, maximum $5 | Runnable harness at `2d27262`; live comparison pending separate credentials; optional |
+| 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate, cutover and merge pending |
 
-Complete acceptance checks, commit each phase, and proceed automatically. Missing
-credentials or unrun live checks must never be recorded as successful validation.
-The release remains blocked if required subscription transcription does not work.
+## Current validation — 2026-09-07
 
-Phase 1 evidence and reproduction: [compatibility/README.md](compatibility/README.md).
-21 offline tests pass. Hermes-owned login and live refresh are verified; the
-refreshed credentials pass chat, detection and transcription with the pinned
-upstreams. ADR-0019 removes the unavailable VPS from this rebuild's acceptance gate.
-Container refresh, native chat, literal detection and Ogg/Opus transcription pass
-in [the Compose report](compatibility/results/2026-09-06-compose.json). All five
-services start healthy from empty state. Development edits synchronize and restart
-both TypeScript and Python services; normal operation retains that same state.
-One container HTTP acceptance test and 21 subscription contract tests pass.
-No VPS has been provisioned or tested. Phase 3 evidence: [archive behavior and acceptance](docs/archive.md). Three
-TypeScript tests (including isolated real PostgreSQL) and six native-integration
-tests pass. A real database stop/start recovered the unchanged original exactly
-once. Live Telegram and assistant dispatch remain Phase 6 checks.
+- 14 TypeScript tests pass against real Compose PostgreSQL where required;
+  30 Python native integration/operations tests pass. No main-suite skips.
+- 21 subscription contracts pass with simulated transport failures. Five Honcho
+  budget/scoring tests pass; no paid requests or live comparison occurred.
+- Live subscription refresh, native chat, literal detection and Ogg/Opus
+  transcription pass again after configuration and worker cleanup.
+  [Latest report](compatibility/results/2026-09-07-cleanup-subscription.json).
+- Native memory store, recall across process restarts and another-group isolation
+  passed the [synthetic live rehearsal](compatibility/results/2026-09-07-assistant-memory.json).
+  Recall reached 152 seconds in that run; it is not a latency guarantee.
+- Required guard failure/retry/redirect tests pass. Native guarded chat passed
+  again after cleanup with one required boundary attempt and no guard failures;
+  the saved `auto` policy is restored. Earlier transient failures remain in the
+  [historical guard report](compatibility/results/2026-09-07-guard.json).
+- `.env` configuration checkpoint `4f3fade` preserves archive credentials and keeps
+  Hermes OAuth in its native file. Format-2 backup/restore matched eight table
+  fingerprints and 38 state files; five restored services were healthy and inactive.
+  The rehearsal is stopped. [Report](compatibility/results/2026-09-07-environment.json).
 
-Phase 4: five TypeScript/PostgreSQL tests and nine Python integration tests pass
-in the final Compose acceptance suite (2026-09-07). The local CLI rehearsal
-imports Telegram Desktop data and supplied media idempotently and exports/reimports
-originals without historical replies. Transcript search has matching scope checks;
-export preserves derived content, source references and provenance. The earlier
-permission-review timeout is resolved.
+## Cleanup and behavior fixes
 
-Phase 5: exact-span masking, destination trust, database caching and the pinned
-mandatory HTTPX boundary are implemented. Native synchronous/asynchronous SDK
-tests cover retries, route changes, redirects and zero protected sends on guard
-failure. Subscription contract tests remain passing. The final live synthetic
-check passed all three detector fixtures and native guarded chat; earlier live
-detector failures/timeouts are retained in the [report](compatibility/results/2026-09-07-guard.json).
-Their transient root cause was not established; required failures remain visible
-and fail closed. See [guard operation and limits](docs/guard.md).
-The saved default `auto` mode is restored after the required-guard rehearsal.
-Continue with Phase 6; the Telegram token and owner/group IDs are not configured.
+The retired application is recoverable on the legacy branch. Its remaining local
+`web/` build output and dependencies were removed. Active documentation describes
+this runtime; historical research and accepted ADRs remain available.
 
-Phase 6 implementation: native Telegram decoding/formatting/sending with durable
-dispatch receipts; separate native Hermes memory/session processes per profile;
-signed archive capabilities; explicit safe tool set; cross-profile session-search
-paths disabled; derived voice transcript persistence/retries; owner-DM-only action
-approval. 12 TypeScript/PostgreSQL and 21 Python tests pass, including native PTB
-batching/delivery against a fixture transport. Live synthetic memory store, recall
-after process restart and other-group isolation pass in the [report](compatibility/results/2026-09-07-assistant-memory.json).
-Recall took up to 152 seconds in that run; this is not a latency guarantee.
+Edit only the ignored root `.env` for local configuration. Previous configuration
+files are saved privately under `data/local/previous-configuration/`; unrelated
+provider keys were not imported. Archive data, files and the dedicated login remain.
 
-The Telegram token remains unconfigured and the conversation policy is disabled.
-Actual DM/group/voice/approval delivery and reconnect acceptance are not run, so
-Phase 6 is not complete and merging remains blocked. [Setup](docs/telegram.md)
-includes capture-only ID discovery without Telegram sends. Continue independent
-experiment/operations work while waiting for these credentials.
+Archive capture, attachments, assistant work and approved actions progress in
+independent non-overlapping loops. Slow inference cannot block capture/downloads.
+Committed media avoids native duplicate downloads and unscoped sticker vision;
+round video notes use the transcript path. Malformed source messages remain
+archived with a visible suppressed dispatch and do not starve subsequent work.
 
-Phase 7: [the isolated harness](experiments/honcho/README.md) builds and boots the
-pinned Honcho and CLIProxyAPI revisions. Five budget/scoring tests pass. Actual
-container configuration verifies all nine reasoning routes and the embedding
-route use the meter; tokenization works without runtime Internet access. The
-native Hermes baseline exposes exactly memory/session search, without inference
-during its configuration check. Missing credentials produce zero model calls and
-$0 in reservations. [Evidence](compatibility/results/2026-09-07-honcho-harness.json).
-Live bridge compatibility, Honcho derivation and comparative recall remain
-pending. No temporary API key was supplied and no paid request was made. This
-optional pending evaluation does not block production; Phase 6 live acceptance does.
+## Remaining release gates
 
-Phase 8 operations: consistent backup and inactive restore are implemented. The
-fresh-project rehearsal matched all eight table fingerprints and all 42 saved
-state files, then started five healthy services with no active Telegram bot or
-OAuth login. The first startup had a connection timeout during a bridge build;
-the PostgreSQL readiness probe now requires TCP, and a complete fresh-project
-retry passed. The source runtime also has five healthy services and its dedicated
-login, with Telegram still disabled. [Evidence](compatibility/results/2026-09-07-operations.json).
+Set the bot token, owner ID and selected groups in `.env`; follow
+[Telegram setup and acceptance](docs/telegram.md). Actual DM/group replies and
+silence, private/group isolation, voice persistence, owner-approved delivery and
+reconnect/restart checks are **unrun**. Container health does not prove these.
+Do not merge until they pass; commit the completed phase and proceed automatically.
 
-Final offline acceptance: 12 TypeScript/PostgreSQL tests and 24 Python tests pass,
-including action receipt backoff and backup corruption/path checks. Diagnostics
-show actual credential presence and job states separately from container health.
-Native session cursors are fsynced. Legacy environment examples were removed;
-old memory research is explicitly historical. Local backup/restore procedures are
-documented in [operations](docs/deploy.md).
-
-The replacement services are running locally. This is an operations checkpoint,
-not a completed release: actual Telegram DM/group/voice/approval/reconnect checks
-remain unrun, no production bot has been activated, and `main` has not been merged.
-
-Configuration follow-up: root `.env` replaces separate Compose secret files,
-`compose.env` and `assistant.json`. Existing archive credentials are preserved;
-legacy provider settings are saved privately and not imported. 12 PostgreSQL/TS
-and 28 Python tests pass. Format-2 backup/restore matched all eight table
-fingerprints and 38 state files, with five healthy inactive restored services.
-The rehearsal was stopped afterward. [Evidence](compatibility/results/2026-09-07-environment.json).
-Live Telegram gates and the merge remain pending.
+The optional [Honcho experiment](experiments/honcho/README.md) needs a separate
+bridge login and an explicitly supplied temporary key. Live compatibility,
+derivation and recall comparison remain pending. Its $5 budget is unused.

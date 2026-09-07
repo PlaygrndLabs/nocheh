@@ -76,7 +76,7 @@ def committed_adapter_class():
         def _should_process_message(self,msg,**kwargs):return TURN.get() is not None
         def _register_handlers(self,app):
             from telegram import Update
-            from telegram.ext import TypeHandler, ApplicationHandlerStop
+            from telegram.ext import TypeHandler, ApplicationHandlerStop, MessageHandler, filters
             super()._register_handlers(app)
             async def command_as_text(update,context):
                 msg=update.effective_message
@@ -86,6 +86,20 @@ def committed_adapter_class():
             # Native administrative command/callback menus are not an
             # authority boundary for a shared group. Commands are data.
             app.add_handler(TypeHandler(Update,command_as_text),group=-90)
+            # The pinned native handler's media filter omits round video notes.
+            app.add_handler(MessageHandler(filters.VIDEO_NOTE,self._handle_media_message))
+        async def _handle_media_message(self,update,context):
+            if TURN.get() is None:raise RuntimeError('uncommitted_media')
+            msg=update.effective_message
+            if msg is None:return
+            from gateway.platforms.base import MessageType
+            kind=MessageType.VIDEO if msg.video_note else self._media_message_type(msg)
+            event=self._build_message_event(msg,kind,update_id=update.update_id)
+            event.text=msg.caption or ''
+            # Original bytes and transcripts are already committed by Nocheh.
+            # Native media preprocessing would re-download files and can invoke
+            # a global sticker vision/cache path outside this conversation.
+            await self.handle_message(event)
         async def handle_message(self,event):
             turn=TURN.get()
             if turn is None:raise RuntimeError('uncommitted_message')
@@ -103,7 +117,7 @@ class AssistantGateway:
     def __init__(self,root,spool,policy,token,model,credentials):
         self.root,self.spool,self.scopes,self.token,self.model,self.credentials=Path(root),Path(spool),policy,token,model,credentials
         self.status='disabled' if not policy.enabled else 'starting'
-        self.loop=None;self.adapter=None;self.lock=None
+        self.loop=None;self.adapter=None;self.lock=None;self.action_lock=None
         self.receipts=self.spool/'dispatch';self.receipts.mkdir(parents=True,exist_ok=True)
         for intent in self.receipts.glob('*.intent'):
             result=intent.with_suffix('.result')
@@ -117,7 +131,7 @@ class AssistantGateway:
     def _serve(self):
         async def run():
             from gateway.config import PlatformConfig
-            self.loop=asyncio.get_running_loop();self.lock=asyncio.Lock()
+            self.loop=asyncio.get_running_loop();self.lock=asyncio.Lock();self.action_lock=asyncio.Lock()
             config=PlatformConfig(enabled=True,token=self.token,typing_indicator=False,gateway_restart_notification=False)
             self.adapter=committed_adapter_class()(config)
             async def message(event):
@@ -177,7 +191,7 @@ class AssistantGateway:
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
         if not re.fullmatch('[a-f0-9]{64}',body['id']) or not re.fullmatch(r'-?[1-9]\d{0,18}',body['destination']) or not isinstance(body['text'],str) or not 0<len(body['text'])<=3500:raise ValueError('invalid_action')
         name='action-'+body['id']
-        async with self.lock:
+        async with self.action_lock:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())
             immutable_file(self.receipts,name+'.intent',canonical({'action_id':body['id']}))

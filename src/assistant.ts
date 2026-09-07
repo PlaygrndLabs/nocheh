@@ -55,8 +55,14 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call):
        WHERE d.state IN ('pending','failed','running') AND d.next_attempt<=now() AND e.origin='live' AND e.kind='telegram_update'
        ORDER BY d.next_attempt,e.received_at LIMIT 1`);
     const event=rows[0];if(!event)return;
-    const payload=JSON.parse(event.payload.toString()) as unknown;
-    const scope=conversationScope(config.assistant,payload,event.scope);
+    let payload:unknown,scope:ReturnType<typeof conversationScope>;
+    try {
+      payload=JSON.parse(event.payload.toString()) as unknown;
+      scope=conversationScope(config.assistant,payload,event.scope);
+    } catch {
+      await client.query("UPDATE dispatches SET state='suppressed',error_code='invalid_source_message',updated_at=now() WHERE event_id=$1",[event.id]);
+      return;
+    }
     if (!scope) {await client.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[event.id]);return;}
     const missing=await client.query("SELECT id FROM artifacts WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event.id]);
     if (missing.rowCount) {await client.query("UPDATE dispatches SET error_code='waiting_for_attachments',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}

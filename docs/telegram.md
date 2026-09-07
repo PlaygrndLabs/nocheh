@@ -34,6 +34,10 @@ may search the complete Nocheh archive. Other chats are captured but cannot trig
 the assistant. Bot senders, edits and historical replay do not trigger new replies.
 Normal group chatter can produce intentional silence. Voice transcripts are
 derived records, never replacements for original audio or message payloads.
+Round video notes follow the same transcription path. Media bytes are downloaded
+by the archive worker; the assistant does not repeat native media downloads or
+run a shared sticker-description cache. Photos/documents remain available as
+archived files and captions; automatic visual interpretation is not enabled.
 
 ## External action approval
 

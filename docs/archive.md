@@ -31,7 +31,18 @@ Journal records remain outside the pending spool for restart reconciliation.
 Live update events receive a dispatch record in the same database transaction.
 Native Telegram handlers reject updates unless invoked by the committed dispatch
 path. Imports, wire captures and outbound records are suppressed. The assistant
-dispatch integration is Phase 6; installing capture does not enable the bot yet.
+uses committed originals and separately recorded transcripts. Archive capture,
+attachment downloads, assistant work and approved actions have independent retry
+loops; a slow model request does not block archive ingestion or downloads. A loop
+never overlaps itself. Malformed live source messages stay archived with a visible
+suppressed dispatch, allowing later work to continue.
+
+Committed media uses native Telegram event decoding and replies. The integration
+bypasses native duplicate downloads and sticker vision preprocessing; those paths
+would operate outside the scoped assistant process. Voice, audio and round video
+notes use the archived transcript path. Photos, stickers and documents are archived
+with their captions and source references; automatic image/document interpretation
+is not enabled in this release.
 
 ## Verification
 

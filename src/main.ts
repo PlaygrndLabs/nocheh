@@ -65,5 +65,10 @@ const server = createServer((req, res) => { void (async () => {
 }); });
 server.requestTimeout = 30000;
 server.listen(config.port, config.host, () => console.log(JSON.stringify({event: 'ready', service: config.service, port: config.port})));
-function stop() { clearInterval(timer); stopWorker(); server.close(() => { void pool.end().then(() => process.exit(0)); }); }
+let stopping=false;
+function stop() {
+  if(stopping)return;stopping=true;clearInterval(timer);
+  const closed=new Promise<void>(resolve=>server.close(()=>resolve()));
+  void Promise.all([closed,stopWorker()]).then(()=>pool.end()).then(()=>process.exit(0));
+}
 process.on('SIGTERM', stop); process.on('SIGINT', stop);

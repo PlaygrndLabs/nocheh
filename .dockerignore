@@ -1,11 +1,11 @@
 .git
 .codex
+.claude
 .agents
 .env
 data
 node_modules
 dist
-web
 graphify-out
 **/__pycache__
 docs
