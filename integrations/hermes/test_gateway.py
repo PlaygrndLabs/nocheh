@@ -47,7 +47,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 adapter._app=app;adapter._bot=bot;adapter._text_batch_delay_seconds=0.001
                 adapter._register_handlers(app)
                 gateway=AssistantGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
-                gateway.status='connected';gateway.adapter=adapter;gateway.lock=asyncio.Lock()
+                gateway.status='connected';gateway.adapter=adapter;gateway.lock=asyncio.Lock();gateway.action_lock=asyncio.Lock()
                 handled=[]
                 async def message(event):
                     turn=TURN.get();handled.append(event)
@@ -72,6 +72,26 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len(handled),2,'native admin command is routed only as ordinary text')
                     self.assertEqual(len(request.sent),2)
                     self.assertTrue(list((root/'spool/outbound').glob('*.result')))
+                    file={'file_id':'already-archived','file_unique_id':'fixture'}
+                    for index,media in enumerate([
+                        {'voice':dict(file,duration=1)},
+                        {'audio':dict(file,duration=1)},
+                        {'photo':[dict(file,width=20,height=20)]},
+                        {'sticker':dict(file,width=20,height=20,type='regular',is_animated=False,is_video=False)},
+                        {'video_note':dict(file,duration=1,length=20)},
+                        {'document':file},
+                    ],3):
+                        media_body=envelope(index,'');msg=media_body['payload']['message'];msg.pop('text');msg.update(media)
+                        msg['caption']='Original Aws 😃  '
+                        media_body['transcripts']=['Separately archived transcript.']
+                        self.assertEqual(await gateway.dispatch(media_body),{'state':'done'},str(media.keys()))
+                        self.assertEqual(handled[-1].text,msg['caption'])
+                    self.assertEqual(len(handled),8)
+                    # Fixture rejects getFile: none of these paths downloads or
+                    # invokes the native sticker vision helper again.
+                    async with gateway.lock:
+                        action=await asyncio.wait_for(gateway.send_action({'id':'a'*64,'destination':'777','text':'Approved fixture'}),1)
+                    self.assertEqual(action,{'state':'done'},'approved sends cannot wait behind a conversation lock')
                 finally:await app.shutdown()
 
 

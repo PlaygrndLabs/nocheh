@@ -7,7 +7,6 @@ import base64
 import asyncio
 import contextlib
 import hmac
-import io
 import json
 import logging
 import os
@@ -18,7 +17,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .subscription import resolve_credentials, detect_literals, DetectorContractError
+from .subscription import resolve_credentials, refresh_credentials, detect_literals, DetectorContractError
 
 MODEL = os.environ.get("NOCHEH_MODEL", "gpt-5.6-sol")
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +25,7 @@ PROFILE_HOME = Path(os.environ["HERMES_HOME"])
 TOKEN = environment_secret('SERVICE_TOKEN')
 CALL_LOCK = threading.RLock()
 DETECTOR_LOCK = threading.RLock()
+TRANSCRIPTION_LOCK = threading.RLock()
 CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
 ASSISTANT = None
@@ -103,11 +103,11 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 return self.reply(400, {"error": "expected_object"})
-            # Hermes writes some diagnostics to stdout even in quiet mode.
-            # Detection can be requested by the main model's guard while its
-            # conversation lock is held. A separate lock prevents that deadlock.
-            lock = contextlib.nullcontext() if self.path == '/internal/status' else DETECTOR_LOCK if self.path == '/internal/detect' else CALL_LOCK
-            with lock, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            # File capture and receipts must not queue behind model inference.
+            # Detection can also be called by the guard during an active chat.
+            lock = {'/internal/chat':CALL_LOCK,'/internal/detect':DETECTOR_LOCK,
+                    '/internal/transcribe':TRANSCRIPTION_LOCK}.get(self.path,contextlib.nullcontext())
+            with lock:
                 result = self.dispatch(body)
             self.reply(200, result)
         except DetectorContractError as error:
@@ -152,9 +152,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('attachment_size_limit')
             return {'bytes_base64': base64.b64encode(raw).decode()}
         if self.path == "/internal/refresh":
-            from hermes_cli.auth_codex import _read_codex_tokens, _save_codex_tokens, refresh_codex_oauth_pure
-            tokens = _read_codex_tokens()["tokens"]
-            _save_codex_tokens(refresh_codex_oauth_pure(tokens["access_token"], tokens["refresh_token"]))
+            refresh_credentials()
             return {"refreshed": True}
         if self.path in ("/internal/chat", "/internal/detect"):
             text = body["text"]
@@ -190,12 +188,15 @@ def main():
     policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
     bot_token=environment_secret('TELEGRAM_BOT_TOKEN', required=False)
     ASSISTANT=AssistantGateway(PROFILE_HOME,os.environ.get('NOCHEH_SPOOL_DIR','/data/spool'),policy,bot_token,MODEL,resolve_credentials)
-    ASSISTANT.start()
     server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8781"))), Handler)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"event": "ready", "service": "hermes"}), flush=True)
-    server.serve_forever()
-    ASSISTANT.stop()
+    # One process-wide redirect, installed before starting threads. Per-request
+    # redirects race and can restore another request's secret-bearing output.
+    with open(os.devnull,'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
+        ASSISTANT.start()
+        server.serve_forever()
+        ASSISTANT.stop()
 
 
 if __name__ == "__main__":

@@ -104,5 +104,11 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     await dispatchCommitted(pool,config,async()=>({state:'ambiguous',error_code:'delivery_unconfirmed'}));
     await dispatchCommitted(pool,config,async()=>{throw Error('ambiguous delivery must not resend');});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[second.id])).rows[0].state,'ambiguous');
+    const malformed=await ingest(pool,{...other,key:'telegram:fixture:update:3',payload:update(-30,456)});
+    const later=await ingest(pool,{...other,key:'telegram:fixture:update:4'});
+    await dispatchCommitted(pool,config,async()=>{throw Error('invalid scope must not reach Hermes');});
+    assert.equal((await pool.query('SELECT error_code FROM dispatches WHERE event_id=$1',[malformed.id])).rows[0].error_code,'invalid_source_message');
+    await dispatchCommitted(pool,config,async()=>({state:'done'}));
+    assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[later.id])).rows[0].state,'done');
   } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });

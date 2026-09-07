@@ -1,8 +1,10 @@
 """Use Hermes's subscription credentials and client; never implement OAuth here."""
 
 from dataclasses import dataclass, field
+from threading import RLock
 
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+AUTH_LOCK = RLock()
 
 
 class DetectorContractError(ValueError):
@@ -23,10 +25,18 @@ class SubscriptionCredentials:
 def resolve_credentials() -> SubscriptionCredentials:
     from hermes_cli.auth_codex import resolve_codex_runtime_credentials
 
-    resolved = resolve_codex_runtime_credentials()
+    with AUTH_LOCK:
+        resolved = resolve_codex_runtime_credentials()
     if resolved.get("auth_mode") != "chatgpt":
         raise ValueError("ChatGPT subscription login required")
     return SubscriptionCredentials(resolved["api_key"], resolved["base_url"])
+
+
+def refresh_credentials():
+    from hermes_cli.auth_codex import _read_codex_tokens, _save_codex_tokens, refresh_codex_oauth_pure
+    with AUTH_LOCK:
+        tokens = _read_codex_tokens()["tokens"]
+        _save_codex_tokens(refresh_codex_oauth_pure(tokens["access_token"], tokens["refresh_token"]))
 
 
 def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list):

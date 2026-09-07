@@ -2,7 +2,7 @@
 
 **Status:** Hermes-owned device login, live refresh and all three core subscription
 paths pass locally. Phase 1 is complete under ADR-0019: the owner chose local
-Compose and deferred VPS verification. Container acceptance follows in Phase 2.
+Compose and deferred VPS verification. Container acceptance subsequently passed; see [current status](../TASK.md).
 
 | Check | Actual result |
 | --- | --- |
@@ -47,7 +47,7 @@ Native code inspected at the pin:
 - [Hermes OAuth ownership and refresh](https://github.com/NousResearch/hermes-agent/blob/7166071fcaadb36df26f6d753dda97da6b5d699e/hermes_cli/auth_codex.py)
 - [codex-asr request construction](https://github.com/Wangnov/codex-asr/blob/479f6a7a3db81fe2a23d4755b0ccbeb4400317d4/src/lib.rs)
 
-## Remaining scope
+## Scope at this historical checkpoint
 
 No real quota exhaustion was deliberately induced. Actual malformed/unsupported
 requests produced HTTP 400; rate limits, expired authentication and transient
@@ -55,6 +55,6 @@ errors were exercised with offline transport responses. Live refresh and request
 with the refreshed Hermes-owned credentials now pass. See the
 [sanitized report](results/2026-09-06-hermes-local.json).
 
-The archive, optional guard enforcement, Telegram capture, group scoping, retry
-worker and VPS deployment are not implemented by this checkpoint. The Honcho
-experiment has not started and its API budget has not been used.
+This Phase 1 checkpoint predates the archive, guard, capture, scoped assistant and
+Honcho harness. Their subsequent implementation and remaining live release gates
+are recorded in [TASK.md](../TASK.md). VPS work remains deferred.
