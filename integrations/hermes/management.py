@@ -6,7 +6,20 @@ from .scopes import Scopes
 from .profile_config import configure_profile, inspect_profile
 
 
-def profile_path(root, chat, policy):
+def profile_path(root, chat, policy, selected=None):
+    if selected and chat in [policy.owner, *policy.groups] and selected == Scopes.profile(chat):
+        selected = None  # Canonical profiles can be inspected before their first turn.
+    if selected:
+        from .native_memory import registered_profiles
+        import json
+        paths={p.name:p for p in registered_profiles(root)}
+        path=paths.get(selected)
+        if path is None:raise ValueError('profile_scope_denied')
+        marker=path/'space.json'
+        if marker.is_symlink():raise ValueError('profile_path_denied')
+        metadata=json.loads(marker.read_text()) if marker.exists() else {}
+        if metadata.get('space')!=chat and path.name!=Scopes.profile(chat) and path.name!=chat:raise ValueError('profile_scope_denied')
+        return path
     allowed = [policy.owner, *policy.groups]
     if not isinstance(chat, str) or chat not in allowed: raise ValueError('profile_scope_denied')
     root = Path(root).resolve()
@@ -18,10 +31,20 @@ def profile_path(root, chat, policy):
 def dispatch(root, model, policy, body):
     action = body.get('action')
     if action == 'profiles':
-        return {'profiles': [{'scope': chat, 'profile': Scopes.profile(chat),
+        profiles=[{'scope': chat, 'profile': Scopes.profile(chat),
                  'owner': chat == policy.owner, 'exists': profile_path(root, chat, policy).exists()}
-                for chat in [policy.owner, *policy.groups] if chat]}
-    path = profile_path(root, body.get('scope'), policy)
+                for chat in [policy.owner, *policy.groups] if chat]
+        from .native_memory import registered_profiles
+        import json
+        historical={p['profile']:p for p in profiles}
+        for path in registered_profiles(root):
+            marker=path/'space.json'
+            if marker.is_symlink():raise ValueError('profile_path_denied')
+            metadata=json.loads(marker.read_text()) if marker.exists() else {}
+            historical[path.name]={'scope':metadata.get('space',historical.get(path.name,{}).get('scope',path.name)),
+                                   'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),'exists':True}
+        return {'profiles':profiles,'history_profiles':list(historical.values())}
+    path = profile_path(root, body.get('scope'), policy,body.get('profile') if action=='memory' else None)
     if action == 'preferences':
         result = configure_profile(path, model, body['changes'], body.get('revision')) if 'changes' in body else inspect_profile(path, model)
         return {'scope': body['scope'], **result}
@@ -37,7 +60,7 @@ def dispatch(root, model, policy, body):
         memories.append({'name': name, 'text': text, 'exists': file.exists(), 'truncated': truncated,
                          'sha256': hashlib.sha256(raw).hexdigest() if not truncated else None,
                          'citations': sorted(set(re.findall(r'nocheh:event:([a-f0-9]{64})', text)))})
-    result = {'scope': body['scope'], 'profile': Scopes.profile(body['scope']), 'memories': memories,
+    result = {'scope': body['scope'], 'profile': path.name, 'memories': memories,
               'sessions': [], 'messages': [], 'next_offset': None,
               'provenance': 'Native notes are model-maintained; only explicit citations identify source evidence.'}
     database = path / 'state.db'

@@ -8,10 +8,10 @@ and audience access. Import review needs explicit approval at import confirmatio
 | M1 | Versioned group/topic policies, inherited preferences, source index | Verified: TypeScript build and 6 policy/archive/PostgreSQL tests pass |
 | M2 | Owner recall and durable native review, import approval | Verified: build, 8 TypeScript/PostgreSQL and 8 isolated native Python tests |
 | M3 | Approved/filtered retrieval, policy revisions and delivery checks | Implemented and fixture-tested for archive text. Native-note/transcript filtering remains blocked pending owner approval of the provider payload and destination |
-| M4 | Dashboard and CLI policies, memory, graph and review controls | Pending |
+| M4 | Dashboard and CLI policies, memory, graph and review controls | Implemented; HTTP/CLI/native tests and browser recall/preview/sharing/mobile layout pass. Browser policy-save check blocked by automatic approval review |
 | M5 | Isolated Compose acceptance, backup/restore, compatibility | Pending |
 
-Commits: M1 `1f7ce49`; M2 `5a16ad7`.
+Commits: M1 `1f7ce49`; M2 `5a16ad7`; M3 checkpoint `d755c24`.
 
 M3 enforces topic scope on original reads, files, graph and actions, retires group
 profiles on policy changes, and rechecks the revision before native Telegram sends.
