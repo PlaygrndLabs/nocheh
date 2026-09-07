@@ -4,8 +4,10 @@ After the requested reset on 2026-09-07, a fresh Compose runtime was started wit
 the supplied Telegram bot token and owner/group IDs in the ignored `.env`.
 All five services are healthy. Fresh Hermes sign-in and live subscription checks
 pass. Telegram is enabled: the owner's real `/start` was captured, dispatched and
-answered with confirmed Telegram delivery. The configured group still returns
-`chat not found`. The rebuild is **not released**: remaining Telegram acceptance,
+answered with confirmed Telegram delivery. The bot now belongs to the selected
+group, can send messages, and its membership updates are archived. Privacy mode
+is still enabled, limiting ordinary group-message visibility. The rebuild is
+**not released**: remaining Telegram acceptance,
 cutover and the merge to `main` remain pending.
 
 Accepted plan: [docs/rebuild-plan.md](docs/rebuild-plan.md).
@@ -67,9 +69,11 @@ archived with a visible suppressed dispatch and do not starve subsequent work.
 The first real owner-DM capture and reply passed after enabling the gateway.
 Fresh subscription refresh, chat, detector and Ogg/Opus checks also passed.
 [Content-free live evidence](compatibility/results/2026-09-07-telegram-dm.json).
-Ensure the bot belongs to the selected group with full message visibility;
-Telegram currently reports that group as unavailable. Credentials and IDs are
-already saved locally. Follow [Telegram setup and acceptance](docs/telegram.md).
+Selected-group membership and send permissions now pass; membership events are
+archived. [Access evidence](compatibility/results/2026-09-07-telegram-group-access.json).
+Full group-message visibility remains blocked by Telegram privacy mode. Configure
+that before proactive group acceptance. Credentials and IDs are already saved
+locally. Follow [Telegram setup and acceptance](docs/telegram.md).
 Actual group replies/silence, private/group isolation, voice persistence,
 owner-approved delivery and reconnect/restart checks remain **unrun**.
 Container health does not prove these.
