@@ -29,9 +29,11 @@ VPS work is deferred. Do not mistake planned phases for completed behavior.
 5. Proactive conversation is permitted in selected Telegram groups. Other
    external effects require owner approval. No auto-trading. Group members may
    not approve actions or change administrative/provider/guard settings.
-6. Group replies use only that group's memory and source data. The owner's
-   private DM may search across the archive. Enforce scope in tools and storage,
-   not only prompts. Suggestions and inferred claims are not source facts.
+6. The owner's private assistant may connect all registered native memories and
+   archived sources. Groups/topics use versioned isolated, approved (default), or
+   explicitly selected filtered sharing (ADR-0028). Enforce audience access in
+   tools, storage, notes, graphs and delivery. Inferences are not source facts.
+   Imported-content learning requires explicit approval during import.
 7. Production uses ChatGPT subscription authentication: no paid model-provider
    API keys and no local models. Automatic transcription is a release requirement.
    The isolated Honcho experiment has a $5 maximum metered API budget and may use
