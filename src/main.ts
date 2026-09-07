@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
+import { listSpaces, spacePolicy, saveSpace } from './spaces.js';
 import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object } from './http.js';
@@ -30,6 +31,11 @@ const server = createServer((req, res) => { void (async () => {
     return json(res, 200, {ok: true, service: config.service, database: 'ready'});
   }
   const principal=reader(req, config.token);
+  if(config.service==='archive' && path==='/v1/memory/spaces') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,url.searchParams.has('id')?await spacePolicy(pool,url.searchParams.get('id')!):await listSpaces(pool,url.searchParams.get('after')??''));
+    if(req.method==='POST'){const b=object(await readJson(req));return json(res,200,await saveSpace(pool,String(b.id),b.overrides,b.revision));}
+  }
   if(config.service==='archive' && req.method==='GET' && path==='/v1/scopes') {
     admin(principal);
     const {rows}=await pool.query('SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 GROUP BY scope ORDER BY scope LIMIT 101',[url.searchParams.get('after') ?? '']);

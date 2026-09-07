@@ -1,6 +1,7 @@
 import pg from 'pg';
 import type { Settings } from './config.js';
 import { schema } from './archive.js';
+import { spaceSchema } from './spaces.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   const pool = new pg.Pool({
@@ -22,6 +23,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
       service text PRIMARY KEY, seen_at timestamptz NOT NULL DEFAULT now()
     )`);
     await client.query(schema);
+    await client.query(spaceSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
