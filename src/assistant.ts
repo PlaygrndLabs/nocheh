@@ -7,8 +7,9 @@ import { conversationScope } from './assistant-policy.js';
 import { turnToken } from './access.js';
 import { controlReply } from './actions.js';
 import { HttpError } from './http.js';
+import type { RuntimeCall } from './runtime.js';
 
-type Call=(path:string,body:unknown,timeout?:number)=>Promise<Record<string,unknown>>;
+type Call=RuntimeCall;
 const TRANSCRIPTION_VERSION='codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4';
 
 export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call):Promise<string[]|null> {
@@ -28,7 +29,7 @@ export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eve
       const raw=await readFile(join(dataDir,'files',artifact.file_hash));
       if (digest(raw)!==artifact.file_hash)throw new HttpError(503,'audio_hash_mismatch');
       const match=artifact.metadata.file_name?.match(/\.(ogg|oga|mp3|wav|m4a|mp4|flac)$/i);
-      const result=await call('/internal/transcribe',{audio_base64:raw.toString('base64'),suffix:artifact.kind==='video_note'?'.mp4':match?'.'+match[1]!.toLowerCase():'.ogg'});
+      const result=await call('perception.transcribe',{audio_base64:raw.toString('base64'),suffix:artifact.kind==='video_note'?'.mp4':match?'.'+match[1]!.toLowerCase():'.ogg'});
       if (result.success!==true || typeof result.transcript!=='string')throw new HttpError(503,result.error==='quota_paused'?'quota_paused':'transcription_unavailable');
       await client.query('BEGIN');
       await client.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,search_text,provenance) VALUES($1,$2,$3,'transcript',$4,$5,$6) ON CONFLICT DO NOTHING`,
@@ -72,7 +73,7 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call):
     const control=await controlReply(pool,config.assistant,event.id);
     await client.query("UPDATE dispatches SET state='running',attempts=$2,updated_at=now(),error_code=NULL WHERE event_id=$1",[event.id,attempt]);
     try {
-      const result=await call('/internal/dispatch',{event_id:event.id,source_key:event.source_key,scope:event.scope,payload,
+      const result=await call('run.start',{channel:'telegram',event_id:event.id,source_key:event.source_key,scope:event.scope,payload,
         text:event.original_text?.toString() ?? null,transcripts,attempt,control_reply:control,
         archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id)},260000);
       if (!['done','failed','ambiguous','suppressed'].includes(String(result.state))) throw new Error('invalid_dispatch_receipt');

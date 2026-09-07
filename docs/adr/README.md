@@ -34,3 +34,4 @@ status before the rebuild.**
 | [0024](0024-single-environment-configuration.md) | One editable `.env`, native OAuth state and inactive environment restores | Active configuration |
 | [0025](0025-owner-dashboard-and-management-cli.md) | Native dashboard extension, shared owner operations and configuration ownership | Implementation in phases |
 | [0026](0026-three-dimensional-evidence-view.md) | Local 3D evidence space with accessible source inspection | Active dashboard presentation |
+| [0027](0027-native-hermes-dashboard-integration.md) | Nocheh product ownership and replaceable Hermes runtime, native dashboard and controlled operations | Active direction; see TASK.md |

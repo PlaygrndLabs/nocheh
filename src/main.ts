@@ -4,13 +4,17 @@ import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object } from './http.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
-import { startWorker, hermesCall } from './worker.js';
+import { startWorker } from './worker.js';
+import { hermesAdapter } from './hermes-adapter.js';
+import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import { guardPayload } from './guard.js';
 import { requestAction } from './actions.js';
 import { reader, admin } from './access.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 
 const config = settings();
+const runtime = hermesAdapter({url: config.hermesUrl, token: config.token});
+const call = runtimeCall(runtime);
 // Each service owns its connection pool; an outage must be visible in health.
 const pool = connectDatabase(config);
 await initialize(pool);
@@ -45,14 +49,21 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
+  if (config.service==='archive' && req.method==='GET' && path==='/v1/runtime') {
+    const status = await call('status', {}, 5000).catch(() => ({ok:false,error:'runtime_unavailable'}));
+    return json(res,200,{id:runtime.id,capabilities:runtime.capabilities,status});
+  }
   if(config.service==='archive' && req.method==='POST' && path==='/v1/manage/hermes') {
-    return json(res,200,await hermesCall(config,'/internal/manage',object(await readJson(req))));
+    const input=object(await readJson(req));
+    const operation:RuntimeOperation|undefined=input.action==='profiles'?'profiles.list':input.action==='memory'?'memory.read':input.action==='preferences'?(input.changes?'config.write':'config.read'):undefined;
+    if(!operation)throw new HttpError(400,'unknown_management_action');
+    return json(res,200,await call(operation,input));
   }
   if (config.service==='guard' && req.method==='POST' && path==='/v1/guard') {
     const body=object(await readJson(req,1024*1024));
     if (typeof body.destination!=='string') throw new HttpError(400,'invalid_destination');
     return json(res,200,await guardPayload(body.payload,{mode:config.guardMode,trusted:config.guardTrusted,detectorVersion:config.detectorVersion},body.destination,
-      async(text)=>(await hermesCall(config,'/internal/detect',{text})).literals,pool));
+      async(text)=>(await call('guard.detect',{text})).literals,pool));
   }
   if (config.service === 'archive') {
     if (req.method==='GET' && path==='/v1/export') return json(res,200,await exportPage(pool,url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit'))));

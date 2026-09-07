@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY scripts ./scripts
+COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
 COPY src ./src
 COPY test ./test
 RUN npm run build && chown -R ${LOCAL_UID}:${LOCAL_GID} /app

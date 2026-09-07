@@ -43,7 +43,7 @@ test('real PostgreSQL: action proposals require a bound turn; only a captured ow
     const owner=await ingest(pool,{...input,key:'action:owner-approval',scope:'123',payload:ownerMessage});
     const approved=await controlReply(pool,policy,owner.id);assert.match(approved!,/approved/);
     assert.equal(await controlReply(pool,policy,owner.id),approved);
-    await executeApproved(pool,async(path,body)=>{assert.equal(path,'/internal/action');assert.deepEqual(body,{id:action.id,destination:'777',text:'Synthetic external message'});sends++;return {state:'done'};});
+    await executeApproved(pool,async(path,body)=>{assert.equal(path,'action.execute');assert.deepEqual(body,{id:action.id,destination:'777',text:'Synthetic external message'});sends++;return {state:'done'};});
     await executeApproved(pool,async()=>{sends++;return {state:'done'};});assert.equal(sends,1);
     assert.equal(await controlReply(pool,policy,owner.id),approved,'decision replay remains idempotent after delivery');
     assert.equal((await pool.query('SELECT state FROM action_requests')).rows[0].state,'done');
@@ -77,13 +77,13 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     await immutableFile(join(root,'files'),digest(audio),audio);
     await pool.query("UPDATE artifacts SET state='ready',file_hash=$1,byte_size=$2",[digest(audio),audio.length]);
     await pool.query('UPDATE dispatches SET next_attempt=now()');
-    await dispatchCommitted(pool,config,async(path)=>{assert.equal(path,'/internal/transcribe');calls++;return {success:false,error:'quota_paused'};});
+    await dispatchCommitted(pool,config,async(path)=>{assert.equal(path,'perception.transcribe');calls++;return {success:false,error:'quota_paused'};});
     assert.equal((await pool.query('SELECT error_code FROM transcription_jobs')).rows[0].error_code,'quota_paused');
     await pool.query('UPDATE transcription_jobs SET next_attempt=now()');await pool.query('UPDATE dispatches SET next_attempt=now()');
     const transcript='😃 Juniper is due Friday.\r\n  ';let firstAttempt=0;
     await dispatchCommitted(pool,config,async(path,body)=>{
       calls++;
-      if(path==='/internal/transcribe')return {success:true,transcript};
+      if(path==='perception.transcribe')return {success:true,transcript};
       const request=body as {attempt:number;archive_credential:string;transcripts:string[]};firstAttempt=request.attempt;
       assert.deepEqual(request.transcripts,[transcript]);
       const claims=JSON.parse(Buffer.from(request.archive_credential.split('.')[1]!,'base64url').toString());assert.equal(claims.scope,'-20');
@@ -92,7 +92,7 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     });
     assert.equal((await pool.query('SELECT state FROM dispatches')).rows[0].state,'running');
     await pool.query('UPDATE dispatches SET next_attempt=now()');
-    await dispatchCommitted(pool,config,async(path,body)=>{assert.equal(path,'/internal/dispatch');assert.equal((body as {attempt:number}).attempt,firstAttempt);return {state:'done'};});
+    await dispatchCommitted(pool,config,async(path,body)=>{assert.equal(path,'run.start');assert.equal((body as {attempt:number}).attempt,firstAttempt);return {state:'done'};});
     assert.equal((await pool.query('SELECT content FROM derived_artifacts')).rows[0].content.toString(),transcript);
     assert.equal((await pool.query('SELECT original_text FROM events')).rows[0].original_text,null);
     await ingest(pool,{...value,key:'historical:voice1',origin:'import'});
