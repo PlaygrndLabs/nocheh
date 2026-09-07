@@ -1,6 +1,6 @@
 (() => {
   const sdk = window.__HERMES_PLUGIN_SDK__;
-  const {createElement: h, useState, useEffect, useRef} = sdk.React;
+  const {createElement: h, useState, useEffect, useRef, useMemo} = sdk.React;
   const base = '/api/plugins/nocheh';
   const call = (path, body) => sdk.fetchJSON(base + path, body === undefined ? {} : {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
@@ -139,31 +139,89 @@
       ...record.derived.map(d=>h('article',{key:d.id},h('h3',null,'Derived '+d.kind),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(d.content_base64),c=>c.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:d.provenance})))),
       h('details',null,h('summary',null,'Source identity and complete metadata'),h(Data,{value:record})));
   }
-  function Graph({notify}){
-    const selection=useRef(0);
-    const [scope,setScope]=useState(''),[scopeAfter,setScopeAfter]=useState(''),[scopeList,setScopeList]=useState([]),[scopes]=useLoad('/scopes?after='+encodeURIComponent(scopeAfter)),[after,setAfter]=useState(''),[history,setHistory]=useState([]),[data,setData]=useState(null),[selected,setSelected]=useState(null),[record,setRecord]=useState(null),[zoom,setZoom]=useState(1),[busy,setBusy]=useState(false);
+  const graphKinds = {scope:'Scope',profile:'Profile',message:'Message',author:'Author',attachment:'File',memory:'Memory',derived:'Derived'};
+  function GraphSpace({data, selectedId, matchingIds, choose}) {
+    const host=useRef(null), scene=useRef(null), onChoose=useRef(choose);
+    const [problem,setProblem]=useState(''),[ready,setReady]=useState(false),[retry,setRetry]=useState(0),[labels,setLabels]=useState(true),[expanded,setExpanded]=useState(false),[expandError,setExpandError]=useState('');
+    onChoose.current=choose;
+    useEffect(()=>{const change=()=>setExpanded(document.fullscreenElement===host.current?.parentElement);document.addEventListener('fullscreenchange',change);return()=>document.removeEventListener('fullscreenchange',change);},[]);
+    const expand=async()=>{setExpandError('');try{if(document.fullscreenElement)await document.exitFullscreen();else await host.current.parentElement.requestFullscreen();}catch{setExpandError('Full screen is unavailable in this browser.');}};
+    useEffect(()=>{
+      let alive=true;setReady(false);setProblem('');
+      import('/dashboard-plugins/nocheh/dist/graph-3d.js').then(module=>{
+        if(!alive)return;
+        scene.current=module.createGraphScene(host.current,data,{onSelect:node=>onChoose.current(node),onError:message=>{if(alive){setProblem(message);setReady(false);}}});
+        setReady(true);
+      }).catch(()=>{if(alive)setProblem('The 3D view could not start. Check that graphics acceleration is available, then reload the scene. You can still inspect every node in the node browser.');});
+      return()=>{alive=false;scene.current?.dispose();scene.current=null;};
+    },[data,retry]);
+    useEffect(()=>{scene.current?.update({selectedId,matchingIds,labels});},[selectedId,matchingIds,labels,ready]);
+    const action=(label,fn)=>h('button',{type:'button',disabled:!ready,onClick:()=>fn(scene.current),'aria-label':({'←':'Orbit left','→':'Orbit right','↑':'Orbit up','↓':'Orbit down','−':'Zoom out','+':'Zoom in'})[label]||label,title:({'←':'Orbit left','→':'Orbit right','↑':'Orbit up','↓':'Orbit down','−':'Zoom out','+':'Zoom in'})[label]||label},label);
+    return h('div',{className:'n-space-shell'},
+      h('div',{className:'n-space-top'},h('span',{className:'n-space-title'},'Evidence space',h('small',null,'3D · '+data.nodes.length+' nodes · '+data.edges.length+' links')),
+        h('div',{className:'n-space-actions'},h('button',{type:'button','aria-pressed':labels,onClick:()=>setLabels(v=>!v),disabled:!ready},'Labels'),action('Reset view',v=>v.fit()),document.fullscreenEnabled&&button(expanded?'Exit full screen':'Full screen',expand,!ready))),
+      h('div',{className:'n-space',ref:host,'aria-busy':!ready&&!problem}),
+      !ready&&h('div',{className:'n-space-status',role:problem?'alert':'status'},h('p',null,problem||'Preparing your evidence space…'),problem&&button('Reload scene',()=>setRetry(v=>v+1))),
+      h('div',{className:'n-space-bottom'},h('div',{className:'n-space-help',id:'n-graph-help'},'Drag to orbit · scroll to zoom',h('small',null,'Right-drag to pan · touch: one finger orbits, two pan / pinch')),
+        h('div',{className:'n-space-actions','aria-label':'Camera controls'},action('←',v=>v.orbit(-.25,0)),action('→',v=>v.orbit(.25,0)),action('↑',v=>v.orbit(0,-.25)),action('↓',v=>v.orbit(0,.25)),action('−',v=>v.zoom(1.25)),action('+',v=>v.zoom(.8)))),
+      h('div',{className:'n-space-focus'},button('Focus selected node',()=>scene.current?.focus(selectedId),!ready||!selectedId),expandError&&h('small',{role:'status'},expandError)));
+  }
+  function Graph({notify}) {
+    const selection=useRef(0), source=useRef(null);
+    const [scope,setScope]=useState(''),[scopeAfter,setScopeAfter]=useState(''),[scopeList,setScopeList]=useState([]),[scopes,scopeError]=useLoad('/scopes?after='+encodeURIComponent(scopeAfter));
+    const [after,setAfter]=useState(''),[history,setHistory]=useState([]),[data,setData]=useState(null),[selected,setSelected]=useState(null),[record,setRecord]=useState(null);
+    const [busy,setBusy]=useState(false),[problem,setProblem]=useState(''),[retry,setRetry]=useState(0),[sourceBusy,setSourceBusy]=useState(false),[sourceError,setSourceError]=useState('');
+    const [query,setQuery]=useState(''),[kind,setKind]=useState('');
     useEffect(()=>{if(scopes?.scopes){setScopeList(old=>[...new Map([...old,...scopes.scopes].map(s=>[s.scope,s])).values()]);if(!scope&&scopes.scopes.length)setScope(scopes.scopes[0].scope);}},[scopes]);
-    useEffect(()=>{if(!scope)return;let alive=true;selection.current++;setBusy(true);setData(null);setRecord(null);setSelected(null);call('/graph?scope='+encodeURIComponent(scope)+'&after='+after).then(value=>{if(alive)setData(value);}).catch(e=>{if(alive)notify(errorText(e),true);}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;};},[scope,after]);
-    const choose=async node=>{const request=++selection.current;setSelected(node);setRecord(null);if(node.event_id)try{const value=await call('/events/'+node.event_id);if(selection.current===request)setRecord(value);}catch(e){notify(errorText(e),true);}};
-    const columns={scope:0,profile:0,memory:0,author:1,message:2,attachment:3,derived:4};const counts=[0,0,0,0,0];
-    const placed=(data?.nodes||[]).map(n=>{const column=columns[n.kind]??0;return {...n,x:20+column*254,y:30+counts[column]++*82};});
-    const byId=Object.fromEntries(placed.map(n=>[n.id,n])),height=Math.max(300,...counts.map(n=>n*82+45));
-    return h('div',null,h(Panel,{title:'Evidence graph',note:'Observed source relationships, with explicit memory references. Select a node to inspect its source. This view makes no model calls.'},
-      h('label',null,'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),scopes?.next&&button('Load more scopes',()=>setScopeAfter(scopes.next)),
-      !scopeList.length&&h('p',{className:'n-muted'},'No archived scopes yet. Import a chat to begin.'),busy&&h('p',{role:'status'},'Loading source relationships…'),
-      data&&h('div',null,h('div',{className:'n-actions'},button('Zoom out',()=>setZoom(v=>Math.max(.5,v-.2)),zoom<=.5),button('Zoom in',()=>setZoom(v=>Math.min(1.8,v+.2)),zoom>=1.8),button('Export this graph page',()=>exportJSON(data,'nocheh-graph.json'))),
-        h('p',{className:'n-muted'},data.nodes.length+' nodes · '+data.edges.length+' links · Scroll to explore. Dashed links are citations or generated content.'),
-        h('div',{className:'n-graph-scroll',tabIndex:0,'aria-label':'Scrollable evidence graph'},h('svg',{width:1300*zoom,height:height*zoom,viewBox:'0 0 1300 '+height,role:'group','aria-label':'Scoped evidence relationships'},
-          h('defs',null,h('marker',{id:'n-arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto-start-reverse'},h('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'#94a9a2'}))),
-          ...data.edges.map((edge,i)=>{const a=byId[edge.from],b=byId[edge.to];if(!a||!b)return null;const relevant=!selected||[edge.from,edge.to].includes(selected.id);return h('path',{key:'e'+i,d:`M ${a.x+216} ${a.y+28} C ${a.x+245} ${a.y+28}, ${b.x-30} ${b.y+28}, ${b.x} ${b.y+28}`,fill:'none',stroke:relevant?'#71998b':'#d6e0dc',strokeWidth:relevant?1.7:1,strokeDasharray:['derived_from','explicit_citation'].includes(edge.kind)?'5 4':undefined,markerEnd:'url(#n-arrow)'});}),
-          ...placed.map(node=>h('g',{key:node.id,transform:`translate(${node.x},${node.y})`,tabIndex:0,role:'button','aria-label':node.kind+': '+node.label,onClick:()=>choose(node),onKeyDown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(node);}},className:'n-graph-node'},
-            h('rect',{width:216,height:58,rx:7,fill:node.kind==='message'?'#fff':node.kind==='memory'||node.kind==='derived'?'#f5efdf':'#eaf2ed',stroke:selected?.id===node.id?'#1f6659':'#c1d0c9',strokeWidth:selected?.id===node.id?3:1}),
-            h('text',{x:12,y:19,fontSize:10,fill:'#526571'},node.kind.toUpperCase()),h('text',{x:12,y:40,fontSize:12,fill:'#182b37'},node.label.slice(0,27)+(node.label.length>27?'…':'')))))),
+    useEffect(()=>{
+      if(!scope)return;let alive=true;selection.current++;setBusy(true);setProblem('');setData(null);setRecord(null);setSelected(null);setSourceError('');setSourceBusy(false);setQuery('');setKind('');
+      call('/graph?scope='+encodeURIComponent(scope)+'&after='+encodeURIComponent(after)).then(value=>{if(alive)setData(value);}).catch(e=>{if(alive)setProblem(errorText(e));}).finally(()=>{if(alive)setBusy(false);});
+      return()=>{alive=false;selection.current++;};
+    },[scope,after,retry]);
+    const choose=async node=>{
+      if(!node)return;const request=++selection.current;setSelected(node);setRecord(null);setSourceError('');setSourceBusy(!!node.event_id);
+      if(node.event_id)try{const value=await call('/events/'+encodeURIComponent(node.event_id));if(selection.current===request)setRecord(value);}catch(e){if(selection.current===request)setSourceError(errorText(e));}finally{if(selection.current===request)setSourceBusy(false);}
+    };
+    const byId=useMemo(()=>new Map((data?.nodes||[]).map(node=>[node.id,node])),[data]);
+    const filtered=useMemo(()=>(data?.nodes||[]).filter(node=>(!kind||node.kind===kind)&&(!query.trim()||(node.label+' '+node.kind+' '+node.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))),[data,kind,query]);
+    const matchingIds=useMemo(()=>kind||query.trim()?new Set(filtered.map(node=>node.id)):null,[filtered,kind,query]);
+    const connections=(data?.edges||[]).filter(edge=>edge.from===selected?.id||edge.to===selected?.id);
+    return h('div',{className:'n-graph-page'},
+      h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Follow the evidence'),h('p',{className:'n-muted'},'Explore messages, people and memory in three dimensions. Select a node to follow its source.')),
+        h('label',{className:'n-graph-scope'},'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),
+        scopes?.next&&button('Load more scopes',()=>setScopeAfter(scopes.next))),
+      scopeError&&h('p',{role:'alert'},scopeError),!scopes&&!scopeError&&h('p',{role:'status'},'Loading archive scopes…'),
+      scopes&&!scopeList.length&&h(Panel,{title:'Your evidence space starts here'},h('p',null,'Import a chat to explore its messages and connections.'),h('a',{href:'#imports'},'Open Imports & jobs')),
+      busy&&h('div',{className:'n-graph-loading',role:'status'},'Loading source relationships…'),
+      problem&&h(Panel,{title:'Graph unavailable'},h('p',{role:'alert'},problem),button('Try again',()=>setRetry(v=>v+1))),
+      data&&h('div',null,
+        h('div',{className:'n-graph-workspace'},h(GraphSpace,{data,selectedId:selected?.id,matchingIds,choose}),
+          h('aside',{className:'n-graph-inspector','aria-label':'Graph inspector'},
+            h('div',{className:'n-node-browser'},h('h3',null,'Node browser'),
+              h('label',{htmlFor:'n-node-search'},'Find on this page'),h('input',{id:'n-node-search',type:'search',placeholder:'Search nodes…',value:query,onChange:e=>setQuery(e.target.value)}),
+              h('label',{className:'n-sr-only',htmlFor:'n-node-kind'},'Node type'),h('select',{id:'n-node-kind',value:kind,onChange:e=>setKind(e.target.value)},h('option',{value:''},'All types'),...Object.entries(graphKinds).filter(([key])=>data.nodes.some(n=>n.kind===key)).map(([key,label])=>h('option',{key,value:key},label))),
+              h('small',{role:'status'},filtered.length+' of '+data.nodes.length+' nodes'),
+              h('div',{className:'n-node-list'},...filtered.map(node=>h('button',{type:'button',key:node.id,className:'n-node-option','aria-pressed':selected?.id===node.id,onClick:()=>choose(node),title:node.kind+': '+node.label},h('span',{className:'n-kind-dot n-kind-'+node.kind,'aria-hidden':true}),h('span',null,h('small',null,graphKinds[node.kind]||node.kind),h('span',{dir:'auto'},node.label))))),
+              !filtered.length&&h('p',{className:'n-muted'},'No nodes match. Clear your search or choose another type.')),
+            h('div',{className:'n-node-detail'},
+              selected?h('div',null,h('div',{className:'n-selection-heading'},h('h3',null,graphKinds[selected.kind]||selected.kind),button('Clear',()=>{selection.current++;setSelected(null);setRecord(null);setSourceError('');setSourceBusy(false);})),
+                h('p',{className:'n-node-title',dir:'auto'},selected.label),selected.state&&h('p',{className:'n-badge'},selected.state),
+                selected.text&&h(Data,{value:selected.text}),selected.provenance&&h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:selected.provenance})),
+                selected.unresolved_citations>0&&h('p',{className:'n-muted'},selected.unresolved_citations+' citations are outside this page or scope.'),
+                sourceBusy&&h('p',{role:'status'},'Loading original source…'),sourceError&&h('div',null,h('p',{role:'alert'},sourceError),button('Retry source',()=>choose(selected))),
+                record&&button('View original source',()=>source.current?.scrollIntoView({block:'start'}),false,'n-primary'),
+                !selected.event_id&&h('p',{className:'n-muted'},'Follow a connection to inspect an original message.'),
+                h('details',{open:true},h('summary',null,connections.length+' direct connections'),...connections.map((edge,i)=>{
+                  const target=byId.get(edge.from===selected.id?edge.to:edge.from);if(!target)return null;
+                  return h('button',{type:'button',key:i,className:'n-connection',onClick:()=>choose(target)},h('small',null,(edge.from===selected.id?'Outgoing · ':'Incoming · ')+edge.kind.replaceAll('_',' ')),h('span',{dir:'auto'},target.label));
+                }))) : h('div',null,h('h3',null,'Inspect a connection'),h('p',{className:'n-muted'},'Select a node in the space or the list. Its direct connections will light up here.'),h('p',{className:'n-muted'},'Positions help you navigate. Only the links represent recorded relationships.'))))),
+        h('div',{className:'n-graph-legend','aria-label':'Node legend'},...Object.entries(graphKinds).filter(([key])=>data.nodes.some(n=>n.kind===key)).map(([key,label])=>h('span',{key},h('i',{className:'n-kind-dot n-kind-'+key,'aria-hidden':true}),label)),h('span',null,h('i',{className:'n-reference-line','aria-hidden':true}),'Dashed: citation / derived')),
+        h('div',{className:'n-graph-pagination'},h('p',{className:'n-muted'},'Page '+(history.length+1)+' · '+data.nodes.filter(n=>n.kind==='message').length+' messages · '+data.unresolved_replies+' reply references outside this page'),
+          h('div',{className:'n-space-actions'},button('Previous messages',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));},!history.length),button('Next messages',()=>{setHistory([...history,after]);setAfter(data.next);},!data.next),button('Export graph JSON',()=>exportJSON(data,'nocheh-graph.json')))),
         data.bounds.truncated&&h('p',{role:'status'},'Attachment or derived-node limit reached. Open source records for the complete details.'),
-        h('p',{className:'n-muted'},data.unresolved_replies+' reply references outside this page.'),
-        h('div',{className:'n-actions'},history.length>0&&button('Previous messages',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));}),data.next&&button('Next messages',()=>{setHistory([...history,after]);setAfter(data.next);})))),
-      selected&&h(Panel,{title:selected.kind+' · '+selected.label},selected.text&&h(Data,{value:selected.text}),selected.provenance&&h(Data,{value:selected.provenance}),selected.unresolved_citations>0&&h('p',null,selected.unresolved_citations+' citations are outside this page or scope.'),
-        ...data.edges.filter(e=>e.from===selected.id||e.to===selected.id).map((edge,i)=>h('div',{className:'n-row',key:i},h('span',null,edge.kind.replaceAll('_',' ')),button(byId[edge.from===selected.id?edge.to:edge.from]?.label||'Related node',()=>choose(byId[edge.from===selected.id?edge.to:edge.from]))))),record&&h(Source,{record,notify}));
+        !data.nodes.some(n=>n.kind==='message')&&h('p',{className:'n-muted'},'No messages on this page. Choose another scope or return to the previous page.'),
+        h('p',{className:'n-muted'},'Observed relationships and explicit memory citations. This view makes no model calls.'),
+        record&&h('div',{ref:source,id:'n-graph-source'},h(Source,{record,notify}))));
   }
   function Operations({notify}){
     const [tick,setTick]=useState(0),[listing]=useLoad('/operations',tick),[jobs]=useLoad('/jobs',tick),[review,setReview]=useState(''),[backup,setBackup]=useState(''),[port,setPort]=useState(8795),[busy,setBusy]=useState(false);
@@ -193,7 +251,7 @@
     const notify=(text,error=false)=>setNotice({text,error});
     const pages={overview:'Overview',settings:'Settings',imports:'Imports & jobs',archive:'Archive',...Object.fromEntries(Object.entries(extensions).map(([k,v])=>[k,v.label]))};
     const Current=extensions[page]?.component;
-    return h('div',{className:'nocheh-app',ref:root},
+    return h('div',{className:'nocheh-app'+(page==='graph'?' n-graph-active':''),ref:root},
       h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'N'),h('div',null,'nocheh',h('small',null,'Your owned AI brain'))),
         h('nav',{'aria-label':'Nocheh'},...Object.entries(pages).map(([key,label])=>h('a',{href:'#'+key,key,'aria-current':page===key?'page':undefined},label))),
         h('div',{className:'n-sidebar-foot'},h('span',{className:'n-dot'}),'Local workspace',h('small',null,'Powered by Hermes'))),

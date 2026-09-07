@@ -139,6 +139,14 @@ derivation and recall comparison remain pending. Its $5 budget is unused.
 
 ### Owner dashboard D4 — evidence graph and operations
 
+The owner's 3D graph revision replaces fixed SVG columns with a local Three.js
+space, deterministic spatial layout, orbit/pan/zoom, node search, direct-connection
+highlighting and source inspection. See ADR-0026 and the dashboard instructions.
+This presentation change does not advance the pending production release gates.
+Verification: nine graph/layout/failure tests, two owner HTTP tests and two pinned
+dashboard compatibility tests pass. Live desktop and 375px browser checks cover
+node picking, original sources, orbit/zoom, search, scope pagination and full screen.
+
 - [x] Deterministic graph over one archive scope, with cursor pagination, original
   chat identities, author/reply/revision links, files, derived provenance and
   explicit native-note citations. No model calls or graph database.

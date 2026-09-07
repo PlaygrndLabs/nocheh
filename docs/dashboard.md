@@ -103,8 +103,22 @@ not create an edge; uncited memory has no verified source provenance. This is a
 deterministic evidence view, not semantic entity extraction or the repository's
 Graphify graph.
 
-Select nodes with a mouse or keyboard to open their sources. Zoom and scroll to
-explore, page forward/backward, or export the current graph as JSON. Source detail
+The graph uses a local Three.js 3D scene. Drag to orbit, scroll to zoom, and
+right-drag to pan; on touch screens use one finger to orbit and two to pan/pinch.
+Camera buttons offer orbit/zoom/reset, selected-node focus and full screen where
+supported. With the scene focused, arrow keys orbit, Shift+arrows pan, +/- zoom,
+and Home resets. No automatic rotation or ongoing render loop runs while idle.
+
+Search the node browser or choose a type, then select a node in the list or scene
+to highlight its direct connections. The inspector shows incoming/outgoing
+relationships and opens original sources. A deterministic spatial layout helps
+navigation; distance is not a semantic assertion. Shapes, colors, labels and
+dashed citation/derived links distinguish the evidence types. If WebGL is
+unavailable or its context is lost, the node browser and source inspection remain
+available with a reload control. The renderer is bundled locally using pinned
+Three.js/esbuild versions; no CDN or additional model calls are used.
+
+Page forward/backward or export the current graph as JSON. Source detail
 includes the original record, downloadable retained files, transcripts and their
 generation provenance. Use the next cursor to retrieve additional graph pages:
 
