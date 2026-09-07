@@ -42,7 +42,7 @@ their integration acceptance passes; see TASK.md for actual phase status.
 
 Original chats are preserved evidence. Native notes are generated working memory
 and may change. Imported messages become archive sources, not native sessions or
-automatically generated memory. Honcho remains separate from production memory.
+automatically generated memory. At import confirmation, an unchecked option lets you approve a Hermes memory review after ingestion succeeds. Honcho remains separate from production memory.
 
 ## Change configuration
 
@@ -110,7 +110,7 @@ are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the 
 
 ## Native memory and Honcho
 
-Hermes memory selects only the configured owner/group profiles. Notes are read-only;
+Hermes memory lists configured and historical group/topic profiles. Notes are read-only;
 preferences in Settings → Hermes preferences use the same locked resolver as assistant startup and take effect on
 the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show
@@ -119,6 +119,7 @@ truncation. A note's presence does not establish source provenance.
 ```sh
 ./scripts/nocheh memory list
 ./scripts/nocheh memory show --scope CHAT_ID
+./scripts/nocheh memory show --scope CHAT_OR_TOPIC --profile NATIVE_PROFILE_ID
 ./scripts/nocheh memory show --scope CHAT_ID --session SESSION_ID --offset 50
 ./scripts/nocheh memory preferences --scope CHAT_ID
 ./scripts/nocheh honcho doctor
@@ -151,7 +152,7 @@ inference or production-memory switch is performed by the dashboard.
 
 ## Evidence graph and local operations
 
-Graph selects one archive scope and pages through 20 events at a time. It includes
+Graph defaults to all private knowledge; you can select one archive scope. It pages through 20 events at a time and includes up to 20 native profiles per page. It includes
 observed authorship, replies to original source IDs, same-source revisions,
 attachments, derived-artifact provenance, and explicit Hermes note references.
 Original chat identity remains part of an imported message's identity even when
@@ -257,3 +258,47 @@ can create its normal WAL/locking sidecars during a read-only connection. It doe
 not change session contents, notes or configuration. Missing stores list as empty.
 Unintegrated native operations return an explicit unavailable result until their
 managed execution phase passes acceptance.
+
+## Space policies and native review
+
+Your private assistant can recall across the entire archive and registered native
+profiles. Group and topic context is constrained in storage and tools. A topic
+inherits its group's settings unless you override them. `approved` is the default;
+`isolated` permits only its own context; `filtered` is an explicit opt-in for
+selected source spaces. Approved shares disclose the exact saved text, while
+supporting original IDs remain private. Revoking a share retires old group contexts
+and blocks stale in-flight delivery; it cannot retract messages already posted.
+
+Filtered mode currently considers original archive text only and uses the ChatGPT
+subscription privacy reviewer. Native-note/transcript filtering is pending explicit
+owner authorization. Filtering can miss personal details; failures withhold wider
+knowledge. The access preview performs no model call and shows eligible sources,
+not a promise that their contents will be released.
+
+At the final import step, **Review with Hermes to update private memory** is
+unchecked. The saved choice survives cancellation/restart and cannot change on
+resume. Completed imports without approval remain searchable. Review jobs use
+Hermes's native memory review, with no external-action tools. Pause/resume controls
+operate on queued work; an interrupted native write is marked ambiguous and needs
+an explicit resume. Retrying an ambiguous review may repeat a native memory edit.
+
+```sh
+./scripts/nocheh memory spaces
+./scripts/nocheh memory policy --space=-100123/topic/42
+./scripts/nocheh memory policy --space=-100123/topic/42 --set policy.json --revision REVISION
+./scripts/nocheh memory share --space=-100123/topic/42 --file shared.txt --revision REVISION
+./scripts/nocheh memory revoke SHARE_ID --revision REVISION
+./scripts/nocheh memory preview --space=-100123/topic/42 --query Juniper
+./scripts/nocheh memory recall Juniper
+./scripts/nocheh memory reviews
+./scripts/nocheh memory pause JOB_ID
+./scripts/nocheh memory resume JOB_ID
+./scripts/nocheh memory review EVENT_ID --approve
+./scripts/nocheh import telegram /path/to/result.json --approve-memory-review
+./scripts/nocheh memory graph --scope '*' --output graph.json
+```
+
+Use the revision returned by `memory policy`; stale edits are rejected. A minimal
+policy file is `{"mode":"approved"}`. Omitting a key restores inheritance; `{}`
+restores all inherited settings. The existing import command without the optional
+approval flag keeps imports searchable without scheduling a native review.

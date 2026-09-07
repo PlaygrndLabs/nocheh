@@ -10,7 +10,7 @@ class DashboardOperationsTests(unittest.TestCase):
     def test_graph_citations_only_join_selected_scoped_page(self):
         def call(path,body=None):
             if path.startswith('/v1/graph'):return {'nodes':[{'id':'event:'+'a'*64}],'edges':[]}
-            if body['action']=='profiles':return {'profiles':[{'scope':'-20'}]}
+            if body['action']=='profiles':return {'profiles':[{'scope':'-20','profile':'fixture','exists':True}]}
             return {'profile':'fixture','memories':[{'exists':True,'name':'MEMORY.md','text':'note','sha256':'hash','truncated':False,'citations':['a'*64,'b'*64]}]}
         with patch('scripts.graph.API') as api:
             api.return_value.call.side_effect=call

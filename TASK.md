@@ -1,5 +1,8 @@
 # Rebuild progress
 
+Memory/privacy work is tracked separately in [space-memory-plan.md](docs/space-memory-plan.md)
+and ADR-0030, on the isolated `codex/memory-space-policies` worktree.
+
 ## Owner dashboard extension — 2026-09-07
 
 Accepted [dashboard/CLI plan](docs/dashboard-cli-plan.md), ADR-0025. Each increment

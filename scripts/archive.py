@@ -147,6 +147,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
     tg=sub.add_parser('import-telegram');tg.add_argument('file',type=Path);tg.add_argument('--scope');tg.add_argument('--scope-map',type=Path)
+    tg.add_argument('--approve-memory-review',action='store_true',help='Explicitly approve a private Hermes memory review after successful import.')
     for name in ('export','import'):
         sub.add_parser(name).add_argument('directory',type=Path)
     sub.add_parser('replay').add_argument('event_ids',nargs='+')
@@ -155,13 +156,16 @@ def main():
     elif args.command=='import': result=import_archive(api,args.directory)
     elif args.command=='replay': result=api.call('/v1/replay',{'event_ids':args.event_ids})
     else:
-        document=json.loads(args.file.read_text());count=missing=0
+        document=json.loads(args.file.read_text());count=missing=0;review_ids=[]
         mapping=json.loads(args.scope_map.read_text()) if args.scope_map else None
         for record,uploads in desktop_records(document,args.file.parent,args.scope,mapping):
             api.call('/v1/import',record)
+            review_ids.append(digest(record['event']['key']))
             for artifact_id,path in uploads: upload(api,artifact_id,path)
             count+=1;missing+=sum(a['state']=='failed' for a in record['artifacts'])
-        result={'imported':count,'missing_files':missing,'telegram_replies':0}
+        if args.approve_memory_review:
+            for start in range(0,len(review_ids),500):api.call('/v1/memory/reviews',{'event_ids':review_ids[start:start+500],'approved':True,'batch':'cli:'+digest(args.file.read_bytes())})
+        result={'imported':count,'missing_files':missing,'telegram_replies':0,'review_approved':args.approve_memory_review}
     print(json.dumps(result))
 
 

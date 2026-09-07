@@ -19,7 +19,7 @@ const PREFIX = '/api/plugins/nocheh';
 const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
-  mapping?: Record<string, unknown>; error?: string; result?: unknown};
+  mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown};
 
 async function atomic(path: string, value: unknown) {
   const temporary = path + '.' + randomUUID() + '.tmp';
@@ -179,6 +179,10 @@ export async function startManagement() {
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
       if (req.method==='POST' && route==='/ws-ticket')return json(res,200,{ticket:sessions.ticket(sessions.authorize(req)),ttl_seconds:30});
+      if(['/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview'].includes(route) && ['GET','POST'].includes(req.method??'')) {
+        return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
+          ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
+      }
       if (req.method === 'POST' && route === '/shutdown') {
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         json(res, 200, {ok: true}); setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100); return;
@@ -217,7 +221,7 @@ export async function startManagement() {
       if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'hermes.manage',request:{action:'profiles'}}));
       if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {
         return json(res,200,await python({operation:'hermes.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
-          scope:url.searchParams.get('scope'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
+          scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
       }
       if (req.method === 'POST' && route === '/memory/preferences') return exclusive('writer-start',async()=>{
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
@@ -258,6 +262,9 @@ export async function startManagement() {
             if (!job.preview || !['ready', 'failed', 'cancelled', 'interrupted'].includes(job.state) || active.has(id)) throw new HttpError(409, 'job_not_ready');
             const body = object(await readJson(req));
             const mapping = object(body.mapping ?? job.mapping ?? {});
+            if(body.review_approved!==undefined && typeof body.review_approved!=='boolean')throw new HttpError(400,'invalid_review_approval');
+            if(job.review_approved!==undefined && body.review_approved!==undefined && body.review_approved!==job.review_approved)throw new HttpError(409,'resume_review_approval_cannot_change');
+            job.review_approved=job.review_approved??(body.review_approved===true);
             if (job.mapping && JSON.stringify(mapping) !== JSON.stringify(job.mapping)) throw new HttpError(409, 'resume_scope_cannot_change');
             job.mapping = mapping; job.state = 'running'; delete job.error; await putJob(job);
             launch(job, {operation: 'import.run', job: id, mapping, after: job.completed});

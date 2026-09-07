@@ -20,7 +20,15 @@ def prepare_profile(root,scope,model):
     profile=Path(root)/'profiles'/scope.profile
     profile.mkdir(parents=True,exist_ok=True,mode=0o700)
     from .profile_config import configure_profile
+    if not (profile/'config.yaml').exists() and scope.revision:
+        from .profile_config import read, atomic_yaml
+        canonical=Path(root)/'profiles'/Scopes.profile(scope.space)
+        parent=Path(root)/'profiles'/Scopes.profile(scope.chat_id)
+        source=canonical if (canonical/'config.yaml').exists() else parent
+        if (source/'config.yaml').exists():atomic_yaml(profile/'config.yaml',read(source/'config.yaml'))
     configure_profile(profile, model)
+    from .native_memory import save_receipt
+    save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'revision':scope.revision,'owner':scope.owner}))
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
@@ -83,6 +91,9 @@ def committed_adapter_class():
             if turn is None:raise RuntimeError('uncommitted_message')
             response=await self._message_handler(event)
             if not response:turn['delivery_success']=True;return
+            if not await asyncio.to_thread(check_delivery_policy,turn['body']['archive_credential']):
+                turn['agent_result']={'state':'failed','error_code':'space_policy_changed'}
+                return
             from gateway.platforms.base import _thread_metadata_for_event
             # Use native Telegram formatting/splitting and the durable
             # outbound journal, without implicit MEDIA/file/TTS delivery.
@@ -132,7 +143,8 @@ class AssistantGateway:
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
         scope=self.scopes.resolve(body['payload'],body['scope'])
         if scope is None:return {'state':'suppressed'}
-        verify_capability(body['archive_credential'],environment_secret('SERVICE_TOKEN'),scope,body['event_id'])
+        claims=verify_capability(body['archive_credential'],environment_secret('SERVICE_TOKEN'),scope,body['event_id'])
+        scope=Scopes.apply_revision(scope,claims)
         if body['event_id']!=digest(body['source_key']) or body['source_key']!=f"telegram:{self.token.split(':',1)[0]}:update:{body['payload']['update_id']}":raise ValueError('invalid_dispatch_identity')
         name=digest(body['event_id']+':'+str(body['attempt']))
         async with self.lock:
@@ -190,3 +202,11 @@ class AssistantGateway:
         if self.loop and self.adapter:
             try:asyncio.run_coroutine_threadsafe(self.adapter.disconnect(),self.loop).result(timeout=20)
             except Exception:pass
+
+
+def check_delivery_policy(credential):
+    import urllib.request
+    try:
+        request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://archive:8780')+'/v1/memory/check',headers={'Authorization':'Bearer '+credential})
+        with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('valid') is True
+    except Exception:return False

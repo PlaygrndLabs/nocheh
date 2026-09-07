@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import { HttpError, object, string } from './http.js';
+import { eventSpace } from './spaces.js';
 
 export const digest = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 export function canonical(value: unknown): string {
@@ -113,6 +114,7 @@ export async function ingest(pool: pg.Pool, value: Envelope, dispatch=true): Pro
       const previous = await client.query<{payload_hash:string}>('SELECT payload_hash FROM events WHERE id=$1',[id]);
       if (previous.rows[0]?.payload_hash !== contentHash) throw new HttpError(409,'source_identity_conflict');
     } else {
+      await client.query('INSERT INTO event_spaces(event_id,space_id) VALUES($1,$2)',[id,eventSpace(value.scope,value.payload,value.channel)]);
       for (const ref of value.channel === undefined || value.channel === 'telegram' ? attachmentRefs(value.payload) : []) {
         await client.query('INSERT INTO artifacts(id,event_id,kind,source_ref,metadata) VALUES($1,$2,$3,$4,$5)',
           [digest(`${id}:${ref.ref}`),id,ref.kind,ref.ref,JSON.stringify(ref.metadata)]);

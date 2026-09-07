@@ -2,6 +2,7 @@ import type pg from 'pg';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Reader } from './access.js';
+import {assertAudience} from './access.js';
 import { type Envelope, digest, envelope, ingest, canonical } from './archive.js';
 import { HttpError, object, string } from './http.js';
 import { storeBytes } from './storage.js';
@@ -18,40 +19,45 @@ const toEnvelope=(row:EventRow):Envelope=>({version:1,key:row.source_key,bot_id:
   origin:row.origin,kind:row.kind,occurred_at:row.occurred_at,payload:JSON.parse(row.payload.toString()),text:row.original_text?.toString() ?? null,
   ...(row.wire ? {wire_base64:row.wire.toString('base64')} : {})});
 export async function search(pool:pg.Pool,principal:Reader,query:string,count=20) {
+  await assertAudience(pool,principal);
   string(query,2000); limit(count);
   if (!query.trim()) throw new HttpError(400,'empty_query');
   const {rows}=await pool.query<EventRow & {derived_id:string|null}>(`WITH hits AS (
     SELECT id,scope,source_id,revision,origin,kind,occurred_at,received_at,original_text,NULL::text AS derived_id,
       ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) AS rank
-    FROM events WHERE ($2::text IS NULL OR scope=$2) AND to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
+    FROM events WHERE ($2::text IS NULL OR (scope=$2 AND origin<>'generated')) AND ($4::text IS NULL OR id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
     UNION ALL
     SELECT e.id,e.scope,e.source_id,e.revision,'derived',d.kind,e.occurred_at,e.received_at,d.content,d.id,
       ts_rank(to_tsvector('simple',d.search_text),plainto_tsquery('simple',$1)) AS rank
     FROM derived_artifacts d JOIN events e ON e.id=d.event_id
-    WHERE ($2::text IS NULL OR e.scope=$2) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
-  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count]);
+    WHERE ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated')) AND ($4::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
+  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count,principal.scope===null?null:principal.space??null]);
+  await assertAudience(pool,principal);
   return rows.map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
     kind:row.kind,origin:row.origin,derived_id:row.derived_id,occurred_at:row.occurred_at,text:row.original_text?.toString().slice(0,2000) ?? null,
     truncated:(row.original_text?.toString().length ?? 0)>2000}));
 }
 export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
+  await assertAudience(pool,principal);
   string(id,64);
-  const {rows}=await pool.query<EventRow>('SELECT * FROM events WHERE id=$1 AND ($2::text IS NULL OR scope=$2)',[id,principal.scope]);
+  const {rows}=await pool.query<EventRow>(`SELECT * FROM events WHERE id=$1 AND ($2::text IS NULL OR (scope=$2 AND origin<>'generated')) AND ($3::text IS NULL OR id IN(SELECT event_id FROM event_spaces WHERE space_id=$3))`,[id,principal.scope,principal.scope===null?null:principal.space??null]);
   const row=rows[0]; if (!row) throw new HttpError(404,'source_not_found');
   const artifacts=await pool.query('SELECT * FROM artifacts WHERE event_id=$1 ORDER BY id',[id]);
   const derived=await pool.query<{id:string;event_id:string;artifact_id:string|null;kind:string;content:Buffer;provenance:unknown;created_at:Date}>(
     'SELECT id,event_id,artifact_id,kind,content,provenance,created_at FROM derived_artifacts WHERE event_id=$1 ORDER BY id',[id]);
+  await assertAudience(pool,principal);
   return {id:row.id,source:`nocheh:event:${id}`,received_at:row.received_at.toISOString(),event:toEnvelope(row),artifacts:artifacts.rows,
     derived:derived.rows.map(d=>({...d,created_at:d.created_at.toISOString(),content_base64:d.content.toString('base64'),content:undefined}))};
 }
 export async function readArtifact(pool:pg.Pool,principal:Reader,root:string,id:string):Promise<Buffer> {
+  await assertAudience(pool,principal);
   const {rows}=await pool.query<{file_hash:string;state:string}>(`SELECT a.file_hash,a.state FROM artifacts a JOIN events e ON e.id=a.event_id
-    WHERE a.id=$1 AND ($2::text IS NULL OR e.scope=$2)`,[string(id,64),principal.scope]);
+    WHERE a.id=$1 AND ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated')) AND ($3::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$3))`,[string(id,64),principal.scope,principal.scope===null?null:principal.space??null]);
   const row=rows[0]; if (!row) throw new HttpError(404,'source_not_found');
   if (row.state!=='ready' || !/^[a-f0-9]{64}$/.test(row.file_hash)) throw new HttpError(409,'artifact_unavailable');
   const bytes=await readFile(join(root,'files',row.file_hash));
   if (digest(bytes)!==row.file_hash) throw new HttpError(503,'artifact_integrity_failed');
-  return bytes;
+  await assertAudience(pool,principal);return bytes;
 }
 export async function exportPage(pool:pg.Pool,after:string,count=20) {
   const ids=await pool.query<{id:string}>('SELECT id FROM events WHERE id>$1 ORDER BY id LIMIT $2',[string(after,64),limit(count,20,50)]);

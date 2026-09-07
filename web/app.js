@@ -118,7 +118,7 @@ import {fetchJSON,authedFetch} from './client.js';
   }
   function Jobs({notify}) {
     const [tick,setTick]=useState(0),[jobs,error]=useLoad('/jobs',tick),[settings]=useLoad('/settings');
-    const [selected,setSelected]=useState(null),[busy,setBusy]=useState(false),[progress,setProgress]=useState(''),[mapping,setMapping]=useState({});
+    const [selected,setSelected]=useState(null),[busy,setBusy]=useState(false),[progress,setProgress]=useState(''),[mapping,setMapping]=useState({}),[reviewApproved,setReviewApproved]=useState(false);
     useEffect(()=>{const timer=setInterval(()=>setTick(v=>v+1),2500);return()=>clearInterval(timer);},[]);
     const fields=Object.fromEntries((settings?.fields||[]).map(f=>[f.key,f.value]));
     const scopes=[fields.TELEGRAM_OWNER_ID,...(fields.TELEGRAM_GROUP_IDS||'').split(',')].filter(Boolean);
@@ -133,10 +133,10 @@ import {fetchJSON,authedFetch} from './client.js';
           setProgress('Uploaded '+(++done)+' of '+files.length+' files');
         }
         setProgress('Checking export and media…');const preview=await call('/jobs/'+job.id+'/preview',{});
-        setSelected(preview);setMapping({});setTick(v=>v+1);setProgress('Ready to review.');
+        setSelected(preview);setMapping({});setReviewApproved(false);setTick(v=>v+1);setProgress('Ready to review.');
       }catch(e){notify(errorText(e),true);setProgress('Upload needs attention. Your archive has not been imported.');}finally{setBusy(false);}
     };
-    const run=async(job,action)=>{try{const result=await call('/jobs/'+job.id+'/'+action,action==='start'?{mapping:job.mapping||mapping}:{});setSelected(result);setTick(v=>v+1);notify(action==='cancel'?'Import stopped. Already archived messages are retained.':'Import started. Historical messages will not send replies.');}catch(e){notify(errorText(e),true);}};
+    const run=async(job,action)=>{try{const result=await call('/jobs/'+job.id+'/'+action,action==='start'?{mapping:job.mapping||mapping,review_approved:job.review_approved??reviewApproved}:{});setSelected(result);setTick(v=>v+1);notify(action==='cancel'?'Import stopped. Already archived messages are retained.':'Import started. Historical messages will not send replies.');}catch(e){notify(errorText(e),true);}};
     const current=jobs?.find(j=>j.id===selected?.id)||selected;
     return h('div',null,h(Panel,{title:'1. Choose a Telegram export',note:'Export from Telegram Desktop as JSON. Select the export folder to include media, a ZIP, or a JSON file for text only.'},
       h(Steps,{items:['Choose an export','Review access and files','Import and track progress']}),h('div',{className:'n-actions'},h('label',{className:'n-file'},'Select JSON or ZIP',h('input',{type:'file',accept:'.json,.zip',disabled:busy,onChange:e=>upload([...e.target.files])})),
@@ -148,7 +148,7 @@ import {fetchJSON,authedFetch} from './client.js';
           h('select',{id:'scope-'+c.id,value:(current.mapping||mapping)[c.id]||'',disabled:current.state!=='ready',onChange:e=>{const next={...mapping};if(e.target.value)next[c.id]=e.target.value;else delete next[c.id];setMapping(next);}},
             h('option',{value:''},'Owner-only archive (default)'),...scopes.map(s=>h('option',{value:s,key:s},s===fields.TELEGRAM_OWNER_ID?'Owner DM · '+s:'Share with group · '+s))))),
         h('p',{className:'n-muted'},'Group mapping makes this history available to that group. Import stores originals; it does not automatically rewrite memory.'),
-        h('p',{role:'status'},friendlyState(current.state)+' · '+current.completed+' / '+current.preview.messages+' messages · '+current.duplicates+' duplicates'),
+        h('label',{className:'n-review-consent'},h('input',{type:'checkbox',checked:current.review_approved??reviewApproved,disabled:busy||current.state!=='ready',onChange:e=>setReviewApproved(e.target.checked)}),'Review with Hermes to update private memory'),h('p',{className:'n-muted'},'Optional. Leave unchecked to import searchable originals without starting a memory review. This decision is preserved when resuming.'),h('p',{role:'status'},friendlyState(current.state)+' · '+current.completed+' / '+current.preview.messages+' messages · '+current.duplicates+' duplicates'),
         current.error&&h('p',{role:'alert'},current.error),
         ['ready','failed','cancelled','interrupted'].includes(current.state)&&button(current.completed?'Resume import':'Start import',()=>run(current,'start'),busy,'n-primary'),
         current.state==='running'&&button('Stop import',()=>run(current,'cancel'))),
@@ -183,18 +183,18 @@ import {fetchJSON,authedFetch} from './client.js';
   }
 
   function Memory() {
-    const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[session,setSession]=useState(''),[offset,setOffset]=useState(0);
-    useEffect(()=>{if(!scope&&profiles?.profiles?.length)setScope(profiles.profiles[0].scope);},[profiles]);
-    const [data,problem]=useLoad(scope?'/memory?scope='+encodeURIComponent(scope)+'&session='+encodeURIComponent(session)+'&offset='+offset:null);
-    return h('div',null,h(Panel,{title:'Choose whose memory to read',note:'Your private DM and each selected group have separate Hermes profiles. These notes are maintained by the assistant and may change as it learns.'},
-      error&&h('p',{role:'alert'},error),h('label',null,'Chat profile',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setSession('');setOffset(0);}},...(profiles?.profiles||[]).map(p=>h('option',{value:p.scope,key:p.scope},profileName(p))))),
+    const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[profile,setProfile]=useState(''),[session,setSession]=useState(''),[offset,setOffset]=useState(0);
+    useEffect(()=>{if(!scope&&profiles?.profiles?.length){setScope(profiles.profiles[0].scope);setProfile(profiles.profiles[0].profile);}},[profiles]);
+    const [data,problem]=useLoad(scope?'/memory?scope='+encodeURIComponent(scope)+'&profile='+encodeURIComponent(profile)+'&session='+encodeURIComponent(session)+'&offset='+offset:null);
+    return h('div',null,h(Panel,{title:'Choose whose memory to read',note:'Your private assistant can recall across profiles. Shared spaces keep separate notes for each policy revision; historical notes remain available here to you.'},
+      error&&h('p',{role:'alert'},error),h('label',null,'Chat profile',h('select',{value:profile,onChange:e=>{const p=(profiles.history_profiles||profiles.profiles).find(p=>p.profile===e.target.value);setProfile(p.profile);setScope(p.scope);setSession('');setOffset(0);}},...(profiles?.history_profiles||profiles?.profiles||[]).map(p=>h('option',{value:p.profile,key:p.profile},profileName(p)+(p.revision?' · policy '+p.revision:''))))),
       profiles&&!profiles.profiles.length&&h('p',null,'No configured profiles yet. Set up your Telegram owner and groups in Settings.'),h(RouteLink,{page:'settings'},'Change memory limits in Settings →')),
-      scope&&problem&&h('p',{role:'alert'},problem),(!profiles||scope&&data?.scope!==scope)&&!error&&!problem&&h('p',{role:'status'},'Loading Hermes memory…'),
-      scope&&data?.scope===scope&&h(Panel,{title:'Working notes',note:'General memory and user profile notes are generated knowledge. Explicit source references help you check the supporting evidence.'},
+      scope&&problem&&h('p',{role:'alert'},problem),(!profiles||scope&&(data?.scope!==scope||data?.profile!==profile))&&!error&&!problem&&h('p',{role:'status'},'Loading Hermes memory…'),
+      scope&&data?.scope===scope&&data?.profile===profile&&h(Panel,{title:'Working notes',note:'General memory and user profile notes are generated knowledge. Explicit source references help you check the supporting evidence.'},
         ...(data.memories||[]).map(m=>h('article',{className:'n-memory-note',key:m.name},h('h3',null,m.name==='MEMORY.md'?'General memory':m.name==='USER.md'?'User profile notes':m.name),h('small',null,'Native Hermes file · '+m.name),
           m.exists&&m.text?h(Data,{value:m.text}):h('p',{className:'n-empty'},'No notes yet. Hermes fills this file when it saves useful information during conversations. Importing a chat alone does not create a note.'),
           m.truncated&&h('p',null,'Showing the first 256 KiB.'),h('small',null,m.citations.length+' explicit source references')))),
-      scope&&data?.scope===scope&&h(Panel,{title:'Conversation history',note:'Sessions saved by Hermes while running the assistant. Imported originals are searchable in Original chats; they do not become Hermes sessions.'},session&&button('Back to conversations',()=>{setSession('');setOffset(0);}),
+      scope&&data?.scope===scope&&data?.profile===profile&&h(Panel,{title:'Conversation history',note:'Sessions saved by Hermes while running the assistant. Imported originals are searchable in Original chats; they do not become Hermes sessions.'},session&&button('Back to conversations',()=>{setSession('');setOffset(0);}),
         !session&&!data.sessions.length&&h('p',{className:'n-empty'},'No saved conversations in this profile yet. They appear after the assistant runs here.'),
         !session&&data.sessions.map(s=>h('div',{className:'n-row',key:s.id},button(s.title||'Conversation '+s.id,()=>{setSession(s.id);setOffset(0);}),h('small',null,s.source))),
         ...data.messages.map((m,i)=>h('article',{className:'n-result',key:m.id||i},h('b',null,({user:'User',assistant:'Hermes',tool:'Tool result',system:'System'})[m.role]||m.role),h(Data,{value:m.content}),m.truncated&&h('small',null,'Message preview truncated.'))),
@@ -259,7 +259,7 @@ import {fetchJSON,authedFetch} from './client.js';
   }
   function Graph({notify}) {
     const selection=useRef(0), source=useRef(null);
-    const [scope,setScope]=useState(''),[scopeAfter,setScopeAfter]=useState(''),[scopeList,setScopeList]=useState([]),[scopes,scopeError]=useLoad('/scopes?after='+encodeURIComponent(scopeAfter));
+    const [scope,setScope]=useState('*'),[scopeAfter,setScopeAfter]=useState(''),[scopeList,setScopeList]=useState([]),[scopes,scopeError]=useLoad('/scopes?after='+encodeURIComponent(scopeAfter));
     const [after,setAfter]=useState(''),[history,setHistory]=useState([]),[data,setData]=useState(null),[selected,setSelected]=useState(null),[record,setRecord]=useState(null);
     const [busy,setBusy]=useState(false),[problem,setProblem]=useState(''),[retry,setRetry]=useState(0),[sourceBusy,setSourceBusy]=useState(false),[sourceError,setSourceError]=useState('');
     const [query,setQuery]=useState(''),[kind,setKind]=useState('');
@@ -279,13 +279,14 @@ import {fetchJSON,authedFetch} from './client.js';
     const connections=(data?.edges||[]).filter(edge=>edge.from===selected?.id||edge.to===selected?.id);
     return h('div',{className:'n-graph-page'},
       h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Follow the evidence'),h('p',{className:'n-muted'},'Explore messages, people and memory in three dimensions. Select a node to follow its source.')),
-        h('label',{className:'n-graph-scope'},'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),
+        h('label',{className:'n-graph-scope'},'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},h('option',{value:'*'},'All private knowledge'),...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),
         scopes?.next&&button('Load more scopes',()=>setScopeAfter(scopes.next))),
       scopeError&&h('p',{role:'alert'},scopeError),!scopes&&!scopeError&&h('p',{role:'status'},'Loading archive scopes…'),
       scopes&&!scopeList.length&&h(Panel,{title:'Your evidence space starts here'},h('p',null,'Import a chat to explore its messages and connections.'),h('a',{href:'#imports'},'Open Imports & jobs')),
       busy&&h('div',{className:'n-graph-loading',role:'status'},'Loading source relationships…'),
       problem&&h(Panel,{title:'Graph unavailable'},h('p',{role:'alert'},problem),button('Try again',()=>setRetry(v=>v+1))),
       data&&h('div',null,
+        data.native_profiles_truncated&&h('p',{role:'status'},'Showing notes from the first 20 native profiles. Select an archive scope or use Hermes memory to inspect further profiles.'),
         h('div',{className:'n-graph-workspace'},h(GraphSpace,{data,selectedId:selected?.id,matchingIds,choose}),
           h('aside',{className:'n-graph-inspector','aria-label':'Graph inspector'},
             h('div',{className:'n-node-browser'},h('h3',null,'Node browser'),
@@ -342,7 +343,12 @@ import {fetchJSON,authedFetch} from './client.js';
       h(Panel,{title:'Recent maintenance',note:'Diagnostics, exports, backups, restarts, restores and settings applies. Results update automatically.'},jobsError&&h('p',{role:'alert'},jobsError),jobs&&!tasks.length&&h('p',{className:'n-empty'},'No maintenance tasks yet. Run diagnostics above to check the installation.'),
         ...tasks.map(j=>h('article',{className:'n-result',key:j.id},h('div',{className:'n-result-heading'},h('h3',null,jobName(j.kind)),h('span',{className:'n-badge'},friendlyState(j.state))),h('small',null,new Date(j.created_at).toLocaleString()),j.error&&h('p',{role:'alert'},j.error),j.result&&h(OperationResult,{result:j.result}),j.kind==='operations.export'&&j.state==='complete'&&button('Download archive ZIP',()=>download('/exports/'+j.id+'/download','nocheh-archive.zip',notify))))));
   }
-  const extensions = {graph:{label:'Evidence graph',component:Graph},operations:{label:'Maintenance',component:Operations},memory:{label:'Hermes memory',component:Memory},honcho:{label:'Honcho lab',component:Honcho}};
+  function SpaceControls() {
+    const [Component,setComponent]=useState(null),[error,setError]=useState('');
+    useEffect(()=>{let alive=true;import('../integrations/hermes/dashboard/space-controls.js').then(m=>{if(alive)setComponent(()=>m.createSpaceControls(sdk.React,call));}).catch(e=>{if(alive)setError(errorText(e));});return()=>{alive=false;};},[]);
+    return error?h('p',{role:'alert'},error):Component?h(Component):h('p',{role:'status'},'Loading memory controls…');
+  }
+  const extensions = {spaces:{label:'Memory access',component:SpaceControls},graph:{label:'Evidence graph',component:Graph},operations:{label:'Maintenance',component:Operations},memory:{label:'Hermes memory',component:Memory},honcho:{label:'Honcho lab',component:Honcho}};
   window.__NOCHEH_PAGES__=extensions;
   function Integrations() {
     const [data,error]=useLoad('/runtime');
@@ -360,10 +366,10 @@ import {fetchJSON,authedFetch} from './client.js';
     useEffect(()=>{const change=()=>{setPage(location.hash.slice(1)||'overview');setNotice(null);};addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
     useEffect(()=>{heading.current?.focus({preventScroll:true});},[page]);
     const notify=(text,error=false)=>setNotice({text,error});
-    const pages={overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho lab'};
-    const descriptions={overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect a separate memory experiment and its setup status.'};
+    const pages={spaces:'Memory access',overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho lab'};
+    const descriptions={spaces:'Connect your private knowledge and control what each group or topic can use.',overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect a separate memory experiment and its setup status.'};
     descriptions.activity='Follow captured inputs, execution results and interruptions.';
-    const groups=[['Explore',['overview','archive','memory','graph','activity']],['Manage',['imports','integrations','settings','operations']],['Experiments',['honcho']]];
+    const groups=[['Explore',['overview','archive','memory','graph','activity']],['Manage',['imports','spaces','integrations','settings','operations']],['Experiments',['honcho']]];
     const Current=extensions[page]?.component;
     return h('div',{className:'nocheh-app'+(page==='graph'?' n-graph-active':'')},
       h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'ن'),h('span',null,'Nocheh',h('small',null,'Your conversations & memory'))),

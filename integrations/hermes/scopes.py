@@ -16,6 +16,10 @@ def verify_capability(credential,secret,scope,event_id):
         claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
         if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
             raise ValueError()
+        if claims.get('space') is not None:
+            if claims['space'] != scope.space or type(claims.get('revision')) is not int or claims['revision'] < 1:raise ValueError()
+        elif scope.space != scope.chat_id:raise ValueError()
+        return claims
     except Exception:raise ValueError('archive_capability_scope_mismatch') from None
 
 
@@ -25,6 +29,8 @@ class Scope:
     user_id: str
     owner: bool
     profile: str
+    space: str = ''
+    revision: int = 0
 
 
 class Scopes:
@@ -46,6 +52,12 @@ class Scopes:
     @staticmethod
     def profile(chat):return 'nocheh-'+hashlib.sha256(chat.encode()).hexdigest()[:24]
 
+    @staticmethod
+    def apply_revision(scope,claims):
+        from dataclasses import replace
+        if scope.owner or not claims.get('revision'):return scope
+        return replace(scope,profile=Scopes.profile(scope.space+':policy:'+str(claims['revision'])),revision=claims['revision'])
+
     def resolve(self,update,expected_scope):
         if not self.enabled:return None
         message=update.get('message')
@@ -59,4 +71,7 @@ class Scopes:
         from gateway.profile_routing import match_profile_route
         route=match_profile_route(self.routes,'telegram',chat_id=chat_id)
         if not route:raise ValueError('missing_profile_route')
-        return Scope(chat_id,user_id,owner,route.profile)
+        topic=message.get('message_thread_id')
+        if topic is not None and (type(topic) is not int or topic<=0):raise ValueError('invalid_topic')
+        space=chat_id if topic is None else chat_id+'/topic/'+str(topic)
+        return Scope(chat_id,user_id,owner,route.profile,space)
