@@ -11,9 +11,10 @@ export function limit(value:unknown,fallback=20,max=50):number {
   if (!Number.isInteger(n) || n<1 || n>max) throw new HttpError(400,'invalid_limit');
   return n;
 }
-type EventRow={id:string;source_key:string;scope:string;bot_id:string;source_id:string;revision:string;origin:Envelope['origin'];kind:string;occurred_at:string|null;
+type EventRow={id:string;source_key:string;scope:string;channel:'telegram'|'browser'|'scheduler';bot_id:string;source_id:string;revision:string;origin:Envelope['origin'];kind:string;occurred_at:string|null;
   received_at:Date;payload:Buffer;original_text:Buffer|null;wire:Buffer|null};
 const toEnvelope=(row:EventRow):Envelope=>({version:1,key:row.source_key,bot_id:row.bot_id,scope:row.scope,source_id:row.source_id,revision:row.revision,
+  ...(row.channel === 'telegram' ? {} : {channel:row.channel}),
   origin:row.origin,kind:row.kind,occurred_at:row.occurred_at,payload:JSON.parse(row.payload.toString()),text:row.original_text?.toString() ?? null,
   ...(row.wire ? {wire_base64:row.wire.toString('base64')} : {})});
 export async function search(pool:pg.Pool,principal:Reader,query:string,count=20) {

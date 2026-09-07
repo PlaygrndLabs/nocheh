@@ -173,3 +173,19 @@ node picking, original sources, orbit/zoom, search, scope pagination and full sc
 - [x] Browser acceptance covers navigation, unchanged native preference save,
   masked credential review/discard, diagnostics and responsive layout. Build and
   owner-management HTTP regression pass; AST-only code graph refreshed.
+
+### Nocheh runtime platform (ADR-0027)
+
+Accepted [seven-phase plan](docs/runtime-platform-plan.md). Complete and verify each
+phase, commit separately, then continue automatically. Existing release gates above
+remain active. Current uncommitted native-host work is superseded by this direction.
+
+| Phase | Actual status |
+| --- | --- |
+| P1 — Ownership and runtime adapters | Complete; Compose regression and adapter contracts pass (commit follows) |
+| P2 — Independent Nocheh dashboard | Pending |
+| P3 — Configuration and native administration | Pending |
+| P4 — Native browser chat | Pending |
+| P5 — Controlled broader tools and approvals | Pending |
+| P6 — Native cron | Pending |
+| P7 — Compatibility and release acceptance | Pending |

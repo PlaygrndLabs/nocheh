@@ -2,12 +2,13 @@
 
 ## Mission and active architecture
 
-Nocheh is a personal AI brain built around Hermes. Telegram is an adapter;
+Nocheh is a personal AI brain with Hermes as its first replaceable runtime. Telegram is an adapter;
 owned source data, useful memory, and reasoning are the product.
 
 The accepted implementation plan is [docs/rebuild-plan.md](docs/rebuild-plan.md).
 [ADR-0018](docs/adr/0018-hermes-owned-archive-subscription-rebuild.md) supersedes
 the previous implementation direction. Check `TASK.md` for actual phase status.
+ADR-0027 and [docs/runtime-platform-plan.md](docs/runtime-platform-plan.md) make Nocheh the main product and Hermes a runtime adapter; implement its seven phases separately.
 ADR-0019 makes local Docker Compose the current development and acceptance target;
 VPS work is deferred. Do not mistake planned phases for completed behavior.
 

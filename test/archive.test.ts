@@ -8,6 +8,8 @@ import { canonical, digest, ingest, type Envelope } from '../src/archive.js';
 import { initialize } from '../src/database.js';
 import { settings } from '../src/config.js';
 import { drainSpool, fetchAttachments, immutableFile } from '../src/storage.js';
+import {runInput} from '../src/run-source.js';
+import {readEvent, importRecord} from '../src/retrieval.js';
 
 test('immutable file storage detects collisions and preserves bytes',async()=>{
   const root=await mkdtemp(join(tmpdir(),'nocheh-files-'));
@@ -63,6 +65,16 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     await drainSpool(pool,root); await drainSpool(pool,root);
     assert.equal((await readdir(spool)).includes(name),false,'malformed entries cannot starve valid originals');
     assert.equal((await pool.query('SELECT count(*) FROM spool_failures')).rows[0].count,'100');
+    for (const channel of ['browser','scheduler'] as const) {
+      const input=runInput({channel,scope:'123',conversation:'fixture',id:'1',text:'exact\0\r\n 😃',payload:{file_id:'not-a-telegram-file'}});
+      const captured=await ingest(pool,input);
+      const exported=await readEvent(pool,{admin:true,scope:null},captured.id);
+      assert.deepEqual(exported.event,input);
+      assert.equal((await importRecord(pool,exported)).duplicate,true);
+      assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[captured.id])).rows[0].state,'suppressed');
+      assert.equal(exported.artifacts.length,0,'non-Telegram payloads cannot trigger Telegram downloads');
+    }
+    assert.equal((await ingest(pool,{...value,channel:'telegram'})).duplicate,true,'explicit default channel preserves legacy identity');
   } finally {
     await pool.end(); await admin.query(`DROP SCHEMA ${namespace} CASCADE`); await admin.end();
     await rm(root,{recursive:true,force:true});

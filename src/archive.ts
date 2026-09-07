@@ -66,15 +66,18 @@ CREATE TABLE IF NOT EXISTS action_requests (
 
 export interface Envelope {
   readonly version: 1; readonly key: string; readonly origin: 'live'|'import'|'generated';
+  readonly channel?: 'telegram'|'browser'|'scheduler';
   readonly bot_id: string; readonly kind: string; readonly scope: string;
   readonly source_id: string; readonly revision: string; readonly occurred_at: string|null;
   readonly payload: Record<string, unknown>; readonly text: string|null; readonly wire_base64?: string;
 }
 export function envelope(value: unknown): Envelope {
   const v = object(value);
-  if (Object.keys(v).some(k=>!['version','key','origin','bot_id','kind','scope','source_id','revision','occurred_at','payload','text','wire_base64'].includes(k))) throw new HttpError(400,'unknown_envelope_field');
+  if (Object.keys(v).some(k=>!['version','channel','key','origin','bot_id','kind','scope','source_id','revision','occurred_at','payload','text','wire_base64'].includes(k))) throw new HttpError(400,'unknown_envelope_field');
+  if (v.channel !== undefined && !['telegram','browser','scheduler'].includes(String(v.channel))) throw new HttpError(400,'invalid_channel');
   if (v.version !== 1 || !['live','import','generated'].includes(String(v.origin))) throw new HttpError(400, 'invalid_envelope');
-  for (const key of ['key','bot_id','kind','scope','source_id','revision']) if (!string(v[key],1024)) throw new HttpError(400,'empty_identity');
+  for (const key of ['key','kind','scope','source_id','revision']) if (!string(v[key],1024)) throw new HttpError(400,'empty_identity');
+  if (!string(v.bot_id,1024) && (v.channel === undefined || v.channel === 'telegram')) throw new HttpError(400,'empty_identity');
   if (v.text !== null) string(v.text, 2000000);
   if (v.occurred_at !== null) string(v.occurred_at, 100);
   object(v.payload);
@@ -96,25 +99,26 @@ export function attachmentRefs(payload: Record<string, unknown>): {kind:string; 
 export async function ingest(pool: pg.Pool, value: Envelope, dispatch=true): Promise<{id:string; duplicate:boolean}> {
   const id = digest(value.key), payload = Buffer.from(canonical(value.payload));
   // Identity metadata is included: reuse of a key cannot silently move a source to another scope.
-  const contentHash = digest(canonical({...value, wire_base64: undefined}));
+  const {channel, ...identity} = value;
+  const contentHash = digest(canonical({...identity, ...(channel && channel !== 'telegram' ? {channel} : {}), wire_base64: undefined}));
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const added = await client.query(`INSERT INTO events(id,source_key,channel,scope,source_id,revision,origin,kind,occurred_at,payload,payload_hash,original_text,search_text,wire,bot_id)
-      VALUES($1,$2,'telegram',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(source_key) DO NOTHING RETURNING id`,
+      VALUES($1,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(source_key) DO NOTHING RETURNING id`,
     [id,value.key,value.scope,value.source_id,value.revision,value.origin,value.kind,value.occurred_at,payload,contentHash,
       value.text === null ? null : Buffer.from(value.text), (value.text ?? '').replaceAll('\0',''),
-      value.wire_base64 === undefined ? null : Buffer.from(value.wire_base64,'base64'),value.bot_id]);
+      value.wire_base64 === undefined ? null : Buffer.from(value.wire_base64,'base64'),value.bot_id,value.channel ?? 'telegram']);
     if (!added.rowCount) {
       const previous = await client.query<{payload_hash:string}>('SELECT payload_hash FROM events WHERE id=$1',[id]);
       if (previous.rows[0]?.payload_hash !== contentHash) throw new HttpError(409,'source_identity_conflict');
     } else {
-      for (const ref of attachmentRefs(value.payload)) {
+      for (const ref of value.channel === undefined || value.channel === 'telegram' ? attachmentRefs(value.payload) : []) {
         await client.query('INSERT INTO artifacts(id,event_id,kind,source_ref,metadata) VALUES($1,$2,$3,$4,$5)',
           [digest(`${id}:${ref.ref}`),id,ref.kind,ref.ref,JSON.stringify(ref.metadata)]);
       }
       await client.query('INSERT INTO dispatches(event_id,state) VALUES($1,$2)',
-        [id, dispatch && value.origin === 'live' && value.kind === 'telegram_update' ? 'pending' : 'suppressed']);
+        [id, dispatch && (value.channel === undefined || value.channel === 'telegram') && value.origin === 'live' && value.kind === 'telegram_update' ? 'pending' : 'suppressed']);
     }
     await client.query('COMMIT'); return {id, duplicate: !added.rowCount};
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }

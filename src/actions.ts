@@ -2,6 +2,7 @@ import type pg from 'pg';
 import { canonical,digest,ingest } from './archive.js';
 import { HttpError,object,string } from './http.js';
 import type { Reader } from './access.js';
+import type { RuntimeCall } from './runtime.js';
 import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
 
 export async function requestAction(pool:pg.Pool,principal:Reader,value:unknown) {
@@ -46,7 +47,7 @@ export async function controlReply(pool:pg.Pool,policy:AssistantPolicy,eventId:s
   return reply;
 }
 
-export async function executeApproved(pool:pg.Pool,call:(path:string,body:unknown,timeout?:number)=>Promise<Record<string,unknown>>) {
+export async function executeApproved(pool:pg.Pool,call:RuntimeCall) {
   const client=await pool.connect();let held=false;
   try {
     held=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803303) AS locked')).rows[0]!.locked;
@@ -55,7 +56,7 @@ export async function executeApproved(pool:pg.Pool,call:(path:string,body:unknow
     if(!row)return;
     await client.query("UPDATE action_requests SET state='running',updated_at=now() WHERE id=$1",[row.id]);
     try {
-      const result=await call('/internal/action',{id:row.id,destination:row.destination,text:row.original_text.toString()},60000);
+      const result=await call('action.execute',{id:row.id,destination:row.destination,text:row.original_text.toString()},60000);
       if(!['done','ambiguous'].includes(String(result.state)))throw Error('invalid_receipt');
       await client.query('UPDATE action_requests SET state=$2,error_code=$3,updated_at=now() WHERE id=$1',[row.id,result.state,result.state==='ambiguous'?'delivery_unconfirmed':null]);
     } catch {await client.query("UPDATE action_requests SET error_code='awaiting_action_receipt',updated_at=now() WHERE id=$1",[row.id]);}
