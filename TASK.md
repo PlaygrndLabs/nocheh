@@ -1,7 +1,10 @@
 # Rebuild progress
 
-Local Compose is running. The rebuild is **not released**: real Telegram
-acceptance, cutover and the merge to `main` remain pending owner configuration.
+The owner requested a fresh start on 2026-09-07. Local Nocheh services are stopped;
+runtime data, backups, logins, generated dependencies/build files, project Docker
+volumes and Nocheh-built images were removed. `.env` is a credential-free template.
+The rebuild is **not released**: fresh setup, real Telegram acceptance, cutover
+and the merge to `main` remain pending.
 
 Accepted plan: [docs/rebuild-plan.md](docs/rebuild-plan.md).
 Baseline: `9dd0b58` on `codex/legacy-nocheh`. Work: `codex/hermes-rebuild`.
@@ -19,7 +22,7 @@ No legacy data migration is required. VPS work is deferred by ADR-0019.
 | 7 — Honcho comparison, maximum $5 | Runnable harness at `2d27262`; live comparison pending separate credentials; optional |
 | 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate, cutover and merge pending |
 
-## Current validation — 2026-09-07
+## Last validation before the reset — 2026-09-07
 
 - 14 TypeScript tests pass against real Compose PostgreSQL where required;
   30 Python native integration/operations tests pass. No main-suite skips.
@@ -46,9 +49,10 @@ The retired application is recoverable on the legacy branch. Its remaining local
 `web/` build output and dependencies were removed. Active documentation describes
 this runtime; historical research and accepted ADRs remain available.
 
-Edit only the ignored root `.env` for local configuration. Previous configuration
-files are saved privately under `data/local/previous-configuration/`; unrelated
-provider keys were not imported. Archive data, files and the dedicated login remain.
+Edit only the ignored root `.env` for local configuration. The requested fresh
+reset removed the entire `data/` directory, including previous configuration,
+archive files, backups, experiment state and the dedicated Hermes login.
+Committed synthetic evidence and historical decisions remain in Git.
 
 Archive capture, attachments, assistant work and approved actions progress in
 independent non-overlapping loops. Slow inference cannot block capture/downloads.
@@ -58,7 +62,8 @@ archived with a visible suppressed dispatch and do not starve subsequent work.
 
 ## Remaining release gates
 
-Set the bot token, owner ID and selected groups in `.env`; follow
+Run `./scripts/nocheh up` and `./scripts/nocheh login` for a fresh runtime and
+dedicated subscription login. Set the bot token, owner ID and selected groups in `.env`; follow
 [Telegram setup and acceptance](docs/telegram.md). Actual DM/group replies and
 silence, private/group isolation, voice persistence, owner-approved delivery and
 reconnect/restart checks are **unrun**. Container health does not prove these.
