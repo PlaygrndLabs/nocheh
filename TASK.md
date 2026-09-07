@@ -12,8 +12,8 @@ Old persisted data requires no migration.
 | 3 | Durable capture and archive | Complete: `d29dbab` |
 | 4 | Import, retrieval, export, replay | Complete: `aa39e60` |
 | 5 | Optional guard on every model attempt | Complete: `eb6d319` |
-| 6 | Scoped assistant and transcription | Implemented and offline/native-memory verified; live Telegram acceptance pending credentials |
-| 7 | Isolated Honcho comparison, maximum $5 | Pending; live portion needs temporary key |
+| 6 | Scoped assistant and transcription | Checkpoint `43eea5e`; offline/native-memory verified; live Telegram acceptance pending credentials |
+| 7 | Isolated Honcho comparison, maximum $5 | Runnable harness verified; live comparison pending temporary key and separate bridge login |
 | 8 | Validate, cut over, merge into main | Pending |
 
 Complete acceptance checks, commit each phase, and proceed automatically. Missing
@@ -66,3 +66,14 @@ Actual DM/group/voice/approval delivery and reconnect acceptance are not run, so
 Phase 6 is not complete and merging remains blocked. [Setup](docs/telegram.md)
 includes capture-only ID discovery without Telegram sends. Continue independent
 experiment/operations work while waiting for these credentials.
+
+Phase 7: [the isolated harness](experiments/honcho/README.md) builds and boots the
+pinned Honcho and CLIProxyAPI revisions. Five budget/scoring tests pass. Actual
+container configuration verifies all nine reasoning routes and the embedding
+route use the meter; tokenization works without runtime Internet access. The
+native Hermes baseline exposes exactly memory/session search, without inference
+during its configuration check. Missing credentials produce zero model calls and
+$0 in reservations. [Evidence](compatibility/results/2026-09-07-honcho-harness.json).
+Live bridge compatibility, Honcho derivation and comparative recall remain
+pending. No temporary API key was supplied and no paid request was made. This
+optional pending evaluation does not block production; Phase 6 live acceptance does.

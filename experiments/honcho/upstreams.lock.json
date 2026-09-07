@@ -1,0 +1,11 @@
+{
+  "honcho": {"repository":"https://github.com/plastic-labs/honcho.git","revision":"be54355545b64ddb10203829d323861f52423685"},
+  "bridge": {"repository":"https://github.com/router-for-me/CLIProxyAPI.git","revision":"c76dfd4e0edabab9000628b1560ab8ab379eadb8"},
+  "build_images": {
+    "python:3.13-slim-bookworm":"python:3.13-slim-bookworm@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e",
+    "ghcr.io/astral-sh/uv:0.9.24":"ghcr.io/astral-sh/uv:0.9.24@sha256:816fdce3387ed2142e37d2e56e1b1b97ccc1ea87731ba199dc8a25c04e4997c5",
+    "golang:1.26-bookworm":"golang:1.26-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81",
+    "debian:bookworm":"debian:bookworm@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443"
+  },
+  "note":"Source pins inspected 2026-09-07. Live Honcho/bridge compatibility is pending; these are not certified production dependencies. Hermes uses compatibility/upstreams.lock.json."
+}
