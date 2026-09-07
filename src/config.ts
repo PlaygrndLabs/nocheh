@@ -4,7 +4,7 @@ import { assistantPolicy } from './assistant-policy.js';
 
 export function secret(name: string): string {
   const path = process.env[`${name}_FILE`];
-  const value = path ? readFileSync(path, 'utf8').trim() : process.env[name]?.trim();
+  const value = process.env[name]?.trim() ?? (path ? readFileSync(path, 'utf8').trim() : undefined);
   if (!value || value.length < 24) throw new Error(`Missing or short ${name}`);
   return value;
 }

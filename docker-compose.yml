@@ -16,17 +16,17 @@ x-service: &service
     PGHOST: postgres
     PGUSER: nocheh
     PGDATABASE: nocheh
-    PGPASSWORD_FILE: /run/secrets/database_password
-    SERVICE_TOKEN_FILE: /run/secrets/service_token
+    PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
+    SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
     NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-auto}
     GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex"]}
-    ASSISTANT_POLICY_FILE: /run/nocheh/assistant.json
-  secrets: [database_password, service_token]
+    TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+    TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+    TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
   volumes:
-    - ${NOCHEH_STATE_DIR:-./data/local}/assistant.json:/run/nocheh/assistant.json:ro
     - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files
     - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
   healthcheck:
@@ -43,8 +43,7 @@ services:
     environment:
       POSTGRES_USER: nocheh
       POSTGRES_DB: nocheh
-      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
-    secrets: [database_password]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
     volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
@@ -90,18 +89,18 @@ services:
     restart: unless-stopped
     stop_grace_period: 120s
     environment:
-      SERVICE_TOKEN_FILE: /run/secrets/service_token
-      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       NOCHEH_CAPTURE_ENABLED: '1'
-      ASSISTANT_POLICY_FILE: /run/nocheh/assistant.json
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+      TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-auto}
       GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex"]}
       NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
       ARCHIVE_URL: http://archive:8780
       GUARD_URL: http://guard:8780
-    secrets: [service_token, telegram_bot_token]
     volumes:
-      - ${NOCHEH_STATE_DIR:-./data/local}/assistant.json:/run/nocheh/assistant.json:ro
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes:/workspace/data/local/hermes
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
       - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
@@ -118,11 +117,3 @@ services:
 
 volumes:
   postgres_data:
-
-secrets:
-  database_password:
-    file: ${NOCHEH_STATE_DIR:-./data/local}/secrets/database_password
-  service_token:
-    file: ${NOCHEH_STATE_DIR:-./data/local}/secrets/service_token
-  telegram_bot_token:
-    file: ${NOCHEH_STATE_DIR:-./data/local}/secrets/telegram_bot_token

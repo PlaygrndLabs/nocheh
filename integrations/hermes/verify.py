@@ -1,4 +1,6 @@
 """Live synthetic acceptance against the running container service."""
+
+from integrations.hermes.environment import secret as environment_secret
 import argparse
 import base64
 import json
@@ -17,7 +19,7 @@ def main():
     args = parser.parse_args()
     if not args.live:
         parser.error("--live is required to use subscription quota")
-    token = Path(os.environ["SERVICE_TOKEN_FILE"]).read_text().strip()
+    token = environment_secret('SERVICE_TOKEN')
     def call(path, body):
         request = urllib.request.Request("http://127.0.0.1:8781" + path,
             data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})

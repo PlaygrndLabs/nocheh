@@ -3,36 +3,19 @@
 import argparse
 import json
 import os
-import secrets
 import re
 import shutil
 import subprocess
 from pathlib import Path
+
+from configuration import initialize, load, write_env, env_path, compose_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(ROOT / "data/local"))).resolve()
 
 
 def bootstrap():
-    for name in ("secrets", "files", "spool", "hermes", "reports"):
-        (STATE / name).mkdir(parents=True, exist_ok=True, mode=0o700)
-    for name in ("database_password", "service_token"):
-        path = STATE / "secrets" / name
-        if not path.exists():
-            with path.open("x") as file:
-                file.write(secrets.token_hex(32) + "\n")
-        path.chmod(0o600)
-    bot = STATE / 'secrets/telegram_bot_token'
-    if not bot.exists():
-        bot.touch(mode=0o600)
-    policy=STATE/'assistant.json'
-    if not policy.exists():
-        policy.write_text(json.dumps({'enabled':False,'owner_id':None,'group_ids':[]},indent=2)+'\n')
-        policy.chmod(0o600)
-    env = STATE / "compose.env"
-    if not env.exists():
-        env.write_text(f"NOCHEH_UID={os.getuid()}\nNOCHEH_GID={os.getgid()}\nNOCHEH_PORT=8780\nNOCHEH_MODEL=gpt-5.6-sol\nNOCHEH_GUARD_MODE=auto\n")
-        env.chmod(0o600)
+    initialize(STATE)
     # Transfer the dedicated test login once. There must be only one refresh owner.
     prior = ROOT / "data/compat/hermes-auth/auth.json"
     current = STATE / "hermes/auth.json"
@@ -44,23 +27,27 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose"))
     args, rest = parser.parse_known_args()
     if args.command in ('backup','restore','diagnose'):
         from operations import main as operations
         return operations(args.command,STATE,rest)
     bootstrap()
+    if args.command == "init":
+        print("Local configuration ready. Edit " + str(env_path(STATE))); return 0
     if args.command=='configure-telegram':
-        config_parser=argparse.ArgumentParser(description='Enable the owner DM and explicitly selected groups; token stays in its secret file.')
+        config_parser=argparse.ArgumentParser(description='Enable the owner DM and explicitly selected groups; token stays in .env.')
         config_parser.add_argument('--owner-id',required=True)
         config_parser.add_argument('--group-id',action='append',default=[])
         selected=config_parser.parse_args(rest)
         if not re.fullmatch(r'[1-9]\d{0,18}',selected.owner_id) or any(not re.fullmatch(r'-\d{1,19}',g) for g in selected.group_id):config_parser.error('Use numeric Telegram IDs; group IDs are negative.')
-        if not (STATE/'secrets/telegram_bot_token').read_text().strip():config_parser.error('The Telegram token file is empty.')
-        (STATE/'assistant.json').write_text(json.dumps({'enabled':True,'owner_id':selected.owner_id,'group_ids':list(dict.fromkeys(selected.group_id))},indent=2)+'\n')
+        values=load(STATE)
+        if not values['TELEGRAM_BOT_TOKEN']:config_parser.error('Set TELEGRAM_BOT_TOKEN in .env first.')
+        values.update(TELEGRAM_ENABLED='true',TELEGRAM_OWNER_ID=selected.owner_id,TELEGRAM_GROUP_IDS=','.join(dict.fromkeys(selected.group_id)))
+        write_env(env_path(STATE),values)
         print('Telegram policy saved. Run ./scripts/nocheh up to apply it.');return 0
-    env = dict(os.environ, NOCHEH_STATE_DIR=str(STATE))
-    command = ["docker", "compose", "--env-file", str(STATE / "compose.env"), "-f", str(ROOT / "docker-compose.yml")]
+    env = compose_environment(STATE)
+    command = ["docker", "compose", "--env-file", str(env_path(STATE)), "-f", str(ROOT / "docker-compose.yml")]
     if args.command in ("dev", "test"):
         command += ["-f", str(ROOT / "docker-compose.dev.yml")]
     actions = {

@@ -1,4 +1,6 @@
 """Native Telegram adapter supervised by committed archive dispatch receipts."""
+
+from integrations.hermes.environment import secret as environment_secret
 import asyncio
 import contextvars
 import hashlib
@@ -43,7 +45,7 @@ async def native_turn(root,scope,body,model,credentials):
     request={'text':text,'model':model,'session_id':session_id,'owner':scope.owner,'chat_id':scope.chat_id,
              'user_id':scope.user_id,'archive_credential':body['archive_credential'],'access_token':credentials.access_token}
     env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
-         'SERVICE_TOKEN_FILE','ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
+         'SERVICE_TOKEN','SERVICE_TOKEN_FILE','ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
     env.update(HERMES_HOME=str(profile),NOCHEH_CAPTURE_ENABLED='0')
     process=await asyncio.create_subprocess_exec(sys.executable,'-m','integrations.hermes.assistant_turn',
         stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL,env=env,
@@ -138,7 +140,7 @@ class AssistantGateway:
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
         scope=self.scopes.resolve(body['payload'],body['scope'])
         if scope is None:return {'state':'suppressed'}
-        verify_capability(body['archive_credential'],Path(os.environ['SERVICE_TOKEN_FILE']).read_text().strip(),scope,body['event_id'])
+        verify_capability(body['archive_credential'],environment_secret('SERVICE_TOKEN'),scope,body['event_id'])
         if body['event_id']!=digest(body['source_key']) or body['source_key']!=f"telegram:{self.token.split(':',1)[0]}:update:{body['payload']['update_id']}":raise ValueError('invalid_dispatch_identity')
         name=digest(body['event_id']+':'+str(body['attempt']))
         async with self.lock:

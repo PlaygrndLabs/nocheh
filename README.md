@@ -12,6 +12,8 @@ completed behavior. Legacy code is preserved on `codex/legacy-nocheh`.
 Install Docker with Compose and Python 3, then run:
 
 ```bash
+./scripts/nocheh init     # create .env with generated internal credentials
+# Edit .env for Telegram, model and optional guarding settings.
 ./scripts/nocheh up       # build, start in the background, wait for health checks
 ./scripts/nocheh dev      # the same services with source watching and restart
 ./scripts/nocheh status
@@ -26,7 +28,10 @@ The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services a
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.
 
-Bootstrap creates credentials and writable state under ignored `data/local/`.
+Configuration is in the ignored root `.env`; `.env.example` documents its fields.
+Bootstrap generates missing internal passwords and creates writable state under
+ignored `data/local/`. Hermes manages its refreshable OAuth login in its native
+`data/local/hermes/auth.json` file.
 It transfers an existing dedicated compatibility login into the runtime once.
 For a new installation, start the services and run `./scripts/nocheh login`.
 No production model-provider API keys or local inference models are required.
