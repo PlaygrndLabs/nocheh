@@ -2,11 +2,11 @@
 
 After the requested reset on 2026-09-07, a fresh Compose runtime was started with
 the supplied Telegram bot token and owner/group IDs in the ignored `.env`.
-All five services are healthy and the archive is empty. Bot token validation
-passes; Telegram currently reports the configured DM/group as unavailable.
-The fresh Hermes device login awaits owner authorization. Telegram replies remain
-disabled until setup is ready. The rebuild is **not released**: subscription
-sign-in, Telegram access/acceptance, cutover and the merge to `main` remain pending.
+All five services are healthy. Fresh Hermes sign-in and live subscription checks
+pass. Telegram is enabled: the owner's real `/start` was captured, dispatched and
+answered with confirmed Telegram delivery. The configured group still returns
+`chat not found`. The rebuild is **not released**: remaining Telegram acceptance,
+cutover and the merge to `main` remain pending.
 
 Accepted plan: [docs/rebuild-plan.md](docs/rebuild-plan.md).
 Baseline: `9dd0b58` on `codex/legacy-nocheh`. Work: `codex/hermes-rebuild`.
@@ -20,7 +20,7 @@ No legacy data migration is required. VPS work is deferred by ADR-0019.
 | 3 — Durable capture and archive | Complete: `d29dbab` |
 | 4 — Import, search, export, replay | Complete: `aa39e60` |
 | 5 — Optional outgoing guard | Complete: `eb6d319` |
-| 6 — Scoped assistant and voice | Implemented at `43eea5e`; native/offline checks pass; real Telegram acceptance pending |
+| 6 — Scoped assistant and voice | Implemented at `43eea5e`; real owner DM capture/reply passes; group, voice, approval and reconnect checks pending |
 | 7 — Honcho comparison, maximum $5 | Runnable harness at `2d27262`; live comparison pending separate credentials; optional |
 | 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate, cutover and merge pending |
 
@@ -64,12 +64,15 @@ archived with a visible suppressed dispatch and do not starve subsequent work.
 
 ## Remaining release gates
 
-Complete the pending device-code sign-in, start the bot's DM and ensure the bot
-belongs to the selected group with full message visibility. Credentials and IDs
-are already saved locally. Follow
-[Telegram setup and acceptance](docs/telegram.md). Actual DM/group replies and
-silence, private/group isolation, voice persistence, owner-approved delivery and
-reconnect/restart checks are **unrun**. Container health does not prove these.
+The first real owner-DM capture and reply passed after enabling the gateway.
+Fresh subscription refresh, chat, detector and Ogg/Opus checks also passed.
+[Content-free live evidence](compatibility/results/2026-09-07-telegram-dm.json).
+Ensure the bot belongs to the selected group with full message visibility;
+Telegram currently reports that group as unavailable. Credentials and IDs are
+already saved locally. Follow [Telegram setup and acceptance](docs/telegram.md).
+Actual group replies/silence, private/group isolation, voice persistence,
+owner-approved delivery and reconnect/restart checks remain **unrun**.
+Container health does not prove these.
 Do not merge until they pass; commit the completed phase and proceed automatically.
 
 The optional [Honcho experiment](experiments/honcho/README.md) needs a separate
