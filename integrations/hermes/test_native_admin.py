@@ -152,3 +152,47 @@ class NativeAdminTests(unittest.TestCase):
         self.assertEqual(self.client.delete('/api/profiles/'+self.owner.name, headers=self.headers).status_code, 400)
         for body in ({'name':'nocheh-impostor'}, {'name':'unsafe','clone_from':'default'}):
             self.assertEqual(self.client.post('/api/profiles', headers=self.headers, json=body).status_code, 400)
+
+class BrowserBoundaryTests(unittest.TestCase):
+    def test_profile_bound_channels_explicit_resume_and_authentication(self):
+        import asyncio
+        from urllib.parse import urlencode,parse_qs
+        from .native_admin import Administration
+        from hermes_state import SessionDB
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);policy=Scopes({'enabled':False,'owner_id':'42','group_ids':['-10']})
+            owner=root/'profiles'/Scopes.profile('42');owner.mkdir(parents=True)
+            group=root/'profiles'/Scopes.profile('-10');group.mkdir(parents=True)
+            db=SessionDB(owner/'state.db');db.create_session('private-session',source='browser');db.close()
+            forwarded=[];sent=[]
+            async def app(scope,receive,send): forwarded.append(parse_qs(scope['query_string'].decode()))
+            admin=Administration(app,root,'model',policy,'fixture',True)
+            async def send(value): sent.append(value)
+            async def receive(): return {'type':'websocket.connect'}
+            def request(**query):
+                scope={'type':'websocket','path':'/api/pty','query_string':urlencode({'token':'fixture','channel':'same-channel','attach':'same-token',**query}).encode()}
+                asyncio.run(admin(scope,receive,send))
+            request();request(profile=group.name)
+            self.assertNotEqual(forwarded[0]['channel'],forwarded[1]['channel'])
+            self.assertEqual(forwarded[0]['profile'],[owner.name])
+            request(profile=group.name,resume='private-session');self.assertEqual(len(forwarded),2)
+            self.assertEqual(sent[-1]['code'],1008)
+            request(resume='private-session');self.assertEqual(len(forwarded),3)
+            request(token='wrong');self.assertEqual(len(forwarded),3)
+
+    def test_native_sidebar_has_metadata_but_cannot_start_a_model(self):
+        from fastapi.testclient import TestClient
+        from .native_admin import create_app
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);policy=Scopes({'enabled':False,'owner_id':'42','group_ids':['-10']})
+            app=create_app(root,'model',policy,'fixture',True)
+            with TestClient(app,base_url='http://127.0.0.1:8785') as client:
+                with client.websocket_connect('/api/ws?token=fixture') as ws:
+                    self.assertEqual(ws.receive_json()['params']['type'],'gateway.ready')
+                    ws.send_json({'id':1,'method':'session.create','params':{'source':'tool','profile':Scopes.profile('-10')}})
+                    info=ws.receive_json();created=ws.receive_json()
+                    self.assertTrue(info['params']['payload']['read_only'])
+                    self.assertEqual(info['params']['payload']['profile_name'],Scopes.profile('-10'))
+                    ws.send_json({'id':2,'method':'prompt.submit','params':{'session_id':created['result']['session_id'],'text':'must never execute'}})
+                    self.assertEqual(ws.receive_json()['error']['message'],'managed_metadata_only')
+            self.assertFalse(list(root.rglob('state.db')))

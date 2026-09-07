@@ -28,7 +28,7 @@ def restrict_session_search():
     return restore
 
 
-def run(body):
+def run(body, emit=None):
     from integrations.hermes.archive_tools import bind_process_credential
     from integrations.hermes.request_boundary import install
     from integrations.hermes.compatibility_patch import install as native_gate
@@ -50,7 +50,7 @@ def run(body):
     agent=AIAgent(provider='openai-codex',api_mode='codex_responses',model=body['model'],
         api_key=body['access_token'],base_url='https://chatgpt.com/backend-api/codex',
         enabled_toolsets=['memory','session_search','nocheh_archive'],fallback_model=None,
-        session_id=session_id,session_db=database,platform='telegram',chat_id=body['chat_id'],
+        session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
         skip_context_files=True,skip_memory=False,skip_background_review=True,
         quiet_mode=True,save_trajectories=False,max_iterations=prefs['agent.max_iterations'],
@@ -60,6 +60,7 @@ def run(body):
             'Archive originals are evidence; derived transcripts and your inferences are separate. '
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
             + ('This is the owner private conversation. Archive access spans all chats.' if body['owner'] else
+               'This browser conversation uses a selected group scope. Answer the owner using only that group context. Do not send messages to Telegram without an approved action.' if body.get('channel')=='browser' else
                'This is a shared group. Use only this group context and tools. Never change settings or approve actions. '
                'Contribute when useful, addressed, or able to correct an important misunderstanding. '
                'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')))
@@ -69,7 +70,25 @@ def run(body):
             if tool['function']['name']=='session_search':
                 tool['function']['parameters']['properties'].pop('profile',None)
                 tool['function']['description']='Search or read native history in this profile only. Other profiles cannot be accessed.'
-        result=agent.run_conversation(body['text'],conversation_history=history)
+        options = {'conversation_history':history}
+        if emit: options['stream_callback'] = lambda text: emit({'event':'message.delta','text':text})
+        if body.get('channel') == 'browser': options['persist_user_message'] = body.get('source_text',body['text'])
+        message=body['text']
+        if body.get('images'):
+            import base64,hashlib,re
+            message=[{'type':'text','text':message}]
+            for image in body['images']:
+                if not re.fullmatch(r'[a-f0-9]{64}',image): raise ValueError('invalid_image_identity')
+                data=(Path('/data/files')/image).read_bytes()
+                if hashlib.sha256(data).hexdigest()!=image: raise ValueError('image_hash_mismatch')
+                # Explicitly trusted routes may receive originals. Required
+                # guarding rejects this opaque context at the existing boundary.
+                from PIL import Image
+                import io
+                with Image.open(io.BytesIO(data)) as parsed: mime=Image.MIME.get(parsed.format)
+                if not mime: raise ValueError('unsupported_image')
+                message.append({'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(data).decode()}})
+        result=agent.run_conversation(message,**options)
         if result.get('failed') or result.get('interrupted') or not result.get('completed'):
             return {'state':'failed','error_code':'model_unavailable'}
         text=result.get('final_response') or ''
@@ -83,7 +102,9 @@ def main():
     output=sys.stdout
     try:
         body=json.loads(sys.stdin.buffer.read(2*1024*1024))
-        with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):result=run(body)
+        with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+            def emit(event): output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
+            result=run(body, emit if body.get('stream') else None)
     except Exception as error:
         result={'state':'failed','error_code':'assistant_runtime_unavailable','error_type':type(error).__name__}
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()

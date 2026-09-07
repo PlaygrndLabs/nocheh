@@ -19,7 +19,8 @@ except ImportError: from configuration import compose_environment, env_path, ini
 ROOT=Path(__file__).resolve().parents[1]
 SERVICES=['hermes','worker','guard','archive']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
-        'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id'}
+        'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
+        'managed_runs':'event_id'}
 
 
 def compose(state,project=None):
@@ -42,9 +43,15 @@ def sync(path):
     with path.open('rb') as file: os.fsync(file.fileno())
 
 
-def fingerprints(command,env):
+def fingerprints(command,env,tables=None):
     result={}
-    for table,key in TABLES.items():
+    if tables is None:
+        raw=subprocess.check_output(command+['exec','-T','postgres','psql','-X','-A','-t','-U','nocheh','-d','nocheh','-c',
+            "SELECT tablename FROM pg_tables WHERE schemaname='public'"],env=env,text=True)
+        tables=[name for name in raw.split() if name in TABLES]
+    if not set(tables).issubset(TABLES): raise ValueError('Unknown snapshot table')
+    for table in tables:
+        key=TABLES[table]
         query=f'COPY (SELECT row_to_json(t) FROM (SELECT * FROM public.{table} ORDER BY {key}) t) TO STDOUT'
         process=subprocess.Popen(command+['exec','-T','postgres','psql','-X','-q','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',query],env=env,stdout=subprocess.PIPE)
         digest=hashlib.sha256()
@@ -144,7 +151,7 @@ def restore(snapshot,state,project,port):
     subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)
     with (snapshot/'archive.dump').open('rb') as file:
         subprocess.run(command+['exec','-T','postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
-    actual=fingerprints(command,env)
+    actual=fingerprints(command,env,manifest['tables'])
     if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
     subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,

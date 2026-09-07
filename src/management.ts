@@ -308,16 +308,17 @@ export async function startManagement() {
   })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,
     {error: error instanceof HttpError ? error.code : 'management_unavailable'}); else res.end(); }); });
   server.requestTimeout = 120000;
-  server.on('upgrade', (req, socket, head) => {
+  server.on('upgrade', (req, socket, head) => { void (async()=>{
     try {
       checkOrigin(req);if(!req.headers.origin)throw new HttpError(403,'origin_required');
       const url=new URL(req.url??'','http://local');
-      if(!['/hermes/api/pty','/hermes/api/ws'].includes(url.pathname))throw new HttpError(403,'websocket_route_denied');
+      if(!['/hermes/api/pty','/hermes/api/ws','/hermes/api/events'].includes(url.pathname))throw new HttpError(403,'websocket_route_denied');
       sessions.consume(req,url.searchParams.get('ticket')??'');
       sockets.add(socket);socket.on('close',()=>sockets.delete(socket));
-      proxyNativeSocket(req,socket,head,NATIVE,token);
+      const connection=object(await python({operation:'native.connection'}));
+      if(!socket.destroyed)proxyNativeSocket(req,socket,head,Number(connection.port),string(connection.token));
     }catch{socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');}
-  });
+  })(); });
   server.listen(PORT, '127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`));
   let stopping=false;
   const stop = () => {

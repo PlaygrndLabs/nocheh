@@ -1,3 +1,4 @@
+import {captureInput,claimRun,finishRun,renewRun,prepareRun} from './managed-runs.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
 import { settings } from './config.js';
@@ -52,6 +53,14 @@ const server = createServer((req, res) => { void (async () => {
   if (config.service==='archive' && req.method==='GET' && path==='/v1/runtime') {
     const status = await call('status', {}, 5000).catch(() => ({ok:false,error:'runtime_unavailable'}));
     return json(res,200,{id:runtime.id,capabilities:runtime.capabilities,status});
+  }
+  if(config.service==='archive' && req.method==='POST' && path.startsWith('/v1/browser/')) {
+    const body=await readJson(req,36*1024*1024);
+    if(path==='/v1/browser/input')return json(res,200,await captureInput(pool,config,body));
+    if(path==='/v1/browser/claim')return json(res,200,await claimRun(pool,config,body));
+    if(path==='/v1/browser/finish')return json(res,200,await finishRun(pool,body));
+    if(path==='/v1/browser/heartbeat')return json(res,200,await renewRun(pool,body));
+    if(path==='/v1/browser/prepare')return json(res,200,await prepareRun(pool,config,body,call));
   }
   if(config.service==='archive' && req.method==='POST' && path==='/v1/manage/hermes') {
     const input=object(await readJson(req));
