@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
 import { listSpaces, spacePolicy, saveSpace } from './spaces.js';
+import {approveLearning,listReviews,controlReview} from './learning.js';
 import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object } from './http.js';
@@ -31,6 +32,18 @@ const server = createServer((req, res) => { void (async () => {
     return json(res, 200, {ok: true, service: config.service, database: 'ready'});
   }
   const principal=reader(req, config.token);
+  if(config.service==='archive' && path==='/v1/memory/recall') {
+    if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
+    if(req.method==='POST')return json(res,200,await call('memory.recall',object(await readJson(req))));
+  }
+  if(config.service==='archive' && path==='/v1/memory/reviews') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,await listReviews(pool,url.searchParams.get('after')??''));
+    if(req.method==='POST')return json(res,200,await approveLearning(pool,await readJson(req)));
+  }
+  if(config.service==='archive' && path==='/v1/memory/reviews/control' && req.method==='POST') {
+    admin(principal);const b=object(await readJson(req));return json(res,200,await controlReview(pool,String(b.id),b.action));
+  }
   if(config.service==='archive' && path==='/v1/memory/spaces') {
     admin(principal);
     if(req.method==='GET')return json(res,200,url.searchParams.has('id')?await spacePolicy(pool,url.searchParams.get('id')!):await listSpaces(pool,url.searchParams.get('after')??''));

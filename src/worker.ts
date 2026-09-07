@@ -7,6 +7,7 @@ import { runtimeCall } from './runtime.js';
 import { dispatchCommitted } from './assistant.js';
 import { executeApproved } from './actions.js';
 import { startLoops } from './worker-loops.js';
+import { runReviewJobs } from './learning.js';
 
 export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
   const call = runtimeCall(hermesAdapter({url: config.hermesUrl, token: config.token}));
@@ -17,6 +18,7 @@ export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
         return Buffer.from(string(result.bytes_base64,70*1024*1024),'base64');
     }),
     assistant:()=>dispatchCommitted(pool,config,call),
+    learning:()=>runReviewJobs(pool,config,call),
     actions:async()=>{if(config.assistant.enabled)await executeApproved(pool,call);},
   });
 }

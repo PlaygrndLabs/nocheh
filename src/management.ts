@@ -15,7 +15,7 @@ const NATIVE = Number(process.env.NOCHEH_DASHBOARD_NATIVE_PORT ?? 8784);
 const PREFIX = '/api/plugins/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
-  mapping?: Record<string, unknown>; error?: string; result?: unknown};
+  mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown};
 
 async function atomic(path: string, value: unknown) {
   const temporary = path + '.' + randomUUID() + '.tmp';
@@ -240,6 +240,9 @@ export async function startManagement() {
             if (!job.preview || !['ready', 'failed', 'cancelled', 'interrupted'].includes(job.state) || active.has(id)) throw new HttpError(409, 'job_not_ready');
             const body = object(await readJson(req));
             const mapping = object(body.mapping ?? job.mapping ?? {});
+            if(body.review_approved!==undefined && typeof body.review_approved!=='boolean')throw new HttpError(400,'invalid_review_approval');
+            if(job.review_approved!==undefined && body.review_approved!==undefined && body.review_approved!==job.review_approved)throw new HttpError(409,'resume_review_approval_cannot_change');
+            job.review_approved=job.review_approved??(body.review_approved===true);
             if (job.mapping && JSON.stringify(mapping) !== JSON.stringify(job.mapping)) throw new HttpError(409, 'resume_scope_cannot_change');
             job.mapping = mapping; job.state = 'running'; delete job.error; await putJob(job);
             launch(job, {operation: 'import.run', job: id, mapping, after: job.completed});

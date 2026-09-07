@@ -101,4 +101,11 @@ def run(directory, mapping, after=0, api=None):
         for artifact_id, path in uploads: upload(api, artifact_id, path)
         duplicates += int(bool(result.get('duplicate')))
         print(json.dumps({'completed': index + 1, 'duplicates': duplicates}), flush=True)
-    return {'completed': preview['messages'], 'duplicates': duplicates, 'telegram_replies': 0}
+    # Only queue after all records and available file bytes were ingested. The
+    # persisted import-step decision survives cancellation and retries.
+    approved = metadata.get('review_approved') is True
+    if approved:
+        ids = [digest(record['event']['key']) for record, _ in desktop_records(document, file.parent, scope_map=mapping)]
+        for start in range(0, len(ids), 500):
+            api.call('/v1/memory/reviews', {'approved': True, 'batch': directory.name, 'event_ids': ids[start:start+500]})
+    return {'completed': preview['messages'], 'duplicates': duplicates, 'telegram_replies': 0, 'review_approved': approved}

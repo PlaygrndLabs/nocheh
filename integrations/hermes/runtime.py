@@ -124,6 +124,13 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path == '/internal/memory/recall':
+            from .native_memory import recall
+            return recall(PROFILE_HOME,body)
+        if self.path == '/internal/memory/review':
+            from .review_worker import review
+            from .scopes import Scopes
+            return review(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),MODEL,resolve_credentials(),body)
         if self.path == '/internal/manage':
             from .management import dispatch
             from .scopes import Scopes

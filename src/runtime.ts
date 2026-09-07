@@ -3,7 +3,7 @@ import { HttpError } from './http.js';
 /** Nocheh capabilities, independent of a harness's URL or native profile names. */
 export const runtimeOperations = ['status', 'profiles.list', 'config.read', 'config.write',
   'memory.read', 'run.start', 'run.resume', 'run.cancel', 'run.events', 'lifecycle',
-  'source.file', 'perception.transcribe', 'guard.detect', 'action.execute'] as const;
+  'source.file', 'perception.transcribe', 'guard.detect', 'action.execute', 'memory.review', 'memory.recall'] as const;
 export type RuntimeOperation = typeof runtimeOperations[number];
 export type RuntimeCall = (operation: RuntimeOperation, input: Record<string, unknown>, timeout?: number) => Promise<Record<string, unknown>>;
 export interface RuntimeAdapter {
