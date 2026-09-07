@@ -53,7 +53,13 @@ async def native_turn(root,scope,body,model,credentials):
         if process.returncode or len(stdout)>2*1024*1024:raise RuntimeError('assistant_process_failed')
         result=json.loads(stdout)
         if result.get('state')=='done':
-            temporary=cursor.with_suffix('.tmp');temporary.write_bytes(canonical({'session_id':result['session_id']}));temporary.replace(cursor)
+            temporary=cursor.with_suffix('.tmp')
+            with temporary.open('wb') as file:
+                file.write(canonical({'session_id':result['session_id']}));file.flush();os.fsync(file.fileno())
+            temporary.replace(cursor)
+            directory=os.open(profile,os.O_RDONLY)
+            try:os.fsync(directory)
+            finally:os.close(directory)
         return result
     except BaseException:
         if process.returncode is None:process.kill();await process.wait()

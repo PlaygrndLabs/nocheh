@@ -47,7 +47,7 @@ services:
     secrets: [database_password]
     volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U nocheh -d nocheh"]
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
       interval: 3s
       timeout: 3s
       retries: 20

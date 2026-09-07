@@ -44,8 +44,11 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram"))
+    parser.add_argument("command", choices=("up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose"))
     args, rest = parser.parse_known_args()
+    if args.command in ('backup','restore','diagnose'):
+        from operations import main as operations
+        return operations(args.command,STATE,rest)
     bootstrap()
     if args.command=='configure-telegram':
         config_parser=argparse.ArgumentParser(description='Enable the owner DM and explicitly selected groups; token stays in its secret file.')

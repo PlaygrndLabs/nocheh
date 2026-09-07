@@ -47,6 +47,17 @@ test('real PostgreSQL: action proposals require a bound turn; only a captured ow
     await executeApproved(pool,async()=>{sends++;return {state:'done'};});assert.equal(sends,1);
     assert.equal(await controlReply(pool,policy,owner.id),approved,'decision replay remains idempotent after delivery');
     assert.equal((await pool.query('SELECT state FROM action_requests')).rows[0].state,'done');
+    const uncertain=await requestAction(pool,{scope:'-20',admin:false,turnEvent:source.id},{destination:'777',text:'Another synthetic message'});
+    const decision=await ingest(pool,{...input,key:'action:second-approval',scope:'123',payload:{...ownerMessage,message:{...ownerMessage.message,text:'/approve '+uncertain.id}}});
+    await controlReply(pool,policy,decision.id);
+    let attempts=0;
+    await executeApproved(pool,async()=>{attempts++;throw Error('receipt response lost');});
+    await executeApproved(pool,async()=>{attempts++;throw Error('must wait before fetching receipt');});
+    assert.equal(attempts,1);
+    await pool.query("UPDATE action_requests SET updated_at=now()-interval '31 seconds' WHERE id=$1",[uncertain.id]);
+    await executeApproved(pool,async(_path,body)=>{attempts++;assert.equal((body as {id:string}).id,uncertain.id);return {state:'ambiguous'};});
+    await executeApproved(pool,async()=>{throw Error('ambiguous action must not resend');});
+    assert.equal(attempts,2);
   } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });
 
