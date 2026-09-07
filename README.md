@@ -4,9 +4,9 @@ A personal assistant built around Hermes, with an independent archive of origina
 messages, events, files and separately recorded transcripts. Source data stays
 portable when the agent or memory system changes.
 
-**Status:** local runtime reset to an empty state at the owner's request.
-The implementation is on `codex/hermes-rebuild`; real Telegram acceptance and
-the merge to `main` remain pending fresh setup. See [TASK.md](TASK.md).
+**Status:** local Docker Compose implementation on `codex/hermes-rebuild`.
+Real Telegram acceptance and the merge to `main` remain pending.
+See [TASK.md](TASK.md) for current setup and validation status.
 Legacy code is preserved on `codex/legacy-nocheh`.
 
 ## Local development and automated startup

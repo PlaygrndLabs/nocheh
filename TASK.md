@@ -1,10 +1,12 @@
 # Rebuild progress
 
-The owner requested a fresh start on 2026-09-07. Local Nocheh services are stopped;
-runtime data, backups, logins, generated dependencies/build files, project Docker
-volumes and Nocheh-built images were removed. `.env` is a credential-free template.
-The rebuild is **not released**: fresh setup, real Telegram acceptance, cutover
-and the merge to `main` remain pending.
+After the requested reset on 2026-09-07, a fresh Compose runtime was started with
+the supplied Telegram bot token and owner/group IDs in the ignored `.env`.
+All five services are healthy and the archive is empty. Bot token validation
+passes; Telegram currently reports the configured DM/group as unavailable.
+The fresh Hermes device login awaits owner authorization. Telegram replies remain
+disabled until setup is ready. The rebuild is **not released**: subscription
+sign-in, Telegram access/acceptance, cutover and the merge to `main` remain pending.
 
 Accepted plan: [docs/rebuild-plan.md](docs/rebuild-plan.md).
 Baseline: `9dd0b58` on `codex/legacy-nocheh`. Work: `codex/hermes-rebuild`.
@@ -62,8 +64,9 @@ archived with a visible suppressed dispatch and do not starve subsequent work.
 
 ## Remaining release gates
 
-Run `./scripts/nocheh up` and `./scripts/nocheh login` for a fresh runtime and
-dedicated subscription login. Set the bot token, owner ID and selected groups in `.env`; follow
+Complete the pending device-code sign-in, start the bot's DM and ensure the bot
+belongs to the selected group with full message visibility. Credentials and IDs
+are already saved locally. Follow
 [Telegram setup and acceptance](docs/telegram.md). Actual DM/group replies and
 silence, private/group isolation, voice persistence, owner-approved delivery and
 reconnect/restart checks are **unrun**. Container health does not prove these.
