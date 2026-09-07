@@ -42,6 +42,8 @@ def run(body):
     auth._global_auth_file_path=lambda:None
     aux._read_codex_access_token=lambda:body['access_token']
     profile=Path(os.environ['HERMES_HOME'])
+    from .profile_config import preferences, read
+    prefs=preferences(read(profile/'config.yaml'))
     database=SessionDB(profile/'state.db')
     session_id=body['session_id']
     history=database.get_messages_as_conversation(session_id) if database.get_session(session_id) else []
@@ -51,8 +53,9 @@ def run(body):
         session_id=session_id,session_db=database,platform='telegram',chat_id=body['chat_id'],
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
         skip_context_files=True,skip_memory=False,skip_background_review=True,
-        quiet_mode=True,save_trajectories=False,max_iterations=8,run_budget_seconds=180,
-        reasoning_config={'effort':'low'},ephemeral_system_prompt=(
+        quiet_mode=True,save_trajectories=False,max_iterations=prefs['agent.max_iterations'],
+        run_budget_seconds=prefs['agent.run_budget_seconds'],
+        reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
             'You are Nocheh. Cite nocheh:event: references when using archived sources. '
             'Archive originals are evidence; derived transcripts and your inferences are separate. '
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '

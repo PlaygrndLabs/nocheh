@@ -1,5 +1,21 @@
 # Rebuild progress
 
+## Owner dashboard extension — 2026-09-07
+
+Accepted [dashboard/CLI plan](docs/dashboard-cli-plan.md), ADR-0025. Each increment
+is committed separately; these do not replace the production release gates below.
+
+| Increment | Actual status |
+| --- | --- |
+| D1 — Compatibility and configuration | Complete: native preferences persist, validated config show/set/apply with redaction/conflict/recovery; 12 configuration/scope tests plus one pinned dashboard auth/extension test pass |
+| D2 — Dashboard and import jobs | Pending |
+| D3 — Native memory and isolated Honcho CLI | Pending |
+| D4 — Source graph and operations | Pending |
+
+D1 also built the pinned upstream dashboard frontend successfully from its npm
+lockfile in a temporary directory. Packaging and serving it are D2 work. No live
+provider requests or production setting changes were required for D1 verification.
+
 After the requested reset on 2026-09-07, a fresh Compose runtime was started with
 the supplied Telegram bot token and owner/group IDs in the ignored `.env`.
 All five services are healthy. Fresh Hermes sign-in and live subscription checks
