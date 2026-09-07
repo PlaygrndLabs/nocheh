@@ -27,7 +27,7 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db"))
     args, rest = parser.parse_known_args()
     if args.command in ('backup','restore','diagnose'):
         from operations import main as operations
@@ -50,6 +50,11 @@ def main():
     command = ["docker", "compose", "--env-file", str(env_path(STATE)), "-f", str(ROOT / "docker-compose.yml")]
     if args.command in ("dev", "test"):
         command += ["-f", str(ROOT / "docker-compose.dev.yml")]
+    if args.command == 'db':
+        from database_viewer import start
+        return start(STATE, command, ROOT)
+    if args.command in ('down', 'status', 'logs'):
+        command += ['--profile', 'tools']
     actions = {
         "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
         "dev": ["up", "--build", "--watch"], "down": ["down"], "status": ["ps"],

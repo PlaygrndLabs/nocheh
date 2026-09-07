@@ -37,6 +37,22 @@ x-service: &service
     start_period: 10s
 
 services:
+  db-viewer:
+    image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
+    profiles: [tools]
+    restart: unless-stopped
+    command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
+    environment:
+      PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@postgres:5432/nocheh?sslmode=disable
+    ports: ["127.0.0.1:8782:8081"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8081/]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   postgres:
     image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
     restart: unless-stopped

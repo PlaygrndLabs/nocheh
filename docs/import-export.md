@@ -1,5 +1,17 @@
 # Portable archive operations
 
+For older Telegram history, use **Telegram Desktop**: open the chat's `…` menu,
+choose **Export chat history**, select JSON and the desired date range/media.
+Keep `result.json` beside its exported media folders. Telegram's separate native
+macOS client may not expose this Desktop export feature.
+[Official export instructions](https://telegram.org/blog/export-and-more).
+
+The invitation's option to share recent history does not backfill this Bot API
+integration. It archives delivered updates; general history retrieval is a
+[user-account API method](https://core.telegram.org/method/messages.getHistory).
+No user-account history connector is implemented. Export/import is the supported
+backfill path; it makes old messages searchable without sending old replies.
+
 Start Compose with `./scripts/nocheh up`. The CLI reads the ignored service token
 and generated local port configuration; credentials never appear in arguments.
 
