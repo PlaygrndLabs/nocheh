@@ -34,6 +34,7 @@ class ManagementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             request={'action':'preferences','scope':'123'}
             first=dispatch(root,'test',policy,request)
+            self.assertEqual(list(Path(root).iterdir()),[],'Viewing preferences must not mutate a backup source')
             updated=dispatch(root,'test',policy,{**request,'revision':first['revision'],'changes':{'agent.max_iterations':4}})
             self.assertEqual(updated['values']['agent.max_iterations'],4)
             with self.assertRaises(ValueError):dispatch(root,'test',policy,{**request,'revision':first['revision'],'changes':{'agent.max_iterations':5}})

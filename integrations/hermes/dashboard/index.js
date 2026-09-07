@@ -15,7 +15,7 @@
   function Data({value}) { return h('pre', {className:'n-data', dir:'auto'}, typeof value === 'string' ? value : JSON.stringify(value, null, 2)); }
   function useLoad(path, refresh = 0) {
     const [data,setData] = useState(null), [error,setError] = useState('');
-    useEffect(() => { let alive=true; setError(''); call(path).then(v => {if(alive)setData(v);}).catch(e => {if(alive)setError(errorText(e));}); return()=>{alive=false;}; }, [path,refresh]);
+    useEffect(() => { let alive=true; setError(''); if(!path)return()=>{alive=false;}; call(path).then(v => {if(alive)setData(v);}).catch(e => {if(alive)setError(errorText(e));}); return()=>{alive=false;}; }, [path,refresh]);
     return [data,error];
   }
   function Status({refresh}) {
@@ -103,13 +103,13 @@
     return h('div',null,h(Panel,{title:'Search your archive',note:'Search original messages and derived text. Owner access spans all chats.'},
       h('form',{className:'n-actions',onSubmit:search},h('label',{className:'n-grow'},'Search terms',h('input',{value:query,onChange:e=>setQuery(e.target.value),required:true})),h('button',{disabled:busy},busy?'Searching…':'Search')),
       results&&(!rows.length?h('p',null,'No matching messages.'):h('div',{className:'n-list'},...rows.map(r=>h('article',{className:'n-result',key:r.id||r.event_id},h('small',null,r.scope),h('p',{dir:'auto'},r.text||r.snippet||r.preview),button('Open source',()=>read(r.id||r.event_id))))))),
-      record&&h(Panel,{title:'Original source'},h('p',{dir:'auto',className:'n-source'},record.event?.text),h('details',null,h('summary',null,'Source, files and provenance'),h(Data,{value:record}))));
+      record&&h(Source,{record,notify}));
   }
   function Memory({notify}) {
     const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[session,setSession]=useState(''),[offset,setOffset]=useState(0),[tick,setTick]=useState(0),[changes,setChanges]=useState({});
     useEffect(()=>{if(!scope&&profiles?.profiles?.length)setScope(profiles.profiles[0].scope);},[profiles]);
-    const [data,problem]=useLoad('/memory?scope='+encodeURIComponent(scope)+'&session='+encodeURIComponent(session)+'&offset='+offset,tick);
-    const [prefs]=useLoad('/memory/preferences?scope='+encodeURIComponent(scope),tick);
+    const [data,problem]=useLoad(scope?'/memory?scope='+encodeURIComponent(scope)+'&session='+encodeURIComponent(session)+'&offset='+offset:null,tick);
+    const [prefs]=useLoad(scope?'/memory/preferences?scope='+encodeURIComponent(scope):null,tick);
     const save=async()=>{try{await call('/memory/preferences',{scope,revision:prefs.revision,changes});setChanges({});setTick(v=>v+1);notify('Hermes preferences saved. They take effect on the next turn.');}catch(e){notify(errorText(e),true);}};
     return h('div',null,h(Panel,{title:'Hermes memory',note:'Native notes are maintained by Hermes. An explicit source citation is needed to identify supporting evidence.'},
       error&&h('p',{role:'alert'},error),h('label',null,'Chat profile',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setSession('');setOffset(0);setChanges({});}},...(profiles?.profiles||[]).map(p=>h('option',{value:p.scope,key:p.scope},(p.owner?'Owner DM':'Group')+' · '+p.scope)))),
@@ -128,7 +128,57 @@
     return h(Panel,{title:'Honcho experiment',note:'Separate from production Hermes memory. Stored-data inspection makes no inference requests.'},error&&h('p',{role:'alert'},error),status&&h(Data,{value:status}),
       h('div',{className:'n-form'},h('label',null,'Stored data',h('select',{value:kind,onChange:e=>setKind(e.target.value)},...['workspace','peer','session'].map(v=>h('option',{key:v,value:v},v+'s')))),kind!=='workspace'&&h('label',null,'Workspace ID',h('input',{value:workspace,onChange:e=>setWorkspace(e.target.value)}))),button('Load stored data',query,busy||!status?.running||(kind!=='workspace'&&!workspace)),data&&h(Data,{value:data}));
   }
-  const extensions = {memory:{label:'Memory',component:Memory},honcho:{label:'Honcho',component:Honcho}};
+  function download(path,name) {
+    const a=document.createElement('a');a.href=base+path+'?name='+encodeURIComponent(name);a.download=name;document.body.appendChild(a);a.click();a.remove();
+  }
+  function exportJSON(value,name){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+  function Source({record,notify}){
+    return h(Panel,{title:'Original source'},h('p',{dir:'auto',className:'n-source'},record.event?.text),
+      button('Download source JSON',()=>exportJSON(record,'nocheh-source-'+record.id+'.json')),
+      ...record.artifacts.map(a=>h('div',{className:'n-row',key:a.id},h('span',null,a.metadata?.relative_path||a.kind),h('small',null,a.state),button('Download original file',()=>download('/artifacts/'+a.id+'/download',a.metadata?.relative_path?.split('/').pop()||a.id,notify),a.state!=='ready'))),
+      ...record.derived.map(d=>h('article',{key:d.id},h('h3',null,'Derived '+d.kind),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(d.content_base64),c=>c.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:d.provenance})))),
+      h('details',null,h('summary',null,'Source identity and complete metadata'),h(Data,{value:record})));
+  }
+  function Graph({notify}){
+    const selection=useRef(0);
+    const [scope,setScope]=useState(''),[scopeAfter,setScopeAfter]=useState(''),[scopeList,setScopeList]=useState([]),[scopes]=useLoad('/scopes?after='+encodeURIComponent(scopeAfter)),[after,setAfter]=useState(''),[history,setHistory]=useState([]),[data,setData]=useState(null),[selected,setSelected]=useState(null),[record,setRecord]=useState(null),[zoom,setZoom]=useState(1),[busy,setBusy]=useState(false);
+    useEffect(()=>{if(scopes?.scopes){setScopeList(old=>[...new Map([...old,...scopes.scopes].map(s=>[s.scope,s])).values()]);if(!scope&&scopes.scopes.length)setScope(scopes.scopes[0].scope);}},[scopes]);
+    useEffect(()=>{if(!scope)return;let alive=true;selection.current++;setBusy(true);setData(null);setRecord(null);setSelected(null);call('/graph?scope='+encodeURIComponent(scope)+'&after='+after).then(value=>{if(alive)setData(value);}).catch(e=>{if(alive)notify(errorText(e),true);}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;};},[scope,after]);
+    const choose=async node=>{const request=++selection.current;setSelected(node);setRecord(null);if(node.event_id)try{const value=await call('/events/'+node.event_id);if(selection.current===request)setRecord(value);}catch(e){notify(errorText(e),true);}};
+    const columns={scope:0,profile:0,memory:0,author:1,message:2,attachment:3,derived:4};const counts=[0,0,0,0,0];
+    const placed=(data?.nodes||[]).map(n=>{const column=columns[n.kind]??0;return {...n,x:20+column*254,y:30+counts[column]++*82};});
+    const byId=Object.fromEntries(placed.map(n=>[n.id,n])),height=Math.max(300,...counts.map(n=>n*82+45));
+    return h('div',null,h(Panel,{title:'Evidence graph',note:'Observed source relationships, with explicit memory references. Select a node to inspect its source. This view makes no model calls.'},
+      h('label',null,'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),scopes?.next&&button('Load more scopes',()=>setScopeAfter(scopes.next)),
+      !scopeList.length&&h('p',{className:'n-muted'},'No archived scopes yet. Import a chat to begin.'),busy&&h('p',{role:'status'},'Loading source relationships…'),
+      data&&h('div',null,h('div',{className:'n-actions'},button('Zoom out',()=>setZoom(v=>Math.max(.5,v-.2)),zoom<=.5),button('Zoom in',()=>setZoom(v=>Math.min(1.8,v+.2)),zoom>=1.8),button('Export this graph page',()=>exportJSON(data,'nocheh-graph.json'))),
+        h('p',{className:'n-muted'},data.nodes.length+' nodes · '+data.edges.length+' links · Scroll to explore. Dashed links are citations or generated content.'),
+        h('div',{className:'n-graph-scroll',tabIndex:0,'aria-label':'Scrollable evidence graph'},h('svg',{width:1300*zoom,height:height*zoom,viewBox:'0 0 1300 '+height,role:'group','aria-label':'Scoped evidence relationships'},
+          h('defs',null,h('marker',{id:'n-arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto-start-reverse'},h('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'#94a9a2'}))),
+          ...data.edges.map((edge,i)=>{const a=byId[edge.from],b=byId[edge.to];if(!a||!b)return null;const relevant=!selected||[edge.from,edge.to].includes(selected.id);return h('path',{key:'e'+i,d:`M ${a.x+216} ${a.y+28} C ${a.x+245} ${a.y+28}, ${b.x-30} ${b.y+28}, ${b.x} ${b.y+28}`,fill:'none',stroke:relevant?'#71998b':'#d6e0dc',strokeWidth:relevant?1.7:1,strokeDasharray:['derived_from','explicit_citation'].includes(edge.kind)?'5 4':undefined,markerEnd:'url(#n-arrow)'});}),
+          ...placed.map(node=>h('g',{key:node.id,transform:`translate(${node.x},${node.y})`,tabIndex:0,role:'button','aria-label':node.kind+': '+node.label,onClick:()=>choose(node),onKeyDown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(node);}},className:'n-graph-node'},
+            h('rect',{width:216,height:58,rx:7,fill:node.kind==='message'?'#fff':node.kind==='memory'||node.kind==='derived'?'#f5efdf':'#eaf2ed',stroke:selected?.id===node.id?'#1f6659':'#c1d0c9',strokeWidth:selected?.id===node.id?3:1}),
+            h('text',{x:12,y:19,fontSize:10,fill:'#526571'},node.kind.toUpperCase()),h('text',{x:12,y:40,fontSize:12,fill:'#182b37'},node.label.slice(0,27)+(node.label.length>27?'…':'')))))),
+        data.bounds.truncated&&h('p',{role:'status'},'Attachment or derived-node limit reached. Open source records for the complete details.'),
+        h('p',{className:'n-muted'},data.unresolved_replies+' reply references outside this page.'),
+        h('div',{className:'n-actions'},history.length>0&&button('Previous messages',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));}),data.next&&button('Next messages',()=>{setHistory([...history,after]);setAfter(data.next);})))),
+      selected&&h(Panel,{title:selected.kind+' · '+selected.label},selected.text&&h(Data,{value:selected.text}),selected.provenance&&h(Data,{value:selected.provenance}),selected.unresolved_citations>0&&h('p',null,selected.unresolved_citations+' citations are outside this page or scope.'),
+        ...data.edges.filter(e=>e.from===selected.id||e.to===selected.id).map((edge,i)=>h('div',{className:'n-row',key:i},h('span',null,edge.kind.replaceAll('_',' ')),button(byId[edge.from===selected.id?edge.to:edge.from]?.label||'Related node',()=>choose(byId[edge.from===selected.id?edge.to:edge.from]))))),record&&h(Source,{record,notify}));
+  }
+  function Operations({notify}){
+    const [tick,setTick]=useState(0),[listing]=useLoad('/operations',tick),[jobs]=useLoad('/jobs',tick),[review,setReview]=useState(''),[backup,setBackup]=useState(''),[port,setPort]=useState(8795),[busy,setBusy]=useState(false);
+    useEffect(()=>{const timer=setInterval(()=>setTick(v=>v+1),3000);return()=>clearInterval(timer);},[]);
+    const run=async action=>{setBusy(true);try{const job=await call('/operations',{action,options:action==='restore'?{backup,port}:undefined});setReview('');setTick(v=>v+1);notify('Operation started. Its result will appear below. Job '+job.id);}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    const descriptions={backup:'Pause running archive writers, take a consistent database and file snapshot, then resume those services.',restart:'Restart Hermes and the archive workers with their configured shutdown grace periods, then check readiness.',restore:'Restore the selected backup into a new, separate Compose project. Telegram stays disabled and the copied subscription login stays inactive.'};
+    return h('div',null,h(Panel,{title:'Local operations',note:'Operations share durable job tracking. Wait for running imports before restarting or taking a backup.'},
+      h('div',{className:'n-actions'},button('Run diagnostics',()=>run('diagnose'),busy),button('Export archive',()=>run('export'),busy),button('Create backup',()=>setReview('backup'),busy),button('Restart services',()=>setReview('restart'),busy))),
+      h(Panel,{title:'Backups and restore',note:'Backup snapshots include private runtime state and credentials. They stay in your local state directory. Archive exports contain source records and files.'},
+        h('label',null,'Saved backup',h('select',{value:backup,onChange:e=>setBackup(e.target.value)},h('option',{value:''},'Choose a backup'),...(listing?.backups||[]).map(b=>h('option',{key:b.id,value:b.id},new Date(b.created_at).toLocaleString()+' · '+b.files+' files')))),
+        h('label',null,'Port for inactive restore',h('input',{type:'number',min:1024,max:65535,value:port,onChange:e=>setPort(Number(e.target.value))})),button('Review inactive restore',()=>setReview('restore'),!backup||busy)),
+      review&&h(Panel,{title:'Review '+review},h('p',null,descriptions[review]),review==='restore'&&h('p',null,'Backup '+backup+' · loopback port '+port),h('div',{className:'n-actions'},button('Confirm '+review,()=>run(review),busy,'n-primary'),button('Cancel',()=>setReview('')))),
+      h(Panel,{title:'Operation results'},...(jobs||[]).filter(j=>j.kind.startsWith('operations.')).map(j=>h('article',{className:'n-result',key:j.id},h('h3',null,j.kind.replace('operations.','')+' · '+j.state),h('small',null,new Date(j.created_at).toLocaleString()),j.error&&h('p',{role:'alert'},j.error),j.result&&h(Data,{value:j.result}),j.kind==='operations.export'&&j.state==='complete'&&button('Download archive ZIP',()=>download('/exports/'+j.id+'/download','nocheh-archive.zip',notify))))));
+  }
+  const extensions = {graph:{label:'Graph',component:Graph},operations:{label:'Operations',component:Operations},memory:{label:'Memory',component:Memory},honcho:{label:'Honcho',component:Honcho}};
   window.__NOCHEH_PAGES__=extensions;
   function App() {
     const [page,setPage]=useState(location.hash.slice(1)||'overview'),[notice,setNotice]=useState(null),[tick,setTick]=useState(0);

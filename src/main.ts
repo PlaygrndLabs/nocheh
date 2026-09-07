@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { evidenceGraph } from './graph.js';
 import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object } from './http.js';
@@ -25,8 +26,14 @@ const server = createServer((req, res) => { void (async () => {
     return json(res, 200, {ok: true, service: config.service, database: 'ready'});
   }
   const principal=reader(req, config.token);
+  if(config.service==='archive' && req.method==='GET' && path==='/v1/scopes') {
+    admin(principal);
+    const {rows}=await pool.query('SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 GROUP BY scope ORDER BY scope LIMIT 101',[url.searchParams.get('after') ?? '']);
+    return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99]?.scope:null});
+  }
   if(config.service==='archive' && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
   if (config.service === 'archive' && req.method === 'GET') {
+    if (path==='/v1/graph') return json(res,200,await evidenceGraph(pool,principal,url.searchParams.get('scope') ?? '',url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit')),url.searchParams.get('focus') ?? ''));
     if (path==='/v1/search') return json(res,200,await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))));
     const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
     if (event?.[1]) return json(res,200,await readEvent(pool,principal,event[1]));

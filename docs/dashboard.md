@@ -90,3 +90,50 @@ The CLI provides deeper stored-data inspection. Live compatibility with the pinn
 Honcho server remains pending the separate bridge login and temporary embedding
 credential; fixture tests do not certify that live comparison. No experiment
 inference or production-memory switch is performed by the dashboard.
+
+## Evidence graph and local operations
+
+Graph selects one archive scope and pages through 20 events at a time. It includes
+observed authorship, replies to original source IDs, same-source revisions,
+attachments, derived-artifact provenance, and explicit Hermes note references.
+Original chat identity remains part of an imported message's identity even when
+multiple Desktop exports are mapped into one scope. Group-scoped API credentials
+cannot request a different scope. Citations outside the current page or scope do
+not create an edge; uncited memory has no verified source provenance. This is a
+deterministic evidence view, not semantic entity extraction or the repository's
+Graphify graph.
+
+Select nodes with a mouse or keyboard to open their sources. Zoom and scroll to
+explore, page forward/backward, or export the current graph as JSON. Source detail
+includes the original record, downloadable retained files, transcripts and their
+generation provenance. Use the next cursor to retrieve additional graph pages:
+
+```sh
+./scripts/nocheh memory graph --scope CHAT_ID --output graph.json
+./scripts/nocheh memory graph --scope CHAT_ID --after EVENT_ID --output next-page.json
+```
+
+Operations provides diagnostics, portable archive ZIP export, consistent backup,
+service restart, and restore into a new inactive Compose project. Backup and
+restart show a review step. Restore selects a locally generated backup ID and an
+unused loopback port; it cannot overwrite current state. Restored Telegram stays
+disabled, and the copied OAuth login stays inactive. The existing `backup`,
+`restore`, `diagnose`, and `scripts/archive.py export` commands remain available.
+
+Jobs, downloads, exports, backups and inactive restores are private files under
+`data/local/admin/` (or the selected `NOCHEH_STATE_DIR`). The UI streams downloads
+through owner authentication. A session-only HttpOnly, SameSite=Strict cookie is
+accepted only on file/export download routes; settings and mutations still require
+the native owner session header. Cross-origin requests remain denied. Jobs show errors and survive manager restarts;
+interrupted non-import operations require a new job, while imports can resume.
+The manager excludes imports/config writes while an operation runs. Preference
+inspection is read-only. Avoid separately running CLI mutations during a dashboard
+backup. A portable export walks available records; use Backup for a consistent
+snapshot of the database, files and native runtime state.
+
+Backups may briefly pause the bot while its writers stop and resume. A failed
+restore can leave a separate, inactive project/state directory for diagnosis;
+it never activates the restored credentials automatically. Read/import subprocesses have a 15-minute limit. Lifecycle operations finish
+their cleanup before a graceful shutdown; dashboard stop refuses while one runs.
+An OS crash or forced kill can still leave interrupted work requiring diagnosis. Export
+and backup files are retained until the owner removes them.

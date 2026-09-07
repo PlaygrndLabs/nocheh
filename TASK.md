@@ -136,3 +136,20 @@ derivation and recall comparison remain pending. Its $5 budget is unused.
 - [x] Compose regression: 16 TypeScript tests and 41 Hermes integration tests;
   two CLI boundary tests and one real upstream CLI/SDK fixture test pass.
 - [ ] Optional live Honcho compatibility remains pending separate credentials.
+
+### Owner dashboard D4 — evidence graph and operations
+
+- [x] Deterministic graph over one archive scope, with cursor pagination, original
+  chat identities, author/reply/revision links, files, derived provenance and
+  explicit native-note citations. No model calls or graph database.
+- [x] Interactive keyboard-accessible graph, source detail, original file download,
+  graph JSON and portable archive ZIP export.
+- [x] Durable jobs for diagnosis, backup, restart and inactive restore; generated
+  destinations, operation exclusion, and no preference writes during inspection.
+- [x] Regression: 17 TypeScript and 43 pinned Hermes integration tests pass,
+  including graph scope/provenance and operation failure/concurrency paths.
+- [x] Local dashboard acceptance: graph node opens original source; diagnostics
+  healthy; backup/restore verified all 8 tables and 89 state files with credentials
+  inactive; portable ZIP exported 65 records with manifest/count/integrity checks.
+- [x] Browser-native authenticated ZIP download verified; download-only HttpOnly
+  cookie cannot access settings, and cross-origin downloads are denied.

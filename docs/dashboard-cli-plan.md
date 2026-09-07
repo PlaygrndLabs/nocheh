@@ -1,6 +1,7 @@
 # Dashboard, configuration, CLI and memory explorer
 
-Status: accepted for phased implementation, 2026-09-07 (ADR-0025).
+Status: D1–D4 implemented and tested locally, 2026-09-07 (ADR-0025).
+Optional live Honcho compatibility remains pending separate credentials.
 See `TASK.md` for delivered increments. Existing production release gates remain.
 
 ## Direction
@@ -17,7 +18,7 @@ currently installs messaging dependencies and starts Nocheh's supervisor; the
 dashboard is not yet packaged, exposed or validated. Current upstream docs are
 capability evidence, not proof of compatibility with that image.
 
-## What already exists
+## Baseline before implementation
 
 | Area | Implemented interface | Gap |
 | --- | --- | --- |
@@ -28,7 +29,7 @@ capability evidence, not proof of compatibility with that image.
 | Archive inspection | Authenticated search/read API and read-only pgweb | No combined source and memory explorer |
 | Honcho | Separate experiment lifecycle and benchmark runner | No general data-inspection CLI; live evaluation pending |
 
-Code finding: `prepare_profile()` in `integrations/hermes/assistant_gateway.py`
+Pre-implementation code finding: `prepare_profile()` in `integrations/hermes/assistant_gateway.py`
 rewrites profile `config.yaml` before each turn. `assistant_turn.py` also supplies
 model, tools, reasoning and turn limits directly to `AIAgent`. Exposing a YAML
 editor alone would therefore create settings that are overwritten or ignored.
@@ -106,7 +107,7 @@ an explicit, separately observable job following guard and scope policy.
 
 ## CLI
 
-Proposed command surface, not commands available today:
+Delivered command surface (details and bounds in `docs/dashboard.md`):
 
 ```text
 ./scripts/nocheh dashboard

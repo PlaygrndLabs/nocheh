@@ -42,11 +42,20 @@ def main():
         sys.path.insert(0, str(ROOT))
         from scripts.management import dispatch
         memory_parser=argparse.ArgumentParser(description='Inspect native Hermes memory without model calls.')
-        memory_parser.add_argument('action',choices=('list','show','preferences'))
-        memory_parser.add_argument('--scope');memory_parser.add_argument('--session')
+        memory_parser.add_argument('action',choices=('list','show','preferences','graph'))
+        memory_parser.add_argument('--output',type=Path);memory_parser.add_argument('--after',default='');memory_parser.add_argument('--scope');memory_parser.add_argument('--session')
         memory_parser.add_argument('--offset',type=int,default=0)
         selected=memory_parser.parse_args(rest)
         if selected.action!='list' and not selected.scope:memory_parser.error('--scope is required')
+        if selected.action=='graph':
+            from scripts.graph import read
+            result=read(selected.scope,selected.after)
+            encoded=json.dumps(result,ensure_ascii=False,indent=2)
+            if selected.output:
+                with selected.output.open('x') as file:file.write(encoded+'\n')
+                selected.output.chmod(0o600)
+            else:print(encoded)
+            return 0
         result=dispatch({'operation':'hermes.manage','request':{'action':{'list':'profiles','show':'memory','preferences':'preferences'}[selected.action],
                         'scope':selected.scope,'session':selected.session,'offset':selected.offset}})
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
