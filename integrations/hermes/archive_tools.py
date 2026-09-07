@@ -69,6 +69,8 @@ def register(ctx):
          {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],search_tool),
         ('nocheh_archive_read','Read an archived source. Originals and generated artifacts have distinct provenance.',
          {'id':{'type':'string'}},['id'],read_tool),
+        ('nocheh_memory_recall','Owner private recall across native Hermes memories and conversation histories. Unavailable to group audiences.',
+         {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
         ('nocheh_action_request','Propose an external Telegram message. Nothing is sent until the owner reviews and approves the exact action in their private DM.',
          {'destination':{'type':'string','description':'Numeric Telegram chat ID'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
     ):
@@ -80,3 +82,8 @@ def register(ctx):
 def action_tool(args,**kwargs):
     try:return json.dumps(request('/v1/action-requests',{'destination':args['destination'],'text':args['text']}),ensure_ascii=False)
     except Exception:return json.dumps({'error':'action_request_unavailable'})
+
+
+def recall_tool(args, **kwargs):
+    try:return json.dumps(request('/v1/memory/recall',args),ensure_ascii=False)
+    except Exception:return json.dumps({'error':'owner_memory_unavailable'})
