@@ -124,6 +124,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path == '/internal/manage':
+            from .management import dispatch
+            from .scopes import Scopes
+            return dispatch(PROFILE_HOME, MODEL, Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')), body)
         if self.path == '/internal/action':
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             return ASSISTANT.action(body)

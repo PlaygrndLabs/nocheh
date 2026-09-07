@@ -160,6 +160,17 @@ export async function startManagement() {
         json(res, 200, {ok: true}); setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100); return;
       }
       if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
+      if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
+      if (req.method === 'POST' && route === '/honcho/read') return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
+      if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'hermes.manage',request:{action:'profiles'}}));
+      if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {
+        return json(res,200,await python({operation:'hermes.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
+          scope:url.searchParams.get('scope'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
+      }
+      if (req.method === 'POST' && route === '/memory/preferences') {
+        const body=object(await readJson(req));
+        return json(res,200,await python({operation:'hermes.manage',request:{action:'preferences',scope:body.scope,changes:body.changes,revision:body.revision}}));
+      }
       if (req.method === 'POST' && route === '/settings') {
         const body = object(await readJson(req));
         return json(res, 200, await python({operation: 'settings.save', changes: body.changes, revision: body.revision}));

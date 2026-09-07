@@ -38,6 +38,9 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
+  if(config.service==='archive' && req.method==='POST' && path==='/v1/manage/hermes') {
+    return json(res,200,await hermesCall(config,'/internal/manage',object(await readJson(req))));
+  }
   if (config.service==='guard' && req.method==='POST' && path==='/v1/guard') {
     const body=object(await readJson(req,1024*1024));
     if (typeof body.destination!=='string') throw new HttpError(400,'invalid_destination');

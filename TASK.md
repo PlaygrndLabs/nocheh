@@ -124,3 +124,15 @@ This diagnosis does not claim a performance fix or a completed release gate.
 The optional [Honcho experiment](experiments/honcho/README.md) needs a separate
 bridge login and an explicitly supplied temporary key. Live compatibility,
 derivation and recall comparison remain pending. Its $5 budget is unused.
+
+### Owner dashboard D3 — native memory and isolated Honcho CLI
+
+- [x] Owner-only profile enumeration, bounded native notes and paginated SQLite
+  session inspection; selected profiles cannot open another profile's session.
+- [x] Native preference forms use the shared revision-checked resolver.
+- [x] Official Honcho CLI 0.1.4 and SDK 2.4.0 pinned in a separate internal-only
+  runner; stored data commands, JSON output, pagination, lifecycle aliases and
+  honest unavailable dashboard state. Read lookups cannot create records.
+- [x] Compose regression: 16 TypeScript tests and 41 Hermes integration tests;
+  two CLI boundary tests and one real upstream CLI/SDK fixture test pass.
+- [ ] Optional live Honcho compatibility remains pending separate credentials.

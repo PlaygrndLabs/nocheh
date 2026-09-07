@@ -9,6 +9,13 @@ from .configuration import ROOT, load
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
+    if operation.startswith('honcho.'):
+        from .honcho import status, read
+        if operation == 'honcho.status': return status()
+        if operation == 'honcho.read': return read(body['args'])
+    if operation == 'hermes.manage':
+        from .archive import API
+        return API().call('/v1/manage/hermes', body['request'])
     if operation == 'archive.read':
         from .archive import API
         from urllib.parse import urlsplit
