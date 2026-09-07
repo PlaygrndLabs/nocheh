@@ -39,7 +39,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);secret='synthetic-service-token-123456789';(root/'token').write_text(secret)
             policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
-            with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN':secret}):
+            with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN':secret}), patch('integrations.hermes.assistant_gateway.check_delivery_policy',return_value=True):
                 adapter=committed_adapter_class()(PlatformConfig(enabled=True,token='123456:synthetic',typing_indicator=False))
                 request=BotFixtureRequest();instrument_request(request,adapter.capture)
                 bot=ExtBot('123456:synthetic',request=request,get_updates_request=BotFixtureRequest())
@@ -92,6 +92,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     async with gateway.lock:
                         action=await asyncio.wait_for(gateway.send_action({'id':'a'*64,'destination':'777','text':'Approved fixture'}),1)
                     self.assertEqual(action,{'state':'done'},'approved sends cannot wait behind a conversation lock')
+                    before=len(request.sent)
+                    with patch('integrations.hermes.assistant_gateway.check_delivery_policy',return_value=False):
+                        blocked=await gateway.dispatch(envelope(20,'Policy changed during generation'))
+                    self.assertEqual(blocked,{'state':'failed','error_code':'space_policy_changed'})
+                    self.assertEqual(len(request.sent),before,'policy recheck precedes native sending')
                 finally:await app.shutdown()
 
 

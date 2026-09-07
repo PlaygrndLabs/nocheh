@@ -11,6 +11,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
     'source.file': '/internal/file', 'perception.transcribe': '/internal/transcribe',
     'guard.detect': '/internal/detect', 'action.execute': '/internal/action',
     'memory.review':'/internal/memory/review', 'memory.recall':'/internal/memory/recall',
+    'memory.filter':'/internal/memory/filter',
   };
   const actions: Partial<Record<RuntimeOperation, string>> = {
     'profiles.list': 'profiles', 'config.read': 'preferences', 'config.write': 'preferences', 'memory.read': 'memory',

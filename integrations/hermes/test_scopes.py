@@ -65,6 +65,17 @@ class ScopeTests(unittest.TestCase):
                 for db in databases:db.close()
                 restore()
 
+    def test_topics_and_revisions_have_distinct_native_memory(self):
+        update=self.update(-20,123);update['message']['message_thread_id']=42
+        topic=self.scopes.resolve(update,'-20')
+        self.assertEqual(topic.space,'-20/topic/42')
+        first=Scopes.apply_revision(topic,{'revision':1});second=Scopes.apply_revision(topic,{'revision':2})
+        self.assertNotEqual(first.profile,second.profile)
+        group=self.scopes.resolve(self.update(-20,123),'-20')
+        self.assertNotEqual(first.profile,Scopes.apply_revision(group,{'revision':1}).profile)
+        owner=self.scopes.resolve(self.update(123,123,'private'),'123')
+        self.assertEqual(Scopes.apply_revision(owner,{'revision':1}).profile,Scopes.apply_revision(owner,{'revision':2}).profile)
+
     def test_native_tool_definitions_are_an_explicit_safe_allowlist(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
         from hermes_cli.plugins import discover_plugins

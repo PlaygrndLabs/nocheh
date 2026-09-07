@@ -124,6 +124,9 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path == '/internal/memory/filter':
+            from .privacy import filter_knowledge
+            return filter_knowledge(resolve_credentials(),MODEL,body)
         if self.path == '/internal/memory/recall':
             from .native_memory import recall
             return recall(PROFILE_HOME,body)

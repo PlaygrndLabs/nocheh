@@ -2,10 +2,12 @@ import type pg from 'pg';
 import { canonical,digest,ingest } from './archive.js';
 import { HttpError,object,string } from './http.js';
 import type { Reader } from './access.js';
+import {assertAudience} from './access.js';
 import type { RuntimeCall } from './runtime.js';
 import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
 
 export async function requestAction(pool:pg.Pool,principal:Reader,value:unknown) {
+  await assertAudience(pool,principal);
   if (!principal.turnEvent)throw new HttpError(403,'assistant_turn_required');
   const input=object(value),destination=string(input.destination,32),text=string(input.text,3500);
   if (!/^-?[1-9]\d{0,18}$/.test(destination) || !text.trim())throw new HttpError(400,'invalid_action');
