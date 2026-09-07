@@ -1,0 +1,10 @@
+{
+  "name": "nocheh",
+  "label": "Nocheh",
+  "description": "Owned archive, settings, imports and memory",
+  "icon": "Database",
+  "version": "1.0.0",
+  "tab": {"path": "/nocheh", "position": "before:config"},
+  "entry": "index.js",
+  "css": "style.css"
+}

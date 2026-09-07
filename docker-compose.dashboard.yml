@@ -1,0 +1,24 @@
+services:
+  dashboard:
+    image: nocheh-dashboard:local
+    build:
+      context: .
+      dockerfile: deploy/dashboard.Dockerfile
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    environment:
+      HERMES_HOME: /tmp/dashboard-home
+      NOCHEH_CAPTURE_ENABLED: '0'
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard:/dashboard-state:ro
+    ports: ["127.0.0.1:8784:9119"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9119/nocheh',timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 15
