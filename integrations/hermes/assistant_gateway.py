@@ -33,35 +33,17 @@ async def native_turn(root,scope,body,model,credentials):
     logical=digest(scope.chat_id+':'+thread)
     cursor=profile/('active-'+logical+'.json')
     session_id=json.loads(cursor.read_text())['session_id'] if cursor.exists() else 'nocheh-'+logical
-    text=body.get('text') or ''
-    if body.get('transcripts'):
-        text+='\n\n[Derived voice transcript; original audio is separately archived]\n'+'\n'.join(body['transcripts'])
-    if not text:text='[An attachment or non-text event was archived. Use its source reference if useful.]'
-    text+='\n\n[Archive source: nocheh:event:'+body['event_id']+']'
-    request={'text':text,'model':model,'session_id':session_id,'owner':scope.owner,'chat_id':scope.chat_id,
-             'user_id':scope.user_id,'archive_credential':body['archive_credential'],'access_token':credentials.access_token}
-    env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
-         'SERVICE_TOKEN','SERVICE_TOKEN_FILE','ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
-    env.update(HERMES_HOME=str(profile),NOCHEH_CAPTURE_ENABLED='0')
-    process=await asyncio.create_subprocess_exec(sys.executable,'-m','integrations.hermes.assistant_turn',
-        stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL,env=env,
-        cwd=Path(__file__).resolve().parents[2])
-    try:
-        stdout,_=await asyncio.wait_for(process.communicate(canonical(request)),timeout=220)
-        if process.returncode or len(stdout)>2*1024*1024:raise RuntimeError('assistant_process_failed')
-        result=json.loads(stdout)
-        if result.get('state')=='done':
-            temporary=cursor.with_suffix('.tmp')
-            with temporary.open('wb') as file:
-                file.write(canonical({'session_id':result['session_id']}));file.flush();os.fsync(file.fileno())
-            temporary.replace(cursor)
-            directory=os.open(profile,os.O_RDONLY)
-            try:os.fsync(directory)
-            finally:os.close(directory)
-        return result
-    except BaseException:
-        if process.returncode is None:process.kill();await process.wait()
-        raise
+    from .turn_process import run_process
+    result = await run_process(root, scope, body, model, credentials, session_id)
+    if result.get('state')=='done':
+        temporary=cursor.with_suffix('.tmp')
+        with temporary.open('wb') as file:
+            file.write(canonical({'session_id':result['session_id']}));file.flush();os.fsync(file.fileno())
+        temporary.replace(cursor)
+        directory=os.open(profile,os.O_RDONLY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+    return result
 
 
 def committed_adapter_class():

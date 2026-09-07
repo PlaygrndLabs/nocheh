@@ -36,7 +36,7 @@ def main():
     @contextlib.asynccontextmanager
     async def lifespan(app): yield
     native.app.router.lifespan_context = lifespan
-    native._DASHBOARD_EMBEDDED_CHAT_ENABLED = False
+    native._DASHBOARD_EMBEDDED_CHAT_ENABLED = True  # UI only; managed PTYs live in the runtime admin service.
     native.app.state.bound_host = '127.0.0.1'
     import uvicorn
     uvicorn.run(RestrictedDashboard(native.app), host='0.0.0.0', port=9119,

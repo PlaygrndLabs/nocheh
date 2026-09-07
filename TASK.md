@@ -184,8 +184,8 @@ remain active. This direction supersedes the earlier Hermes-hosted presentation.
 | --- | --- |
 | P1 — Ownership and runtime adapters | Complete: cbe3022; 30 JS/TS and 44 Python tests pass |
 | P2 — Independent Nocheh dashboard | Complete: 1438674; independent root, native return page, desktop/mobile and 3D graph pass; 32 JS/TS and 44 Python tests pass |
-| P3 — Configuration and native administration | Verified: actual native state, shared config revisions, preference inheritance, scoped sessions/files and private profile management; 32 JS/TS and 52 Python tests pass |
-| P4 — Native browser chat | Pending |
+| P3 — Configuration and native administration | Complete: 67d6a05; actual native state, shared config revisions, preference inheritance, scoped sessions/files and private profile management; 32 JS/TS and 52 Python tests pass |
+| P4 — Native browser chat | Complete: isolated managed turns, original/file capture, native resume/cancel, scoped reconnect, durable receipts and Activity; 33 JS/TS and 64 Python tests plus live owner-private browser chat pass |
 | P5 — Controlled broader tools and approvals | Pending |
 | P6 — Native cron | Pending |
 | P7 — Compatibility and release acceptance | Pending |

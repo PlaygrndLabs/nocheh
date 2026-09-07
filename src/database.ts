@@ -1,5 +1,6 @@
 import pg from 'pg';
 import type { Settings } from './config.js';
+import {managedRunSchema} from './managed-runs.js';
 import { schema } from './archive.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
@@ -22,6 +23,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
       service text PRIMARY KEY, seen_at timestamptz NOT NULL DEFAULT now()
     )`);
     await client.query(schema);
+    await client.query(managedRunSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

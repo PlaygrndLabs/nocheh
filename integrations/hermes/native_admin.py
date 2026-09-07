@@ -6,9 +6,11 @@ Only verified read routes and revision-checked owner operations reach native cod
 import asyncio
 import contextlib
 import hmac
+import hashlib
 import json
 import os
 import re
+import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode
 from .scopes import Scopes
@@ -19,10 +21,11 @@ NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 
 
 class Administration:
-    def __init__(self, app, root, model, policy, token):
+    def __init__(self, app, root, model, policy, token, browser_enabled=False):
         self.app, self.root, self.model = app, Path(root).resolve(), model
         self.policy, self.token = policy, token
         self.lock = asyncio.Lock()
+        self.browser_enabled = browser_enabled
 
     def profile(self, name):
         if not name or name in ('default', 'current'):
@@ -70,12 +73,59 @@ class Administration:
             return value
         return {**redact(native), "_nocheh_revision": profile_revision(original, policy)}, profile_revision(original, policy)
 
+    async def metadata_socket(self, scope, receive, send):
+        """Native sidebar connection metadata only; never a second agent session."""
+        from starlette.websockets import WebSocket,WebSocketDisconnect
+        ws=WebSocket(scope,receive,send);await ws.accept();session=None
+        await ws.send_json({'jsonrpc':'2.0','method':'event','params':{'type':'gateway.ready','payload':{'heartbeat':True}}})
+        try:
+            while True:
+                raw=await ws.receive_text()
+                if len(raw)>16384: await ws.close(code=1008);return
+                request=json.loads(raw);method=request.get('method');params=request.get('params') or {};result=None
+                if method=='session.create' and params.get('source')=='tool':
+                    name,_=self.profile(params.get('profile'));session='metadata-'+uuid.uuid4().hex
+                    info={'model':self.model,'provider':'openai-codex','profile_name':name,'lazy':True,'read_only':True}
+                    result={'session_id':session,'info':info}
+                    await ws.send_json({'jsonrpc':'2.0','method':'event','params':{'type':'session.info','session_id':session,'payload':info}})
+                elif method=='ping': result={'pong':True}
+                elif method=='session.close' and params.get('session_id')==session: result={'closed':True}
+                if result is None:
+                    await ws.send_json({'jsonrpc':'2.0','id':request.get('id'),'error':{'code':4032,'message':'managed_metadata_only'}})
+                else: await ws.send_json({'jsonrpc':'2.0','id':request.get('id'),'result':result})
+        except WebSocketDisconnect: pass
+        except (ValueError,TypeError,AttributeError): await ws.close(code=1008)
+
     async def __call__(self, scope, receive, send):
         from starlette.requests import Request
         from starlette.responses import JSONResponse
         if scope['type'] == 'lifespan': return await self.app(scope, receive, send)
-        if scope['type'] != 'http':
-            await send({'type': 'websocket.close', 'code': 1008}); return
+        if scope['type'] == 'websocket':
+            query=parse_qs(scope.get('query_string',b'').decode(),keep_blank_values=True)
+            supplied=query.get('token',[''])[0]
+            if not self.browser_enabled or scope['path'] not in ('/api/pty','/api/ws','/api/pub','/api/events') or not self.token or not hmac.compare_digest(supplied,self.token):
+                await send({'type':'websocket.close','code':1008});return
+            try:
+                if any(len(values)!=1 for values in query.values()): raise ValueError('ambiguous_query')
+                name,home=self.profile(query.get('profile',[''])[0])
+                if resume:=query.get('resume',[''])[0]:
+                    from hermes_state import SessionDB
+                    if not (home/'state.db').is_file(): raise ValueError('session_not_in_profile')
+                    db=SessionDB(home/'state.db',read_only=True)
+                    try:
+                        if not db.get_session(resume): raise ValueError('session_not_in_profile')
+                    finally: db.close()
+                query['profile']=[name]
+                if scope['path']!='/api/pub' and (channel:=query.get('channel',[''])[0]):
+                    query['channel']=['nocheh-'+hashlib.sha256((name+':'+channel).encode()).hexdigest()[:32]]
+            except ValueError:
+                await send({'type':'websocket.close','code':1008});return
+            # This authenticated internal connection was verified by Nocheh's
+            # loopback browser boundary; the Docker transport is a proxy peer.
+            forwarded={**scope,'client':('127.0.0.1',0),'query_string':urlencode(query,doseq=True).encode()}
+            if scope['path']=='/api/ws': return await self.metadata_socket(forwarded,receive,send)
+            return await self.app(forwarded,receive,send)
+        if scope['type'] != 'http': return
         headers = dict(scope['headers'])
         supplied = headers.get(b'x-hermes-session-token', b'').decode()
         if not self.token or not hmac.compare_digest(supplied, self.token):
@@ -111,7 +161,7 @@ class Administration:
                     raw = bytearray()
                     async for chunk in req.stream():
                         raw.extend(chunk)
-                        if len(raw) > 1024 * 1024: raise ValueError('body_size_limit')
+                        if len(raw) > (36 if path=='/api/chat/image-upload' else 1) * 1024 * 1024: raise ValueError('body_size_limit')
                     body = json.loads(raw or b'{}')
                     if not isinstance(body, dict): raise ValueError('expected_object')
                     if body.get('profile'):
@@ -119,7 +169,13 @@ class Administration:
                         if query.get('profile') and body_name != name: raise ValueError('profile_scope_mismatch')
                         name, home = self.profile(body_name)
                 result, status, extra = None, 200, {}
-                if path == '/api/profiles' and method == 'GET': result = self.profiles()
+                if path == '/api/chat/image-upload' and method == 'POST' and self.browser_enabled:
+                    images=home/'images'
+                    if images.is_symlink() or not images.resolve().is_relative_to(home.resolve()): raise ValueError('attachment_scope_denied')
+                    from hermes_cli.web_routers.files import upload_chat_image
+                    from hermes_cli.web_models import ChatImageUpload
+                    result=await upload_chat_image(ChatImageUpload(**body),name)
+                elif path == '/api/profiles' and method == 'GET': result = self.profiles()
                 elif path == '/api/profiles/active' and method == 'GET':
                     result = {'active': self.profile('')[0], 'current': self.profile('')[0]}
                 elif path == '/api/profiles' and method == 'POST':
@@ -265,13 +321,13 @@ class Administration:
                 await JSONResponse({'error': 'native_administration_unavailable'}, 503)(scope, receive, send)
 
 
-def create_app(root, model, policy, token):
+def create_app(root, model, policy, token, browser_enabled=False):
     from hermes_cli import web_server as native
     from hermes_cli import web_server_sessions as sessions
     from hermes_cli.web_routers import sessions as router
     from hermes_state import SessionDB
     from hermes_cli import web_server_profiles, web_server_cron
-    app = Administration(native.app, root, model, policy, token)
+    app = Administration(native.app, root, model, policy, token, browser_enabled)
     web_server_profiles._resolve_profile_dir = lambda name: app.profile(name)[1]
     web_server_cron._cron_profile_home = lambda profile: app.profile(profile)
     # Inspection must never create/migrate/auto-archive native state.
@@ -281,6 +337,11 @@ def create_app(root, model, policy, token):
     async def lifespan(_): yield
     native.app.router.lifespan_context = lifespan
     native._SESSION_TOKEN = token
+    from hermes_cli import web_server_chat
+    from .browser_launch import launch
+    web_server_chat._resolve_chat_argv = lambda **kwargs: launch(app,**kwargs)
+    native._DASHBOARD_EMBEDDED_CHAT_ENABLED = browser_enabled
+    native.app.state.bound_port = 8785
     native.app.state.bound_host = '127.0.0.1'
     return app
 
@@ -293,7 +354,7 @@ def main():
     token = os.environ['SERVICE_TOKEN']
     os.environ['HERMES_DASHBOARD_SESSION_TOKEN'] = token
     import uvicorn
-    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'gpt-5.6-sol'), Scopes.load(None), token),
+    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'gpt-5.6-sol'), Scopes.load(None), token, os.environ.get('NOCHEH_BROWSER_CHAT')=='1'),
                 host='0.0.0.0', port=8785, access_log=False, log_level='critical')
 
 

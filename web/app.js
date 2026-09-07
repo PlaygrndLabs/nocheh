@@ -167,6 +167,21 @@ import {fetchJSON,authedFetch} from './client.js';
       record&&h(Source,{record,notify}));
   }
 
+  function Activity({notify}) {
+    const [tick,setTick]=useState(0),[record,setRecord]=useState(null);
+    useEffect(()=>{const timer=setInterval(()=>setTick(v=>v+1),10000);return()=>clearInterval(timer);},[]);
+    const [data,error]=useLoad('/status',tick);
+    const read=async id=>{try{setRecord(await call('/events/'+id));}catch(e){notify(errorText(e),true);}};
+    const runs=data?.archive?.managed_runs||[];
+    return h('div',null,h(Panel,{title:'Browser conversations',note:'The latest 50 captured inputs. Captured only includes local UI commands and inputs that have not started a model turn. Interrupted runs require an explicit new submission.'},
+      error&&h('p',{role:'alert'},error),!data&&!error&&h('p',{role:'status'},'Loading activity…'),
+      data&&!runs.length&&h('p',null,'No browser inputs yet. Open Hermes Chat to start a conversation.'),
+      ...runs.map(run=>h('article',{className:'n-result',key:run.event_id},
+        h('div',{className:'n-row'},h('strong',null,({captured:'Captured only',done:'Complete'})[run.state]||friendlyState(run.state)),h('small',null,new Date(run.created_at).toLocaleString())),
+        h('p',null,'Profile: '+run.profile+' · Scope: '+run.scope),run.error_code&&h('p',{role:'status'},run.error_code.replaceAll('_',' ')),
+        button('Open original and result',()=>read(run.event_id))))),record&&h(Source,{record,notify}));
+  }
+
   function Memory() {
     const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[session,setSession]=useState(''),[offset,setOffset]=useState(0);
     useEffect(()=>{if(!scope&&profiles?.profiles?.length)setScope(profiles.profiles[0].scope);},[profiles]);
@@ -211,8 +226,8 @@ import {fetchJSON,authedFetch} from './client.js';
   function Source({record,notify}){
     return h(Panel,{title:'Original source'},h('p',{dir:'auto',className:'n-source'},record.event?.text),
       button('Download source JSON',()=>exportJSON(record,'nocheh-source-'+record.id+'.json')),
-      ...record.artifacts.map(a=>h('div',{className:'n-row',key:a.id},h('span',null,a.metadata?.relative_path||a.kind),h('small',null,a.state),button('Download original file',()=>download('/artifacts/'+a.id+'/download',a.metadata?.relative_path?.split('/').pop()||a.id,notify),a.state!=='ready'))),
-      ...record.derived.map(d=>h('article',{key:d.id},h('h3',null,'Derived '+d.kind),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(d.content_base64),c=>c.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:d.provenance})))),
+      ...record.artifacts.map(a=>h('div',{className:'n-row',key:a.id},h('span',null,a.metadata?.relative_path||a.metadata?.file_name||a.kind),h('small',null,a.state),button('Download original file',()=>download('/artifacts/'+a.id+'/download',a.metadata?.relative_path?.split('/').pop()||a.metadata?.file_name||a.id,notify),a.state!=='ready'))),
+      ...record.derived.map(d=>h('article',{key:d.id},h('h3',null,d.kind==='browser_result'?'Assistant result':d.kind==='transcript'?'Voice transcript':'Generated '+d.kind.replaceAll('_',' ')),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(d.content_base64),c=>c.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:d.provenance})))),
       h('details',null,h('summary',null,'Source identity and complete metadata'),h(Data,{value:record})));
   }
   const graphKinds = {scope:'Scope',profile:'Profile',message:'Message',author:'Author',attachment:'File',memory:'Memory',derived:'Derived'};
@@ -345,9 +360,10 @@ import {fetchJSON,authedFetch} from './client.js';
     useEffect(()=>{const change=()=>{setPage(location.hash.slice(1)||'overview');setNotice(null);};addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
     useEffect(()=>{heading.current?.focus({preventScroll:true});},[page]);
     const notify=(text,error=false)=>setNotice({text,error});
-    const pages={overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho lab'};
+    const pages={overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho lab'};
     const descriptions={overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect a separate memory experiment and its setup status.'};
-    const groups=[['Explore',['overview','archive','memory','graph']],['Manage',['imports','integrations','settings','operations']],['Experiments',['honcho']]];
+    descriptions.activity='Follow captured inputs, execution results and interruptions.';
+    const groups=[['Explore',['overview','archive','memory','graph','activity']],['Manage',['imports','integrations','settings','operations']],['Experiments',['honcho']]];
     const Current=extensions[page]?.component;
     return h('div',{className:'nocheh-app'+(page==='graph'?' n-graph-active':'')},
       h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'ن'),h('span',null,'Nocheh',h('small',null,'Your conversations & memory'))),
@@ -356,7 +372,7 @@ import {fetchJSON,authedFetch} from './client.js';
         h('div',{className:'n-sidebar-foot'},h('a',{href:'/hermes/nocheh',className:'n-text-link'},'Open Hermes ↗'),h('small',null,'Local owner dashboard'))),
       h('main',{className:'n-main'},h('header',{className:'n-header'},h('div',null,h('h1',{ref:heading,tabIndex:-1},pages[page]||'Overview'),h('p',{className:'n-page-description'},descriptions[page]||descriptions.overview)),button('Refresh',()=>setTick(v=>v+1))),
         notice&&h('div',{className:'n-notice '+(notice.error?'n-error':''),role:notice.error?'alert':'status'},notice.text,button('Dismiss',()=>setNotice(null))),
-        h('div',{key:page+tick},page==='integrations'?h(Integrations):page==='settings'?h(Settings,{notify}):page==='imports'?h(Jobs,{notify}):page==='archive'?h(Archive,{notify}):Current?h(Current,{notify,call,h,sdk}):h(Status,{refresh:tick})),
+        h('div',{key:page+tick},page==='activity'?h(Activity,{notify}):page==='integrations'?h(Integrations):page==='settings'?h(Settings,{notify}):page==='imports'?h(Jobs,{notify}):page==='archive'?h(Archive,{notify}):Current?h(Current,{notify,call,h,sdk}):h(Status,{refresh:tick})),
         h('footer',null,'Owned archive · Native Hermes memory · Local administration')));
   }
   createRoot(document.getElementById('root')).render(h(App));

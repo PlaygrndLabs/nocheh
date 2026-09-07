@@ -9,7 +9,7 @@ RUN curl -fSL --retry 3 https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz -
     CFLAGS='-O2 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_RTREE -DSQLITE_THREADSAFE=1' \
     ./configure --prefix=/opt/sqlite --disable-static && make -j2 && make install
 
-FROM python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
+FROM python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84 AS native-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg ca-certificates libatomic1 && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=asr /usr/local/bin/codex-asr /usr/local/bin/rust-silk /usr/local/bin/
@@ -32,4 +32,20 @@ COPY --chown=${LOCAL_UID}:${LOCAL_GID} integrations ./integrations
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/fixtures ./compatibility/fixtures
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} scripts ./scripts
 USER nocheh
+CMD ["python", "-m", "integrations.hermes.runtime"]
+
+
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS tui-assets
+WORKDIR /opt/hermes
+COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.json ./
+COPY --from=native-runtime /opt/hermes/ui-tui ./ui-tui
+COPY --from=native-runtime /opt/hermes/apps/shared ./apps/shared
+COPY --from=native-runtime /opt/hermes/web/package.json ./web/package.json
+COPY scripts/patch-native-tui.py /tmp/patch-native-tui.py
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/* && python3 /tmp/patch-native-tui.py /opt/hermes
+RUN npm ci --workspace ui-tui --workspace apps/shared --ignore-scripts --no-audit --no-fund && npm run build --workspace ui-tui
+
+FROM native-runtime
+COPY --from=tui-assets /usr/local/bin/node /usr/local/bin/node
+COPY --from=tui-assets /opt/hermes/ui-tui/dist /opt/hermes/ui-tui/dist
 CMD ["python", "-m", "integrations.hermes.runtime"]

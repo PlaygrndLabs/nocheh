@@ -7,10 +7,12 @@ import { runtimeCall } from './runtime.js';
 import { dispatchCommitted } from './assistant.js';
 import { executeApproved } from './actions.js';
 import { startLoops } from './worker-loops.js';
+import {recoverRuns} from './managed-runs.js';
 
 export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
   const call = runtimeCall(hermesAdapter({url: config.hermesUrl, token: config.token}));
   return startLoops({
+    browser:()=>recoverRuns(pool),
     capture:()=>drainSpool(pool,config.dataDir),
     attachments:()=>fetchAttachments(pool,config.dataDir,async(ref)=>{
         const result=await call('source.file',{file_id:ref});

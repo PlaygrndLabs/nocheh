@@ -27,6 +27,7 @@ Native assets use the pinned upstream lockfile. Stop and start to rebuild update
 | Archive | Search original messages and generated transcripts, then open source records and files. |
 | Memory | Read general notes, user profile notes and native conversation history for one chat. |
 | Graph | Follow recorded relationships back to their source evidence. |
+| Activity | Follow browser inputs, completed results and interruptions; open their original sources. |
 | Imports | Choose a Telegram export, review access and files, then start or resume an import. |
 | Settings → Nocheh settings | Manage Telegram access, model routing and guarding across the installation. Review, save, then apply to running services. |
 | Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
@@ -80,6 +81,32 @@ The browser receives a separate HttpOnly owner session and CSRF value. Native HT
 and one-use, 30-second WebSocket tickets are checked by Nocheh before proxying.
 Internal backend credentials are not injected into native pages. Existing CLI
 headers remain compatible; download-only cookies cannot administer settings.
+
+## Native browser chat
+
+Open Hermes → Chat. The context banner identifies the owner-private default or
+selected group profile. Changing the native profile selector changes the scope of
+archive retrieval, native sessions and memory. Chat does not send replies to Telegram.
+The terminal, its model turn and the sidebar metadata connection have distinct roles;
+only the managed turn runner can invoke a model.
+
+Submitted text and up to 10 files (25 MiB total) are archived before execution.
+Voice attachments use automatic subscription transcription; bounded UTF-8 files
+(up to 200 kB each, 1 MB total) are included as context. Other binary files remain
+retrievable. Original images may reach explicitly trusted routes; required guarding
+rejects opaque image context. Generated results and transcripts retain provenance.
+
+Native Sessions can resume a conversation in its profile. Cancel stops the isolated
+model process. Reload reconnects to the same live terminal. After a service restart,
+a recorded run can be completed, failed or interrupted; it is never automatically
+executed again. Activity shows the latest 50 browser inputs and their source/result.
+An explicit retry creates another observed input. Local UI commands appear as
+“Captured only” because they do not start a model turn.
+
+The current tool set is memory, scoped native session search, archive retrieval and
+external-action proposals. Broader shell/browser/MCP execution and cron remain in
+their following phases. Local wake-word models and arbitrary TUI gateway commands
+are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the boundary.
 
 ## Native memory and Honcho
 
