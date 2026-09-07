@@ -105,7 +105,30 @@
       results&&(!rows.length?h('p',null,'No matching messages.'):h('div',{className:'n-list'},...rows.map(r=>h('article',{className:'n-result',key:r.id||r.event_id},h('small',null,r.scope),h('p',{dir:'auto'},r.text||r.snippet||r.preview),button('Open source',()=>read(r.id||r.event_id))))))),
       record&&h(Panel,{title:'Original source'},h('p',{dir:'auto',className:'n-source'},record.event?.text),h('details',null,h('summary',null,'Source, files and provenance'),h(Data,{value:record}))));
   }
-  const extensions = {};
+  function Memory({notify}) {
+    const [profiles,error]=useLoad('/memory/profiles'),[scope,setScope]=useState(''),[session,setSession]=useState(''),[offset,setOffset]=useState(0),[tick,setTick]=useState(0),[changes,setChanges]=useState({});
+    useEffect(()=>{if(!scope&&profiles?.profiles?.length)setScope(profiles.profiles[0].scope);},[profiles]);
+    const [data,problem]=useLoad('/memory?scope='+encodeURIComponent(scope)+'&session='+encodeURIComponent(session)+'&offset='+offset,tick);
+    const [prefs]=useLoad('/memory/preferences?scope='+encodeURIComponent(scope),tick);
+    const save=async()=>{try{await call('/memory/preferences',{scope,revision:prefs.revision,changes});setChanges({});setTick(v=>v+1);notify('Hermes preferences saved. They take effect on the next turn.');}catch(e){notify(errorText(e),true);}};
+    return h('div',null,h(Panel,{title:'Hermes memory',note:'Native notes are maintained by Hermes. An explicit source citation is needed to identify supporting evidence.'},
+      error&&h('p',{role:'alert'},error),h('label',null,'Chat profile',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setSession('');setOffset(0);setChanges({});}},...(profiles?.profiles||[]).map(p=>h('option',{value:p.scope,key:p.scope},(p.owner?'Owner DM':'Group')+' · '+p.scope)))),
+      scope&&problem&&h('p',{role:'alert'},problem),scope&&data?.scope===scope&&(data.memories||[]).map(m=>h('article',{key:m.name},h('h3',null,m.name),m.exists?h(Data,{value:m.text||'This note is empty.'}):h('p',{className:'n-muted'},'No note has been created yet.'),m.truncated&&h('p',null,'Showing the first 256 KiB.'),h('small',null,m.citations.length+' explicit source references')))),
+      scope&&prefs?.scope===scope&&h(Panel,{title:'Profile preferences',note:'Source: Hermes config.yaml. Changes take effect on the next turn. Routing and scope policy remain managed by Nocheh.'},
+        h('div',{className:'n-form'},...Object.entries(prefs.schema).map(([key,spec])=>h('label',{key},key.replaceAll('_',' ').replace('.',' · '),spec.choices?h('select',{value:changes[key]??prefs.values[key],onChange:e=>setChanges({...changes,[key]:e.target.value})},...spec.choices.map(v=>h('option',{key:v},v))):h('input',{type:'number',min:spec.min,max:spec.max,value:changes[key]??prefs.values[key],onChange:e=>setChanges({...changes,[key]:Number(e.target.value)})})))),button('Save profile preferences',save,!Object.keys(changes).length)),
+      scope&&data?.scope===scope&&h(Panel,{title:'Native sessions'},session&&button('Back to sessions',()=>{setSession('');setOffset(0);}),
+        !session&&!data.sessions.length&&h('p',{className:'n-muted'},'No sessions in this profile.'),
+        ...data.sessions.map(s=>h('div',{className:'n-row',key:s.id},button(s.title||s.id,()=>{setSession(s.id);setOffset(0);}),h('small',null,s.source))),
+        ...data.messages.map((m,i)=>h('article',{className:'n-result',key:m.id||i},h('b',null,m.role),h(Data,{value:m.content}),m.truncated&&h('small',null,'Message preview truncated.'))),
+        h('div',{className:'n-actions'},offset>0&&button('Previous page',()=>setOffset(Math.max(0,offset-50))),data.next_offset!==null&&button('Next page',()=>setOffset(data.next_offset)))));
+  }
+  function Honcho({notify}) {
+    const [status,error]=useLoad('/honcho/status'),[workspace,setWorkspace]=useState(''),[kind,setKind]=useState('workspace'),[data,setData]=useState(null),[busy,setBusy]=useState(false);
+    const query=async()=>{setBusy(true);try{setData(await call('/honcho/read',{args:kind==='workspace'?['workspace','list']:[kind,'list','-w',workspace]}));}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    return h(Panel,{title:'Honcho experiment',note:'Separate from production Hermes memory. Stored-data inspection makes no inference requests.'},error&&h('p',{role:'alert'},error),status&&h(Data,{value:status}),
+      h('div',{className:'n-form'},h('label',null,'Stored data',h('select',{value:kind,onChange:e=>setKind(e.target.value)},...['workspace','peer','session'].map(v=>h('option',{key:v,value:v},v+'s')))),kind!=='workspace'&&h('label',null,'Workspace ID',h('input',{value:workspace,onChange:e=>setWorkspace(e.target.value)}))),button('Load stored data',query,busy||!status?.running||(kind!=='workspace'&&!workspace)),data&&h(Data,{value:data}));
+  }
+  const extensions = {memory:{label:'Memory',component:Memory},honcho:{label:'Honcho',component:Honcho}};
   window.__NOCHEH_PAGES__=extensions;
   function App() {
     const [page,setPage]=useState(location.hash.slice(1)||'overview'),[notice,setNotice]=useState(null),[tick,setTick]=useState(0);

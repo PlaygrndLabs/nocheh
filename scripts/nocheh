@@ -28,12 +28,28 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho"))
     args, rest = parser.parse_known_args()
     if args.command in ('backup','restore','diagnose'):
         from operations import main as operations
         return operations(args.command,STATE,rest)
     bootstrap()
+    if args.command == 'honcho':
+        sys.path.insert(0, str(ROOT))
+        from scripts.honcho import main as honcho
+        return honcho(rest)
+    if args.command == 'memory':
+        sys.path.insert(0, str(ROOT))
+        from scripts.management import dispatch
+        memory_parser=argparse.ArgumentParser(description='Inspect native Hermes memory without model calls.')
+        memory_parser.add_argument('action',choices=('list','show','preferences'))
+        memory_parser.add_argument('--scope');memory_parser.add_argument('--session')
+        memory_parser.add_argument('--offset',type=int,default=0)
+        selected=memory_parser.parse_args(rest)
+        if selected.action!='list' and not selected.scope:memory_parser.error('--scope is required')
+        result=dispatch({'operation':'hermes.manage','request':{'action':{'list':'profiles','show':'memory','preferences':'preferences'}[selected.action],
+                        'scope':selected.scope,'session':selected.session,'offset':selected.offset}})
+        print(json.dumps(result,ensure_ascii=False,indent=2));return 0
     if args.command in ('dashboard', 'jobs', 'import'):
         sys.path.insert(0, str(ROOT))
         if args.command == 'dashboard':

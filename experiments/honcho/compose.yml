@@ -73,6 +73,15 @@ services:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8790/health',timeout=2)"]
       interval: 5s
       retries: 15
+  cli:
+    image: nocheh-honcho-cli:0.1.4
+    build: {context: ., dockerfile: cli.Dockerfile}
+    profiles: [runner]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - ../../data/honcho-experiment/internal_token:/state/internal_token:ro
+    networks: [isolated]
   baseline:
     # Reuses the pinned Hermes image, with only experiment state and no Telegram.
     image: nocheh-hermes:local
