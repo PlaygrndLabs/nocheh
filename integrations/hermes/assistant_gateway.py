@@ -19,12 +19,8 @@ TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
 def prepare_profile(root,scope,model):
     profile=Path(root)/'profiles'/scope.profile
     profile.mkdir(parents=True,exist_ok=True,mode=0o700)
-    config=(f'model:\n  provider: openai-codex\n  default: {model}\n'
-            'plugins:\n  enabled: [nocheh]\nfallback_models: []\n'
-            'tools:\n  tool_search:\n    enabled: "off"\n'
-            'memory:\n  memory_enabled: true\n  user_profile_enabled: true\n'
-            f'auxiliary:\n  session_search:\n    provider: openai-codex\n    model: {model}\n')
-    (profile/'config.yaml').write_text(config)
+    from .profile_config import configure_profile
+    configure_profile(profile, model)
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
