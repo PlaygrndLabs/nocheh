@@ -81,6 +81,43 @@ def register(ctx):
         ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
             handler=handler)
+    for kind,description,properties,required in (
+        ('shell','Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval or an exact standing permission is required.',
+         {'command':{'type':'string','maxLength':16000}},['command']),
+        ('browser','Propose inspection of one public HTTPS HTML page. The approved response renders offline without scripts or secondary requests. No logins, clicks or form submissions.',
+         {'url':{'type':'string'}},['url']),
+        ('mcp','Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities.',
+         {'url':{'type':'string'},'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string'},'input':{'type':'object'}},['url']),
+    ):
+        name='nocheh_'+kind
+        ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
+            schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
+            handler=lambda args,_kind=kind,**kwargs:controlled_tool(_kind,args))
+    name='nocheh_action_status';description='Read a proposed controlled action and its separate execution result in your authorized scope.'
+    ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
+        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'required':['id'],'additionalProperties':False}},handler=controlled_status)
+
+
+def controlled_tool(kind,args):
+    try:
+        from pathlib import Path
+        from .profile_config import inherited_config,read,preferences
+        home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
+        if preferences(config)['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
+        return json.dumps(request('/v1/tools/propose',{'kind':kind,'arguments':args}),ensure_ascii=False)
+    except Exception:return json.dumps({'error':'controlled_action_unavailable'})
+
+
+def controlled_status(args,**kwargs):
+    import re
+    try:
+        id=args.get('id','')
+        if not re.fullmatch(r'[a-f0-9]{64}',id):raise ValueError('invalid_action')
+        value=request('/v1/tools/actions/'+id)
+        # Bound tool context; complete bytes remain in the archive and owner UI.
+        result=json.dumps({key:value.get(key) for key in ('id','kind','state','result','result_id','error_code')},ensure_ascii=False)
+        return result if len(result)<=24000 else json.dumps({'id':id,'state':value['state'],'result_id':value['result_id'],'excerpt':result[:22000],'truncated':True})
+    except Exception:return json.dumps({'error':'controlled_action_unavailable'})
 
 
 def action_tool(args,**kwargs):

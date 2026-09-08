@@ -28,12 +28,17 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals"))
     args, rest = parser.parse_known_args()
     if args.command in ('backup','restore','diagnose'):
-        from operations import main as operations
+        sys.path.insert(0,str(ROOT))
+        from scripts.operations import main as operations
         return operations(args.command,STATE,rest)
     bootstrap()
+    if args.command=='approvals':
+        sys.path.insert(0,str(ROOT))
+        from scripts.approvals import main as approvals
+        return approvals(STATE,rest)
     if args.command in ('runtime', 'policy'):
         sys.path.insert(0, str(ROOT))
         from scripts.native import main as native
@@ -119,6 +124,10 @@ def main():
         return start(STATE, command, ROOT)
     if args.command in ('down', 'status', 'logs'):
         command += ['--profile', 'tools']
+    if args.command=='down':
+        sys.path.insert(0,str(ROOT))
+        from scripts.tool_worker import stop
+        stop(STATE,wait=True)
     actions = {
         "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
         "dev": ["up", "--build", "--watch"], "down": ["down"], "status": ["ps"],
@@ -135,6 +144,12 @@ def main():
         if ready:
             return ready
     result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
+    if args.command=='up' and result==0:
+        result=subprocess.call(['docker','build','-f',str(ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(ROOT)],cwd=ROOT,env=env)
+        if result==0:
+            sys.path.insert(0,str(ROOT))
+            from scripts.tool_worker import start
+            print(json.dumps(start(STATE)))
     if args.command == 'test' and result == 0:
         return subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
             '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes', 'python', '-m', 'unittest',

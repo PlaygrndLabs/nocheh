@@ -11,7 +11,8 @@ import { startWorker } from './worker.js';
 import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import { guardPayload } from './guard.js';
-import { requestAction } from './actions.js';
+import { requestAction,telegramActions,decideTelegram } from './actions.js';
+import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,finishControlled} from './controlled-actions.js';
 import { reader, admin,assertAudience } from './access.js';
 import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
@@ -85,6 +86,8 @@ const server = createServer((req, res) => { void (async () => {
     return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99]?.scope:null});
   }
   if(config.service==='archive' && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
+  if(config.service==='archive' && path==='/v1/tools/propose' && req.method==='POST')return json(res,200,await proposeControlled(pool,principal,await readJson(req)));
+  if(config.service==='archive' && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path))return json(res,200,await controlledAction(pool,principal,path.split('/').at(-1)));
   if (config.service === 'archive' && req.method === 'GET') {
     if (path==='/v1/graph') return json(res,200,await evidenceGraph(pool,principal,url.searchParams.get('scope') ?? '',url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit')),url.searchParams.get('focus') ?? ''));
     if (path==='/v1/search') return json(res,200,await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))));
@@ -98,6 +101,16 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
+  if(config.service==='archive' && path==='/v1/tools/actions' && req.method==='GET')return json(res,200,{...await controlledList(pool,principal),telegram:await telegramActions(pool,principal)});
+  if(config.service==='archive' && path.startsWith('/v1/tools/') && req.method==='POST') {
+    const body=await readJson(req,2*1024*1024);
+    if(path==='/v1/tools/decide')return json(res,200,await decideControlled(pool,principal,body));
+    if(path==='/v1/tools/telegram-decision')return json(res,200,await decideTelegram(pool,principal,body));
+    if(path==='/v1/tools/grant')return json(res,200,await grantPermission(pool,principal,body));
+    if(path==='/v1/tools/revoke')return json(res,200,await revokePermission(pool,principal,body));
+    if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body));
+    if(path==='/v1/tools/finish')return json(res,200,await finishControlled(pool,body));
+  }
   if (config.service==='archive' && req.method==='GET' && path==='/v1/runtime') {
     const status = await call('status', {}, 5000).catch(() => ({ok:false,error:'runtime_unavailable'}));
     return json(res,200,{id:runtime.id,capabilities:runtime.capabilities,status});

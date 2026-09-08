@@ -41,7 +41,7 @@ class BrowserGateway:
         except HTTPError as error:
             try: code=json.load(error).get('error')
             except Exception: code=None
-            allowed={'quota_paused','subscription_unavailable','transcription_unavailable','run_lease_lost'}
+            allowed={'quota_paused','subscription_unavailable','transcription_unavailable','run_lease_lost','browser_audience_changed','profile_policy_changed'}
             raise RuntimeError(code if code in allowed else 'managed_service_unavailable') from None
         except Exception: raise RuntimeError('managed_service_unavailable') from None
 
@@ -57,6 +57,7 @@ class BrowserGateway:
         if not isinstance(text,str) or len(text)>100000: raise ValueError('invalid_text')
         files = list(session.get('_nocheh_attachments',{}).values())
         request = {'scope':self.scope.chat_id, 'profile':self.scope.profile,
+                   'space':self.scope.space or self.scope.chat_id,'revision':self.scope.revision,
                    'conversation':session['session_key'], 'id':params['id'], 'text':text, 'files':files,
                    'submission':params.get('submission','composer'), 'display':params.get('display',text)}
         result = self.call('/v1/browser/input',request)
@@ -238,6 +239,7 @@ class BrowserGateway:
             return result
         except Exception as error:
             code = str(error) if isinstance(error,ValueError) and re.fullmatch(r'[a-z_]+',str(error)) else 'managed_operation_unavailable'
+            if str(error) in ('browser_audience_changed','profile_policy_changed'):code='Audience policy changed. Select the current group profile to start a fresh context. Your input remains archived.'
             return self.server._err(rid,4032,code)
 
     def install(self):
@@ -264,7 +266,8 @@ def main():
     root=Path(os.environ['NOCHEH_RUNTIME_HOME']).resolve();home=Path(os.environ['HERMES_HOME']).resolve()
     profile=os.environ['NOCHEH_BROWSER_PROFILE'];chat=os.environ['NOCHEH_BROWSER_SCOPE']
     if home != root/'profiles'/profile: raise SystemExit('managed_profile_mismatch')
-    scope=Scope(chat,os.environ['NOCHEH_BROWSER_OWNER_ID'],os.environ['NOCHEH_BROWSER_OWNER']=='1',profile)
+    scope=Scope(chat,os.environ['NOCHEH_BROWSER_OWNER_ID'],os.environ['NOCHEH_BROWSER_OWNER']=='1',profile,
+                os.environ.get('NOCHEH_BROWSER_SPACE',chat),int(os.environ.get('NOCHEH_BROWSER_REVISION','0')))
     from tui_gateway import server
     gateway=BrowserGateway(server,root,scope,os.environ['NOCHEH_MODEL']);gateway.install();gateway.flush_receipts()
     from .request_boundary import install

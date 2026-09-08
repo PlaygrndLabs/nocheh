@@ -21,7 +21,7 @@ SERVICES=['hermes','worker','guard','archive']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
         'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
-        'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id'}
+        'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id'}
 
 
 def compose(state,project=None):
@@ -63,13 +63,17 @@ def fingerprints(command,env,tables=None):
 
 
 def backup(state,output,leave_stopped=False):
+    try:from .tool_worker import running as tools_running,stop as stop_tools,start as start_tools
+    except ImportError:from scripts.tool_worker import running as tools_running,stop as stop_tools,start as start_tools
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
     output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     stage=Path(tempfile.mkdtemp(prefix='.backup-',dir=output.parent));stage.chmod(0o700)
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
     stopped=[name for name in SERVICES if name in running]
+    tool_was_running=tools_running(state)
     try:
+        if tool_was_running:stop_tools(state,wait=True)
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
         for service in stopped: subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
@@ -82,9 +86,9 @@ def backup(state,output,leave_stopped=False):
         dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
-            for name in ('.env','files','spool','hermes','admin/jobs'):
+            for name in ('.env','files','spool','hermes','admin/jobs','admin/tools/receipts'):
                 base=env_path(state) if name=='.env' else state/name
-                if name=='admin/jobs' and not base.exists(): continue
+                if name.startswith('admin/') and not base.exists(): continue
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
                 for path in candidates:
                     relative='.env' if name=='.env' else path.relative_to(state).as_posix()
@@ -106,6 +110,7 @@ def backup(state,output,leave_stopped=False):
     finally:
         # Resume precisely the services that were running before the snapshot.
         if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180']+stopped,env=env,check=True)
+        if tool_was_running and not leave_stopped:start_tools(state)
 
 
 def validate_snapshot(snapshot):
@@ -148,6 +153,8 @@ def restore(snapshot,state,project,port):
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
     config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port))
+    (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
+    (state/'admin/tools/inactive').touch()
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
     subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)

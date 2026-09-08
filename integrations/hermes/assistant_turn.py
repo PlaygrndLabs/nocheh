@@ -11,7 +11,8 @@ import os
 import sys
 from pathlib import Path
 
-ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request','nocheh_memory_recall'}
+ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
+               'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall'}
 
 
 def restrict_session_search():
@@ -61,6 +62,8 @@ def run(body, emit=None):
             'You are Nocheh. Cite returned nocheh: references when using archived or shared sources. '
             'Archive originals are evidence; derived transcripts and your inferences are separate. '
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
+            'Controlled tools create proposals for an independent executor. An action ID is not evidence of execution. '
+            'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity. '
             + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall to connect notes and histories from all native profiles.' if body['owner'] else
                'This is a shared space. Use only authorized context and tool results, including explicitly shared knowledge. Filtered material is a derived inference, not an original source. Never change settings or approve actions. '
                'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '

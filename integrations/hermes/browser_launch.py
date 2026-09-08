@@ -6,11 +6,10 @@ from .scopes import Scope, Scopes
 
 def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_file=None):
     name, home = admin.profile(profile)
-    chat = next((chat for chat in [admin.policy.owner,*admin.policy.groups] if chat and Scopes.profile(chat)==name),admin.policy.owner)
-    owner = chat == admin.policy.owner
+    bound=admin.binding(name);chat,owner=bound.chat_id,bound.owner
     if not chat: raise ValueError('owner_required')
     from .assistant_gateway import prepare_profile
-    prepare_profile(admin.root,Scope(chat,admin.policy.owner,owner,name),admin.model)
+    prepare_profile(admin.root,bound,admin.model)
     workspace = home / 'workspace'
     if workspace.is_symlink(): raise ValueError('workspace_path_denied')
     workspace.mkdir(exist_ok=True,mode=0o700)
@@ -31,6 +30,7 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
         HERMES_PYTHON_SRC_ROOT='/opt/hermes',HERMES_CWD=str(workspace),
         NOCHEH_RUNTIME_HOME=str(admin.root),NOCHEH_MODEL=admin.model,
         NOCHEH_BROWSER_PROFILE=name,NOCHEH_BROWSER_SCOPE=chat,NOCHEH_BROWSER_OWNER='1' if owner else '0',
+        NOCHEH_BROWSER_SPACE=bound.space,NOCHEH_BROWSER_REVISION=str(bound.revision),
         NOCHEH_BROWSER_OWNER_ID=admin.policy.owner,NOCHEH_CAPTURE_ENABLED='0',
         NODE_ENV='production',HERMES_TUI_DISABLE_MOUSE='1',HERMES_TUI_INLINE='1',HERMES_TUI_DASHBOARD='1',
         COLORTERM='truecolor',TERM='xterm-256color')
