@@ -23,7 +23,7 @@ def call(state, path, body=None, method=None, revision=None):
         except Exception: code = 'native_administration_unavailable'
         allowed = {'configuration_conflict', 'profile_scope_denied', 'invalid_preference',
                    'unsupported_preference', 'managed_operation_unavailable', 'setting_managed_by_nocheh'}
-        raise ValueError(code if code in allowed else 'native_administration_unavailable') from None
+        raise ValueError(code if code in allowed or isinstance(code,str) and code.startswith(('cron_','invalid_cron_')) else 'native_administration_unavailable') from None
 
 
 def main(state, command, args):

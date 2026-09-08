@@ -7,6 +7,13 @@ import urllib.request
 
 ARCHIVE_CREDENTIAL = contextvars.ContextVar('nocheh_archive_credential', default=None)
 _PROCESS_CREDENTIAL = None
+_PROCESS_PREFERENCES = None
+
+
+def bind_process_preferences(values):
+    global _PROCESS_PREFERENCES
+    from .policy_config import validate
+    validate(values);_PROCESS_PREFERENCES=dict(values)
 
 
 def bind_process_credential(credential):
@@ -103,7 +110,7 @@ def controlled_tool(kind,args):
         from pathlib import Path
         from .profile_config import inherited_config,read,preferences
         home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
-        if preferences(config)['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
+        if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
         return json.dumps(request('/v1/tools/propose',{'kind':kind,'arguments':args}),ensure_ascii=False)
     except Exception:return json.dumps({'error':'controlled_action_unavailable'})
 

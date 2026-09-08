@@ -49,7 +49,7 @@ def view(root, config=None, job=None):
     return {'revision': revision(value), 'global': value.get('global', {}),
             'jobs': value.get('jobs', {}), 'values': values, 'origins': origins,
             'schema': PREFERENCES, 'takes_effect': 'next managed turn',
-            'job_status': 'stored; scheduled execution becomes available in P6',
+            'job_status': 'applies to the next managed scheduled turn',
             'external_actions': 'review each action unless an exact bounded standing permission matches; controlled tools execute outside the agent'}
 
 

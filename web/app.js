@@ -189,12 +189,13 @@ import {fetchJSON,authedFetch} from './client.js';
           button('Create bounded permission',()=>decide('grant',{action_id:action.id,fingerprint:action.fingerprint,minutes,uses}),busy)))),
       h(Panel,{title:'Standing permissions',note:'Only exact matches can start automatically while a permission remains valid.'},
         ...(queue?.permissions||[]).map(permission=>h('article',{className:'n-result',key:permission.id},h('strong',null,permission.kind+' · '+permission.remaining+' starts left'),h('p',null,'Expires '+new Date(permission.expires_at).toLocaleString()+' · Scope '+permission.scope),h('details',null,h('summary',null,'Exact arguments'),h(Data,{value:permission.arguments})),permission.revoked_at?h('span',null,'Revoked'):button('Revoke permission',()=>decide('revoke',{id:permission.id}),busy))),queue&&!queue.permissions.length&&h('p',null,'No standing permissions. Each action requires review.')),
-      h(Panel,{title:'Browser conversations',note:'The latest 50 captured inputs. Captured only includes local UI commands and inputs that have not started a model turn. Interrupted runs require an explicit new submission.'},
+      h(Panel,{title:'Conversations and scheduled runs',note:'The latest 50 captured inputs and schedule fires. Missed and interrupted runs stay visible. Use Hermes Schedules to catch up once or cancel a run.'},
+      h('a',{href:'/hermes/cron'},'Manage schedules in Hermes →'),
       error&&h('p',{role:'alert'},error),!data&&!error&&h('p',{role:'status'},'Loading activity…'),
-      data&&!runs.length&&h('p',null,'No browser inputs yet. Open Hermes Chat to start a conversation.'),
+      data&&!runs.length&&h('p',null,'No runs yet. Open Hermes Chat or Schedules to start.'),
       ...runs.map(run=>h('article',{className:'n-result',key:run.event_id},
         h('div',{className:'n-row'},h('strong',null,({captured:'Captured only',done:'Complete'})[run.state]||friendlyState(run.state)),h('small',null,new Date(run.created_at).toLocaleString())),
-        h('p',null,'Profile: '+run.profile+' · Scope: '+run.scope),run.error_code&&h('p',{role:'status'},run.error_code.replaceAll('_',' ')),
+        h('p',null,(run.channel==='scheduler'?'Schedule: '+(run.job_name||run.job_id)+' · ':'Browser · ')+'Profile: '+run.profile+' · Scope: '+run.scope),run.error_code&&h('p',{role:'status'},run.error_code.replaceAll('_',' ')),
         button('Open original and result',()=>read(run.event_id))))),record&&h(Source,{record,notify}));
   }
 

@@ -46,7 +46,9 @@ def run(body, emit=None):
     aux._read_codex_access_token=lambda:body['access_token']
     profile=Path(os.environ['HERMES_HOME'])
     from .profile_config import preferences, read
-    prefs=preferences(read(profile/'config.yaml'))
+    prefs=body.get('preferences') or preferences(read(profile/'config.yaml'))
+    from .archive_tools import bind_process_preferences
+    bind_process_preferences(prefs)
     database=SessionDB(profile/'state.db')
     session_id=body['session_id']
     history=database.get_messages_as_conversation(session_id) if database.get_session(session_id) else []
@@ -70,6 +72,9 @@ def run(body, emit=None):
                'Contribute when useful, addressed, or able to correct an important misunderstanding. '
                'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')))
     try:
+        if agent._memory_store is not None:
+            agent._memory_store.memory_char_limit=prefs['memory.memory_char_limit']
+            agent._memory_store.user_char_limit=prefs['memory.user_char_limit']
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'])
@@ -80,7 +85,7 @@ def run(body, emit=None):
                 tool['function']['description']='Search or read native history in this profile only. Other profiles cannot be accessed.'
         options = {'conversation_history':history}
         if emit: options['stream_callback'] = lambda text: emit({'event':'message.delta','text':text})
-        if body.get('channel') == 'browser': options['persist_user_message'] = body.get('source_text',body['text'])
+        if body.get('channel') in ('browser','scheduler'): options['persist_user_message'] = body.get('source_text',body['text'])
         message=body['text']
         if body.get('images'):
             import base64,hashlib,re

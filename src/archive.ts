@@ -134,8 +134,8 @@ export async function archiveStatus(pool:pg.Pool) {
   const actions = await pool.query('SELECT state,count(*)::integer AS count FROM action_requests GROUP BY state');
   const dispatchFailures = await pool.query("SELECT event_id,state,error_code,attempts FROM dispatches WHERE error_code IS NOT NULL ORDER BY updated_at DESC LIMIT 50");
   const failures = await pool.query('SELECT file_name, attempts, error_code, seen_at FROM spool_failures ORDER BY seen_at DESC LIMIT 100');
-  const runs = await pool.query(`SELECT r.event_id,r.state,r.error_code,r.created_at,r.updated_at,e.scope,
+  const runs = await pool.query(`SELECT r.event_id,r.state,r.error_code,r.created_at,r.updated_at,e.scope,e.channel,r.job_id,
     e.payload FROM managed_runs r JOIN events e ON e.id=r.event_id ORDER BY r.created_at DESC LIMIT 50`);
-  const managedRuns=runs.rows.map(({payload,...row})=>({...row,profile:JSON.parse((payload as Buffer).toString()).profile}));
+  const managedRuns=runs.rows.map(({payload,...row})=>({...row,profile:JSON.parse((payload as Buffer).toString()).profile,job_name:JSON.parse((payload as Buffer).toString()).definition?.name}));
   return {events:Number(events.rows[0]?.count),artifacts:artifacts.rows,dispatches:dispatches.rows,transcriptions:transcriptions.rows,actions:actions.rows,dispatch_failures:dispatchFailures.rows,spool_failures:failures.rows,managed_runs:managedRuns};
 }

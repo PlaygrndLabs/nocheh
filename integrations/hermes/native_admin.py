@@ -167,7 +167,8 @@ class Administration:
                 query = parse_qs(scope.get('query_string', b'').decode(), keep_blank_values=True)
                 if any(len(values) != 1 for values in query.values()): raise ValueError('ambiguous_query')
                 path, method = scope['path'], scope['method']
-                name, home = self.profile(query.get('profile', [''])[0])
+                selected=query.get('profile', [''])[0]
+                name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected)
                 if path.startswith('/api/files') and (method, path) in {
                     ('GET','/api/files'), ('GET','/api/files/read'), ('GET','/api/files/download'),
                     ('GET','/api/files/stream'), ('HEAD','/api/files/stream'), ('POST','/api/files/upload'),
@@ -203,7 +204,10 @@ class Administration:
                 result, status, extra = None, 200, {}
                 if path in ('/api/config','/api/nocheh/preferences','/api/nocheh/policy'):
                     home=self.preference_home(name,home)
-                if path == '/api/chat/image-upload' and method == 'POST' and self.browser_enabled:
+                if path.startswith('/api/cron/'):
+                    from .native_cron import manage
+                    result=manage(self,path,method,query,body,headers)
+                elif path == '/api/chat/image-upload' and method == 'POST' and self.browser_enabled:
                     images=home/'images'
                     if images.is_symlink() or not images.resolve().is_relative_to(home.resolve()): raise ValueError('attachment_scope_denied')
                     from hermes_cli.web_routers.files import upload_chat_image

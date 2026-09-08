@@ -1,4 +1,4 @@
-import {captureInput,claimRun,finishRun,renewRun,prepareRun} from './managed-runs.js';
+import {captureInput,claimRun,finishRun,renewRun,prepareRun,cancelScheduled,recoverScheduled,scheduleDefinition,scheduledRuns,scheduledDelivery} from './managed-runs.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
 import { listSpaces, spacePolicy, saveSpace,parentSpace } from './spaces.js';
@@ -101,6 +101,18 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
+  if(config.service==='archive'&&req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
+    const body=await readJson(req);
+    if(path==='/v1/scheduler/input')return json(res,200,await captureInput(pool,config,body,'scheduler'));
+    if(path==='/v1/scheduler/claim')return json(res,200,await claimRun(pool,config,body,'scheduler'));
+    if(path==='/v1/scheduler/finish')return json(res,200,await finishRun(pool,body));
+    if(path==='/v1/scheduler/heartbeat')return json(res,200,await renewRun(pool,body));
+    if(path==='/v1/scheduler/cancel')return json(res,200,await cancelScheduled(pool,body));
+    if(path==='/v1/scheduler/recover')return json(res,200,await recoverScheduled(pool));
+    if(path==='/v1/scheduler/definition')return json(res,200,await scheduleDefinition(pool,config,body));
+    if(path==='/v1/scheduler/runs')return json(res,200,await scheduledRuns(pool,body));
+    if(path==='/v1/scheduler/delivery')return json(res,200,await scheduledDelivery(pool,body));
+  }
   if(config.service==='archive' && path==='/v1/tools/actions' && req.method==='GET')return json(res,200,{...await controlledList(pool,principal),telegram:await telegramActions(pool,principal)});
   if(config.service==='archive' && path.startsWith('/v1/tools/') && req.method==='POST') {
     const body=await readJson(req,2*1024*1024);
