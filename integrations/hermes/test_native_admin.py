@@ -77,7 +77,7 @@ class NativeAdminTests(unittest.TestCase):
         self.assertEqual(len(profiles), 2)
         self.assertEqual(self.client.get('/api/config?profile=../../secrets', headers=self.headers).status_code, 400)
         for method, path in [('POST','/api/gateway/start'), ('GET','/api/env/reveal'), ('GET','/api/fs/read-text'),
-                             ('POST','/api/cron/jobs'), ('POST','/api/mcp/test')]:
+                             ('POST','/api/mcp/test')]:
             self.assertEqual(self.client.request(method, path, headers=self.headers).status_code, 409)
 
     def test_native_config_roundtrip_preserves_fields_and_rejects_stale_writer(self):

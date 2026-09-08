@@ -155,6 +155,7 @@ def restore(snapshot,state,project,port):
     config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port))
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
+    (state/'hermes/scheduler-inactive').touch()
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
     subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)

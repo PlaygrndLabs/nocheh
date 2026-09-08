@@ -9,6 +9,15 @@ from pathlib import Path
 from .capture import canonical
 
 
+def scheduled_preferences(profile,body):
+    from .profile_config import inherited_config,read,preferences
+    from .policy_config import validate
+    config,_=inherited_config(profile,read(profile/'config.yaml'),job=body['job_id'])
+    values=preferences(config);overrides=body.get('job_preferences',{});validate(overrides)
+    values.update({key:value for key,value in overrides.items() if value is not None})
+    return values
+
+
 async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None):
     from .assistant_gateway import prepare_profile
     profile = prepare_profile(root, scope, model)
@@ -34,6 +43,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
                'access_token':credentials.access_token, 'stream':emit is not None,
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image']}
+    if body.get('channel')=='scheduler':
+        request['preferences']=scheduled_preferences(profile,body)
     env = {key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
            'SERVICE_TOKEN','SERVICE_TOKEN_FILE','ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
     env.update(HERMES_HOME=str(profile), NOCHEH_CAPTURE_ENABLED='0')

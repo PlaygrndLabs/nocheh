@@ -1,0 +1,135 @@
+"""Native storage and supervised scheduling acceptance without external traffic."""
+import asyncio,base64,hashlib,hmac,json,os,tempfile,threading,time,unittest
+from datetime import timedelta
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from .native_admin import Administration
+from .native_cron import manage,inspect,store
+from .scheduler import Scheduler,now
+from .scopes import Scopes
+
+
+class SchedulerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
+        self.env=patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':str(self.root)});self.env.start()
+        self.admin=Administration(None,self.root,'gpt-5.6-sol',Scopes({'enabled':False,'owner_id':'42','group_ids':[]}), 'fixture-token-long-enough')
+        self.calls=[];self.inputs={};self.finished={};self.failed=None;self.executions=0;self.hold=False
+        self.scheduler=Scheduler(self.admin,lambda:SimpleNamespace(access_token='ephemeral'),self.call,self.runner)
+
+    def tearDown(self):
+        self.scheduler.stop()
+        for thread,cancel in list(self.scheduler.active.values()):cancel.set();thread.join(timeout=5)
+        self.env.stop();self.temp.cleanup()
+
+    def call(self,route,body):
+        self.calls.append((route,body))
+        if route==self.failed:raise OSError('synthetic archive outage')
+        if route=='input':self.inputs[body['id']]=body;return {'event_id':body['id']}
+        if route=='claim':
+            if body['event_id'] in self.finished:return {'claimed':False,'state':self.finished[body['event_id']]['state']}
+            claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000}
+            encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+            signature=base64.urlsafe_b64encode(hmac.new(self.admin.token.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+            return {**body,'claimed':True,'archive_credential':'turn.'+encoded+'.'+signature,'text':self.inputs[body['event_id']]['text']}
+        if route=='finish':self.finished[body['event_id']]=body;return {'state':body['state']}
+        return {'state':'local'}
+
+    async def runner(self,root,bound,body,model,credentials,session,cancelled=None):
+        self.executions+=1
+        while self.hold and not cancelled.is_set():await asyncio.sleep(.01)
+        return {'state':'cancelled' if cancelled.is_set() else 'done','text':'Synthetic result','session_id':session}
+
+    def request(self,path='/api/cron/jobs',method='GET',body=None,headers=None):
+        return manage(self.admin,path,method,{},body or {},headers or {},self.call)
+
+    def create(self,**extra):
+        return self.request(method='POST',body={'name':'Fixture','prompt':'  Original\r\n\0 text  ','schedule':'every 1h',**extra})
+
+    def settle(self):
+        for thread,_ in list(self.scheduler.active.values()):thread.join(timeout=5)
+        self.assertFalse(self.scheduler.active)
+
+    def due(self,job,seconds=0):
+        from cron import jobs as native
+        home=Path(job['hermes_home'])
+        with store(home):native.update_job(job['id'],{'next_run_at':(now()-timedelta(seconds=seconds)).isoformat()})
+        return home
+
+    def test_native_form_roundtrip_conflict_and_inert_capture_failure(self):
+        self.assertEqual(self.request(),[]);self.assertFalse(list(self.root.rglob('jobs.json')))
+        job=self.create();self.assertEqual(job['prompt'],'  Original\r\n\0 text  ')
+        home=Path(job['hermes_home']);original=(home/'cron/jobs.json').read_bytes();self.request();self.assertEqual((home/'cron/jobs.json').read_bytes(),original)
+        saved=self.request('/api/cron/jobs/'+job['id'],'PUT',{'updates':{'prompt':'Exact revised text','_nocheh_revision':job['_nocheh_revision']}})
+        with self.assertRaisesRegex(ValueError,'configuration_conflict'):
+            self.request('/api/cron/jobs/'+job['id'],'PUT',{'updates':{'prompt':'stale','_nocheh_revision':job['_nocheh_revision']}})
+        for extra in ({'script':'escape.py'},{'deliver':'telegram:other'},{'base_url':'https://paid.example'},{'context_from':['private']},{'no_agent':True}):
+            with self.assertRaises(ValueError):self.create(**extra)
+        self.failed='definition'
+        with self.assertRaises(OSError):self.create(name='Pending capture')
+        self.assertFalse(inspect(home)[-1]['nocheh_registered'])
+
+    def test_one_fire_original_provenance_schedule_advance_and_no_repeat(self):
+        job=self.create();home=self.due(job);before=inspect(home)[0]['next_run_at'];self.failed='input'
+        with self.assertRaises(OSError):self.scheduler.tick()
+        self.assertEqual(inspect(home)[0]['next_run_at'],before);self.assertEqual(self.executions,0)
+        self.failed=None;self.scheduler.tick();self.settle()
+        self.assertEqual(self.executions,1);self.assertEqual(next(iter(self.inputs.values()))['text'],job['prompt'])
+        self.assertEqual(next(iter(self.finished.values()))['state'],'done')
+        self.scheduler.tick();self.settle();self.assertEqual(self.executions,1)
+        self.assertEqual(self.request('/api/cron/jobs/'+job['id'])['last_status'],'success')
+
+    def test_unconfirmed_claim_never_starts_or_permanently_blocks_a_job(self):
+        job=self.create();home=self.due(job);self.failed='claim';self.scheduler.tick()
+        self.assertEqual(self.executions,0);self.assertIsNone(inspect(home)[0]['nocheh_running'])
+        self.assertEqual(inspect(home)[0]['last_error'],'claim_unconfirmed')
+        self.failed=None;self.scheduler.tick();self.settle();self.assertEqual(self.executions,0)
+
+    def test_missed_runs_require_explicit_one_catch_up_and_manual_identity(self):
+        job=self.create();home=self.due(job,120);before=inspect(home)[0]['next_run_at']
+        self.scheduler.tick();self.assertEqual(self.executions,0)
+        from .scheduler import date
+        self.assertEqual((date(inspect(home)[0]['next_run_at'])-date(before)).total_seconds(),3600)
+        self.assertEqual(next(iter(self.inputs.values()))['fire_reason'],'missed')
+        path='/api/cron/jobs/'+job['id']+'/catch-up'
+        self.request(path,'POST',{'request_id':'one-catch-up'});self.scheduler.tick();self.settle()
+        self.assertEqual(self.executions,1);self.assertIsNone(self.request('/api/cron/jobs/'+job['id'])['nocheh_missed'])
+        self.request(path,'POST',{'request_id':'one-catch-up'});self.scheduler.tick();self.settle();self.assertEqual(self.executions,1)
+
+    def test_receipt_outage_restart_and_overlap_do_not_repeat_execution(self):
+        job=self.create();self.due(job);self.failed='finish';self.scheduler.tick();self.settle()
+        self.assertEqual(self.executions,1);self.assertEqual(len(list(self.scheduler.receipts.glob('*.json'))),1)
+        self.failed=None;self.scheduler.recover();self.scheduler.tick();self.settle();self.assertEqual(self.executions,1)
+        first=self.create(name='First overlapping');second=self.create(name='Second overlapping');self.due(first);self.due(second)
+        self.hold=True;self.scheduler.tick()
+        self.assertIn('overlap',[value['fire_reason'] for value in self.inputs.values()])
+        for _,cancel in list(self.scheduler.active.values()):cancel.set()
+        self.settle();self.assertIn('cancelled',[result['state'] for result in self.finished.values()])
+
+    def test_one_supervisor_and_inactive_restore(self):
+        (self.root/'scheduler-inactive').touch();self.scheduler.start()
+        for _ in range(100):
+            if self.scheduler.status=='inactive_restore':break
+            time.sleep(.01)
+        self.assertEqual(self.scheduler.status,'inactive_restore')
+        second=Scheduler(self.admin,lambda:None,self.call,self.runner);second.start();second.thread.join(timeout=2)
+        self.assertEqual(second.status,'already_supervised');self.assertEqual(self.executions,0)
+
+    def test_job_preferences_are_ephemeral_and_disable_proposals(self):
+        from .profile_config import configure_profile
+        from .policy_config import save,view
+        from .turn_process import scheduled_preferences
+        from . import archive_tools
+        home=self.root/'profiles'/Scopes.profile('42');configure_profile(home,'gpt-5.6-sol')
+        before=(home/'config.yaml').read_bytes()
+        save(self.root,{'agent.max_iterations':3},view(self.root)['revision'],'job-one')
+        values=scheduled_preferences(home,{'job_id':'job-one','job_preferences':{'memory.memory_char_limit':500,'nocheh_tools.shell':'off'}})
+        self.assertEqual(values['agent.max_iterations'],3);self.assertEqual(values['memory.memory_char_limit'],500)
+        self.assertEqual((home/'config.yaml').read_bytes(),before)
+        with patch.dict(os.environ,{'HERMES_HOME':str(home)}),patch.object(archive_tools,'_PROCESS_PREFERENCES',values),patch.object(archive_tools,'request') as request:
+            self.assertEqual(json.loads(archive_tools.controlled_tool('shell',{'command':'pwd'}))['error'],'tool_disabled_by_owner')
+            request.assert_not_called()
+
+
+if __name__=='__main__':unittest.main()

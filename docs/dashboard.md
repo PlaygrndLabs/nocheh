@@ -335,3 +335,35 @@ Use the revision returned by `memory policy`; stale edits are rejected. A minima
 policy file is `{"mode":"approved"}`. Omitting a key restores inheritance; `{}`
 restores all inherited settings. The existing import command without the optional
 approval flag keeps imports searchable without scheduling a native review.
+
+## Schedules
+
+Open **Hermes → Cron** to create a prompt schedule for the owner-private profile or
+one selected group. The native schedule builder supports intervals, cron expressions
+and one-time schedules. Each fire starts a fresh session with that profile's memory.
+Set **Run settings** to override agent steps and time for one job, or leave them
+blank to inherit. Production model selection remains in Nocheh Settings.
+
+**Local** saves results in Activity. **Telegram** proposes the exact result to that
+scope for owner approval. Overlong results stay local with a visible delivery error.
+Pause prevents future starts; Cancel run interrupts an active run. Runs more than
+60 seconds late are recorded as missed; **Catch up once** is an explicit extra run.
+It does not replay every missed interval. Original prompts and generated results
+remain separately inspectable in Activity, including after deleting a schedule.
+
+```sh
+./scripts/nocheh cron list --profile all
+./scripts/nocheh cron create --profile PROFILE --file job.json
+./scripts/nocheh cron show JOB_ID --profile PROFILE
+./scripts/nocheh cron update JOB_ID --profile PROFILE --file changes.json --revision REVISION
+./scripts/nocheh cron pause JOB_ID --profile PROFILE
+./scripts/nocheh cron trigger JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
+./scripts/nocheh cron catch-up JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
+./scripts/nocheh cron cancel JOB_ID --profile PROFILE
+./scripts/nocheh cron runs JOB_ID --profile PROFILE
+```
+
+A minimal job file is `{"name":"Daily review","prompt":"Review today's archived notes.","schedule":"0 18 * * *","deliver":"local"}`.
+The native parser uses the profile's Hermes timezone; ISO dates include their UTC
+offset. Reuse the same request ID only when retrying the same manual request.
+Custom skills/scripts, alternate providers and topic schedules are not enabled.

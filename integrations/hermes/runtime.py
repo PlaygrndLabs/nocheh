@@ -32,6 +32,7 @@ CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
 ASSISTANT = None
 ADMIN = None
+SCHEDULER = None
 
 
 def configure():
@@ -95,7 +96,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(404, {"error": "not_found"})
         return self.reply(200, {"ok": True, "service": "hermes", "model": MODEL,
                                 "login_present": (PROFILE_HOME / "auth.json").is_file(), "telegram": ASSISTANT.status if ASSISTANT else 'not_started',
-                                "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable"})
+                                "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable",
+                                "scheduler": SCHEDULER.status if SCHEDULER else 'not_started'})
 
     def do_POST(self):
         if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), ("Bearer " + TOKEN).encode()):
@@ -209,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ASSISTANT, ADMIN
+    global ASSISTANT, ADMIN, SCHEDULER
     if len(TOKEN) < 24:
         raise SystemExit("Service token is missing or too short")
     logging.disable(logging.CRITICAL)
@@ -231,8 +233,13 @@ def main():
     with open(os.devnull,'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
         ASSISTANT.start()
         ADMIN = admin = subprocess.Popen([sys.executable, '-m', 'integrations.hermes.native_admin'], stdout=quiet, stderr=quiet)
+        from .native_admin import Administration,audience_revision
+        from .scheduler import Scheduler
+        SCHEDULER=Scheduler(Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space)),resolve_credentials)
+        SCHEDULER.start()
         try: server.serve_forever()
         finally:
+            SCHEDULER.stop()
             admin.terminate()
             try: admin.wait(timeout=10)
             except subprocess.TimeoutExpired: admin.kill(); admin.wait()
