@@ -23,6 +23,7 @@ RUN git init /opt/hermes && cd /opt/hermes && git remote add origin https://gith
     git fetch --depth 1 origin "$HERMES_REVISION" && git checkout --detach FETCH_HEAD && \
     uv sync --frozen --no-dev --no-install-project --extra messaging --python /usr/local/bin/python && \
     rm -rf /opt/hermes/.git /root/.cache/uv
+LABEL org.opencontainers.image.revision=${HERMES_REVISION}
 RUN python -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3,51,3)"
 ARG LOCAL_UID=1000
 ARG LOCAL_GID=1000

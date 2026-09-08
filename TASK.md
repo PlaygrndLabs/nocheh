@@ -190,5 +190,22 @@ remain active. This direction supersedes the earlier Hermes-hosted presentation.
 | P3 — Configuration and native administration | Complete: 67d6a05; actual native state, shared config revisions, preference inheritance, scoped sessions/files and private profile management; 32 JS/TS and 52 Python tests pass |
 | P4 — Native browser chat | Complete: 4effeac; isolated managed turns, original/file capture, native resume/cancel, scoped reconnect, durable receipts and Activity; 33 JS/TS and 64 Python tests plus live owner-private browser chat pass |
 | P5 — Controlled broader tools and approvals | Complete: 75f7c39; exact approvals, bounded/revoked permissions, isolated shell and offline browser, public HTTPS MCP; 39 JS/TS + 78 Python full-suite and 16 targeted follow-up tests; live UI/CLI/worker acceptance passes |
-| P6 — Native cron | Complete: native editor and CLI, one supervised scheduler, durable fires/results, explicit catch-up, cancellation and local delivery; 40 JS/TS + 86 Python tests and live native scheduled subscription turn pass |
-| P7 — Compatibility and release acceptance | Pending |
+| P6 — Native cron | Complete: 725983b; native editor and CLI, one supervised scheduler, durable fires/results, explicit catch-up, cancellation and local delivery; 40 JS/TS + 86 Python tests and live native scheduled subscription turn pass |
+| P7 — Compatibility and release acceptance | Tooling verified and committed in the P7 increment: candidate runtime/native/UI builds, portable archive + memory export, inactive recovery with all 18 tables and 175 state files preserved across restart; 41 JS/TS + 91 Python tests and 2 host management checks pass. Real Telegram gates remain pending |
+
+
+### P7 operations evidence — 2026-09-08
+
+[Content-free report](compatibility/results/2026-09-08-runtime-platform-operations.json).
+The native candidate builds and tests with no live state, credentials or test
+network. UI/CLI export verified 135 sources and two native SQLite databases. The
+current archive had no attachment or native note files; synthetic tests verify
+those byte-preservation paths. Full backup and inactive restore preserve all 18
+tables and 175 state files. Restored workers, tools, scheduler and copied OAuth
+remain held; table fingerprints survive restart unchanged. The rehearsal is stopped.
+
+The first cache-link backup and closed-SQLite export failures are retained in the
+report; both were fixed and successfully repeated. No Telegram test messages were
+sent. P7 **release acceptance remains incomplete** until the owner supplies the
+[remaining Telegram test inputs](docs/release-acceptance.md). Cutover and `main`
+merge remain pending; this tooling commit does not waive those gates.

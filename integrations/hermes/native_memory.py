@@ -20,8 +20,10 @@ def memory_lock(profile):
 
 def registered_profiles(root):
     directory = Path(root) / 'profiles'
-    return sorted(p for p in directory.glob('nocheh-*') if p.is_dir() and not p.is_symlink()
-                  and re.fullmatch(r'nocheh-[a-f0-9]{24}', p.name))
+    if directory.is_symlink():raise ValueError('profile_path_denied')
+    return sorted(p for p in directory.glob('*') if p.is_dir() and not p.is_symlink()
+                  and (re.fullmatch(r'nocheh-[a-f0-9]{24}',p.name) or
+                       re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',p.name) and (p/'nocheh-owner-profile.json').is_file() and not (p/'nocheh-owner-profile.json').is_symlink()))
 
 
 def save_receipt(path, state):

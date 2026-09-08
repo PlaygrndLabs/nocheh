@@ -4,8 +4,9 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
-from scripts.operations import sha,validate_snapshot,backup,fingerprints,TABLES
+from scripts.operations import sha,validate_snapshot,backup,restore,fingerprints,TABLES
 
 
 class SnapshotTests(unittest.TestCase):
@@ -47,6 +48,8 @@ class SnapshotTests(unittest.TestCase):
             for name in ('files','spool','hermes','admin/jobs/fixture'):(state/name).mkdir(parents=True,exist_ok=True)
             job=state/'admin/jobs/fixture/job.json';job.write_text('{"review_approved":true,"state":"cancelled"}')
             receipt=state/'hermes/review-receipt';receipt.write_text('ambiguous')
+            cache=state/'hermes/profiles/fixture/.cache/uv';cache.mkdir(parents=True)
+            (cache/'wheel-link').symlink_to('/not-read-by-backup')
             def run(command,**kwargs):
                 if 'pg_dump' in command:kwargs['stdout'].write(b'synthetic database dump')
             with patch('scripts.operations.compose',return_value=['fixture']),patch('scripts.operations.environment',return_value={}),\
@@ -60,8 +63,44 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(manifest['files']['hermes/review-receipt']['sha256'],sha(receipt))
             self.assertIn('memory_review_jobs',manifest['tables'])
             self.assertIn('memory_shares',manifest['tables'])
+            self.assertEqual(manifest['excluded_rebuildable_caches'],['hermes/profiles/fixture/.cache/uv'])
+            self.assertFalse(any('.cache/uv' in name for name in manifest['files']))
+            (state/'hermes/unknown-link').symlink_to('/not-read-by-backup')
+            with patch('scripts.operations.compose',return_value=['fixture']),patch('scripts.operations.environment',return_value={}),\
+                 patch('scripts.operations.subprocess.check_output',side_effect=['','fixture-revision']),\
+                 patch('scripts.operations.fingerprints',return_value={name:'hash' for name in TABLES}),\
+                 patch('scripts.operations.subprocess.run',side_effect=run):
+                with self.assertRaisesRegex(ValueError,'Unsupported state symlink'):backup(state,root/'rejected-backup')
 
     def test_restore_fingerprint_table_names_are_allowlisted(self):
         with patch('scripts.operations.subprocess.Popen') as process:
             with self.assertRaises(ValueError):fingerprints([],{},['events; DROP TABLE events'])
             process.assert_not_called()
+
+    def test_restore_holds_all_executors_before_starting_services(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);snapshot=root/'snapshot';snapshot.mkdir();state=root/'restored'
+            (snapshot/'archive.dump').write_bytes(b'dump')
+            with tarfile.open(snapshot/'state.tar.gz','w:gz') as tar:
+                raw=b'{"synthetic":"login"}';info=tarfile.TarInfo('state/hermes/auth.json');info.size=len(raw)
+                tar.addfile(info,io.BytesIO(raw))
+            manifest={'version':1,'tables':{'events':'exact-hash'},'files':{'hermes/auth.json':{}}}
+            starts=[]
+            def run(command,**kwargs):
+                if command[:3]==['docker','volume','inspect']:return SimpleNamespace(returncode=1)
+                if 'up' in command:
+                    starts.append(command)
+                    for name in ('spool/.restore-inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json'):
+                        self.assertTrue((state/name).is_file(),name)
+                    self.assertFalse((state/'hermes/auth.json').exists())
+                    self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
+                return SimpleNamespace(returncode=0)
+            with patch('scripts.operations.validate_snapshot',return_value=manifest),\
+                 patch('scripts.operations.initialize',return_value={'TELEGRAM_ENABLED':'true'}),\
+                 patch('scripts.operations.compose',return_value=['fixture']),\
+                 patch('scripts.operations.environment',return_value={}),\
+                 patch('scripts.operations.fingerprints',return_value=manifest['tables']),\
+                 patch('scripts.operations.subprocess.run',side_effect=run):
+                result=restore(snapshot,state,'nocheh-test-restore',18980)
+            self.assertEqual(len(starts),2);self.assertFalse(result['executors_active'])
+            self.assertFalse(result['telegram_enabled']);self.assertFalse(result['subscription_login_activated'])

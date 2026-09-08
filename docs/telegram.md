@@ -1,7 +1,9 @@
 # Telegram setup and assistant acceptance
 
-Phase 6 is under validation. Telegram stays disabled until a token, owner ID and
-explicit conversation policy are configured. No VPS is needed.
+The native Hermes Telegram adapter is active locally with the configured owner and
+selected groups. Owner-DM and selected-group replies have passed; the remaining
+[release checks](release-acceptance.md) are pending. New installations default to
+disabled until a token, owner ID and explicit policy are configured. No VPS is needed.
 
 1. Create or select your bot in [BotFather](https://t.me/BotFather).
 2. Set `TELEGRAM_BOT_TOKEN` in `.env`, then run `./scripts/nocheh up`. Keep it out of chat,
@@ -29,8 +31,9 @@ the Bot API supplies; use Desktop imports for available history. See Telegram's
 Large files that Telegram cannot supply remain visibly failed artifacts; supplied
 Desktop media can be imported separately.
 
-Each selected group has its own native Hermes memory and history. The owner DM
-may search the complete Nocheh archive. Other chats are captured but cannot trigger
+Each selected group/topic has its own native Hermes memory and history. Memory
+access supports isolated, approved and filtered derived sharing under ADR-0030;
+the owner DM may search the complete archive and registered native memory. Other chats are captured but cannot trigger
 the assistant. Bot senders, edits and historical replay do not trigger new replies.
 Normal group chatter can produce intentional silence. Voice transcripts are
 derived records, never replacements for original audio or message payloads.
@@ -51,9 +54,11 @@ In the owner's private DM:
 /deny FULL_ACTION_ID
 ```
 
-`/action` shows the destination and exact requested text. Only a live typed owner
-DM can approve. Group messages, imported history, callbacks and transcripts cannot
-approve or alter settings. Other external integrations are unavailable. Uncertain
+`/action` shows the destination and exact requested text. A live typed owner DM,
+the authenticated owner's Activity page or `./scripts/nocheh approvals` can approve.
+Group messages, imported history, callbacks and transcripts cannot approve or
+alter settings. Controlled shell, browser and public HTTPS MCP requests also use
+exact proposals and bounded revocable permissions; see ADR-0029. Uncertain
 delivery remains ambiguous; it is not automatically resent.
 
 ## Validation
@@ -68,6 +73,7 @@ docker compose exec -T hermes python -m integrations.hermes.verify_assistant
 
 Before release, verify actual owner DM replies, selected-group replies and silence,
 group-private retrieval boundaries, voice transcript persistence, approved action
-delivery, native reconnect and restart recovery. Live Telegram checks are pending
-while credentials are absent. Phase 6 must not be marked complete on offline tests
-alone. See [the implementation decision](adr/0021-scoped-native-assistant-processes.md).
+delivery, native reconnect and restart recovery. Credentials are present; those
+remaining checks need actual Telegram traffic and saved evidence. Production
+release cannot be marked complete on offline tests alone. See
+[the test inputs and evidence requirements](release-acceptance.md).

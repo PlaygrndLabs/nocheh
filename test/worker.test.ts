@@ -2,6 +2,23 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startLoops} from '../src/worker-loops.js';
+import {startWorker} from '../src/worker.js';
+import {settings} from '../src/config.js';
+import type pg from 'pg';
+import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+
+test('restored state starts no capture, learning, recovery or action loop before reconciliation',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'nocheh-inactive-worker-'));
+  const pool=new Proxy({},{get(){throw Error('restored worker must not access the database');}}) as pg.Pool;
+  try {
+    await mkdir(join(directory,'spool'));
+    await writeFile(join(directory,'spool','.restore-inactive'),'');
+    const stop=startWorker(pool,{...settings(),dataDir:directory});
+    await delay(20);await stop();
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
 
 test('slow inference does not block capture, attachments or approved actions; shutdown waits without overlapping a stage',async()=>{
   let release!:()=>void;
