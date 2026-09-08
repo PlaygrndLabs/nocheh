@@ -9,7 +9,7 @@ import {initialize} from '../src/database.js';
 import {captureInput,claimRun,finishRun,renewRun,recoverRuns,prepareRun} from '../src/managed-runs.js';
 import {reader} from '../src/access.js';
 import type {IncomingMessage} from 'node:http';
-import {archiveStatus} from '../src/archive.js';
+import {archiveStatus,digest} from '../src/archive.js';
 
 test('real PostgreSQL: browser originals, files, scoped claims and idempotent results',{skip:!process.env.PGHOST},async()=>{
   const config=settings(),connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
@@ -20,7 +20,8 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
   try {
     await initialize(pool);
     const text='  browser original\r\nsecret value\0🙂 ',bytes=Buffer.from([0,255,42,10]);
-    const body={id:'input-one',conversation:'session-one',profile:'group-profile',scope:'-10',text,
+    const profile='nocheh-'+digest('-10:policy:1').slice(0,24);
+    const body={id:'input-one',conversation:'session-one',profile,scope:'-10',space:'-10',revision:1,text,
       files:[{name:'original.bin',kind:'file',bytes_base64:bytes.toString('base64')}]};
     const first=await captureInput(pool,config,body),second=await captureInput(pool,config,body);
     assert.equal(first.event_id,second.event_id);assert.equal(second.duplicate,true);
@@ -28,7 +29,7 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     await assert.rejects(captureInput(pool,config,{...body,text:'changed'}),/source_identity_conflict/);
     await assert.rejects(captureInput(pool,config,{...body,id:'other',scope:'-20'}),/run_scope_denied/);
     await assert.rejects(captureInput(pool,config,{...body,id:'other',files:[{...body.files[0],name:'../outside'}]}),/invalid_attachment/);
-    const claim={event_id:first.event_id,actor:'actor-one',scope:'-10',profile:'group-profile'};
+    const claim={event_id:first.event_id,actor:'actor-one',scope:'-10',profile};
     await assert.rejects(claimRun(pool,config,{...claim,profile:'private-profile'}),/run_profile_mismatch/);
     await assert.rejects(claimRun(pool,config,{...claim,scope:'42'}),/captured_run_not_found/);
     const claims=await Promise.all([claimRun(pool,config,claim),claimRun(pool,config,claim)]);
@@ -36,6 +37,7 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     assert.equal(claims.filter(c=>c.claimed).length,1);assert.equal(won.text,text);
     const principal=reader({headers:{authorization:'Bearer '+won.archive_credential}} as IncomingMessage,config.token);
     assert.equal(principal.scope,'-10');assert.equal(principal.admin,false);assert.equal(principal.turnEvent,first.event_id);
+    assert.equal(principal.space,'-10');assert.equal(principal.revision,1);
     await assert.rejects(finishRun(pool,{...claim,actor:'wrong',state:'done',text:'answer',session:'session-one'}),/run_actor_mismatch/);
     const result={...claim,state:'done',text:'Generated answer',session:'session-one'};
     await finishRun(pool,result);assert.equal((await finishRun(pool,result)).duplicate,true);
@@ -66,5 +68,8 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     await assert.rejects(captureInput(unavailable,config,{...body,id:'outage',files:[]}));
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM managed_runs')).rows[0].count,3);
     assert.equal((await archiveStatus(pool)).managed_runs.length,3);
+    const stale=await captureInput(pool,config,{...body,id:'after-policy-change',files:[]});
+    await pool.query('UPDATE memory_policy_state SET revision=revision+1');
+    await assert.rejects(claimRun(pool,config,{...claim,event_id:stale.event_id}),{code:'browser_audience_changed'});
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });

@@ -53,6 +53,6 @@ replace('  const { profile: scopedProfile } = useProfileScope();', '''  const { 
 replace('      <PluginSlot name="chat:top" />', '''      <PluginSlot name="chat:top" />
       <div className="border border-border rounded px-3 py-2 text-xs" role="status">
         Context: {nochehContext}. Select a profile to change context. Originals are archived before execution.
-        External actions require owner approval. Shell, browser, MCP and scheduled runs are being integrated.
+        Shell, public-page inspection and HTTPS MCP requests appear in Nocheh Activity for approval. Scheduled runs are being integrated.
       </div>''')
 path.write_text(source)

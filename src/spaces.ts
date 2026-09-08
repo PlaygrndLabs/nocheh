@@ -7,11 +7,6 @@ INSERT INTO memory_policy_state(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS memory_spaces (id text PRIMARY KEY, overrides jsonb NOT NULL DEFAULT '{}', updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS event_spaces (event_id text PRIMARY KEY REFERENCES events(id), space_id text NOT NULL);
 CREATE INDEX IF NOT EXISTS event_spaces_space ON event_spaces(space_id,event_id);
-INSERT INTO event_spaces(event_id,space_id)
-SELECT id, CASE WHEN channel='telegram' AND scope ~ '^-?[0-9]+$'
- AND coalesce((convert_from(payload,'UTF8')::jsonb->'message'->>'message_thread_id'),(convert_from(payload,'UTF8')::jsonb->'edited_message'->>'message_thread_id'),'') ~ '^[1-9][0-9]{0,15}$'
- THEN scope||'/topic/'||coalesce((convert_from(payload,'UTF8')::jsonb->'message'->>'message_thread_id'),(convert_from(payload,'UTF8')::jsonb->'edited_message'->>'message_thread_id')) ELSE scope END
-FROM events ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS memory_shares (id text PRIMARY KEY, destination text NOT NULL, content text NOT NULL,
  source_ids jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz);
 CREATE INDEX IF NOT EXISTS memory_shares_destination ON memory_shares(destination) WHERE revoked_at IS NULL;
@@ -25,9 +20,27 @@ export function spaceId(scope:string, topic?:unknown):string {
   return `${scope}/topic/${topic}`;
 }
 export function eventSpace(scope:string, payload:unknown, channel='telegram'):string {
-  if(channel!=='telegram') return scope;
+  if(channel==='browser'||channel==='scheduler') {
+    const space=object(payload).space;
+    if(space===undefined)return scope;
+    const value=validateSpace(space);
+    if((parentSpace(value)??value)!==scope)throw new HttpError(400,'source_space_mismatch');
+    return value;
+  }
+  if(channel!=='telegram')return scope;
   const body=object(payload), message=body.message ?? body.edited_message ?? body.channel_post ?? body.edited_channel_post;
   return message ? spaceId(scope,object(message).message_thread_id) : scope;
+}
+
+export async function backfillSpaces(db:pg.PoolClient) {
+  // PostgreSQL JSON cannot represent literal NUL; originals remain exact bytea.
+  for(;;) {
+    const {rows}=await db.query<{id:string;scope:string;channel:string;payload:Buffer}>(`SELECT e.id,e.scope,e.channel,e.payload FROM events e
+      WHERE NOT EXISTS(SELECT 1 FROM event_spaces s WHERE s.event_id=e.id) ORDER BY e.id LIMIT 500`);
+    if(!rows.length)return;
+    const spaces=rows.map(row=>{try{return eventSpace(row.scope,JSON.parse(row.payload.toString()),row.channel);}catch{return row.scope;}});
+    await db.query('INSERT INTO event_spaces(event_id,space_id) SELECT * FROM unnest($1::text[],$2::text[]) ON CONFLICT DO NOTHING',[rows.map(row=>row.id),spaces]);
+  }
 }
 export function validateSpace(id:unknown):string {
   const value=string(id,256);

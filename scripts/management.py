@@ -9,6 +9,17 @@ from .configuration import ROOT, load
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
+    if operation == 'tools.manage':
+        from .archive import API
+        from urllib.error import HTTPError
+        action=body.get('action','actions')
+        if action not in ('actions','decide','telegram-decision','grant','revoke'):raise ValueError('tools_route_denied')
+        try:return API().call('/v1/tools/'+action,None if action=='actions' else body['request'])
+        except HTTPError as error:
+            try:code=json.load(error).get('error')
+            except Exception:code=None
+            allowed={'action_changed','action_already_started_or_closed','invalid_permission_bounds','action_not_found','permission_not_found'}
+            raise ValueError(code if code in allowed else 'tools_operation_unavailable') from None
     if operation == 'policy.manage':
         from .native import call
         from urllib.parse import urlencode

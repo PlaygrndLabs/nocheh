@@ -259,6 +259,39 @@ not change session contents, notes or configuration. Missing stores list as empt
 Unintegrated native operations return an explicit unavailable result until their
 managed execution phase passes acceptance.
 
+## Tools and approvals
+
+**Activity → Approvals** shows the complete command, page URL or MCP arguments,
+the originating profile and scope, and the eventual execution result. Approve or
+deny each operation there or in your private Telegram DM with `/actions`,
+`/action ID`, `/approve ID` and `/deny ID`. Group messages cannot approve actions.
+Long operations require the dashboard so approval never relies on truncated text.
+
+An optional permission allows only that exact operation in that scope/profile,
+for 1–20 starts and 1–1440 minutes. Revoke it in Activity, `/revoke ID`, or the CLI.
+Revocation stops future starts; it cannot undo a started operation. Ambiguous
+results are retained without automatically repeating execution.
+
+Shell runs in a disposable, network-disabled container with only the selected
+workspace mounted. Browser inspection fetches one approved public HTTPS page and
+renders its inert text/link structure offline. MCP supports exact public HTTPS
+tool calls or discovery with JSON responses; authenticated/SSE servers, local MCP
+processes and interactive browser actions remain unavailable. Global/profile
+preferences can disable each tool. Enabling a tool still requires action approval.
+
+```sh
+./scripts/nocheh approvals list
+./scripts/nocheh approvals show ACTION_ID
+./scripts/nocheh approvals approve ACTION_ID --fingerprint DISPLAYED_FINGERPRINT
+./scripts/nocheh approvals deny ACTION_ID --fingerprint DISPLAYED_FINGERPRINT
+./scripts/nocheh approvals grant ACTION_ID --fingerprint DISPLAYED_FINGERPRINT --uses 3 --minutes 60
+./scripts/nocheh approvals revoke PERMISSION_ID
+./scripts/nocheh approvals status
+```
+
+`up` starts one approved-tool worker; `down` and backup drain it. Restored tool
+workers remain inactive. Bash entrypoints and the optional Honcho CLI are retained.
+
 ## Space policies and native review
 
 Your private assistant can recall across the entire archive and registered native

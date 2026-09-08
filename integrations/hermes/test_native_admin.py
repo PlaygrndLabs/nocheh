@@ -3,6 +3,7 @@ import hashlib
 import os
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 from .scopes import Scopes
@@ -70,7 +71,7 @@ class NativeAdminTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/profiles').status_code, 401)
         schema = self.client.get('/api/config/schema', headers=self.headers)
         self.assertEqual(schema.status_code,200,schema.text)
-        self.assertEqual(len(schema.json()['fields']),5)
+        self.assertEqual(len(schema.json()['fields']),8)
         self.assertEqual(schema.json()['category_order'][0],'agent')
         profiles = self.client.get('/api/profiles', headers=self.headers).json()['profiles']
         self.assertEqual(len(profiles), 2)
@@ -154,6 +155,42 @@ class NativeAdminTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/profiles', headers=self.headers, json=body).status_code, 400)
 
 class BrowserBoundaryTests(unittest.TestCase):
+    def test_audience_revision_keeps_logical_preferences_without_copying_memory(self):
+        from .native_admin import Administration
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);policy=Scopes({'enabled':True,'owner_id':'42','group_ids':['-10']})
+            with patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':str(root)}):
+                logical=root/'profiles'/Scopes.profile('-10')
+                original=configure_profile(logical,'model')
+                configure_profile(logical,'model',{'nocheh_tools.shell':'off','agent.max_iterations':7},original['revision'])
+                admin=Administration(None,root,'model',policy,'fixture',True,lambda _:2)
+                name,home=admin.profile(logical.name);home.mkdir(parents=True)
+                (home/'space.json').write_text(json.dumps({'space':'-10','revision':2,'owner':False}))
+                values=configure_profile(home,'model')['values']
+                self.assertEqual(values['nocheh_tools.shell'],'off');self.assertEqual(values['agent.max_iterations'],7)
+                self.assertEqual(admin.preference_home(name,home),logical)
+                current=inspect_profile(logical,'model')
+                configure_profile(logical,'model',{'agent.max_iterations':4},current['revision'])
+                self.assertEqual(configure_profile(home,'model')['values']['agent.max_iterations'],4)
+                self.assertFalse((home/'memories').exists())
+
+    def test_group_browser_profiles_follow_audience_revision_without_copying_old_context(self):
+        from .native_admin import Administration
+        from .scopes import Scopes
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);policy=Scopes({'enabled':True,'owner_id':'42','group_ids':['-10']});revision=[1]
+            admin=Administration(None,root,'model',policy,'fixture',True,lambda _:revision[0])
+            name,path=admin.profile(Scopes.profile('-10'))
+            self.assertEqual(name,Scopes.profile('-10:policy:1'));self.assertFalse(path.exists())
+            path.mkdir(parents=True);(path/'space.json').write_text(json.dumps({'space':'-10','revision':1,'owner':False}))
+            (path/'memories').mkdir();(path/'memories/MEMORY.md').write_text('Old audience fixture')
+            self.assertFalse(admin.binding(name).owner)
+            revision[0]=2
+            fresh,new_path=admin.profile(Scopes.profile('-10'))
+            self.assertNotEqual(fresh,name);self.assertFalse(new_path.exists())
+            with self.assertRaisesRegex(ValueError,'profile_policy_changed'):admin.profile(name)
+            self.assertEqual((path/'memories/MEMORY.md').read_text(),'Old audience fixture')
+
     def test_profile_bound_channels_explicit_resume_and_authentication(self):
         import asyncio
         from urllib.parse import urlencode,parse_qs

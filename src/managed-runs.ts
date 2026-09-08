@@ -9,6 +9,7 @@ import type {Settings} from './config.js';
 import {readFile} from 'node:fs/promises';
 import {prepareTranscripts} from './assistant.js';
 import type {RuntimeCall} from './runtime.js';
+import {validateSpace,parentSpace,policyRevision} from './spaces.js';
 
 export const managedRunSchema=`CREATE TABLE IF NOT EXISTS managed_runs (
   event_id text PRIMARY KEY REFERENCES events(id),
@@ -27,6 +28,8 @@ function scopeFor(config:Settings,value:unknown) {
 export async function captureInput(pool:pg.Pool,config:Settings,input:unknown) {
   const body=object(input),{scope}=scopeFor(config,body.scope);
   const id=identifier(body.id),conversation=identifier(body.conversation),profile=identifier(body.profile);
+  const space=validateSpace(body.space??scope),revision=body.revision??0;
+  if((parentSpace(space)??space)!==scope||!Number.isSafeInteger(revision)||Number(revision)<0)throw new HttpError(400,'invalid_run_audience');
   const text=string(body.text,100000),files=body.files??[];
   if(!Array.isArray(files)||files.length>10)throw new HttpError(400,'invalid_attachments');
   const attachments=[];
@@ -42,7 +45,7 @@ export async function captureInput(pool:pg.Pool,config:Settings,input:unknown) {
   const submission=body.submission??'composer';
   if(!['composer','resubmission'].includes(String(submission)))throw new HttpError(400,'invalid_submission');
   const display=string(body.display??text,200000);
-  const value=runInput({channel:'browser',scope,conversation,id,text,payload:{profile,attachments,submission,display}});
+  const value=runInput({channel:'browser',scope,conversation,id,text,payload:{profile,space,revision,attachments,submission,display}});
   const captured=await ingest(pool,value,false);
   const client=await pool.connect();
   try {
@@ -72,10 +75,12 @@ export async function claimRun(pool:pg.Pool,config:Settings,input:unknown) {
     const payload=object(JSON.parse(row.payload.toString()));
     if(payload.profile!==profile)throw new HttpError(403,'run_profile_mismatch');
     if(row.state!=='captured') {await client.query('COMMIT');return {event_id:event,state:row.state,claimed:false,text:row.content?.toString()??'',error_code:row.error_code};}
+    const space=validateSpace(payload.space??scope),revision=await policyRevision(client);
+    if(!owner&&(payload.revision!==revision||profile!=='nocheh-'+digest(space+':policy:'+revision).slice(0,24)))throw new HttpError(409,'browser_audience_changed');
     await client.query("UPDATE managed_runs SET state='running',actor=$2,lease_until=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1",[event,actor]);
     await client.query('COMMIT');
     return {event_id:event,state:'running',claimed:true,text:row.original_text.toString(),payload,source_key:row.source_key,
-      archive_credential:turnToken(config.token,owner?null:scope,Date.now()+600000,event),owner,scope};
+      archive_credential:turnToken(config.token,owner?null:scope,Date.now()+600000,event,{space,revision}),owner,scope};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 export async function finishRun(pool:pg.Pool,input:unknown) {

@@ -13,6 +13,9 @@ PREFERENCES = {
     'agent.run_budget_seconds': {'default': 180, 'min': 30, 'max': 180},
     'memory.memory_char_limit': {'default': 2200, 'min': 100, 'max': 20000},
     'memory.user_char_limit': {'default': 1375, 'min': 100, 'max': 20000},
+    'nocheh_tools.shell': {'default': 'on', 'choices': ['on','off']},
+    'nocheh_tools.browser': {'default': 'on', 'choices': ['on','off']},
+    'nocheh_tools.mcp': {'default': 'on', 'choices': ['on','off']},
 }
 
 
@@ -78,7 +81,18 @@ def policy_root(profile):
 def inherited_config(profile, config, job=None, policy=None):
     from .policy_config import effective
     result = json.loads(json.dumps(config))
-    values, origins = effective(policy_root(profile), config, job, policy)
+    # Audience revisions retire memory/history, while the logical scope retains
+    # the owner's preferences. Never silently lose settings on a privacy change.
+    logical=config;marker=Path(profile)/'space.json'
+    if marker.is_file() and not marker.is_symlink():
+        binding=json.loads(marker.read_text())
+        if binding.get('revision',0)>0 and binding.get('owner') is False:
+            from .scopes import Scopes
+            base=policy_root(profile)/'profiles'/Scopes.profile(binding['space'])/'config.yaml'
+            parent=policy_root(profile)/'profiles'/Scopes.profile(binding['space'].split('/topic/')[0])/'config.yaml'
+            source=base if base.is_file() else parent
+            if source.is_file():logical=read(source)
+    values, origins = effective(policy_root(profile), logical, job, policy)
     for key, value in values.items():
         section, field = key.split(".")
         result.setdefault(section, {})[field] = value

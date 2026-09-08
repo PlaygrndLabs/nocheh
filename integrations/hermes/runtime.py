@@ -150,16 +150,13 @@ class Handler(BaseHTTPRequestHandler):
             return dispatch(PROFILE_HOME, MODEL, Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')), body)
         if self.path == '/internal/browser-credentials':
             from .scopes import Scopes, Scope, verify_capability
-            from .native_admin import Administration
+            from .native_admin import Administration,audience_revision
             policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
-            _, path=Administration(None,PROFILE_HOME,MODEL,policy,TOKEN).profile(body['profile'])
-            chat=body['scope']; owner=chat==policy.owner
-            if not owner and (chat not in policy.groups or path.name!=Scopes.profile(chat)):
-                raise ValueError('profile_scope_denied')
-            if owner and path.name.startswith('nocheh-') and path.name!=Scopes.profile(chat):
-                raise ValueError('profile_scope_denied')
-            scope=Scope(chat,policy.owner,owner,path.name)
-            verify_capability(body['archive_credential'],TOKEN,scope,body['event_id'])
+            administration=Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space))
+            name,path=administration.profile(body['profile']);scope=administration.binding(name)
+            if scope.chat_id!=body['scope']:raise ValueError('profile_scope_denied')
+            claims=verify_capability(body['archive_credential'],TOKEN,scope,body['event_id'])
+            if not scope.owner and claims.get('revision')!=scope.revision:raise ValueError('browser_audience_changed')
             credentials=resolve_credentials()
             return {'model':MODEL,'access_token':credentials.access_token}
         if self.path == '/internal/action':

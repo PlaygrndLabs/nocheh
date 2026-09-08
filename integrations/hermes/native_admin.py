@@ -13,19 +13,52 @@ import re
 import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode
-from .scopes import Scopes
+from .scopes import Scopes, Scope
 from .profile_config import (read, revision, resolved, inherited_config, inspect_profile,
                              configure_profile, atomic_yaml, PREFERENCES, profile_revision, policy_root)
 
 NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 
 
+def audience_revision(token,space):
+    from urllib.request import Request,urlopen
+    request=Request(os.environ.get('ARCHIVE_URL','http://archive:8780')+'/v1/memory/spaces?'+urlencode({'id':space}),headers={'Authorization':'Bearer '+token})
+    with urlopen(request,timeout=5) as response:value=json.load(response)['revision']
+    if type(value) is not int or value<1:raise ValueError('invalid_audience_revision')
+    return value
+
+
 class Administration:
-    def __init__(self, app, root, model, policy, token, browser_enabled=False):
+    def __init__(self, app, root, model, policy, token, browser_enabled=False, revision_reader=None):
         self.app, self.root, self.model = app, Path(root).resolve(), model
         self.policy, self.token = policy, token
         self.lock = asyncio.Lock()
         self.browser_enabled = browser_enabled
+        self.revision_reader = revision_reader
+
+    def binding(self,name):
+        if not self.policy.owner:raise ValueError('owner_profile_unavailable')
+        if not name or name in ('default','current'):name=Scopes.profile(self.policy.owner)
+        path=self.root/'profiles'/name
+        if name==Scopes.profile(self.policy.owner):return Scope(self.policy.owner,self.policy.owner,True,name,self.policy.owner)
+        if (path/'nocheh-owner-profile.json').is_file():return Scope(self.policy.owner,self.policy.owner,True,name,self.policy.owner)
+        current_revision=self.revision_reader(self.policy.owner) if self.revision_reader else 0
+        for chat in self.policy.groups:
+            revision=current_revision
+            current=Scopes.profile(chat+':policy:'+str(revision)) if revision else Scopes.profile(chat)
+            if name in (Scopes.profile(chat),current):return Scope(chat,self.policy.owner,False,current,chat,revision)
+        marker=path/'space.json'
+        if marker.is_file() and not marker.is_symlink():
+            value=json.loads(marker.read_text());space=value.get('space','');chat=space.split('/topic/')[0];revision=value.get('revision')
+            if chat in self.policy.groups and value.get('owner') is False and type(revision) is int and revision>0 and name==Scopes.profile(space+':policy:'+str(revision)):
+                if self.revision_reader and revision!=current_revision:raise ValueError('profile_policy_changed')
+                return Scope(chat,self.policy.owner,False,name,space,revision)
+        if (path/'nocheh-owner-profile.json').is_file():return Scope(self.policy.owner,self.policy.owner,True,name,self.policy.owner)
+        raise ValueError('profile_scope_denied')
+
+    def preference_home(self,name,home):
+        bound=self.binding(name)
+        return self.root/'profiles'/Scopes.profile(bound.space) if bound.revision else home
 
     def profile(self, name):
         if not name or name in ('default', 'current'):
@@ -35,9 +68,8 @@ class Administration:
         path = self.root / 'profiles' / name
         if path.is_symlink() or not path.resolve().is_relative_to(self.root / 'profiles'):
             raise ValueError('profile_path_denied')
-        allowed = {Scopes.profile(chat) for chat in [self.policy.owner, *self.policy.groups] if chat}
-        if name not in allowed and not (path / 'nocheh-owner-profile.json').is_file():
-            raise ValueError('profile_scope_denied')
+        binding=self.binding(name);name=binding.profile;path=self.root/'profiles'/name
+        if path.is_symlink():raise ValueError('profile_path_denied')
         return name, path
 
     def profiles(self):
@@ -47,7 +79,7 @@ class Administration:
             names += [p.name for p in parent.iterdir() if not p.is_symlink() and (p / 'nocheh-owner-profile.json').is_file() and p.name not in names]
         result = []
         for name in names:
-            _, path = self.profile(name)
+            name, path = self.profile(name)
             managed = name.startswith('nocheh-')
             owner = name == (Scopes.profile(self.policy.owner) if self.policy.owner else '') or not managed
             result.append({'name': name, 'path': str(path), 'is_default': name == (Scopes.profile(self.policy.owner) if self.policy.owner else ''),
@@ -169,6 +201,8 @@ class Administration:
                         if query.get('profile') and body_name != name: raise ValueError('profile_scope_mismatch')
                         name, home = self.profile(body_name)
                 result, status, extra = None, 200, {}
+                if path in ('/api/config','/api/nocheh/preferences','/api/nocheh/policy'):
+                    home=self.preference_home(name,home)
                 if path == '/api/chat/image-upload' and method == 'POST' and self.browser_enabled:
                     images=home/'images'
                     if images.is_symlink() or not images.resolve().is_relative_to(home.resolve()): raise ValueError('attachment_scope_denied')
@@ -321,13 +355,13 @@ class Administration:
                 await JSONResponse({'error': 'native_administration_unavailable'}, 503)(scope, receive, send)
 
 
-def create_app(root, model, policy, token, browser_enabled=False):
+def create_app(root, model, policy, token, browser_enabled=False, revision_reader=None):
     from hermes_cli import web_server as native
     from hermes_cli import web_server_sessions as sessions
     from hermes_cli.web_routers import sessions as router
     from hermes_state import SessionDB
     from hermes_cli import web_server_profiles, web_server_cron
-    app = Administration(native.app, root, model, policy, token, browser_enabled)
+    app = Administration(native.app, root, model, policy, token, browser_enabled, revision_reader)
     web_server_profiles._resolve_profile_dir = lambda name: app.profile(name)[1]
     web_server_cron._cron_profile_home = lambda profile: app.profile(profile)
     # Inspection must never create/migrate/auto-archive native state.
@@ -354,7 +388,7 @@ def main():
     token = os.environ['SERVICE_TOKEN']
     os.environ['HERMES_DASHBOARD_SESSION_TOKEN'] = token
     import uvicorn
-    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'gpt-5.6-sol'), Scopes.load(None), token, os.environ.get('NOCHEH_BROWSER_CHAT')=='1'),
+    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'gpt-5.6-sol'), Scopes.load(None), token, os.environ.get('NOCHEH_BROWSER_CHAT')=='1',lambda space:audience_revision(token,space)),
                 host='0.0.0.0', port=8785, access_log=False, log_level='critical')
 
 

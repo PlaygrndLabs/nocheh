@@ -100,7 +100,7 @@ class BrowserGatewayTests(unittest.TestCase):
         created=next(row for row in rows if row.get('id')==1)
         self.assertIn('session_id',created.get('result',{}),created)
         self.assertEqual(created['result']['info']['managed_execution'],'isolated_per_turn')
-        self.assertEqual(len(created['result']['info']['tools']['Nocheh']),6)
+        self.assertEqual(set(created['result']['info']['tools']['Nocheh']),{'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request','nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall'})
         self.assertIn('error',next(row for row in rows if row.get('id')==2))
         self.assertFalse((home/'auth.json').exists())
 
@@ -110,7 +110,7 @@ class BrowserGatewayTests(unittest.TestCase):
         from .scopes import Scopes
         profile=Scopes.profile('-10');home=self.root/'profiles'/profile
         admin=SimpleNamespace(root=self.root,model='gpt-5.6-sol',
-            profile=lambda _: (profile,home),policy=SimpleNamespace(owner='42',groups=['-10']))
+            profile=lambda _: (profile,home),binding=lambda _:Scope('-10','42',False,profile,'-10'),policy=SimpleNamespace(owner='42',groups=['-10']))
         with patch.dict(os.environ,{'SERVICE_TOKEN':'fixture-only','ARCHIVE_URL':'http://127.0.0.1:9'}):
             argv,cwd,env=launch(admin,profile=profile)
         master,slave=os.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',32,100,0,0))

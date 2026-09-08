@@ -1,8 +1,9 @@
 import pg from 'pg';
 import type { Settings } from './config.js';
 import {managedRunSchema} from './managed-runs.js';
+import {controlledSchema} from './controlled-actions.js';
 import { schema } from './archive.js';
-import { spaceSchema } from './spaces.js';
+import { spaceSchema,backfillSpaces } from './spaces.js';
 import { learningSchema } from './learning.js';
 import { sharingSchema } from './sharing.js';
 
@@ -28,8 +29,10 @@ export async function initialize(pool: pg.Pool): Promise<void> {
     await client.query(schema);
     await client.query(managedRunSchema);
     await client.query(spaceSchema);
+    await backfillSpaces(client);
     await client.query(learningSchema);
     await client.query(sharingSchema);
+    await client.query(controlledSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

@@ -50,7 +50,7 @@ def view(root, config=None, job=None):
             'jobs': value.get('jobs', {}), 'values': values, 'origins': origins,
             'schema': PREFERENCES, 'takes_effect': 'next managed turn',
             'job_status': 'stored; scheduled execution becomes available in P6',
-            'external_actions': 'review each action; broader tools remain unavailable until P5'}
+            'external_actions': 'review each action unless an exact bounded standing permission matches; controlled tools execute outside the agent'}
 
 
 def save(root, changes, expected, job=None):
