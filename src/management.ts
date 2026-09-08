@@ -199,14 +199,14 @@ export async function startManagement() {
       }
       const exported=route.match(/^\/exports\/([a-f0-9-]{36})\/download$/);
       if(req.method==='GET' && exported?.[1]) {
-        const job=await getJob(exported[1]);if(job.kind!=='operations.export'||job.state!=='complete')throw new HttpError(409,'export_not_ready');
-        res.writeHead(200,{'content-type':'application/zip','content-disposition':'attachment; filename="nocheh-archive.zip"','cache-control':'no-store'});
+        const job=await getJob(exported[1]);if(!['operations.export','operations.portable-export'].includes(job.kind)||job.state!=='complete')throw new HttpError(409,'export_not_ready');
+        res.writeHead(200,{'content-type':'application/zip','content-disposition':'attachment; filename="'+(job.kind==='operations.portable-export'?'nocheh-archive-memory.zip':'nocheh-archive.zip')+'"','cache-control':'no-store'});
         createReadStream(join(STATE,'admin/exports',job.id,'export.zip')).on('error',()=>res.destroy()).pipe(res);return;
       }
       if(req.method==='GET' && route==='/operations')return json(res,200,await python({operation:'operations.list'}));
       if(req.method==='POST' && route==='/operations') return exclusive('writer-start', async () => {
         const body=object(await readJson(req));const action=string(body.action,30);
-        if(!['diagnose','backup','restore','restart','export'].includes(action))throw new HttpError(400,'operation_denied');
+        if(!['diagnose','backup','restore','restart','export','portable-export'].includes(action))throw new HttpError(400,'operation_denied');
         if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
         operationBusy=true;
         try {const job=await newJob('operations.'+action);job.state='running';await putJob(job);

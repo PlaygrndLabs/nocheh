@@ -102,11 +102,13 @@ its own `.env` in that state directory and its own login; do not duplicate a ref
 Backup stops Telegram ingress first, then archive writers. It takes a PostgreSQL
 custom-format dump and copies the file store, durable spool, native Hermes state,
 configuration and credentials while those writers are stopped. It records file
-checksums and deterministic fingerprints of all eight archive tables, then
+checksums and deterministic fingerprints of all 18 current archive, policy,
+review, managed-run and action tables, then
 restarts the previously running services. Backups are private local directories
 under ignored `data/backups/`; they contain original data and credentials. Keep
 their access permissions when copying them. Generated plugin symlinks are recorded
-and recreated by the integration; unknown state symlinks fail the backup.
+and recreated by the integration. Native `.cache/uv` dependency caches are recorded
+as excluded and rebuilt when needed; other unknown state symlinks fail the backup.
 
 Restore requires a new state directory and a new Compose database volume. It
 validates every saved file before extraction, restores the database, compares all
@@ -114,24 +116,66 @@ table fingerprints, and starts the same images. Unsafe archive paths, links,
 missing files and checksum mismatches fail validation. A report is written under
 the restored state's `reports/` directory. The restored Telegram policy is
 disabled and the saved OAuth file is held as `hermes/auth.restore-pending.json`.
-No second bot or refresh owner is activated by the rehearsal.
+`spool/.restore-inactive`, `admin/tools/inactive` and `hermes/scheduler-inactive`
+hold archive workers, controlled tools and scheduled runs. No second bot, executor
+or refresh owner is activated by the rehearsal. Diagnostics expose these holds.
 
 For a planned cutover, use `backup --leave-stopped` to keep the source writers
-stopped after its final snapshot. On the restored project, obtain a fresh dedicated
-login and re-enable the saved Telegram policy only after verifying the source is
-stopped. Commands for the restored project use both environment variables:
+stopped after its final snapshot. First reconcile pending work against deliveries
+and receipts after the snapshot; verify the source is stopped. Commands for the
+restored project use both environment variables:
 
 ```sh
 NOCHEH_STATE_DIR="$PWD/data/restored" COMPOSE_PROJECT_NAME=nocheh-restored ./scripts/nocheh diagnose
-NOCHEH_STATE_DIR="$PWD/data/restored" COMPOSE_PROJECT_NAME=nocheh-restored ./scripts/nocheh login
 ```
 
-Review the saved `restored.env` and edit the restored `.env` before enabling
-Telegram and running `up` with those same variables. When recovering an older backup, reconcile
-pending replies/actions against what happened after that snapshot before enabling
-Telegram. A backup cannot know about deliveries made after it was taken. Ordinary
+Only after reconciliation and an approved cutover should the operator remove the
+three execution holds, obtain a fresh dedicated login, review `restored.env`, enable
+the intended policy and restart using those same variables. This is intentionally
+not automated. A backup cannot know about deliveries made after it was taken. Ordinary
 restarts use durable delivery receipts and never automatically resend ambiguous
 results. Restore is deliberately inactive until the owner resolves that gap.
+
+## Portable archive and memory
+
+Maintenance → **Export archive and memory** creates an authenticated ZIP download.
+The same export is available without the dashboard:
+
+```sh
+./scripts/nocheh export --output data/exports/my-portable-copy
+```
+
+The destination must be new. `archive/` preserves the existing NDJSON/file replay
+format with originals and derived provenance. `native/` contains registered
+profiles' exact notes, scope markers and consistent SQLite copies, including
+committed WAL state. The completion manifest includes sizes and SHA-256 hashes.
+Operational auth/configuration files are excluded; secrets typed into conversations
+remain part of those original conversations. This read-only export is not one
+global snapshot and does not include every setting, policy or retired custom
+profile. Use a full backup for installation recovery.
+
+## Hermes updates and rollback
+
+```sh
+./scripts/nocheh compatibility status
+./scripts/nocheh compatibility check
+./scripts/nocheh compatibility check --revision FULL_40_CHARACTER_COMMIT
+```
+
+Candidates build into separate image tags with no production state mounts or
+provider credentials. Native contract tests run without network on a read-only
+filesystem; the native dashboard must build against the candidate. Private reports
+are under `data/local/reports/compatibility/`. These commands never update the pin
+or activate an image. Native self-update is not an alternate update mechanism.
+
+For an update, review upstream changes and compatibility anchors, update the saved
+pin and adapter metadata together, run the full regression suite and the candidate
+check, then rehearse a backup in a separate inactive project. Save the previous
+code revision and image IDs before changing live images. Subscription and
+[real Telegram acceptance](release-acceptance.md) still apply; an offline pass is
+not permission to cut over. For rollback, use the matching prior code/images and
+a verified snapshot in a new inactive project. Never downgrade a live database
+in place or activate copied pending actions without reconciliation.
 
 ## Pauses, backlogs and release checks
 

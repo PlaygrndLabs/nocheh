@@ -78,7 +78,7 @@ def backup(state,output,leave_stopped=False):
         for service in stopped: subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-                  'files':{},'recreated_plugin_links':[]}
+                  'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
         manifest['tables']=fingerprints(command,env)
         dump=stage/'archive.dump'
         with dump.open('xb') as file:
@@ -92,6 +92,12 @@ def backup(state,output,leave_stopped=False):
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
                 for path in candidates:
                     relative='.env' if name=='.env' else path.relative_to(state).as_posix()
+                    cache=re.match(r'(hermes/(?:profiles/[^/]+/)?\.cache/uv)(?:/|$)',relative)
+                    if cache:
+                        # Native uv may create wheel-cache links. This exact
+                        # dependency cache is rebuildable, never owned memory.
+                        if cache[1] not in manifest['excluded_rebuildable_caches']:manifest['excluded_rebuildable_caches'].append(cache[1])
+                        continue
                     if path.is_symlink():
                         if relative.endswith('plugins/nocheh'):
                             manifest['recreated_plugin_links'].append(relative);continue
@@ -156,6 +162,7 @@ def restore(snapshot,state,project,port):
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
     (state/'hermes/scheduler-inactive').touch()
+    (state/'spool/.restore-inactive').touch()
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
     subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)
@@ -168,6 +175,7 @@ def restore(snapshot,state,project,port):
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
             'telegram_enabled':False,'subscription_login_activated':False}
+    result['executors_active']=False
     (state/'reports/restore.json').write_text(json.dumps(result,indent=2)+'\n')
     return result
 
@@ -179,6 +187,12 @@ def main(command,state,rest):
         rows=subprocess.check_output(compose(state)+['ps','--format','json'],env=environment(state),text=True)
         containers=[json.loads(line) for line in rows.splitlines() if line.strip()]
         result={'containers':[{'service':row['Service'],'state':row['State'],'health':row.get('Health')} for row in containers]}
+        result['execution_holds']={
+            'workers':(state/'spool/.restore-inactive').exists(),
+            'tools':(state/'admin/tools/inactive').exists(),
+            'scheduler':(state/'hermes/scheduler-inactive').exists(),
+            'subscription_login':(state/'hermes/auth.restore-pending.json').exists(),
+        }
         config=load(state)
         port=int(config.get('NOCHEH_PORT','8780'))
         request=urllib.request.Request(f'http://127.0.0.1:{port}/v1/status',headers={'Authorization':'Bearer '+config['SERVICE_TOKEN']})

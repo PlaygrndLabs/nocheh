@@ -18,7 +18,7 @@ import {fetchJSON,authedFetch} from './client.js';
   function Panel({title, children, note}) { return h('section', {className:'n-panel'}, h('h2', null, title), note && h('p', {className:'n-muted'}, note), children); }
   function Data({value}) { return h('pre', {className:'n-data', dir:'auto'}, typeof value === 'string' ? value : JSON.stringify(value, null, 2)); }
   const friendlyState = value => ({ready:'Ready',running:'In progress',complete:'Complete',failed:'Needs attention',cancelled:'Stopped',interrupted:'Interrupted',uploading:'Uploading',pending:'Waiting'})[value] || String(value||'Unknown').replaceAll('_',' ');
-  const jobName = value => ({import:'Chat import','settings.apply':'Apply settings','operations.diagnose':'Service diagnostics','operations.export':'Archive export','operations.backup':'Full backup','operations.restart':'Service restart','operations.restore':'Inactive restore'})[value] || value;
+  const jobName = value => ({import:'Chat import','settings.apply':'Apply settings','operations.diagnose':'Service diagnostics','operations.export':'Archive export','operations.portable-export':'Archive and memory export','operations.backup':'Full backup','operations.restart':'Service restart','operations.restore':'Inactive restore'})[value] || value;
   const profileName = p => (p.owner?'Owner · private DM':'Group')+' · '+p.scope;
   function Details({value,label='Technical details'}) { return h('details',null,h('summary',null,label),h(Data,{value})); }
   function RouteLink({page,children}) { return h('a',{href:'#'+page,className:'n-text-link'},children); }
@@ -334,10 +334,10 @@ import {fetchJSON,authedFetch} from './client.js';
   }
 
   function OperationResult({result}) {
-    if(result.containers)return h('div',null,...result.containers.map(c=>h('div',{className:'n-row',key:c.service},h('b',null,c.service),h('span',null,(c.state==='running'?'Running':friendlyState(c.state))+(c.health?' · '+c.health:'')))),h(Details,{value:result,label:'Full diagnostics'}));
+    if(result.containers)return h('div',null,result.execution_holds&&Object.values(result.execution_holds).some(Boolean)&&h('p',{role:'status'},'This restored installation is held for inspection. Review pending work before activating it.'),...result.containers.map(c=>h('div',{className:'n-row',key:c.service},h('b',null,c.service),h('span',null,(c.state==='running'?'Running':friendlyState(c.state))+(c.health?' · '+c.health:'')))),h(Details,{value:result,label:'Full diagnostics'}));
     const messages={backed_up:'Full backup created.',restored_inactive:'Backup restored into a separate inactive installation. Telegram and the copied login remain disabled.',exported:'Portable archive ZIP ready to download.',restarted:'Services restarted and readiness checked.',applied:'Saved settings applied to running services.',apply_failed:result.rolled_back?'Applying settings failed. The previous configuration was restored.':'Applying settings failed. Check diagnostics before trying again.'};
     return h('div',null,h('p',null,messages[result.status]||'Task finished. See details for its result.'),
-      result.status==='exported'&&h('p',{className:'n-muted'},result.events+' source records · '+result.files+' original files'),
+      result.status==='exported'&&h('p',{className:'n-muted'},result.events+' source records · '+result.files+' original files'+(result.native_profiles!==undefined?' · '+result.native_profiles+' native profiles':'')),
       result.status==='restored_inactive'&&h('p',{className:'n-muted'},(result.verified_tables?.length||0)+' tables verified · '+result.verified_state_files+' state files verified'),h(Details,{value:result}));
   }
   function Operations({notify}){
@@ -347,6 +347,7 @@ import {fetchJSON,authedFetch} from './client.js';
     const descriptions={backup:'Pause archive writers, save a consistent database, files and runtime snapshot, then resume those services. This local backup includes private state and credentials.',restart:'Restart Hermes and the archive workers, then check readiness. Telegram replies may be briefly interrupted.',restore:'Restore the selected backup into a new, separate local installation. Telegram stays disabled and the copied subscription login stays inactive. Your current installation is not replaced.'};
     const tasks=(jobs||[]).filter(j=>j.kind!=='import');
     return h('div',null,h('div',{className:'n-operation-grid'},...[
+      ['portable-export','Export archive and memory','Download originals, file bytes, generated results and native notes/session databases. Operational credentials are excluded.','Export archive & memory ZIP'],
       ['diagnose','Check service health','Inspect containers and archive readiness without changing your data.','Run diagnostics'],
       ['export','Download your archive','Create a portable ZIP of original source records and files.','Prepare archive ZIP'],
       ['backup','Back up the installation','Save the database, files and Hermes runtime state, including credentials, locally.','Review full backup'],
@@ -358,7 +359,7 @@ import {fetchJSON,authedFetch} from './client.js';
           h('label',null,'Local port for the inactive installation',h('input',{type:'number',min:1024,max:65535,value:port,onChange:e=>{setPort(Number(e.target.value));setReview('');}}))),button('Review inactive restore',()=>setReview('restore'),!backup||busy))),
       review&&h(Panel,{title:'Review '+({backup:'full backup',restart:'service restart',restore:'inactive restore'})[review]},h('p',null,descriptions[review]),review==='restore'&&h('p',null,'Backup '+backup+' · local port '+port),h('div',{className:'n-actions'},button('Confirm '+review,()=>run(review),busy,'n-primary'),button('Cancel',()=>setReview('')))),
       h(Panel,{title:'Recent maintenance',note:'Diagnostics, exports, backups, restarts, restores and settings applies. Results update automatically.'},jobsError&&h('p',{role:'alert'},jobsError),jobs&&!tasks.length&&h('p',{className:'n-empty'},'No maintenance tasks yet. Run diagnostics above to check the installation.'),
-        ...tasks.map(j=>h('article',{className:'n-result',key:j.id},h('div',{className:'n-result-heading'},h('h3',null,jobName(j.kind)),h('span',{className:'n-badge'},friendlyState(j.state))),h('small',null,new Date(j.created_at).toLocaleString()),j.error&&h('p',{role:'alert'},j.error),j.result&&h(OperationResult,{result:j.result}),j.kind==='operations.export'&&j.state==='complete'&&button('Download archive ZIP',()=>download('/exports/'+j.id+'/download','nocheh-archive.zip',notify))))));
+        ...tasks.map(j=>h('article',{className:'n-result',key:j.id},h('div',{className:'n-result-heading'},h('h3',null,jobName(j.kind)),h('span',{className:'n-badge'},friendlyState(j.state))),h('small',null,new Date(j.created_at).toLocaleString()),j.error&&h('p',{role:'alert'},j.error),j.result&&h(OperationResult,{result:j.result}),['operations.export','operations.portable-export'].includes(j.kind)&&j.state==='complete'&&button('Download ZIP',()=>download('/exports/'+j.id+'/download','nocheh-archive.zip',notify))))));
   }
   function SpaceControls() {
     const [Component,setComponent]=useState(null),[error,setError]=useState('');

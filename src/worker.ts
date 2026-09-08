@@ -9,8 +9,13 @@ import { executeApproved } from './actions.js';
 import { startLoops } from './worker-loops.js';
 import {recoverRuns} from './managed-runs.js';
 import { runReviewJobs } from './learning.js';
+import {existsSync} from 'node:fs';
+import {join} from 'node:path';
 
 export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
+  // A snapshot cannot prove whether its pending work ran after it was taken.
+  // Recovered state stays inspectable until an explicit cutover reconciles it.
+  if(existsSync(join(config.dataDir,'spool','.restore-inactive')))return async()=>{};
   const call = runtimeCall(hermesAdapter({url: config.hermesUrl, token: config.token}));
   return startLoops({
     browser:()=>recoverRuns(pool),

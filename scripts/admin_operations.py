@@ -27,15 +27,21 @@ def backups(state):
 
 def run(state,action,job,options=None):
     identifier(job);options=options or {};environment={**os.environ,'NOCHEH_STATE_DIR':str(state)}
-    if action=='export':
+    if action in ('export','portable-export'):
         from .archive import API,export_archive
         root=state/'admin/exports'/job;root.mkdir(parents=True,mode=0o700)
-        manifest=export_archive(API(),root/'archive')
+        if action=='portable-export':
+            from .portable import export_all
+            manifest=export_all(state,root/'archive')
+        else:manifest=export_archive(API(),root/'archive')
         temporary=root/'export.part'
         with zipfile.ZipFile(temporary,'x',compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted((root/'archive').rglob('*')):
                 if path.is_file():archive.write(path,path.relative_to(root/'archive'))
         temporary.chmod(0o600);temporary.rename(root/'export.zip')
+        if action=='portable-export':return {'status':'exported','format':manifest['format'],'complete':manifest['complete'],
+            'events':manifest['archive']['events'],'files':manifest['archive']['files'],'export_files':len(manifest['files']),
+            'native_profiles':len(manifest['native_profiles']),'job':job}
         return {'status':'exported',**manifest,'job':job}
     args=[str(ROOT/'scripts/nocheh')]
     if action=='diagnose':args+=['diagnose']
