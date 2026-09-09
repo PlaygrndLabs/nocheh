@@ -17,7 +17,9 @@ its return link brings you back to Nocheh. Old `/nocheh#…` bookmarks still wor
 The launcher starts Nocheh before building the optional native page. If Hermes is
 unavailable, the Nocheh archive/import/maintenance screens remain accessible.
 The owner API runs locally and does not expose a Docker socket to containers.
-Native assets use the pinned upstream lockfile. Stop and start to rebuild updates.
+All containers, including the native dashboard, belong to the `nocheh` Compose
+project. Native assets use the pinned upstream lockfile. Stop and start to rebuild
+updates; `dashboard --stop` stops only the dashboard service and owner server.
 
 ## Find the right page
 

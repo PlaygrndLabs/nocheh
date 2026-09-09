@@ -14,6 +14,14 @@ The native Hermes subscription route remains active until the candidate shared r
 passes its live checks. Honcho attachment remains gated by its separate embedding and
 memory acceptance; the recorded HTTP 429 is still pending.
 
+## Unified local Compose project — 2026-09-10
+
+ADR-0036 places the native dashboard service in the main `nocheh` Compose project.
+Complete: lifecycle tests, 47 service tests, 107 Hermes tests and a no-cache rebuild
+pass. Docker reports one `nocheh` project with 10 healthy services, including the
+native dashboard and optional database viewer. The old `nocheh-dashboard` project
+is removed. The owner management server remains host-managed and healthy.
+
 # Guarded projections and primary Honcho memory (ADR-0033)
 
 Owner-approved replacement plan: [guarded-memory-plan.md](docs/guarded-memory-plan.md).

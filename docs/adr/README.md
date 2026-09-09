@@ -43,3 +43,4 @@ status before the rebuild.**
 | [0033](0033-guarded-projections-and-honcho-memory.md) | Durable editable guarding and Honcho primary memory | Implemented; live Honcho activation pending |
 | [0034](0034-explicit-embedding-environment.md) | Explicit dedicated OpenAI embedding provider, model and capped key | Configured; live embedding acceptance pending |
 | [0035](0035-shared-cliproxy-provider-and-monitoring.md) | One CLIProxyAPI login for Hermes and Honcho, with CPA Manager Plus monitoring | Active implementation plan |
+| [0036](0036-one-compose-project.md) | All local containers in one Compose project while the owner server stays host-managed | Active local packaging |
