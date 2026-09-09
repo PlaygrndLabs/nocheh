@@ -199,7 +199,7 @@ const server = createServer((req, res) => { void (async () => {
   }
   if (config.service === 'archive') {
     if (req.method==='GET' && path==='/v1/export') return json(res,200,await exportPage(pool,url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit'))));
-    if (req.method==='POST' && path==='/v1/import') return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024)));
+    if (req.method==='POST' && path==='/v1/import') return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024),url.searchParams.get('restore_guarded')==='true'));
     if (req.method==='POST' && path==='/v1/replay') return json(res,200,await replay(pool,object(await readJson(req)).event_ids));
     const upload=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
     if (req.method==='POST' && upload?.[1]) return json(res,200,await uploadArtifact(pool,config.dataDir,upload[1],await readJson(req,70*1024*1024)));

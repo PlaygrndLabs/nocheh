@@ -240,3 +240,35 @@ export async function browseData(pool:pg.Pool,principal:Reader,after='') {
     FROM events e WHERE e.id>$1 ORDER BY e.id LIMIT 51`,[string(after,64)]);
   return {records:rows.slice(0,50).map(({original_text,...row})=>({...row,text:original_text?.toString().slice(0,500)??null})),next:rows.length>50?rows[49].id:null};
 }
+
+export async function exportGuarded(pool:pg.Pool,eventId:string) {
+ const {rows}=await pool.query('SELECT id,active_revision FROM guard_sources WHERE event_id=$1 AND active_revision IS NOT NULL ORDER BY id',[eventId]);
+ const sources=[];
+ for(const row of rows){const revisions=(await pool.query('SELECT revision,content,input_hash,author,preparation_version,created_at FROM guard_revisions WHERE source_id=$1 ORDER BY revision',[row.id])).rows;
+  sources.push({...row,revisions:revisions.map(r=>({...r,content:JSON.parse(r.content.toString()),created_at:r.created_at.toISOString()}))});}
+ return {format:'nocheh-guarded-v1',sources};
+}
+export async function restoreGuarded(pool:pg.Pool,eventId:string,input:unknown) {
+ const bundle=object(input);if(bundle.format!=='nocheh-guarded-v1'||!Array.isArray(bundle.sources)||bundle.sources.length>1001)throw new HttpError(400,'invalid_guarded_export');
+ const client=await pool.connect();let changed=false;
+ try{await client.query('BEGIN');
+  for(const raw of bundle.sources){const entry=object(raw),id=string(entry.id,256),source=(await client.query('SELECT * FROM guard_sources WHERE id=$1 AND event_id=$2 FOR UPDATE',[id,eventId])).rows[0];
+   if(!source||!Array.isArray(entry.revisions)||!entry.revisions.length||entry.revisions.length>10000||entry.active_revision!==entry.revisions.length)throw new HttpError(400,'invalid_guarded_export');
+   const original=await sourceInput(client,source),inputHash=digest(canonical(original));
+   const existing=(await client.query('SELECT revision,content,author,preparation_version,input_hash FROM guard_revisions WHERE source_id=$1 ORDER BY revision',[id])).rows;
+   // A restored export cannot silently replace another current owner history.
+   if(existing.length&&existing.length!==entry.revisions.length)throw new HttpError(409,'guard_restore_conflict');
+   for(const [index,rawRevision] of entry.revisions.entries()) {
+    const r=object(rawRevision),value=object(r.content),serialized=canonical(value);
+    if(r.revision!==index+1||r.input_hash!==inputHash||!['owner','automatic'].includes(String(r.author))||!Number.isFinite(Date.parse(String(r.created_at))))throw new HttpError(409,'guard_restore_integrity');
+    if(source.kind==='events'){if(value.text!==null)string(value.text,2000000);object(value.payload);}
+    else if(source.kind==='artifacts'){string(value.kind,100);object(value.metadata);}else{string(value.text,4000000);string(value.kind,100);object(value.provenance);}
+    if(existing.length){const old=existing[index];if(old.content.toString()!==serialized||old.author!==r.author||old.input_hash!==inputHash||old.preparation_version!==r.preparation_version)throw new HttpError(409,'guard_restore_conflict');}
+    else{await client.query(`INSERT INTO guard_revisions(id,source_id,revision,content,search_text,input_hash,author,preparation_version,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+     [digest(id+':'+r.revision),id,r.revision,Buffer.from(serialized),textValues(value).join('\n').replaceAll('\0',''),inputHash,r.author,string(r.preparation_version,256),r.created_at]);changed=true;}
+   }
+   await client.query("UPDATE guard_sources SET input=$2,input_hash=$3,active_revision=$4,state='ready',error_code=NULL WHERE id=$1",[id,Buffer.from(canonical(original)),inputHash,entry.active_revision]);
+  }
+  if(changed)await client.query('UPDATE guard_state SET epoch=epoch+1');await client.query('COMMIT');return {restored:bundle.sources.length};
+ }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}

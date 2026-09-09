@@ -54,5 +54,14 @@ test('durable Honcho receipts, consent, isolation, uncertain writes and current-
   const current=(await memoryStatus(pool)).generations.find(g=>g.audience==='-10')!;assert.notEqual(current.id,generation.id);
   assert.ok([...remote.entries()].filter(([path])=>path.includes(current.id)).every(([,rows])=>rows[0].content.includes('coffee')&&!rows[0].content.includes('tea')));
   await setMemoryConnection(pool,{attached:false});const detachedWrites=writes;await syncMemory(pool,call);assert.equal(writes,detachedWrites);
+  const skipped=await ingest(pool,{version:1,key:'detached-no-catchup',origin:'import',bot_id:'fixture',scope:'-10',source_id:'c',revision:'1',kind:'message',occurred_at:null,text:'While detached without catchup',payload:{}},false);
+  await approveLearning(pool,{approved:true,event_ids:[skipped.id]});await prepareGuarded(pool,detect);
+  await setMemoryConnection(pool,{attached:true,include_history:false});await syncMemory(pool,call);
+  assert.ok(![...remote.values()].some(rows=>rows[0].content.includes('without catchup')));
+  await setMemoryConnection(pool,{attached:false});
+  const caught=await ingest(pool,{version:1,key:'detached-with-catchup',origin:'import',bot_id:'fixture',scope:'-10',source_id:'d',revision:'1',kind:'message',occurred_at:null,text:'While detached with catchup',payload:{}},false);
+  await approveLearning(pool,{approved:true,event_ids:[caught.id]});await prepareGuarded(pool,detect);
+  await setMemoryConnection(pool,{attached:true,include_history:false,catch_up:true});await syncMemory(pool,call);
+  assert.ok([...remote.values()].some(rows=>rows[0].content.includes('with catchup')));
  }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });

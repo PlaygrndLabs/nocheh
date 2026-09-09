@@ -127,13 +127,13 @@ def export_archive(api,directory):
     return manifest
 
 
-def import_archive(api,directory):
+def import_archive(api,directory,restore_guarded=False):
     manifest=json.loads((directory/'manifest.json').read_text())
     if manifest.get('format')!='nocheh-archive-v1' or manifest.get('complete') is not True: raise ValueError('incomplete_export')
     count=0
     with (directory/'events.ndjson').open() as source:
         for line in source:
-            record=json.loads(line); api.call('/v1/import',record)
+            record=json.loads(line); api.call('/v1/import'+('?restore_guarded=true' if restore_guarded else ''),record)
             for artifact in record['artifacts']:
                 if artifact['state']=='ready':
                     checksum=artifact['file_hash']
@@ -149,11 +149,12 @@ def main():
     tg=sub.add_parser('import-telegram');tg.add_argument('file',type=Path);tg.add_argument('--scope');tg.add_argument('--scope-map',type=Path)
     tg.add_argument('--approve-memory-review',action='store_true',help='Explicitly approve a private Hermes memory review after successful import.')
     for name in ('export','import'):
-        sub.add_parser(name).add_argument('directory',type=Path)
+        command=sub.add_parser(name);command.add_argument('directory',type=Path)
+        if name=='import':command.add_argument('--restore-guarded',action='store_true',help='Trust and restore guarded revision history from your own export; no re-detection.')
     sub.add_parser('replay').add_argument('event_ids',nargs='+')
     args=parser.parse_args();api=API()
     if args.command=='export': result=export_archive(api,args.directory)
-    elif args.command=='import': result=import_archive(api,args.directory)
+    elif args.command=='import': result=import_archive(api,args.directory,args.restore_guarded)
     elif args.command=='replay': result=api.call('/v1/replay',{'event_ids':args.event_ids})
     else:
         document=json.loads(args.file.read_text());count=missing=0;review_ids=[]

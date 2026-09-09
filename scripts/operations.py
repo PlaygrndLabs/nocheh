@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import tarfile
 import tempfile
@@ -21,6 +22,8 @@ SERVICES=['hermes','worker','guard','archive']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
+        'honcho_connection':'singleton','honcho_generations':'id','honcho_receipts':'id',
+        'honcho_prepared_sources':'source_id,guard_epoch,policy_revision',
         'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
         'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
         'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id'}
@@ -108,6 +111,17 @@ def backup(state,output,leave_stopped=False):
                     if not path.is_file(): raise ValueError('Missing/non-regular state file: '+relative)
                     manifest['files'][relative]={'sha256':sha(path),'size':path.stat().st_size}
                     tar.add(path,arcname='state/'+relative,recursive=False)
+            # Provider reservations live outside the archive. Snapshot them with
+            # SQLite's backup API; restoring Nocheh never resets the live ledger.
+            ledger=ROOT/'data/honcho-experiment/ledger/budget.sqlite'
+            if state.resolve()==(ROOT/'data/local').resolve() and ledger.is_file():
+                copy=stage/'memory-budget.sqlite';source=sqlite3.connect(ledger.as_uri()+'?mode=ro',uri=True);target=sqlite3.connect(copy)
+                try:source.backup(target);target.commit()
+                finally:source.close();target.close()
+                copy.chmod(0o600);relative='memory-ledger/budget.sqlite'
+                manifest['files'][relative]={'sha256':sha(copy),'size':copy.stat().st_size}
+                tar.add(copy,arcname='state/'+relative,recursive=False)
+                copy.unlink()
         archive.chmod(0o600);sync(archive);manifest['state_sha256']=sha(archive)
         metadata=stage/'manifest.json';metadata.write_text(json.dumps(manifest,indent=2)+'\n');metadata.chmod(0o600);sync(metadata)
         stage.rename(output)
@@ -160,7 +174,8 @@ def restore(snapshot,state,project,port):
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
-    config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port))
+    config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
+                  NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory')
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
     (state/'hermes/scheduler-inactive').touch()
@@ -173,10 +188,14 @@ def restore(snapshot,state,project,port):
     # Old snapshots predate the policy tables; verify exactly their recorded set.
     actual=fingerprints(command,env,manifest['tables'])
     if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
+    if 'honcho_connection' in manifest['tables']:
+        subprocess.run(command+['exec','-T','postgres','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
+            "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
     subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
             'telegram_enabled':False,'subscription_login_activated':False}
+    result['honcho_attached']=False
     result['executors_active']=False
     (state/'reports/restore.json').write_text(json.dumps(result,indent=2)+'\n')
     return result

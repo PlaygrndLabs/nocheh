@@ -45,12 +45,12 @@ export async function memoryStatus(pool:pg.Pool) {
  return {connection,generations,receipts,guard,policy,primary:'honcho',native_notes:['MEMORY.md','USER.md'],limited_memory:!connection.attached||!connection.verified||!generations.length||generations.some(g=>g.state!=='ready')};
 }
 export async function setMemoryConnection(pool:pg.Pool,input:unknown) {
- const b=object(input);if(typeof b.attached!=='boolean'||(b.include_history!==undefined&&typeof b.include_history!=='boolean'))throw new HttpError(400,'invalid_memory_connection');
+ const b=object(input);if(typeof b.attached!=='boolean'||(b.include_history!==undefined&&typeof b.include_history!=='boolean')||(b.catch_up!==undefined&&typeof b.catch_up!=='boolean'))throw new HttpError(400,'invalid_memory_connection');
  await memoryStatus(pool);
  const client=await pool.connect();try{await client.query('BEGIN');
   const state=(await client.query('SELECT * FROM honcho_connection FOR UPDATE')).rows[0];
   if(b.attached&&!state.verified)throw new HttpError(409,'honcho_live_acceptance_pending');
-  await client.query('UPDATE honcho_connection SET attached=$1,attached_at=coalesce(attached_at,now()),include_history=$2,updated_at=now()', [b.attached,b.include_history??state.include_history]);
+  await client.query('UPDATE honcho_connection SET attached=$1,attached_at=CASE WHEN $1 AND NOT attached AND NOT $3 THEN now() ELSE coalesce(attached_at,now()) END,include_history=$2,updated_at=now()', [b.attached,b.include_history??state.include_history,b.catch_up??false]);
   // Revokes in-flight work and keeps old provider memory inaccessible. Reattach
   // reconciles old receipts before a new generation can be used (G6).
   if(state.attached!==b.attached)await client.query('UPDATE guard_state SET epoch=epoch+1');
@@ -82,11 +82,10 @@ export async function queueMemory(pool:pg.Pool) {
  const sources=(await pool.query(`SELECT s.*,e.revision,e.origin,e.received_at,es.space_id FROM guard_sources s JOIN events e ON e.id=s.event_id
  JOIN event_spaces es ON es.event_id=e.id JOIN memory_learning_sources l ON l.event_id=e.id
  WHERE (s.kind='events' OR (s.kind='derived_artifacts' AND EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.id=s.source_id AND d.kind IN ('transcript','extracted_text'))))
- AND ($1::boolean OR e.received_at >= $2) AND ($3='off' OR s.state='ready')
+ AND ($1::boolean OR e.received_at >= $2 OR EXISTS(SELECT 1 FROM honcho_receipts prior WHERE prior.source_id=s.id AND prior.state='done')) AND ($3='off' OR s.state='ready')
  AND NOT EXISTS(SELECT 1 FROM honcho_prepared_sources p WHERE p.source_id=s.id AND p.guard_epoch=$4 AND p.policy_revision=$5)
  ORDER BY e.received_at,s.id LIMIT 50`,[connection.include_history,connection.attached_at,guard.mode,guard.epoch,policy])).rows;
  for(const source of sources) {
-  if(!connection.include_history&&new Date(source.received_at)<new Date(connection.attached_at))continue;
   let value:any,revision:number|null=null;
   if(guard.mode==='on') {try{const copy=await guardedValue(pool,source.id);value=copy.value;revision=copy.revision;}catch(error){if(error instanceof HttpError&&error.code==='guard_preparation_pending')continue;throw error;}}
   else value=JSON.parse(source.input?.toString()??'null');
@@ -115,6 +114,16 @@ export async function syncMemory(pool:pg.Pool,call:HonchoCall) {
  const client=await pool.connect();let locked=false;
  try{
   locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803311)) AS locked')).rows[0].locked;if(!locked)return;
+  const connection=(await memoryStatus(pool)).connection;if(!connection.attached||!connection.verified)return;
+  // Reattachment first reconciles uncertain writes from retired generations.
+  // Reads do not resurrect those workspaces or permit their model processing.
+  const old=(await pool.query(`SELECT r.* FROM honcho_receipts r JOIN honcho_generations g ON g.id=r.generation
+    WHERE r.state='uncertain' AND (g.guard_epoch<>(SELECT epoch FROM guard_state) OR g.policy_revision<>(SELECT revision FROM memory_policy_state)) LIMIT 20`)).rows;
+  for(const job of old){try{const found=(await call('/v3/workspaces/'+job.generation+'/sessions/'+job.id+'/messages/list',{filters:{metadata:{nocheh_receipt:job.id}}})).items;
+    if(!Array.isArray(found)||found.length!==1||found[0].content!==job.content.toString()||found[0].metadata?.nocheh_receipt!==job.id)return;
+    await pool.query("UPDATE honcho_receipts SET state='done',remote_id=$2,error_code=NULL WHERE id=$1",[job.id,String(found[0].id)]);
+   }catch{return;}}
+  if(old.length===20)return;
   await queueMemory(pool);
   const guard=await guardState(pool),policy=await policyRevision(pool);
   const jobs=(await pool.query(`SELECT r.* FROM honcho_receipts r JOIN honcho_generations g ON g.id=r.generation
