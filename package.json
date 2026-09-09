@@ -15,7 +15,7 @@
     "test": "npm run build && node --test dist/test/*.test.js test/dashboard-graph.test.mjs",
     "graphify:extract": "graphify extract . --no-cluster --out .",
     "graphify:report": "graphify cluster-only . --no-label",
-    "graphify:update": "graphify update ."
+    "graphify:update": "python3 scripts/graphify_ast.py"
   },
   "dependencies": {
     "pg": "8.23.0",

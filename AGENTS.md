@@ -17,15 +17,16 @@ VPS work is deferred. Do not mistake planned phases for completed behavior.
 1. Preserve original messages, observed events, revisions, and retrievable file
    bytes in the owned archive. Store transcripts and other generated artifacts
    separately, with provenance. Never replace an original with a model output.
-2. Guarding is optional: `off`, `on`, `auto` (default). Trust is an explicit
-   destination policy, not a model-name heuristic. Trusted ChatGPT routes may
-   receive originals. Required guarding fails closed on every model attempt,
-   including history, tool results, auxiliary calls, and route changes.
+2. Guarding is `on` (default) or `off` under ADR-0033. Prepare durable guarded
+   projections at ingestion; reuse them without repeated detection. The owner can
+   inspect originals and edit guarded projections. Saved owner edits are final.
+   On sends only current guarded data to agents and memory; required enforcement
+   fails closed on every model attempt. Consult TASK.md for activation status.
 3. A model detects literal secret substrings; local code validates and masks them.
    All other text remains exactly unchanged. Detection quality is measured, never
    described as a guarantee that every possible secret will be found.
 4. Raw media may reach explicitly trusted perception/transcription providers.
-   Derived text follows the same outgoing-request guard policy as typed text.
+   Derived text is prepared and versioned under the same guard policy as typed text.
 5. Proactive conversation is permitted in selected Telegram groups. Other
    external effects require owner approval. No auto-trading. Group members may
    not approve actions or change administrative/provider/guard settings.
@@ -34,15 +35,15 @@ VPS work is deferred. Do not mistake planned phases for completed behavior.
    explicitly selected filtered sharing (ADR-0028). Enforce audience access in
    tools, storage, notes, graphs and delivery. Inferences are not source facts.
    Imported-content learning requires explicit approval during import.
-7. Production uses ChatGPT subscription authentication: no paid model-provider
-   API keys and no local models. Automatic transcription is a release requirement.
-   The isolated Honcho experiment has a $5 maximum metered API budget and may use
-   an explicitly supplied temporary key. Never use existing unrelated API keys.
+7. Reasoning uses ChatGPT subscription authentication; no local models or paid
+   reasoning keys. ADR-0033 authorizes dedicated paid embeddings only: a $5 total
+   pilot cap, then $5/month. Never use unrelated provider credentials. Automatic
+   transcription remains a release requirement; missing live evidence is pending.
 8. Reuse Hermes's Telegram adapter, agent, tools, profiles, and built-in memory.
    Keep custom integration thin; a minimal pinned upstream compatibility patch is
    allowed for durable capture and mandatory guard enforcement.
-9. Nocheh owns one PostgreSQL archive and file store. Optional guarded copies are
-   versioned cache records in that database. Hermes owns its native runtime state.
+9. Nocheh owns one PostgreSQL archive and file store. Guarded projections and owner
+   revisions are durable records in that database. Hermes owns its native runtime state.
    Preserve source identities and provenance for portable export and replay.
 
 ## Implementation agreements
