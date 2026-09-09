@@ -391,7 +391,9 @@ import {GuardedEditor} from './guarded-editor.js';
         h('p',{className:'n-muted'},data.status?.model||'Check runtime health or restart services in Maintenance.'),
         h('a',{className:'n-text-link',href:'/hermes/nocheh'},'Open native Hermes dashboard →'),
         h(Details,{value:data,label:'Runtime status and capabilities'}))),
-      h(Panel,{title:'Honcho',note:'Primary long-term memory with scoped recall, guarded sources and durable ingestion receipts.'},h(RouteLink,{page:'honcho'},'Open Honcho memory →')));
+      h(Panel,{title:'Honcho',note:'Primary long-term memory with scoped recall, guarded sources and durable ingestion receipts.'},h(RouteLink,{page:'honcho'},'Open Honcho memory →')),
+      h(Panel,{title:'Provider monitoring',note:'Request history, usage, latency, failures and subscription account observations from CPA Manager Plus.'},
+        h('a',{className:'n-text-link',href:'/providers/management.html'},'Open provider monitoring →')));
   }
   function App() {
     const [page,setPage]=useState(location.hash.slice(1)||'overview'),[notice,setNotice]=useState(null),[tick,setTick]=useState(0);
@@ -408,7 +410,7 @@ import {GuardedEditor} from './guarded-editor.js';
       h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'ن'),h('span',null,'Nocheh',h('small',null,'Your conversations & memory'))),
         h('nav',{'aria-label':'Main navigation'},...groups.map(([label,keys])=>h('div',{className:'n-nav-group',key:label},h('span',{className:'n-nav-label'},label),...keys.map(key=>h('a',{href:'#'+key,key,'aria-current':page===key?'page':undefined},pages[key]))))),
         h('label',{className:'n-mobile-navigation'},'Navigate',h('select',{value:pages[page]?page:'overview',onChange:e=>{location.hash=e.target.value;}},...Object.entries(pages).map(([key,label])=>h('option',{key,value:key},label)))),
-        h('div',{className:'n-sidebar-foot'},h('a',{href:'/hermes/nocheh',className:'n-text-link'},'Open Hermes ↗'),h('small',null,'Local owner dashboard'))),
+        h('div',{className:'n-sidebar-foot'},h('a',{href:'/hermes/nocheh',className:'n-text-link'},'Open Hermes ↗'),h('a',{href:'/providers/management.html',className:'n-text-link'},'Provider monitor ↗'),h('small',null,'Local owner dashboard'))),
       h('main',{className:'n-main'},h('header',{className:'n-header'},h('div',null,h('h1',{ref:heading,tabIndex:-1},pages[page]||'Overview'),h('p',{className:'n-page-description'},descriptions[page]||descriptions.overview)),button('Refresh',()=>setTick(v=>v+1))),
         notice&&h('div',{className:'n-notice '+(notice.error?'n-error':''),role:notice.error?'alert':'status'},notice.text,button('Dismiss',()=>setNotice(null))),
         h('div',{key:page+tick},page==='activity'?h(Activity,{notify}):page==='integrations'?h(Integrations):page==='settings'?h(Settings,{notify}):page==='imports'?h(Jobs,{notify}):page==='archive'?h(Archive,{notify}):Current?h(Current,{notify,call,h,sdk}):h(Status,{refresh:tick})),

@@ -8,7 +8,9 @@ import urllib.request
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-LOCK=json.loads((ROOT/'compatibility/upstreams.lock.json').read_text())['cliproxy']
+LOCKS=json.loads((ROOT/'compatibility/upstreams.lock.json').read_text())
+LOCK=LOCKS['cliproxy']
+MONITOR_LOCK=LOCKS['cpamp']
 CLIENTS=('hermes','honcho','preparation')
 
 
@@ -28,8 +30,10 @@ def _secret(path):
 
 def initialize(state):
     root,auth,keys,config=paths(state)
-    for directory in (root,auth,keys):directory.mkdir(parents=True,exist_ok=True,mode=0o700)
+    monitor=root/'monitor'
+    for directory in (root,auth,keys,monitor):directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     values={name:_secret(keys/(name+'.key')) for name in (*CLIENTS,'management')}
+    _secret(keys/'monitor-admin.key');_secret(keys/'monitor-data.key')
     desired={
         'host':'','port':8317,'auth-dir':'/auth','api-keys':[values[name] for name in CLIENTS],
         'remote-management':{'allow-remote':True,'secret-key':values['management'],
@@ -49,17 +53,26 @@ def initialize(state):
     return {'root':str(root),'login_present':bool(list(auth.glob('*.json'))),'clients':list(CLIENTS)}
 
 
-def ensure_source(run=subprocess.run):
-    destination=ROOT/'data/compat/upstreams/CLIProxyAPI'
+def _ensure_source(directory,pin,error_prefix,run):
+    destination=ROOT/'data/compat/upstreams'/directory
     if not destination.exists():
         destination.parent.mkdir(parents=True,exist_ok=True)
-        run(['git','clone','--no-checkout',LOCK['repository'],str(destination)],check=True)
-        run(['git','-C',str(destination),'checkout','--detach',LOCK['revision']],check=True)
+        run(['git','clone','--no-checkout',pin['repository'],str(destination)],check=True)
+        run(['git','-C',str(destination),'checkout','--detach',pin['revision']],check=True)
     actual=subprocess.check_output(['git','-C',str(destination),'rev-parse','HEAD'],text=True).strip()
-    if actual!=LOCK['revision']:raise ValueError('cliproxy_source_pin_mismatch')
+    if actual!=pin['revision']:raise ValueError(error_prefix+'_source_pin_mismatch')
     if subprocess.run(['git','-C',str(destination),'diff','--quiet','HEAD']).returncode:
-        raise ValueError('cliproxy_source_is_modified')
+        raise ValueError(error_prefix+'_source_is_modified')
+    (destination/'.nocheh-source-revision').write_text(pin['revision']+'\n')
     return destination
+
+
+def ensure_source(run=subprocess.run):
+    return _ensure_source('CLIProxyAPI',LOCK,'cliproxy',run)
+
+
+def ensure_monitor_source(run=subprocess.run):
+    return _ensure_source('cpa-manager-plus',MONITOR_LOCK,'provider_monitor',run)
 
 
 def compose(state):
@@ -69,26 +82,31 @@ def compose(state):
 
 
 def status(state):
-    info=initialize(state);info.update(revision=LOCK['revision'],running=False,healthy=False)
+    info=initialize(state);info.update(revision=LOCK['revision'],running=False,healthy=False,
+        monitor={'revision':MONITOR_LOCK['revision'],'running':False,'healthy':False})
     command,env=compose(state)
     try:
-        raw=subprocess.check_output(command+['ps','--format','json','cliproxy'],cwd=ROOT,env=env,text=True,stderr=subprocess.DEVNULL,timeout=15)
+        raw=subprocess.check_output(command+['ps','--format','json','cliproxy','provider-monitor'],cwd=ROOT,env=env,text=True,stderr=subprocess.DEVNULL,timeout=15)
         rows=[json.loads(line) for line in raw.splitlines() if line.strip()]
-        if rows:
-            info['running']=rows[0].get('State')=='running'
-            info['healthy']=rows[0].get('Health')=='healthy'
+        for row in rows:
+            target=info if row.get('Service')=='cliproxy' else info['monitor']
+            target['running']=row.get('State')=='running';target['healthy']=row.get('Health')=='healthy'
     except (OSError,subprocess.SubprocessError,ValueError):pass
     return info
 
 
 def verify(state):
-    ensure_source();result=status(state)
+    ensure_source();ensure_monitor_source();result=status(state)
     command,env=compose(state)
     try:
         subprocess.run(command+['exec','-T','cliproxy','curl','--fail','--silent','--output','/dev/null','http://127.0.0.1:8317/healthz'],cwd=ROOT,env=env,check=True,timeout=20)
         result['health_check']='passed'
     except (OSError,subprocess.SubprocessError):result['health_check']='failed'
-    result['verified']=result['health_check']=='passed' and result['healthy']
+    try:
+        subprocess.run(command+['exec','-T','provider-monitor','wget','-q','-O','/dev/null','http://127.0.0.1:18317/health'],cwd=ROOT,env=env,check=True,timeout=20)
+        result['monitor_health_check']='passed'
+    except (OSError,subprocess.SubprocessError):result['monitor_health_check']='failed'
+    result['verified']=result['health_check']=='passed' and result['healthy'] and result['monitor_health_check']=='passed' and result['monitor']['healthy']
     return result
 
 
@@ -105,9 +123,8 @@ def login(state):
 def main(state,args):
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=('init','status','verify','login'))
     selected=parser.parse_args(args)
-    if selected.action=='init':ensure_source();result=initialize(state)
+    if selected.action=='init':ensure_source();ensure_monitor_source();result=initialize(state)
     elif selected.action=='status':result=status(state)
     elif selected.action=='verify':result=verify(state)
     else:return login(state)
     print(json.dumps(result,indent=2));return 0 if selected.action!='verify' or result['verified'] else 1
-

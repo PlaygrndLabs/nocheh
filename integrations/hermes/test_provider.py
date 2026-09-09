@@ -23,6 +23,9 @@ class SharedProviderTests(unittest.TestCase):
             self.assertFalse(config['quota-exceeded']['switch-project'])
             self.assertTrue(config['remote-management']['allow-remote'])
             self.assertTrue(config['remote-management']['disable-control-panel'])
+            self.assertTrue((state/'provider/monitor').is_dir())
+            self.assertEqual(len((state/'provider/keys/monitor-admin.key').read_text().strip()),64)
+            self.assertEqual(len((state/'provider/keys/monitor-data.key').read_text().strip()),64)
             for path in (state/'provider').rglob('*'):
                 if path.is_file():self.assertEqual(path.stat().st_mode & 0o777,0o600)
 

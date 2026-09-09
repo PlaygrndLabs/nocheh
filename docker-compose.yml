@@ -66,6 +66,50 @@ services:
       retries: 12
       start_period: 10s
 
+  provider-monitor:
+    image: nocheh-cpamp:1ae656c
+    build:
+      context: ./data/compat/upstreams/cpa-manager-plus
+      dockerfile: ../../../../deploy/cpamp.Dockerfile
+      additional_contexts:
+        nocheh_source: .
+      args:
+        CPAMP_REVISION: 1ae656c82990c480f3f104326a08c6e0001eeb4c
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      HTTP_ADDR: 0.0.0.0:18317
+      USAGE_DATA_DIR: /data
+      USAGE_DB_PATH: /data/usage.sqlite
+      CPA_UPSTREAM_URL: http://cliproxy:8317
+      CPA_MANAGEMENT_KEY_FILE: /run/secrets/cpa_management_key
+      CPA_MANAGER_ADMIN_KEY_FILE: /run/secrets/cpamp_admin_key
+      CPA_MANAGER_DATA_KEY_FILE: /run/secrets/cpamp_data_key
+      USAGE_COLLECTOR_MODE: http
+      USAGE_CORS_ORIGINS: ''
+      USAGE_QUOTA_COOLDOWN_ENABLED: 'false'
+      USAGE_ACCOUNT_ACTIONS_ENABLED: 'false'
+      USAGE_ACCOUNT_ACTIONS_AUTO_DISABLE: 'false'
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/monitor:/data
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/management.key:/run/secrets/cpa_management_key:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/monitor-admin.key:/run/secrets/cpamp_admin_key:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/monitor-data.key:/run/secrets/cpamp_data_key:ro
+    ports: ["127.0.0.1:${NOCHEH_PROVIDER_MONITOR_PORT:-18317}:18317"]
+    depends_on:
+      cliproxy: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:18317/health]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   db-viewer:
     image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
     profiles: [tools]

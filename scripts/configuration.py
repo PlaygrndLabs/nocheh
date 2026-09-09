@@ -12,7 +12,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE = ROOT / 'data/local'
 DEFAULTS = {
-    'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_MODEL': 'gpt-5.6-sol',
+    'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_PROVIDER_MONITOR_PORT': '18317', 'NOCHEH_MODEL': 'gpt-5.6-sol',
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'native',
     'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
@@ -93,6 +93,7 @@ def validate(values):
     if not isinstance(endpoints, list) or any(not isinstance(v,str) or urlsplit(v).scheme not in ('http','https') or not urlsplit(v).netloc for v in endpoints): raise ValueError('Invalid trusted endpoints')
     if not values['NOCHEH_MODEL'].strip(): raise ValueError('NOCHEH_MODEL is required')
     if not values['NOCHEH_PORT'].isdigit() or not 1024 <= int(values['NOCHEH_PORT']) <= 65535: raise ValueError('Invalid NOCHEH_PORT')
+    if not values['NOCHEH_PROVIDER_MONITOR_PORT'].isdigit() or not 1024 <= int(values['NOCHEH_PROVIDER_MONITOR_PORT']) <= 65535: raise ValueError('Invalid NOCHEH_PROVIDER_MONITOR_PORT')
     for name in ('POSTGRES_PASSWORD', 'SERVICE_TOKEN'):
         if len(values[name]) < 24: raise ValueError(f'{name} must contain at least 24 characters')
 
