@@ -1,3 +1,19 @@
+# Shared CLIProxyAPI provider and monitoring (ADR-0035)
+
+Owner-approved implementation plan: [shared-provider-plan.md](docs/shared-provider-plan.md).
+
+| Phase | Actual status |
+| --- | --- |
+| S1 — Contract | Complete in the ADR/plan increment; implementation follows in separate commits |
+| S2 — Shared provider service | Pending |
+| S3 — Hermes, voice and Honcho routes | Pending |
+| S4 — CPA Manager Plus dashboard integration | Pending |
+| S5 — Local acceptance and cutover | Pending |
+
+The native Hermes subscription route remains active until the candidate shared route
+passes its live checks. Honcho attachment remains gated by its separate embedding and
+memory acceptance; the recorded HTTP 429 is still pending.
+
 # Guarded projections and primary Honcho memory (ADR-0033)
 
 Owner-approved replacement plan: [guarded-memory-plan.md](docs/guarded-memory-plan.md).
