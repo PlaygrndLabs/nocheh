@@ -13,6 +13,10 @@
     "revision": "479f6a7a3db81fe2a23d4755b0ccbeb4400317d4",
     "image": "ghcr.io/wangnov/codex-asr@sha256:8fd68262922d4b8348be4f71ed7638b03577842d8b06d323d28b564e68860808"
   },
+  "cliproxy": {
+    "repository": "https://github.com/router-for-me/CLIProxyAPI.git",
+    "revision": "c76dfd4e0edabab9000628b1560ab8ab379eadb8"
+  },
   "model": "gpt-5.6-sol",
   "note": "Pins identify candidates under test. See the evidence report for actual compatibility results."
 }
