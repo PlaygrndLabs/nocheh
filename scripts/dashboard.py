@@ -20,6 +20,10 @@ def request(state, path, body=None):
     with urllib.request.urlopen(req, timeout=30) as response: return json.load(response)
 
 
+def compose(state):
+    return ['docker', 'compose', '--env-file', str(env_path(state)), '-f', str(ROOT / 'docker-compose.yml')]
+
+
 def start(state, rest):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-open', action='store_true')
@@ -29,7 +33,7 @@ def start(state, rest):
     token = directory / 'token'
     if not token.exists():
         with token.open('x') as file: token.chmod(0o600); file.write(secrets.token_urlsafe(48))
-    command = ['docker', 'compose', '--env-file', str(env_path(state)), '-f', str(ROOT / 'docker-compose.dashboard.yml'), '-p', 'nocheh-dashboard']
+    command = compose(state)
     env = compose_environment(state)
     if args.stop:
         # Ask the authenticated owner process to stop itself; never trust a stale PID.
@@ -39,7 +43,7 @@ def start(state, rest):
                 print('Wait for the active operation to finish before stopping the dashboard.'); return 1
             raise
         except (urllib.error.URLError, FileNotFoundError): pass
-        return subprocess.call(command + ['down'], cwd=ROOT, env=env)
+        return subprocess.call(command + ['stop', 'dashboard'], cwd=ROOT, env=env)
     try: running = request(state, '/health').get('ok') is True
     except Exception: running = False
     if not running:
@@ -63,7 +67,7 @@ def start(state, rest):
     with native_log.open('ab') as output:
         native_log.chmod(0o600)
         try:
-            native=subprocess.run(command + ['up', '-d', '--build', '--wait', '--wait-timeout', '180'],cwd=ROOT,env=env,
+            native=subprocess.run(command + ['up', '-d', '--build', '--wait', '--wait-timeout', '180', 'dashboard'],cwd=ROOT,env=env,
                                   stdin=subprocess.DEVNULL,stdout=output,stderr=output,timeout=600)
             if native.returncode: print('The native Hermes page is unavailable. Nocheh remains running; check Maintenance.')
         except (OSError,subprocess.TimeoutExpired):
