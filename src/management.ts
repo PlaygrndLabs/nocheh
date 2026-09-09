@@ -181,7 +181,7 @@ export async function startManagement() {
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
       if (req.method==='POST' && route==='/ws-ticket')return json(res,200,{ticket:sessions.ticket(sessions.authorize(req)),ttl_seconds:30});
-      if(['/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview'].includes(route) && ['GET','POST'].includes(req.method??'')) {
+      if(['/memory/honcho','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview'].includes(route) && ['GET','POST'].includes(req.method??'')) {
         return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
           ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
       }

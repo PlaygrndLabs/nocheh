@@ -20,6 +20,7 @@ x-service: &service
     SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
+    HONCHO_URL: http://honcho-memory:8000
     NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
     GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex"]}
@@ -69,15 +70,18 @@ services:
 
   archive:
     <<: *service
+    networks: [default, memory]
     environment:
       <<: *environment
       NOCHEH_SERVICE: archive
+      NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
     depends_on:
       postgres: {condition: service_healthy}
 
   worker:
     <<: *service
+    networks: [default, memory]
     environment:
       <<: *environment
       NOCHEH_SERVICE: worker
@@ -135,3 +139,8 @@ services:
 
 volumes:
   postgres_data:
+
+networks:
+  memory:
+    name: nocheh-memory
+    internal: true

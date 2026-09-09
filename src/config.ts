@@ -22,6 +22,8 @@ export function settings() {
     token: secret('SERVICE_TOKEN'), databasePassword: secret('PGPASSWORD'),
     dataDir: process.env.NOCHEH_DATA_DIR ?? '/data',
     hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
+    honchoUrl:process.env.HONCHO_URL??'http://honcho:8000',
+    memoryToken:process.env.NOCHEH_MEMORY_TOKEN??'',
     guardMode: mode as 'off' | 'on',
     guardTrusted:trusted as string[],detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_MODEL ?? 'gpt-5.6-sol'}`,
     assistant:assistantPolicy(process.env.ASSISTANT_POLICY_FILE),

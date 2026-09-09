@@ -43,8 +43,9 @@ export async function controlReview(pool:pg.Pool,id:string,action:unknown) {
 export async function prepareReviews(pool:pg.Pool,live:boolean) {
   const guard=await guardState(pool);
   if(live)await pool.query(`INSERT INTO memory_learning_sources(event_id,reason)
-    SELECT e.id,'live' FROM events e JOIN dispatches d ON d.event_id=e.id
-    WHERE d.state='done' AND e.origin='live' AND e.kind='telegram_update' ON CONFLICT DO NOTHING`);
+    SELECT e.id,'live' FROM events e WHERE e.origin='live' AND
+    (EXISTS(SELECT 1 FROM dispatches d WHERE d.event_id=e.id AND d.state='done') OR
+     EXISTS(SELECT 1 FROM managed_runs r WHERE r.event_id=e.id AND r.state='done')) ON CONFLICT DO NOTHING`);
   const {rows}=await pool.query(`SELECT e.id,e.scope,e.original_text,e.payload,
     coalesce((SELECT string_agg(convert_from(content,'UTF8'),E'\n' ORDER BY id) FROM derived_artifacts WHERE event_id=e.id AND kind='transcript'),'') AS transcript
     FROM memory_learning_sources s JOIN events e ON e.id=s.event_id

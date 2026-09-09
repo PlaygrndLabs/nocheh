@@ -52,6 +52,12 @@ def run(body, emit=None):
     from .archive_tools import bind_process_preferences
     bind_process_preferences(prefs)
     database=SessionDB(profile/'state.db')
+    long_term=''
+    if not review:
+        from .archive_tools import request
+        try: memory=request('/v1/memory/honcho/recall',{'query':body['text'][:2000]})
+        except Exception: memory={'limited_memory':True,'note':'Long-term memory is limited. Current context, native notes and archive search remain available.'}
+        long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     session_id=body['session_id']
     history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
     agent=AIAgent(provider='openai-codex',api_mode='codex_responses',model=body['model'],
@@ -68,11 +74,11 @@ def run(body, emit=None):
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
             'Controlled tools create proposals for an independent executor. An action ID is not evidence of execution. '
             'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity. '
-            + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall to connect notes and histories from all native profiles.' if body['owner'] else
-               'This is a shared space. Use only authorized context and tool results, including explicitly shared knowledge. Filtered material is a derived inference, not an original source. Never change settings or approve actions. '
+            + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall for primary Honcho recall and authorized native profiles.' if body['owner'] else
+               'This is a shared space. Use nocheh_memory_recall for this audience. Use only authorized context and tool results, including explicitly shared knowledge. Filtered material is a derived inference, not an original source. Never change settings or approve actions. '
                'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '
                'Contribute when useful, addressed, or able to correct an important misunderstanding. '
-               'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')))
+               'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')+long_term))
     try:
         if agent._memory_store is not None:
             agent._memory_store.memory_char_limit=prefs['memory.memory_char_limit']
