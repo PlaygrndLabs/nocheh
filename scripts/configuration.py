@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE = ROOT / 'data/local'
 DEFAULTS = {
     'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_MODEL': 'gpt-5.6-sol',
-    'NOCHEH_GUARD_MODE': 'on',
-    'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex"]',
+    'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'native',
+    'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     **EMBEDDING_DEFAULTS,
@@ -87,6 +87,7 @@ def validate(values):
     if groups and any(not re.fullmatch(r'-[1-9]\d{0,18}', g.strip()) for g in groups.split(',')): raise ValueError('TELEGRAM_GROUP_IDS must contain negative numeric IDs separated by commas')
     if values['TELEGRAM_ENABLED'] == 'true' and (not owner or not values['TELEGRAM_BOT_TOKEN']): raise ValueError('Enabling Telegram requires TELEGRAM_OWNER_ID and TELEGRAM_BOT_TOKEN')
     if values['NOCHEH_GUARD_MODE'] not in ('off', 'on'): raise ValueError('NOCHEH_GUARD_MODE must be off or on')
+    if values['NOCHEH_REASONING_ROUTE'] not in ('native', 'shared'): raise ValueError('NOCHEH_REASONING_ROUTE must be native or shared')
     from urllib.parse import urlsplit
     endpoints = json.loads(values['NOCHEH_GUARD_TRUSTED_ENDPOINTS'])
     if not isinstance(endpoints, list) or any(not isinstance(v,str) or urlsplit(v).scheme not in ('http','https') or not urlsplit(v).netloc for v in endpoints): raise ValueError('Invalid trusted endpoints')

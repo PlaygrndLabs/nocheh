@@ -89,6 +89,16 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(GuardUnavailable):client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'planted-SECRET'})
         self.assertEqual(len(seen),1)
 
+    def test_detector_exemption_can_be_bound_to_only_the_shared_provider(self):
+        seen=[]
+        self.setup_boundary(lambda *_: (_ for _ in ()).throw(GuardUnavailable('guard_down')))
+        with httpx.Client(transport=httpx.MockTransport(lambda req:seen.append(req) or httpx.Response(200,json={}))) as client:
+            with trusted_detector('http://cliproxy:8317/v1'):
+                client.post('http://cliproxy:8317/v1/chat/completions',json={'messages':[]})
+                with self.assertRaises(GuardUnavailable):
+                    client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'secret'})
+        self.assertEqual(len(seen),1)
+
     def test_required_guard_drops_only_opaque_reasoning_sidecars_and_preserves_original_request(self):
         payload={'instructions':'Aws original','input':[{'role':'user','content':'exact\r\n😃  '},{'type':'reasoning','encrypted_content':'opaque'}]}
         request=httpx.Request('POST','https://untrusted.example/responses',json=payload)

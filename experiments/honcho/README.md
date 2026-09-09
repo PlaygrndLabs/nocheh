@@ -3,8 +3,8 @@
 This experiment compares native Hermes memory with self-hosted Honcho using five
 synthetic source messages and five recall questions. That benchmark is separate
 from the gated primary-memory runtime described below.
-Live evaluation is pending a temporary embedding key and a separate CLIProxyAPI
-device login. No unrelated keys or production archives are mounted.
+Live evaluation is pending provider capacity and the one shared CLIProxyAPI device
+login. No unrelated keys or production archives are mounted.
 
 ```mermaid
 flowchart LR
@@ -13,15 +13,16 @@ flowchart LR
   HON --> PG[("Experiment PostgreSQL + pgvector")]
   H --> M["Meter / fixed routes"]
   HON --> M
-  M -->|"Reasoning"| C["CLIProxyAPI / separate subscription login"]
+  M -->|"Reasoning / scoped Honcho key"| C["Shared CLIProxyAPI subscription login"]
   M -->|"Embeddings / reserve before send"| E["text-embedding-3-small / temporary API key"]
   M --> L[("Persistent budget and usage ledger")]
 ```
 
 The Honcho and baseline containers have an internal Docker network with no direct
-Internet access. The meter alone holds the temporary paid key. The bridge has its
-own OAuth directory and no paid provider configuration. Production state, bot
-credentials and subscription refresh tokens are not shared.
+Internet access. The meter alone holds the temporary paid key and a scoped internal
+CLIProxyAPI client key. Only the shared provider service owns the OAuth directory;
+Honcho never receives refresh tokens. Production state and bot credentials are not
+shared.
 
 ## Reproduce
 
@@ -44,10 +45,10 @@ No experiment ports are published. The runner performs HTTP requests through
 Compose exec inside the isolated network. Compose project
 `nocheh-honcho-experiment` owns its own database.
 
-`login` uses CLIProxyAPI's native `-codex-device-login`. Do not copy the main
-Hermes login: each refresh store has one owner. The runner first tests structured
-tool calls through the bridge, then stores the same labelled sources in each
-system. Honcho must finish actual derivation before recall is scored. The Hermes
+`login` delegates to the shared provider's native `-codex-device-login`. Complete
+one fresh login there; CLIProxyAPI remains the sole refresh owner. The runner first
+tests structured tool calls through the shared route, then stores the same labelled
+sources in each system. Honcho must finish actual derivation before recall is scored. The Hermes
 baseline must have written a native memory file and uses a fresh conversation and
 process for each recall. Each run gets a new workspace/profile; message writes are
 not automatically retried after an uncertain response.
@@ -62,7 +63,7 @@ or $0.02 for large before sending**, durably and under a database lock. The fixe
 pilot limit is **$5 across all runs and restarts**, with at most 500 small-model or
 250 large-model paid attempts. Reservations are never
 refunded, including rejected and timed-out requests. Reasoning uses only the
-subscription bridge and a fixed model; there is no paid reasoning fallback.
+shared subscription provider and a fixed model; there is no paid reasoning fallback.
 
 The reviewed prices (2026-09-09) are $0.02 per million input tokens for
 [small](https://developers.openai.com/api/docs/models/text-embedding-3-small) and
@@ -75,14 +76,15 @@ the authority for actual invoiced spend. Never delete or replace
 `down` preserves the ledger and database; it has no volume-deletion option.
 The first paid attempt binds the embedding model. Switching an existing memory to
 another model requires a rebuild; the gateway blocks mismatches. Both models request
-1536 dimensions. No paid key is passed into the Honcho API, deriver or reasoning bridge.
+1536 dimensions. No paid key is passed into the Honcho API, deriver or shared
+subscription provider.
 
 Reports under `data/honcho-experiment/reports/` contain source ID mappings, native
-store/bridge/deriver checks, answers, literal answer matches, source-label matches,
+store/provider/deriver checks, answers, literal answer matches, source-label matches,
 latency, usage and failures. Source-label matching is not a proof that an answer
 is semantically supported. This small synthetic dataset is a reproducible smoke
 comparison, not a general recall benchmark. No LLM judge or extra metered scoring
-calls are used. A failed bridge/store/deriver check is retained as failure or
+calls are used. A failed provider/store/deriver check is retained as failure or
 pending data, never converted into a successful score.
 
 Honcho's embedding configuration is independent of reasoning; successful
@@ -96,5 +98,5 @@ ADR-0033 adds gated primary Honcho memory, built on this isolated harness.
 See [the current system and operating instructions](../../docs/guarded-memory-system.md)
 for `verify-memory`, `accept-memory`, runtime attachment and the durable monthly
 budget cutover. The live gates remain pending until the dedicated embeddings key
-and separate bridge login are present. The comparison above is a separate benchmark;
+and shared provider login are present. The comparison above is a separate benchmark;
 its fixture scores do not certify primary-memory activation.

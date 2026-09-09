@@ -15,7 +15,3 @@ services:
     environment:
       NOCHEH_ARCHIVE_URL: http://archive:8780
     networks: [isolated, egress, memory]
-networks:
-  memory:
-    external: true
-    name: nocheh-memory

@@ -43,7 +43,7 @@ class EmbeddingConfigTests(unittest.TestCase):
                 self.assertEqual(honcho['EMBEDDING_VECTOR_DIMENSIONS'],'1536')
                 self.assertEqual(meter['NOCHEH_EMBEDDING_MODEL'],values['NOCHEH_EMBEDDING_MODEL'])
                 self.assertEqual(honcho['DERIVER_MODEL_CONFIG__MODEL'],'gpt-5.6-sol')
-                for name in ('compose.env','honcho.env','meter.env','bridge.yaml'):
+                for name in ('compose.env','honcho.env','meter.env'):
                     self.assertNotIn(values['OPENAI_API_KEY'],(state/name).read_text())
                     self.assertNotIn('unrelated-shell-key',(state/name).read_text())
                 values['OPENAI_API_KEY']='';values['NOCHEH_EMBEDDING_API_KEY']='old-key';write_env(root/'.env',values)
@@ -54,7 +54,7 @@ class EmbeddingConfigTests(unittest.TestCase):
             path=Path(folder)/'budget.sqlite';ledger=Ledger(path);transport=Transport()
             large=embeddings({'NOCHEH_EMBEDDING_MODEL':'text-embedding-3-large'})
             self.assertGreater(large.reservation,131072*large.price_per_million)
-            egress=Egress(ledger,'subscription-token','dedicated-key',transport,embedding=large)
+            egress=Egress(ledger,'subscription-token','dedicated-key',transport,embedding=large,reasoning_key='honcho-client')
             payload={'model':large.model,'input':'synthetic text'}
             self.assertEqual(egress.send('/v1/embeddings',payload)[0],200)
             sent=transport.calls[0]

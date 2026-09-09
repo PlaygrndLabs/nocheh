@@ -33,13 +33,13 @@ class BrowserGatewayTests(unittest.TestCase):
             if body['event_id'] in self.finished: return {'claimed':False,**self.finished[body['event_id']]}
             return {'claimed':True,'state':'running','event_id':body['event_id'],'archive_credential':'scoped', 'text':' exact\r\n '}
         if route.endswith('/prepare'): return {'files':[],'transcripts':[]}
-        if route.endswith('credentials'): return {'model':'model','access_token':'short-lived'}
+        if route.endswith('credentials'): return {'model':'model','api_key':'client-key','base_url':'http://cliproxy:8317/v1','provider':'openai','api_mode':'chat_completions'}
         if route.endswith('/finish'): self.finished[body['event_id']]=body
         return {}
     async def runner(self,root,scope,body,model,credentials,session_id,emit,cancelled):
         self.run_count+=1
         self.assertFalse(scope.owner);self.assertEqual(body['archive_credential'],'scoped')
-        self.assertEqual(credentials.access_token,'short-lived');emit('answer')
+        self.assertEqual(credentials.runtime(),{'api_key':'client-key','base_url':'http://cliproxy:8317/v1','provider':'openai','api_mode':'chat_completions'});emit('answer')
         return {'state':'done','text':'answer','session_id':session_id}
     def invoke(self,name,**params): return self.server._methods[name](1,{'session_id':'sid',**params})
     def capture(self): return self.invoke('nocheh.input',id='event-one',text=' exact\r\n ')

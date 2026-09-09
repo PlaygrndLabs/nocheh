@@ -40,12 +40,14 @@ def run(body, emit=None):
     bind_process_credential(body['archive_credential'])
     from .prepared_context import install as prepare_native, prepare
     prepare_native()
-    # The supervisor is the sole OAuth refresh owner. Native auxiliary clients
-    # receive this turn's access token, without copying any refresh token/store.
+    from .subscription import SubscriptionCredentials
+    credentials=SubscriptionCredentials(body['api_key'],body['base_url'],body['provider'],body['api_mode'])
+    # Children never receive a refresh store. In shared mode the credential is a
+    # client-specific proxy key; CLIProxyAPI alone owns the OAuth login.
     from agent import auxiliary_client as aux
     from hermes_cli import auth
     auth._global_auth_file_path=lambda:None
-    aux._read_codex_access_token=lambda:body['access_token']
+    aux._read_codex_access_token=lambda:credentials.access_token
     profile=Path(os.environ['HERMES_HOME'])
     from .profile_config import preferences, read
     prefs=body.get('preferences') or preferences(read(profile/'config.yaml'))
@@ -60,8 +62,8 @@ def run(body, emit=None):
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     session_id=body['session_id']
     history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
-    agent=AIAgent(provider='openai-codex',api_mode='codex_responses',model=body['model'],
-        api_key=body['access_token'],base_url='https://chatgpt.com/backend-api/codex',
+    agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
+        api_key=credentials.access_token,base_url=credentials.base_url,
         enabled_toolsets=['memory'] if review else ['memory','session_search','nocheh_archive'],fallback_model=None,
         session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',

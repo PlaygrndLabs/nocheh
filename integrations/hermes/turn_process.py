@@ -42,15 +42,18 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         if file.get('text') is not None: text += '\n' + file['text']
         elif file['kind']=='file': text += '\n[Binary file retained; text extraction is unavailable.]'
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
+    transport = credentials.runtime() if hasattr(credentials, 'runtime') else {
+        'api_key': credentials.access_token, 'base_url': 'https://chatgpt.com/backend-api/codex',
+        'provider': 'openai-codex', 'api_mode': 'codex_responses'}
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
                'model':model, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
-               'access_token':credentials.access_token, 'stream':emit is not None,
+               **transport, 'stream':emit is not None,
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image']}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
     env = {key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
-           'ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
+           'ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE') if key in os.environ}
     env.update(HERMES_HOME=str(profile), NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
     process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'integrations.hermes.assistant_turn',
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,

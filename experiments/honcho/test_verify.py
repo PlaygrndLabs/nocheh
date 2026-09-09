@@ -12,15 +12,14 @@ from . import control,verify
 class AcceptanceTests(unittest.TestCase):
     def state(self,root,credentials=False):
         root=Path(root)
-        (root/'reports').mkdir();(root/'bridge-auth').mkdir()
+        (root/'reports').mkdir()
         (root/'temporary_embedding_key').write_text('synthetic-dedicated-key' if credentials else '')
-        if credentials:(root/'bridge-auth/fixture.json').write_text('{}')
         return root
 
     def test_missing_credentials_keep_all_gates_pending_without_startup_or_requests(self):
         with tempfile.TemporaryDirectory() as directory:
             root=self.state(directory)
-            with patch.object(verify,'STATE',root),patch.object(verify,'request') as request,patch.object(verify.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()):
+            with patch.object(verify,'STATE',root),patch.object(verify,'provider_ready',return_value=False),patch.object(verify,'request') as request,patch.object(verify.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(verify.main(),2)
             request.assert_not_called();run.assert_not_called()
             report=json.loads((root/'reports/live-memory.json').read_text())
@@ -30,7 +29,7 @@ class AcceptanceTests(unittest.TestCase):
     def test_failed_subscription_never_ingests_and_retains_content_free_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root=self.state(directory,True)
-            with patch.object(verify,'STATE',root),patch.object(verify,'request',side_effect=RuntimeError('private provider body')) as request,patch.object(verify.subprocess,'run'),contextlib.redirect_stdout(io.StringIO()):
+            with patch.object(verify,'STATE',root),patch.object(verify,'provider_ready',return_value=True),patch.object(verify,'request',side_effect=RuntimeError('private provider body')) as request,patch.object(verify.subprocess,'run'),contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(verify.main(),1)
             self.assertEqual(request.call_count,1)
             report=(root/'reports/live-memory.json').read_text()

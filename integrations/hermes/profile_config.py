@@ -60,12 +60,14 @@ def resolved(config, model):
     for key, value in values.items():
         section, field = key.split('.')
         config.setdefault(section, {})[field] = value
-    config['model'] = {'provider': 'openai-codex', 'default': model}
+    from .subscription import reasoning_route
+    provider = 'openai-codex' if reasoning_route() == 'native' else 'openai'
+    config['model'] = {'provider': provider, 'default': model}
     config['plugins'] = {'enabled': ['nocheh']}
     config['fallback_models'] = []
     config.setdefault('tools', {})['tool_search'] = {'enabled': 'off'}
     config.setdefault('memory', {}).update(memory_enabled=True, user_profile_enabled=True, provider='')
-    config['auxiliary'] = {'session_search': {'provider': 'openai-codex', 'model': model}}
+    config['auxiliary'] = {'session_search': {'provider': provider, 'model': model}}
     return config
 
 

@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY scripts ./scripts
+COPY compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
 COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
 COPY web ./web
 COPY src ./src

@@ -4,7 +4,7 @@ import subprocess
 import time
 import uuid
 from datetime import datetime,timezone
-from .control import STATE,ROOT,COMPOSE
+from .control import STATE,ROOT,COMPOSE,PROVIDER_STATE,provider_ready
 from .compare import request
 
 NAMES=('subscription_reasoning','ingestion','retrieval','embedding_guarded','restart','provider_failure')
@@ -18,8 +18,8 @@ def main():
         except Exception as error:report['checks'][name]='failed';report.setdefault('errors',{})[name]=type(error).__name__
         save();print(json.dumps({'check':name,'status':report['checks'][name]}),flush=True)
         return report['checks'][name]=='passed'
-    if not (STATE/'temporary_embedding_key').read_text().strip() or not list((STATE/'bridge-auth').glob('*.json')):
-        report['status']='credentials_pending';save();print('Dedicated embeddings credential and separate bridge login are required.');return 2
+    if not (STATE/'temporary_embedding_key').read_text().strip() or not provider_ready():
+        report['status']='credentials_pending';save();print('Dedicated embeddings credential and shared provider login are required.');return 2
     subprocess.run(COMPOSE+['up','-d','--no-build','--wait','--wait-timeout','180'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
     subprocess.run(COMPOSE+['up','-d','--no-build','--force-recreate','--wait','meter'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
     model={'model':'gpt-5.6-sol','messages':[{'role':'user','content':'Reply exactly HONCHO_PROXY_OK.'}],'max_completion_tokens':256}
@@ -61,13 +61,15 @@ def main():
         recall()
     checked('restart',restart)
     def failure():
-        subprocess.run(COMPOSE+['stop','bridge'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
+        from scripts.provider import compose
+        provider,env=compose(PROVIDER_STATE)
+        subprocess.run(provider+['stop','cliproxy'],cwd=ROOT,env=env,check=True,stdout=subprocess.DEVNULL)
         failed=False
         try:
             try:request('meter','/v1/chat/completions',model)
             except Exception:failed=True
             if not failed:raise ValueError('failure_not_observed')
-        finally:subprocess.run(COMPOSE+['up','-d','--no-build','bridge'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
+        finally:subprocess.run(provider+['up','-d','--no-build','--wait','cliproxy'],cwd=ROOT,env=env,check=True,stdout=subprocess.DEVNULL)
         reasoning()
     checked('provider_failure',failure)
     report['status']='passed' if all(v=='passed' for v in report['checks'].values()) else 'incomplete';report['ledger']=request('meter','/ledger');save()
