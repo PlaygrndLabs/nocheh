@@ -1,7 +1,8 @@
 # Isolated Honcho comparison
 
 This experiment compares native Hermes memory with self-hosted Honcho using five
-synthetic source messages and five recall questions. It is not production memory.
+synthetic source messages and five recall questions. That benchmark is separate
+from the gated primary-memory runtime described below.
 Live evaluation is pending a temporary embedding key and a separate CLIProxyAPI
 device login. No unrelated keys or production archives are mounted.
 
@@ -83,3 +84,12 @@ Honcho's embedding configuration is independent of reasoning; successful
 CLIProxyAPI reasoning does not establish subscription embeddings. See the
 [Honcho configuration reference](https://honcho.dev/docs/v3/contributing/configuration)
 and [CLIProxyAPI source](https://github.com/router-for-me/CLIProxyAPI).
+
+## Primary memory integration
+
+ADR-0033 adds gated primary Honcho memory, built on this isolated harness.
+See [the current system and operating instructions](../../docs/guarded-memory-system.md)
+for `verify-memory`, `accept-memory`, runtime attachment and the durable monthly
+budget cutover. The live gates remain pending until the dedicated embeddings key
+and separate bridge login are present. The comparison above is a separate benchmark;
+its fixture scores do not certify primary-memory activation.

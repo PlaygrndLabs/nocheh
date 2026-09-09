@@ -11,6 +11,7 @@ export const honchoSchema=`
 CREATE TABLE IF NOT EXISTS honcho_connection(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  instance text NOT NULL,attached boolean NOT NULL DEFAULT false,verified boolean NOT NULL DEFAULT false,
  attached_at timestamptz,include_history boolean NOT NULL DEFAULT false,updated_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE honcho_connection ADD COLUMN IF NOT EXISTS acceptance jsonb;
 CREATE TABLE IF NOT EXISTS honcho_generations(id text PRIMARY KEY,audience text NOT NULL,mode text NOT NULL,
  guard_epoch bigint NOT NULL,policy_revision integer NOT NULL,event_id text NOT NULL REFERENCES events(id),
  state text NOT NULL DEFAULT 'building',error_code text,created_at timestamptz NOT NULL DEFAULT now(),
@@ -56,6 +57,15 @@ export async function setMemoryConnection(pool:pg.Pool,input:unknown) {
   if(state.attached!==b.attached)await client.query('UPDATE guard_state SET epoch=epoch+1');
   await client.query('COMMIT');return memoryStatus(pool);
  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}
+export async function acceptMemoryVerification(pool:pg.Pool,input:unknown) {
+ const report=object(input),checks=object(report.checks),ledger=object(report.ledger);
+ const required=['subscription_reasoning','ingestion','retrieval','embedding_guarded','restart','provider_failure'];
+ if(report.format!=='nocheh-honcho-live-v1'||report.status!=='passed'||report.synthetic_only!==true||required.some(name=>checks[name]!=='passed')||
+   typeof ledger.reserved_usd!=='number'||!Number.isFinite(ledger.reserved_usd)||ledger.reserved_usd<=0||ledger.reserved_usd>5||ledger.limit_usd!==5)throw new HttpError(409,'honcho_live_acceptance_pending');
+ await memoryStatus(pool);
+ await pool.query('UPDATE honcho_connection SET verified=true,acceptance=$1,updated_at=now()',[JSON.stringify({checks,recorded_at:report.recorded_at,format:report.format})]);
+ return memoryStatus(pool);
 }
 async function currentGeneration(pool:pg.Pool,id:string) {
  const row=(await pool.query(`SELECT g.* FROM honcho_generations g,guard_state s,memory_policy_state p,honcho_connection c

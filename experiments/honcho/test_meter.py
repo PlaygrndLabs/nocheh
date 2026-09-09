@@ -44,6 +44,8 @@ class BudgetTests(unittest.TestCase):
             egress.send('/v1/embeddings',payload,'current')
             self.assertNotIn(b'planted-secret',transport.calls[0].data)
             self.assertIn(b'password manager',transport.calls[0].data)
+            audit=json.loads(ledger.report()['calls'][0]['audit'])
+            self.assertEqual(audit,{'owner_wording':True,'synthetic_raw_canary':False})
             with self.assertRaises(Rejected): egress.send('/v1/embeddings',payload,'retired')
             with self.assertRaises(Rejected): egress.send('/v1/embeddings',payload)
             self.assertEqual(len(transport.calls),1)

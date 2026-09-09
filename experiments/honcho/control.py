@@ -1,4 +1,4 @@
-"""Compose lifecycle for the separate, synthetic-only memory comparison."""
+"""Pinned Honcho lifecycle, isolated acceptance and gated primary-memory activation."""
 import argparse
 import json
 import os
@@ -42,7 +42,7 @@ def initialize():
          'DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS':'0',
          'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS':'1',
          'DERIVER_POLLING_STARTUP_JITTER_SECONDS':'0','DERIVER_POLLING_BACKOFF_ENABLED':'false',
-         'DREAM_ENABLED':'false','SUMMARY_ENABLED':'true','LOG_LEVEL':'WARNING',
+         'DREAM_ENABLED':'false','SUMMARY_ENABLED':'true','EMBED_MESSAGES':'true','LOG_LEVEL':'WARNING',
          'EMBEDDING_VECTOR_DIMENSIONS':'1536','EMBEDDING_MODEL_CONFIG__TRANSPORT':'openai',
          'EMBEDDING_MODEL_CONFIG__MODEL':'text-embedding-3-small',
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL':'http://meter:8790/v1',
@@ -83,8 +83,24 @@ def sources():
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('init','up','down','status','login','run','test','config','runtime-init','runtime-up'))
+    parser.add_argument('command',choices=('init','up','down','status','login','run','test','config','runtime-init','runtime-up','verify-memory','accept-memory','monthly'))
     args=parser.parse_args();initialize()
+    if args.command=='verify-memory':
+        from .verify import main as verify
+        return verify()
+    if args.command=='accept-memory':
+        from scripts.archive import API
+        report=json.loads((STATE/'reports/live-memory.json').read_text())
+        API().call('/v1/memory/honcho/verify',report)
+        print('Real Honcho acceptance recorded. Attachment is now available.');return 0
+    if args.command=='monthly':
+        from scripts.archive import API
+        from .meter import Ledger
+        connection=API().call('/v1/memory/honcho')['connection']
+        if not connection['verified'] or not connection['attached']:
+            raise SystemExit('Monthly cutover requires passed live acceptance and attached memory.')
+        Ledger(STATE/'ledger/budget.sqlite').enable_monthly()
+        print('Embeddings now use the durable $5 monthly cap. Pilot reservations are preserved.');return 0
     if args.command=='runtime-init':
         from scripts.configuration import read_env,write_env
         path=ROOT/'.env';values=read_env(path)

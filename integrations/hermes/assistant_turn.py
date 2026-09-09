@@ -52,7 +52,7 @@ def run(body, emit=None):
     from .archive_tools import bind_process_preferences
     bind_process_preferences(prefs)
     database=SessionDB(profile/'state.db')
-    long_term=''
+    long_term='';memory={}
     if not review:
         from .archive_tools import request
         try: memory=request('/v1/memory/honcho/recall',{'query':body['text'][:2000]})
@@ -113,6 +113,8 @@ def run(body, emit=None):
         if result.get('failed') or result.get('interrupted') or not result.get('completed'):
             return {'state':'failed','error_code':'model_unavailable'}
         text=result.get('final_response') or ''
+        if text.strip()!='[NO_REPLY]' and memory.get('limited_memory'):
+            text+='\n\nMemory is limited; current context, native notes and archive search remain available.'
         return {'state':'done','text':'' if text.strip()=='[NO_REPLY]' else text,'session_id':agent.session_id}
     finally:
         agent.close();database.close()

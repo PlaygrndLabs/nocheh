@@ -61,7 +61,7 @@ def main():
         return honcho(rest)
     if args.command == 'memory':
         sys.path.insert(0, str(ROOT))
-        if rest and rest[0] in ('spaces','policy','shares','share','revoke','preview','recall','reviews','review','pause','resume'):
+        if rest and rest[0] in ('honcho','spaces','policy','shares','share','revoke','preview','recall','reviews','review','pause','resume'):
             from scripts.memory import main as memory
             return memory(rest)
         from scripts.management import dispatch

@@ -1,17 +1,28 @@
 # Guarded projections and primary Honcho memory (ADR-0033)
 
 Owner-approved replacement plan: [guarded-memory-plan.md](docs/guarded-memory-plan.md).
-These phases are distinct from the earlier runtime-platform phases below. G1 commit: `7d474a1`; G2 commit: `c99d324`.
+These phases are distinct from the earlier runtime-platform phases below.
+Commits: G1 `7d474a1`, G2 `c99d324`, G3 `c22c50e`, G4 infrastructure `9194ed7`,
+G5 `c84369a`, G6 `3e671e1`.
 
 | Phase | Actual status |
 | --- | --- |
-| G1 — Durable guarded versions | Complete; 42 JS/TS checks and 91 pinned Hermes Python checks pass; new routing inactive |
+| G1 — Durable guarded versions | Complete; 42 JS/TS checks and 91 pinned Hermes Python checks passed at this increment |
 | G2 — Owner dashboard editor | Complete; owner API, conflict/race tests and synthetic browser edit/history/restore pass |
-| G3 — On/off throughout | Complete; 45 JS/TS and 94 pinned Hermes checks pass; Compose activation remains G7 |
+| G3 — On/off throughout | Complete; 45 JS/TS and 94 pinned Hermes checks passed at this increment; activated locally in G7 |
 | G4 — Live Honcho connection | Pinned images build and isolated Compose startup pass; 9 boundary/budget checks pass. Real ingestion/recall/restart/failure gates pending dedicated credentials and bridge sign-in |
 | G5 — Primary Honcho memory | Implemented; 46 JS/TS and 94 Hermes checks pass. Attachment remains gated by G4 live acceptance |
 | G6 — Edits, switching and recovery | Implemented; 47 JS/TS and 94 native checks pass. Portable owner revisions, inactive recovery, generation invalidation and optional catch-up verified with fixtures |
-| G7 — Local acceptance and final graph | Pending |
+| G7 — Local acceptance and final graph | Guarded workflow passes live subscription recall, dashboard editing and restart. Backfill: 439 ready, zero pending/failed. Final 47 JS/TS, 94 Hermes and 12 Honcho fixture checks pass. Real Honcho activation and opted-in history pilot remain pending G4 credentials/gates |
+
+G7 [local acceptance](compatibility/results/2026-09-09-guarded-memory-acceptance.json)
+and [live guarded recall](compatibility/results/2026-09-09-guarded-copies.json).
+The [current system graph and instructions](docs/guarded-memory-system.md) distinguish
+implemented routing from the pending Honcho activation. Hermes retains its tested
+native subscription route; a shared Hermes-through-CLIProxyAPI route has not been
+activated. The real Honcho gates are not passes: `.env` has no dedicated embeddings
+key, the separate bridge device login expired without credentials, and attachment
+remains disabled. Pilot paid requests and reserved spend are both zero.
 
 G1 evidence: isolated PostgreSQL covers byte preservation, duplicate/concurrent capture,
 restart, partial detector failure recovery, derived text and consent separation. Host

@@ -60,6 +60,12 @@ test('PostgreSQL guarded projections preserve originals, survive retries/restart
     const begun=new Promise<void>(r=>{started=r;}),hold=new Promise<void>(r=>{resume=r;});
     const work=prepareGuarded(pool,async()=>{started();await hold;return [];});
     await begun;
+    try {
+      await prepareGuarded(pool,async()=>{throw new Error('an in-flight source must not be detected twice');},undefined,100,racing.id);
+      const independent=await ingest(pool,{...event,key:'independent',text:'Current live content',payload:{}},false);
+      await prepareGuarded(pool,async()=>[],undefined,100,independent.id);
+      assert.equal((await guardedValue(pool,'events:'+independent.id)).value.text,'Current live content','targeted live preparation proceeds while another source is backfilling');
+    }catch(error){resume();await work;throw error;}
     await editGuarded(pool,owner,racing.id,{source_id:'events:'+racing.id,expected_revision:null,content:{text:'owner wins',payload:{}}});
     resume();await work;
     assert.equal((await guardedValue(pool,'events:'+racing.id)).value.text,'owner wins');

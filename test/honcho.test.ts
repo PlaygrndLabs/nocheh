@@ -5,7 +5,7 @@ import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {approveLearning} from '../src/learning.js';
 import {prepareGuarded,setGuardMode,guardState,editGuarded} from '../src/guarded.js';
-import {syncMemory,queueMemory,memoryStatus,setMemoryConnection,recallMemory,prepareMemoryRequest,type HonchoCall} from '../src/honcho.js';
+import {syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,prepareMemoryRequest,type HonchoCall} from '../src/honcho.js';
 
 test('durable Honcho receipts, consent, isolation, uncertain writes and current-only egress',{skip:!process.env.PGHOST},async()=>{
  const admin=new pg.Pool(),namespace=`honcho_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);const pool=new pg.Pool({options:`-c search_path=${namespace}`});
@@ -25,8 +25,14 @@ test('durable Honcho receipts, consent, isolation, uncertain writes and current-
   await ingest(pool,{version:1,key:'memory-b',origin:'import',bot_id:'fixture',scope:'-20',source_id:'b',revision:'1',kind:'message',occurred_at:null,text:'Private other group fact',payload:{}},false);
   await prepareGuarded(pool,detect);await memoryStatus(pool);
   await assert.rejects(setMemoryConnection(pool,{attached:true}),{code:'honcho_live_acceptance_pending'});
-  // The fixture models a passed live gate. It is not evidence of a provider pass.
-  await pool.query('UPDATE honcho_connection SET verified=true');await setMemoryConnection(pool,{attached:true,include_history:true});
+  // This report exercises the acceptance interface with a fixture, not a provider pass.
+  const verification={format:'nocheh-honcho-live-v1',status:'passed',synthetic_only:true,
+   checks:Object.fromEntries(['subscription_reasoning','ingestion','retrieval','embedding_guarded','restart','provider_failure'].map(name=>[name,'passed'])),
+   ledger:{reserved_usd:0.01,limit_usd:5}};
+  for(const amount of [-1,0,NaN,Infinity,5.01])await assert.rejects(acceptMemoryVerification(pool,{...verification,ledger:{...verification.ledger,reserved_usd:amount}}),{code:'honcho_live_acceptance_pending'});
+  await assert.rejects(acceptMemoryVerification(pool,{...verification,checks:{...verification.checks,embedding_guarded:'pending'}}),{code:'honcho_live_acceptance_pending'});
+  assert.equal((await memoryStatus(pool)).connection.verified,false);
+  await acceptMemoryVerification(pool,verification);await setMemoryConnection(pool,{attached:true,include_history:true});
   await syncMemory(pool,call);assert.equal(writes,0,'preparation does not imply learning consent');
   await approveLearning(pool,{approved:true,event_ids:[first.id]});await syncMemory(pool,call);
   assert.equal(writes,2,'one logical write per owner/group audience');
