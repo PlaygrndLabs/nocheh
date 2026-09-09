@@ -10,8 +10,10 @@ try:
 except ImportError:
     from configuration import load, validate, write_env, env_path, DEFAULTS
 
-SECRETS = {'TELEGRAM_BOT_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN'}
-EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN'}
+SECRETS = {'TELEGRAM_BOT_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','OPENAI_API_KEY'}
+# These settings belong to the separately managed Honcho stack, not main Apply.
+HONCHO_SETTINGS={'OPENAI_API_KEY','NOCHEH_EMBEDDING_PROVIDER','NOCHEH_EMBEDDING_MODEL'}
+EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN'} - HONCHO_SETTINGS
 
 
 def revision(values):
@@ -25,7 +27,7 @@ def view(state):
     active = json.loads(applied.read_text()).get('revision') if applied.exists() else None
     fields = [{'key': key, 'value': None if key in SECRETS else values[key],
                'configured': bool(values[key]), 'secret': key in SECRETS,
-               'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'apply / service restart'}
+               'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'Honcho stack restart' if key in HONCHO_SETTINGS else 'apply / service restart'}
               for key in DEFAULTS]
     return {'revision': saved_revision, 'applied_revision': active,
             'apply_state': 'current' if active == saved_revision else 'pending' if active else 'unverified',

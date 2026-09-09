@@ -12,6 +12,9 @@ COMPOSE=['docker','compose','--env-file',str(STATE/'compose.env'),'-f',str(ROOT/
 
 
 def initialize():
+    from scripts.configuration import read_env
+    from scripts.embedding_config import embeddings
+    values=read_env(ROOT/'.env');embedding=embeddings(values)
     for directory in ('','ledger','bridge-auth','baseline','reports'):
         (STATE/directory).mkdir(parents=True,exist_ok=True,mode=0o700)
     for name in ('internal_token','database_password','temporary_embedding_key'):
@@ -19,9 +22,10 @@ def initialize():
         if not path.exists(): path.write_text('' if name=='temporary_embedding_key' else secrets.token_hex(32))
         path.chmod(0o600)
     # Only the owner-designated embedding key. Never use unrelated provider keys.
-    from scripts.configuration import read_env
-    dedicated=read_env(ROOT/'.env').get('NOCHEH_EMBEDDING_API_KEY','').strip()
-    if dedicated:
+    # Explicitly empty OPENAI_API_KEY revokes the saved key. The old dedicated
+    # name is accepted only when the new setting is absent; never use shell keys.
+    if 'OPENAI_API_KEY' in values or 'NOCHEH_EMBEDDING_API_KEY' in values:
+        dedicated=values.get('OPENAI_API_KEY',values.get('NOCHEH_EMBEDDING_API_KEY','')).strip()
         (STATE/'temporary_embedding_key').write_text(dedicated)
         (STATE/'temporary_embedding_key').chmod(0o600)
     token=(STATE/'internal_token').read_text().strip()
@@ -34,6 +38,7 @@ def initialize():
             'logging-to-file':False,'request-log':False,'debug':False,
             'quota-exceeded':{'switch-project':False,'switch-preview-model':False}}
     (STATE/'bridge.yaml').write_text(json.dumps(bridge,indent=2)+'\n')  # JSON is valid YAML
+    (STATE/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedding.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\n')
     env={'DB_CONNECTION_URI':f'postgresql+psycopg://experiment:{password}@database:5432/honcho_experiment',
          'CACHE_URL':'redis://redis:6379/0?suppress=true','CACHE_ENABLED':'true','AUTH_USE_AUTH':'false',
          'PYTHON_DOTENV_DISABLED':'1','HONCHO_CONFIG_TOML_DISABLED':'1',
@@ -43,8 +48,8 @@ def initialize():
          'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS':'1',
          'DERIVER_POLLING_STARTUP_JITTER_SECONDS':'0','DERIVER_POLLING_BACKOFF_ENABLED':'false',
          'DREAM_ENABLED':'false','SUMMARY_ENABLED':'true','EMBED_MESSAGES':'true','LOG_LEVEL':'WARNING',
-         'EMBEDDING_VECTOR_DIMENSIONS':'1536','EMBEDDING_MODEL_CONFIG__TRANSPORT':'openai',
-         'EMBEDDING_MODEL_CONFIG__MODEL':'text-embedding-3-small',
+         'EMBEDDING_VECTOR_DIMENSIONS':str(embedding.dimensions),'EMBEDDING_MODEL_CONFIG__TRANSPORT':embedding.provider,
+         'EMBEDDING_MODEL_CONFIG__MODEL':embedding.model,
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL':'http://meter:8790/v1',
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__API_KEY_ENV':'EXPERIMENT_INTERNAL_TOKEN'}
     prefixes=['DERIVER_MODEL_CONFIG','SUMMARY_MODEL_CONFIG','DREAM_DEDUCTION_MODEL_CONFIG','DREAM_INDUCTION_MODEL_CONFIG']
@@ -56,7 +61,7 @@ def initialize():
     env['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
     for level in ('minimal','low','medium','high','max'): env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
     (STATE/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
-    for name in ('compose.env','bridge.yaml','honcho.env'): (STATE/name).chmod(0o600)
+    for name in ('compose.env','bridge.yaml','honcho.env','meter.env'): (STATE/name).chmod(0o600)
 
 
 def sources():

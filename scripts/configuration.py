@@ -4,6 +4,10 @@ import os
 import re
 import secrets
 from pathlib import Path
+try:
+    from .embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
+except ImportError:
+    from embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE = ROOT / 'data/local'
@@ -13,6 +17,7 @@ DEFAULTS = {
     'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex"]',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
+    **EMBEDDING_DEFAULTS,
 }
 
 
@@ -68,11 +73,14 @@ def write_env(path, values):
 def load(state):
     values = read_env(env_path(state))
     if values.get('NOCHEH_CONFIG_VERSION') != '1': raise ValueError('Run ./scripts/nocheh init to prepare the active .env')
+    if 'OPENAI_API_KEY' not in values and 'NOCHEH_EMBEDDING_API_KEY' in values:values['OPENAI_API_KEY']=values['NOCHEH_EMBEDDING_API_KEY']
+    values={**DEFAULTS,**values}
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     return values
 
 
 def validate(values):
+    embeddings(values)
     if values['TELEGRAM_ENABLED'] not in ('true', 'false'): raise ValueError('TELEGRAM_ENABLED must be true or false')
     owner = values['TELEGRAM_OWNER_ID']; groups = values['TELEGRAM_GROUP_IDS']
     if owner and not re.fullmatch(r'[1-9]\d{0,18}', owner): raise ValueError('TELEGRAM_OWNER_ID must be a numeric user ID')
@@ -106,6 +114,7 @@ def initialize(state):
         file = state / 'secrets' / old
         if not active and file.exists(): values[name] = file.read_text().strip()
     if active: values.update(existing)
+    if active and 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))
     for name in ('POSTGRES_PASSWORD','SERVICE_TOKEN'):

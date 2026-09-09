@@ -59,7 +59,25 @@ Automatic preparation never replaces an original or an owner-edited projection.
   restores trusted guarded history from your own export. Ordinary imports prepare
   copies again and do not accept supplied guarded text as already trusted.
 
-The dedicated embeddings key is `NOCHEH_EMBEDDING_API_KEY` in root `.env`.
+Configure embeddings in the root `.env`:
+
+```dotenv
+NOCHEH_EMBEDDING_PROVIDER='openai'
+NOCHEH_EMBEDDING_MODEL='text-embedding-3-small'
+OPENAI_API_KEY='' # Set your dedicated key locally; never commit it.
+```
+
+OpenAI is the only enabled provider. `text-embedding-3-large` is also supported
+for a fresh setup; both models use 1536 dimensions. After the first paid attempt,
+switching embedding models is blocked until memory is rebuilt, so incompatible
+vectors cannot mix. The small model reserves $0.01 per bounded request; the large
+model reserves $0.02. The total spending caps stay unchanged (ADR-0034).
+`NOCHEH_MODEL` is the separate Hermes subscription reasoning model.
+The old `NOCHEH_EMBEDDING_API_KEY` is a migration alias; explicit `OPENAI_API_KEY`
+wins, including an empty value. Only the isolated meter receives the paid key.
+Settings displays credential presence, never its value. Edit these fields in `.env`
+and restart the Honcho stack (`up` while isolated, `runtime-up` when attached).
+
 `./scripts/honcho-experiment login` starts CLIProxyAPI's separate device login.
 The isolated stack uses pinned revisions and cannot bypass the spending gateway.
 After saving the dedicated key and completing the separate login, run these in
