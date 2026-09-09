@@ -28,7 +28,7 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
     if args.command=='export':
         sys.path.insert(0,str(ROOT))
@@ -47,6 +47,10 @@ def main():
         from scripts.operations import main as operations
         return operations(args.command,STATE,rest)
     bootstrap()
+    if args.command=='provider':
+        sys.path.insert(0,str(ROOT))
+        from scripts.provider import main as provider
+        return provider(STATE,rest)
     if args.command=='approvals':
         sys.path.insert(0,str(ROOT))
         from scripts.approvals import main as approvals
@@ -128,6 +132,10 @@ def main():
         write_env(env_path(STATE),values)
         print('Telegram policy saved. Run ./scripts/nocheh up to apply it.');return 0
     env = compose_environment(STATE)
+    if args.command in ('up','dev','build'):
+        sys.path.insert(0,str(ROOT))
+        from scripts.provider import ensure_source
+        ensure_source()
     command = ["docker", "compose", "--env-file", str(env_path(STATE)), "-f", str(ROOT / "docker-compose.yml")]
     if args.command in ("dev", "test"):
         command += ["-f", str(ROOT / "docker-compose.dev.yml")]

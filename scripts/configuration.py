@@ -128,6 +128,9 @@ def initialize(state):
         print('Preserved the old environment in the private state directory; unrelated provider keys were not imported.')
     if values != existing: write_env(path, values)
     path.chmod(0o600)
+    try: from .provider import initialize as initialize_provider
+    except ImportError: from provider import initialize as initialize_provider
+    initialize_provider(state)
     return values
 
 

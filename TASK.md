@@ -5,7 +5,7 @@ Owner-approved implementation plan: [shared-provider-plan.md](docs/shared-provid
 | Phase | Actual status |
 | --- | --- |
 | S1 — Contract | Complete in the ADR/plan increment; implementation follows in separate commits |
-| S2 — Shared provider service | Pending |
+| S2 — Shared provider service | Complete: pinned image builds, private per-client credentials and locked no-retry/no-fallback configuration; container health and 8 focused tests pass. Fresh proxy login remains a cutover gate |
 | S3 — Hermes, voice and Honcho routes | Pending |
 | S4 — CPA Manager Plus dashboard integration | Pending |
 | S5 — Local acceptance and cutover | Pending |
