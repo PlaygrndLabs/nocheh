@@ -40,3 +40,6 @@ status before the rebuild.**
 | [0030](0030-configurable-space-memory.md) | Owner-wide native recall, manual import review and versioned group/topic sharing | Current memory direction; see space-memory-plan.md for gates |
 | [0031](0031-native-managed-schedules.md) | One supervised native scheduler and durable captured fires | Implemented |
 | [0032](0032-isolated-upgrades-and-portable-memory.md) | Isolated candidate checks, complete restore holds and portable native memory | Tooling implemented; live release gates remain separate |
+| [0033](0033-guarded-projections-and-honcho-memory.md) | Durable editable guarding and Honcho primary memory | Implemented; live Honcho activation pending |
+| [0034](0034-explicit-embedding-environment.md) | Explicit dedicated OpenAI embedding provider, model and capped key | Configured; live embedding acceptance pending |
+| [0035](0035-shared-cliproxy-provider-and-monitoring.md) | One CLIProxyAPI login for Hermes and Honcho, with CPA Manager Plus monitoring | Active implementation plan |
