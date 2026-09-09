@@ -14,7 +14,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         for restore in reversed(self.restores): restore()
 
-    def setup_boundary(self,transform,mode='auto'):
+    def setup_boundary(self,transform,mode='on'):
         self.restores.append(install(Boundary(mode,transform=transform)))
 
     def test_real_sdk_retries_and_changed_destinations_see_only_guarded_content(self):
@@ -76,7 +76,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.setup_boundary(fail)
         with httpx.Client(transport=httpx.MockTransport(sink),follow_redirects=True) as client:
             with self.assertRaises(GuardUnavailable):client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'planted-SECRET'})
-        self.assertEqual(destinations,['https://chatgpt.com/backend-api/codex/responses'])
+        self.assertEqual(destinations,[])
 
     def test_detector_exemption_is_confined_to_trusted_endpoint_and_reset(self):
         seen=[]

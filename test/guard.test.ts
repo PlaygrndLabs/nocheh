@@ -5,7 +5,7 @@ import { settings } from '../src/config.js';
 import { initialize } from '../src/database.js';
 import { DEFAULT_TRUSTED, guardPayload, literalSpans, mask, patternSpans, requiresGuard, type GuardPolicy } from '../src/guard.js';
 
-const policy:GuardPolicy={mode:'auto',trusted:DEFAULT_TRUSTED,detectorVersion:'synthetic-v1'};
+const policy:GuardPolicy={mode:'on',trusted:DEFAULT_TRUSTED,detectorVersion:'synthetic-v1'};
 test('masking preserves every unselected character including Unicode, casing, whitespace and repeated/overlapping literals',()=>{
   for(let i=0;i<250;i++) {
     const prefix=`😃 Aws\r\n${'متن '.repeat(i%5)}\t`,suffix=`\u0000  Friday ${i} 😃`;
@@ -18,10 +18,10 @@ test('masking preserves every unselected character including Unicode, casing, wh
   assert.throws(()=>literalSpans('original',['rewritten']),{code:'detector_contract_rejected'});
 });
 
-test('off and trusted auto routes do not call the detector; trust is endpoint-based',async()=>{
+test('off skips detection; on guards even explicitly trusted routes',async()=>{
   let calls=0;const detect=async()=>{calls++;throw Error('unavailable');};
   const payload={model:'untrusted-name',messages:[{content:'pass: 123456'}]};
-  assert.equal((await guardPayload(payload,policy,'https://chatgpt.com/backend-api/codex/responses',detect)).payload,payload);
+  assert.equal((await guardPayload(payload,{...policy,mode:'off'},'https://chatgpt.com/backend-api/codex/responses',detect)).payload,payload);
   assert.equal((await guardPayload(payload,{...policy,mode:'off'},'https://untrusted.example/v1/responses',detect)).payload,payload);
   assert.equal(calls,0);
   assert.equal(requiresGuard(policy,'https://chatgpt.com.evil.example/backend-api/codex/responses'),true);
@@ -62,6 +62,6 @@ test('real PostgreSQL: guarded caches are isolated by input, destination, policy
     await guardPayload(value,{...policy,detectorVersion:'synthetic-v2'},destination,detect,pool);
     await guardPayload(value,{...policy,mode:'on'},destination,detect,pool);
     await guardPayload({...value,extra:'new'},policy,destination,detect,pool);
-    await guardPayload(value,policy,'https://other.example/responses',detect,pool);assert.equal(calls,5);
+    await guardPayload(value,policy,'https://other.example/responses',detect,pool);assert.equal(calls,4);
   } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });

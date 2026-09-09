@@ -31,6 +31,7 @@ class Scope:
     profile: str
     space: str = ''
     revision: int = 0
+    guard_epoch: int = 0
 
 
 class Scopes:
@@ -55,8 +56,13 @@ class Scopes:
     @staticmethod
     def apply_revision(scope,claims):
         from dataclasses import replace
-        if scope.owner or not claims.get('revision'):return scope
-        return replace(scope,profile=Scopes.profile(scope.space+':policy:'+str(claims['revision'])),revision=claims['revision'])
+        if not scope.owner and claims.get('revision'):
+            scope=replace(scope,profile=Scopes.profile(scope.space+':policy:'+str(claims['revision'])),revision=claims['revision'])
+        epoch=claims.get('guard_epoch')
+        if epoch is not None:
+            if type(epoch) is not int or epoch<1:raise ValueError('invalid_guard_generation')
+            scope=replace(scope,profile=Scopes.profile((scope.space or scope.chat_id)+':policy:'+str(scope.revision)+':guard:'+str(epoch)),guard_epoch=epoch)
+        return scope
 
     def resolve(self,update,expected_scope):
         if not self.enabled:return None

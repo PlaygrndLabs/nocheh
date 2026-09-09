@@ -13,8 +13,8 @@ export type Service = 'archive' | 'worker' | 'guard';
 export function settings() {
   const service = process.env.NOCHEH_SERVICE ?? 'archive';
   if (!['archive', 'worker', 'guard'].includes(service)) throw new Error('Invalid service');
-  const mode = process.env.GUARD_MODE ?? 'auto';
-  if (!['off', 'on', 'auto'].includes(mode)) throw new Error('Invalid guard mode');
+  const mode = process.env.GUARD_MODE === 'auto' ? 'on' : process.env.GUARD_MODE ?? 'on';
+  if (!['off', 'on'].includes(mode)) throw new Error('Invalid guard mode');
   const trusted:unknown=JSON.parse(process.env.GUARD_TRUSTED_ENDPOINTS ?? JSON.stringify(DEFAULT_TRUSTED));
   if (!Array.isArray(trusted) || trusted.some(v=>typeof v!=='string' || !['http:','https:'].includes(new URL(v).protocol))) throw new Error('Invalid trusted endpoints');
   return {
@@ -22,7 +22,7 @@ export function settings() {
     token: secret('SERVICE_TOKEN'), databasePassword: secret('PGPASSWORD'),
     dataDir: process.env.NOCHEH_DATA_DIR ?? '/data',
     hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
-    guardMode: mode as 'off' | 'on' | 'auto',
+    guardMode: mode as 'off' | 'on',
     guardTrusted:trusted as string[],detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_MODEL ?? 'gpt-5.6-sol'}`,
     assistant:assistantPolicy(process.env.ASSISTANT_POLICY_FILE),
   };

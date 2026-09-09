@@ -10,11 +10,12 @@ import { archiveStatus, envelope, ingest } from './archive.js';
 import { startWorker } from './worker.js';
 import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
-import { guardPayload } from './guard.js';
-import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision} from './guarded.js';
+import { guardPayload,inspectRequest } from './guard.js';
+import {prepareContext,allowPrepared} from './prepared-context.js';
+import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState,prepareGuarded} from './guarded.js';
 import { requestAction,telegramActions,decideTelegram } from './actions.js';
 import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,finishControlled} from './controlled-actions.js';
-import { reader, admin,assertAudience } from './access.js';
+import { reader, admin,assertAudience,turnToken } from './access.js';
 import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 
@@ -24,6 +25,7 @@ const call = runtimeCall(runtime);
 // Each service owns its connection pool; an outage must be visible in health.
 const pool = connectDatabase(config);
 await initialize(pool);
+if(config.service==='archive')await setGuardMode(pool,config.guardMode);
 await heartbeat(pool, config.service);
 const timer = setInterval(() => { void heartbeat(pool, config.service).catch(() => {}); }, 5000);
 timer.unref();
@@ -37,6 +39,23 @@ const server = createServer((req, res) => { void (async () => {
   }
   const principal=reader(req, config.token);
   await assertAudience(pool,principal);
+  const prepare=(value:unknown)=>prepareContext(pool,principal,value,async text=>(await call('guard.detect',{text})).literals);
+  const agentResult=async(value:unknown,prepared=false)=>{
+    const result=principal.admin?value:prepared?(await allowPrepared(pool,principal,value),value):await prepare(value);
+    await assertAudience(pool,principal);return json(res,200,result);
+  };
+  const claim=async(body:unknown,channel:'browser'|'scheduler')=>{
+    if((await guardState(pool)).mode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,String(object(body).event_id));
+    return claimRun(pool,config,body,channel);
+  };
+  if(config.service==='guard' && !principal.admin && req.method==='POST' && path==='/v1/guard') {
+    const body=object(await readJson(req,1024*1024));
+    if(typeof body.destination!=='string')throw new HttpError(400,'invalid_destination');
+    const destination=new URL(body.destination);if(!['http:','https:'].includes(destination.protocol)||destination.username||destination.password)throw new HttpError(400,'invalid_destination');
+    if((await guardState(pool)).mode==='on')inspectRequest(body.payload);
+    return json(res,200,{guarded:true,payload:await prepare(body.payload)});
+  }
+  if(config.service==='archive' && !principal.admin && req.method==='POST' && path==='/v1/context/prepare')return agentResult(await readJson(req,1024*1024));
   if(config.service==='archive' && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
   if(config.service==='archive' && path==='/v1/memory/preview' && req.method==='GET') {
     admin(principal);const policy=await spacePolicy(pool,url.searchParams.get('space')??'');
@@ -55,12 +74,19 @@ const server = createServer((req, res) => { void (async () => {
   if(config.service==='archive' && path==='/v1/memory/shares/revoke' && req.method==='POST') {
     admin(principal);const b=object(await readJson(req));return json(res,200,await revokeShare(pool,String(b.id),b.revision));
   }
-  if(config.service==='archive' && path==='/v1/memory/context' && req.method==='GET')return json(res,200,await sharedContext(pool,principal,url.searchParams.get('q')??'',call));
+  if(config.service==='archive' && path==='/v1/memory/context' && req.method==='GET')return agentResult(await sharedContext(pool,principal,url.searchParams.get('q')??'',async(operation,input,timeout)=>{
+    if(operation!=='memory.filter'||(await guardState(pool)).mode==='off')return call(operation,input,timeout);
+    if(!principal.turnEvent)throw new HttpError(403,'bound_guard_context_required');
+    const policy={space:config.assistant.owner_id!,revision:principal.revision!,guard_epoch:(await guardState(pool)).epoch};
+    const preparer={...policy,admin:false,scope:null,turnEvent:principal.turnEvent};
+    await allowPrepared(pool,preparer,input.candidates);
+    return call(operation,{...input,archive_credential:turnToken(config.token,null,Date.now()+600000,principal.turnEvent,policy)},timeout);
+  }));
   const shared=path.match(/^\/v1\/memory\/(shared|filtered)\/([a-f0-9]{64})$/);
-  if(config.service==='archive' && shared && req.method==='GET')return json(res,200,await readShared(pool,principal,shared[1]!,shared[2]!));
+  if(config.service==='archive' && shared && req.method==='GET')return agentResult(await readShared(pool,principal,shared[1]!,shared[2]!,call));
   if(config.service==='archive' && path==='/v1/memory/recall') {
     if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
-    if(req.method==='POST')return json(res,200,await call('memory.recall',object(await readJson(req))));
+    if(req.method==='POST')return agentResult(await call('memory.recall',{...object(await readJson(req)),...(principal.admin?{}:{guard_epoch:(await guardState(pool)).epoch})}));
   }
   if(config.service==='archive' && path==='/v1/memory/reviews') {
     admin(principal);
@@ -88,12 +114,12 @@ const server = createServer((req, res) => { void (async () => {
   }
   if(config.service==='archive' && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
   if(config.service==='archive' && path==='/v1/tools/propose' && req.method==='POST')return json(res,200,await proposeControlled(pool,principal,await readJson(req)));
-  if(config.service==='archive' && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path))return json(res,200,await controlledAction(pool,principal,path.split('/').at(-1)));
+  if(config.service==='archive' && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path))return agentResult(await controlledAction(pool,principal,path.split('/').at(-1)));
   if (config.service === 'archive' && req.method === 'GET') {
-    if (path==='/v1/graph') return json(res,200,await evidenceGraph(pool,principal,url.searchParams.get('scope') ?? '',url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit')),url.searchParams.get('focus') ?? ''));
-    if (path==='/v1/search') return json(res,200,await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))));
+    if (path==='/v1/graph') {admin(principal);return json(res,200,await evidenceGraph(pool,principal,url.searchParams.get('scope') ?? '',url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit')),url.searchParams.get('focus') ?? ''));}
+    if (path==='/v1/search') return agentResult(await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))),true);
     const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
-    if (event?.[1]) return json(res,200,await readEvent(pool,principal,event[1]));
+    if (event?.[1]) return agentResult(await readEvent(pool,principal,event[1]),true);
     const artifact=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
     if (artifact?.[1]) {
       const bytes=await readArtifact(pool,principal,config.dataDir,artifact[1]);
@@ -113,7 +139,7 @@ const server = createServer((req, res) => { void (async () => {
   if(config.service==='archive'&&req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
     const body=await readJson(req);
     if(path==='/v1/scheduler/input')return json(res,200,await captureInput(pool,config,body,'scheduler'));
-    if(path==='/v1/scheduler/claim')return json(res,200,await claimRun(pool,config,body,'scheduler'));
+    if(path==='/v1/scheduler/claim')return json(res,200,await claim(body,'scheduler'));
     if(path==='/v1/scheduler/finish')return json(res,200,await finishRun(pool,body));
     if(path==='/v1/scheduler/heartbeat')return json(res,200,await renewRun(pool,body));
     if(path==='/v1/scheduler/cancel')return json(res,200,await cancelScheduled(pool,body));
@@ -139,7 +165,7 @@ const server = createServer((req, res) => { void (async () => {
   if(config.service==='archive' && req.method==='POST' && path.startsWith('/v1/browser/')) {
     const body=await readJson(req,36*1024*1024);
     if(path==='/v1/browser/input')return json(res,200,await captureInput(pool,config,body));
-    if(path==='/v1/browser/claim')return json(res,200,await claimRun(pool,config,body));
+    if(path==='/v1/browser/claim')return json(res,200,await claim(body,'browser'));
     if(path==='/v1/browser/finish')return json(res,200,await finishRun(pool,body));
     if(path==='/v1/browser/heartbeat')return json(res,200,await renewRun(pool,body));
     if(path==='/v1/browser/prepare')return json(res,200,await prepareRun(pool,config,body,call));

@@ -12,7 +12,7 @@ import {GuardedEditor} from './guarded-editor.js';
   });
   const button = (label, onClick, disabled = false, className = '') => h('button', {type: 'button', onClick, disabled, className}, label);
   const errorText = e => ({configuration_conflict:'These settings changed elsewhere. Refresh this page and review your changes again.', operation_in_progress:'Another maintenance task is running. Wait for it to finish and try again.'})[e.message] || e.message || 'The operation could not finish. Try again.';
-  const labels = {NOCHEH_PORT:'Archive port', NOCHEH_MODEL:'ChatGPT model', NOCHEH_GUARD_MODE:'Outgoing guard',
+  const labels = {NOCHEH_PORT:'Archive port', NOCHEH_MODEL:'ChatGPT model', NOCHEH_GUARD_MODE:'Secret guarding',
     NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Trusted destinations (JSON)', TELEGRAM_ENABLED:'Telegram enabled',
     TELEGRAM_BOT_TOKEN:'Telegram bot token', TELEGRAM_OWNER_ID:'Owner user ID', TELEGRAM_GROUP_IDS:'Selected group IDs',
     POSTGRES_PASSWORD:'Database credential', SERVICE_TOKEN:'Service credential', NOCHEH_CONFIG_VERSION:'Configuration version'};
@@ -46,7 +46,7 @@ import {GuardedEditor} from './guarded-editor.js';
       error&&h(Panel,{title:'Archive status unavailable'},h('p',{role:'alert'},error),h(RouteLink,{page:'operations'},'Open maintenance →')),
       !data&&!error&&h('p',{role:'status'},'Connecting to your archive…'),
       data&&h(Panel,{title:'Archive activity',note:'Recorded counts and service check-ins. Run diagnostics in Maintenance to check current service health.'},
-        h('div',{className:'n-summary-line'},h('div',null,h('strong',null,Number(data.archive?.events||0).toLocaleString()),h('small',null,'original events preserved')),h('div',null,h('span',{className:'n-badge'},'Guard: '+({auto:'Automatic',on:'On',off:'Off'})[data.guard_mode]),h('small',null,'Controls masking before outgoing model requests'))),
+        h('div',{className:'n-summary-line'},h('div',null,h('strong',null,Number(data.archive?.events||0).toLocaleString()),h('small',null,'original events preserved')),h('div',null,h('span',{className:'n-badge'},'Guard: '+({auto:'Automatic',on:'On',off:'Off'})[data.guard_mode]),h('small',null,'Selects guarded copies or originals for agents and memory'))),
         ...['artifacts','dispatches','transcriptions','actions'].map(kind=>h('div',{className:'n-row',key:kind},h('b',null,({artifacts:'Files',dispatches:'Assistant replies',transcriptions:'Transcripts',actions:'Approved actions'})[kind]),h('span',null,data.archive?.[kind]?.length?data.archive[kind].map(s=>s.count+' '+friendlyState(s.state).toLowerCase()).join(' · '):'None recorded'))),
         h('p',{className:'n-muted n-afterword'},'Suppressed replies were deliberately skipped, for example for imported history. Open the details below to inspect recorded reasons.'),h('details',null,h('summary',null,'Service check-ins'),...(data.services||[]).map(s=>h('div',{className:'n-row',key:s.service},h('b',null,s.service),h('span',null,'Last seen '+new Date(s.seen_at).toLocaleString())))),
         data.archive?.dispatch_failures?.length>0&&h(Details,{label:'Suppressed or failed replies',value:data.archive.dispatch_failures})),
@@ -80,11 +80,11 @@ import {GuardedEditor} from './guarded-editor.js';
     const apply=async()=>{setBusy(true);try{await call('/settings/apply',{});notify('Applying saved settings. Follow the result in Maintenance.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     if(error)return h('p',{role:'alert'},error);
     if(!data)return h('p',{role:'status'},'Loading settings…');
-    const hints={TELEGRAM_ENABLED:'Start or stop Telegram message handling when settings are applied.',TELEGRAM_OWNER_ID:'Your numeric Telegram user ID. Only the owner can administer Nocheh.',TELEGRAM_GROUP_IDS:'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',TELEGRAM_BOT_TOKEN:'The token from BotFather for the bot used by the native Hermes Telegram adapter.',NOCHEH_MODEL:'The model used through your ChatGPT subscription.',NOCHEH_GUARD_MODE:'Automatic follows destination trust. On requires masking; Off skips masking.',NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Explicitly trusted model destinations may receive original text in Automatic mode.',NOCHEH_PORT:'Local port used by the archive service.'};
+    const hints={TELEGRAM_ENABLED:'Start or stop Telegram message handling when settings are applied.',TELEGRAM_OWNER_ID:'Your numeric Telegram user ID. Only the owner can administer Nocheh.',TELEGRAM_GROUP_IDS:'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',TELEGRAM_BOT_TOKEN:'The token from BotFather for the bot used by the native Hermes Telegram adapter.',NOCHEH_MODEL:'The model used through your ChatGPT subscription.',NOCHEH_GUARD_MODE:'On uses saved guarded copies for agents and memory. Off uses originals with the same access rules.',NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Explicit destinations for trusted preparation services. This does not bypass guarding for agents.',NOCHEH_PORT:'Local port used by the archive service.'};
     const field=f=>{
       const value=changes[f.key]??f.value??'';
       const attrs={id:f.key,disabled:busy||!f.editable,value,type:f.secret?'password':'text',autoComplete:'off','aria-describedby':f.key+'-help',onChange:e=>{const next={...changes};if(f.secret&&!e.target.value)delete next[f.key];else next[f.key]=e.target.value;setChanges(next);setReview(false);}};
-      const options=f.key==='NOCHEH_GUARD_MODE'?[['auto','Automatic · follow trust policy'],['on','On · always guard'],['off','Off · no masking']]:[['false','Disabled'],['true','Enabled']];
+      const options=f.key==='NOCHEH_GUARD_MODE'?[['on','On · use guarded copies'],['off','Off · use originals']]:[['false','Disabled'],['true','Enabled']];
       return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]||f.key),
         f.key==='NOCHEH_GUARD_MODE'||f.key==='TELEGRAM_ENABLED'?h('select',attrs,...options.map(([value,label])=>h('option',{key:value,value},label))):h('input',attrs),
         h('small',{id:f.key+'-help'},hints[f.key],f.secret?' '+(f.configured?(f.editable?'Configured. Leave blank to keep it; enter a replacement to change it.':'Configured and managed internally.'):'Not configured.'):!f.editable?' Managed automatically.':''));

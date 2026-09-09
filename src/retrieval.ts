@@ -6,6 +6,8 @@ import {assertAudience} from './access.js';
 import { type Envelope, digest, envelope, ingest, canonical } from './archive.js';
 import { HttpError, object, string } from './http.js';
 import { storeBytes } from './storage.js';
+import {guardState,guardedValue} from './guarded.js';
+import {contextAudience,allowPrepared} from './prepared-context.js';
 
 export function limit(value:unknown,fallback=20,max=50):number {
   const n=value===null || value===undefined ? fallback : Number(value);
@@ -22,6 +24,20 @@ export async function search(pool:pg.Pool,principal:Reader,query:string,count=20
   await assertAudience(pool,principal);
   string(query,2000); limit(count);
   if (!query.trim()) throw new HttpError(400,'empty_query');
+  if(!principal.admin && (await guardState(pool)).mode==='on') {
+    const {rows}=await pool.query(`SELECT e.id,e.scope,e.occurred_at,e.origin,s.kind,s.source_id,r.content,r.revision
+      FROM guard_sources s JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision JOIN events e ON e.id=s.event_id
+      WHERE s.state='ready' AND s.kind IN ('events','derived_artifacts') AND ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated'))
+      AND ($3::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$3))
+      AND ($5::text IS NULL OR s.kind<>'derived_artifacts' OR EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.id=s.source_id AND (d.kind<>'runtime_context' OR d.provenance->>'audience'=$5)))
+      AND to_tsvector('simple',r.search_text) @@ plainto_tsquery('simple',$1)
+      ORDER BY ts_rank(to_tsvector('simple',r.search_text),plainto_tsquery('simple',$1)) DESC,e.received_at DESC LIMIT $4`,[query,principal.scope,principal.scope===null?null:principal.space??null,count,principal.scope===null?null:contextAudience(principal)]);
+    await assertAudience(pool,principal);
+    return rows.map(row=>{const value=JSON.parse(row.content.toString()),text=String(value.text??'');return {
+      id:row.id,source:'nocheh:event:'+row.id,scope:row.scope,source_id:row.id,revision:row.revision,representation:'guarded',
+      kind:row.kind==='events'?'message':value.kind??'derived',origin:row.kind==='events'?row.origin:'derived',derived_id:row.kind==='events'?null:row.source_id,
+      occurred_at:row.occurred_at,text:text.slice(0,2000),truncated:text.length>2000};});
+  }
   const {rows}=await pool.query<EventRow & {derived_id:string|null}>(`WITH hits AS (
     SELECT id,scope,source_id,revision,origin,kind,occurred_at,received_at,original_text,NULL::text AS derived_id,
       ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) AS rank
@@ -30,8 +46,8 @@ export async function search(pool:pg.Pool,principal:Reader,query:string,count=20
     SELECT e.id,e.scope,e.source_id,e.revision,'derived',d.kind,e.occurred_at,e.received_at,d.content,d.id,
       ts_rank(to_tsvector('simple',d.search_text),plainto_tsquery('simple',$1)) AS rank
     FROM derived_artifacts d JOIN events e ON e.id=d.event_id
-    WHERE ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated')) AND ($4::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
-  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count,principal.scope===null?null:principal.space??null]);
+    WHERE ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated')) AND ($4::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND ($5::text IS NULL OR d.kind<>'runtime_context' OR d.provenance->>'audience'=$5) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
+  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count,principal.scope===null?null:principal.space??null,principal.scope===null?null:contextAudience(principal)]);
   await assertAudience(pool,principal);
   return rows.map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
     kind:row.kind,origin:row.origin,derived_id:row.derived_id,occurred_at:row.occurred_at,text:row.original_text?.toString().slice(0,2000) ?? null,
@@ -44,13 +60,32 @@ export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
   const row=rows[0]; if (!row) throw new HttpError(404,'source_not_found');
   const artifacts=await pool.query('SELECT * FROM artifacts WHERE event_id=$1 ORDER BY id',[id]);
   const derived=await pool.query<{id:string;event_id:string;artifact_id:string|null;kind:string;content:Buffer;provenance:unknown;created_at:Date}>(
-    'SELECT id,event_id,artifact_id,kind,content,provenance,created_at FROM derived_artifacts WHERE event_id=$1 ORDER BY id',[id]);
+    "SELECT id,event_id,artifact_id,kind,content,provenance,created_at FROM derived_artifacts WHERE event_id=$1 AND ($2::text IS NULL OR kind<>'runtime_context' OR provenance->>'audience'=$2) ORDER BY id",[id,principal.scope===null?null:contextAudience(principal)]);
+  if(!principal.admin && (await guardState(pool)).mode==='on') {
+    const selected=await guardedValue(pool,'events:'+id),{wire_base64:_wire,...event}=toEnvelope(row);
+    await allowPrepared(pool,principal,selected.value);
+    const guardedArtifacts:Record<string,unknown>[]=[],guardedDerived=[];
+    for(const artifact of artifacts.rows) {
+      try {const copy=await guardedValue(pool,'artifacts:'+artifact.id);guardedArtifacts.push({id:artifact.id,kind:copy.value.kind,state:artifact.state,metadata:copy.value.metadata});}
+      catch(error){if(!(error instanceof HttpError)||error.code!=='guard_preparation_pending')throw error;}
+    }
+    for(const item of derived.rows) {
+      try {const copy=await guardedValue(pool,'derived_artifacts:'+item.id);await allowPrepared(pool,principal,copy.value);guardedDerived.push({id:item.id,event_id:id,artifact_id:item.artifact_id,kind:copy.value.kind,
+        content_base64:Buffer.from(copy.value.text??'').toString('base64'),provenance:copy.value.provenance,created_at:item.created_at.toISOString()});}
+      catch(error){if(!(error instanceof HttpError)||error.code!=='guard_preparation_pending')throw error;}
+    }
+    await assertAudience(pool,principal);
+    return {id,source:'nocheh:event:'+id,received_at:row.received_at.toISOString(),representation:'guarded',guarded_revision:selected.revision,
+      event:{...event,key:'nocheh:event:'+id,source_id:id,revision:String(selected.revision),bot_id:'',kind:'message',text:selected.value.text,payload:selected.value.payload},
+      artifacts:guardedArtifacts,derived:guardedDerived};
+  }
   await assertAudience(pool,principal);
   return {id:row.id,source:`nocheh:event:${id}`,received_at:row.received_at.toISOString(),event:toEnvelope(row),artifacts:artifacts.rows,
     derived:derived.rows.map(d=>({...d,created_at:d.created_at.toISOString(),content_base64:d.content.toString('base64'),content:undefined}))};
 }
 export async function readArtifact(pool:pg.Pool,principal:Reader,root:string,id:string):Promise<Buffer> {
   await assertAudience(pool,principal);
+  if(!principal.admin && (await guardState(pool)).mode==='on')throw new HttpError(403,'original_file_requires_owner');
   const {rows}=await pool.query<{file_hash:string;state:string}>(`SELECT a.file_hash,a.state FROM artifacts a JOIN events e ON e.id=a.event_id
     WHERE a.id=$1 AND ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated')) AND ($3::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$3))`,[string(id,64),principal.scope,principal.scope===null?null:principal.space??null]);
   const row=rows[0]; if (!row) throw new HttpError(404,'source_not_found');
