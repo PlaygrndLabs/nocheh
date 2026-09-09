@@ -11,6 +11,8 @@ import {prepareTranscripts} from './assistant.js';
 import type {RuntimeCall} from './runtime.js';
 import {validateSpace,parentSpace,policyRevision} from './spaces.js';
 import {requestAction} from './actions.js';
+import {guardState,guardedValue,prepareGuarded} from './guarded.js';
+import {allowPrepared} from './prepared-context.js';
 
 export const managedRunSchema=`CREATE TABLE IF NOT EXISTS managed_runs (
   event_id text PRIMARY KEY REFERENCES events(id),
@@ -22,6 +24,7 @@ ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS lease_until timestamptz;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS cancel_requested boolean NOT NULL DEFAULT false;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS job_id text;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS logical_profile text;
+ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS guard_epoch bigint;
 CREATE INDEX IF NOT EXISTS managed_runs_job ON managed_runs(logical_profile,job_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS managed_runs_lease ON managed_runs(lease_until) WHERE state='running';`;
 const identifier=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_run_identity');return id;};
@@ -86,11 +89,14 @@ export async function claimRun(pool:pg.Pool,config:Settings,input:unknown,channe
     if(payload.profile!==profile)throw new HttpError(403,'run_profile_mismatch');
     if(row.state!=='captured') {await client.query('COMMIT');return {event_id:event,state:row.state,claimed:false,text:row.content?.toString()??'',error_code:row.error_code};}
     const space=validateSpace(payload.space??scope),revision=await policyRevision(client);
+    const guard=await guardState(client);
+    const text=guard.mode==='on'?(await guardedValue(pool,'events:'+event)).value.text:row.original_text.toString();
     if(!owner&&(payload.revision!==revision||profile!=='nocheh-'+digest(space+':policy:'+revision).slice(0,24)))throw new HttpError(409,'browser_audience_changed');
-    await client.query("UPDATE managed_runs SET state='running',actor=$2,lease_until=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1",[event,actor]);
+    await client.query("UPDATE managed_runs SET state='running',actor=$2,guard_epoch=$3,lease_until=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1",[event,actor,guard.epoch]);
     await client.query('COMMIT');
-    return {event_id:event,state:'running',claimed:true,text:row.original_text.toString(),payload,source_key:row.source_key,channel,
-      archive_credential:turnToken(config.token,owner?null:scope,Date.now()+600000,event,{space,revision}),owner,scope};
+    await allowPrepared(pool,{scope:owner?null:scope,admin:false,turnEvent:event,space,revision,guard_epoch:guard.epoch},{text});
+    return {event_id:event,state:'running',claimed:true,text,payload,source_key:row.source_key,channel,guard_mode:guard.mode,
+      archive_credential:turnToken(config.token,owner?null:scope,Date.now()+600000,event,{space,revision,guard_epoch:guard.epoch}),owner,scope};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 export async function finishRun(pool:pg.Pool,input:unknown) {
@@ -101,7 +107,7 @@ export async function finishRun(pool:pg.Pool,input:unknown) {
   const resultId=digest(canonical({event,text,provenance,code})),client=await pool.connect();
   try {
     await client.query('BEGIN');
-    const {rows}=await client.query<{state:string;actor:string;result_id:string;cancel_requested:boolean;channel:string}>('SELECT r.state,r.actor,r.result_id,r.cancel_requested,e.channel FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE event_id=$1 FOR UPDATE OF r',[event]);
+    const {rows}=await client.query<{state:string;actor:string;result_id:string;cancel_requested:boolean;channel:string;guard_epoch:string|null}>('SELECT r.state,r.actor,r.result_id,r.cancel_requested,r.guard_epoch,e.channel FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE event_id=$1 FOR UPDATE OF r',[event]);
     const row=rows[0];if(!row||row.actor!==actor)throw new HttpError(403,'run_actor_mismatch');
     if(row.state!=='running' && !(row.state==='interrupted' && !row.result_id)) {
       if(row.result_id!==resultId)throw new HttpError(409,'run_result_conflict');
@@ -111,7 +117,9 @@ export async function finishRun(pool:pg.Pool,input:unknown) {
       [resultId,event,content,text.replaceAll('\0',''),JSON.stringify(provenance),row.channel==='scheduler'?'scheduled_result':'browser_result']);
     // A late durable receipt is retained as evidence, but cannot turn an expired
     // lease into a claim that execution was continuously supervised.
-    const finalState=row.state==='interrupted'?'interrupted':row.cancel_requested?'cancelled':state;
+    const current=(await client.query('SELECT epoch FROM guard_state WHERE singleton FOR SHARE')).rows[0];
+    const stale=row.guard_epoch!==null&&Number(row.guard_epoch)!==Number(current.epoch);
+    const finalState=row.state==='interrupted'||stale?'interrupted':row.cancel_requested?'cancelled':state;
     await client.query('UPDATE managed_runs SET state=$2,result_id=$3,error_code=$4,lease_until=NULL,updated_at=now() WHERE event_id=$1',[event,finalState,resultId,finalState==='interrupted'?'execution_interrupted':code]);
     await client.query('COMMIT');return {event_id:event,state:finalState,duplicate:false};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
@@ -119,7 +127,7 @@ export async function finishRun(pool:pg.Pool,input:unknown) {
 
 export async function renewRun(pool:pg.Pool,input:unknown) {
   const body=object(input),event=string(body.event_id,64),actor=identifier(body.actor);
-  const result=await pool.query("UPDATE managed_runs SET lease_until=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1 AND actor=$2 AND state='running' AND lease_until>now() RETURNING event_id,cancel_requested",[event,actor]);
+  const result=await pool.query("UPDATE managed_runs SET lease_until=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1 AND actor=$2 AND state='running' AND lease_until>now() AND (guard_epoch IS NULL OR guard_epoch=(SELECT epoch FROM guard_state WHERE singleton)) RETURNING event_id,cancel_requested",[event,actor]);
   if(!result.rowCount)throw new HttpError(409,'run_lease_lost');
   return {event_id:event,state:'running',cancel_requested:result.rows[0].cancel_requested};
 }
@@ -149,15 +157,17 @@ export async function scheduledRuns(pool:pg.Pool,input:unknown) {
 }
 export async function scheduledDelivery(pool:pg.Pool,input:unknown) {
   const event=string(object(input).event_id,64);
-  const row=(await pool.query(`SELECT r.state,e.scope,e.payload,d.content FROM managed_runs r JOIN events e ON e.id=r.event_id
+  const row=(await pool.query(`SELECT r.state,r.guard_epoch,e.scope,e.payload,d.content FROM managed_runs r JOIN events e ON e.id=r.event_id
     LEFT JOIN derived_artifacts d ON d.id=r.result_id WHERE r.event_id=$1 AND e.channel='scheduler'`,[event])).rows[0];
   if(!row||row.state!=='done')return {state:'withheld',reason:'run_not_complete'};
+  const guard=await guardState(pool);
+  if(Number(row.guard_epoch)!==guard.epoch)return {state:'withheld',reason:'guard_context_changed'};
   const payload=JSON.parse(row.payload.toString()),text=row.content?.toString()??'';
   if(payload.definition.deliver!=='telegram'||!text.trim())return {state:'local'};
   if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
   if(payload.space!==row.scope)return {state:'withheld',reason:'topic_delivery_unavailable'};
   if(payload.revision&&payload.revision!==await policyRevision(pool))return {state:'withheld',reason:'audience_changed'};
-  return requestAction(pool,{scope:row.scope,admin:false,turnEvent:event,space:payload.space,revision:await policyRevision(pool)},
+  return requestAction(pool,{scope:row.scope,admin:false,turnEvent:event,space:payload.space,revision:await policyRevision(pool),guard_epoch:guard.epoch},
     {destination:row.scope,text});
 }
 export async function recoverRuns(pool:pg.Pool) {
@@ -171,7 +181,7 @@ export async function prepareRun(pool:pg.Pool,config:Settings,input:unknown,call
     if(!held.rowCount)throw new HttpError(409,'run_lease_lost');
     const transcripts=await prepareTranscripts(client,config.dataDir,event,call);
     if(transcripts===null)throw new HttpError(503,'transcription_unavailable');
-    const {rows}=await client.query<{file_hash:string;metadata:{file_name:string};kind:string}>('SELECT file_hash,metadata,kind FROM artifacts WHERE event_id=$1 ORDER BY id',[event]);
+    const {rows}=await client.query<{id:string;file_hash:string;metadata:{file_name:string};kind:string}>('SELECT id,file_hash,metadata,kind FROM artifacts WHERE event_id=$1 ORDER BY id',[event]);
     const files=[];let total=0;
     for(const row of rows) {
       if(!/^[a-f0-9]{64}$/.test(row.file_hash))throw new HttpError(503,'file_hash_invalid');
@@ -181,7 +191,20 @@ export async function prepareRun(pool:pg.Pool,config:Settings,input:unknown,call
       if(row.kind==='file' && data.length<=200000 && total+data.length<=1000000 && !data.includes(0)) {
         try {text=new TextDecoder('utf-8',{fatal:true}).decode(data);total+=data.length;} catch { /* retained binary */ }
       }
-      files.push({sha256:row.file_hash,name:row.metadata.file_name,kind:row.kind,text});
+      const derivedId=digest(row.id+':text:utf8-v1');
+      if(text!==null)await client.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,search_text,provenance) VALUES($1,$2,$3,'extracted_text',$4,$5,$6) ON CONFLICT DO NOTHING`,
+        [derivedId,event,row.id,Buffer.from(text),text.replaceAll('\0',''),JSON.stringify({extractor:'utf8-v1',input_sha256:row.file_hash})]);
+      files.push({id:row.id,derivedId,sha256:row.file_hash,name:row.metadata.file_name,kind:row.kind,text});
+    }
+    if((await guardState(pool)).mode==='on') {
+      await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event);
+      const selected=[];for(const row of (await pool.query("SELECT id FROM derived_artifacts WHERE event_id=$1 AND kind='transcript' ORDER BY id",[event])).rows)selected.push((await guardedValue(pool,'derived_artifacts:'+row.id)).value.text);
+      for(const file of files) {
+        file.name=(await guardedValue(pool,'artifacts:'+file.id)).value.metadata.file_name??'attachment';
+        if(file.text!==null)file.text=(await guardedValue(pool,'derived_artifacts:'+file.derivedId)).value.text;
+        if(file.kind==='image')file.kind='file';
+      }
+      return {transcripts:selected,files};
     }
     return {transcripts,files};
   }finally{client.release();}

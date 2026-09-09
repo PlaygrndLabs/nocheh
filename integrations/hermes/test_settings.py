@@ -14,7 +14,7 @@ class SettingsTests(unittest.TestCase):
             first = view(state)
             self.assertNotIn(values['SERVICE_TOKEN'], str(first))
             self.assertNotIn('private-extra-value', str(first))
-            second = save(state, {'NOCHEH_GUARD_MODE': 'on'}, first['revision'])
+            second = save(state, {'NOCHEH_GUARD_MODE': 'off'}, first['revision'])
             self.assertEqual(load(state)['FUTURE_SECRET'], 'private-extra-value')
             for changes, revision in [({'NOCHEH_GUARD_MODE': 'bad'}, second['revision']),
                                       ({'SERVICE_TOKEN': 'new'}, second['revision']),
@@ -27,7 +27,7 @@ class SettingsTests(unittest.TestCase):
             state = Path(folder); initialize(state)
             baseline = load(state)
             save(state, {'NOCHEH_MODEL': 'new'}, view(state)['revision'])
-            save(state, {'NOCHEH_GUARD_MODE': 'on'}, view(state)['revision'])
+            save(state, {'NOCHEH_GUARD_MODE': 'off'}, view(state)['revision'])
             with patch('scripts.settings.subprocess.run') as run:
                 run.return_value.returncode = 1
                 self.assertEqual(apply(state), {'status': 'apply_failed', 'rolled_back': False})

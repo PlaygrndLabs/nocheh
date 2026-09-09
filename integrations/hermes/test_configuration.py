@@ -8,6 +8,16 @@ from integrations.hermes.environment import secret, telegram_policy
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_auto_migrates_to_on_and_new_configuration_has_only_two_states(self):
+        from scripts.configuration import validate
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            self.assertEqual(values['NOCHEH_GUARD_MODE'],'on')
+            values['NOCHEH_GUARD_MODE']='auto';write_env(env_path(state),values)
+            self.assertEqual(load(state)['NOCHEH_GUARD_MODE'],'on')
+            self.assertEqual(initialize(state)['NOCHEH_GUARD_MODE'],'on')
+            self.assertEqual(read_env(env_path(state))['NOCHEH_GUARD_MODE'],'on')
+            with self.assertRaises(ValueError):validate(values)
     def test_literal_roundtrip_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'.env'

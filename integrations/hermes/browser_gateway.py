@@ -128,8 +128,9 @@ class BrowserGateway:
         directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         name = body['event_id'] + '.json'
         immutable_file(directory,name,canonical(body))
-        self.call('/v1/browser/finish',body)
+        receipt=self.call('/v1/browser/finish',body)
         (directory/name).unlink(missing_ok=True)
+        return receipt
 
     def flush_receipts(self):
         for path in (self.home/'nocheh-browser-receipts').glob('*.json'):
@@ -166,9 +167,10 @@ class BrowserGateway:
             if cancel.is_set(): result.update(state='cancelled')
             if lost.is_set(): result.update(state='interrupted',error_code='run_lease_lost')
             result.setdefault('session_id',session['session_key'])
-            self.finish({'event_id':claim['event_id'],'actor':self.actor,'state':result['state'],
+            receipt=self.finish({'event_id':claim['event_id'],'actor':self.actor,'state':result['state'],
                 'text':result.get('text',''),'session':result['session_id'],
                 **({'error_code':result['error_code']} if result.get('error_code') else {})})
+            if receipt and receipt.get('state')!='done': result.update(state=receipt['state'])
         except Exception:
             result.update(state='failed',error_code='result_commit_pending')
         finally:
@@ -182,7 +184,9 @@ class BrowserGateway:
                 try: session['history'] = db.get_messages_as_conversation(session['session_key'])
                 finally: db.close()
             state=result['state'];text=result.get('text','')
-            if state == 'failed': text = 'The managed turn did not complete. Its original input is preserved. See Nocheh status before retrying.'
+            from .assistant_gateway import check_delivery_policy
+            if state=='done' and not check_delivery_policy(claim['archive_credential']): state='interrupted'
+            if state != 'done': text = 'The managed turn did not complete. Its original input is preserved. See Nocheh status before retrying.'
             self.server._emit('message.complete',sid,{'text':text,'usage':{},
                 'status':'complete' if state=='done' else 'interrupted' if state=='cancelled' else 'error'})
             self.server._emit('session.info',sid,self.info(session))

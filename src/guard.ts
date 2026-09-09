@@ -2,7 +2,7 @@ import type pg from 'pg';
 import { canonical, digest } from './archive.js';
 import { HttpError, object, string } from './http.js';
 
-export type GuardMode='off'|'on'|'auto';
+export type GuardMode='off'|'on';
 export const DETECTOR_VERSION='gpt-literals-v1+patterns-v1';
 export const POLICY_VERSION='exact-spans-v1';
 export const DEFAULT_TRUSTED=['https://chatgpt.com/backend-api/codex'];
@@ -18,8 +18,8 @@ export function trustedDestination(destination:string,trusted:readonly string[])
   });
 }
 export function requiresGuard(policy:GuardPolicy,destination:string):boolean {
-  if (!['off','on','auto'].includes(policy.mode)) throw new HttpError(400,'invalid_guard_mode');
-  return policy.mode==='on' || (policy.mode==='auto' && !trustedDestination(destination,policy.trusted));
+  if (!['off','on'].includes(policy.mode)) throw new HttpError(400,'invalid_guard_mode');
+  return policy.mode==='on';
 }
 export function literalSpans(text:string,literals:unknown):Span[] {
   if (!Array.isArray(literals) || literals.length>1000) throw new HttpError(503,'detector_contract_rejected');
@@ -80,6 +80,10 @@ function contentStrings(value:unknown,strings:Set<string>,depth=0):void {
     if (typeof record.type==='string' && ['input_image','input_audio','input_file','image','audio'].includes(record.type)) throw new HttpError(422,'uninspectable_model_context');
     for (const [key,item] of Object.entries(record)) {strings.add(key);contentStrings(item,strings,depth+1);}
   }
+}
+export function inspectRequest(value:unknown):void {
+  if(Buffer.byteLength(canonical(value))>512*1024)throw new HttpError(413,'guard_request_too_large');
+  contentStrings(value,new Set<string>());
 }
 function replaceStrings(value:unknown,replacements:Map<string,string>):unknown {
   if (typeof value==='string') return replacements.get(value) ?? value;

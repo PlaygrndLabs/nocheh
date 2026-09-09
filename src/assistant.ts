@@ -9,6 +9,8 @@ import {eventSpace,spacePolicy} from './spaces.js';
 import { controlReply } from './actions.js';
 import { HttpError } from './http.js';
 import type { RuntimeCall } from './runtime.js';
+import {guardState,guardedValue,prepareGuarded} from './guarded.js';
+import {allowPrepared} from './prepared-context.js';
 
 type Call=RuntimeCall;
 const TRANSCRIPTION_VERSION='codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4';
@@ -23,7 +25,7 @@ export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eve
     if (previous.rows[0]) {texts.push(previous.rows[0].content.toString());continue;}
     if (artifact.state!=='ready') return null;
     await client.query('INSERT INTO transcription_jobs(artifact_id) VALUES($1) ON CONFLICT DO NOTHING',[artifact.id]);
-    const due=await client.query("UPDATE transcription_jobs SET state='running',attempts=attempts+1 WHERE artifact_id=$1 AND next_attempt<=now() RETURNING artifact_id",[artifact.id]);
+    const due=await client.query("UPDATE transcription_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes' WHERE artifact_id=$1 AND next_attempt<=now() RETURNING artifact_id",[artifact.id]);
     if (!due.rowCount)return null;
     try {
       if (!/^[a-f0-9]{64}$/.test(artifact.file_hash))throw new HttpError(503,'audio_hash_invalid');
@@ -72,12 +74,23 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call):
     if (transcripts===null) {await client.query("UPDATE dispatches SET error_code='waiting_for_transcription',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
     const attempt=event.state==='running'?event.attempts:event.attempts+1;
     const control=await controlReply(pool,config.assistant,event.id);
+    const guard=await guardState(pool);
+    let text=event.original_text?.toString()??null,selectedTranscripts=transcripts;
+    if(guard.mode==='on') {
+      await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event.id);
+      try {
+        text=(await guardedValue(pool,'events:'+event.id)).value.text;
+        const derived=await pool.query("SELECT id FROM derived_artifacts WHERE event_id=$1 AND kind='transcript' ORDER BY id",[event.id]);
+        selectedTranscripts=[];for(const d of derived.rows)selectedTranscripts.push((await guardedValue(pool,'derived_artifacts:'+d.id)).value.text);
+      }catch {await client.query("UPDATE dispatches SET error_code='guard_preparation_pending',next_attempt=now()+interval '15 seconds' WHERE event_id=$1",[event.id]);return;}
+    }
     await client.query("UPDATE dispatches SET state='running',attempts=$2,updated_at=now(),error_code=NULL WHERE event_id=$1",[event.id,attempt]);
     try {
       const policy=await spacePolicy(pool,eventSpace(event.scope,payload));
+      await allowPrepared(pool,{scope:scope.owner?null:scope.chat_id,admin:false,turnEvent:event.id,space:policy.id,revision:policy.revision,guard_epoch:guard.epoch},{text,transcripts:selectedTranscripts});
       const result=await call('run.start',{channel:'telegram',event_id:event.id,source_key:event.source_key,scope:event.scope,payload,
-        text:event.original_text?.toString() ?? null,transcripts,attempt,control_reply:control,
-        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision})},260000);
+        text,transcripts:selectedTranscripts,attempt,control_reply:control,guard_mode:guard.mode,
+        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision,guard_epoch:guard.epoch})},260000);
       if (!['done','failed','ambiguous','suppressed'].includes(String(result.state))) throw new Error('invalid_dispatch_receipt');
       const allowedCodes=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed'];
       await client.query(`UPDATE dispatches SET state=$2,error_code=$3,next_attempt=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1`,

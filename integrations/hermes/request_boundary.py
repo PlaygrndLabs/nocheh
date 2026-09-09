@@ -37,9 +37,9 @@ def trusted(destination, endpoints):
 
 
 def required(mode,destination,endpoints):
-    if mode not in ('off','on','auto'):
+    if mode not in ('off','on'):
         raise GuardUnavailable('invalid_guard_mode')
-    return mode=='on' or (mode=='auto' and not trusted(destination,endpoints))
+    return mode=='on'
 
 
 @contextlib.contextmanager
@@ -84,7 +84,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def guard_rpc(destination,payload):
-    token=environment_secret('SERVICE_TOKEN')
+    from .archive_tools import _PROCESS_CREDENTIAL, ARCHIVE_CREDENTIAL
+    token=_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get() or environment_secret('SERVICE_TOKEN')
     req=urllib.request.Request(os.environ.get('GUARD_URL','http://guard:8780')+'/v1/guard',
         data=json.dumps({'destination':destination,'payload':payload},ensure_ascii=False).encode(),
         headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
@@ -102,7 +103,7 @@ def guard_rpc(destination,payload):
             code=json.loads(error.read(2048)).get('error')
         except Exception:
             code=None
-        allowed={'detector_contract_rejected','uninspectable_model_context','detector_input_too_large','guard_request_too_large','guarded_key_collision','service_unavailable','hermes_unavailable','quota_paused'}
+        allowed={'guard_context_changed','detector_contract_rejected','uninspectable_model_context','detector_input_too_large','guard_request_too_large','guarded_key_collision','service_unavailable','hermes_unavailable','quota_paused'}
         raise GuardUnavailable(code if code in allowed else 'required_guard_unavailable') from None
     except Exception:
         # Do not include an upstream body, URL credentials, or original request.
@@ -110,8 +111,8 @@ def guard_rpc(destination,payload):
 
 
 class Boundary:
-    def __init__(self,mode='auto',endpoints=None,transform=guard_rpc):
-        if mode not in ('off','on','auto'): raise GuardUnavailable('invalid_guard_mode')
+    def __init__(self,mode='on',endpoints=None,transform=guard_rpc):
+        if mode not in ('off','on'): raise GuardUnavailable('invalid_guard_mode')
         self.mode,self.endpoints,self.transform=mode,list(DEFAULT_TRUSTED if endpoints is None else endpoints),transform
 
     def needs_guard(self,request):
@@ -121,6 +122,8 @@ class Boundary:
             if not trusted(destination,DEFAULT_TRUSTED): raise GuardUnavailable('detector_destination_rejected')
             return False
         if operational_request(request): return False
+        from .archive_tools import _PROCESS_CREDENTIAL, ARCHIVE_CREDENTIAL
+        if _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get(): return True
         return required(self.mode,destination,self.endpoints)
 
     def prepare(self,request):
@@ -154,7 +157,7 @@ def install(boundary=None):
     for method in (original_sync,original_async):
         if list(inspect.signature(method).parameters)!=['self','request']:
             raise GuardUnavailable('unsupported_httpx_boundary')
-    boundary=boundary or Boundary(os.environ.get('GUARD_MODE','auto'),json.loads(os.environ.get('GUARD_TRUSTED_ENDPOINTS',json.dumps(DEFAULT_TRUSTED))))
+    boundary=boundary or Boundary('on' if os.environ.get('GUARD_MODE','on')=='auto' else os.environ.get('GUARD_MODE','on'),json.loads(os.environ.get('GUARD_TRUSTED_ENDPOINTS',json.dumps(DEFAULT_TRUSTED))))
     def sync_send(client,request):
         COUNTS['attempts']+=1
         try:

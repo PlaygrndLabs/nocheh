@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS guard_fragments (
  created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS guard_state (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),epoch bigint NOT NULL DEFAULT 1);
+ALTER TABLE guard_state ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'off' CHECK(mode IN ('on','off'));
 INSERT INTO guard_state(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS guard_invalidations (
  id bigserial PRIMARY KEY,source_id text NOT NULL REFERENCES guard_sources(id),epoch bigint NOT NULL,
@@ -125,11 +126,13 @@ async function prepareValue(client:pg.PoolClient,id:string,input:unknown,version
   return replaceValues(input,replacements);
 }
 
-export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10) {
+export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null) {
   const client=await pool.connect();let locked=false;
   try {
-    locked=(await client.query('SELECT pg_try_advisory_lock(803308) AS locked')).rows[0].locked;if(!locked)return;
-    const {rows}=await client.query("SELECT * FROM guard_sources WHERE state<>'ready' AND next_attempt<=now() ORDER BY next_attempt,id LIMIT $1",[count]);
+    if(eventId){await client.query('SELECT pg_advisory_lock(hashtextextended(current_schema(),803308))');locked=true;}
+    else locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803308)) AS locked')).rows[0].locked;
+    if(!locked)return;
+    const {rows}=await client.query("SELECT * FROM guard_sources WHERE state<>'ready' AND next_attempt<=now() AND ($2::text IS NULL OR event_id=$2) ORDER BY next_attempt,id LIMIT $1",[count,eventId]);
     for(const source of rows) {
       try {
         const input=source.input?JSON.parse(source.input.toString()):await sourceInput(client,source);
@@ -150,13 +153,24 @@ export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<
         await client.query(`UPDATE guard_sources SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second' WHERE id=$1 AND active_revision IS NULL`,[source.id,error instanceof HttpError?error.code:'guard_preparation_unavailable']);
       }
     }
-  } finally {if(locked)await client.query('SELECT pg_advisory_unlock(803308)').catch(()=>{});client.release();}
+  } finally {if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803308))').catch(()=>{});client.release();}
 }
 
 export async function guardedValue(pool:pg.Pool,id:string) {
   const {rows}=await pool.query(`SELECT r.content,r.revision FROM guard_sources s JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision WHERE s.id=$1 AND s.state='ready'`,[id]);
   if(!rows[0])throw new HttpError(409,'guard_preparation_pending');
   return {value:JSON.parse(rows[0].content.toString()),revision:rows[0].revision as number};
+}
+
+export type GuardMode='on'|'off';
+export async function guardState(pool:Pick<pg.Pool,'query'>):Promise<{mode:GuardMode;epoch:number}> {
+  const row=(await pool.query('SELECT mode,epoch FROM guard_state WHERE singleton')).rows[0];
+  return {mode:row.mode,epoch:Number(row.epoch)};
+}
+export async function setGuardMode(pool:pg.Pool,mode:GuardMode) {
+  if(!['on','off'].includes(mode))throw new HttpError(400,'invalid_guard_mode');
+  await pool.query('UPDATE guard_state SET mode=$1,epoch=epoch+1 WHERE singleton AND mode<>$1',[mode]);
+  return guardState(pool);
 }
 
 export async function inspectGuarded(pool:pg.Pool,principal:Reader,eventId:string) {

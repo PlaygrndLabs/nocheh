@@ -37,7 +37,9 @@ def run(body, emit=None):
     from hermes_state import SessionDB
     install();native_gate();restrict_session_search()
     review = body.get('review') is True
-    if not review: bind_process_credential(body['archive_credential'])
+    bind_process_credential(body['archive_credential'])
+    from .prepared_context import install as prepare_native, prepare
+    prepare_native()
     # The supervisor is the sole OAuth refresh owner. Native auxiliary clients
     # receive this turn's access token, without copying any refresh token/store.
     from agent import auxiliary_client as aux
@@ -51,7 +53,7 @@ def run(body, emit=None):
     bind_process_preferences(prefs)
     database=SessionDB(profile/'state.db')
     session_id=body['session_id']
-    history=database.get_messages_as_conversation(session_id) if database.get_session(session_id) else []
+    history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
     agent=AIAgent(provider='openai-codex',api_mode='codex_responses',model=body['model'],
         api_key=body['access_token'],base_url='https://chatgpt.com/backend-api/codex',
         enabled_toolsets=['memory'] if review else ['memory','session_search','nocheh_archive'],fallback_model=None,

@@ -21,7 +21,7 @@ x-service: &service
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
     NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
-    GUARD_MODE: ${NOCHEH_GUARD_MODE:-auto}
+    GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
     GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex"]}
     TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
     TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
@@ -113,7 +113,7 @@ services:
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
       TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
-      GUARD_MODE: ${NOCHEH_GUARD_MODE:-auto}
+      GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
       GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex"]}
       NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
       ARCHIVE_URL: http://archive:8780

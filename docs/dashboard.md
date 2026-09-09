@@ -67,7 +67,7 @@ remain supported alongside these conveniences:
 
 ```sh
 ./scripts/nocheh config show
-./scripts/nocheh config set NOCHEH_GUARD_MODE auto
+./scripts/nocheh config set NOCHEH_GUARD_MODE on
 ./scripts/nocheh config apply
 ./scripts/nocheh import telegram /absolute/export/result.json
 ./scripts/nocheh jobs list
@@ -93,7 +93,7 @@ only the managed turn runner can invoke a model.
 Submitted text and up to 10 files (25 MiB total) are archived before execution.
 Voice attachments use automatic subscription transcription; bounded UTF-8 files
 (up to 200 kB each, 1 MB total) are included as context. Other binary files remain
-retrievable. Original images may reach explicitly trusted routes; required guarding
+retrievable. Original images remain owner-only while guarding is on; required guarding
 rejects opaque image context. Generated results and transcripts retain provenance.
 
 Native Sessions can resume a conversation in its profile. Cancel stops the isolated
@@ -379,5 +379,5 @@ Concurrent saves require refresh and comparison; preparation never overwrites an
 owner revision. Original file downloads remain read only.
 
 The editor/storage increment precedes runtime activation. See TASK.md G3 for the
-on/off enforcement gate; the presence of a guarded copy alone does not prove the
+on/off enforcement gate (implemented in phase G3); the presence of a guarded copy alone does not prove the
 running assistant uses it.

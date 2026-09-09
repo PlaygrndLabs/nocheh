@@ -20,6 +20,10 @@ def scheduled_preferences(profile,body):
 
 async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None):
     from .assistant_gateway import prepare_profile
+    from .scopes import Scopes
+    import base64
+    claims=json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'==='))
+    scope=Scopes.apply_revision(scope,claims)
     profile = prepare_profile(root, scope, model)
     with (profile / '.turn.lock').open('a') as lock:
         try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -46,8 +50,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
     env = {key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
-           'SERVICE_TOKEN','SERVICE_TOKEN_FILE','ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
-    env.update(HERMES_HOME=str(profile), NOCHEH_CAPTURE_ENABLED='0')
+           'ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
+    env.update(HERMES_HOME=str(profile), NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
     process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'integrations.hermes.assistant_turn',
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         env=env, cwd=Path(__file__).resolve().parents[2], limit=2*1024*1024)
@@ -68,6 +72,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             if size > 8*1024*1024: raise RuntimeError('assistant_output_limit')
             value = json.loads(line)
             if isinstance(value,dict) and value.get('event') == 'message.delta' and emit:
+                from .assistant_gateway import check_delivery_policy
+                if not await asyncio.to_thread(check_delivery_policy,body['archive_credential']):raise RuntimeError('guard_context_changed')
                 if isinstance(value.get('text'),str): emit(value['text'])
             elif isinstance(value,dict) and value.get('state') in ('done','failed'):
                 result = value
@@ -75,6 +81,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         await process.wait()
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
+        from .assistant_gateway import check_delivery_policy
+        if not await asyncio.to_thread(check_delivery_policy,body['archive_credential']):raise RuntimeError('guard_context_changed')
         return result
     try: return await asyncio.wait_for(collect(), timeout=230)
     finally:

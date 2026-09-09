@@ -20,6 +20,7 @@ ROOT=Path(__file__).resolve().parents[1]
 SERVICES=['hermes','worker','guard','archive']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
+        'guard_context_values':'id','guard_context_inputs':'id',
         'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
         'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
         'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id'}

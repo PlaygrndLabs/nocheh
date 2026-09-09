@@ -20,7 +20,7 @@ def prepare_profile(root,scope,model):
     profile=Path(root)/'profiles'/scope.profile
     profile.mkdir(parents=True,exist_ok=True,mode=0o700)
     from .profile_config import configure_profile
-    if not (profile/'config.yaml').exists() and scope.revision:
+    if not (profile/'config.yaml').exists() and (scope.revision or scope.guard_epoch):
         from .profile_config import read, atomic_yaml
         canonical=Path(root)/'profiles'/Scopes.profile(scope.space)
         parent=Path(root)/'profiles'/Scopes.profile(scope.chat_id)
@@ -28,7 +28,7 @@ def prepare_profile(root,scope,model):
         if (source/'config.yaml').exists():atomic_yaml(profile/'config.yaml',read(source/'config.yaml'))
     configure_profile(profile, model)
     from .native_memory import save_receipt
-    save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'revision':scope.revision,'owner':scope.owner}))
+    save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'revision':scope.revision,'owner':scope.owner,'guard_epoch':scope.guard_epoch}))
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)

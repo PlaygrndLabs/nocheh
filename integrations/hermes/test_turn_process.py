@@ -17,12 +17,12 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             async def spawn(*args,**kwargs):
                 self.env=kwargs['env']
                 return await original(sys.executable,'-c',source,**kwargs)
-            with patch('integrations.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden'}):
+            with patch('integrations.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('integrations.hermes.assistant_gateway.check_delivery_policy',return_value=True):
                 events=[]
                 result=await _run_process(Path(folder),Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser'},'model',
                     SimpleNamespace(access_token='ephemeral'),'session',events.append,cancel)
-                self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
+                self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 return result,events
     async def test_stream_framing_and_failed_child(self):
         result,events=await self.execute('import sys,json; body=json.load(sys.stdin); assert body["channel"]=="browser"; print(json.dumps({"event":"message.delta","text":"hello"})); print(json.dumps({"state":"done","text":"hello"}))')
@@ -42,7 +42,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             with (profile/'.turn.lock').open('a') as lock,patch('integrations.hermes.assistant_gateway.prepare_profile',return_value=profile):
                 fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 with self.assertRaisesRegex(RuntimeError,'profile_busy'):
-                    await run_process(profile,Scope('42','42',True,'owner'),{},'model',None,'session')
+                    await run_process(profile,Scope('42','42',True,'owner'),{'archive_credential':'turn.e30.signature'},'model',None,'session')
 
     async def test_already_cancelled_never_starts_a_child(self):
         cancel=threading.Event();cancel.set()

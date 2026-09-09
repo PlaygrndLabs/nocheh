@@ -45,7 +45,7 @@ No production model-provider API keys or local inference models are required.
 
 See [operations and configuration](docs/deploy.md),
 [durable archive behavior](docs/archive.md), [portable import/export](docs/import-export.md),
-[optional outgoing guarding](docs/guard.md),
+[saved guarded copies](docs/guard.md),
 [Telegram setup and scoped assistant](docs/telegram.md),
 [isolated Honcho comparison](experiments/honcho/README.md),
 [architecture and phase diagram](docs/rebuild-plan.md), and
