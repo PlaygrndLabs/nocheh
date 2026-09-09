@@ -134,8 +134,8 @@ def main():
     env = compose_environment(STATE)
     if args.command in ('up','dev','build','test'):
         sys.path.insert(0,str(ROOT))
-        from scripts.provider import ensure_source
-        ensure_source()
+        from scripts.provider import ensure_source,ensure_monitor_source
+        ensure_source();ensure_monitor_source()
         from compatibility.setup import checkout,LOCK
         checkout('hermes-agent',LOCK['hermes'])
     command = ["docker", "compose", "--env-file", str(env_path(STATE)), "-f", str(ROOT / "docker-compose.yml")]
