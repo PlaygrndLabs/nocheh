@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
 STATE=ROOT/'data/honcho-experiment'
+PROVIDER_STATE=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local')).resolve()
 COMPOSE=['docker','compose','--env-file',str(STATE/'compose.env'),'-f',str(ROOT/'experiments/honcho/compose.yml')]
 
 
@@ -15,7 +16,7 @@ def initialize():
     from scripts.configuration import read_env
     from scripts.embedding_config import embeddings
     values=read_env(ROOT/'.env');embedding=embeddings(values)
-    for directory in ('','ledger','bridge-auth','baseline','reports'):
+    for directory in ('','ledger','baseline','reports'):
         (STATE/directory).mkdir(parents=True,exist_ok=True,mode=0o700)
     for name in ('internal_token','database_password','temporary_embedding_key'):
         path=STATE/name
@@ -30,15 +31,8 @@ def initialize():
         (STATE/'temporary_embedding_key').chmod(0o600)
     token=(STATE/'internal_token').read_text().strip()
     password=(STATE/'database_password').read_text().strip()
-    (STATE/'compose.env').write_text(f'NOCHEH_UID={os.getuid()}\nNOCHEH_GID={os.getgid()}\nHONCHO_EXPERIMENT_DOCKERFILE={STATE}/honcho.Dockerfile\nBRIDGE_EXPERIMENT_DOCKERFILE={STATE}/bridge.Dockerfile\n')
-    # Only the bridge owns this separate OAuth login. No copying Hermes/Codex auth.
-    bridge={'host':'','port':8317,'auth-dir':'/auth','api-keys':[token],
-            'remote-management':{'allow-remote':False,'secret-key':'','disable-control-panel':True},
-            'plugins':{'enabled':False},'request-retry':0,'max-retry-credentials':1,
-            'logging-to-file':False,'request-log':False,'debug':False,
-            'quota-exceeded':{'switch-project':False,'switch-preview-model':False}}
-    (STATE/'bridge.yaml').write_text(json.dumps(bridge,indent=2)+'\n')  # JSON is valid YAML
-    (STATE/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedding.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\n')
+    (STATE/'compose.env').write_text(f'NOCHEH_UID={os.getuid()}\nNOCHEH_GID={os.getgid()}\nNOCHEH_STATE_DIR={PROVIDER_STATE}\nHONCHO_EXPERIMENT_DOCKERFILE={STATE}/honcho.Dockerfile\n')
+    (STATE/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedding.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\nNOCHEH_REASONING_URL=http://shared-provider:8317/v1\n')
     env={'DB_CONNECTION_URI':f'postgresql+psycopg://experiment:{password}@database:5432/honcho_experiment',
          'CACHE_URL':'redis://redis:6379/0?suppress=true','CACHE_ENABLED':'true','AUTH_USE_AUTH':'false',
          'PYTHON_DOTENV_DISABLED':'1','HONCHO_CONFIG_TOML_DISABLED':'1',
@@ -61,14 +55,14 @@ def initialize():
     env['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
     for level in ('minimal','low','medium','high','max'): env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
     (STATE/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
-    for name in ('compose.env','bridge.yaml','honcho.env','meter.env'): (STATE/name).chmod(0o600)
+    for name in ('compose.env','honcho.env','meter.env'): (STATE/name).chmod(0o600)
 
 
 def sources():
     pins=json.loads((ROOT/'experiments/honcho/upstreams.lock.json').read_text())
     for name,pin in pins.items():
         if not isinstance(pin,dict) or 'repository' not in pin: continue
-        path=ROOT/'data/compat/upstreams'/('CLIProxyAPI' if name=='bridge' else 'honcho')
+        path=ROOT/'data/compat/upstreams/honcho'
         if not path.exists():
             subprocess.run(['git','clone','--no-checkout',pin['repository'],str(path)],check=True)
             subprocess.run(['git','-C',str(path),'checkout','--detach',pin['revision']],check=True)
@@ -82,8 +76,12 @@ def sources():
         return text
     upstream=pinned((ROOT/'data/compat/upstreams/honcho/Dockerfile').read_text())
     (STATE/'honcho.Dockerfile').write_text(upstream+'\nENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache\nRUN python -c "import tiktoken; tiktoken.get_encoding(\'o200k_base\'); tiktoken.get_encoding(\'cl100k_base\')"\n')
-    bridge=pinned((ROOT/'data/compat/upstreams/CLIProxyAPI/Dockerfile').read_text())
-    (STATE/'bridge.Dockerfile').write_text(bridge.replace('RUN CGO_ENABLED=1','RUN GOMAXPROCS=2 GOFLAGS=-p=2 CGO_ENABLED=1'))
+
+
+def provider_ready():
+    from scripts.provider import status
+    result=status(PROVIDER_STATE)
+    return result['healthy'] and result['login_present']
 
 
 def main():
@@ -116,17 +114,22 @@ def main():
         from scripts.configuration import read_env
         if read_env(ROOT/'.env').get('NOCHEH_MEMORY_TOKEN')!=(STATE/'internal_token').read_text().strip():
             raise SystemExit('Run runtime-init and apply Nocheh Compose first.')
+        if not provider_ready(): raise SystemExit('Shared provider is not ready. Run ./scripts/nocheh provider login, then ./scripts/nocheh up.')
         return subprocess.call(COMPOSE+['-f',str(ROOT/'deploy/honcho-runtime.yml'),'up','-d','--wait','--wait-timeout','240'],cwd=ROOT)
     if args.command=='init':
         sources();print('Experiment initialized; no provider requests were made.');return 0
     if args.command=='test': return subprocess.call(['python3','-m','unittest','experiments.honcho.test_meter','experiments.honcho.test_compare','-v'],cwd=ROOT)
     if args.command=='run':
         if not (STATE/'temporary_embedding_key').read_text().strip(): raise SystemExit('Live evaluation pending: temporary_embedding_key is empty.')
-        if not list((STATE/'bridge-auth').glob('*.json')): raise SystemExit('Live evaluation pending: run scripts/honcho-experiment login for the separate bridge login.')
+        if not provider_ready(): raise SystemExit('Live evaluation pending: the shared provider login is not ready.')
         from .compare import main as compare
         return compare()
-    if args.command=='up': sources()
+    if args.command=='login':
+        from scripts.provider import login
+        return login(PROVIDER_STATE)
+    if args.command=='up':
+        sources()
+        if not provider_ready(): raise SystemExit('Shared provider is not ready. Run ./scripts/nocheh provider login, then ./scripts/nocheh up.')
     actions={'up':['up','-d','--build','--wait','--wait-timeout','240'],
-             'down':['down'],'status':['ps'],'config':['config','--quiet'],
-             'login':['run','--rm','--no-deps','bridge','./CLIProxyAPI','-config','/CLIProxyAPI/config.yaml','-codex-device-login','-no-browser']}
+             'down':['down'],'status':['ps'],'config':['config','--quiet']}
     return subprocess.call(COMPOSE+actions[args.command],cwd=ROOT)

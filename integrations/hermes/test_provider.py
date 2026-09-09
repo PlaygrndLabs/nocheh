@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from scripts.configuration import initialize as initialize_configuration
 from scripts.provider import CLIENTS,initialize,status
+from integrations.hermes.subscription import SHARED_BASE_URL,resolve_credentials
 
 
 class SharedProviderTests(unittest.TestCase):
@@ -34,3 +35,21 @@ class SharedProviderTests(unittest.TestCase):
             encoded=json.dumps(result)
             self.assertFalse(any(value in encoded for value in before.values()))
             self.assertFalse(result['running']);self.assertFalse(result['login_present'])
+
+    def test_shared_route_resolves_only_the_scoped_hermes_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'hermes.key';path.write_text('h'*32)
+            with patch.dict('os.environ',{'NOCHEH_REASONING_ROUTE':'shared','CLIPROXY_HERMES_KEY_FILE':str(path)}):
+                credentials=resolve_credentials()
+            self.assertEqual(credentials.runtime(),{'api_key':'h'*32,'base_url':SHARED_BASE_URL,
+                'provider':'openai','api_mode':'chat_completions'})
+            link=Path(folder)/'linked.key';link.symlink_to(path)
+            with patch.dict('os.environ',{'NOCHEH_REASONING_ROUTE':'shared','CLIPROXY_HERMES_KEY_FILE':str(link)}):
+                with self.assertRaises(ValueError):resolve_credentials()
+
+    def test_proxy_build_disables_hidden_unauthorized_replay(self):
+        path=Path(__file__).resolve().parents[2]/'deploy/cliproxy.Dockerfile'
+        if not path.is_file():self.skipTest('deployment sources are outside the runtime image')
+        dockerfile=path.read_text()
+        self.assertIn("grep -c 'false && okRefresh'",dockerfile)
+        self.assertIn('test \"$(grep -c',dockerfile)

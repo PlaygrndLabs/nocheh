@@ -1,4 +1,19 @@
-FROM ghcr.io/wangnov/codex-asr@sha256:8fd68262922d4b8348be4f71ed7638b03577842d8b06d323d28b564e68860808 AS asr
+FROM rust:1.91.1-bookworm@sha256:c1e5f19e773b7878c3f7a805dd00a495e747acbdc76fb2337a4ebf0418896b33 AS asr-builder
+ARG CODEX_ASR_REVISION=479f6a7a3db81fe2a23d4755b0ccbeb4400317d4
+ARG RUST_SILK_VERSION=0.1.3
+RUN git init /src && cd /src && git remote add origin https://github.com/Wangnov/codex-asr.git && \
+    git fetch --depth 1 origin "$CODEX_ASR_REVISION" && git checkout --detach FETCH_HEAD && \
+    cargo build --release --locked --bin codex-asr && cp target/release/codex-asr /usr/local/bin/ && \
+    cargo install rust-silk --version "$RUST_SILK_VERSION" --locked --root /usr/local
+
+FROM debian:bookworm@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443 AS asr
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* && \
+    useradd --system --uid 10001 --gid nogroup --home-dir /nonexistent --shell /usr/sbin/nologin codex-asr
+COPY --from=asr-builder /usr/local/bin/codex-asr /usr/local/bin/rust-silk /usr/local/bin/
+ENV CODEX_ASR_SILK_DECODER=/usr/local/bin/rust-silk
+USER 10001:65534
+ENTRYPOINT ["codex-asr"]
+
 FROM ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 AS uv
 FROM python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84 AS sqlite
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -19,10 +34,10 @@ ENV LD_LIBRARY_PATH=/opt/sqlite/lib PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
     PYTHONPATH=/opt/hermes:/workspace PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
     HERMES_HOME=/workspace/data/local/hermes CODEX_ASR_SILK_DECODER=/usr/local/bin/rust-silk
 ARG HERMES_REVISION=7166071fcaadb36df26f6d753dda97da6b5d699e
-RUN git init /opt/hermes && cd /opt/hermes && git remote add origin https://github.com/NousResearch/hermes-agent.git && \
-    git fetch --depth 1 origin "$HERMES_REVISION" && git checkout --detach FETCH_HEAD && \
+COPY --from=hermes_source . /opt/hermes
+RUN test "$(cat /opt/hermes/.nocheh-source-revision)" = "$HERMES_REVISION" && cd /opt/hermes && \
     uv sync --frozen --no-dev --no-install-project --extra messaging --python /usr/local/bin/python && \
-    rm -rf /opt/hermes/.git /root/.cache/uv
+    rm -rf /opt/hermes/.git /opt/hermes/.nocheh-source-revision /root/.cache/uv
 LABEL org.opencontainers.image.revision=${HERMES_REVISION}
 RUN python -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3,51,3)"
 ARG LOCAL_UID=1000
@@ -31,6 +46,7 @@ RUN /usr/sbin/useradd --uid ${LOCAL_UID} --create-home nocheh && mkdir -p /works
 WORKDIR /workspace
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} integrations ./integrations
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/fixtures ./compatibility/fixtures
+COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} scripts ./scripts
 USER nocheh
 CMD ["python", "-m", "integrations.hermes.runtime"]

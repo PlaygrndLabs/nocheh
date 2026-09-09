@@ -132,8 +132,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Egress:
-    def __init__(self, ledger, token, paid_key, opener=None, prepare=None, embedding=None):
+    def __init__(self, ledger, token, paid_key, opener=None, prepare=None, embedding=None,
+                 reasoning_key=None, reasoning_url='http://shared-provider:8317/v1'):
         self.ledger,self.token,self.paid_key = ledger,token,paid_key
+        if reasoning_url.rstrip('/') != 'http://shared-provider:8317/v1':
+            raise Rejected('reasoning_route_denied')
+        self.reasoning_key=reasoning_key
+        if not self.reasoning_key: raise Rejected('reasoning_key_missing')
+        self.reasoning_url=reasoning_url.rstrip('/')
         self.opener=opener or urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
         self.prepare=prepare
         self.embedding=embedding or embeddings({})
@@ -149,9 +155,9 @@ class Egress:
         if len(data)>1024*1024: raise Rejected('request_too_large')
         call=self.ledger.reserve(route,data,self.embedding)  # fsync transaction BEFORE any egress
         start=time.monotonic();status=502;usage=None
-        url=self.embedding.url if paid else ('http://bridge:8317'+route)
+        url=self.embedding.url if paid else (self.reasoning_url+route.removeprefix('/v1'))
         try:
-            request=urllib.request.Request(url,data=data,headers={'Authorization':'Bearer '+(self.paid_key if paid else self.token),'Content-Type':'application/json'})
+            request=urllib.request.Request(url,data=data,headers={'Authorization':'Bearer '+(self.paid_key if paid else self.reasoning_key),'Content-Type':'application/json'})
             with self.opener.open(request,timeout=180) as response:
                 status=response.status;content=response.read(16*1024*1024+1)
                 if len(content)>16*1024*1024: raise Rejected('response_too_large')
@@ -216,7 +222,9 @@ class ArchivePreparation:
 if __name__=='__main__':
     token=Path('/state/internal_token').read_text().strip()
     paid=Path('/run/secrets/temporary_embedding_key').read_text().strip()
+    reasoning=Path('/run/secrets/cliproxy_honcho_key').read_text().strip()
     if not token: raise SystemExit('internal_token_missing')
     archive=os.environ.get('NOCHEH_ARCHIVE_URL')
     prepare=ArchivePreparation(archive,token) if archive else None
-    ThreadingHTTPServer(('0.0.0.0',8790),handler(Egress(Ledger('/ledger/budget.sqlite'),token,paid,prepare=prepare,embedding=embeddings(os.environ)))).serve_forever()
+    ThreadingHTTPServer(('0.0.0.0',8790),handler(Egress(Ledger('/ledger/budget.sqlite'),token,paid,prepare=prepare,
+        embedding=embeddings(os.environ),reasoning_key=reasoning,reasoning_url=os.environ.get('NOCHEH_REASONING_URL','http://shared-provider:8317/v1')))).serve_forever()

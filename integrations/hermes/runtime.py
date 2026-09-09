@@ -19,7 +19,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .subscription import resolve_credentials, refresh_credentials, detect_literals, DetectorContractError
+from .subscription import resolve_credentials, refresh_credentials, detect_literals, DetectorContractError, reasoning_route
 
 MODEL = os.environ.get("NOCHEH_MODEL", "gpt-5.6-sol")
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,8 +39,9 @@ def configure():
     PROFILE_HOME.mkdir(parents=True, exist_ok=True)
     config = PROFILE_HOME / "config.yaml"
     if not config.exists():
+        provider = 'openai-codex' if reasoning_route() == 'native' else 'openai'
         config.write_text(
-            f"model:\n  provider: openai-codex\n  default: {MODEL}\n"
+            f"model:\n  provider: {provider}\n  default: {MODEL}\n"
             "stt:\n  enabled: true\n  provider: nocheh-subscription\n"
             "plugins:\n  enabled: [nocheh]\nfallback_models: []\n"
         )
@@ -58,7 +59,7 @@ def chat(text: str):
     from run_agent import AIAgent
     credentials = resolve_credentials()
     agent = AIAgent(
-        provider="openai-codex", api_mode="codex_responses", model=MODEL,
+        provider=credentials.provider, api_mode=credentials.api_mode, model=MODEL,
         api_key=credentials.access_token, base_url=credentials.base_url,
         enabled_toolsets=[], max_iterations=2, run_budget_seconds=90,
         skip_context_files=True, skip_memory=True, skip_background_review=True,
@@ -160,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
             claims=verify_capability(body['archive_credential'],TOKEN,scope,body['event_id'])
             if not scope.owner and claims.get('revision')!=scope.revision:raise ValueError('browser_audience_changed')
             credentials=resolve_credentials()
-            return {'model':MODEL,'access_token':credentials.access_token}
+            return {'model':MODEL,**credentials.runtime()}
         if self.path == '/internal/action':
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             return ASSISTANT.action(body)
@@ -189,8 +190,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('attachment_size_limit')
             return {'bytes_base64': base64.b64encode(raw).decode()}
         if self.path == "/internal/refresh":
-            refresh_credentials()
-            return {"refreshed": True}
+            return {"refreshed": refresh_credentials(), "owner": "cliproxy" if reasoning_route() == "shared" else "hermes"}
         if self.path in ("/internal/chat", "/internal/detect"):
             text = body["text"]
             if not isinstance(text, str) or len(text) > 100000:

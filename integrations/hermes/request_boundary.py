@@ -15,8 +15,8 @@ from collections import deque, Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
-DETECTOR_CALL = contextvars.ContextVar('nocheh_trusted_detector', default=False)
-DEFAULT_TRUSTED = ['https://chatgpt.com/backend-api/codex']
+DETECTOR_CALL = contextvars.ContextVar('nocheh_trusted_detector', default=None)
+DEFAULT_TRUSTED = ['https://chatgpt.com/backend-api/codex', 'http://cliproxy:8317/v1']
 MAX_BODY = 1024*1024
 FAILURES = deque(maxlen=30)
 COUNTS = Counter()
@@ -43,8 +43,8 @@ def required(mode,destination,endpoints):
 
 
 @contextlib.contextmanager
-def trusted_detector():
-    token=DETECTOR_CALL.set(True)
+def trusted_detector(endpoint='https://chatgpt.com/backend-api/codex'):
+    token=DETECTOR_CALL.set(endpoint)
     try:
         yield
     finally:
@@ -117,9 +117,9 @@ class Boundary:
 
     def needs_guard(self,request):
         destination=str(request.url)
-        if DETECTOR_CALL.get():
+        if detector_endpoint := DETECTOR_CALL.get():
             # The exemption can never survive a provider change/redirect.
-            if not trusted(destination,DEFAULT_TRUSTED): raise GuardUnavailable('detector_destination_rejected')
+            if not trusted(destination,[detector_endpoint]): raise GuardUnavailable('detector_destination_rejected')
             return False
         if operational_request(request): return False
         from .archive_tools import _PROCESS_CREDENTIAL, ARCHIVE_CREDENTIAL

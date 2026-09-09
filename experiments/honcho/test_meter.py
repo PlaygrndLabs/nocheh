@@ -39,7 +39,7 @@ class BudgetTests(unittest.TestCase):
             def prepare(workspace,route,payload):
                 if workspace!='current': raise Rejected('memory_context_retired')
                 return {**payload,'input':'Database credentials are in my password manager.'}
-            egress=Egress(ledger,'internal','dedicated',transport,prepare)
+            egress=Egress(ledger,'internal','dedicated',transport,prepare,reasoning_key='honcho-client')
             payload={'model':'text-embedding-3-small','input':'Database password: planted-secret'}
             egress.send('/v1/embeddings',payload,'current')
             self.assertNotIn(b'planted-secret',transport.calls[0].data)
@@ -55,7 +55,7 @@ class BudgetTests(unittest.TestCase):
             ledger=Ledger(Path(root)/'budget.sqlite');transport=Transport()
             # Reserve 499 calls, then race the final dollar-cent across threads.
             for _ in range(499): ledger.reserve('/v1/embeddings',b'fixture')
-            egress=Egress(ledger,'internal','temporary',transport)
+            egress=Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client')
             def send(_):
                 try: return egress.send('/v1/embeddings',{'model':'text-embedding-3-small','input':'fixture'})[0]
                 except Rejected: return 'blocked'
@@ -69,9 +69,9 @@ class BudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             ledger=Ledger(Path(root)/'budget.sqlite');transport=Transport(True)
             payload={'model':'text-embedding-3-small','input':['hello']}
-            with self.assertRaises(Rejected): Egress(ledger,'internal','',transport).send('/v1/embeddings',payload)
+            with self.assertRaises(Rejected): Egress(ledger,'internal','',transport,reasoning_key='honcho-client').send('/v1/embeddings',payload)
             self.assertEqual(ledger.report()['reserved_usd'],0);self.assertEqual(len(transport.calls),0)
-            self.assertEqual(Egress(ledger,'internal','temporary',transport).send('/v1/embeddings',payload)[0],502)
+            self.assertEqual(Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client').send('/v1/embeddings',payload)[0],502)
             self.assertEqual(ledger.report()['reserved_usd'],.01)
 
     def test_route_model_bounds_and_subscription_only_reasoning(self):
@@ -79,9 +79,9 @@ class BudgetTests(unittest.TestCase):
             with self.assertRaises(Rejected): validate(route,payload)
         with tempfile.TemporaryDirectory() as root:
             transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
-            Egress(ledger,'internal','temporary',transport).send('/v1/chat/completions',{'model':'gpt-5.6-sol','messages':[]})
-            self.assertEqual(transport.calls[0].full_url,'http://bridge:8317/v1/chat/completions')
-            self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer internal')
+            Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client').send('/v1/chat/completions',{'model':'gpt-5.6-sol','messages':[]})
+            self.assertEqual(transport.calls[0].full_url,'http://shared-provider:8317/v1/chat/completions')
+            self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer honcho-client')
             self.assertEqual(ledger.report()['reserved_usd'],0)
 
 

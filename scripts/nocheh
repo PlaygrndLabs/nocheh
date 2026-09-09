@@ -132,10 +132,12 @@ def main():
         write_env(env_path(STATE),values)
         print('Telegram policy saved. Run ./scripts/nocheh up to apply it.');return 0
     env = compose_environment(STATE)
-    if args.command in ('up','dev','build'):
+    if args.command in ('up','dev','build','test'):
         sys.path.insert(0,str(ROOT))
         from scripts.provider import ensure_source
         ensure_source()
+        from compatibility.setup import checkout,LOCK
+        checkout('hermes-agent',LOCK['hermes'])
     command = ["docker", "compose", "--env-file", str(env_path(STATE)), "-f", str(ROOT / "docker-compose.yml")]
     if args.command in ("dev", "test"):
         command += ["-f", str(ROOT / "docker-compose.dev.yml")]

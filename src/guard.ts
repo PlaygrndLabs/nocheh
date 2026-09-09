@@ -5,7 +5,7 @@ import { HttpError, object, string } from './http.js';
 export type GuardMode='off'|'on';
 export const DETECTOR_VERSION='gpt-literals-v1+patterns-v1';
 export const POLICY_VERSION='exact-spans-v1';
-export const DEFAULT_TRUSTED=['https://chatgpt.com/backend-api/codex'];
+export const DEFAULT_TRUSTED=['https://chatgpt.com/backend-api/codex','http://cliproxy:8317/v1'];
 export interface Span {start:number;end:number}
 export interface GuardPolicy {mode:GuardMode;trusted:readonly string[];detectorVersion:string}
 

@@ -14,7 +14,6 @@ from datetime import datetime,timezone
 from .environment import secret as environment_secret
 from .scopes import Scopes
 from .turn_process import run_process
-from types import SimpleNamespace
 
 async def main():
     secret=environment_secret('SERVICE_TOKEN');base=os.environ.get('ARCHIVE_URL','http://archive:8780')
@@ -62,7 +61,9 @@ async def main():
         start=time.monotonic()
         credentials_request=urllib.request.Request('http://127.0.0.1:8781/internal/browser-credentials',data=json.dumps({'profile':Scopes.profile(scope_id),'scope':scope_id,'event_id':event,'archive_credential':credential}).encode(),headers={'Authorization':'Bearer '+secret,'Content-Type':'application/json'})
         with urllib.request.urlopen(credentials_request,timeout=30) as response:credentials=json.load(response)
-        result=await run_process(root,scope,body,credentials['model'],SimpleNamespace(access_token=credentials['access_token']),'guarded-'+run)
+        from .subscription import SubscriptionCredentials
+        runtime=SubscriptionCredentials(credentials['api_key'],credentials['base_url'],credentials['provider'],credentials['api_mode'])
+        result=await run_process(root,scope,body,credentials['model'],runtime,'guarded-'+run)
         record('native_archive_recall',result.get('state')=='done' and edited in result.get('text','') and 'mango123' not in result.get('text',''))
         checks[-1]['duration_ms']=round((time.monotonic()-start)*1000)
         if result.get('state')!='done':checks[-1]['error_code']=result.get('error_code')

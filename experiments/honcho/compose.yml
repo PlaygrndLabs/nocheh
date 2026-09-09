@@ -48,17 +48,6 @@ services:
     entrypoint: [/app/.venv/bin/python, -m, src.deriver]
     depends_on:
       honcho: {condition: service_healthy}
-  bridge:
-    image: nocheh-cliproxy-experiment:c76dfd4e
-    build:
-      context: ../../data/compat/upstreams/CLIProxyAPI
-      dockerfile: ${BRIDGE_EXPERIMENT_DOCKERFILE:?run scripts/honcho-experiment init}
-      args: {COMMIT: c76dfd4e0edabab9000628b1560ab8ab379eadb8}
-    command: [./CLIProxyAPI, -config, /CLIProxyAPI/config.yaml]
-    volumes:
-      - ../../data/honcho-experiment/bridge.yaml:/CLIProxyAPI/config.yaml:ro
-      - ../../data/honcho-experiment/bridge-auth:/auth
-    networks: [isolated, egress]
   meter:
     image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
     command: [python, /experiment/meter.py]
@@ -69,8 +58,9 @@ services:
       - ../../scripts/embedding_config.py:/experiment/embedding_config.py:ro
       - ../../data/honcho-experiment/internal_token:/state/internal_token:ro
       - ../../data/honcho-experiment/ledger:/ledger
+      - ${NOCHEH_STATE_DIR:?run scripts/honcho-experiment init}/provider/keys/honcho.key:/run/secrets/cliproxy_honcho_key:ro
     secrets: [temporary_embedding_key]
-    networks: [isolated, egress]
+    networks: [isolated, egress, memory]
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8790/health',timeout=2)"]
       interval: 5s
@@ -102,6 +92,9 @@ services:
 networks:
   isolated: {internal: true}
   egress: {}
+  memory:
+    external: true
+    name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
 volumes:
   database: {}
 secrets:

@@ -5,6 +5,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# Upstream refreshes and replays a 401 inside one client request. Nocheh needs
+# the 401 returned so any later attempt enters the mandatory guard again.
+RUN sed -i 's/; okRefresh {/; false \&\& okRefresh {/' sdk/cliproxy/auth/conductor_execution.go && \
+    test "$(grep -c 'false && okRefresh' sdk/cliproxy/auth/conductor_execution.go)" = 2
 ARG VERSION=dev
 ARG COMMIT=c76dfd4e0edabab9000628b1560ab8ab379eadb8
 ARG BUILD_DATE=unknown
@@ -18,4 +22,3 @@ ARG COMMIT=c76dfd4e0edabab9000628b1560ab8ab379eadb8
 LABEL org.opencontainers.image.revision=${COMMIT}
 EXPOSE 8317
 CMD ["./CLIProxyAPI", "-config", "/state/config.yaml"]
-

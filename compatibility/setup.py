@@ -24,10 +24,15 @@ def checkout(name, spec):
         run("git", "remote", "add", "origin", spec["repository"], cwd=destination)
         run("git", "fetch", "--depth", "1", "origin", spec["revision"], cwd=destination)
         run("git", "checkout", "--detach", spec["revision"], cwd=destination)
-    actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=destination, text=True).strip()
-    if actual != spec["revision"]:
-        raise SystemExit(f"{name}: existing checkout differs from lock; use a separate clean workspace")
-    run("git", "diff", "--exit-code", "HEAD", cwd=destination)
+    if (destination/".git").is_dir():
+        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=destination, text=True).strip()
+        if actual != spec["revision"]:
+            raise SystemExit(f"{name}: existing checkout differs from lock; use a separate clean workspace")
+        run("git", "diff", "--exit-code", "HEAD", cwd=destination)
+    elif (not (destination/".nocheh-source-revision").is_file()
+          or (destination/".nocheh-source-revision").read_text().strip() != spec["revision"]):
+        raise SystemExit(f"{name}: cached source revision is unavailable")
+    (destination/".nocheh-source-revision").write_text(spec["revision"]+'\n')
     if (destination / ".env").exists():
         raise SystemExit(f"{name}: compatibility checkout must not contain .env")
     return destination
@@ -48,7 +53,9 @@ def main():
     run("uv", "sync", "--project", str(hermes), "--python", LOCK["python"],
         "--frozen", "--no-dev", "--no-install-project", env=env)
     if not args.skip_image:
-        run("docker", "pull", LOCK["codex_asr"]["image"])
+        run("docker", "build", "--target", "asr", "--build-context", "hermes_source="+str(hermes),
+            "-f", str(ROOT/"deploy/hermes.Dockerfile"),
+            "-t", LOCK["codex_asr"]["image"], str(ROOT))
     print("Compatibility dependencies ready; no live model checks have run.")
 
 

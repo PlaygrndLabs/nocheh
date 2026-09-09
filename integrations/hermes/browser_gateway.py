@@ -12,7 +12,6 @@ import sys
 import threading
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from .scopes import Scope
@@ -157,8 +156,10 @@ class BrowserGateway:
                 'scope':self.scope.chat_id,'profile':self.scope.profile})
             if cancel.is_set(): raise RuntimeError('cancelled')
             body = {**claim,**prepared,'channel':'browser'}
+            from .subscription import SubscriptionCredentials
+            runtime=SubscriptionCredentials(credentials['api_key'],credentials['base_url'],credentials['provider'],credentials['api_mode'])
             result = asyncio.run(self.runner(self.root,self.scope,body,credentials['model'],
-                SimpleNamespace(access_token=credentials['access_token']), session['session_key'],
+                runtime, session['session_key'],
                 emit=lambda text:self.server._emit('message.delta',sid,{'text':text}),cancelled=cancel))
         except Exception as error:
             if str(error) in ('quota_paused','subscription_unavailable','transcription_unavailable','run_lease_lost','profile_busy'):
