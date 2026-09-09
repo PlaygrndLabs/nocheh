@@ -34,7 +34,7 @@ def dispatch(body):
         from .archive import API
         from urllib.parse import urlsplit
         path=body['path'];parsed=urlsplit(path)
-        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview'):
+        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/honcho','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview'):
             raise ValueError('memory_route_denied')
         return API().call(path,body.get('body'))
     if operation == 'operations.list':

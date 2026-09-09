@@ -83,8 +83,19 @@ def sources():
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('init','up','down','status','login','run','test','config'))
+    parser.add_argument('command',choices=('init','up','down','status','login','run','test','config','runtime-init','runtime-up'))
     args=parser.parse_args();initialize()
+    if args.command=='runtime-init':
+        from scripts.configuration import read_env,write_env
+        path=ROOT/'.env';values=read_env(path)
+        values['NOCHEH_MEMORY_TOKEN']=(STATE/'internal_token').read_text().strip()
+        write_env(path,values)
+        print('Dedicated memory gateway credential installed. Apply Nocheh Compose before runtime-up.');return 0
+    if args.command=='runtime-up':
+        from scripts.configuration import read_env
+        if read_env(ROOT/'.env').get('NOCHEH_MEMORY_TOKEN')!=(STATE/'internal_token').read_text().strip():
+            raise SystemExit('Run runtime-init and apply Nocheh Compose first.')
+        return subprocess.call(COMPOSE+['-f',str(ROOT/'deploy/honcho-runtime.yml'),'up','-d','--wait','--wait-timeout','240'],cwd=ROOT)
     if args.command=='init':
         sources();print('Experiment initialized; no provider requests were made.');return 0
     if args.command=='test': return subprocess.call(['python3','-m','unittest','experiments.honcho.test_meter','experiments.honcho.test_compare','-v'],cwd=ROOT)

@@ -76,11 +76,11 @@ def read_tool(args, **kwargs):
 
 def register(ctx):
     for name,description,properties,required,handler in (
-        ('nocheh_archive_search','Search original archived text in your authorized scope. Cite returned source references.',
+        ('nocheh_archive_search','Search the current permitted archived text in your authorized scope. Cite returned source references.',
          {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],search_tool),
         ('nocheh_archive_read','Read an archived source. Originals and generated artifacts have distinct provenance.',
          {'id':{'type':'string'}},['id'],read_tool),
-        ('nocheh_memory_recall','Owner private recall across native Hermes memories and conversation histories. Unavailable to group audiences.',
+        ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence.',
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
         ('nocheh_action_request','Propose an external Telegram message. Nothing is sent until the owner reviews and approves the exact action in their private DM.',
          {'destination':{'type':'string','description':'Numeric Telegram chat ID'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
@@ -133,5 +133,10 @@ def action_tool(args,**kwargs):
 
 
 def recall_tool(args, **kwargs):
-    try:return json.dumps(request('/v1/memory/recall',args),ensure_ascii=False)
+    try:
+        result=request('/v1/memory/honcho/recall',{'query':args.get('query','')})
+        claims=json.loads(base64.urlsafe_b64decode((_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()).split('.')[1]+'==='))
+        if claims.get('scope') is None:
+            result['native']=request('/v1/memory/recall',args)
+        return json.dumps(result,ensure_ascii=False)
     except Exception:return json.dumps({'error':'owner_memory_unavailable'})

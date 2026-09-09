@@ -5,7 +5,8 @@ import { listSpaces, spacePolicy, saveSpace,parentSpace } from './spaces.js';
 import {approveLearning,listReviews,controlReview} from './learning.js';
 import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
-import { HttpError, json, readJson, object } from './http.js';
+import { HttpError, json, readJson, object,authorize } from './http.js';
+import {honchoClient,memoryStatus,setMemoryConnection,recallMemory,prepareMemoryRequest} from './honcho.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
 import { startWorker } from './worker.js';
 import { hermesAdapter } from './hermes-adapter.js';
@@ -22,6 +23,7 @@ import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifa
 const config = settings();
 const runtime = hermesAdapter({url: config.hermesUrl, token: config.token});
 const call = runtimeCall(runtime);
+const honcho=honchoClient(config.honchoUrl);
 // Each service owns its connection pool; an outage must be visible in health.
 const pool = connectDatabase(config);
 await initialize(pool);
@@ -36,6 +38,10 @@ const server = createServer((req, res) => { void (async () => {
   if (req.method === 'GET' && path === '/health') {
     await pool.query('SELECT 1');
     return json(res, 200, {ok: true, service: config.service, database: 'ready'});
+  }
+  if(config.service==='archive'&&req.method==='POST'&&path==='/internal/honcho/prepare') {
+    if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
+    return json(res,200,await prepareMemoryRequest(pool,await readJson(req,1024*1024),async text=>(await call('guard.detect',{text})).literals));
   }
   const principal=reader(req, config.token);
   await assertAudience(pool,principal);
@@ -57,9 +63,18 @@ const server = createServer((req, res) => { void (async () => {
   }
   if(config.service==='archive' && !principal.admin && req.method==='POST' && path==='/v1/context/prepare')return agentResult(await readJson(req,1024*1024));
   if(config.service==='archive' && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
+  if(config.service==='archive'&&path==='/v1/memory/honcho') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,await memoryStatus(pool));
+    if(req.method==='POST')return json(res,200,await setMemoryConnection(pool,await readJson(req)));
+  }
+  if(config.service==='archive'&&path==='/v1/memory/honcho/recall'&&req.method==='POST') {
+    if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');
+    const body=object(await readJson(req));return agentResult(await recallMemory(pool,principal,String(body.query??''),honcho,async text=>(await call('guard.detect',{text})).literals),true);
+  }
   if(config.service==='archive' && path==='/v1/memory/preview' && req.method==='GET') {
     admin(principal);const policy=await spacePolicy(pool,url.searchParams.get('space')??'');
-    const preview={scope:parentSpace(policy.id)??policy.id,space:policy.id,revision:policy.revision,admin:false};
+    const preview={scope:parentSpace(policy.id)??policy.id,space:policy.id,revision:policy.revision,admin:false,guard_epoch:(await guardState(pool)).epoch};
     const q=url.searchParams.get('q')??'';
     const originals=q.trim()?await search(pool,preview,q):[];
     const shares=policy.effective.mode==='isolated'?[]:(await listShares(pool,policy.id)).filter(s=>!s.revoked_at).map(s=>({source:'nocheh:shared:'+s.id,text:s.content}));

@@ -9,6 +9,7 @@ from .archive import API
 def main(arguments):
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest='action',required=True)
+    honcho=commands.add_parser('honcho');honcho.add_argument('mode',choices=('status','attach','detach'),default='status',nargs='?');honcho.add_argument('--include-history',action='store_true')
     spaces=commands.add_parser('spaces');spaces.add_argument('--after',default='')
     for name in ('policy','shares','preview'):
         command=commands.add_parser(name);command.add_argument('--space',required=True)
@@ -27,7 +28,8 @@ def main(arguments):
         if position+1<len(arguments) and arguments[position+1].startswith('-') and not arguments[position+1].startswith('--'):
             arguments[position:position+2]=['--space='+arguments[position+1]]
     args=parser.parse_args(arguments);api=API();prefix='/v1/memory/'
-    if args.action=='spaces':result=api.call(prefix+'spaces?'+urlencode({'after':args.after}))
+    if args.action=='honcho':result=api.call(prefix+'honcho',None if args.mode=='status' else {'attached':args.mode=='attach','include_history':args.include_history})
+    elif args.action=='spaces':result=api.call(prefix+'spaces?'+urlencode({'after':args.after}))
     elif args.action=='policy':
         if args.set:
             if args.revision is None:parser.error('--revision is required with --set')

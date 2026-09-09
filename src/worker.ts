@@ -13,6 +13,7 @@ import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {prepareGuarded,guardState} from './guarded.js';
 import {prepareArchiveFiles} from './preparation.js';
+import {syncMemory,honchoClient} from './honcho.js';
 
 export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
   // A snapshot cannot prove whether its pending work ran after it was taken.
@@ -30,6 +31,7 @@ export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
     }),
     assistant:()=>dispatchCommitted(pool,config,call),
     learning:()=>runReviewJobs(pool,config,call),
+    honcho:()=>syncMemory(pool,honchoClient(config.honchoUrl)),
     actions:async()=>{if(config.assistant.enabled)await executeApproved(pool,call);},
   });
 }

@@ -40,3 +40,19 @@ only. Embeddings use text-embedding-3-small at 1536 dimensions. The published
 was checked on 2026-09-09; the meter reserves a conservative $0.01 before each bounded
 request, retaining the reservation after failures. Pilot total is $5. Monthly mode
 is a durable post-pilot cutover, limited to $5 per UTC calendar month.
+
+G5: Nocheh owns the only Honcho ingestion path. Hermes loads only the Nocheh
+plugin, keeps its real MEMORY.md/USER.md files and receives Honcho recall through
+the scoped archive API; no native Hermes-to-Honcho writes are enabled. Each source
+revision has deterministic audience/generation/chunk receipts. A lost write response
+is reconciled by its receipt metadata; absence after an uncertain write stays pending
+rather than guessing that a resend is safe. Import-learning consent is unchanged.
+
+`./scripts/nocheh memory honcho status` inspects attachment and receipts. Attach
+and detach are owner operations; attachment rejects until real acceptance is recorded.
+The `deploy/honcho-runtime.yml` overlay binds both API and deriver attempts to their
+workspace. The meter asks Nocheh to select current prepared content before reasoning
+or embeddings. Retired workspaces and unbound global jobs fail closed. Hermes has
+no route to the private Honcho network and no Honcho credential. Group/topic workspaces
+contain their own consented sources; approved/filtered cross-space sharing continues
+through the audience-checked archive tools.
