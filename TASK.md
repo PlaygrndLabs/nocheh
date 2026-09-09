@@ -1,3 +1,23 @@
+# Guarded projections and primary Honcho memory (ADR-0033)
+
+Owner-approved replacement plan: [guarded-memory-plan.md](docs/guarded-memory-plan.md).
+These phases are distinct from the earlier runtime-platform phases below.
+
+| Phase | Actual status |
+| --- | --- |
+| G1 — Durable guarded versions | Complete; 42 JS/TS checks and 91 pinned Hermes Python checks pass; new routing inactive |
+| G2 — Owner dashboard editor | Pending |
+| G3 — On/off throughout | Pending |
+| G4 — Live Honcho connection | Pending; dedicated credentials required |
+| G5 — Primary Honcho memory | Pending |
+| G6 — Edits, switching and recovery | Pending |
+| G7 — Local acceptance and final graph | Pending |
+
+G1 evidence: isolated PostgreSQL covers byte preservation, duplicate/concurrent capture,
+restart, partial detector failure recovery, derived text and consent separation. Host
+suite setup failures were resolved using explicit fixture DB credentials and the pinned
+Hermes image. AST graph refreshed without model calls.
+
 # Rebuild progress
 
 Memory/privacy work is tracked separately in [space-memory-plan.md](docs/space-memory-plan.md)

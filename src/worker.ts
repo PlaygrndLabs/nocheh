@@ -11,6 +11,7 @@ import {recoverRuns} from './managed-runs.js';
 import { runReviewJobs } from './learning.js';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
+import {prepareGuarded} from './guarded.js';
 
 export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
   // A snapshot cannot prove whether its pending work ran after it was taken.
@@ -20,6 +21,7 @@ export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
   return startLoops({
     browser:()=>recoverRuns(pool),
     capture:()=>drainSpool(pool,config.dataDir),
+    preparation:async()=>{if(config.guardMode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion);},
     attachments:()=>fetchAttachments(pool,config.dataDir,async(ref)=>{
         const result=await call('source.file',{file_id:ref});
         return Buffer.from(string(result.bytes_base64,70*1024*1024),'base64');
