@@ -381,7 +381,7 @@ import {GuardedEditor} from './guarded-editor.js';
     useEffect(()=>{let alive=true;import('../integrations/hermes/dashboard/space-controls.js').then(m=>{if(alive)setComponent(()=>m.createSpaceControls(sdk.React,call));}).catch(e=>{if(alive)setError(errorText(e));});return()=>{alive=false;};},[]);
     return error?h('p',{role:'alert'},error):Component?h(Component):h('p',{role:'status'},'Loading memory controls…');
   }
-  const extensions = {spaces:{label:'Memory access',component:SpaceControls},graph:{label:'Evidence graph',component:Graph},operations:{label:'Maintenance',component:Operations},memory:{label:'Hermes memory',component:Memory},honcho:{label:'Honcho lab',component:Honcho}};
+  const extensions = {spaces:{label:'Memory access',component:SpaceControls},graph:{label:'Evidence graph',component:Graph},operations:{label:'Maintenance',component:Operations},memory:{label:'Hermes memory',component:Memory},honcho:{label:'Honcho memory',component:Honcho}};
   window.__NOCHEH_PAGES__=extensions;
   function Integrations() {
     const [data,error]=useLoad('/runtime');
@@ -391,7 +391,7 @@ import {GuardedEditor} from './guarded-editor.js';
         h('p',{className:'n-muted'},data.status?.model||'Check runtime health or restart services in Maintenance.'),
         h('a',{className:'n-text-link',href:'/hermes/nocheh'},'Open native Hermes dashboard →'),
         h(Details,{value:data,label:'Runtime status and capabilities'}))),
-      h(Panel,{title:'Honcho',note:'A separate, optional memory experiment. Its configuration and data stay separate from your assistant.'},h(RouteLink,{page:'honcho'},'Open Honcho lab →')));
+      h(Panel,{title:'Honcho',note:'Primary long-term memory with scoped recall, guarded sources and durable ingestion receipts.'},h(RouteLink,{page:'honcho'},'Open Honcho memory →')));
   }
   function App() {
     const [page,setPage]=useState(location.hash.slice(1)||'overview'),[notice,setNotice]=useState(null),[tick,setTick]=useState(0);
@@ -399,10 +399,10 @@ import {GuardedEditor} from './guarded-editor.js';
     useEffect(()=>{const change=()=>{setPage(location.hash.slice(1)||'overview');setNotice(null);};addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
     useEffect(()=>{heading.current?.focus({preventScroll:true});},[page]);
     const notify=(text,error=false)=>setNotice({text,error});
-    const pages={spaces:'Memory access',overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho lab'};
-    const descriptions={spaces:'Connect your private knowledge and control what each group or topic can use.',overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect a separate memory experiment and its setup status.'};
+    const pages={spaces:'Memory access',overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho memory'};
+    const descriptions={spaces:'Connect your private knowledge and control what each group or topic can use.',overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect primary memory, preparation and connection status.'};
     descriptions.activity='Review proposed actions, manage permissions and inspect conversation results.';
-    const groups=[['Explore',['overview','archive','memory','graph','activity']],['Manage',['imports','spaces','integrations','settings','operations']],['Experiments',['honcho']]];
+    const groups=[['Explore',['overview','archive','memory','honcho','graph','activity']],['Manage',['imports','spaces','integrations','settings','operations']]];
     const Current=extensions[page]?.component;
     return h('div',{className:'nocheh-app'+(page==='graph'?' n-graph-active':'')},
       h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'ن'),h('span',null,'Nocheh',h('small',null,'Your conversations & memory'))),

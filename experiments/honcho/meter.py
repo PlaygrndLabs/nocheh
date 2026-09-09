@@ -30,6 +30,7 @@ class Ledger:
             db.execute('CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY, route TEXT, digest TEXT, reserved INTEGER, started REAL, status INTEGER, duration_ms INTEGER, usage TEXT)')
             db.execute("CREATE TABLE IF NOT EXISTS policy(id INTEGER PRIMARY KEY CHECK(id=1),monthly_since REAL)")
             db.execute('INSERT OR IGNORE INTO policy(id,monthly_since) VALUES(1,NULL)')
+            if 'audit' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]: db.execute('ALTER TABLE calls ADD COLUMN audit TEXT')
 
     def enable_monthly(self):
         # An explicit post-pilot cutover, persisted once; restart cannot reset it.
@@ -58,8 +59,10 @@ class Ledger:
             total, count = db.execute('SELECT coalesce(sum(reserved),0),count(*) FROM calls WHERE started>=?',(start,)).fetchone()
             if total + amount > LIMIT_MICRODOLLARS or count >= 1500:
                 raise Rejected('experiment_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
-            return db.execute('INSERT INTO calls(route,digest,reserved,started) VALUES(?,?,?,?)',
-                (route, hashlib.sha256(body).hexdigest(), amount, time.time())).lastrowid
+            audit={'owner_wording':b'Database credentials are in my password manager.' in body,
+                   'synthetic_raw_canary':b'mango123' in body}
+            return db.execute('INSERT INTO calls(route,digest,reserved,started,audit) VALUES(?,?,?,?,?)',
+                (route, hashlib.sha256(body).hexdigest(), amount, time.time(),json.dumps(audit))).lastrowid
 
     def finish(self, call, status, duration, usage):
         with self.connect() as db:

@@ -6,6 +6,8 @@ portable when the agent or memory system changes.
 
 **Status:** local Docker Compose implementation on `codex/hermes-rebuild`.
 Real Telegram acceptance and the merge to `main` remain pending.
+Guarded copies and the owner editor are active locally. Primary Honcho integration
+is implemented but stays detached until its dedicated provider checks pass.
 See [TASK.md](TASK.md) for current setup and validation status.
 Legacy code is preserved on `codex/legacy-nocheh`.
 
@@ -31,8 +33,9 @@ The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services a
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.
 
-There is no Nocheh product dashboard yet. The optional database browser reuses
-pgweb and provides table browsing, SQL queries and CSV/JSON export. See
+Run `./scripts/nocheh dashboard` for owner archive inspection, guarded editing,
+memory and configuration. The optional database browser reuses pgweb for table
+browsing, SQL queries and CSV/JSON export. See
 [browsing the archive](docs/database-viewer.md) for readable message queries.
 
 Configuration is in the ignored root `.env`; `.env.example` documents its fields.
@@ -41,13 +44,16 @@ ignored `data/local/`. Hermes manages its refreshable OAuth login in its native
 `data/local/hermes/auth.json` file.
 It transfers an existing dedicated compatibility login into the runtime once.
 For a new installation, start the services and run `./scripts/nocheh login`.
-No production model-provider API keys or local inference models are required.
+Reasoning uses subscription authentication. Optional Honcho activation additionally
+requires a dedicated embeddings credential, capped at $5 for the pilot and then
+$5 per month. No unrelated provider credentials or local models are used.
 
 See [operations and configuration](docs/deploy.md),
 [durable archive behavior](docs/archive.md), [portable import/export](docs/import-export.md),
 [saved guarded copies](docs/guard.md),
 [Telegram setup and scoped assistant](docs/telegram.md),
-[isolated Honcho comparison](experiments/honcho/README.md),
+[guarded memory system and operating instructions](docs/guarded-memory-system.md),
+[isolated Honcho acceptance](experiments/honcho/README.md),
 [architecture and phase diagram](docs/rebuild-plan.md), and
 [subscription evidence](compatibility/findings.md). VPS setup is deferred; local
 Compose is the current development and acceptance target (ADR-0019).

@@ -70,7 +70,7 @@ test('PostgreSQL on/off: prepared source reuse, authoritative edits, generation 
     const track=async(text:string)=>{detections.push(text);assert.ok(!text.includes('Database password: ***'),'stored guarded data must not be detected again');return detect(text);};
     const payload={input:[{role:'user',content:'Context:\n'+record.event.text+'\nQuestion: what database?'}]};
     await prepareContext(pool,reader,payload,track);const calls=detections.length;
-    assert.ok(calls>0,'only newly introduced context requires preparation');
+    assert.equal(calls,1,'new fields and residual passages use one bounded detector batch');
     assert.equal(JSON.stringify(await prepareContext(pool,reader,payload,track)),JSON.stringify(payload));assert.equal(detections.length,calls);
     await prepareContext(pool,reader,{input:[{role:'user',content:'Context:\n'+record.event.text+'\nQuestion: a different question?'}]},track);
     assert.ok(detections.length>calls);

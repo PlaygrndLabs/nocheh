@@ -129,12 +129,16 @@ async function prepareValue(client:pg.PoolClient,id:string,input:unknown,version
 export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null) {
   const client=await pool.connect();let locked=false;
   try {
-    if(eventId){await client.query('SELECT pg_advisory_lock(hashtextextended(current_schema(),803308))');locked=true;}
-    else locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803308)) AS locked')).rows[0].locked;
-    if(!locked)return;
+    if(!eventId)locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803308)) AS locked')).rows[0].locked;
+    if(!eventId&&!locked)return;
     const {rows}=await client.query("SELECT * FROM guard_sources WHERE state<>'ready' AND next_attempt<=now() AND ($2::text IS NULL OR event_id=$2) ORDER BY next_attempt,id LIMIT $1",[count,eventId]);
     for(const source of rows) {
+      let sourceHeld=false;
       try {
+        sourceHeld=(await client.query("SELECT pg_try_advisory_lock(hashtextextended(current_schema()||$1,803312)) AS locked",[source.id])).rows[0].locked;
+        if(!sourceHeld)continue;
+        const fresh=(await client.query("SELECT * FROM guard_sources WHERE id=$1 AND state<>'ready' AND next_attempt<=now()",[source.id])).rows[0];
+        if(!fresh)continue;Object.assign(source,fresh);
         const input=source.input?JSON.parse(source.input.toString()):await sourceInput(client,source);
         const inputHash=digest(canonical(input));
         await client.query('UPDATE guard_sources SET input=$2,input_hash=$3,attempts=attempts+1 WHERE id=$1',[source.id,Buffer.from(canonical(input)),inputHash]);
@@ -149,9 +153,11 @@ export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<
         }
         await client.query('COMMIT');
       } catch(error) {
+        console.warn(JSON.stringify({event:'guard_preparation_failed',kind:error instanceof Error?error.name:'unknown',
+          location:error instanceof Error?error.stack?.split('\n')[1]?.trim().replace(/\([^)]*\)/,'(source)'):undefined}));
         await client.query('ROLLBACK');
         await client.query(`UPDATE guard_sources SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second' WHERE id=$1 AND active_revision IS NULL`,[source.id,error instanceof HttpError?error.code:'guard_preparation_unavailable']);
-      }
+      }finally{if(sourceHeld)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema()||$1,803312))',[source.id]);}
     }
   } finally {if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803308))').catch(()=>{});client.release();}
 }

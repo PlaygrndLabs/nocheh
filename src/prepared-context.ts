@@ -52,32 +52,47 @@ export async function prepareContext(pool:pg.Pool,principal:Reader,value:unknown
     // auxiliary calls. No unrelated audience's prepared content is reusable.
     await client.query('SELECT pg_advisory_lock(hashtextextended($1,803309))',[scope]);
     const known=(await client.query('SELECT content FROM guard_context_values WHERE audience=$1 AND epoch=$2',[scope,state.epoch])).rows.map(r=>r.content.toString() as string);
-    const replacements=new Map<string,string>();
+    const replacements=new Map<string,string>(),plans=new Map<string,{text:string;prepared:boolean}[]>();
+    const fresh=new Map<string,string>(),outputs=new Map<string,string>();
     for(const original of new Set(textValues(value))) {
       if(!original||known.includes(original)){replacements.set(original,original);continue;}
-      const parts=segments(original,known);let output='';
+      const parts=segments(original,known).flatMap(part=>{
+        if(part.prepared||part.text.length<=24000)return [part];
+        const chunks=[];let offset=0;
+        while(offset<part.text.length){let end=Math.min(offset+24000,part.text.length);if(end<part.text.length&&/[\uD800-\uDBFF]/.test(part.text[end-1]!))end--;chunks.push({text:part.text.slice(offset,end),prepared:false});offset=end;}return chunks;
+      });
+      plans.set(original,parts);
       for(const part of parts) {
-        if(part.prepared||!part.text.trim()){output+=part.text;continue;}
+        if(part.prepared||!part.text.trim()||outputs.has(part.text)||fresh.has(part.text))continue;
         const key=digest(canonical({scope,epoch:state.epoch,input:part.text}));
         const cached=(await client.query(`SELECT r.content FROM guard_context_inputs c JOIN guard_sources s ON s.id=c.source_id
           JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision WHERE c.id=$1`,[key])).rows[0];
-        if(cached){output+=JSON.parse(cached.content.toString()).text;continue;}
-        if(part.text.length>100000)throw new HttpError(413,'detector_input_too_large');
-        const literals=await detect(part.text),guarded=mask(part.text,[...literalSpans(part.text,literals),...patternSpans(part.text)]).text;
+        if(cached)outputs.set(part.text,JSON.parse(cached.content.toString()).text);else fresh.set(part.text,key);
+      }
+    }
+    const pending=[...fresh.entries()];
+    while(pending.length) {
+      const batch:[string,string][]=[];let length=0;
+      while(pending.length&&length+pending[0]![0].length+32<=50000){const item=pending.shift()!;batch.push(item);length+=item[0].length+32;}
+      const joined=batch.map(([text])=>text).join('\n<NOCHEH_FRAGMENT>\n'),literals=await detect(joined);
+      literalSpans(joined,literals);
+      if(!(literals as string[]).every(value=>batch.some(([text])=>text.includes(value))))throw new HttpError(422,'guard_candidate_rejected');
+      for(const [text,key] of batch) {
+        const guarded=mask(text,[...literalSpans(text,(literals as string[]).filter(v=>text.includes(v))),...patternSpans(text)]).text;
         const derivedId=digest('guard-context:'+key),sourceId='derived_artifacts:'+derivedId;
-        const input={text:part.text,kind:'runtime_context',provenance:{event_id:principal.turnEvent,audience:scope,guard_epoch:state.epoch}};
+        const input={text,kind:'runtime_context',provenance:{event_id:principal.turnEvent,audience:scope,guard_epoch:state.epoch}};
         const result={...input,text:guarded},hash=digest(canonical(input));
         await client.query('BEGIN');
         await client.query(`INSERT INTO derived_artifacts(id,event_id,kind,content,search_text,provenance) VALUES($1,$2,'runtime_context',$3,$4,$5) ON CONFLICT DO NOTHING`,
-          [derivedId,principal.turnEvent,Buffer.from(part.text),part.text.replaceAll('\0',''),JSON.stringify(input.provenance)]);
+          [derivedId,principal.turnEvent,Buffer.from(text),text.replaceAll('\0',''),JSON.stringify(input.provenance)]);
         await client.query(`INSERT INTO guard_revisions(id,source_id,revision,content,search_text,input_hash,author,preparation_version)
           VALUES($1,$2,1,$3,$4,$5,'automatic',$6) ON CONFLICT DO NOTHING`,[digest(sourceId+':1'),sourceId,Buffer.from(canonical(result)),guarded.replaceAll('\0',''),hash,DETECTOR_VERSION]);
         await client.query("UPDATE guard_sources SET input=$2,input_hash=$3,active_revision=1,state='ready',error_code=NULL WHERE id=$1 AND active_revision IS NULL",[sourceId,Buffer.from(canonical(input)),hash]);
         await client.query('INSERT INTO guard_context_inputs(id,audience,epoch,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[key,scope,state.epoch,sourceId]);
-        await client.query('COMMIT');output+=guarded;
+        await client.query('COMMIT');outputs.set(text,guarded);
       }
-      replacements.set(original,output);
     }
+    for(const [original,parts] of plans)replacements.set(original,parts.map(part=>part.prepared||!part.text.trim()?part.text:outputs.get(part.text)!).join(''));
     const prepared=replaceValues(value,replacements);
     await assertAudience(pool,principal);await allowPrepared(pool,principal,prepared);
     return prepared;

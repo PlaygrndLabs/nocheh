@@ -24,7 +24,7 @@ Native assets use the pinned upstream lockfile. Stop and start to rebuild update
 | Page | Use it for |
 | --- | --- |
 | Overview | Start common tasks and understand the archive, Hermes memory and Honcho. |
-| Archive | Search original messages and generated transcripts, then open source records and files. |
+| Archive | Browse originals, guarded copies and transcripts; edit guarded wording and inspect history or original files. |
 | Memory | Read general notes, user profile notes and native conversation history for one chat. |
 | Graph | Follow recorded relationships back to their source evidence. |
 | Activity | Follow browser inputs, completed results and interruptions; open their original sources. |
@@ -33,7 +33,7 @@ Native assets use the pinned upstream lockfile. Stop and start to rebuild update
 | Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
 | Maintenance | Check health, prepare archive downloads, create backups, restart or verify an inactive restore; inspect settings-apply results. |
 | Integrations | Inspect runtime status and capabilities, or open the native Hermes dashboard. |
-| Honcho lab | Check the optional experiment and browse its stored data when it is running. |
+| Honcho memory | Inspect primary-memory readiness, attachment, generations and receipts, plus stored Honcho data. |
 
 Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
 tools, profiles and memory through an integration. Nocheh owns capture, access rules,
@@ -42,7 +42,10 @@ their integration acceptance passes; see TASK.md for actual phase status.
 
 Original chats are preserved evidence. Native notes are generated working memory
 and may change. Imported messages become archive sources, not native sessions or
-automatically generated memory. At import confirmation, an unchecked option lets you approve a Hermes memory review after ingestion succeeds. Honcho remains separate from production memory.
+automatically generated memory. At import confirmation, an unchecked option grants
+learning consent. That permits native note review and Honcho ingestion when attached;
+preparing guarded copies alone grants no learning consent. Honcho stays detached
+until its real provider acceptance passes.
 
 ## Change configuration
 
@@ -144,11 +147,12 @@ wrapper caps at 100 pages and reports failure rather than silently exporting an
 incomplete collection. `complete` refers to the requested command/limit, with
 server pagination metadata retained. Inspect is a summary, not a full export.
 
-The dashboard shows experiment availability and workspace/peer/session lists.
-The CLI provides deeper stored-data inspection. Live compatibility with the pinned
-Honcho server remains pending the separate bridge login and temporary embedding
-credential; fixture tests do not certify that live comparison. No experiment
-inference or production-memory switch is performed by the dashboard.
+The dashboard shows live-gate status, attachment, current memory generations and
+receipts alongside workspace/peer/session lists. Attach remains disabled while
+provider acceptance is pending. After acceptance, owner attach/detach controls
+offer optional consented history and catch-up. The CLI provides deeper stored-data
+inspection. See [the current memory system](guarded-memory-system.md) for activation
+and budget instructions; fixture tests do not certify live provider behavior.
 
 ## Evidence graph and local operations
 
@@ -378,6 +382,6 @@ History lets you inspect an old revision and restore it as a new owner revision.
 Concurrent saves require refresh and comparison; preparation never overwrites an
 owner revision. Original file downloads remain read only.
 
-The editor/storage increment precedes runtime activation. See TASK.md G3 for the
-on/off enforcement gate (implemented in phase G3); the presence of a guarded copy alone does not prove the
-running assistant uses it.
+Local Compose now uses the saved guarded version when guarding is on. A synthetic
+live subscription test verified import, edit, scoped retrieval and native Hermes
+archive recall. See TASK.md G7 for evidence and remaining Honcho/release checks.
