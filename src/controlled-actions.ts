@@ -2,6 +2,7 @@ import type pg from 'pg';
 import {randomUUID} from 'node:crypto';
 import {canonical,digest,ingest} from './archive.js';
 import {HttpError,object,string} from './http.js';
+import {guardState} from './guarded.js';
 import {admin,assertAudience,type Reader} from './access.js';
 
 export const controlledSchema=`
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS controlled_actions (
  result bytea, result_id text REFERENCES derived_artifacts(id), error_code text,
  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS guard_epoch bigint;
 CREATE TABLE IF NOT EXISTS action_permissions (
  id text PRIMARY KEY, fingerprint text NOT NULL, scope text NOT NULL, profile text NOT NULL,
  kind text NOT NULL, arguments bytea NOT NULL, expires_at timestamptz NOT NULL,
@@ -48,7 +50,7 @@ export function actionArguments(kind:unknown,value:unknown) {
   }
   throw new HttpError(400,'unsupported_controlled_tool');
 }
-type Row={id:string;event_id:string;scope:string;profile:string;kind:string;arguments:Buffer;fingerprint:string;state:string;
+type Row={guard_epoch:string|null;id:string;event_id:string;scope:string;profile:string;kind:string;arguments:Buffer;fingerprint:string;state:string;
  decision_event_id:string|null;permission_id:string|null;actor:string|null;result:Buffer|null;result_id:string|null;error_code:string|null};
 function view(row:Row) {return {...row,arguments:JSON.parse(row.arguments.toString()),result:row.result?JSON.parse(row.result.toString()):null};}
 
@@ -67,14 +69,15 @@ export async function proposeControlled(pool:pg.Pool,principal:Reader,value:unkn
   const id=digest(canonical({event_id:principal.turnEvent,fingerprint}));
   await ingest(pool,{version:1,key:'controlled-action:'+id,origin:'generated',kind:'controlled_action_request',bot_id:'nocheh',scope:event.scope,
     source_id:id,revision:'0',occurred_at:null,text:canonical(args),payload:{source_event_id:principal.turnEvent,kind:input.kind,profile,fingerprint}});
-  await pool.query(`INSERT INTO controlled_actions(id,event_id,scope,profile,kind,arguments,fingerprint)
-    VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,[id,principal.turnEvent,event.scope,profile,input.kind,Buffer.from(canonical(args)),fingerprint]);
+  await pool.query(`INSERT INTO controlled_actions(id,event_id,scope,profile,kind,arguments,fingerprint,guard_epoch)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,[id,principal.turnEvent,event.scope,profile,input.kind,Buffer.from(canonical(args)),fingerprint,(await guardState(pool)).epoch]);
   return {id,state:(await controlledAction(pool,principal,id)).state,message:'Review the exact operation in Nocheh Activity or /action '+id+'. Execution waits for owner approval or a matching bounded permission.'};
 }
 export async function controlledAction(pool:pg.Pool,principal:Reader,id:unknown) {
   await assertAudience(pool,principal);
   const row=(await pool.query<Row>('SELECT * FROM controlled_actions WHERE id=$1',[idValue(id)])).rows[0];
   if(!row)throw new HttpError(404,'action_not_found');
+  if(!principal.admin&&(await guardState(pool)).mode==='on'&&Number(row.guard_epoch)!==(await guardState(pool)).epoch)throw new HttpError(409,'guard_context_changed');
   if(!principal.admin&&(!principal.turnEvent||(principal.scope!==null&&principal.scope!==row.scope)))throw new HttpError(403,'action_scope_denied');
   if(principal.scope!==null&&principal.space&&principal.revision&&row.profile!=='nocheh-'+digest(principal.space+':policy:'+principal.revision).slice(0,24))throw new HttpError(403,'action_audience_denied');
   return view(row);
@@ -128,8 +131,9 @@ export async function claimControlled(pool:pg.Pool,value:unknown) {
     await client.query('BEGIN');
     // No retry after a crashed executor. Missing outcomes stay explicitly ambiguous.
     await client.query("UPDATE controlled_actions SET state='ambiguous',error_code='executor_receipt_missing',updated_at=now() WHERE state='running' AND lease_until<now()");
-    const row=(await client.query<Row>(`SELECT a.* FROM controlled_actions a WHERE a.state='approved' OR (a.state='proposed' AND EXISTS
-      (SELECT 1 FROM action_permissions p WHERE p.fingerprint=a.fingerprint AND p.revoked_at IS NULL AND p.remaining>0 AND p.expires_at>now()))
+    const row=(await client.query<Row>(`SELECT a.* FROM controlled_actions a WHERE (a.state='approved' OR (a.state='proposed' AND EXISTS
+      (SELECT 1 FROM action_permissions p WHERE p.fingerprint=a.fingerprint AND p.revoked_at IS NULL AND p.remaining>0 AND p.expires_at>now())))
+      AND ((SELECT mode FROM guard_state)='off' OR a.guard_epoch=(SELECT epoch FROM guard_state))
       ORDER BY a.created_at LIMIT 1 FOR UPDATE OF a SKIP LOCKED`)).rows[0];
     if(!row){await client.query('COMMIT');return {claimed:false};}
     let permission:string|null=null;
@@ -157,7 +161,7 @@ export async function finishControlled(pool:pg.Pool,value:unknown) {
     if(!['running','ambiguous'].includes(row.state))throw new HttpError(409,'action_not_running');
     const derived=digest(canonical({action:id,content:digest(content)}));
     await client.query(`INSERT INTO derived_artifacts(id,event_id,kind,content,provenance,search_text)
-      VALUES($1,$2,'controlled_action_result',$3,$4,$5) ON CONFLICT DO NOTHING`,[derived,row.event_id,content,{action_id:id,kind:row.kind,profile:row.profile,fingerprint:row.fingerprint,permission_id:row.permission_id},content.toString().replaceAll('\0','').slice(0,100000)]);
+      VALUES($1,$2,'controlled_action_result',$3,$4,$5) ON CONFLICT DO NOTHING`,[derived,row.event_id,content,{guard_epoch:row.guard_epoch===null?null:Number(row.guard_epoch),action_id:id,kind:row.kind,profile:row.profile,fingerprint:row.fingerprint,permission_id:row.permission_id},content.toString().replaceAll('\0','').slice(0,100000)]);
     const state=row.state==='ambiguous'?'ambiguous':input.state;
     await client.query('UPDATE controlled_actions SET state=$2,result=$3,result_id=$4,updated_at=now() WHERE id=$1',[id,state,content,derived]);
     await client.query('COMMIT');return {id,state};

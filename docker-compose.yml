@@ -142,5 +142,5 @@ volumes:
 
 networks:
   memory:
-    name: nocheh-memory
+    name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
     internal: true

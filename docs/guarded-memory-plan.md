@@ -56,3 +56,25 @@ or embeddings. Retired workspaces and unbound global jobs fail closed. Hermes ha
 no route to the private Honcho network and no Honcho credential. Group/topic workspaces
 contain their own consented sources; approved/filtered cross-space sharing continues
 through the audience-checked archive tools.
+
+G6: edits/mode switches retire old credentials and profiles immediately. Retired
+Honcho workspaces cannot make further reasoning/embedding requests. Native review
+jobs rebuild compact notes from the current consented sources. Old generated archive
+summaries remain owner-visible but are withheld from guarded agent retrieval unless
+bound to the current generation. Unsupported global Honcho reconciliation remains
+blocked; current API/deriver work is explicitly bound.
+
+Detach preserves source data, owner edits and receipts. Attach rebuilds previously
+learned sources in the current representation. `--catch-up` adds consented sources
+received since the previous attachment; `--include-history` includes older approved
+sources. Neither grants import-learning consent. Uncertain old writes are reconciled
+before new ingestion. Missing confirmation remains pending, never a blind resend.
+
+Archive exports include guarded history. `scripts/archive import DIRECTORY
+--restore-guarded` explicitly trusts saved copies from your own export; ordinary
+imports prepare fresh copies. Existing divergent histories produce a conflict.
+Full backups include the new PostgreSQL tables, native state and a snapshot of the
+spending ledger. Inactive restores disable Honcho and use a separate memory network;
+they never replace/reset the live spending ledger. Restore the ledger conservatively
+before any recovery cutover. The archived Honcho source receipts let its disposable
+provider memory be rebuilt; a local edit cannot recall previously transmitted data.

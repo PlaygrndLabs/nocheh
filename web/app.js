@@ -35,18 +35,18 @@ import {GuardedEditor} from './guarded-editor.js';
     return h('div',null,
       h('div',{className:'n-shortcuts'},...[
         ['imports','Bring in a chat','Upload a Telegram export and choose who can use it.'],
-        ['memory','See what Hermes remembers','Read the notes and conversation history for a chat.'],
+        ['memory','Read native working notes','Inspect Hermes notes and conversation history.'],
         ['graph','Follow a connection','Explore links between messages, people and source evidence.']
       ].map(([page,title,note])=>h('a',{href:'#'+page,key:page,className:'n-shortcut'},h('h2',null,title,h('span',{'aria-hidden':true},'↗')),h('p',null,note)))),
       h(Panel,{title:'Where your information lives',note:'Three different jobs, each with its own place in the dashboard.'},
         h('div',{className:'n-explain-grid'},
           h('div',null,h('h3',null,'Original chats'),h('p',null,'Messages, files and revisions preserved in your archive. Search these when you need the original evidence.'),h(RouteLink,{page:'archive'},'Search original chats →')),
           h('div',null,h('h3',null,'Hermes memory'),h('p',null,'Notes Hermes maintains while it works, with separate profiles for your DM and selected groups. Check important claims against their sources.'),h(RouteLink,{page:'memory'},'Read Hermes memory →')),
-          h('div',null,h('h3',null,'Honcho lab'),h('p',null,'An optional, isolated memory experiment. Its data and setup are separate from the Hermes memory used by your assistant.'),h(RouteLink,{page:'honcho'},'View experiment status →')))),
+          h('div',null,h('h3',null,'Honcho memory'),h('p',null,'Primary long-term memory, with source receipts and audience isolation. Attachment waits for the live compatibility checks.'),h(RouteLink,{page:'honcho'},'View memory status →')))),
       error&&h(Panel,{title:'Archive status unavailable'},h('p',{role:'alert'},error),h(RouteLink,{page:'operations'},'Open maintenance →')),
       !data&&!error&&h('p',{role:'status'},'Connecting to your archive…'),
       data&&h(Panel,{title:'Archive activity',note:'Recorded counts and service check-ins. Run diagnostics in Maintenance to check current service health.'},
-        h('div',{className:'n-summary-line'},h('div',null,h('strong',null,Number(data.archive?.events||0).toLocaleString()),h('small',null,'original events preserved')),h('div',null,h('span',{className:'n-badge'},'Guard: '+({auto:'Automatic',on:'On',off:'Off'})[data.guard_mode]),h('small',null,'Selects guarded copies or originals for agents and memory'))),
+        h('div',{className:'n-summary-line'},h('div',null,h('strong',null,Number(data.archive?.events||0).toLocaleString()),h('small',null,'original events preserved')),h('div',null,h('span',{className:'n-badge'},'Guard: '+({on:'On',off:'Off'})[data.guard_mode]),h('small',null,'Selects guarded copies or originals for agents and memory'))),
         ...['artifacts','dispatches','transcriptions','actions'].map(kind=>h('div',{className:'n-row',key:kind},h('b',null,({artifacts:'Files',dispatches:'Assistant replies',transcriptions:'Transcripts',actions:'Approved actions'})[kind]),h('span',null,data.archive?.[kind]?.length?data.archive[kind].map(s=>s.count+' '+friendlyState(s.state).toLowerCase()).join(' · '):'None recorded'))),
         h('p',{className:'n-muted n-afterword'},'Suppressed replies were deliberately skipped, for example for imported history. Open the details below to inspect recorded reasons.'),h('details',null,h('summary',null,'Service check-ins'),...(data.services||[]).map(s=>h('div',{className:'n-row',key:s.service},h('b',null,s.service),h('span',null,'Last seen '+new Date(s.seen_at).toLocaleString())))),
         data.archive?.dispatch_failures?.length>0&&h(Details,{label:'Suppressed or failed replies',value:data.archive.dispatch_failures})),
@@ -149,7 +149,7 @@ import {GuardedEditor} from './guarded-editor.js';
           h('select',{id:'scope-'+c.id,value:(current.mapping||mapping)[c.id]||'',disabled:current.state!=='ready',onChange:e=>{const next={...mapping};if(e.target.value)next[c.id]=e.target.value;else delete next[c.id];setMapping(next);}},
             h('option',{value:''},'Owner-only archive (default)'),...scopes.map(s=>h('option',{value:s,key:s},s===fields.TELEGRAM_OWNER_ID?'Owner DM · '+s:'Share with group · '+s))))),
         h('p',{className:'n-muted'},'Group mapping makes this history available to that group. Import stores originals; it does not automatically rewrite memory.'),
-        h('label',{className:'n-review-consent'},h('input',{type:'checkbox',checked:current.review_approved??reviewApproved,disabled:busy||current.state!=='ready',onChange:e=>setReviewApproved(e.target.checked)}),'Review with Hermes to update private memory'),h('p',{className:'n-muted'},'Optional. Leave unchecked to import searchable originals without starting a memory review. This decision is preserved when resuming.'),h('p',{role:'status'},friendlyState(current.state)+' · '+current.completed+' / '+current.preview.messages+' messages · '+current.duplicates+' duplicates'),
+        h('label',{className:'n-review-consent'},h('input',{type:'checkbox',checked:current.review_approved??reviewApproved,disabled:busy||current.state!=='ready',onChange:e=>setReviewApproved(e.target.checked)}),'Allow this import to be learned by memory'),h('p',{className:'n-muted'},'Optional. This permits native memory review and Honcho learning when attached. Guarding alone does not permit learning. This choice is preserved when resuming.'),h('p',{role:'status'},friendlyState(current.state)+' · '+current.completed+' / '+current.preview.messages+' messages · '+current.duplicates+' duplicates'),
         current.error&&h('p',{role:'alert'},current.error),
         ['ready','failed','cancelled','interrupted'].includes(current.state)&&button(current.completed?'Resume import':'Start import',()=>run(current,'start'),busy,'n-primary'),
         current.state==='running'&&button('Stop import',()=>run(current,'cancel'))),
@@ -223,9 +223,20 @@ import {GuardedEditor} from './guarded-editor.js';
   }
 
   function Honcho({notify}) {
+    const [tick,setTick]=useState(0),[memory,memoryError]=useLoad('/memory/honcho',tick),[history,setHistory]=useState(false),[catchUp,setCatchUp]=useState(false);
+    const connect=async attached=>{try{await call('/memory/honcho',{attached,include_history:history,catch_up:catchUp});setTick(v=>v+1);notify(attached?'Memory attached. Current authorized sources are being prepared.':'Memory detached. Originals and guarded edits are preserved.');}catch(e){notify(errorText(e),true);}};
     const [status,error]=useLoad('/honcho/status'),[workspace,setWorkspace]=useState(''),[kind,setKind]=useState('workspace'),[data,setData]=useState(null),[busy,setBusy]=useState(false);
     const query=async()=>{setBusy(true);setData(null);try{setData(await call('/honcho/read',{args:kind==='workspace'?['workspace','list']:[kind,'list','-w',workspace]}));}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
-    return h('div',null,h(Panel,{title:'Optional memory experiment',note:'Honcho is isolated from your assistant. Hermes remains the memory system used in production.'},
+    return h('div',null,h(Panel,{title:'Primary long-term memory',note:'Honcho recalls learned sources. Hermes keeps compact native working notes. Originals and saved guarded copies remain in Nocheh.'},
+      memoryError&&h('p',{role:'alert'},memoryError),memory&&h('div',null,
+        h('p',{role:'status'},memory.connection.attached?(memory.limited_memory?'Attached · memory is limited while current sources rebuild':'Attached · current memory ready'):'Detached · native notes and archive search remain available'),
+        !memory.connection.verified&&h('p',{className:'n-muted'},'Live Honcho ingestion, recall, reasoning, restart and provider-failure checks are still pending. Attachment is disabled.'),
+        h('label',null,h('input',{type:'checkbox',checked:history,onChange:e=>setHistory(e.target.checked)}),'Include previously consented history when attaching'),
+        h('label',null,h('input',{type:'checkbox',checked:catchUp,onChange:e=>setCatchUp(e.target.checked)}),'Catch up on consented sources received while detached'),
+        h('p',{className:'n-muted'},'Previously learned sources rebuild in the current mode. These options do not approve learning from any new import.'),
+        button(memory.connection.attached?'Detach memory':'Attach memory',()=>connect(!memory.connection.attached),!memory.connection.attached&&!memory.connection.verified),
+        h(Details,{value:{generations:memory.generations,receipts:memory.receipts},label:'Preparation and ingestion receipts'}))),
+      h(Panel,{title:'Connection checks',note:'Pinned local Honcho services use subscription reasoning and a dedicated, capped embeddings route.'},
       error&&h('p',{role:'alert'},error),!status&&!error&&h('p',{role:'status'},'Checking the experiment…'),status&&h('div',null,
         h('p',{className:'n-badge'},status.running?'Experiment services running':'Experiment stopped'),
         h('div',{className:'n-row'},h('b',null,'Live compatibility'),h('span',null,status.live_compatibility)),

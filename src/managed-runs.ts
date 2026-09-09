@@ -104,17 +104,19 @@ export async function finishRun(pool:pg.Pool,input:unknown) {
   if(!['done','failed','cancelled','interrupted'].includes(state))throw new HttpError(400,'invalid_run_state');
   const text=string(body.text??'',1000000),session=identifier(body.session),code=body.error_code?identifier(body.error_code):null;
   const content=Buffer.from(text),provenance={runtime:'hermes',version:'7166071fcaadb36df26f6d753dda97da6b5d699e',session_id:session,state};
-  const resultId=digest(canonical({event,text,provenance,code})),client=await pool.connect();
+  const client=await pool.connect();
   try {
     await client.query('BEGIN');
     const {rows}=await client.query<{state:string;actor:string;result_id:string;cancel_requested:boolean;channel:string;guard_epoch:string|null}>('SELECT r.state,r.actor,r.result_id,r.cancel_requested,r.guard_epoch,e.channel FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE event_id=$1 FOR UPDATE OF r',[event]);
     const row=rows[0];if(!row||row.actor!==actor)throw new HttpError(403,'run_actor_mismatch');
+    const capturedProvenance={...provenance,guard_epoch:row.guard_epoch===null?null:Number(row.guard_epoch)};
+    const resultId=digest(canonical({event,text,provenance:capturedProvenance,code}));
     if(row.state!=='running' && !(row.state==='interrupted' && !row.result_id)) {
       if(row.result_id!==resultId)throw new HttpError(409,'run_result_conflict');
       await client.query('COMMIT');return {event_id:event,state:row.state,duplicate:true};
     }
     await client.query(`INSERT INTO derived_artifacts(id,event_id,kind,content,search_text,provenance) VALUES($1,$2,$6,$3,$4,$5) ON CONFLICT DO NOTHING`,
-      [resultId,event,content,text.replaceAll('\0',''),JSON.stringify(provenance),row.channel==='scheduler'?'scheduled_result':'browser_result']);
+      [resultId,event,content,text.replaceAll('\0',''),JSON.stringify(capturedProvenance),row.channel==='scheduler'?'scheduled_result':'browser_result']);
     // A late durable receipt is retained as evidence, but cannot turn an expired
     // lease into a claim that execution was continuously supervised.
     const current=(await client.query('SELECT epoch FROM guard_state WHERE singleton FOR SHARE')).rows[0];

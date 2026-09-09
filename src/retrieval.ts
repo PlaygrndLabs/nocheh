@@ -6,7 +6,7 @@ import {assertAudience} from './access.js';
 import { type Envelope, digest, envelope, ingest, canonical } from './archive.js';
 import { HttpError, object, string } from './http.js';
 import { storeBytes } from './storage.js';
-import {guardState,guardedValue} from './guarded.js';
+import {guardState,guardedValue,exportGuarded,restoreGuarded} from './guarded.js';
 import {contextAudience,allowPrepared} from './prepared-context.js';
 
 export function limit(value:unknown,fallback=20,max=50):number {
@@ -27,7 +27,7 @@ export async function search(pool:pg.Pool,principal:Reader,query:string,count=20
   if(!principal.admin && (await guardState(pool)).mode==='on') {
     const {rows}=await pool.query(`SELECT e.id,e.scope,e.occurred_at,e.origin,s.kind,s.source_id,r.content,r.revision
       FROM guard_sources s JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision JOIN events e ON e.id=s.event_id
-      WHERE s.state='ready' AND s.kind IN ('events','derived_artifacts') AND ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated'))
+      WHERE s.state='ready' AND e.origin<>'generated' AND (s.kind<>'derived_artifacts' OR EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.id=s.source_id AND (d.kind IN ('transcript','extracted_text','extraction_status') OR d.provenance->>'guard_epoch'=(SELECT epoch::text FROM guard_state WHERE singleton)))) AND s.kind IN ('events','derived_artifacts') AND ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated'))
       AND ($3::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$3))
       AND ($5::text IS NULL OR s.kind<>'derived_artifacts' OR EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.id=s.source_id AND (d.kind<>'runtime_context' OR d.provenance->>'audience'=$5)))
       AND to_tsvector('simple',r.search_text) @@ plainto_tsquery('simple',$1)
@@ -62,6 +62,7 @@ export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
   const derived=await pool.query<{id:string;event_id:string;artifact_id:string|null;kind:string;content:Buffer;provenance:unknown;created_at:Date}>(
     "SELECT id,event_id,artifact_id,kind,content,provenance,created_at FROM derived_artifacts WHERE event_id=$1 AND ($2::text IS NULL OR kind<>'runtime_context' OR provenance->>'audience'=$2) ORDER BY id",[id,principal.scope===null?null:contextAudience(principal)]);
   if(!principal.admin && (await guardState(pool)).mode==='on') {
+    if(row.origin==='generated')throw new HttpError(409,'generated_context_unavailable');
     const selected=await guardedValue(pool,'events:'+id),{wire_base64:_wire,...event}=toEnvelope(row);
     await allowPrepared(pool,principal,selected.value);
     const guardedArtifacts:Record<string,unknown>[]=[],guardedDerived=[];
@@ -70,6 +71,7 @@ export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
       catch(error){if(!(error instanceof HttpError)||error.code!=='guard_preparation_pending')throw error;}
     }
     for(const item of derived.rows) {
+      if(!['transcript','extracted_text','extraction_status'].includes(item.kind)&&String((item.provenance as any)?.guard_epoch)!==String((await guardState(pool)).epoch))continue;
       try {const copy=await guardedValue(pool,'derived_artifacts:'+item.id);await allowPrepared(pool,principal,copy.value);guardedDerived.push({id:item.id,event_id:id,artifact_id:item.artifact_id,kind:copy.value.kind,
         content_base64:Buffer.from(copy.value.text??'').toString('base64'),provenance:copy.value.provenance,created_at:item.created_at.toISOString()});}
       catch(error){if(!(error instanceof HttpError)||error.code!=='guard_preparation_pending')throw error;}
@@ -97,10 +99,10 @@ export async function readArtifact(pool:pg.Pool,principal:Reader,root:string,id:
 export async function exportPage(pool:pg.Pool,after:string,count=20) {
   const ids=await pool.query<{id:string}>('SELECT id FROM events WHERE id>$1 ORDER BY id LIMIT $2',[string(after,64),limit(count,20,50)]);
   const records=[];
-  for (const {id} of ids.rows) records.push(await readEvent(pool,{scope:null,admin:true},id));
+  for (const {id} of ids.rows) records.push({...await readEvent(pool,{scope:null,admin:true},id),guarded:await exportGuarded(pool,id)});
   return {format:'nocheh-archive-v1',records,next:ids.rows.length===count ? ids.rows.at(-1)?.id : null};
 }
-export async function importRecord(pool:pg.Pool,value:unknown) {
+export async function importRecord(pool:pg.Pool,value:unknown,restoreCopies=false) {
   const record=object(value), event=envelope(record.event);
   const artifacts=record.artifacts ?? [], derived=record.derived ?? [];
   if (!Array.isArray(artifacts) || artifacts.length>1000 || !Array.isArray(derived) || derived.length>1000) throw new HttpError(400,'invalid_artifacts');
@@ -128,6 +130,7 @@ export async function importRecord(pool:pg.Pool,value:unknown) {
     await pool.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,provenance,created_at,search_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING`,
       [id,result.id,artifactId,string(d.kind,100),content,JSON.stringify(provenance),d.created_at ?? new Date().toISOString(),content.toString().replaceAll('\0','')]);
   }
+  if(restoreCopies&&record.guarded)await restoreGuarded(pool,result.id,record.guarded);
   return result;
 }
 export function decodeBytes(value:unknown,max=50*1024*1024):Buffer {
