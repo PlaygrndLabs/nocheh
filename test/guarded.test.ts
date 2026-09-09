@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest,digest,type Envelope} from '../src/archive.js';
-import {guardedValue,prepareGuarded} from '../src/guarded.js';
+import {guardedValue,prepareGuarded,editGuarded,guardedHistory,inspectGuarded,inspectRevision,browseData} from '../src/guarded.js';
 
 test('PostgreSQL guarded projections preserve originals, survive retries/restarts, and never authorize learning',{skip:!process.env.PGHOST},async()=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
@@ -41,5 +41,28 @@ test('PostgreSQL guarded projections preserve originals, survive retries/restart
     await prepareGuarded(pool,async text=>{assert.ok(!completed.includes(text),'completed chunks are reused after partial failure');return [];});
     assert.equal((await guardedValue(pool,'events:'+second.id)).value.text,long);
     assert.equal((await pool.query('SELECT original_text FROM events WHERE id=$1',[digest('long')])).rows[0].original_text.toString(),long);
+    const owner={admin:true,scope:null},agent={admin:false,scope:null},sourceId='events:'+id;
+    assert.equal((await browseData(pool,owner)).records.length,2);
+    for(const operation of [()=>inspectGuarded(pool,agent,id),()=>guardedHistory(pool,agent,id,sourceId),()=>editGuarded(pool,agent,id,{})])await assert.rejects(operation(),{code:'owner_required'});
+    const replacement={text:'I deliberately retained planted-SECRET',payload:{text:'owner wording'}};
+    const edited=await editGuarded(pool,owner,id,{source_id:sourceId,expected_revision:1,content:replacement});
+    assert.equal(edited.revision,2);
+    assert.deepEqual((await guardedValue(pool,sourceId)).value,replacement,'owner text is not re-masked');
+    await assert.rejects(editGuarded(pool,owner,id,{source_id:sourceId,expected_revision:1,content:replacement}),{code:'guard_revision_conflict'});
+    assert.equal((await guardedHistory(pool,owner,id,sourceId)).revisions.length,2);
+    assert.equal((await inspectRevision(pool,owner,id,sourceId,1)).content.text,original.replace('planted-SECRET','***'));
+    await editGuarded(pool,owner,id,{source_id:sourceId,expected_revision:2,restore_revision:1});
+    assert.equal((await guardedValue(pool,sourceId)).revision,3);
+    assert.equal((await pool.query('SELECT count(*) FROM guard_invalidations')).rows[0].count,'2');
+    assert.equal((await pool.query('SELECT original_text FROM events WHERE id=$1',[id])).rows[0].original_text.toString(),original);
+    const racing=await ingest(pool,{...event,key:'racing',text:'new guarded copy',payload:{}},false);
+    let started!:()=>void,resume!:()=>void;
+    const begun=new Promise<void>(r=>{started=r;}),hold=new Promise<void>(r=>{resume=r;});
+    const work=prepareGuarded(pool,async()=>{started();await hold;return [];});
+    await begun;
+    await editGuarded(pool,owner,racing.id,{source_id:'events:'+racing.id,expected_revision:null,content:{text:'owner wins',payload:{}}});
+    resume();await work;
+    assert.equal((await guardedValue(pool,'events:'+racing.id)).value.text,'owner wins');
+    await prepareGuarded(pool,async()=>{throw new Error('must not reprocess');});
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });

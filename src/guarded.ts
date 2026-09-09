@@ -1,7 +1,8 @@
 import type pg from 'pg';
 import {canonical,digest} from './archive.js';
 import {DETECTOR_VERSION,literalSpans,mask,patternSpans} from './guard.js';
-import {HttpError} from './http.js';
+import {HttpError,object,string} from './http.js';
+import {admin,type Reader} from './access.js';
 
 // The archive is evidence. These independently versioned projections are disposable
 // except for owner revisions, which must be retained and never overwritten by jobs.
@@ -156,4 +157,72 @@ export async function guardedValue(pool:pg.Pool,id:string) {
   const {rows}=await pool.query(`SELECT r.content,r.revision FROM guard_sources s JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision WHERE s.id=$1 AND s.state='ready'`,[id]);
   if(!rows[0])throw new HttpError(409,'guard_preparation_pending');
   return {value:JSON.parse(rows[0].content.toString()),revision:rows[0].revision as number};
+}
+
+export async function inspectGuarded(pool:pg.Pool,principal:Reader,eventId:string) {
+  admin(principal);
+  const {rows}=await pool.query(`SELECT s.id,s.kind,s.source_id,s.state,s.active_revision,s.error_code,r.author,r.content,r.created_at
+    FROM guard_sources s LEFT JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision WHERE s.event_id=$1 ORDER BY s.id`,[string(eventId,64)]);
+  if(!rows.length)throw new HttpError(404,'source_not_found');
+  return {event_id:eventId,projections:rows.map(({content,...row})=>({...row,content:content?JSON.parse(content.toString()):null}))};
+}
+
+export async function guardedHistory(pool:pg.Pool,principal:Reader,eventId:string,sourceId:string,before=2147483647) {
+  admin(principal);
+  if(!Number.isSafeInteger(before)||before<1)throw new HttpError(400,'invalid_revision');
+  const {rows}=await pool.query(`SELECT r.revision,r.author,r.preparation_version,r.created_at FROM guard_revisions r JOIN guard_sources s ON s.id=r.source_id
+    WHERE s.event_id=$1 AND s.id=$2 AND r.revision<$3 ORDER BY r.revision DESC LIMIT 51`,[string(eventId,64),string(sourceId,256),before]);
+  return {revisions:rows.slice(0,50),next:rows.length>50?rows[49].revision:null};
+}
+
+export async function inspectRevision(pool:pg.Pool,principal:Reader,eventId:string,sourceId:string,revision:number) {
+  admin(principal);
+  if(!Number.isSafeInteger(revision)||revision<1)throw new HttpError(400,'invalid_revision');
+  const {rows}=await pool.query(`SELECT r.revision,r.author,r.content FROM guard_revisions r JOIN guard_sources s ON s.id=r.source_id
+    WHERE s.event_id=$1 AND s.id=$2 AND r.revision=$3`,[string(eventId,64),string(sourceId,256),revision]);
+  if(!rows[0])throw new HttpError(404,'guard_revision_missing');
+  return {...rows[0],content:JSON.parse(rows[0].content.toString())};
+}
+
+export async function editGuarded(pool:pg.Pool,principal:Reader,eventId:string,input:unknown) {
+  admin(principal);const body=object(input),id=string(body.source_id,256),expected=body.expected_revision;
+  if(expected!==null&&(!Number.isSafeInteger(expected)||Number(expected)<1))throw new HttpError(400,'invalid_revision');
+  if(('restore_revision' in body)===('content' in body))throw new HttpError(400,'guard_edit_required');
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const source=(await client.query('SELECT * FROM guard_sources WHERE event_id=$1 AND id=$2 FOR UPDATE',[string(eventId,64),id])).rows[0];
+    if(!source)throw new HttpError(404,'source_not_found');
+    if(source.active_revision!==expected)throw new HttpError(409,'guard_revision_conflict');
+    let content=body.content;
+    if('restore_revision' in body) {
+      if(!Number.isSafeInteger(body.restore_revision)||Number(body.restore_revision)<1)throw new HttpError(400,'invalid_revision');
+      const old=(await client.query('SELECT content FROM guard_revisions WHERE source_id=$1 AND revision=$2',[id,body.restore_revision])).rows[0];
+      if(!old)throw new HttpError(404,'guard_revision_missing');
+      content=JSON.parse(old.content.toString());
+    }
+    const value=object(content);
+    if(source.kind==='events') {if(value.text!==null)string(value.text,2000000);object(value.payload);}
+    else if(source.kind==='artifacts'){string(value.kind,100);object(value.metadata);}
+    else {string(value.text,4000000);string(value.kind,100);object(value.provenance);}
+    const serialized=canonical(value);
+    if(Buffer.byteLength(serialized)>8*1024*1024)throw new HttpError(413,'guard_edit_too_large');
+    const original=source.input?JSON.parse(source.input.toString()):await sourceInput(client,source);
+    const inputHash=digest(canonical(original)),revision=(expected as number|null??0)+1;
+    await client.query(`INSERT INTO guard_revisions(id,source_id,revision,content,search_text,input_hash,author,preparation_version)
+      VALUES($1,$2,$3,$4,$5,$6,'owner','owner-edit-v1')`,[digest(id+':'+revision),id,revision,Buffer.from(serialized),textValues(value).join('\n').replaceAll('\0',''),inputHash]);
+    await client.query("UPDATE guard_sources SET state='ready',input=$2,input_hash=$3,active_revision=$4,error_code=NULL WHERE id=$1",[id,Buffer.from(canonical(original)),inputHash,revision]);
+    const epoch=(await client.query('UPDATE guard_state SET epoch=epoch+1 RETURNING epoch')).rows[0].epoch;
+    await client.query('INSERT INTO guard_invalidations(source_id,epoch) VALUES($1,$2)',[id,epoch]);
+    await client.query('COMMIT');return {source_id:id,revision,epoch:Number(epoch)};
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}
+
+export async function browseData(pool:pg.Pool,principal:Reader,after='') {
+  admin(principal);
+  const {rows}=await pool.query(`SELECT e.id,e.scope,e.kind,e.original_text,e.received_at,
+    (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id AND s.state='ready') AS ready,
+    (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id) AS total
+    FROM events e WHERE e.id>$1 ORDER BY e.id LIMIT 51`,[string(after,64)]);
+  return {records:rows.slice(0,50).map(({original_text,...row})=>({...row,text:original_text?.toString().slice(0,500)??null})),next:rows.length>50?rows[49].id:null};
 }
