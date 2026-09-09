@@ -1,12 +1,12 @@
 # Guarded projections and primary Honcho memory (ADR-0033)
 
 Owner-approved replacement plan: [guarded-memory-plan.md](docs/guarded-memory-plan.md).
-These phases are distinct from the earlier runtime-platform phases below.
+These phases are distinct from the earlier runtime-platform phases below. G1 commit: `7d474a1`.
 
 | Phase | Actual status |
 | --- | --- |
 | G1 — Durable guarded versions | Complete; 42 JS/TS checks and 91 pinned Hermes Python checks pass; new routing inactive |
-| G2 — Owner dashboard editor | Pending |
+| G2 — Owner dashboard editor | Complete; owner API, conflict/race tests and synthetic browser edit/history/restore pass |
 | G3 — On/off throughout | Pending |
 | G4 — Live Honcho connection | Pending; dedicated credentials required |
 | G5 — Primary Honcho memory | Pending |

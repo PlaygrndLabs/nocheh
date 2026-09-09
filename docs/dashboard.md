@@ -367,3 +367,17 @@ A minimal job file is `{"name":"Daily review","prompt":"Review today's archived 
 The native parser uses the profile's Hermes timezone; ISO dates include their UTC
 offset. Reuse the same request ID only when retrying the same manual request.
 Custom skills/scripts, alternate providers and topic schedules are not enabled.
+
+## Original and guarded versions (ADR-0033)
+
+Archive now browses all records without requiring a search. Open a source to see
+its read-only original beside the separate guarded copy, including derived text
+and file metadata. Save guarded wording directly; matching copies of the message
+text are updated together. Other guarded fields can be inspected and edited too.
+History lets you inspect an old revision and restore it as a new owner revision.
+Concurrent saves require refresh and comparison; preparation never overwrites an
+owner revision. Original file downloads remain read only.
+
+The editor/storage increment precedes runtime activation. See TASK.md G3 for the
+on/off enforcement gate; the presence of a guarded copy alone does not prove the
+running assistant uses it.

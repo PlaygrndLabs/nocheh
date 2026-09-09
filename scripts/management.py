@@ -68,6 +68,19 @@ def dispatch(body):
         except urllib.error.HTTPError as error:
             if error.code == 409: raise ValueError('configuration_conflict') from None
             raise
+    if operation == 'archive.projections':
+        from .archive import API
+        from urllib.parse import urlsplit
+        import re
+        import urllib.error
+        path=body['path'];parsed=urlsplit(path)
+        if parsed.scheme or parsed.netloc or not (parsed.path=='/v1/data' or re.fullmatch(r'/v1/data/[a-f0-9]{64}/guarded(?:/history)?',parsed.path)):
+            raise ValueError('archive_route_denied')
+        if 'body' in body and not re.fullmatch(r'/v1/data/[a-f0-9]{64}/guarded',parsed.path): raise ValueError('archive_route_denied')
+        try: return API().call(path,body.get('body'))
+        except urllib.error.HTTPError as error:
+            if error.code==409: raise ValueError('guard_revision_conflict') from None
+            raise ValueError('guarded_data_unavailable') from None
     if operation == 'archive.read':
         from .archive import API
         from urllib.parse import urlsplit

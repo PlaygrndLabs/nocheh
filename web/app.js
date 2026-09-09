@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
 import {fetchJSON,authedFetch} from './client.js';
+import {GuardedEditor} from './guarded-editor.js';
 
 (() => {
   const sdk = {React,fetchJSON,authedFetch};
@@ -160,10 +161,13 @@ import {fetchJSON,authedFetch} from './client.js';
     const [query,setQuery]=useState(''),[results,setResults]=useState(null),[record,setRecord]=useState(null),[busy,setBusy]=useState(false);
     const search=async e=>{e.preventDefault();setBusy(true);try{setResults(await call('/search?q='+encodeURIComponent(query)));setRecord(null);}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     const read=async id=>{try{setRecord(await call('/events/'+id));}catch(e){notify(errorText(e),true);}};
-    const rows=Array.isArray(results)?results:results?.results||results?.items||[];
+    const [browse,browseError]=useLoad('/data');
+    const more=async()=>{try{setResults(await call('/data?after='+encodeURIComponent(results?.next??browse?.next??'')));}catch(e){notify(errorText(e),true);}};
+    const rows=Array.isArray(results)?results:results?.records||results?.results||results?.items||browse?.records||[];
     return h('div',null,h(Panel,{title:'Find an original message',note:'Search preserved chat messages and generated text such as transcripts across all chats. Open a result to see its original source, files and provenance.'},
       h('form',{className:'n-actions',onSubmit:search},h('label',{className:'n-grow'},'Search terms',h('input',{value:query,onChange:e=>setQuery(e.target.value),required:true})),h('button',{disabled:busy},busy?'Searching…':'Search')),
-      results===null&&h('p',{className:'n-empty'},'Search a word or phrase from a conversation. To add older history, use Import chats.'),results&&(!rows.length?h('p',null,'No matching messages.'):h('div',{className:'n-list'},...rows.map(r=>h('article',{className:'n-result',key:r.id||r.event_id},h('small',null,(r.derived_id?'Generated text match':'Original message')+' · '+r.scope),h('p',{dir:'auto'},r.text||r.snippet||r.preview),button('Open source',()=>read(r.id||r.event_id))))))),
+      browseError&&h('p',{role:'alert'},browseError),results===null&&h('p',{className:'n-muted'},'Browse all archived records, including messages without text, or search above.'),!rows.length?h('p',null,'No records on this page.'):h('div',{className:'n-list'},...rows.map(r=>h('article',{className:'n-result',key:(r.id||r.event_id)+':'+(r.derived_id??'')},h('small',null,(r.derived_id?'Generated text match':'Original record')+' · '+r.scope),h('p',{dir:'auto'},r.text||r.snippet||r.preview||'(No message text)'),r.total!==undefined&&h('small',null,r.ready+' / '+r.total+' guarded copies ready'),button('Open source and guarded copy',()=>read(r.id||r.event_id))))),
+      (results?.next||(results===null&&browse?.next))&&button('Next records',more)),
       record&&h(Source,{record,notify}));
   }
 
@@ -241,11 +245,11 @@ import {fetchJSON,authedFetch} from './client.js';
   }
   function exportJSON(value,name){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
   function Source({record,notify}){
-    return h(Panel,{title:'Original source'},h('p',{dir:'auto',className:'n-source'},record.event?.text),
+    return h('div',null,h(GuardedEditor,{key:record.id,record,call,notify}),h(Panel,{title:'Original source and files'},h('p',{dir:'auto',className:'n-source'},record.event?.text),
       button('Download source JSON',()=>exportJSON(record,'nocheh-source-'+record.id+'.json')),
       ...record.artifacts.map(a=>h('div',{className:'n-row',key:a.id},h('span',null,a.metadata?.relative_path||a.metadata?.file_name||a.kind),h('small',null,a.state),button('Download original file',()=>download('/artifacts/'+a.id+'/download',a.metadata?.relative_path?.split('/').pop()||a.metadata?.file_name||a.id,notify),a.state!=='ready'))),
       ...record.derived.map(d=>h('article',{key:d.id},h('h3',null,d.kind==='browser_result'?'Assistant result':d.kind==='transcript'?'Voice transcript':'Generated '+d.kind.replaceAll('_',' ')),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(d.content_base64),c=>c.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:d.provenance})))),
-      h('details',null,h('summary',null,'Source identity and complete metadata'),h(Data,{value:record})));
+      h('details',null,h('summary',null,'Source identity and complete metadata'),h(Data,{value:record}))));
   }
   const graphKinds = {scope:'Scope',profile:'Profile',message:'Message',author:'Author',attachment:'File',memory:'Memory',derived:'Derived'};
   function GraphSpace({data, selectedId, matchingIds, choose}) {

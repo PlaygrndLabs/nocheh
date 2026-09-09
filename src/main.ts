@@ -11,6 +11,7 @@ import { startWorker } from './worker.js';
 import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import { guardPayload } from './guard.js';
+import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision} from './guarded.js';
 import { requestAction,telegramActions,decideTelegram } from './actions.js';
 import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,finishControlled} from './controlled-actions.js';
 import { reader, admin,assertAudience } from './access.js';
@@ -101,6 +102,14 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
+  if(config.service==='archive' && path==='/v1/data' && req.method==='GET')return json(res,200,await browseData(pool,principal,url.searchParams.get('after')??''));
+  const projection=path.match(/^\/v1\/data\/([a-f0-9]{64})\/guarded(?:\/(history))?$/);
+  if(config.service==='archive' && projection) {
+    if(req.method==='GET' && projection[2] && url.searchParams.has('revision'))return json(res,200,await inspectRevision(pool,principal,projection[1]!,url.searchParams.get('source_id')??'',Number(url.searchParams.get('revision'))));
+    if(req.method==='GET' && projection[2])return json(res,200,await guardedHistory(pool,principal,projection[1]!,url.searchParams.get('source_id')??'',Number(url.searchParams.get('before')??2147483647)));
+    if(req.method==='GET')return json(res,200,await inspectGuarded(pool,principal,projection[1]!));
+    if(req.method==='POST' && !projection[2])return json(res,200,await editGuarded(pool,principal,projection[1]!,await readJson(req,8*1024*1024)));
+  }
   if(config.service==='archive'&&req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
     const body=await readJson(req);
     if(path==='/v1/scheduler/input')return json(res,200,await captureInput(pool,config,body,'scheduler'));

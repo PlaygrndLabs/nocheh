@@ -84,7 +84,7 @@ function python(body: unknown, progress?: (value: Record<string, unknown>) => vo
     child.on('error', () => { clearTimeout(timer); reject(new HttpError(503, 'operation_unavailable')); });
     child.on('close', code => {
       clearTimeout(timer);
-      if (code || failure || result === undefined) reject(new HttpError(failure==='configuration_conflict'?409:400, failure ?? 'operation_interrupted'));
+      if (code || failure || result === undefined) reject(new HttpError(['configuration_conflict','guard_revision_conflict'].includes(failure??'')?409:400, failure ?? 'operation_interrupted'));
       else accept(result);
     });
     child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(body));
@@ -243,6 +243,10 @@ export async function startManagement() {
         }catch(error){operationBusy=false;throw error;}
       });
       if (req.method === 'GET' && route === '/status') return json(res, 200, await archive('/v1/status'));
+      if ((req.method==='GET'||req.method==='POST') && (route==='/data'||/^\/data\/[a-f0-9]{64}\/guarded(?:\/history)?$/.test(route))) {
+        return json(res,200,await python({operation:'archive.projections',path:'/v1'+route+url.search,
+          ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
+      }
       if (req.method === 'GET' && route === '/search') return json(res, 200, await archive('/v1/search?' + url.searchParams.toString()));
       if (req.method === 'GET' && route.startsWith('/events/')) return json(res, 200, await archive('/v1' + route));
       if (req.method === 'GET' && route === '/jobs') return json(res, 200, await listJobs());

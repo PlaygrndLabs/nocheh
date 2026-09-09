@@ -137,3 +137,4 @@ html,body,#root{margin:0;min-height:100%;background:#f5f6f8}body{font-family:sys
 .nocheh-app button.n-primary:hover{background:#194f45;border-color:#194f45;color:white}
 .nocheh-app .n-mobile-navigation{display:none}
 @media(max-width:600px){.n-sidebar nav{display:none}.nocheh-app .n-mobile-navigation{display:block;font-size:12px}.n-mobile-navigation select{margin-bottom:0}}
+.n-guard-comparison{display:grid;grid-template-columns:1fr 1fr;gap:24px}.n-guard-comparison>section{min-width:0}.n-guard-comparison textarea{width:100%;resize:vertical}.n-projection+.n-projection{margin-top:28px;padding-top:20px;border-top:1px solid var(--n-line)}.n-guard-comparison h4{margin:8px 0 16px}.n-guard-comparison pre{max-height:380px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}@media(max-width:850px){.n-guard-comparison{grid-template-columns:1fr}}
