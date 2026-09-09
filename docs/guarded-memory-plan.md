@@ -32,13 +32,16 @@ The [preflight report](../compatibility/results/2026-09-09-honcho-preflight.json
 keeps every real memory/provider gate pending. Later independent code can be built,
 but primary-memory attachment must remain disabled until those gates pass.
 
-Use only `NOCHEH_EMBEDDING_API_KEY` in the root `.env` or the dedicated experiment
-credential file. CLIProxyAPI owns a separate device login (`scripts/honcho-experiment
+ADR-0034 configures `OPENAI_API_KEY`, `NOCHEH_EMBEDDING_PROVIDER` and
+`NOCHEH_EMBEDDING_MODEL` in root `.env`; the old dedicated key name is a migration
+alias. CLIProxyAPI owns a separate device login (`scripts/honcho-experiment
 login`); Hermes/Codex OAuth stores are not copied. The model route remains subscription
-only. Embeddings use text-embedding-3-small at 1536 dimensions. The published
+only. Default embeddings use text-embedding-3-small at 1536 dimensions. The published
 [$0.02 per million input tokens](https://developers.openai.com/api/docs/models/text-embedding-3-small)
 was checked on 2026-09-09; the meter reserves a conservative $0.01 before each bounded
-request, retaining the reservation after failures. Pilot total is $5. Monthly mode
+request, retaining the reservation after failures. Selecting text-embedding-3-large
+uses a $0.02 reservation and retains 1536 dimensions; existing vectors cannot be
+silently mixed across models. Pilot total is $5. Monthly mode
 is a durable post-pilot cutover, limited to $5 per UTC calendar month.
 
 G5: Nocheh owns the only Honcho ingestion path. Hermes loads only the Nocheh

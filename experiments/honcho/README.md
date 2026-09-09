@@ -26,13 +26,11 @@ credentials and subscription refresh tokens are not shared.
 ## Reproduce
 
 ```bash
+# Set OPENAI_API_KEY, NOCHEH_EMBEDDING_PROVIDER and NOCHEH_EMBEDDING_MODEL in root .env.
 ./scripts/honcho-experiment init
 ./scripts/honcho-experiment test
 ./scripts/honcho-experiment up
 ./scripts/honcho-experiment login
-# Save the explicitly authorized temporary embedding key in:
-# data/honcho-experiment/temporary_embedding_key (mode 0600)
-./scripts/honcho-experiment up
 ./scripts/honcho-experiment run
 ./scripts/honcho-experiment down
 ```
@@ -56,21 +54,28 @@ not automatically retried after an uncertain response.
 
 ## Spending bound and results
 
-Only `/v1/embeddings` with `text-embedding-3-small` can use the temporary key.
-Each request is bounded to 131,072 input bytes/tokens and reserves **$0.01 before
-sending**, durably and under a database lock. The fixed total limit is **$5 across
-all runs and restarts**, with at most 500 paid attempts. Reservations are never
+Only `/v1/embeddings` with the configured reviewed model can use `OPENAI_API_KEY`.
+Root `.env` selects `NOCHEH_EMBEDDING_PROVIDER=openai` and
+`NOCHEH_EMBEDDING_MODEL=text-embedding-3-small` (default) or `text-embedding-3-large`.
+Each request is bounded to 131,072 input bytes/tokens and reserves **$0.01 for small
+or $0.02 for large before sending**, durably and under a database lock. The fixed
+pilot limit is **$5 across all runs and restarts**, with at most 500 small-model or
+250 large-model paid attempts. Reservations are never
 refunded, including rejected and timed-out requests. Reasoning uses only the
 subscription bridge and a fixed model; there is no paid reasoning fallback.
 
-The reviewed model price is $0.02 per million input tokens (2026-09-07), so the
-input bound costs at most $0.002622 per embedding request at that price. Recheck
-the [official model price](https://developers.openai.com/api/docs/models/text-embedding-3-small)
+The reviewed prices (2026-09-09) are $0.02 per million input tokens for
+[small](https://developers.openai.com/api/docs/models/text-embedding-3-small) and
+$0.13 for [large](https://developers.openai.com/api/docs/models/text-embedding-3-large),
+so the bound costs at most $0.002622 or $0.017040 respectively. Recheck those prices
 before a later live run if pricing changes. The ledger records response usage and
 latency, while reservations deliberately overstate charges. Provider billing is
 the authority for actual invoiced spend. Never delete or replace
 `data/honcho-experiment/ledger/budget.sqlite` to continue an exhausted experiment.
 `down` preserves the ledger and database; it has no volume-deletion option.
+The first paid attempt binds the embedding model. Switching an existing memory to
+another model requires a rebuild; the gateway blocks mismatches. Both models request
+1536 dimensions. No paid key is passed into the Honcho API, deriver or reasoning bridge.
 
 Reports under `data/honcho-experiment/reports/` contain source ID mappings, native
 store/bridge/deriver checks, answers, literal answer matches, source-label matches,
