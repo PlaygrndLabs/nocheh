@@ -18,6 +18,12 @@ def initialize():
         path=STATE/name
         if not path.exists(): path.write_text('' if name=='temporary_embedding_key' else secrets.token_hex(32))
         path.chmod(0o600)
+    # Only the owner-designated embedding key. Never use unrelated provider keys.
+    from scripts.configuration import read_env
+    dedicated=read_env(ROOT/'.env').get('NOCHEH_EMBEDDING_API_KEY','').strip()
+    if dedicated:
+        (STATE/'temporary_embedding_key').write_text(dedicated)
+        (STATE/'temporary_embedding_key').chmod(0o600)
     token=(STATE/'internal_token').read_text().strip()
     password=(STATE/'database_password').read_text().strip()
     (STATE/'compose.env').write_text(f'NOCHEH_UID={os.getuid()}\nNOCHEH_GID={os.getgid()}\nHONCHO_EXPERIMENT_DOCKERFILE={STATE}/honcho.Dockerfile\nBRIDGE_EXPERIMENT_DOCKERFILE={STATE}/bridge.Dockerfile\n')

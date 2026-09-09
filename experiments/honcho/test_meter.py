@@ -21,6 +21,33 @@ class Transport:
 
 
 class BudgetTests(unittest.TestCase):
+    def test_monthly_cutover_is_durable_and_does_not_erase_pilot(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path)
+            for _ in range(500): ledger.reserve('/v1/embeddings',b'pilot')
+            ledger.enable_monthly();ledger.reserve('/v1/embeddings',b'monthly')
+            ledger=Ledger(path);ledger.enable_monthly()
+            self.assertEqual(ledger.report()['mode'],'monthly')
+            self.assertEqual(ledger.report()['reserved_usd'],.01)
+            self.assertEqual(ledger.report()['lifetime_reserved_usd'],5.01)
+            for _ in range(499): ledger.reserve('/v1/embeddings',b'monthly')
+            with self.assertRaisesRegex(Rejected,'monthly_budget_exhausted'): ledger.reserve('/v1/embeddings',b'exhausted')
+
+    def test_embedding_egress_uses_prepared_wording_and_rejects_retired_context(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
+            def prepare(workspace,route,payload):
+                if workspace!='current': raise Rejected('memory_context_retired')
+                return {**payload,'input':'Database credentials are in my password manager.'}
+            egress=Egress(ledger,'internal','dedicated',transport,prepare)
+            payload={'model':'text-embedding-3-small','input':'Database password: planted-secret'}
+            egress.send('/v1/embeddings',payload,'current')
+            self.assertNotIn(b'planted-secret',transport.calls[0].data)
+            self.assertIn(b'password manager',transport.calls[0].data)
+            with self.assertRaises(Rejected): egress.send('/v1/embeddings',payload,'retired')
+            with self.assertRaises(Rejected): egress.send('/v1/embeddings',payload)
+            self.assertEqual(len(transport.calls),1)
+
     def test_concurrent_budget_restart_and_zero_egress(self):
         with tempfile.TemporaryDirectory() as root:
             ledger=Ledger(Path(root)/'budget.sqlite');transport=Transport()

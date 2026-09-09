@@ -24,3 +24,19 @@ Accepted plan: ADR-0033. TASK.md records actual completion and evidence.
 Each phase: appropriate tests, AST-only Graphify refresh, status/docs, scoped commit,
 report hash and proceed automatically. Keep live gates pending when credentials or
 evidence are missing; continue independent work. Do not activate incomplete routing.
+
+G4 implementation evidence: both pinned images build and isolated Compose starts.
+Nine pinned-image checks cover API/worker context binding, embedding preparation,
+provider failure, conservative reservations and durable pilot/monthly cutover.
+The [preflight report](../compatibility/results/2026-09-09-honcho-preflight.json)
+keeps every real memory/provider gate pending. Later independent code can be built,
+but primary-memory attachment must remain disabled until those gates pass.
+
+Use only `NOCHEH_EMBEDDING_API_KEY` in the root `.env` or the dedicated experiment
+credential file. CLIProxyAPI owns a separate device login (`scripts/honcho-experiment
+login`); Hermes/Codex OAuth stores are not copied. The model route remains subscription
+only. Embeddings use text-embedding-3-small at 1536 dimensions. The published
+[$0.02 per million input tokens](https://developers.openai.com/api/docs/models/text-embedding-3-small)
+was checked on 2026-09-09; the meter reserves a conservative $0.01 before each bounded
+request, retaining the reservation after failures. Pilot total is $5. Monthly mode
+is a durable post-pilot cutover, limited to $5 per UTC calendar month.

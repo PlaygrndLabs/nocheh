@@ -9,6 +9,8 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from datetime import datetime, timezone
+from contextlib import contextmanager
 
 MODEL = 'text-embedding-3-small'
 REASONING_MODEL = 'gpt-5.6-sol'
@@ -26,19 +28,36 @@ class Ledger:
         self.path = str(path)
         with self.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY, route TEXT, digest TEXT, reserved INTEGER, started REAL, status INTEGER, duration_ms INTEGER, usage TEXT)')
+            db.execute("CREATE TABLE IF NOT EXISTS policy(id INTEGER PRIMARY KEY CHECK(id=1),monthly_since REAL)")
+            db.execute('INSERT OR IGNORE INTO policy(id,monthly_since) VALUES(1,NULL)')
 
+    def enable_monthly(self):
+        # An explicit post-pilot cutover, persisted once; restart cannot reset it.
+        with self.connect() as db:
+            db.execute('UPDATE policy SET monthly_since=coalesce(monthly_since,?) WHERE id=1',(time.time(),))
+
+    def window(self, db):
+        since=db.execute('SELECT monthly_since FROM policy WHERE id=1').fetchone()[0]
+        if since is None: return 0, 'pilot'
+        month=datetime.now(timezone.utc).replace(day=1,hour=0,minute=0,second=0,microsecond=0).timestamp()
+        return max(since,month), 'monthly'
+
+    @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=20)
         db.execute('PRAGMA synchronous=FULL')
-        return db
+        try:
+            with db: yield db
+        finally: db.close()
 
     def reserve(self, route, body):
         amount = RESERVATION if route == '/v1/embeddings' else 0
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            total, count = db.execute('SELECT coalesce(sum(reserved),0),count(*) FROM calls').fetchone()
+            start,mode=self.window(db)
+            total, count = db.execute('SELECT coalesce(sum(reserved),0),count(*) FROM calls WHERE started>=?',(start,)).fetchone()
             if total + amount > LIMIT_MICRODOLLARS or count >= 1500:
-                raise Rejected('experiment_budget_exhausted')
+                raise Rejected('experiment_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
             return db.execute('INSERT INTO calls(route,digest,reserved,started) VALUES(?,?,?,?)',
                 (route, hashlib.sha256(body).hexdigest(), amount, time.time())).lastrowid
 
@@ -51,7 +70,9 @@ class Ledger:
         with self.connect() as db:
             db.row_factory = sqlite3.Row
             calls = [dict(row) for row in db.execute('SELECT * FROM calls ORDER BY id')]
-        return {'limit_usd': 5, 'reserved_usd': sum(c['reserved'] for c in calls)/1e6,
+            start,mode=self.window(db)
+        return {'limit_usd': 5, 'mode':mode,'reserved_usd': sum(c['reserved'] for c in calls if c['started']>=start)/1e6,
+                'lifetime_reserved_usd':sum(c['reserved'] for c in calls)/1e6,
                 'pricing_usd_per_million_embedding_tokens': PRICE_PER_MILLION,
                 'note': 'Reservations are conservative, not a provider invoice; unfinished calls remain reserved.', 'calls': calls}
 
@@ -91,12 +112,16 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Egress:
-    def __init__(self, ledger, token, paid_key, opener=None):
+    def __init__(self, ledger, token, paid_key, opener=None, prepare=None):
         self.ledger,self.token,self.paid_key = ledger,token,paid_key
         self.opener=opener or urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+        self.prepare=prepare
 
-    def send(self, route, payload):
+    def send(self, route, payload, workspace=None):
         payload=validate(route,payload)
+        if self.prepare:
+            if not isinstance(workspace,str) or not workspace: raise Rejected('memory_context_required')
+            payload=validate(route,self.prepare(workspace,route,payload))
         paid=route=='/v1/embeddings'
         if paid and not self.paid_key: raise Rejected('temporary_embedding_key_missing')
         data=json.dumps(payload,ensure_ascii=False).encode()
@@ -145,15 +170,32 @@ def handler(egress):
             try:
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0 < length <= 1024*1024 or self.headers.get('Transfer-Encoding'): raise Rejected('request_bound_exceeded')
-                status,kind,body=egress.send(self.path,json.loads(self.rfile.read(length)))
+                status,kind,body=egress.send(self.path,json.loads(self.rfile.read(length)),self.headers.get('X-Nocheh-Workspace'))
             except (Rejected,ValueError) as error:
                 status,kind,body=403,'application/json',json.dumps({'error':{'message':str(error) if isinstance(error,Rejected) else 'invalid_json'}}).encode()
             self.respond(status,kind,body)
     return Handler
 
 
+class ArchivePreparation:
+    def __init__(self,url,token):
+        self.url=url.rstrip('/')+'/internal/honcho/prepare';self.token=token
+        self.opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+    def __call__(self,workspace,route,payload):
+        request=urllib.request.Request(self.url,data=json.dumps({'workspace':workspace,'route':route,'payload':payload}).encode(),
+            headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
+        try:
+            with self.opener.open(request,timeout=180) as response:
+                content=response.read(2*1024*1024+1)
+                if len(content)>2*1024*1024: raise ValueError()
+                return json.loads(content)['payload']
+        except Exception: raise Rejected('memory_preparation_unavailable') from None
+
+
 if __name__=='__main__':
     token=Path('/state/internal_token').read_text().strip()
     paid=Path('/run/secrets/temporary_embedding_key').read_text().strip()
     if not token: raise SystemExit('internal_token_missing')
-    ThreadingHTTPServer(('0.0.0.0',8790),handler(Egress(Ledger('/ledger/budget.sqlite'),token,paid))).serve_forever()
+    archive=os.environ.get('NOCHEH_ARCHIVE_URL')
+    prepare=ArchivePreparation(archive,token) if archive else None
+    ThreadingHTTPServer(('0.0.0.0',8790),handler(Egress(Ledger('/ledger/budget.sqlite'),token,paid,prepare=prepare))).serve_forever()

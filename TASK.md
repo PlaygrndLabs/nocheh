@@ -8,7 +8,7 @@ These phases are distinct from the earlier runtime-platform phases below. G1 com
 | G1 — Durable guarded versions | Complete; 42 JS/TS checks and 91 pinned Hermes Python checks pass; new routing inactive |
 | G2 — Owner dashboard editor | Complete; owner API, conflict/race tests and synthetic browser edit/history/restore pass |
 | G3 — On/off throughout | Complete; 45 JS/TS and 94 pinned Hermes checks pass; Compose activation remains G7 |
-| G4 — Live Honcho connection | Pending; dedicated credentials required |
+| G4 — Live Honcho connection | Pinned images build and isolated Compose startup pass; 9 boundary/budget checks pass. Real ingestion/recall/restart/failure gates pending dedicated credentials and bridge sign-in |
 | G5 — Primary Honcho memory | Pending |
 | G6 — Edits, switching and recovery | Pending |
 | G7 — Local acceptance and final graph | Pending |
