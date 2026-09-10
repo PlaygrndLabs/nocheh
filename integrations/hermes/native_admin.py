@@ -142,8 +142,9 @@ class Administration:
                 name,home=self.profile(query.get('profile',[''])[0])
                 if resume:=query.get('resume',[''])[0]:
                     from hermes_state import SessionDB
-                    if not (home/'state.db').is_file(): raise ValueError('session_not_in_profile')
-                    db=SessionDB(home/'state.db',read_only=True)
+                    from .isolated_profile import database_path
+                    if not database_path(home).is_file(): raise ValueError('session_not_in_profile')
+                    db=SessionDB(database_path(home),read_only=True)
                     try:
                         if not db.get_session(resume): raise ValueError('session_not_in_profile')
                     finally: db.close()
@@ -339,7 +340,8 @@ class Administration:
                               'nocheh_runtime': live}
                 elif method == 'GET' and (path in ('/api/config/schema', '/api/config/defaults') or
                       re.fullmatch(r'/api/sessions(?:/[^/]+(?:/(?:messages|export|latest-descendant))?)?', path)):
-                    if path.startswith('/api/sessions') and not (home / 'state.db').exists():
+                    from .isolated_profile import database_path
+                    if path.startswith('/api/sessions') and not database_path(home).exists():
                         if path == '/api/sessions':
                             return await JSONResponse({'sessions':[], 'total':0, 'limit':20, 'offset':0})(scope, receive, send)
                         return await JSONResponse({'error':'session_not_found'},404)(scope, receive, send)
@@ -370,7 +372,8 @@ def create_app(root, model, policy, token, browser_enabled=False, revision_reade
     web_server_cron._cron_profile_home = lambda profile: app.profile(profile)
     # Inspection must never create/migrate/auto-archive native state.
     router._maybe_auto_archive_for_profile = lambda *_: None
-    sessions._open_session_db_for_profile = lambda profile, read_only: SessionDB(app.profile(profile)[1] / 'state.db', read_only=read_only)
+    from .isolated_profile import database_path
+    sessions._open_session_db_for_profile = lambda profile, read_only: SessionDB(database_path(app.profile(profile)[1]), read_only=read_only)
     @contextlib.asynccontextmanager
     async def lifespan(_): yield
     native.app.router.lifespan_context = lifespan

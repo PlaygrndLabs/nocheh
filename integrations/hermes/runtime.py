@@ -137,6 +137,9 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path == '/internal/security/transport':
+            from .security_transport import broker_transport
+            return broker_transport(resolve_credentials())
         if self.path == '/internal/memory/filter':
             from .privacy import filter_knowledge
             return filter_knowledge(resolve_credentials(),MODEL,body)

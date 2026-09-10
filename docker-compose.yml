@@ -38,6 +38,49 @@ x-service: &service
     start_period: 10s
 
 services:
+  security:
+    <<: *service
+    command: [node, dist/src/security/main.js]
+    networks: [default, agent]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes: []
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8786/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      archive: {condition: service_healthy}
+
+  security-launcher:
+    image: nocheh-hermes:local
+    command: [python, -m, integrations.hermes.security_launcher]
+    user: "0:0"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: [no-new-privileges:true]
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      NOCHEH_HOST_PROFILES: ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles
+      NOCHEH_UID: ${NOCHEH_UID:-1000}
+      NOCHEH_GID: ${NOCHEH_GID:-1000}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles:/profiles:ro
+    depends_on:
+      security: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
   cliproxy:
     image: nocheh-cliproxy:c76dfd4e
     build:
@@ -242,6 +285,7 @@ services:
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
       GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]}
       NOCHEH_REASONING_ROUTE: ${NOCHEH_REASONING_ROUTE:-native}
+      NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-legacy}
       CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
       SPEECH_URL: http://speech:8783
       NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
@@ -269,6 +313,9 @@ volumes:
   postgres_data:
 
 networks:
+  agent:
+    name: nocheh-agent
+    internal: true
   memory:
     name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
     internal: true

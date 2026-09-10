@@ -25,7 +25,18 @@ def review(root, policy, model, credentials, body):
         'provider':'openai-codex','api_mode':'codex_responses'}
     request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],
              'session_id':'review-'+body['id'],'owner':True,'chat_id':policy.owner,'user_id':policy.owner,**transport}
-    result=subprocess.run([sys.executable,'-m','integrations.hermes.assistant_turn'],input=json.dumps(request).encode(),
+    from .security_transport import isolated_enabled,scoped_transport
+    module='integrations.hermes.assistant_turn'
+    if isolated_enabled():
+        from .isolated_profile import prepare
+        from .profile_config import inherited_config,read,preferences
+        from .environment import secret
+        prepare(profile)
+        effective,_=inherited_config(profile,read(profile/'config.yaml'))
+        request.update(scoped_transport(body['archive_credential'],transport['api_mode']))
+        request['preferences']=preferences(effective)
+        env['SERVICE_TOKEN']=secret('SERVICE_TOKEN');module='integrations.hermes.security_client'
+    result=subprocess.run([sys.executable,'-m',module],input=json.dumps(request).encode(),
                           stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,timeout=220,cwd=Path(__file__).resolve().parents[2])
     if result.returncode or len(result.stdout)>1024*1024:raise RuntimeError('review_worker_failed')
     return json.loads(result.stdout)

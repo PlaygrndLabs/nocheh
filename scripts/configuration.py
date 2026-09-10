@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE = ROOT / 'data/local'
 DEFAULTS = {
     'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_PROVIDER_MONITOR_PORT': '18317', 'NOCHEH_MODEL': 'gpt-5.6-sol',
-    'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'native',
+    'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'native', 'NOCHEH_SECURITY_RUNTIME': 'legacy',
     'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
@@ -81,6 +81,7 @@ def load(state):
 
 def validate(values):
     embeddings(values)
+    if values.get('NOCHEH_SECURITY_RUNTIME','legacy') not in ('legacy','isolated'):raise ValueError('NOCHEH_SECURITY_RUNTIME must be legacy or isolated')
     if values['TELEGRAM_ENABLED'] not in ('true', 'false'): raise ValueError('TELEGRAM_ENABLED must be true or false')
     owner = values['TELEGRAM_OWNER_ID']; groups = values['TELEGRAM_GROUP_IDS']
     if owner and not re.fullmatch(r'[1-9]\d{0,18}', owner): raise ValueError('TELEGRAM_OWNER_ID must be a numeric user ID')

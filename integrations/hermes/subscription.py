@@ -25,6 +25,8 @@ class SubscriptionCredentials:
         allowed = {
             (CODEX_BASE_URL, "openai-codex", "codex_responses"),
             (SHARED_BASE_URL, "openai", "chat_completions"),
+            ('http://security:8786/codex', 'openai-codex', 'codex_responses'),
+            ('http://security:8786/v1', 'openai', 'chat_completions'),
         }
         route = (self.base_url.rstrip("/"), self.provider, self.api_mode)
         if (not isinstance(self.access_token, str) or not self.access_token.strip()

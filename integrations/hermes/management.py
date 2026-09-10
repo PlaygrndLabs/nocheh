@@ -63,7 +63,8 @@ def dispatch(root, model, policy, body):
     result = {'scope': body['scope'], 'profile': path.name, 'memories': memories,
               'sessions': [], 'messages': [], 'next_offset': None,
               'provenance': 'Native notes are model-maintained; only explicit citations identify source evidence.'}
-    database = path / 'state.db'
+    from .isolated_profile import database_path
+    database = database_path(path)
     if database.is_symlink(): raise ValueError('session_path_denied')
     if not database.exists(): return result
     offset = body.get('offset', 0)

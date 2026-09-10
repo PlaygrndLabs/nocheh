@@ -53,7 +53,11 @@ def run(body, emit=None):
     prefs=body.get('preferences') or preferences(read(profile/'config.yaml'))
     from .archive_tools import bind_process_preferences
     bind_process_preferences(prefs)
-    database=SessionDB(profile/'state.db')
+    from .isolated_profile import database_path
+    if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
+        import hermes_state
+        hermes_state.DEFAULT_DB_PATH=database_path(profile)
+    database=SessionDB(database_path(profile))
     long_term='';memory={}
     if not review:
         from .archive_tools import request
@@ -102,7 +106,11 @@ def run(body, emit=None):
             message=[{'type':'text','text':message}]
             for image in body['images']:
                 if not re.fullmatch(r'[a-f0-9]{64}',image): raise ValueError('invalid_image_identity')
-                data=(Path('/data/files')/image).read_bytes()
+                if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
+                    from urllib.request import Request,urlopen
+                    req=Request('http://security:8786/v1/turn-files/'+image,headers={'Authorization':'Bearer '+body['archive_credential']})
+                    with urlopen(req,timeout=30) as response:data=response.read(26*1024*1024)
+                else:data=(Path('/data/files')/image).read_bytes()
                 if hashlib.sha256(data).hexdigest()!=image: raise ValueError('image_hash_mismatch')
                 # Explicitly trusted routes may receive originals. Required
                 # guarding rejects this opaque context at the existing boundary.
@@ -127,6 +135,10 @@ def main():
     output=sys.stdout
     try:
         body=json.loads(sys.stdin.buffer.read(2*1024*1024))
+        if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
+            profile=Path(os.environ['HERMES_HOME'])
+            (profile/'plugins').mkdir(exist_ok=True)
+            (profile/'plugins'/'nocheh').symlink_to(Path(__file__).resolve().parent,target_is_directory=True)
         from .native_memory import memory_lock, save_receipt
         with memory_lock(os.environ['HERMES_HOME']), contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             if body.get('review'):
