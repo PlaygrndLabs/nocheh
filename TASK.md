@@ -1,3 +1,7 @@
+Security service: [SEC1 complete; SEC2–SEC5 pending](docs/security-service-plan.md).
+Phased implementation and automatic per-phase commits authorized under ADR-0037.
+Existing provider and Honcho activation gates remain separate.
+
 # Shared CLIProxyAPI provider and monitoring (ADR-0035)
 
 Owner-approved implementation plan: [shared-provider-plan.md](docs/shared-provider-plan.md).
