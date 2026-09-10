@@ -286,6 +286,7 @@ services:
       GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]}
       NOCHEH_REASONING_ROUTE: ${NOCHEH_REASONING_ROUTE:-native}
       NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-legacy}
+      NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-legacy}
       CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
       SPEECH_URL: http://speech:8783
       NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}

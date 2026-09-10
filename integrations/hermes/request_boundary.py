@@ -139,7 +139,8 @@ class Boundary:
         except (ValueError,UnicodeError):
             raise GuardUnavailable('uninspectable_model_request') from None
         if not isinstance(payload,dict): raise GuardUnavailable('invalid_model_request')
-        guarded=self.transform(str(request.url),clear_reasoning_sidecars(payload))
+        from .memory_evidence import inject
+        guarded=self.transform(str(request.url),inject(clear_reasoning_sidecars(payload)))
         if not isinstance(guarded,dict): raise GuardUnavailable('invalid_guard_response')
         headers=dict(request.headers)
         headers.pop('content-length',None);headers.pop('transfer-encoding',None)

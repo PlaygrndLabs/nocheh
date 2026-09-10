@@ -10,7 +10,7 @@ Honcho activation. Local Compose is the release target.
 | SEC1 | Boundary inventory; versioned plugin/policy contract; precedence, autonomy and baseline tests | Complete |
 | SEC2 | External provider/context broker and isolated turn launcher; no credential/root-profile/egress escape; failure tests | Complete (candidate; activation pending SEC5) |
 | SEC3 | Durable configuration, bounded authority and clear decision/effect records; owner CLI/API; concurrency/revocation tests | Complete |
-| SEC4 | Memory evidence separated from instruction authority without truncation; exact context and retrieval parity checks | Pending |
+| SEC4 | Memory evidence separated from instruction authority without truncation; exact context and retrieval parity checks | Complete (candidate placement; live quality gate in SEC5) |
 | SEC5 | Adversarial and local Compose acceptance, lifecycle/failure evidence and quality/autonomy gate; documented activation status | Pending |
 
 Each phase records its checks here before committing. Tests that skip for absent
@@ -74,3 +74,12 @@ effect records. Six executor tests passed, including denied start and receipt
 outage without replay. The [owner CLI/API](security-service.md) is available in
 the candidate source. Graphify refreshed. Policies are shared by the broker and
 trusted archive executor; effect logs distinguish reservation from execution.
+
+SEC4 verification: four pinned-Hermes memory checks preserve full native blocks,
+retrieved objects/citations, Unicode/spacing, current history and model settings;
+they also verify refresh after native prompt rebuild and complete preflight token
+accounting. The full pinned Python suite ran 116 checks: 114 passed, two optional
+checks skipped. The previous 54 service checks cover authorized retrieval and
+exact guarded revisions. Graphify refreshed. `NOCHEH_MEMORY_CONTEXT=evidence` is
+a separate candidate switch; it is not silently enabled without the live quality
+comparison. No classifier drops memory and no source is summarized by this layer.

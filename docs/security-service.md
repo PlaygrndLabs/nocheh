@@ -69,3 +69,11 @@ authority. Agent containers do not. It pins the installed image ID at startup,
 disables external DNS, mounts only native data plus read-only configuration, and
 discards the turn filesystem on exit. Replacing it requires a trusted compatible
 implementation; arbitrary plugin installation does not confer privileges.
+
+`NOCHEH_MEMORY_CONTEXT=evidence` moves complete native memory blocks and recalled
+objects into a labelled data message on each provider attempt. It leaves native
+history and memory files unchanged. The same evidence participates in initial
+context-size estimates; the layer does not lower limits or summarize sources.
+The pinned native compaction instruction is adjusted so it does not label memory
+as administrative authority. This candidate flag remains separate from process
+isolation until the SEC5 live quality comparison passes.
