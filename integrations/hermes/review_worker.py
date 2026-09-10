@@ -23,7 +23,7 @@ def review(root, policy, model, credentials, body):
     transport = credentials.runtime() if hasattr(credentials,'runtime') else {
         'api_key':credentials.access_token,'base_url':'https://chatgpt.com/backend-api/codex',
         'provider':'openai-codex','api_mode':'codex_responses'}
-    request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],
+    request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
              'session_id':'review-'+body['id'],'owner':True,'chat_id':policy.owner,'user_id':policy.owner,**transport}
     from .security_transport import isolated_enabled,scoped_transport
     module='integrations.hermes.assistant_turn'

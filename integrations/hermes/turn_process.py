@@ -49,6 +49,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                'model':model, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
                **transport, 'stream':emit is not None,
+               'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image']}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)

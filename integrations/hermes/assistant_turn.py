@@ -66,6 +66,11 @@ def run(body, emit=None):
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     session_id=body['session_id']
     history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
+    from . import memory_evidence
+    placement=body.get('memory_context','legacy')
+    if placement not in ('legacy','evidence'):raise ValueError('invalid_memory_context')
+    restore_evidence=memory_evidence.install(memory if not review else None) if placement=='evidence' else lambda:None
+    if placement=='evidence':long_term='\n'+memory_evidence.INSTRUCTION
     agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
         api_key=credentials.access_token,base_url=credentials.base_url,
         enabled_toolsets=['memory'] if review else ['memory','session_search','nocheh_archive'],fallback_model=None,
@@ -127,7 +132,7 @@ def run(body, emit=None):
             text+='\n\nMemory is limited; current context, native notes and archive search remain available.'
         return {'state':'done','text':'' if text.strip()=='[NO_REPLY]' else text,'session_id':agent.session_id}
     finally:
-        agent.close();database.close()
+        agent.close();database.close();restore_evidence()
 
 
 def main():
