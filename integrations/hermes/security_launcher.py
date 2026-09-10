@@ -11,7 +11,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import Request,build_opener,ProxyHandler
-from .isolated_profile import DATA_DIRS
+from .isolated_profile import DATA_DIRS,DATA_FILES
 
 class DockerConnection(http.client.HTTPConnection):
     def __init__(self):super().__init__('localhost',timeout=240)
@@ -37,6 +37,7 @@ def container_spec(profile,host_root,image,network,uid,gid):
     if not all(type(x) is int and x>0 for x in (uid,gid)):raise ValueError('unprivileged_identity_required')
     mounts=[{'Type':'bind','Source':str(root/profile/'config.yaml'),'Target':'/profile/config.yaml','ReadOnly':True}]
     mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_DIRS]
+    mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_FILES]
     return {'Image':image,'User':f'{uid}:{gid}','WorkingDir':'/workspace',
       'Cmd':['python','-m','integrations.hermes.assistant_turn'],
       'Env':['HOME=/tmp/home','HERMES_HOME=/profile','NOCHEH_CAPTURE_ENABLED=0','NOCHEH_ISOLATED_TURN=1',
@@ -53,7 +54,7 @@ def container_spec(profile,host_root,image,network,uid,gid):
 def validate_local_profile(profile,root=Path('/profiles')):
     path=root/profile
     if path.is_symlink() or not path.is_dir() or path.parent.resolve()!=root.resolve():raise ValueError('profile_mount_denied')
-    for name in ('config.yaml',*DATA_DIRS):
+    for name in ('config.yaml',*DATA_DIRS,*DATA_FILES):
         item=path/name
         if item.is_symlink() or not item.exists() or not item.resolve().is_relative_to(path.resolve()):raise ValueError('profile_mount_denied')
 
@@ -95,7 +96,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<length<=2*1024*1024:raise ValueError('turn_size_limit')
             body=json.loads(self.rfile.read(length));credential=body['archive_credential']
             request=Request('http://security:8786/v1/security/binding',headers={'Authorization':'Bearer '+credential})
-            with build_opener(ProxyHandler({})).open(request,timeout=10) as response:binding=json.load(response)
+            with build_opener(ProxyHandler({})).open(request,timeout=120) as response:binding=json.load(response)
             profile=binding['profile'];validate_local_profile(profile)
             with ACTIVE_LOCK:
                 if profile in ACTIVE:raise ValueError('profile_busy')
@@ -103,7 +104,8 @@ class Handler(BaseHTTPRequestHandler):
             if body.get('model')!=binding['model'] or body.get('owner')!=binding['owner'] or body.get('chat_id')!=binding['scope']:raise ValueError('turn_binding_mismatch')
             from .security_transport import scoped_transport
             body.update(scoped_transport(credential,body['api_mode']))
-            spec=container_spec(profile,os.environ['NOCHEH_HOST_PROFILES'],self.server.image,self.server.network,int(os.environ['NOCHEH_UID']),int(os.environ['NOCHEH_GID']))
+            body['model_context_length']=binding['model_context_length']
+            spec=container_spec(profile,self.server.host_profiles,self.server.image,self.server.network,int(os.environ['NOCHEH_UID']),int(os.environ['NOCHEH_GID']))
             identifier=docker('POST','/containers/create?name=nocheh-turn-'+uuid.uuid4().hex,spec)['Id']
             self.send_response(200);self.send_header('Content-Type','application/x-ndjson');self.send_header('Cache-Control','no-store');self.end_headers()
             def watch():
@@ -130,11 +132,14 @@ def main():
     network=os.environ.get('NOCHEH_AGENT_NETWORK','nocheh-agent')
     description=docker('GET','/networks/'+network)
     if description.get('Internal') is not True:raise RuntimeError('internal_network_required')
-    image=docker('GET','/images/nocheh-hermes:local/json')['Id']
+    image=docker('GET','/images/'+os.environ.get('NOCHEH_TURN_IMAGE','nocheh-hermes:local')+'/json')['Id']
+    mounted=docker('GET','/containers/'+socket.gethostname()+'/json')['Mounts']
+    inventory=next((m for m in mounted if m['Destination']=='/profiles' and m['Type']=='bind' and not m['RW']),None)
+    if not inventory:raise RuntimeError('readonly_profile_inventory_required')
     # Remove orphaned turns from a previous launcher instance. Never restart them.
     for container in docker('GET','/containers/json?all=true'):
-        if container.get('Labels',{}).get('nocheh.role')=='isolated-turn':docker('DELETE','/containers/'+container['Id']+'?force=true')
-    server=ThreadingHTTPServer(('0.0.0.0',8787),Handler);server.image=image;server.network=network
+        if container.get('Labels',{}).get('nocheh.role')=='isolated-turn' and network in container.get('NetworkSettings',{}).get('Networks',{}):docker('DELETE','/containers/'+container['Id']+'?force=true')
+    server=ThreadingHTTPServer(('0.0.0.0',8787),Handler);server.image=image;server.network=network;server.host_profiles=inventory['Source']
     server.serve_forever()
 
 if __name__=='__main__':main()

@@ -87,7 +87,7 @@ export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCal
       const policy={space:config.assistant.owner_id,revision:await policyRevision(pool),guard_epoch:guard.epoch};
       await allowPrepared(pool,{admin:false,scope:null,turnEvent:job.event_id,...policy},{text:job.content});
       const result=await call('memory.review',{id:digest(job.id+':'+job.generation),scope:config.assistant.owner_id,content:job.content,event_id:job.event_id,
-        guard_mode:guard.mode,archive_credential:turnToken(config.token,null,Date.now()+600000,job.event_id,policy)},240000);
+        guard_mode:guard.mode,archive_credential:turnToken(config.token,null,Date.now()+600000,job.event_id,{...policy,purpose:'memory-review'})},240000);
       if((await guardState(pool)).epoch!==guard.epoch)throw new HttpError(409,'guard_context_changed');
       if(!['done','ambiguous'].includes(String(result.state)))throw new HttpError(503,'review_failed');
       await client.query('UPDATE memory_review_jobs SET state=$2,error_code=$3,updated_at=now() WHERE id=$1',[job.id,result.state,result.state==='ambiguous'?'review_interrupted':null]);

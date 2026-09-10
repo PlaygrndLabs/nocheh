@@ -37,6 +37,7 @@ def export_database(database,destination,locked):
 
 def export_native(root,directory):
     from integrations.hermes.native_memory import registered_profiles
+    from integrations.hermes.isolated_profile import database_path
     profiles=[];directory.mkdir(parents=True,exist_ok=False,mode=0o700)
     for profile in registered_profiles(root):
         destination=directory/profile.name;destination.mkdir(mode=0o700)
@@ -55,7 +56,7 @@ def export_native(root,directory):
                 target=destination/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
                 shutil.copyfile(source,target);target.chmod(0o600)
                 if name.startswith('memories/'):item['notes'].append(name)
-            database=profile/'state.db'
+            database=database_path(profile)
             if database.is_symlink():raise ValueError('native_export_path_denied')
             if database.exists():
                 # SQLite's backup API captures committed WAL state too.

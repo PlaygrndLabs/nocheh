@@ -18,7 +18,7 @@ try: from .configuration import compose_environment, env_path, initialize, load,
 except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env
 
 ROOT=Path(__file__).resolve().parents[1]
-SERVICES=['hermes','worker','guard','archive']
+SERVICES=['hermes','worker','security-launcher','security','guard','archive']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -26,7 +26,8 @@ TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'ev
         'honcho_prepared_sources':'source_id,guard_epoch,policy_revision',
         'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
         'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
-        'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id'}
+        'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id',
+        'security_policy_versions':'revision','security_policy':'singleton','security_events':'id'}
 
 
 def compose(state,project=None):
@@ -175,7 +176,7 @@ def restore(snapshot,state,project,port):
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
     config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
-                  NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory')
+                  NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
     (state/'hermes/scheduler-inactive').touch()

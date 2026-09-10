@@ -66,9 +66,11 @@ function effect(row:Pick<Row,'id'|'kind'|'scope'|'profile'|'fingerprint'|'job_id
 export async function proposeControlled(pool:pg.Pool,principal:Reader,value:unknown) {
   await assertAudience(pool,principal);
   if(!principal.turnEvent)throw new HttpError(403,'assistant_turn_required');
+  if(principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
   const input=object(value),args=actionArguments(input.kind,input.arguments);
-  const event=(await pool.query<{scope:string;payload:Buffer;channel:string}>('SELECT scope,payload,channel FROM events WHERE id=$1',[principal.turnEvent])).rows[0];
+  const event=(await pool.query<{scope:string;payload:Buffer;channel:string;origin:string}>('SELECT scope,payload,channel,origin FROM events WHERE id=$1',[principal.turnEvent])).rows[0];
   if(!event||(principal.scope!==null&&principal.scope!==event.scope))throw new HttpError(403,'action_scope_denied');
+  if(event.origin!=='live')throw new HttpError(403,'external_effect_requires_live_turn');
   // Profiles are read from the trusted captured envelope, never from tool arguments.
   const payload=JSON.parse(event.payload.toString());
   const profile=event.channel==='browser'||event.channel==='scheduler'?payload.profile:

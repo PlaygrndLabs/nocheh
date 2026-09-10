@@ -1,4 +1,4 @@
-Security service: [SEC1–SEC4 complete; SEC5 pending](docs/security-service-plan.md).
+Security service: [SEC1–SEC5 complete; active locally](docs/security-service-plan.md).
 Phased implementation and automatic per-phase commits authorized under ADR-0037.
 Existing provider and Honcho activation gates remain separate.
 

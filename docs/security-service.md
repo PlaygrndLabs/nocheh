@@ -4,7 +4,7 @@ The versioned `nocheh.security` service brokers isolated assistant requests.
 Its policy library also runs inside the trusted archive executor, using the same
 database and precedence. Thus an unavailable optional UI or broker does not remove
 effect authorization. An isolated model has no direct provider fallback.
-See [phase status](security-service-plan.md) before enabling the candidate.
+See [phase status and acceptance evidence](security-service-plan.md).
 
 From the repository root:
 
@@ -75,5 +75,32 @@ objects into a labelled data message on each provider attempt. It leaves native
 history and memory files unchanged. The same evidence participates in initial
 context-size estimates; the layer does not lower limits or summarize sources.
 The pinned native compaction instruction is adjusted so it does not label memory
-as administrative authority. This candidate flag remains separate from process
-isolation until the SEC5 live quality comparison passes.
+as administrative authority. The memory and process-isolation settings remain independently configurable.
+The local installation uses `NOCHEH_SECURITY_RUNTIME=isolated` and
+`NOCHEH_MEMORY_CONTEXT=evidence`; fresh configurations retain explicit opt-in
+defaults until their own acceptance and profile conversion are complete.
+
+
+For an existing installation, stop Hermes and its native writers before running
+`python3 -m scripts.security_profiles /absolute/path/to/hermes --hermes-stopped`.
+The converter checkpoints SQLite, validates integrity, moves the same database
+bytes into `native-state`, and reports their hash. It never replaces history with
+a model output. Browser history, native recall and portable export use the same
+path. A shared memory-lock file coordinates trusted writers and exports.
+
+The launcher derives the host profile path from its read-only Docker mount and
+pins the installed image ID. `NOCHEH_AGENT_NETWORK` selects its internal network;
+restored projects receive a separate network and do not clean up another project's
+turns. Backups stop both security services and include policy/history receipts.
+
+To return to the previous execution mode, set `NOCHEH_SECURITY_RUNTIME=legacy`
+and `NOCHEH_MEMORY_CONTEXT=legacy` and restart Hermes with this version's image.
+The converted history remains readable. An older image that predates this layout
+requires an offline reverse conversion; do not start it against converted profiles.
+There is no automatic fallback when a required security service is unavailable.
+
+Secret detection remains the existing ADR-0033 mechanism. It can produce false
+positives: the live acceptance run observed a harmless synthetic colour being
+masked. The exact saved owner-edit path is checked separately. This service adds
+no classifier that discards memory, and finite fixture results do not establish
+identical accuracy for every future conversation.
