@@ -1,4 +1,5 @@
 import {captureInput,claimRun,finishRun,renewRun,prepareRun,cancelScheduled,recoverScheduled,scheduleDefinition,scheduledRuns,scheduledDelivery} from './managed-runs.js';
+import {ownerSecurityRoute} from './security/owner-api.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
 import { listSpaces, spacePolicy, saveSpace,parentSpace } from './spaces.js';
@@ -15,7 +16,7 @@ import { guardPayload,inspectRequest } from './guard.js';
 import {prepareContext,allowPrepared} from './prepared-context.js';
 import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState,prepareGuarded} from './guarded.js';
 import { requestAction,telegramActions,decideTelegram } from './actions.js';
-import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,finishControlled} from './controlled-actions.js';
+import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,startControlled,finishControlled} from './controlled-actions.js';
 import { reader, admin,assertAudience,turnToken } from './access.js';
 import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
@@ -45,6 +46,7 @@ const server = createServer((req, res) => { void (async () => {
   }
   const principal=reader(req, config.token);
   await assertAudience(pool,principal);
+  if(config.service==='archive'&&await ownerSecurityRoute(pool,principal,req,res,url))return;
   const prepare=(value:unknown)=>prepareContext(pool,principal,value,async text=>(await call('guard.detect',{text})).literals);
   const agentResult=async(value:unknown,prepared=false)=>{
     const result=principal.admin?value:prepared?(await allowPrepared(pool,principal,value),value):await prepare(value);
@@ -179,6 +181,7 @@ const server = createServer((req, res) => { void (async () => {
     if(path==='/v1/tools/decide')return json(res,200,await decideControlled(pool,principal,body));
     if(path==='/v1/tools/telegram-decision')return json(res,200,await decideTelegram(pool,principal,body));
     if(path==='/v1/tools/grant')return json(res,200,await grantPermission(pool,principal,body));
+    if(path==='/v1/tools/start')return json(res,200,await startControlled(pool,body));
     if(path==='/v1/tools/revoke')return json(res,200,await revokePermission(pool,principal,body));
     if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body));
     if(path==='/v1/tools/finish')return json(res,200,await finishControlled(pool,body));

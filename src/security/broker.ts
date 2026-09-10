@@ -1,10 +1,13 @@
 import {createServer,type IncomingMessage,type ServerResponse} from 'node:http';
 import {once} from 'node:events';
+import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import {reader,assertAudience,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,json,readJson,object} from '../http.js';
-import {manifest} from './contract.js';
+import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
+import {evaluate,recordEffect} from './store.js';
+import {ownerSecurityRoute} from './owner-api.js';
 
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; guard:string; hermes:string; model:string; fetch?:typeof fetch;}
 const relayRoutes:[string,RegExp][]=[
@@ -44,10 +47,21 @@ export function brokerServer(options:BrokerOptions) {
     const url=new URL(req.url??'/','http://security'),path=url.pathname;
     if(req.method==='GET'&&path==='/health'){await options.pool.query('SELECT 1');return json(res,200,{ok:true,service:'security',plugin:manifest.id,api_version:1});}
     const principal=reader(req,options.token);
+    if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url))return;
     const binding=await turnBinding(options.pool,principal);
     const credential=req.headers.authorization!;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),120000);
     const closed=()=>{if(!res.writableEnded)controller.abort();};res.on('close',closed);
+    let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
+    const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{
+      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{})};
+      const decision=await evaluate(options.pool,effect);
+      trace={effect,decision,started:false,closed:false};
+      await recordEffect(options.pool,effect,'proposed',decision,binding.event_id);
+      await recordEffect(options.pool,effect,decision.outcome==='allow'?'allowed':'blocked',decision,binding.event_id);
+      if(decision.outcome!=='allow'){trace.closed=true;throw new HttpError(403,'security_policy_denied');}
+      return trace;
+    };
     try {
       const rpc=async(base:string,route:string,body:unknown,authorization=credential)=>boundedJson(await call(base+route,{method:'POST',headers:{authorization,'content-type':'application/json'},body:JSON.stringify(body),redirect:'error',signal:controller.signal}));
       if(path==='/v1/security/binding'&&req.method==='GET')return json(res,200,{...binding,model:options.model,plugin:manifest});
@@ -65,25 +79,35 @@ export function brokerServer(options:BrokerOptions) {
       }
       if(scopedRoute(req.method??'',relay)) {
         const body=req.method==='POST'?JSON.stringify(await readJson(req,1024*1024)):undefined;
+        // Context preparation and proposals have their own enforcement. Read policies
+        // apply to retrieval; native memory remains writable within the owned profile.
+        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests'].includes(relay))await authorizeEffect(relay.includes('/memory/')?'memory.read':'archive.read',{relay,query:url.search});
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok){await response.body?.cancel();throw new HttpError(response.status,'scoped_archive_unavailable');}
-        await stream(response,principal,res,file?26*1024*1024:8*1024*1024);return;
+        await stream(response,principal,res,file?26*1024*1024:8*1024*1024);
+        if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.event_id);trace.closed=true;}return;
       }
       if(req.method!=='POST'||!['/codex/responses','/v1/chat/completions'].includes(path)||url.search)throw new HttpError(403,'security_route_denied');
       const payload=object(await readJson(req,1024*1024));
       if(payload.model!==options.model)throw new HttpError(403,'model_configuration_mismatch');
+      const attempt=await authorizeEffect('model.request',payload);
       const transport=object(await rpc(options.hermes,'/internal/security/transport',{},'Bearer '+options.token));
       const destination=providerTarget(transport,path);
       const prepared=object(await rpc(options.guard,'/v1/guard',{destination,payload}));
       if(prepared.guarded!==true||!prepared.payload)throw new HttpError(503,'required_guard_unavailable');
       // Every attempt, including SDK retries, repeats current audience enforcement.
       await assertAudience(options.pool,principal);
+      const current=await evaluate(options.pool,attempt.effect);
+      if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
       const headers:Record<string,string>={'content-type':'application/json',authorization:'Bearer '+String(transport.api_key)};
       for(const [key,value] of Object.entries(object(transport.headers??{})))if(['user-agent','originator','chatgpt-account-id'].includes(key.toLowerCase())&&typeof value==='string')headers[key]=value;
+      await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.event_id);attempt.started=true;
       const response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});
-      if(!response.ok){await response.body?.cancel();throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
+      if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.event_id);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
       await stream(response,principal,res,8*1024*1024);
-    }finally{clearTimeout(timer);res.off('close',closed);controller.abort();}
+      await recordEffect(options.pool,attempt.effect,'completed',attempt.decision,binding.event_id);attempt.closed=true;
+    }catch(error){if(trace&&!trace.closed)await recordEffect(options.pool,trace.effect,trace.started?'ambiguous':'failed',trace.decision,binding.event_id);throw error;}
+    finally{clearTimeout(timer);res.off('close',closed);controller.abort();}
   }
   async function stream(response:Response,principal:Reader,res:ServerResponse,max:number) {
     await assertAudience(options.pool,principal);

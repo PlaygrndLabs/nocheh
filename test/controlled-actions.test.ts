@@ -56,7 +56,7 @@ test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants 
     const revoked=await grantPermission(pool,owner,{action_id:changed.id,fingerprint:(await controlledAction(pool,owner,changed.id)).fingerprint,uses:2,minutes:5});
     const revoke=await command('/revoke '+revoked.id);assert.match((await controlReply(pool,policy,revoke.id))!,/revoked/);
     assert.equal((await claimControlled(pool,{actor:'five'})).claimed,false);
-    await assert.rejects(grantPermission(pool,owner,{action_id:first.id,fingerprint:row.fingerprint,uses:21,minutes:5}),{code:'invalid_permission_bounds'});
+    await assert.rejects(grantPermission(pool,owner,{action_id:first.id,fingerprint:row.fingerprint,uses:1001,minutes:5}),{code:'invalid_permission_bounds'});
     const expiring=await grantPermission(pool,owner,{action_id:changed.id,fingerprint:(await controlledAction(pool,owner,changed.id)).fingerprint,uses:2,minutes:1});
     await pool.query("UPDATE action_permissions SET expires_at=now()-interval '1 second' WHERE id=$1",[expiring.id]);
     assert.equal((await claimControlled(pool,{actor:'five'})).claimed,false);

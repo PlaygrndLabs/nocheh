@@ -47,6 +47,7 @@ class ToolTests(unittest.TestCase):
         class API:
             def __init__(self):self.claims=0;self.finishes=0;self.outage=True
             def call(self,path,body):
+                if path.endswith('/start'):return {'started':True}
                 if path.endswith('/claim'):
                     self.claims+=1
                     return {'claimed':False} if self.claims>1 else {'claimed':True,'id':'a'*64,'kind':'shell'}
@@ -67,10 +68,23 @@ class ToolTests(unittest.TestCase):
         class API:
             def call(self,path,body):
                 calls.append((path,body))
+                if path.endswith('/start'):return {'started':True}
                 return {'claimed':True,'id':'b'*64} if path.endswith('/claim') else {}
         def run(*args):raise TimeoutError('sensitive remote response must not appear')
         with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run)
         self.assertEqual(calls[-1][1]['state'],'ambiguous')
         self.assertNotIn('sensitive',json.dumps(calls))
+
+    def test_revoked_authority_after_claim_never_reaches_executor(self):
+        calls=[]
+        class API:
+            def call(self,path,body):
+                calls.append((path,body))
+                if path.endswith('/claim'):return {'claimed':True,'id':'c'*64}
+                if path.endswith('/start'):return {'started':False,'reason':'permission_no_longer_valid'}
+                return {}
+        def run(*args):raise AssertionError('executor must not run')
+        with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run)
+        self.assertEqual(calls[-1][1]['state'],'failed')
 
 if __name__=='__main__':unittest.main()
