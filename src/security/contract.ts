@@ -35,6 +35,7 @@ export function validatePolicy(value:unknown):Policy {
     const rule=object(value);keys(rule,['id','kind','outcome','scope','profile','job','fingerprint']);
     if(typeof rule.id!=='string'||!identity.test(rule.id)||ids.has(rule.id)||!effectKinds.includes(rule.kind as EffectKind)||!['deny','ask'].includes(String(rule.outcome)))throw new HttpError(400,'invalid_security_rule');
     ids.add(rule.id);
+    if(rule.kind==='memory.write')throw new HttpError(400,'native_memory_write_policy_unsupported');
     for(const field of ['scope','profile','job'] as const)if(rule[field]!==undefined&&(typeof rule[field]!=='string'||!(field==='scope'?/^[\w.:-]{1,256}$/:identity).test(rule[field] as string)))throw new HttpError(400,'invalid_security_selector');
     if(rule.fingerprint!==undefined&&(typeof rule.fingerprint!=='string'||!hash.test(rule.fingerprint)))throw new HttpError(400,'invalid_security_fingerprint');
     // Reading and remembering already-authorized context is not an approval boundary.

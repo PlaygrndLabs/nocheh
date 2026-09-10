@@ -9,6 +9,7 @@ import { sharingSchema } from './sharing.js';
 import { guardedSchema } from './guarded.js';
 import {contextSchema} from './prepared-context.js';
 import {honchoSchema} from './honcho.js';
+import {securitySchema} from './security/store.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   const pool = new pg.Pool({
@@ -39,6 +40,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
     await client.query(guardedSchema);
     await client.query(contextSchema);
     await client.query(honchoSchema);
+    await client.query(securitySchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

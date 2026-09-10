@@ -9,7 +9,7 @@ Honcho activation. Local Compose is the release target.
 |---|---|---|
 | SEC1 | Boundary inventory; versioned plugin/policy contract; precedence, autonomy and baseline tests | Complete |
 | SEC2 | External provider/context broker and isolated turn launcher; no credential/root-profile/egress escape; failure tests | Complete (candidate; activation pending SEC5) |
-| SEC3 | Durable configuration, bounded authority and clear decision/effect records; owner CLI/API; concurrency/revocation tests | Pending |
+| SEC3 | Durable configuration, bounded authority and clear decision/effect records; owner CLI/API; concurrency/revocation tests | Complete |
 | SEC4 | Memory evidence separated from instruction authority without truncation; exact context and retrieval parity checks | Pending |
 | SEC5 | Adversarial and local Compose acceptance, lifecycle/failure evidence and quality/autonomy gate; documented activation status | Pending |
 
@@ -65,3 +65,12 @@ read-only profile inventory. Only data directories are writable by turns; an
 existing `state.db` must be moved offline into `native-state` before activation.
 No current profile was moved and no runtime route was switched in SEC2. No memory
 or context limit was reduced. Native history readers support both layouts.
+
+SEC3 verification: all 54 service checks passed with real isolated PostgreSQL
+(zero skips). Coverage includes concurrent policy edits, deny-over-approval,
+one grant across multiple turns, revocation between claim and start, separate
+execution receipts, unchanged archive/guard/sharing behavior and secret-free
+effect records. Six executor tests passed, including denied start and receipt
+outage without replay. The [owner CLI/API](security-service.md) is available in
+the candidate source. Graphify refreshed. Policies are shared by the broker and
+trusted archive executor; effect logs distinguish reservation from execution.

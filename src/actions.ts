@@ -6,6 +6,8 @@ import {assertAudience} from './access.js';
 import {admin} from './access.js';
 import {randomUUID} from 'node:crypto';
 import type { RuntimeCall } from './runtime.js';
+import {evaluate,recordEffect} from './security/store.js';
+import type {Effect,Decision} from './security/contract.js';
 import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
 import {controlledAction,controlledList,decideControlled,revokePermission} from './controlled-actions.js';
 
@@ -39,6 +41,10 @@ export async function requestAction(pool:pg.Pool,principal:Reader,value:unknown)
   await ingest(pool,{version:1,key:'action-request:'+id,origin:'generated',kind:'action_request',bot_id:event.bot_id,scope:event.scope,
     source_id:id,revision:'0',occurred_at:null,text,payload:{source_event_id:principal.turnEvent,kind:'telegram_message',destination}});
   await pool.query('INSERT INTO action_requests(id,event_id,scope,destination,original_text) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',[id,principal.turnEvent,event.scope,destination,Buffer.from(text)]);
+  const effect:Effect={id,kind:'telegram.send',scope:event.scope,profile:'nocheh-'+digest(event.scope).slice(0,24),fingerprint:digest(canonical({destination,text}))};
+  const decision=await evaluate(pool,effect);
+  await recordEffect(pool,effect,'proposed',decision,principal.turnEvent);
+  await recordEffect(pool,effect,decision.outcome==='deny'?'blocked':'awaiting_approval',decision,principal.turnEvent);
   return {id,state:'proposed',message:'Owner must review /action '+id+' and type /approve '+id+' in their private DM.'};
 }
 
@@ -100,13 +106,22 @@ export async function executeApproved(pool:pg.Pool,call:RuntimeCall) {
   try {
     held=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803303) AS locked')).rows[0]!.locked;
     if(!held)return;
-    const row=(await client.query<{id:string;destination:string;original_text:Buffer}>("SELECT id,destination,original_text FROM action_requests WHERE (state='approved' OR (state='running' AND updated_at < now()-interval '30 seconds')) AND decision_event_id IS NOT NULL ORDER BY updated_at LIMIT 1")).rows[0];
+    const row=(await client.query<{id:string;destination:string;original_text:Buffer;scope:string;event_id:string;state:string;security_decision:Decision|null}>("SELECT * FROM action_requests WHERE (state='approved' OR (state='running' AND updated_at < now()-interval '30 seconds')) AND decision_event_id IS NOT NULL ORDER BY updated_at LIMIT 1")).rows[0];
     if(!row)return;
-    await client.query("UPDATE action_requests SET state='running',updated_at=now() WHERE id=$1",[row.id]);
+    const effect:Effect={id:row.id,kind:'telegram.send',scope:row.scope,profile:'nocheh-'+digest(row.scope).slice(0,24),fingerprint:digest(canonical({destination:row.destination,text:row.original_text.toString()}))};
+    const decision=row.state==='running'&&row.security_decision?row.security_decision:await evaluate(client,effect,'exact_owner_approval');
+    if(decision.outcome!=='allow') {
+      await recordEffect(client,effect,'blocked',decision,row.event_id);
+      await client.query("UPDATE action_requests SET state='rejected',security_decision=$2,updated_at=now() WHERE id=$1",[row.id,decision]);return;
+    }
+    await recordEffect(client,effect,'allowed',decision,row.event_id);
+    await client.query("UPDATE action_requests SET state='running',security_decision=$2,updated_at=now() WHERE id=$1",[row.id,decision]);
     try {
+      await recordEffect(client,effect,'started',decision,row.event_id);
       const result=await call('action.execute',{id:row.id,destination:row.destination,text:row.original_text.toString()},60000);
       if(!['done','ambiguous'].includes(String(result.state)))throw Error('invalid_receipt');
       await client.query('UPDATE action_requests SET state=$2,error_code=$3,updated_at=now() WHERE id=$1',[row.id,result.state,result.state==='ambiguous'?'delivery_unconfirmed':null]);
-    } catch {await client.query("UPDATE action_requests SET error_code='awaiting_action_receipt',updated_at=now() WHERE id=$1",[row.id]);}
+      await recordEffect(client,effect,result.state==='done'?'completed':'ambiguous',decision,row.event_id);
+    } catch {await recordEffect(client,effect,'ambiguous',decision,row.event_id);await client.query("UPDATE action_requests SET error_code='awaiting_action_receipt',updated_at=now() WHERE id=$1",[row.id]);}
   } finally {if(held)await client.query('SELECT pg_advisory_unlock(803303)');client.release();}
 }

@@ -41,7 +41,8 @@ def tick(state,api,actor,executor=permitted_execute):
     if not action.get('claimed'):return False
     body={'id':action['id'],'actor':actor}
     try:
-        result=executor(state,action)
+        ready=api.call('/v1/tools/start',body)
+        result=executor(state,action) if ready.get('started') else {'exit_code':1,'error':'security_start_denied'}
         body.update(state='failed' if result.get('exit_code',0)!=0 or result.get('limit') else 'done',result=result)
     except Exception:
         # A timeout or response failure may follow an already-sent remote request.
