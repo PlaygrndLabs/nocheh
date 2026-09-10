@@ -67,7 +67,8 @@ def recall(root, body):
                     if all(word in line.casefold() for word in query.casefold().split()):
                         hits.append({'profile': profile.name, 'kind': 'native_note', 'file': name,
                                      'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line)})
-        database = profile / 'state.db'
+        from .isolated_profile import database_path
+        database = database_path(profile)
         if database.is_symlink(): raise ValueError('session_path_denied')
         if database.is_file():
             db = SessionDB(database, read_only=True)

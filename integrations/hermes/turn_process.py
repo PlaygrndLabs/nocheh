@@ -52,10 +52,25 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image']}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
+    from .security_transport import isolated_enabled,scoped_transport
+    isolated=isolated_enabled()
+    if isolated:
+        from .isolated_profile import prepare
+        from .profile_config import inherited_config,read,preferences
+        prepare(profile)
+        request.update(scoped_transport(body['archive_credential'],transport['api_mode']))
+        if 'preferences' not in request:
+            effective,_=inherited_config(profile,read(profile/'config.yaml'))
+            request['preferences']=preferences(effective)
     env = {key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
            'ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE') if key in os.environ}
     env.update(HERMES_HOME=str(profile), NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
-    process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'integrations.hermes.assistant_turn',
+    if isolated:
+        from .environment import secret
+        # This short-lived bridge is trusted parent infrastructure, not the model process.
+        env['SERVICE_TOKEN']=secret('SERVICE_TOKEN')
+    module='integrations.hermes.security_client' if isolated else 'integrations.hermes.assistant_turn'
+    process = await asyncio.create_subprocess_exec(sys.executable, '-m', module,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         env=env, cwd=Path(__file__).resolve().parents[2], limit=2*1024*1024)
     async def stop_when_cancelled():

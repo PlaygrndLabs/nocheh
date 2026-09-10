@@ -8,7 +8,7 @@ Honcho activation. Local Compose is the release target.
 | Phase | Deliverable and acceptance | Status |
 |---|---|---|
 | SEC1 | Boundary inventory; versioned plugin/policy contract; precedence, autonomy and baseline tests | Complete |
-| SEC2 | External provider/context broker and isolated turn launcher; no credential/root-profile/egress escape; failure tests | Pending |
+| SEC2 | External provider/context broker and isolated turn launcher; no credential/root-profile/egress escape; failure tests | Complete (candidate; activation pending SEC5) |
 | SEC3 | Durable configuration, bounded authority and clear decision/effect records; owner CLI/API; concurrency/revocation tests | Pending |
 | SEC4 | Memory evidence separated from instruction authority without truncation; exact context and retrieval parity checks | Pending |
 | SEC5 | Adversarial and local Compose acceptance, lifecycle/failure evidence and quality/autonomy gate; documented activation status | Pending |
@@ -50,3 +50,18 @@ automatic replay after an uncertain effect. Missing live providers remain pendin
 SEC1 verification: TypeScript build, four contract behavior tests and nine existing
 Hermes controlled-tool/turn-process baseline tests passed without skips. Graphify
 refreshed using AST extraction only. No runtime activation in this phase.
+
+SEC2 verification: six TypeScript contract/broker checks passed against an isolated
+PostgreSQL database, including exact request preservation, route denial, stale
+epochs and guard outage. Four Python security checks passed including a real
+Docker container with denied external DNS/network, absent credentials/socket,
+read-only configuration and a durable exact native-memory write. The full pinned
+Hermes suite ran 111 checks: 109 passed, two optional checks skipped (the Docker
+fixture was run separately). Fifteen host baseline/configuration checks passed.
+Graphify refreshed. Fresh image build and coupled live activation belong to SEC5.
+
+The launcher is explicitly trusted infrastructure with Docker authority and a
+read-only profile inventory. Only data directories are writable by turns; an
+existing `state.db` must be moved offline into `native-state` before activation.
+No current profile was moved and no runtime route was switched in SEC2. No memory
+or context limit was reduced. Native history readers support both layouts.
