@@ -68,5 +68,18 @@ class PortableTests(unittest.TestCase):
         for value in ('main','../escape','a'*39,'A'*40):
             with self.assertRaises(ValueError):commands(value)
 
+    def test_migrated_native_history_remains_portable(self):
+        from scripts.portable import export_native
+        from scripts.security_profiles import convert
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);home=root/'hermes/profiles'/('nocheh-'+'c'*24);home.mkdir(parents=True)
+            source=sqlite3.connect(home/'state.db');source.execute('CREATE TABLE sessions(content text)')
+            source.execute('INSERT INTO sessions VALUES(?)',('Exact preserved history 😃\r\n',));source.commit();source.close()
+            convert(home);result=export_native(root/'hermes',root/'export')
+            self.assertTrue(result[0]['sessions']);self.assertFalse((home/'state.db').exists())
+            copied=sqlite3.connect(root/'export'/home.name/'state.db')
+            try:self.assertEqual(copied.execute('SELECT content FROM sessions').fetchone()[0],'Exact preserved history 😃\r\n')
+            finally:copied.close()
+
 
 if __name__=='__main__':unittest.main()

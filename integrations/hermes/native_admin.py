@@ -30,6 +30,8 @@ def audience_revision(token,space):
 
 class Administration:
     def __init__(self, app, root, model, policy, token, browser_enabled=False, revision_reader=None):
+        from .isolated_profile import install_database_paths
+        install_database_paths()
         self.app, self.root, self.model = app, Path(root).resolve(), model
         self.policy, self.token = policy, token
         self.lock = asyncio.Lock()

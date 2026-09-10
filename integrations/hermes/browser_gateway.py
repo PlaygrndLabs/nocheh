@@ -181,7 +181,8 @@ class BrowserGateway:
                 self.running.pop(sid,None)
             with contextlib.suppress(Exception):
                 from hermes_state import SessionDB
-                db = SessionDB(self.home/'state.db',read_only=True)
+                from .isolated_profile import database_path
+                db = SessionDB(database_path(self.home),read_only=True)
                 try: session['history'] = db.get_messages_as_conversation(session['session_key'])
                 finally: db.close()
             state=result['state'];text=result.get('text','')
@@ -268,6 +269,8 @@ class BrowserGateway:
 
 def main():
     logging.disable(logging.CRITICAL)
+    from .isolated_profile import install_database_paths
+    install_database_paths()
     root=Path(os.environ['NOCHEH_RUNTIME_HOME']).resolve();home=Path(os.environ['HERMES_HOME']).resolve()
     profile=os.environ['NOCHEH_BROWSER_PROFILE'];chat=os.environ['NOCHEH_BROWSER_SCOPE']
     if home != root/'profiles'/profile: raise SystemExit('managed_profile_mismatch')

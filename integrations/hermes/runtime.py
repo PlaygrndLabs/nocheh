@@ -139,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
     def dispatch(self, body):
         if self.path == '/internal/security/transport':
             from .security_transport import broker_transport
-            return broker_transport(resolve_credentials())
+            return broker_transport(resolve_credentials(),MODEL if body.get('metadata') is True else None)
         if self.path == '/internal/memory/filter':
             from .privacy import filter_knowledge
             return filter_knowledge(resolve_credentials(),MODEL,body)

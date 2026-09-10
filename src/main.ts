@@ -107,7 +107,7 @@ const server = createServer((req, res) => { void (async () => {
     const policy={space:config.assistant.owner_id!,revision:principal.revision!,guard_epoch:(await guardState(pool)).epoch};
     const preparer={...policy,admin:false,scope:null,turnEvent:principal.turnEvent};
     await allowPrepared(pool,preparer,input.candidates);
-    return call(operation,{...input,archive_credential:turnToken(config.token,null,Date.now()+600000,principal.turnEvent,policy)},timeout);
+    return call(operation,{...input,archive_credential:turnToken(config.token,null,Date.now()+600000,principal.turnEvent,{...policy,purpose:'filter'})},timeout);
   }));
   const shared=path.match(/^\/v1\/memory\/(shared|filtered)\/([a-f0-9]{64})$/);
   if(config.service==='archive' && shared && req.method==='GET')return agentResult(await readShared(pool,principal,shared[1]!,shared[2]!,call));

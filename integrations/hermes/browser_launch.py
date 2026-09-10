@@ -15,16 +15,18 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
     workspace.mkdir(exist_ok=True,mode=0o700)
     if resume:
         from hermes_state import SessionDB
+        from .isolated_profile import database_path
         # Explicit resume IDs are verified by the authenticated WS boundary.
         # A keep-alive channel may still point at an unpersisted native draft.
-        if not (home/'state.db').exists(): resume=None
+        if not database_path(home).exists(): resume=None
         else:
-            db=SessionDB(home/'state.db',read_only=True)
+            db=SessionDB(database_path(home),read_only=True)
             try:
                 if not db.get_session(resume): resume=None
             finally: db.close()
     env = {key:os.environ[key] for key in ('LANG','LC_ALL','LD_LIBRARY_PATH','SERVICE_TOKEN',
-        'ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS') if key in os.environ}
+        'ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS',
+        'NOCHEH_SECURITY_RUNTIME','NOCHEH_MEMORY_CONTEXT','NOCHEH_REASONING_ROUTE') if key in os.environ}
     env.update(PATH='/opt/venv/bin:/usr/local/bin:/usr/bin:/bin',HOME=str(home),HERMES_HOME=str(home),
         PYTHONPATH='/workspace:/opt/hermes',HERMES_PYTHON='/opt/venv/bin/python',
         HERMES_PYTHON_SRC_ROOT='/opt/hermes',HERMES_CWD=str(workspace),

@@ -8,6 +8,7 @@ import {HttpError,json,readJson,object} from '../http.js';
 import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
 import {evaluate,recordEffect} from './store.js';
 import {ownerSecurityRoute} from './owner-api.js';
+import {providerPayload} from './provider-request.js';
 
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; guard:string; hermes:string; model:string; fetch?:typeof fetch;}
 const relayRoutes:[string,RegExp][]=[
@@ -23,13 +24,15 @@ export function providerTarget(transport:Record<string,unknown>,path:string):str
 export async function turnBinding(pool:pg.Pool,principal:Reader) {
   if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');
   await assertAudience(pool,principal);
-  const event=(await pool.query<{scope:string;payload:Buffer;channel:string}>('SELECT scope,payload,channel FROM events WHERE id=$1',[principal.turnEvent])).rows[0];
+  const event=(await pool.query<{scope:string;payload:Buffer;channel:string;managed:boolean}>('SELECT scope,payload,channel,EXISTS(SELECT 1 FROM managed_runs WHERE event_id=events.id) AS managed FROM events WHERE id=$1',[principal.turnEvent])).rows[0];
   if(!event||(principal.scope!==null&&principal.scope!==event.scope))throw new HttpError(403,'turn_source_denied');
   const profile='nocheh-'+digest(principal.space+':policy:'+(principal.scope===null?0:principal.revision)+':guard:'+principal.guard_epoch).slice(0,24);
   const payload=object(JSON.parse(event.payload.toString()));
-  return {event_id:principal.turnEvent,scope:event.scope,profile,owner:principal.scope===null,
+  const logicalProfile=event.managed&&typeof payload.profile==='string'?payload.profile:
+    'nocheh-'+digest(principal.scope===null?event.scope:principal.space+':policy:'+principal.revision).slice(0,24);
+  return {event_id:principal.turnEvent,scope:event.scope,profile,logical_profile:logicalProfile,owner:principal.scope===null,
     guard_epoch:principal.guard_epoch,revision:principal.revision,
-    ...(event.channel==='scheduler'&&typeof payload.job_id==='string'?{job:payload.job_id}:{})};
+    ...(event.managed&&event.channel==='scheduler'&&typeof payload.job_id==='string'?{job:payload.job_id}:{})};
 }
 async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
   if(!response.ok){await response.body?.cancel();throw new HttpError(response.status>=400&&response.status<500?response.status:503,'security_upstream_unavailable');}
@@ -54,7 +57,7 @@ export function brokerServer(options:BrokerOptions) {
     const closed=()=>{if(!res.writableEnded)controller.abort();};res.on('close',closed);
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
     const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{
-      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{})};
+      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{})};
       const decision=await evaluate(options.pool,effect);
       trace={effect,decision,started:false,closed:false};
       await recordEffect(options.pool,effect,'proposed',decision,binding.event_id);
@@ -64,7 +67,11 @@ export function brokerServer(options:BrokerOptions) {
     };
     try {
       const rpc=async(base:string,route:string,body:unknown,authorization=credential)=>boundedJson(await call(base+route,{method:'POST',headers:{authorization,'content-type':'application/json'},body:JSON.stringify(body),redirect:'error',signal:controller.signal}));
-      if(path==='/v1/security/binding'&&req.method==='GET')return json(res,200,{...binding,model:options.model,plugin:manifest});
+      if(path==='/v1/security/binding'&&req.method==='GET') {
+        const transport=object(await rpc(options.hermes,'/internal/security/transport',{metadata:true},'Bearer '+options.token));
+        if(!Number.isSafeInteger(transport.model_context_length)||Number(transport.model_context_length)<1)throw new HttpError(503,'model_context_metadata_required');
+        return json(res,200,{...binding,model:options.model,model_context_length:transport.model_context_length,plugin:manifest});
+      }
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
         // Preparation is separate from permission to transmit. Destination is not forwarded.
@@ -88,8 +95,20 @@ export function brokerServer(options:BrokerOptions) {
         if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.event_id);trace.closed=true;}return;
       }
       if(req.method!=='POST'||!['/codex/responses','/v1/chat/completions'].includes(path)||url.search)throw new HttpError(403,'security_route_denied');
-      const payload=object(await readJson(req,1024*1024));
-      if(payload.model!==options.model)throw new HttpError(403,'model_configuration_mismatch');
+      const input=await readJson(req,1024*1024);let payload:Record<string,unknown>;
+      try {
+        payload=providerPayload(input);
+        if(payload.model!==options.model)throw new HttpError(403,'model_configuration_mismatch');
+      }catch(error){
+        if(error instanceof HttpError){
+          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{})};
+          const current=await evaluate(options.pool,effect);
+          const decision:Decision={outcome:'deny',origin:'mandatory',revision:current.revision,rule:error.code};
+          await recordEffect(options.pool,effect,'proposed',decision,binding.event_id);
+          await recordEffect(options.pool,effect,'blocked',decision,binding.event_id);
+        }
+        throw error;
+      }
       const attempt=await authorizeEffect('model.request',payload);
       const transport=object(await rpc(options.hermes,'/internal/security/transport',{},'Bearer '+options.token));
       const destination=providerTarget(transport,path);

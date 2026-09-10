@@ -30,6 +30,10 @@ def restrict_session_search():
 
 
 def run(body, emit=None):
+    # Pinned native imports may initialize session state during module loading.
+    # Install the durable path before importing any agent/tool module.
+    from .isolated_profile import database_path,install_database_paths
+    install_database_paths()
     from integrations.hermes.archive_tools import bind_process_credential
     from integrations.hermes.request_boundary import install
     from integrations.hermes.compatibility_patch import install as native_gate
@@ -48,15 +52,14 @@ def run(body, emit=None):
     from hermes_cli import auth
     auth._global_auth_file_path=lambda:None
     aux._read_codex_access_token=lambda:credentials.access_token
+    if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
+        from .security_transport import install_isolated_route
+        install_isolated_route(credentials,body['model'],body.get('model_context_length'))
     profile=Path(os.environ['HERMES_HOME'])
     from .profile_config import preferences, read
     prefs=body.get('preferences') or preferences(read(profile/'config.yaml'))
     from .archive_tools import bind_process_preferences
     bind_process_preferences(prefs)
-    from .isolated_profile import database_path
-    if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
-        import hermes_state
-        hermes_state.DEFAULT_DB_PATH=database_path(profile)
     database=SessionDB(database_path(profile))
     long_term='';memory={}
     if not review:
@@ -161,7 +164,11 @@ def main():
                 def emit(event): output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
                 result=run(body, emit if body.get('stream') else None)
     except Exception as error:
-        result={'state':'failed','error_code':'assistant_runtime_unavailable','error_type':type(error).__name__}
+        import traceback
+        frames=traceback.extract_tb(error.__traceback__)
+        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','required_guard_unavailable','invalid_process_scope_binding'}
+        result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
+                'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()
 
 

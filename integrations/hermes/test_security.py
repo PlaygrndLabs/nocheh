@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 from .security_launcher import container_spec,validate_local_profile,docker,attach
 from .security_transport import scoped_transport,isolated_enabled
-from .isolated_profile import prepare,database_path,DATA_DIRS
+from .isolated_profile import prepare,database_path,DATA_DIRS,DATA_FILES
 
 class SecurityTests(unittest.TestCase):
     def test_no_ambient_authority_in_container(self):
@@ -14,7 +14,7 @@ class SecurityTests(unittest.TestCase):
         host=spec['HostConfig'];encoded=json.dumps(spec)
         for value in ['SERVICE_TOKEN','TELEGRAM_BOT_TOKEN','api_key','docker.sock','/auth','network=host']:self.assertNotIn(value,encoded)
         self.assertEqual(host['CapDrop'],['ALL']);self.assertTrue(host['ReadonlyRootfs']);self.assertEqual(host['Dns'],['127.0.0.1'])
-        self.assertEqual([Path(m['Source']).name for m in host['Mounts'] if not m['ReadOnly']],list(DATA_DIRS))
+        self.assertEqual([Path(m['Source']).name for m in host['Mounts'] if not m['ReadOnly']],list(DATA_DIRS+DATA_FILES))
         self.assertFalse(any(m['Target']=='/profile' for m in host['Mounts']))
         with self.assertRaises(ValueError):container_spec('../private','/owned','sha256:'+'b'*64,'nocheh-agent',1000,1000)
         with self.assertRaises(ValueError):container_spec('nocheh-'+'a'*24,'relative','tag','nocheh-agent',0,0)
@@ -33,6 +33,19 @@ class SecurityTests(unittest.TestCase):
             with self.assertRaises(ValueError):isolated_enabled()
         self.assertEqual(scoped_transport('turn.capability','codex_responses')['api_key'],'turn.capability')
         with self.assertRaises(ValueError):scoped_transport('turn.capability','bedrock')
+
+    def test_pinned_auxiliary_route_and_model_context_are_preserved(self):
+        from agent import auxiliary_client as aux,model_metadata,context_compressor
+        from .security_transport import install_isolated_route
+        from .subscription import SubscriptionCredentials
+        with patch.object(model_metadata,'get_model_context_length',return_value=12345),patch.object(context_compressor,'get_model_context_length'),patch.object(aux,'_CODEX_AUX_BASE_URL',aux._CODEX_AUX_BASE_URL):
+            credentials=SubscriptionCredentials('turn.scoped.capability','http://security:8786/codex','openai-codex','codex_responses')
+            install_isolated_route(credentials,'same-model',272000)
+            self.assertEqual(model_metadata.get_model_context_length('same-model',base_url=credentials.base_url),272000)
+            self.assertEqual(context_compressor.get_model_context_length('same-model'),272000)
+            self.assertEqual(model_metadata.get_model_context_length('different-model'),12345)
+            self.assertEqual(aux._CODEX_AUX_BASE_URL,credentials.base_url)
+        with self.assertRaises(ValueError):install_isolated_route(credentials,'same-model',None)
 
     @unittest.skipUnless(os.environ.get('NOCHEH_TEST_DOCKER')=='1','explicit isolated Docker fixture required')
     def test_real_container_cannot_reach_secrets_siblings_or_internet(self):
