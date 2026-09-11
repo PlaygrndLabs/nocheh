@@ -18,7 +18,7 @@ try: from .configuration import compose_environment, env_path, initialize, load,
 except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env
 
 ROOT=Path(__file__).resolve().parents[1]
-SERVICES=['hermes','worker','security-launcher','security','guard','archive','speech','provider-monitor','cliproxy']
+SERVICES=['hermes','workflow-worker','worker','inngest','security-launcher','security','guard','archive','speech','provider-monitor','cliproxy']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -90,6 +90,9 @@ def backup(state,output,leave_stopped=False):
         with dump.open('xb') as file:
             subprocess.run(command+['exec','-T','postgres','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
         dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
+        from scripts.workflow_recovery import enabled_or_present,snapshot as workflow_snapshot
+        if enabled_or_present(state,env):
+            manifest.update(version=4,workflows=workflow_snapshot(command,env,stage,sha))
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
             for name in ('.env','files','spool','hermes','provider','admin/jobs','admin/tools/receipts'):
@@ -138,8 +141,11 @@ def backup(state,output,leave_stopped=False):
 
 def validate_snapshot(snapshot):
     manifest=json.loads((snapshot/'manifest.json').read_text())
-    if manifest.get('version') not in (1,2,3) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
+    if manifest.get('version') not in (1,2,3,4) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
         raise ValueError('Backup checksum mismatch')
+    if manifest['version']==4:
+        from scripts.workflow_recovery import validate
+        validate(snapshot,manifest.get('workflows'),sha)
     seen=set()
     with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
         for member in tar:
@@ -180,12 +186,14 @@ def restore(snapshot,state,project,port):
     initialize_provider(state)
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
-    config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
+    config.update(TELEGRAM_ENABLED='false',NOCHEH_WORKFLOWS_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
                   NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
     (state/'hermes/scheduler-inactive').touch()
     (state/'spool/.restore-inactive').touch()
+    (state/'workflows').mkdir(parents=True,exist_ok=True,mode=0o700)
+    (state/'workflows/inactive').touch()
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
     subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)
@@ -194,6 +202,9 @@ def restore(snapshot,state,project,port):
     # Old snapshots predate the policy tables; verify exactly their recorded set.
     actual=fingerprints(command,env,manifest['tables'])
     if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
+    if manifest.get('workflows'):
+        from scripts.workflow_recovery import restore as restore_workflows
+        restore_workflows(command,env,snapshot,state,manifest['workflows'],sha)
     if 'honcho_connection' in manifest['tables']:
         subprocess.run(command+['exec','-T','postgres','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
             "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
@@ -215,6 +226,7 @@ def main(command,state,rest):
         containers=[json.loads(line) for line in rows.splitlines() if line.strip()]
         result={'containers':[{'service':row['Service'],'state':row['State'],'health':row.get('Health')} for row in containers]}
         result['execution_holds']={
+            'workflows':(state/'workflows/inactive').exists(),
             'workers':(state/'spool/.restore-inactive').exists(),
             'tools':(state/'admin/tools/inactive').exists(),
             'scheduler':(state/'hermes/scheduler-inactive').exists(),

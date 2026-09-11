@@ -26,5 +26,14 @@
     "image": "nocheh-cpamp:1ae656c"
   },
   "model": "gpt-5.6-sol",
-  "note": "Pins identify candidates under test. See the evidence report for actual compatibility results."
+  "note": "Pins identify candidates under test. See the evidence report for actual compatibility results.",
+  "inngest": {
+    "sdk": "4.20.0",
+    "version": "1.44.0",
+    "image": "inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2"
+  },
+  "workflow_redis": {
+    "version": "7.4.11",
+    "image": "redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7"
+  }
 }

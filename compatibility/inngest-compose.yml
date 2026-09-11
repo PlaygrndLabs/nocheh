@@ -1,0 +1,74 @@
+# Synthetic acceptance only. Never merge this file with the active installation.
+name: ${NOCHEH_FIXTURE_PROJECT:?Explicit fixture project required}
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    environment:
+      POSTGRES_USER: nocheh
+      POSTGRES_DB: nocheh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Synthetic password required}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  workflow-database:
+    image: ${NOCHEH_FIXTURE_IMAGE:?Unique fixture image required}
+    build: {context: .., target: development}
+    command: [node, dist/src/workflows/bootstrap.js]
+    environment: &database
+      PGHOST: postgres
+      PGUSER: nocheh
+      PGDATABASE: nocheh
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD}
+    depends_on:
+      postgres: {condition: service_healthy}
+  workflow-redis:
+    image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
+    command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  inngest:
+    image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
+    command: [inngest, start]
+    environment:
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+      INNGEST_POSTGRES_URI: postgres://nocheh_inngest:${INNGEST_POSTGRES_PASSWORD}@postgres:5432/nocheh_inngest?sslmode=disable
+      INNGEST_REDIS_URI: redis://workflow-redis:6379
+      LOG_LEVEL: error
+    depends_on:
+      workflow-database: {condition: service_completed_successfully}
+      workflow-redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, inngest, alpha, doctor, healthcheck]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+  checks:
+    image: ${NOCHEH_FIXTURE_IMAGE}
+    profiles: [checks]
+    command: [npm, test]
+    environment:
+      <<: *database
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      NOCHEH_DATA_DIR: /tmp/nocheh-fixture
+      INNGEST_BASE_URL: http://inngest:8288
+      INNGEST_CONNECT_GATEWAY_URL: ws://inngest:8289/v0/connect
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+      TELEGRAM_ENABLED: "false"
+      NOCHEH_WORKFLOW_FIXTURE: "1"
+    depends_on:
+      inngest: {condition: service_healthy}
+networks:
+  default: {internal: true}
+volumes:
+  postgres_data:
+  redis_data:
