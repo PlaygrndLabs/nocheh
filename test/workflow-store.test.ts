@@ -4,7 +4,7 @@ import pg from 'pg';
 import {settings} from '../src/config.js';
 import {initialize} from '../src/database.js';
 import {ingest,type Envelope} from '../src/archive.js';
-import {requestWorkflow,publishOutbox,pauseFamily,switchFamily,enterFamily,leaveFamily,claimWorkflow,beginEffect,finishEffect,hash,type WorkflowEvent} from '../src/workflows/store.js';
+import {requestWorkflow,publishOutbox,pauseFamily,switchFamily,enterFamily,leaveFamily,claimWorkflow,beginEffect,finishEffect,hash,registerWorker,type WorkflowEvent} from '../src/workflows/store.js';
 import {safeMetadata,WorkflowBoundary} from '../src/workflows/boundary.js';
 import {workflowClient} from '../src/workflows/client.js';
 
@@ -48,6 +48,11 @@ test('transactional outbox, permanent identity, lost acknowledgments, publisher 
     assert.equal(await switchFamily(pool,'telegram',1,'inngest'),2);
     assert.equal(await enterFamily(client,'telegram','legacy'),false);
     assert.equal(await enterFamily(client,'telegram','inngest',1),false);
+    assert.equal(await publishOutbox(pool,async e=>{sent.push(e);}),0,'requests wait until a compatible worker has registered');
+    await registerWorker(pool,'pipeline',['telegram']);
+    await pool.query("UPDATE workflow_worker_registrations SET seen_at=now()-interval '1 minute'");
+    assert.equal(await publishOutbox(pool,async e=>{sent.push(e);}),0,'stale connectivity leaves the durable request in the outbox');
+    await registerWorker(pool,'pipeline',['telegram']);
     assert.equal(await publishOutbox(pool,async e=>{sent.push(e);throw Error('lost acknowledgement private-canary');}),0);
     await pool.query('UPDATE workflow_outbox SET next_attempt=now()');
     await publishOutbox(pool,async e=>{sent.push(e);});

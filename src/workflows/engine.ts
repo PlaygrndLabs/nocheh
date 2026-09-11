@@ -38,7 +38,7 @@ export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,fam
   }finally{clearInterval(renew);}
 }
 
-async function continueWorkflow(pool:pg.Pool,id:string,dispatch:number):Promise<void> {
+export async function continueWorkflow(pool:pg.Pool,id:string,dispatch:number):Promise<void> {
   const client=await pool.connect();try {
     await client.query('BEGIN');
     const updated=await client.query(`UPDATE workflow_registry SET dispatch=dispatch+1,updated_at=now() WHERE id=$1 AND dispatch=$2
@@ -49,18 +49,22 @@ async function continueWorkflow(pool:pg.Pool,id:string,dispatch:number):Promise<
 }
 
 export function workflowFunctions(client:Inngest,pool:pg.Pool,operations:Partial<Record<WorkflowFamily,WorkflowOperation>>) {
-  return Object.entries(operations).map(([family,operation])=>client.createFunction({id:family+'-v1',retries:20,
+  return coordinatedFunctions(client,Object.keys(operations) as WorkflowFamily[],(id,dispatch,family,runId)=>advanceWorkflow(pool,id,dispatch,family,runId,operations[family]!),
+    (id,dispatch)=>continueWorkflow(pool,id,dispatch));
+}
+export function coordinatedFunctions(client:Inngest,families:WorkflowFamily[],advance:(id:string,dispatch:number,family:WorkflowFamily,runId:string)=>Promise<Observation>,continuation:(id:string,dispatch:number)=>Promise<void>) {
+  return families.map(family=>client.createFunction({id:family+'-v1',retries:20,
     triggers:[{event:'nocheh/workflow.requested',if:`event.data.family == '${family}'`}]},async({event,step,runId})=>{
       const id=workflowIdentity(event.data.workflow_id),dispatch=Number(event.data.dispatch);
       if(!Number.isSafeInteger(dispatch)||dispatch<1)throw Error('invalid_workflow_dispatch');
       for(let index=0;index<400;index++) {
-        const result=await step.run('advance-'+index,()=>advanceWorkflow(pool,id,dispatch,family as WorkflowFamily,runId,operation!));
+        const result=await step.run('advance-'+index,()=>advance(id,dispatch,family,runId));
         if((closedStates as readonly string[]).includes(result.state))return {workflow_id:id,state:result.state};
         await step.sleepUntil('wait-'+index,new Date(Math.max(Date.now()+100,result.next_attempt)));
       }
       // Bound each run's step history without changing the permanent execution
       // identity or its receipts. Only Inngest determines when this happens.
-      await step.run('continue',async()=>{await continueWorkflow(pool,id,dispatch);return {workflow_id:id,state:'queued'};});
+      await step.run('continue',async()=>{await continuation(id,dispatch);return {workflow_id:id,state:'queued'};});
       return {workflow_id:id,state:'queued'};
     }));
 }

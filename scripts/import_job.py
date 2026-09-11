@@ -79,12 +79,17 @@ def inspect(directory, mapping=None):
             'chats': summaries, 'messages': count, 'missing_files': missing, 'supplied_files': supplied}
 
 
-def run(directory, mapping, after=0, api=None):
+def run(directory, mapping, after=0, api=None, *, limit=None, duplicates=None, learning_after=0):
+    if limit is not None and (type(limit) is not int or not 1 <= limit <= 100): raise ValueError('invalid_import_batch_limit')
+    if type(after) is not int or after < 0 or type(learning_after) is not int or learning_after < 0: raise ValueError('invalid_import_checkpoint')
     # The immutable preview identifies the already-validated uploaded file.
     metadata = json.loads((directory / 'job.json').read_text())
     preview = metadata['preview']; file = directory / safe_name(preview['file'])
     if digest(file.read_bytes()) != preview['sha256']: raise ValueError('export_integrity_failed')
     document = json.loads(file.read_text()); api = api or API()
+    duplicates = metadata.get('duplicates', 0) if duplicates is None else duplicates
+    if type(duplicates) is not int or duplicates < 0: raise ValueError('invalid_import_checkpoint')
+    if after > preview['messages'] or learning_after > preview['messages']: raise ValueError('invalid_import_checkpoint')
     batch_key = 'telegram-import:' + digest(canonical({'sha256': preview['sha256'], 'mapping': mapping}))
     event = {'version': 1, 'key': batch_key, 'bot_id': 'desktop-export', 'origin': 'import',
              'scope': 'import:' + preview['sha256'], 'kind': 'import_manifest', 'source_id': preview['sha256'],
@@ -94,18 +99,25 @@ def run(directory, mapping, after=0, api=None):
     api.call('/v1/import', {'event': event, 'artifacts': [{'id': artifact_id, 'source_ref': 'original-export',
              'kind': 'telegram_export', 'state': 'pending', 'metadata': {'sha256': preview['sha256']}}], 'derived': []})
     upload(api, artifact_id, file, preview['sha256'])
-    duplicates = metadata.get('duplicates', 0)
+    completed = after
     for index, (record, uploads) in enumerate(desktop_records(document, file.parent, scope_map=mapping)):
         if index < after: continue
+        if limit is not None and index >= after + limit: break
         result = api.call('/v1/import', record)
         for artifact_id, path in uploads: upload(api, artifact_id, path)
         duplicates += int(bool(result.get('duplicate')))
+        completed = index + 1
         print(json.dumps({'completed': index + 1, 'duplicates': duplicates}), flush=True)
     # Only queue after all records and available file bytes were ingested. The
     # persisted import-step decision survives cancellation and retries.
     approved = metadata.get('review_approved') is True
-    if approved:
+    if approved and completed == preview['messages']:
         ids = [digest(record['event']['key']) for record, _ in desktop_records(document, file.parent, scope_map=mapping)]
-        for start in range(0, len(ids), 500):
-            api.call('/v1/memory/reviews', {'approved': True, 'batch': directory.name, 'event_ids': ids[start:start+500]})
-    return {'completed': preview['messages'], 'duplicates': duplicates, 'telegram_replies': 0, 'review_approved': approved}
+        end = len(ids) if limit is None else min(len(ids), learning_after + limit)
+        for start in range(learning_after, end, 500):
+            api.call('/v1/memory/reviews', {'approved': True, 'batch': directory.name, 'event_ids': ids[start:min(end,start+500)]})
+        learning_after = end
+    result = {'completed': completed, 'duplicates': duplicates, 'telegram_replies': 0, 'review_approved': approved}
+    if limit is not None:
+        result.update(learning_after=learning_after, complete=completed == preview['messages'] and (not approved or learning_after == preview['messages']))
+    return result

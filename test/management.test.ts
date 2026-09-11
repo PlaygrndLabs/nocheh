@@ -25,6 +25,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const body=JSON.parse(raw || '{}');
     if(slow) await new Promise(r=>setTimeout(r,300));
     let result:unknown={};
+    if(req.url==='/v1/workflows/imports/confirm')result={owned:false};
     if(req.url==='/v1/import') {const duplicate=records.has(body.event.key);records.set(body.event.key,body);result={duplicate};}
     else if(req.url==='/v1/memory/reviews') reviews.push(body);
     else if(req.url?.endsWith('/bytes')) uploads++;

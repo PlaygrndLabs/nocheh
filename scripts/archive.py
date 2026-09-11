@@ -21,7 +21,7 @@ def canonical(value):
 
 
 class API:
-    def __init__(self):
+    def __init__(self, import_job=None, import_lease=None, import_owner='inngest'):
         state=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local'))
         try: from .configuration import load
         except ImportError: from configuration import load
@@ -29,10 +29,12 @@ class API:
         port=config['NOCHEH_PORT']
         self.url='http://127.0.0.1:'+str(int(port))
         self.token=config['SERVICE_TOKEN']
+        self.import_headers={} if import_job is None else {'X-Nocheh-Import-Job':import_job,'X-Nocheh-Import-Owner':import_owner}
+        if import_lease is not None:self.import_headers['X-Nocheh-Import-Lease']=import_lease
 
     def call(self,path,body=None,binary=False,timeout=120):
         req=urllib.request.Request(self.url+path,data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
-                                   headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
+                                   headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json',**self.import_headers})
         with urllib.request.urlopen(req,timeout=timeout) as response:
             return response.read() if binary else json.load(response)
 

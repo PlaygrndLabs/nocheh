@@ -1,0 +1,55 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import pg from 'pg';
+import {randomUUID} from 'node:crypto';
+import {initialize} from '../src/database.js';
+import {confirmImport,cancelImport,enterImportWrite,importConfiguration} from '../src/workflows/imports.js';
+import {claimHostWorkflow,finishHostWorkflow,renewHostWorkflow} from '../src/workflows/host-coordinator.js';
+import {pauseFamily,switchFamily} from '../src/workflows/store.js';
+
+test('host import authority survives lost receipts, lease expiry, cancellation and explicit resume',async()=>{
+  const admin=new pg.Pool(),schema='workflow_imports_'+randomUUID().replaceAll('-','');await admin.query(`CREATE SCHEMA ${schema}`);
+  const pool=new pg.Pool({options:`-c search_path=${schema}`,max:8});
+  try{
+    await initialize(pool);const id=randomUUID(),input={id,configuration_hash:importConfiguration({sha256:'a'.repeat(64),messages:103},{},true),review_approved:true,total:103};
+    assert.deepEqual(await confirmImport(pool,input),{owned:false});
+    const legacy=await enterImportWrite(pool,id,undefined,'legacy');await pauseFamily(pool,'imports',1);
+    await assert.rejects(switchFamily(pool,'imports',1,'inngest'),{code:'workflow_family_not_drained'});await legacy.release();
+    await switchFamily(pool,'imports',1,'inngest');
+    await assert.rejects(enterImportWrite(pool,id,undefined,'legacy'),{code:'import_owner_paused'});
+    await confirmImport(pool,input);await confirmImport(pool,input);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM workflow_registry WHERE family='imports'")).rows[0].n,1);
+    const workflow=(await pool.query("SELECT * FROM workflow_registry WHERE family='imports'")).rows[0];
+    const event={workflow_id:workflow.id,dispatch:1,family:'imports',run_id:'fixture-run'};
+    const first=await claimHostWorkflow(pool,event);assert.equal(first.claimed,true);assert.equal((await claimHostWorkflow(pool,event)).claimed,false);
+    const token={workflow_id:workflow.id,token:first.token,import_token:first.job.lease_token};
+    assert.equal((await renewHostWorkflow(pool,token)).renewed,true);
+    const held=await enterImportWrite(pool,id,first.job.lease_token);assert.equal(held.job.review_approved,true);await held.release();
+    const result={completed:50,duplicates:0,learning_after:0,complete:false};
+    const receipt=await finishHostWorkflow(pool,{...token,result});
+    assert.deepEqual(await finishHostWorkflow(pool,{...token,result}),receipt,'lost acknowledgment returns stored receipt');
+    await assert.rejects(enterImportWrite(pool,id,first.job.lease_token),{code:'import_execution_closed'});
+    const second=await claimHostWorkflow(pool,event);assert.equal(second.job.completed,50);
+    await pool.query("UPDATE workflow_imports SET lease_until=now()-interval '1 second' WHERE id=$1",[id]);
+    await assert.rejects(enterImportWrite(pool,id,second.job.lease_token),{code:'import_execution_closed'});
+    await cancelImport(pool,id);assert.equal((await claimHostWorkflow(pool,event)).observation?.state,'cancelled');
+    await assert.rejects(confirmImport(pool,input),{code:'import_resume_required'});
+    await assert.rejects(confirmImport(pool,{...input,resume:true,configuration_hash:'b'.repeat(64)}),{code:'resume_import_configuration_cannot_change'});
+    await confirmImport(pool,{...input,resume:true});
+    assert.equal((await pool.query('SELECT completed FROM workflow_imports WHERE id=$1',[id])).rows[0].completed,50);
+    assert.equal((await claimHostWorkflow(pool,event)).observation?.state,'cancelled','old generation cannot reopen');
+    const newer=(await pool.query("SELECT * FROM workflow_registry WHERE family='imports' AND generation=2")).rows[0];
+    const resumed=await claimHostWorkflow(pool,{...event,workflow_id:newer.id});assert.equal(resumed.claimed,true);
+    await assert.rejects(finishHostWorkflow(pool,{workflow_id:newer.id,token:resumed.token,import_token:resumed.job.lease_token,result:{completed:103,duplicates:0,learning_after:0,complete:true}}),{code:'import_receipt_conflict'},'approved learning must finish before completion');
+    await finishHostWorkflow(pool,{workflow_id:newer.id,token:resumed.token,import_token:resumed.job.lease_token,result:{completed:103,duplicates:0,learning_after:103,complete:true}});
+    assert.equal((await claimHostWorkflow(pool,{...event,workflow_id:newer.id})).observation?.state,'completed');
+    const deniedId=randomUUID();await confirmImport(pool,{...input,id:deniedId});
+    const deniedWorkflow=(await pool.query("SELECT id FROM workflow_registry WHERE family='imports' AND job_id=$1",[deniedId])).rows[0].id;
+    const denied=await claimHostWorkflow(pool,{...event,workflow_id:deniedWorkflow});
+    await finishHostWorkflow(pool,{workflow_id:deniedWorkflow,token:denied.token,import_token:denied.job.lease_token,failure_code:'import_configuration_changed'});
+    assert.equal((await claimHostWorkflow(pool,{...event,workflow_id:deniedWorkflow})).observation?.state,'failed','changed input cannot retry automatically');
+    const existingId=randomUUID();await confirmImport(pool,{...input,id:existingId,completed:25,duplicates:2});
+    await confirmImport(pool,{...input,id:existingId,completed:0,duplicates:0});
+    assert.equal((await pool.query('SELECT completed FROM workflow_imports WHERE id=$1',[existingId])).rows[0].completed,25,'legacy checkpoint seeds once and cannot be overwritten by replay');
+  }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
+});

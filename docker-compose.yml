@@ -265,11 +265,13 @@ services:
 
   archive:
     <<: *service
-    networks: [default, memory]
+    networks: [default, memory, workflows]
     environment:
       <<: *environment
       NOCHEH_SERVICE: archive
       NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
+      NOCHEH_WORKFLOWS_ENABLED: ${NOCHEH_WORKFLOWS_ENABLED:-false}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
     depends_on:
       postgres: {condition: service_healthy}

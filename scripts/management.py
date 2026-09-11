@@ -9,6 +9,15 @@ from .configuration import ROOT, load
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
+    if operation=='workflow.import.batch':
+        from .workflow_jobs import import_batch
+        return import_batch(state,body)
+    if operation=='workflow.api':
+        from .archive import API
+        import re
+        path=body['path']
+        if not re.fullmatch(r'/v1/workflows/(?:imports/(?:confirm|cancel|[a-f0-9-]{36})|host/(?:claim|renew|finish|continue|heartbeat))',path):raise ValueError('workflow_route_denied')
+        return API().call(path,body.get('body'))
     if operation == 'monitoring.status':
         from .monitoring import status
         return status(state)
@@ -105,12 +114,17 @@ def dispatch(body):
         directory = state / 'admin/jobs' / job
         if operation == 'import.inspect': return inspect(directory)
         if operation == 'import.run':
+            import fcntl
+            from .archive import API
             mapping = body.get('mapping', {})
             policy = load(state)
             allowed = set(filter(None, [policy['TELEGRAM_OWNER_ID'], *policy['TELEGRAM_GROUP_IDS'].split(',')]))
             if not isinstance(mapping, dict) or any(not isinstance(k, str) or v not in allowed for k, v in mapping.items()):
                 raise ValueError('scope_mapping_denied')
-            return run(directory, mapping, body.get('after', 0))
+            with (directory/'execution.lock').open('a') as lock:
+                try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError:raise ValueError('import_batch_busy') from None
+                return run(directory,mapping,body.get('after',0),API(job,import_owner='legacy'))
     raise ValueError('unknown_operation')
 
 

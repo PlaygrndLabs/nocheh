@@ -30,6 +30,8 @@ TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'ev
         'security_policy_versions':'revision','security_policy':'singleton','security_events':'id'}
 TABLES.update(workflow_owners='family',workflow_registry='id',workflow_outbox='id',workflow_runs='workflow_id,run_id',workflow_receipts='workflow_id,step,attempt')
 TABLES.update(workflow_request_revisions='family,job_id')
+TABLES.update(workflow_imports='id',workflow_host_receipts='token')
+TABLES.update(workflow_worker_registrations='family')
 
 
 def compose(state,project=None):
@@ -73,6 +75,7 @@ def fingerprints(command,env,tables=None):
 def backup(state,output,leave_stopped=False):
     try:from .tool_worker import running as tools_running,stop as stop_tools,start as start_tools
     except ImportError:from scripts.tool_worker import running as tools_running,stop as stop_tools,start as start_tools
+    from scripts.workflow_worker import running as workflows_running,stop as stop_workflows,start as start_workflows
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
     output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -80,10 +83,14 @@ def backup(state,output,leave_stopped=False):
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
     stopped=[name for name in SERVICES if name in running]
     tool_was_running=tools_running(state)
+    workflow_was_running=workflows_running(state)
     try:
+        if 'hermes' in stopped:subprocess.run(command+['stop','hermes'],env=env,check=True)
+        if workflow_was_running:stop_workflows(state,wait=True)
         if tool_was_running:stop_tools(state,wait=True)
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
-        for service in stopped: subprocess.run(command+['stop',service],env=env,check=True)
+        for service in stopped:
+            if service!='hermes':subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                   'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
@@ -139,6 +146,7 @@ def backup(state,output,leave_stopped=False):
         # Resume precisely the services that were running before the snapshot.
         if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180']+stopped,env=env,check=True)
         if tool_was_running and not leave_stopped:start_tools(state)
+        if workflow_was_running and not leave_stopped:start_workflows(state)
 
 
 def validate_snapshot(snapshot):

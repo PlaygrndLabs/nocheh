@@ -9,7 +9,7 @@ import {settings} from '../src/config.js';
 import {initialize} from '../src/database.js';
 import {ingest,type Envelope} from '../src/archive.js';
 import {setGuardMode} from '../src/guarded.js';
-import {pauseFamily,switchFamily,publishOutbox} from '../src/workflows/store.js';
+import {pauseFamily,switchFamily,publishOutbox,registerWorker} from '../src/workflows/store.js';
 import {pipelineOperations} from '../src/workflows/pipeline.js';
 import {workflowFunctions} from '../src/workflows/engine.js';
 import {workflowClient,connectWorkflows} from '../src/workflows/client.js';
@@ -37,6 +37,7 @@ try {
   await ingest(pool,source);await ingest(pool,source);
   const deadline=Date.now()+120000;
   while(Date.now()<deadline) {
+    if(connection.state==='ACTIVE')await registerWorker(pool,'pipeline',['preparation','telegram']);
     await publishOutbox(pool,event=>client.send(event));
     const rows=(await pool.query("SELECT family,state,stage FROM workflow_registry WHERE family IN ('preparation','telegram') ORDER BY family")).rows;
     if(rows.length>=2&&rows.every(row=>['completed','skipped'].includes(row.state)))break;
