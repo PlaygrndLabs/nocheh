@@ -86,7 +86,7 @@ export function browserOperation(pool:pg.Pool,config:Settings,call:RuntimeCall):
     if(row.state==='captured'&&!row.cancel_requested&&(await guardState(pool)).mode==='on'&&(await pool.query("SELECT 1 FROM guard_sources WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event])).rowCount)
       return observation('waiting','preparation',0,Date.now()+5000,'guard_pending');
     if(['captured','running'].includes(row.state)) {
-      const body={channel:'browser',event_id:event,attempt:1,owner_epoch:authority.epoch};
+      const body={channel:'browser',event_id:event,attempt:1,owner_epoch:authority.epoch,asynchronous:true};
       let runtime:Record<string,unknown>;
       try {
         if(row.cancel_requested)await call('run.cancel',body);
