@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import time
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -97,6 +98,16 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         blocked=await gateway.dispatch(envelope(20,'Policy changed during generation'))
                     self.assertEqual(blocked,{'state':'failed','error_code':'space_policy_changed'})
                     self.assertEqual(len(request.sent),before,'policy recheck precedes native sending')
+                    async def silence(event):
+                        TURN.get()['agent_result']={'state':'done','text':'','session_id':'fixture'}
+                        return ''
+                    adapter.set_message_handler(silence)
+                    silent=envelope(21,'Intentional silence')
+                    self.assertEqual(await gateway.dispatch(silent),{'state':'suppressed','error_code':'intentional_silence'})
+                    self.assertEqual(await gateway.dispatch(silent),{'state':'suppressed','error_code':'intentional_silence'})
+                    cancel=threading.Event();cancel.set()
+                    self.assertEqual(await gateway.dispatch(envelope(22,'Cancelled'),cancelled=cancel),{'state':'cancelled'})
+                    self.assertEqual(len(request.sent),before,'silence and cancellation cannot send a reply')
                 finally:await app.shutdown()
 
 

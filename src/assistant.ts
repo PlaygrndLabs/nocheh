@@ -16,6 +16,15 @@ import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionA
 type Call=RuntimeCall;
 const TRANSCRIPTION_VERSION='codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4';
 
+async function dispatchReceipt(client:pg.PoolClient,eventId:string,result:Record<string,unknown>) {
+  if(!['queued','running','done','failed','ambiguous','suppressed','cancelled'].includes(String(result.state)))throw Error('invalid_dispatch_receipt');
+  const active=['queued','running'].includes(String(result.state));
+  const allowed=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence'];
+  await client.query(`UPDATE dispatches SET state=$2,error_code=$3,next_attempt=now()+($4*interval '1 second'),updated_at=now(),
+    runtime_stage=coalesce($5,runtime_stage) WHERE event_id=$1`,[eventId,active?'running':result.state,active?'awaiting_dispatch_receipt':allowed.includes(String(result.error_code))?result.error_code:null,
+    active?5:60,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:result.state==='done'?'delivery':null]);
+}
+
 export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call,authority:ExecutionAuthority=legacyAuthority):Promise<string[]|null> {
   const {rows}=await client.query<{id:string;file_hash:string;kind:string;state:string;metadata:{file_name?:string}}>(
     "SELECT id,file_hash,kind,state,metadata FROM artifacts WHERE event_id=$1 AND kind IN ('voice','audio','video_note') ORDER BY id",[eventId]);
@@ -65,6 +74,16 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,e
        WHERE d.state IN ('pending','failed','running') AND d.next_attempt<=now() AND e.origin='live' AND e.kind='telegram_update'
        AND ($1::text IS NULL OR e.id=$1) ORDER BY d.next_attempt,e.received_at LIMIT 1`,[eventId]);
     const event=rows[0];if(!event)return;
+    if(authority.owner==='inngest'&&event.state==='running') {
+      try {
+        const observed=await call('run.resume',{channel:'telegram',event_id:event.id,attempt:event.attempts},10000);
+        if(observed.state!=='not_found'){await dispatchReceipt(client,event.id,observed);return;}
+        // Only the runtime's explicit absence permits resending the same start
+        // identity. Never increment the attempt merely after a lost response.
+      }catch {
+        await client.query("UPDATE dispatches SET error_code='awaiting_dispatch_receipt',next_attempt=now()+interval '10 seconds',updated_at=now() WHERE event_id=$1",[event.id]);return;
+      }
+    }
     let payload:unknown,scope:ReturnType<typeof conversationScope>;
     try {
       payload=JSON.parse(event.payload.toString()) as unknown;
@@ -96,11 +115,9 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,e
       await allowPrepared(pool,{scope:scope.owner?null:scope.chat_id,admin:false,turnEvent:event.id,space:policy.id,revision:policy.revision,guard_epoch:guard.epoch},{text,transcripts:selectedTranscripts});
       const result=await call('run.start',{channel:'telegram',event_id:event.id,source_key:event.source_key,scope:event.scope,payload,
         text,transcripts:selectedTranscripts,attempt,control_reply:control,guard_mode:guard.mode,
-        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision,guard_epoch:guard.epoch})},260000);
-      if (!['done','failed','ambiguous','suppressed'].includes(String(result.state))) throw new Error('invalid_dispatch_receipt');
-      const allowedCodes=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed'];
-      await client.query(`UPDATE dispatches SET state=$2,error_code=$3,next_attempt=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1`,
-        [event.id,result.state,allowedCodes.includes(String(result.error_code))?result.error_code:null]);
+        ...(authority.owner==='inngest'?{asynchronous:true}:{}),
+        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision,guard_epoch:guard.epoch})},authority.owner==='inngest'?10000:260000);
+      await dispatchReceipt(client,event.id,result);
     } catch {
       // Retain running + the same attempt ID. A retry reads the Hermes receipt;
       // it never blindly launches a second turn after an uncertain HTTP result.

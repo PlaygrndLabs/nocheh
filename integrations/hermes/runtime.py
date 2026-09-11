@@ -151,6 +151,11 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
+            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
+            if body.get('channel','telegram')!='telegram':raise ValueError('runtime_channel_unavailable')
+            if self.path.endswith(('/start','/resume')) and (ASSISTANT.loop is None or ASSISTANT.status!='connected'):raise RuntimeError('telegram_not_ready')
+            return getattr(ASSISTANT.runs,self.path.rsplit('/',1)[-1])(body)
         if self.path == '/internal/security/transport':
             from .security_transport import broker_transport
             return broker_transport(resolve_credentials(),MODEL if body.get('metadata') is True else None)

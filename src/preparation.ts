@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {digest} from './archive.js';
 import {prepareTranscripts} from './assistant.js';
 import type {RuntimeCall} from './runtime.js';
+import {HttpError} from './http.js';
 import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 // Imports and live capture share the same preparation path. Unsupported bytes
@@ -18,8 +19,8 @@ export async function prepareArchiveFiles(pool:pg.Pool,root:string,call:RuntimeC
       AND (t.artifact_id IS NULL OR t.next_attempt<=now()) AND ($1::text IS NULL OR a.event_id=$1) ORDER BY a.id LIMIT 10`,[eventId]);
     for(const row of rows) {
       if(['voice','audio','video_note'].includes(row.kind)){await prepareTranscripts(client,root,row.event_id,call,authority);continue;}
-      if(!/^[a-f0-9]{64}$/.test(row.file_hash))continue;
-      const bytes=await readFile(join(root,'files',row.file_hash));if(digest(bytes)!==row.file_hash)continue;
+      if(!/^[a-f0-9]{64}$/.test(row.file_hash))throw new HttpError(409,'archive_integrity_failed');
+      const bytes=await readFile(join(root,'files',row.file_hash));if(digest(bytes)!==row.file_hash)throw new HttpError(409,'archive_integrity_failed');
       let text:string|null=null;
       if(!['photo','image','video','sticker','animation'].includes(row.kind)&&bytes.length<=200000&&!bytes.includes(0)) {
         try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* original binary remains retrievable by the owner */}

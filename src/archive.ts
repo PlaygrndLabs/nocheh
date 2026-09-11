@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS spool_failures (
   file_name text PRIMARY KEY, attempts integer NOT NULL DEFAULT 1, error_code text NOT NULL,
   seen_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE dispatches DROP CONSTRAINT IF EXISTS dispatches_state_check;
+ALTER TABLE dispatches ADD CONSTRAINT dispatches_state_check CHECK(state IN ('pending','running','done','failed','ambiguous','suppressed','cancelled'));
+ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS runtime_stage text NOT NULL DEFAULT 'admission';
 CREATE TABLE IF NOT EXISTS guarded_cache (
   cache_key text PRIMARY KEY, payload bytea NOT NULL, spans integer NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()

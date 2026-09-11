@@ -1,4 +1,5 @@
 import {Middleware,NonRetriableError,RetryAfterError} from 'inngest';
+import {families} from './store.js';
 
 const states=new Set(['queued','waiting','running','retryable_failed','completed','failed','skipped','cancelled','ambiguous','denied','done','ready']);
 const stages=new Set(['admission','attachments','transcription','preparation','assistant','delivery','import','review','sync','reconcile','browser','schedule','action']);
@@ -13,6 +14,7 @@ export function safeMetadata(value:unknown):void {
     if(['version','generation','dispatch','count','attempts','at','next_attempt'].includes(key))valid=typeof item==='number'&&Number.isSafeInteger(item)&&item>=0;
     if(key==='state')valid=typeof item==='string'&&states.has(item);
     if(key==='stage')valid=typeof item==='string'&&stages.has(item);
+    if(key==='family')valid=typeof item==='string'&&(families as readonly string[]).includes(item);
     if(key==='waiting_reason')valid=item===null||(typeof item==='string'&&reasons.has(item));
     if(!valid)throw new NonRetriableError('workflow_data_boundary');
   }
