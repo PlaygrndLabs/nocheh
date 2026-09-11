@@ -4,6 +4,8 @@ import {HttpError} from '../http.js';
 
 export const families=['preparation','telegram','imports','memory_review','honcho','browser','schedules','actions','tools'] as const;
 export type WorkflowFamily=typeof families[number];
+export type ExecutionAuthority={owner:'legacy'|'inngest';epoch?:number};
+export const legacyAuthority:ExecutionAuthority={owner:'legacy'};
 export const closedStates=['completed','failed','skipped','cancelled','ambiguous','denied'] as const;
 export type WorkflowState='queued'|'waiting'|'running'|'retryable_failed'|typeof closedStates[number];
 export const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -74,6 +76,11 @@ export async function enterFamily(client:pg.PoolClient,family:WorkflowFamily,own
 }
 export async function leaveFamily(client:pg.PoolClient,family:WorkflowFamily):Promise<void> {
   await client.query(`SELECT pg_advisory_unlock_shared(${lockKey})`,[family]);
+}
+/** A failed unlock must discard the session, never return its locks to the pool. */
+export async function releaseOperation(client:pg.PoolClient,unlock:()=>Promise<void>):Promise<void> {
+  let failed=false;
+  try{await unlock();}catch(error){failed=true;throw error;}finally{client.release(failed);}
 }
 
 /** Pausing is separate from switching: existing holders may finish and commit receipts. */

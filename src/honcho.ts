@@ -6,6 +6,7 @@ import {assertAudience,type Reader} from './access.js';
 import {guardState,guardedValue} from './guarded.js';
 import {policyRevision,parentSpace,spacePolicy} from './spaces.js';
 import {allowPrepared,prepareContext} from './prepared-context.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 export const honchoSchema=`
 CREATE TABLE IF NOT EXISTS honcho_connection(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
@@ -120,24 +121,27 @@ export async function queueMemory(pool:pg.Pool) {
   await pool.query('INSERT INTO honcho_prepared_sources VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,guard.epoch,policy]);
  }
 }
-export async function syncMemory(pool:pg.Pool,call:HonchoCall) {
- const client=await pool.connect();let locked=false;
+export async function syncMemory(pool:pg.Pool,call:HonchoCall,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+ const client=await pool.connect();let locked=false,fenced=false;
  try{
+  fenced=await enterFamily(client,'honcho',authority.owner,authority.epoch);if(!fenced)return;
   locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803311)) AS locked')).rows[0].locked;if(!locked)return;
   const connection=(await memoryStatus(pool)).connection;if(!connection.attached||!connection.verified)return;
   // Reattachment first reconciles uncertain writes from retired generations.
   // Reads do not resurrect those workspaces or permit their model processing.
   const old=(await pool.query(`SELECT r.* FROM honcho_receipts r JOIN honcho_generations g ON g.id=r.generation
-    WHERE r.state='uncertain' AND (g.guard_epoch<>(SELECT epoch FROM guard_state) OR g.policy_revision<>(SELECT revision FROM memory_policy_state)) LIMIT 20`)).rows;
+    WHERE r.state='uncertain' AND (g.guard_epoch<>(SELECT epoch FROM guard_state) OR g.policy_revision<>(SELECT revision FROM memory_policy_state))
+    AND ($1::text IS NULL OR r.id=$1 OR g.id=$1) LIMIT 20`,[jobId])).rows;
   for(const job of old){try{const found=(await call('/v3/workspaces/'+job.generation+'/sessions/'+job.id+'/messages/list',{filters:{metadata:{nocheh_receipt:job.id}}})).items;
     if(!Array.isArray(found)||found.length!==1||found[0].content!==job.content.toString()||found[0].metadata?.nocheh_receipt!==job.id)return;
     await pool.query("UPDATE honcho_receipts SET state='done',remote_id=$2,error_code=NULL WHERE id=$1",[job.id,String(found[0].id)]);
    }catch{return;}}
   if(old.length===20)return;
-  await queueMemory(pool);
+  if(!jobId)await queueMemory(pool);
   const guard=await guardState(pool),policy=await policyRevision(pool);
   const jobs=(await pool.query(`SELECT r.* FROM honcho_receipts r JOIN honcho_generations g ON g.id=r.generation
-   WHERE g.guard_epoch=$1 AND g.policy_revision=$2 AND g.state<>'retired' AND r.state<>'done' AND r.next_attempt<=now() ORDER BY r.created_at,r.id LIMIT 10`,[guard.epoch,policy])).rows;
+   WHERE g.guard_epoch=$1 AND g.policy_revision=$2 AND g.state<>'retired' AND r.state<>'done' AND r.next_attempt<=now()
+   AND ($3::text IS NULL OR r.id=$3 OR g.id=$3) ORDER BY r.created_at,r.id LIMIT 10`,[guard.epoch,policy,jobId])).rows;
   for(const job of jobs) {
    let attempted=false;
    try{
@@ -161,7 +165,7 @@ export async function syncMemory(pool:pg.Pool,call:HonchoCall) {
     await pool.query("UPDATE honcho_receipts SET state='done',remote_id=$2,error_code=NULL,updated_at=now() WHERE id=$1",[job.id,String(found[0].id)]);
    }catch(error){await pool.query(`UPDATE honcho_receipts SET state=CASE WHEN state='uncertain' OR $3 THEN 'uncertain' ELSE 'pending' END,error_code=$2,next_attempt=now()+interval '60 seconds',updated_at=now() WHERE id=$1`,[job.id,error instanceof HttpError?error.code:'honcho_unavailable',attempted]);}
   }
-  const generations=(await pool.query("SELECT * FROM honcho_generations WHERE guard_epoch=$1 AND policy_revision=$2 AND state<>'retired'",[guard.epoch,policy])).rows;
+  const generations=(await pool.query("SELECT * FROM honcho_generations WHERE guard_epoch=$1 AND policy_revision=$2 AND state<>'retired' AND ($3::text IS NULL OR id=$3 OR id=(SELECT generation FROM honcho_receipts WHERE id=$3))",[guard.epoch,policy,jobId])).rows;
   for(const generation of generations) {
    try{await currentGeneration(pool,generation.id);
     const pending=Number((await pool.query("SELECT count(*) AS count FROM honcho_receipts WHERE generation=$1 AND state<>'done'",[generation.id])).rows[0].count);
@@ -170,7 +174,7 @@ export async function syncMemory(pool:pg.Pool,call:HonchoCall) {
     await pool.query('UPDATE honcho_generations SET state=$2,error_code=NULL WHERE id=$1 AND state<>\'retired\'',[generation.id,ready?'ready':'building']);
    }catch{await pool.query("UPDATE honcho_generations SET error_code='honcho_unavailable' WHERE id=$1",[generation.id]);}
   }
- }finally{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803311))');client.release();}
+ }finally{await releaseOperation(client,async()=>{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803311))');if(fenced)await leaveFamily(client,'honcho');});}
 }
 export async function recallMemory(pool:pg.Pool,principal:Reader,query:string,call:HonchoCall,detect:(text:string)=>Promise<unknown>) {
  await assertAudience(pool,principal);string(query,2000);

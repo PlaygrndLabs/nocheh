@@ -10,6 +10,7 @@ import {evaluate,recordEffect} from './security/store.js';
 import type {Effect,Decision} from './security/contract.js';
 import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
 import {controlledAction,controlledList,decideControlled,revokePermission} from './controlled-actions.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 export async function telegramActions(pool:pg.Pool,principal:Reader) {
   admin(principal);
@@ -103,12 +104,13 @@ export async function controlReply(pool:pg.Pool,policy:AssistantPolicy,eventId:s
   return reply;
 }
 
-export async function executeApproved(pool:pg.Pool,call:RuntimeCall) {
-  const client=await pool.connect();let held=false;
+export async function executeApproved(pool:pg.Pool,call:RuntimeCall,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+  const client=await pool.connect();let held=false,fenced=false;
   try {
+    fenced=await enterFamily(client,'actions',authority.owner,authority.epoch);if(!fenced)return;
     held=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803303) AS locked')).rows[0]!.locked;
     if(!held)return;
-    const row=(await client.query<{id:string;destination:string;original_text:Buffer;scope:string;event_id:string;state:string;security_decision:Decision|null}>("SELECT * FROM action_requests WHERE (state='approved' OR (state='running' AND updated_at < now()-interval '30 seconds')) AND decision_event_id IS NOT NULL ORDER BY updated_at LIMIT 1")).rows[0];
+    const row=(await client.query<{id:string;destination:string;original_text:Buffer;scope:string;event_id:string;state:string;security_decision:Decision|null}>("SELECT * FROM action_requests WHERE (state='approved' OR (state='running' AND updated_at < now()-interval '30 seconds')) AND decision_event_id IS NOT NULL AND ($1::text IS NULL OR id=$1) ORDER BY updated_at LIMIT 1",[jobId])).rows[0];
     if(!row)return;
     const effect:Effect={id:row.id,kind:'telegram.send',scope:row.scope,profile:'nocheh-'+digest(row.scope).slice(0,24),fingerprint:digest(canonical({destination:row.destination,text:row.original_text.toString()}))};
     const decision=row.state==='running'&&row.security_decision?row.security_decision:await evaluate(client,effect,'exact_owner_approval');
@@ -125,5 +127,5 @@ export async function executeApproved(pool:pg.Pool,call:RuntimeCall) {
       await client.query('UPDATE action_requests SET state=$2,error_code=$3,updated_at=now() WHERE id=$1',[row.id,result.state,result.state==='ambiguous'?'delivery_unconfirmed':null]);
       await recordEffect(client,effect,result.state==='done'?'completed':'ambiguous',decision,row.event_id);
     } catch {await recordEffect(client,effect,'ambiguous',decision,row.event_id);await client.query("UPDATE action_requests SET error_code='awaiting_action_receipt',updated_at=now() WHERE id=$1",[row.id]);}
-  } finally {if(held)await client.query('SELECT pg_advisory_unlock(803303)');client.release();}
+  } finally {await releaseOperation(client,async()=>{if(held)await client.query('SELECT pg_advisory_unlock(803303)');if(fenced)await leaveFamily(client,'actions');});}
 }

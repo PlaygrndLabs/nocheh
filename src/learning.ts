@@ -7,6 +7,7 @@ import {guardState,guardedValue} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
 import {turnToken} from './access.js';
 import {policyRevision} from './spaces.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 export const learningSchema=`
 CREATE TABLE IF NOT EXISTS memory_learning_sources (event_id text PRIMARY KEY REFERENCES events(id), reason text NOT NULL, batch text, prepared boolean NOT NULL DEFAULT false, approved_at timestamptz NOT NULL DEFAULT now());
@@ -74,13 +75,14 @@ export async function prepareReviews(pool:pg.Pool,live:boolean) {
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
 }
-export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCall) {
+export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCall,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
   if(!config.assistant.owner_id)return;
-  const client=await pool.connect();let locked=false;
-  try{locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803304)) AS locked')).rows[0].locked;if(!locked)return;
-    await prepareReviews(pool,config.assistant.enabled);
+  const client=await pool.connect();let locked=false,fenced=false;
+  try{fenced=await enterFamily(client,'memory_review',authority.owner,authority.epoch);if(!fenced)return;
+    locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803304)) AS locked')).rows[0].locked;if(!locked)return;
+    if(!jobId)await prepareReviews(pool,config.assistant.enabled);
     const guard=await guardState(pool);
-    const {rows}=await client.query("SELECT * FROM memory_review_jobs WHERE state IN ('pending','failed','running') AND next_attempt<=now() AND guard_epoch=$1 ORDER BY created_at,id LIMIT 1",[guard.epoch]);
+    const {rows}=await client.query("SELECT * FROM memory_review_jobs WHERE state IN ('pending','failed','running') AND next_attempt<=now() AND guard_epoch=$1 AND ($2::text IS NULL OR id=$2) ORDER BY created_at,id LIMIT 1",[guard.epoch,jobId]);
     const job=rows[0];if(!job)return;
     await client.query("UPDATE memory_review_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1",[job.id]);
     try{
@@ -92,5 +94,5 @@ export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCal
       if(!['done','ambiguous'].includes(String(result.state)))throw new HttpError(503,'review_failed');
       await client.query('UPDATE memory_review_jobs SET state=$2,error_code=$3,updated_at=now() WHERE id=$1',[job.id,result.state,result.state==='ambiguous'?'review_interrupted':null]);
     }catch(error){await client.query("UPDATE memory_review_jobs SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second',updated_at=now() WHERE id=$1",[job.id,error instanceof HttpError?error.code:'review_unavailable']);}
-  }finally{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803304))');client.release();}
+  }finally{await releaseOperation(client,async()=>{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803304))');if(fenced)await leaveFamily(client,'memory_review');});}
 }

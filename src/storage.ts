@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { digest, envelope, ingest } from './archive.js';
 import { HttpError } from './http.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 export async function syncDirectory(path:string):Promise<void> {
   const dir=await open(path,'r'); try { await dir.sync(); } finally { await dir.close(); }
@@ -49,16 +50,17 @@ export async function drainSpool(pool:pg.Pool,root:string):Promise<void> {
   }
 }
 
-export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref:string)=>Promise<Buffer>):Promise<void> {
+export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref:string)=>Promise<Buffer>,eventId:string|null=null,authority:ExecutionAuthority=legacyAuthority):Promise<void> {
   const client=await pool.connect();
   // One short batch per worker. An advisory lock prevents duplicate downloads by extra workers.
-  let locked=false;
+  let locked=false,fenced=false;
   try {
+    fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);if(!fenced)return;
     locked=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803301) AS locked')).rows[0]?.locked ?? false;
     if (!locked) return;
     const rows=await client.query<{id:string;source_ref:string}> (`SELECT id,source_ref FROM artifacts WHERE state<>'ready'
       AND source_ref NOT LIKE 'desktop:%' AND error_code IS DISTINCT FROM 'import_bytes_pending'
-      AND next_attempt<=now() ORDER BY next_attempt LIMIT 10`);
+      AND next_attempt<=now() AND ($1::text IS NULL OR event_id=$1) ORDER BY next_attempt LIMIT 10`,[eventId]);
     for (const artifact of rows.rows) {
       try {
         const bytes=await fetchFile(artifact.source_ref);
@@ -70,5 +72,5 @@ export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref
           [artifact.id,error instanceof HttpError ? error.code : 'attachment_unavailable']);
       }
     }
-  } finally { if (locked) await client.query('SELECT pg_advisory_unlock(803301)').catch(()=>{}); client.release(); }
+  } finally {await releaseOperation(client,async()=>{if(locked)await client.query('SELECT pg_advisory_unlock(803301)');if(fenced)await leaveFamily(client,'preparation');});}
 }
