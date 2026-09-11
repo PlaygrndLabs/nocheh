@@ -1,7 +1,9 @@
 # Guarded copies and primary memory
 
-Implementation: ADR-0033. Actual activation and acceptance are recorded in TASK.md;
-Honcho stays detached until real provider checks pass.
+The accepted target below is defined in [SPECS.md](../SPECS.md), with rationale in
+ADR-0033 and ADR-0035. Actual activation and acceptance are recorded in
+[TASK.md](../TASK.md); the diagram is not a claim of active shared-provider routing
+or attached Honcho. Honcho stays detached until its live gates pass.
 
 ```mermaid
 flowchart TD
@@ -29,9 +31,9 @@ flowchart TD
 ```
 
 The shared route stays inactive until `./scripts/nocheh provider cutover` passes
-the live checks recorded in `TASK.md`. The native Hermes route remains the rollback
-during that gate. Honcho memory attachment still requires its separate embedding
-and recall acceptance.
+the live checks recorded in `TASK.md`. The native Hermes route stays active
+during that gate and becomes an inactive rollback only after shared cutover. Honcho
+memory attachment still requires its separate embedding and recall acceptance.
 
 1. Import `Database password: mango123`. The original is archived unchanged.
 2. Preparation saves `Database password: ***`. You can inspect both versions.

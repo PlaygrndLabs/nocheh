@@ -1,31 +1,21 @@
-# Share one ChatGPT login through CLIProxyAPI
+# Shared provider execution and cutover
 
-Accepted plan: ADR-0035. `TASK.md` records actual completion and evidence.
+[SPECS.md](../SPECS.md) defines authentication, retry, speech, monitoring, and
+embedding boundaries. [TASK.md](../TASK.md) records actual routing and acceptance.
+ADR-0035 supplies the rationale. Follow [AGENTS.md](../AGENTS.md) for integration.
 
-1. **Contract:** record the shared authentication, retry, speech and monitoring
-   boundaries. Keep the existing native Hermes route available only as an inactive
-   rollback until shared-provider acceptance passes.
-2. **Provider service:** promote the pinned CLIProxyAPI build from the Honcho
-   experiment into the local Nocheh stack. CLIProxyAPI is the sole OAuth writer
-   and refresh owner. Hermes, Honcho and trusted preparation use distinct internal
-   client keys. A fresh proxy device login replaces, rather than copies, Hermes's
-   login at cutover.
-3. **Hermes and voice:** route every Hermes reasoning path through the guarded
-   OpenAI-compatible proxy. Keep `codex-asr` as the speech client; a trusted speech
-   boundary reads the proxy's current access token without receiving the refresh
-   token or writing the auth store.
-4. **Honcho:** use the same reasoning proxy while retaining the existing Nocheh
-   preparation gateway, audience generations, durable receipts and separately
-   capped paid embeddings. Provider retries must return through current-revision
-   guarding before another model attempt.
-5. **Monitoring and cutover:** run pinned CPA Manager Plus Full Mode as a separate
-   service, proxy it behind the Nocheh owner dashboard, verify shared reasoning,
-   refresh, transcription, monitoring and recovery, then deactivate the old Hermes
-   login. Honcho attachment still requires its independent live embedding and
-   ingestion/recall gates.
+## Checkpoints
 
-Each phase ends with relevant checks, an AST-only Graphify refresh when code has
-changed, a scoped commit, and automatic continuation. Local Docker Compose remains
-the acceptance target. Missing live credentials or provider capacity remain pending
-checks and do not prevent independent implementation work.
+| Phase | Work and acceptance procedure |
+| --- | --- |
+| S1 — Contract | Inventory each consumer, credential owner, retry path, speech route, and monitoring boundary against the specification. |
+| S2 — Provider service | Build the pinned service; verify private per-client credentials, single-owner refresh, locked no-fallback/no-extra-retry settings, and health. Fresh login remains a cutover gate. |
+| S3 — Hermes, voice, and Honcho routes | Test every reasoning client through scoped shared-provider keys and current guard checks; verify speech has only read-only access-token access and Honcho retains its separate embedding meter and audience binding. |
+| S4 — Monitoring | Build pinned CPA Manager Plus Full Mode; verify isolated state, owner session/CSRF proxying, credential protection, disabled automatic account actions, and failure isolation. |
+| S5 — Local acceptance and cutover | Complete fresh login; run live reasoning, refresh, literal detection, Ogg/Opus speech, monitoring, and restart/recovery checks. Verify recovery-safe backup/restore and explicitly cut over only after success. |
 
+The native Hermes subscription route remains active until S5 passes. Only after
+cutover is the old native login an inactive rollback. Honcho attachment still needs
+its independent live embeddings, ingestion, retrieval, and failure acceptance.
+[Provider operations](provider.md) describes the commands; missing capacity or login
+remains pending and does not prevent independent work.

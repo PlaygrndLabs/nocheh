@@ -1,5 +1,8 @@
 # Local Compose operations
 
+[SPECS.md](../SPECS.md) defines the product; [TASK.md](../TASK.md) records actual
+activation and pending acceptance. This guide describes operating procedures.
+
 Local Docker Compose is the current target. It is used for normal unattended
 operation, development and acceptance. No VPS is required.
 
@@ -19,7 +22,10 @@ Docker must itself be configured to start at login/boot for unattended operation
 `dev` overlays `docker-compose.dev.yml`. TypeScript source changes synchronize into
 the development images, rebuild and restart affected services. Python integration
 changes restart Hermes. Dependencies and Dockerfile changes rebuild images.
-Both modes use the same persistent database, files, spool and Hermes state.
+Both modes use the same persistent database, files, spool and Hermes state. A new
+Git worktree does not isolate that installation. Per-session preview tooling and
+the missing `make dev` recipe are tracked in TASK.md; use this workflow only in an
+explicitly assigned environment.
 See Docker's [Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/)
 and [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/) docs.
 
@@ -35,7 +41,7 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 | --- | --- |
 | `.env` | Model, optional guard, port, Telegram settings and internal passwords |
 | `.env.example` | Committed template without credentials |
-| `data/local/hermes/` | Hermes profiles, memory, session state and inactive native rollback login until cutover |
+| `data/local/hermes/` | Hermes profiles, memory and sessions; native login active before shared cutover and inactive afterward |
 | `data/local/provider/auth/` | CLIProxyAPI-owned OAuth login; its only active refresh store after cutover |
 | `data/local/provider/monitor/` | CPA Manager Plus request and usage history |
 | `data/local/files/` | Original attachment bytes |
@@ -45,8 +51,10 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 
 `TELEGRAM_ENABLED` defaults to `false`. Configure `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_OWNER_ID` and comma-separated negative `TELEGRAM_GROUP_IDS` before enabling.
-`NOCHEH_GUARD_MODE` is `off`, `on` or `auto`; explicit trusted endpoints are a JSON
-array in `NOCHEH_GUARD_TRUSTED_ENDPOINTS`. The default trusts the subscription route.
+`NOCHEH_GUARD_MODE` is `on` (default) or `off`; legacy `auto` values convert to
+`on`. Explicit trusted endpoints are a JSON array in `NOCHEH_GUARD_TRUSTED_ENDPOINTS`.
+Trust does not bypass guarded representation selection when guarding is on. See
+[guarded-copy operations](guard.md).
 The API binds only to loopback; PostgreSQL has no host port.
 
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.

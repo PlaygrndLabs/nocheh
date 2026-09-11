@@ -1,12 +1,19 @@
 # ADRs
 
-Decision history, oldest first. Accepted ADRs are not rewritten — a later ADR
-supersedes an earlier one. **ADR-0018 is the active rebuild direction and supersedes
-conflicting decisions and sequencing below; ADR-0019 makes local Compose the current
-deployment target. Older status entries describe their
-status before the rebuild.**
+[SPECS.md](../../SPECS.md) is the authoritative product definition;
+[AGENTS.md](../../AGENTS.md) defines agent workflow and [TASK.md](../../TASK.md)
+records current implementation and activation. ADRs are decision history, oldest
+first. Accepted ADR files are preserved unchanged; later accepted decisions
+supersede conflicting earlier requirements. Table statuses are historical notes,
+not a substitute for TASK.md.
 
-| ADR | Decision | Recorded relationship (historical for 0001–0017) |
+ADR-0018 began the rebuild; ADR-0019 selects local Compose; ADR-0027 gives Nocheh
+product ownership; ADR-0030 updates space privacy; ADR-0033 replaces guard/memory
+semantics; ADRs 0035 and 0037 define provider and security boundaries. ADR-0039
+separates main integration from release. ADR-0040 consolidates the specification
+and governs subsequent agent work without changing those product decisions.
+
+| ADR | Decision | Recorded relationship / supersession |
 | --- | --- | --- |
 | [0001](0001-phase-1-core-processing.md) | Clean architecture, Telegram -> redaction -> tasks -> Notion MCP | Yes |
 | [0002](0002-phase-1-5-validation-observability.md) | Per-step audit records, task validation, metrics port | Yes |
@@ -22,10 +29,10 @@ status before the rebuild.**
 | [0012](0012-wiring-recall-into-analysis.md) | Recall grounds analysis: context built post-guard, graph seeded from recalled memory | Yes, extends 0011 and 0004 |
 | [0013](0013-importer-core-message-log-projections.md) | Importer core: one guarded append-only message log, replayable projections with cursors | Yes, replaces the buffer from 0004 |
 | [0014](0014-postgres-plaintext-at-rest-owner-column.md) | Postgres + pgvector, plaintext `jsonb` payloads, encryption kept only for credentials, `owner_id` everywhere | Yes, supersedes 0005 on engine and encryption |
-| [0015](0015-not-adopting-honcho-as-memory-layer.md) | Honcho rejected as the memory layer on evidence; own recall and own consolidation; spike gated by a named test | Current safe default; evaluation timing amended by 0017 |
+| [0015](0015-not-adopting-honcho-as-memory-layer.md) | Honcho rejected as the memory layer on evidence; own recall and own consolidation; spike gated by a named test | Historical; superseded by 0018 and 0033 |
 | [0016](0016-answer-path-outbound-delivery-approval-rule.md) | Reply contract, single audited egress, scheduler, rule 3 amended to bounded autonomous sending | Yes, amends rule 3 |
 | [0017](0017-memory-backend-evidence-gate.md) | Choose owned, Honcho-primary, or hybrid memory from an early frozen bake-off; the guarded log remains owned in every outcome | Yes, amends 0015 sequencing |
-| [0018](0018-hermes-owned-archive-subscription-rebuild.md) | Hermes rebuild, owned originals, optional guard, subscription production, isolated Honcho trial | Active direction |
+| [0018](0018-hermes-owned-archive-subscription-rebuild.md) | Hermes rebuild, owned originals, optional guard, subscription production, isolated Honcho trial | Rebuild baseline; later ADRs supersede specific policies |
 | [0019](0019-local-compose-development-and-acceptance.md) | Local Compose for development, automation and acceptance; VPS deferred | Active deployment target |
 | [0020](0020-mandatory-outgoing-request-guard.md) | Mandatory per-attempt guard at pinned HTTPX boundary, explicit trust and unsupported-transport rejection | Active guard implementation |
 | [0021](0021-scoped-native-assistant-processes.md) | Native per-profile assistant processes, scoped capabilities and owner-DM approval | Implemented; live Telegram acceptance pending |
@@ -47,3 +54,4 @@ status before the rebuild.**
 | [0037](0037-external-security-plugin-service.md) | Configurable external security service, bounded autonomy and memory-preserving runtime isolation | Accepted; see security-service-plan.md |
 | [0038](0038-observed-telegram-health-and-local-oauth-callback.md) | Observed Telegram polling health, recovery supervision and local OAuth callback | Active locally; shared-provider sign-in and cutover pending |
 | [0039](0039-main-refactor-consolidation.md) | Owner-directed refactor integration into main, separate from release acceptance | Supersedes earlier merge sequencing; remaining live gates stay pending |
+| [0040](0040-specifications-and-agent-workflow.md) | Canonical SPECS.md, AGENTS.md workflow, separate status/evidence, and session integration | Active documentation and coding workflow; product/activation gates preserved |

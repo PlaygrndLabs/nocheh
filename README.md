@@ -1,15 +1,19 @@
 # Nocheh
 
-A personal assistant built around Hermes, with an independent archive of original
-messages, events, files and separately recorded transcripts. Source data stays
-portable when the agent or memory system changes.
+A personal AI brain with Hermes as its first replaceable runtime. Original messages,
+events, files, and separately recorded transcripts stay in an owned, portable archive.
+
+[SPECS.md](SPECS.md) defines the product. [AGENTS.md](AGENTS.md) explains the coding
+workflow. [TASK.md](TASK.md) records implementation, activation, and outstanding
+acceptance; [ADRs](docs/adr/README.md) preserve the decision history.
 
 **Status:** local Docker Compose implementation consolidated into `main` under
 [ADR-0039](docs/adr/0039-main-refactor-consolidation.md). Remaining live Telegram
 acceptance and provider cutover are pending; this is not a release declaration.
 Guarded copies and the owner editor are active locally. Primary Honcho integration
-is implemented but stays detached until its dedicated embedding checks pass. The
-shared CLIProxyAPI reasoning route and CPA Manager Plus monitor are implemented;
+is implemented but stays detached until shared reasoning, dedicated embeddings,
+and live memory acceptance pass. The shared CLIProxyAPI reasoning route and CPA
+Manager Plus monitor are implemented;
 the fresh provider login and live cutover are recorded in `TASK.md`.
 See [TASK.md](TASK.md) for current setup and validation status.
 Legacy code is preserved on `codex/legacy-nocheh`.
@@ -32,7 +36,10 @@ Install Docker with Compose and Python 3, then run:
 ./scripts/nocheh down     # stop services; retain data
 ```
 
-`make up`, `make dev`, `make test` and the other matching Make targets are aliases.
+`make up` and `make test` are working aliases. `make dev` has no recipe yet; use
+`./scripts/nocheh dev` for the explicitly assigned local installation. Per-session
+preview isolation is [follow-up work](TASK.md); a separate worktree alone does not
+isolate Compose services, ports, credentials, or runtime state.
 The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services are
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.
@@ -59,6 +66,6 @@ See [operations and configuration](docs/deploy.md),
 [guarded memory system and operating instructions](docs/guarded-memory-system.md),
 [shared provider and monitoring](docs/provider.md),
 [isolated Honcho acceptance](experiments/honcho/README.md),
-[architecture and phase diagram](docs/rebuild-plan.md), and
+[rebuild execution checkpoints](docs/rebuild-plan.md), and
 [subscription evidence](compatibility/findings.md). VPS setup is deferred; local
 Compose is the current development and acceptance target (ADR-0019).

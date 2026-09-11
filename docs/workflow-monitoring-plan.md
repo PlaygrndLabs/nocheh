@@ -1,5 +1,9 @@
 # Workflow monitoring and proposed Inngest adoption
 
+[SPECS.md](../SPECS.md) defines accepted monitoring requirements.
+[TASK.md](../TASK.md) records implementation. The Inngest sequence below is an
+unaccepted proposal, not part of the product specification or authorized activation.
+
 Implemented now: Nocheh's Monitoring page reads PostgreSQL workflow records and
 observed native Telegram reception. It shows success, failure, waiting, retries,
 skips, uncertain delivery, provider state and the most recent Telegram incident.
