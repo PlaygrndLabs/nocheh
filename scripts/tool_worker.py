@@ -32,16 +32,18 @@ def atomic(path,value):
     finally:os.close(fd)
 
 
-def tick(state,api,actor,executor=permitted_execute):
+def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None,admit=None):
     receipts=Path(state)/'admin/tools/receipts';receipts.mkdir(parents=True,exist_ok=True,mode=0o700)
     # Publish existing receipts before claiming new work. Never repeat execution.
     for path in sorted(receipts.glob('*.json')):
+        if admit is not None and not admit():return False
         body=json.loads(path.read_text());api.call('/v1/tools/finish',body);path.unlink()
-    action=api.call('/v1/tools/claim',{'actor':actor})
+    if admit is not None and not admit():return False
+    action=api.call('/v1/tools/claim',{'actor':actor,**({'id':action_id} if action_id else {}),**(workflow or {})})
     if not action.get('claimed'):return False
     body={'id':action['id'],'actor':actor}
     try:
-        ready=api.call('/v1/tools/start',body)
+        ready=api.call('/v1/tools/start',{**body,**(workflow or {})})
         result=executor(state,action) if ready.get('started') else {'exit_code':1,'error':'security_start_denied'}
         body.update(state='failed' if result.get('exit_code',0)!=0 or result.get('limit') else 'done',result=result)
     except Exception:

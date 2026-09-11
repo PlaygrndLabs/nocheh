@@ -6,6 +6,7 @@ import {guardState} from './guarded.js';
 import {admin,assertAudience,type Reader} from './access.js';
 import {evaluate,recordEffect,type EffectState} from './security/store.js';
 import type {Effect,Decision} from './security/contract.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 export const controlledSchema=`
 CREATE TABLE IF NOT EXISTS controlled_actions (
@@ -20,6 +21,8 @@ ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS guard_epoch bigint;
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS job_id text;
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS security_decision jsonb;
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS started_at timestamptz;
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS execution_owner text;
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS owner_epoch integer;
 CREATE TABLE IF NOT EXISTS action_permissions (
  id text PRIMARY KEY, fingerprint text NOT NULL, scope text NOT NULL, profile text NOT NULL,
  kind text NOT NULL, arguments bytea NOT NULL, expires_at timestamptz NOT NULL,
@@ -140,18 +143,32 @@ export async function revokePermission(pool:pg.Pool,principal:Reader,value:unkno
   await pool.query('UPDATE action_permissions SET revoked_at=coalesce(revoked_at,now()) WHERE id=$1',[id]);
   return {id,revoked:true};
 }
-export async function claimControlled(pool:pg.Pool,value:unknown) {
+export async function claimControlled(pool:pg.Pool,value:unknown,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
   const actor=string(object(value).actor,128);if(!/^[\w-]{1,128}$/.test(actor))throw new HttpError(400,'invalid_actor');
-  const client=await pool.connect();
+  if(jobId!==null)idValue(jobId);
+  const client=await pool.connect();let fenced=false;
   try {
+    fenced=await enterFamily(client,'tools',authority.owner,authority.epoch);if(!fenced)return {claimed:false};
     await client.query('BEGIN');
+    if(authority.owner==='inngest')await client.query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema()||':controlled-operation',803322))");
     // No retry after a crashed executor. Missing outcomes stay explicitly ambiguous.
-    const expired=(await client.query<Row>("UPDATE controlled_actions SET state='ambiguous',error_code='executor_receipt_missing',updated_at=now() WHERE state='running' AND lease_until<now() RETURNING *")).rows;
+    const expired=(await client.query<Row>("UPDATE controlled_actions SET state='ambiguous',error_code='executor_receipt_missing',updated_at=now() WHERE state='running' AND lease_until<now() AND ($1::text IS NULL OR id=$1) RETURNING *",[jobId])).rows;
     for(const row of expired)await recordEffect(client,effect(row),'ambiguous',row.security_decision??await evaluate(client,effect(row)),row.event_id,row.permission_id??undefined);
+    if(jobId){
+      const stale=(await client.query<Row>("SELECT * FROM controlled_actions WHERE id=$1 AND state IN ('proposed','approved') AND (SELECT mode FROM guard_state)='on' AND guard_epoch IS DISTINCT FROM (SELECT epoch FROM guard_state) FOR UPDATE",[jobId])).rows[0];
+      if(stale){
+        const decision:Decision={...await evaluate(client,effect(stale)),outcome:'deny',origin:'mandatory',rule:'guard_context_changed'};
+        await recordEffect(client,effect(stale),'blocked',decision,stale.event_id);
+        await client.query("UPDATE controlled_actions SET state='rejected',security_decision=$2,error_code='guard_context_changed',updated_at=now() WHERE id=$1",[jobId,decision]);
+        await client.query('COMMIT');return {claimed:false,blocked:jobId,reason:'guard_context_changed'};
+      }
+    }
+    if(authority.owner==='inngest'&&(await client.query("SELECT 1 FROM controlled_actions WHERE state='running' LIMIT 1")).rowCount){await client.query('COMMIT');return {claimed:false};}
     const row=(await client.query<Row>(`SELECT a.* FROM controlled_actions a WHERE (a.state='approved' OR (a.state='proposed' AND EXISTS
       (SELECT 1 FROM action_permissions p WHERE p.fingerprint=a.fingerprint AND (p.job_id IS NULL OR p.job_id=a.job_id) AND p.revoked_at IS NULL AND p.remaining>0 AND p.expires_at>now())))
       AND ((SELECT mode FROM guard_state)='off' OR a.guard_epoch=(SELECT epoch FROM guard_state))
-      ORDER BY a.created_at LIMIT 1 FOR UPDATE OF a SKIP LOCKED`)).rows[0];
+      AND ($1::text IS NULL OR a.id=$1)
+      ORDER BY a.created_at LIMIT 1 FOR UPDATE OF a SKIP LOCKED`,[jobId])).rows[0];
     if(!row){await client.query('COMMIT');return {claimed:false};}
     let permission:string|null=null;
     if(row.state==='proposed') {
@@ -169,16 +186,22 @@ export async function claimControlled(pool:pg.Pool,value:unknown) {
     if(permission)await client.query('UPDATE action_permissions SET remaining=remaining-1 WHERE id=$1',[permission]);
     await recordEffect(client,effect(row),'allowed',decision,row.event_id,permission??undefined);
     await recordEffect(client,effect(row),'claimed',decision,row.event_id,permission??undefined);
-    await client.query(`UPDATE controlled_actions SET state='running',actor=$2,permission_id=$3,security_decision=$4,lease_until=now()+interval '120 seconds',updated_at=now() WHERE id=$1`,[row.id,actor,permission,decision]);
+    await client.query(`UPDATE controlled_actions SET state='running',actor=$2,permission_id=$3,security_decision=$4,lease_until=now()+interval '120 seconds',
+      execution_owner=$5,owner_epoch=(SELECT epoch FROM workflow_owners WHERE family='tools'),updated_at=now() WHERE id=$1`,[row.id,actor,permission,decision,authority.owner]);
     await client.query('COMMIT');return {claimed:true,...view({...row,state:'running',actor,permission_id:permission})};
-  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{await releaseOperation(client,async()=>{if(fenced)await leaveFamily(client,'tools');});}
 }
-export async function startControlled(pool:pg.Pool,value:unknown) {
+export async function startControlled(pool:pg.Pool,value:unknown,authority:ExecutionAuthority=legacyAuthority) {
   const input=object(value),id=idValue(input.id),actor=string(input.actor,128),client=await pool.connect();
+  let fenced=false;
   try {
     await client.query('BEGIN');
-    const row=(await client.query<Row&{started_at:string|null;lease_until:Date}>('SELECT * FROM controlled_actions WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    const row=(await client.query<Row&{started_at:string|null;lease_until:Date;execution_owner:'legacy'|'inngest'|null;owner_epoch:number|null}>('SELECT * FROM controlled_actions WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(!row||row.actor!==actor||row.state!=='running')throw new HttpError(403,'action_actor_denied');
+    const epoch=row.owner_epoch??(await client.query("SELECT epoch FROM workflow_owners WHERE family='tools'")).rows[0].epoch;
+    if((row.execution_owner??'legacy')!==authority.owner||(authority.epoch!==undefined&&authority.epoch!==epoch))throw new HttpError(409,'workflow_owner_changed');
+    fenced=await enterFamily(client,'tools',authority.owner,epoch,true);
+    if(!fenced)throw new HttpError(409,'workflow_owner_changed');
     if(row.started_at){await client.query('COMMIT');return {started:false,reason:'execution_already_started'};}
     let blocked:string|undefined;
     const guard=await guardState(client);
@@ -193,7 +216,7 @@ export async function startControlled(pool:pg.Pool,value:unknown) {
     await client.query('UPDATE controlled_actions SET started_at=now(),security_decision=$2 WHERE id=$1',[id,decision]);
     await recordEffect(client,effect(row),'started',decision,row.event_id,row.permission_id??undefined);
     await client.query('COMMIT');return {started:true};
-  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{await releaseOperation(client,async()=>{if(fenced)await leaveFamily(client,'tools');});}
 }
 export async function finishControlled(pool:pg.Pool,value:unknown) {
   const input=object(value),id=idValue(input.id),actor=string(input.actor,128),result=object(input.result);

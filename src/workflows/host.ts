@@ -32,14 +32,15 @@ function batch(body:unknown):Promise<unknown> {
   });
 }
 const client=workflowClient('host');
-const functions=coordinatedFunctions(client,['imports'],async(workflow_id,dispatch,family,run_id)=>{
+const functions=coordinatedFunctions(client,['imports','tools'],async(workflow_id,dispatch,family,run_id)=>{
   const claim=await rpc('host/claim',{workflow_id,dispatch,family,run_id});
   if(!claim.claimed){safeMetadata(claim.observation);return claim.observation;}
   const identity={workflow_id,token:claim.token,import_token:claim.job.lease_token};
   const timer=setInterval(()=>{void rpc('host/renew',identity).catch(()=>{});},15000);
   try{
     let result:unknown,failure_code:string|undefined;
-    try{result=await batch({operation:'workflow.import.batch',job:claim.job.id,lease:claim.job.lease_token,configuration_hash:claim.job.configuration_hash,
+    try{result=await batch(family==='tools'?{operation:'workflow.tools.tick',action_id:claim.job.id,workflow_id,workflow_token:claim.token}:
+      {operation:'workflow.import.batch',job:claim.job.id,lease:claim.job.lease_token,configuration_hash:claim.job.configuration_hash,
       completed:claim.job.completed,duplicates:claim.job.duplicates,learning_after:claim.job.learning_after});}catch(error){failure_code=error instanceof Error?error.message:'workflow_host_operation_failed';}
     const observation:Observation=await rpc('host/finish',{...identity,...(result===undefined?{failure_code}:{result})});safeMetadata(observation);return observation;
   }finally{clearInterval(timer);}

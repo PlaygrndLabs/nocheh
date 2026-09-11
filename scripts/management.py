@@ -12,6 +12,9 @@ def dispatch(body):
     if operation=='workflow.import.batch':
         from .workflow_jobs import import_batch
         return import_batch(state,body)
+    if operation=='workflow.tools.tick':
+        from .workflow_jobs import tool_tick
+        return tool_tick(state,body)
     if operation=='workflow.api':
         from .archive import API
         import re

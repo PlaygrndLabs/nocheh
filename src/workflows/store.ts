@@ -69,12 +69,14 @@ export async function requestWorkflow(client:pg.PoolClient,family:WorkflowFamily
 
 const lockKey="hashtextextended(current_schema()||':workflow:'||$1,803321)";
 /** Hold on the operation's existing database connection through receipt commit. */
-export async function enterFamily(client:pg.PoolClient,family:WorkflowFamily,owner:'legacy'|'inngest',epoch?:number):Promise<boolean> {
+export async function enterFamily(client:pg.PoolClient,family:WorkflowFamily,owner:'legacy'|'inngest',epoch?:number,draining=false):Promise<boolean> {
   const locked=(await client.query(`SELECT pg_try_advisory_lock_shared(${lockKey}) AS locked`,[family])).rows[0].locked;
   if(!locked)return false;
   try {
     const row=(await client.query('SELECT owner,epoch,admission FROM workflow_owners WHERE family=$1',[family])).rows[0];
-    if(row?.owner===owner&&row.admission&&(epoch===undefined||row.epoch===epoch))return true;
+    // Draining is only for a domain operation already durably claimed under
+    // this exact epoch. It cannot grant admission to new work.
+    if(row?.owner===owner&&(row.admission||(draining&&epoch!==undefined))&&(epoch===undefined||row.epoch===epoch))return true;
   } catch(error) {await leaveFamily(client,family);throw error;}
   await leaveFamily(client,family);return false;
 }
