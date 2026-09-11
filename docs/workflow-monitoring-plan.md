@@ -1,43 +1,81 @@
-# Workflow monitoring and proposed Inngest adoption
+<execution_plan>
 
-[SPECS.md](../SPECS.md) defines accepted monitoring requirements.
-[TASK.md](../TASK.md) records implementation. The Inngest sequence below is an
-unaccepted proposal, not part of the product specification or authorized activation.
+# Local Inngest workflow migration
 
-Implemented now: Nocheh's Monitoring page reads PostgreSQL workflow records and
-observed native Telegram reception. It shows success, failure, waiting, retries,
-skips, uncertain delivery, provider state and the most recent Telegram incident.
-It does not provide a retained timeline of every state transition or notifications.
+<authority>
 
-## Why consider Inngest
+Accepted by the owner's implementation request on 2026-09-12. Product requirements
+live in [SPECS.md](../SPECS.md), the architectural decision in
+[ADR-0041](adr/0041-local-inngest-workflows.md), and actual progress and activation
+in [TASK.md](../TASK.md). This plan does not claim any runtime gate has passed.
 
-The owner suggested the official [inngest SDK](https://www.npmjs.com/package/inngest).
-Inngest provides persisted steps, retries and execution history. Its server can run
-locally in Docker with the Event API and dashboard at port 8288. Self-hosting can
-use PostgreSQL instead of the default SQLite persistence; the server also has queue
-and state-store requirements. Sources: [self-hosting](https://www.inngest.com/docs/self-hosting),
-[observability](https://www.inngest.com/docs/platform/monitor/observability-metrics).
+</authority>
 
-## Proposed increments — not yet implemented
+<sequence>
 
-1. Pin the SDK and server; add a local Compose service and an owner-authenticated
-   dashboard entry. Use a separate schema in the owned PostgreSQL installation
-   for orchestration metadata, keeping archive identities and original bytes
-   authoritative in the existing archive. Verify queue persistence and restore.
-2. Add a transactional outbox for committed source IDs. Pass IDs and bounded stage
-   metadata to Inngest, not raw messages, media, secrets or model prompts. Replay
-   uses stable source identities and deterministic idempotency keys.
-3. Move capture-following stages into functions: file availability, transcript
-   generation, guarded projection readiness, assistant execution, and confirmed
-   delivery. Inngest becomes the sole scheduler for each migrated stage; disable
-   the old loop for that stage to avoid competing retry owners.
-4. Keep native Hermes agent execution and the security boundary. Preserve owner
-   approval, policy rechecks, guarded context, subscription-only reasoning and
-   delivery receipts. A retry must check an existing receipt; ambiguous external
-   effects never resend automatically.
-5. Accept with restart, database/outbox outage, duplicate events, quota waits,
-   detector failure, cancellation, approval and ambiguous-delivery fixtures. Then
-   repeat real owner Telegram text/voice acceptance and record the cutover.
+## Verified increments
 
-Choose concrete versions and document the orchestration cutover in a new ADR
-before activation. Hosted Inngest Cloud is outside this local-only proposal.
+| Phase | Work | Acceptance before completion |
+| --- | --- | --- |
+| I1 — Foundation and recovery | Pin SDK 4.20.0/server 1.44.0 and image digests; dedicated PostgreSQL database/role, persistent Redis, separate Connect apps, credentials and health; quiesced backups and inactive restore; isolated Compose fixture | Real server/SDK registration and checkpoint recovery, PostgreSQL/Redis restart, isolated ports/images/state, backup/restore integrity and inactive workers |
+| I2 — Outbox and execution safety | Transactional publication, registry, permanent deduplication, receipts and family ownership fencing; job-ID operations and single retry authority | Rollback, lost acknowledgment, concurrent/delayed duplicates beyond 24h, publisher restart, crash/effect/receipt gaps, stale authority rejection |
+| I3 — Telegram pipeline | Attachment/transcription/preparation steps and receipt-protected native dispatch; independent capture/poller; asynchronous runtime contracts and observed delivery progress | Text/media fixtures, quota and guard waits, stored-result reuse, silence, uncertain delivery, runtime/worker restart without duplicate execution |
+| I4 — Imports and memory | Bounded import batches/checkpoints, native review, Honcho reconciliation/rebuild; source/edit/consent/generation triggers | Cancellation/resume, stable identities, zero historical replies, consent separation, stale revisions/generations, detached Honcho and uncertain writes |
+| I5 — Browser, schedules, approvals | Durable browser submission with native streaming/resume; Inngest schedule waits and native definition helpers; exact approved actions | Browser reconnect/cancel, profile exclusion, schedule revision/cadence/missed/overlap/repeat/catch-up, revocation and uncertain effects |
+| I6 — Monitoring | Owner API/CLI list/detail/retry/cancel; dashboard summaries and read-only authenticated Inngest inspection | Pagination, status distinctions, data boundary, session/CSRF checks, unavailable/stale services, UI interaction/accessibility |
+| I7 — Local cutover | Per-family pause/drain/reconcile/fenced switch/backfill of eligible unfinished work; compatible rollback | Isolated fault suite, quiesced recovery, actual local family checks, real Telegram text/voice/group/isolation/approval/restart acceptance |
+
+Each phase may contain smaller independently verified commits. Follow the shared
+Git lock/integration workflow in AGENTS.md. Continue independent work when a live
+dependency is unavailable; record dependent gates as pending.
+
+</sequence>
+
+<implementation>
+
+## Execution boundaries
+
+Keep the Compose and host workers as separate Connect applications with stable
+function/step IDs and build versions. Bind requests to existing source/job
+identities and resolve protected data only inside steps. Domain receipts remain
+authoritative when runtime responses or Inngest checkpoints are lost. Family
+ownership fences apply to old and new runners before any effect.
+
+Capture/spool draining and outbox delivery are supervised outside Inngest. Host
+maintenance is independent so it can stop or recover Inngest. Native reasoning
+and synchronous security enforcement are not rewritten. Workflow migrations do
+not activate provider routes or attach Honcho.
+
+Use additive schema changes and preserve native/browser/CLI compatibility. Extend
+runtime run.start, run.events, run.resume and run.cancel instead of exposing
+Hermes identifiers or credential transport through the owner interface. Inngest
+permits inspection; Nocheh endpoints validate retry/cancel requests.
+
+</implementation>
+
+<acceptance>
+
+## Acceptance procedure
+
+Use an explicit fixture Compose project with unique images, networks, ports,
+storage and synthetic credentials. Never copy the installation's login into a
+fixture. Run existing service, pinned Hermes, and recovery suites plus focused
+workflow failures. Inspect captured Inngest event/step/error payloads with
+synthetic secret canaries to verify the data boundary.
+
+Before each local family switch, back up, pause admission, drain its old runner,
+reconcile outstanding receipts and change authority transactionally. Queue only
+eligible unfinished identities. Never reopen completed, cancelled, suppressed,
+denied or ambiguous work. Test rollback using compatible schema/receipts; never
+restore stale snapshots over later source evidence.
+
+Repeat real Telegram owner text/voice, selected-group silence, isolation, exact
+approval and reconnect/restart checks from [release acceptance](release-acceptance.md)
+before Telegram cutover completes. Missing inputs or credentials remain pending.
+Subscription transcription failure blocks dependent release/cutover work.
+Refresh the AST-only Graphify graph after code changes. Retain safe evidence in
+compatibility/results without source conversations or credentials.
+
+</acceptance>
+
+</execution_plan>

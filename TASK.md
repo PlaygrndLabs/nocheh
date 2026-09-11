@@ -18,6 +18,7 @@ runs, not tests repeated by the documentation migration.
 | Honcho | Infrastructure and scoped integration implemented; attachment disabled pending live provider, embedding, and memory gates. Dedicated embedding attempt returned HTTP 429 with a retained $0.01 reservation. | [Embedding evidence](compatibility/results/2026-09-09-openai-embeddings.json), [memory instructions](docs/guarded-memory-system.md) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
+| Inngest workflows | Accepted for all product workflows with phased local cutover. Contract/specification increment recorded; I1–I7 implementation and activation pending. | [ADR-0041](docs/adr/0041-local-inngest-workflows.md), [execution plan](docs/workflow-monitoring-plan.md) |
 
 Latest recorded runtime regression: 57 service tests and 125 Hermes tests passed;
 one optional Docker security fixture was skipped. These are the main-consolidation
@@ -37,7 +38,7 @@ VPS work remains deferred.
 
 - **Per-session previews — not implemented:** add explicit isolation of Compose projects, networks, image tags, ports, state, and credentials before concurrent worktree previews. No duplicate Telegram poller, scheduler, or OAuth refresh owner may use the active installation.
 - **Makefile — not implemented:** `dev` is declared phony but has no recipe. Existing `./scripts/nocheh dev` runs the installation's Compose Watch workflow; it is not an isolated-session setup command. Wiring `make dev`, fresh-worktree setup, and visible persistent preview startup are follow-up tooling work.
-- **Inngest — proposal only:** [workflow-monitoring proposal](docs/workflow-monitoring-plan.md). No orchestration migration or hosted service is activated or included in SPECS.md.
+- **Inngest — accepted implementation:** [workflow execution plan](docs/workflow-monitoring-plan.md), I1–I7. No orchestration service or migrated family is activated yet; independent host recovery and existing provider/Honcho/release gates apply.
 
 ## Historical implementation records
 
