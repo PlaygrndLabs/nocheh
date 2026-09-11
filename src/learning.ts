@@ -41,17 +41,19 @@ export async function controlReview(pool:pg.Pool,id:string,action:unknown) {
     generation=generation+CASE WHEN state='ambiguous' THEN 1 ELSE 0 END WHERE id=$1 AND state NOT IN ('done','running') RETURNING id,state`,[id,action==='pause'?'paused':'pending']);
   if(!result.rowCount)throw new HttpError(409,'review_not_controllable');return result.rows[0];
 }
-export async function prepareReviews(pool:pg.Pool,live:boolean) {
+export async function prepareReviews(pool:pg.Pool,live:boolean,eventId:string|null=null) {
   const guard=await guardState(pool);
   if(live)await pool.query(`INSERT INTO memory_learning_sources(event_id,reason)
-    SELECT e.id,'live' FROM events e WHERE e.origin='live' AND
+    SELECT e.id,'live' FROM events e WHERE e.origin='live' AND ($1::text IS NULL OR e.id=$1) AND
     (EXISTS(SELECT 1 FROM dispatches d WHERE d.event_id=e.id AND d.state='done') OR
-     EXISTS(SELECT 1 FROM managed_runs r WHERE r.event_id=e.id AND r.state='done')) ON CONFLICT DO NOTHING`);
+     EXISTS(SELECT 1 FROM managed_runs r WHERE r.event_id=e.id AND r.state='done')) ON CONFLICT DO NOTHING`,[eventId]);
   const {rows}=await pool.query(`SELECT e.id,e.scope,e.original_text,e.payload,
     coalesce((SELECT string_agg(convert_from(content,'UTF8'),E'\n' ORDER BY id) FROM derived_artifacts WHERE event_id=e.id AND kind='transcript'),'') AS transcript
     FROM memory_learning_sources s JOIN events e ON e.id=s.event_id
-    WHERE NOT s.prepared OR s.prepared_epoch IS DISTINCT FROM $1 ORDER BY s.approved_at LIMIT 20`,[guard.epoch]);
+    WHERE (NOT s.prepared OR s.prepared_epoch IS DISTINCT FROM $1) AND ($2::text IS NULL OR e.id=$2) ORDER BY s.approved_at LIMIT 20`,[guard.epoch,eventId]);
   for(const row of rows){
+    if((await pool.query(`SELECT 1 FROM artifacts a WHERE event_id=$1 AND kind IN ('voice','audio','video_note') AND
+      NOT EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.artifact_id=a.id AND d.kind='transcript') LIMIT 1`,[row.id])).rowCount)continue;
     let data={text:row.original_text?.toString()??'',payload:JSON.parse(row.payload.toString())},transcript=row.transcript;
     if(guard.mode==='on') {
       try {
@@ -82,7 +84,7 @@ export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCal
     locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803304)) AS locked')).rows[0].locked;if(!locked)return;
     if(!jobId)await prepareReviews(pool,config.assistant.enabled);
     const guard=await guardState(pool);
-    const {rows}=await client.query("SELECT * FROM memory_review_jobs WHERE state IN ('pending','failed','running') AND next_attempt<=now() AND guard_epoch=$1 AND ($2::text IS NULL OR id=$2) ORDER BY created_at,id LIMIT 1",[guard.epoch,jobId]);
+    const {rows}=await client.query("SELECT * FROM memory_review_jobs j WHERE state IN ('pending','failed','running') AND next_attempt<=now() AND guard_epoch=$1 AND ($2::text IS NULL OR id=$2) AND EXISTS(SELECT 1 FROM memory_learning_sources s WHERE s.event_id=j.event_id) ORDER BY created_at,id LIMIT 1",[guard.epoch,jobId]);
     const job=rows[0];if(!job)return;
     await client.query("UPDATE memory_review_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1",[job.id]);
     try{

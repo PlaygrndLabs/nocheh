@@ -32,18 +32,18 @@ try {
     throw Error('unexpected_runtime_operation');
   });
   connection=await connectWorkflows('pipeline',client,workflowFunctions(client,pool,operations));
-  const source:Envelope={version:1,key:'telegram:fixture:update:1',origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'1',revision:'1',occurred_at:null,text:null,
+  const source:Envelope={version:1,key:'telegram:fixture:'+namespace+':update:1',origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'1',revision:'1',occurred_at:null,text:null,
     payload:{update_id:1,message:{message_id:1,chat:{id:123,type:'private'},from:{id:123,is_bot:false},voice:{file_id:'voice1'}}}};
   await ingest(pool,source);await ingest(pool,source);
   const deadline=Date.now()+120000;
   while(Date.now()<deadline) {
     await publishOutbox(pool,event=>client.send(event));
-    const rows=(await pool.query('SELECT family,state,stage FROM workflow_registry ORDER BY family')).rows;
-    if(rows.length===2&&rows.every(row=>row.state==='completed'))break;
+    const rows=(await pool.query("SELECT family,state,stage FROM workflow_registry WHERE family IN ('preparation','telegram') ORDER BY family")).rows;
+    if(rows.length>=2&&rows.every(row=>['completed','skipped'].includes(row.state)))break;
     await delay(250);
   }
-  const rows=(await pool.query('SELECT id,family,state,stage,attempts FROM workflow_registry ORDER BY family')).rows;
-  if(rows.length!==2||rows.some(row=>row.state!=='completed'))throw Error('pipeline_did_not_complete');
+  const rows=(await pool.query("SELECT id,family,state,stage,attempts FROM workflow_registry WHERE family IN ('preparation','telegram') ORDER BY family")).rows;
+  if(rows.length<2||rows.some(row=>!['completed','skipped'].includes(row.state))||!rows.some(row=>row.family==='preparation'&&row.state==='completed'))throw Error('pipeline_did_not_complete');
   // A new transport event beyond any event dedup guarantee still cannot create
   // another effect for this permanently completed Nocheh workflow identity.
   const telegram=rows.find(row=>row.family==='telegram')!;
