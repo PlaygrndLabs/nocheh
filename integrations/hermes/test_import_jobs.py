@@ -9,8 +9,9 @@ from scripts.import_job import inspect, run
 
 
 class FakeArchive:
-    def __init__(self): self.records = {}; self.files = {}; self.fail = False
+    def __init__(self): self.records = {}; self.files = {}; self.fail = False; self.reviews=[]
     def call(self, path, body):
+        if path == '/v1/memory/reviews': self.reviews.extend(body['event_ids']);return {}
         if path == '/v1/import':
             key = body['event']['key']
             duplicate = key in self.records
@@ -68,3 +69,23 @@ class ImportJobTests(unittest.TestCase):
             api=FakeArchive()
             with self.assertRaisesRegex(ValueError,'integrity'):run(root,{},api=api)
             self.assertFalse(api.records)
+
+    def test_bounded_batches_resume_same_sources_and_learning_waits_for_all_bytes(self):
+        with tempfile.TemporaryDirectory() as folder,contextlib.redirect_stdout(io.StringIO()):
+            root,_=self.prepare(folder);metadata=json.loads((root/'job.json').read_text())
+            metadata['review_approved']=True;(root/'job.json').write_text(json.dumps(metadata))
+            api=FakeArchive()
+            first=run(root,{},api=api,limit=1)
+            self.assertEqual(first['completed'],1);self.assertFalse(first['complete']);self.assertEqual(api.reviews,[])
+            # A lost checkpoint can replay capture; its source identities do not change.
+            replay=run(root,{},api=api,limit=1)
+            self.assertEqual(replay['duplicates'],1);self.assertEqual(len(api.records),2)
+            second=run(root,{},after=1,api=api,limit=1,duplicates=replay['duplicates'])
+            self.assertEqual(second['completed'],2);self.assertEqual(second['learning_after'],1);self.assertFalse(second['complete'])
+            final=run(root,{},after=2,api=api,limit=1,duplicates=second['duplicates'],learning_after=1)
+            self.assertTrue(final['complete']);self.assertEqual(final['telegram_replies'],0)
+            self.assertEqual(len(set(api.reviews)),2);self.assertEqual(len(api.records),3)
+            for kwargs in ({'limit':101},{'after':3},{'learning_after':-1},{'duplicates':-1}):
+                clean=FakeArchive()
+                with self.assertRaises(ValueError):run(root,{},api=clean,**kwargs)
+                self.assertFalse(clean.records)

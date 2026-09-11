@@ -56,3 +56,4 @@ and governs subsequent agent work without changing those product decisions.
 | [0039](0039-main-refactor-consolidation.md) | Owner-directed refactor integration into main, separate from release acceptance | Supersedes earlier merge sequencing; remaining live gates stay pending |
 | [0040](0040-specifications-and-agent-workflow.md) | Canonical SPECS.md, AGENTS.md workflow, separate status/evidence, and session integration | Active documentation and coding workflow; product/activation gates preserved |
 | [0041](0041-local-inngest-workflows.md) | Local Inngest for product workflows, owned outbox/receipts, phased cutover and independent host recovery | Accepted; implementation and activation tracked in TASK.md |
+| [0042](0042-host-workflow-archive-coordination.md) | Host Connect over the archive listener, protected checkpoints, registration-aware publication and independent supervision | Implementation of ADR-0041; activation pending |

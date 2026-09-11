@@ -20,6 +20,10 @@ import {proposeControlled,controlledAction,controlledList,decideControlled,grant
 import { reader, admin,assertAudience,turnToken } from './access.js';
 import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
+import {hostTransport} from './workflows/host-transport.js';
+import {confirmImport,cancelImport,enterImportWrite} from './workflows/imports.js';
+import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from './workflows/host-coordinator.js';
+import {registerWorker} from './workflows/store.js';
 
 const config = settings();
 const runtime = hermesAdapter({url: config.hermesUrl, token: config.token});
@@ -33,8 +37,10 @@ await heartbeat(pool, config.service);
 const timer = setInterval(() => { void heartbeat(pool, config.service).catch(() => {}); }, 5000);
 timer.unref();
 const stopWorker = config.service === 'worker' ? startWorker(pool, config) : () => {};
+const transport=config.service==='archive'&&process.env.NOCHEH_WORKFLOWS_ENABLED==='true'?hostTransport(process.env.INNGEST_SIGNING_KEY??''):null;
 
 const server = createServer((req, res) => { void (async () => {
+  if(transport?.handle(req,res))return;
   const url = new URL(req.url ?? '/', 'http://local'), path=url.pathname;
   if (req.method === 'GET' && path === '/health') {
     await pool.query('SELECT 1');
@@ -47,6 +53,39 @@ const server = createServer((req, res) => { void (async () => {
   const principal=reader(req, config.token);
   await assertAudience(pool,principal);
   if(config.service==='archive'&&await ownerSecurityRoute(pool,principal,req,res,url))return;
+  if(config.service==='archive'&&path.startsWith('/v1/workflows/')){
+    admin(principal);
+    if(req.method==='POST'){
+      const body=await readJson(req);
+      if(path==='/v1/workflows/imports/confirm')return json(res,200,await confirmImport(pool,body));
+      if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(pool,object(body).id));
+      if(path==='/v1/workflows/host/claim')return json(res,200,await claimHostWorkflow(pool,body));
+      if(path==='/v1/workflows/host/renew')return json(res,200,await renewHostWorkflow(pool,body));
+      if(path==='/v1/workflows/host/finish')return json(res,200,await finishHostWorkflow(pool,body));
+      if(path==='/v1/workflows/host/continue')return json(res,200,await continueHostWorkflow(pool,body));
+      if(path==='/v1/workflows/host/heartbeat'){await registerWorker(pool,'host',['imports']);await heartbeat(pool,'workflow-host');return json(res,200,{ok:true});}
+    }
+    if(req.method==='GET'&&/^\/v1\/workflows\/imports\/[a-f0-9-]{36}$/.test(path)){
+      const job=(await pool.query('SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at FROM workflow_imports WHERE id=$1',[path.split('/').at(-1)])).rows[0];
+      return json(res,200,{owned:!!job,job});
+    }
+    throw new HttpError(404,'not_found');
+  }
+  // Every migrated import write checks its live batch lease. Hold the family
+  // fence and import row through the write so cancellation/cutover can drain it.
+  if(config.service==='archive'&&req.headers['x-nocheh-import-job']){
+    admin(principal);
+    if(req.method!=='POST'||!(path==='/v1/import'||path==='/v1/memory/reviews'||/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)))throw new HttpError(403,'import_route_denied');
+    const held=await enterImportWrite(pool,req.headers['x-nocheh-import-job'],req.headers['x-nocheh-import-lease'],req.headers['x-nocheh-import-owner']);
+    try{
+      if(path==='/v1/import')return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024)));
+      if(path==='/v1/memory/reviews'){
+        if(!held.job.review_approved)throw new HttpError(403,'import_consent_required');
+        return json(res,200,await approveLearning(pool,await readJson(req)));
+      }
+      return json(res,200,await uploadArtifact(pool,config.dataDir,path.split('/')[3]!,await readJson(req,70*1024*1024)));
+    }finally{await held.release();}
+  }
   const prepare=(value:unknown)=>prepareContext(pool,principal,value,async text=>(await call('guard.detect',{text})).literals);
   const agentResult=async(value:unknown,prepared=false)=>{
     const result=principal.admin?value:prepared?(await allowPrepared(pool,principal,value),value):await prepare(value);
@@ -231,10 +270,11 @@ const server = createServer((req, res) => { void (async () => {
     {error: error instanceof HttpError ? error.code : 'service_unavailable'});
 }); });
 server.requestTimeout = 30000;
+transport?.attach(server);
 server.listen(config.port, config.host, () => console.log(JSON.stringify({event: 'ready', service: config.service, port: config.port})));
 let stopping=false;
 function stop() {
-  if(stopping)return;stopping=true;clearInterval(timer);
+  if(stopping)return;stopping=true;clearInterval(timer);transport?.close();
   const closed=new Promise<void>(resolve=>server.close(()=>resolve()));
   void Promise.all([closed,stopWorker()]).then(()=>pool.end()).then(()=>process.exit(0));
 }

@@ -30,7 +30,7 @@ export function workflowClient(app:WorkflowApp,config=workflowConfig()):Inngest 
     if(url.origin!==origin)throw Error('workflow_destination_denied');
     return fetch(input,{...init,redirect:'error',signal:init?.signal?AbortSignal.any([init.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
   };
-  return new Inngest({id:'nocheh-'+app,appVersion:config.version,isDev:false,
+  return new Inngest({id:'nocheh-'+app,appVersion:app+'-'+config.version,isDev:false,
     baseUrl:config.baseUrl,eventKey:config.eventKey,signingKey:config.signingKey,
     logger:quietLogger,internalLogger:quietLogger,fetch:transport,middleware:[WorkflowBoundary]});
 }

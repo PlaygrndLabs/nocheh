@@ -11,6 +11,7 @@ import type {Duplex} from 'node:stream';
 import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 import {proxyProviderMonitor} from './provider-monitor-proxy.js';
 import {ProviderOAuth} from './provider-oauth.js';
+import {importConfiguration} from './workflows/imports.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -22,7 +23,7 @@ const PREFIX = '/api/plugins/nocheh';
 const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
-  mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown};
+  mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown;workflow?:'pending'|'inngest'};
 
 async function atomic(path: string, value: unknown) {
   const temporary = path + '.' + randomUUID() + '.tmp';
@@ -38,8 +39,18 @@ function jobPath(id: string) {
   return join(JOBS, id);
 }
 async function getJob(id: string): Promise<Job> {
-  try { return JSON.parse(await readFile(join(jobPath(id), 'job.json'), 'utf8')) as Job; }
-  catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(404, 'job_not_found'); }
+  let job:Job;
+  try {job=JSON.parse(await readFile(join(jobPath(id),'job.json'),'utf8')) as Job;}
+  catch(error){if(error instanceof HttpError)throw error;throw new HttpError(404,'job_not_found');}
+    if(job.workflow){
+      const status=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/'+id}));
+      if(status.owned){
+        const current=object(status.job);job.state=current.state==='completed'?'complete':['queued','running'].includes(String(current.state))?'running':String(current.state);
+        job.completed=Number(current.completed);job.duplicates=Number(current.duplicates);
+        if(job.state==='complete')job.result={completed:job.completed,duplicates:job.duplicates,telegram_replies:0,review_approved:job.review_approved};
+      }
+    }
+    return job;
 }
 async function putJob(job: Job) { await atomic(join(jobPath(job.id), 'job.json'), job); }
 async function listJobs(max=200) {
@@ -158,7 +169,7 @@ export async function startManagement() {
   const sessions=new DashboardSessions();
   const providerOAuth=new ProviderOAuth(MONITOR,monitorKey,PORT);
   const sockets=new Set<Duplex>();
-  for (const job of await listJobs(Infinity)) if (['running', 'queued'].includes(job.state)) {
+  for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
   }
   function authorized(req: IncomingMessage, download=false) {
@@ -282,12 +293,17 @@ export async function startManagement() {
             if(job.review_approved!==undefined && body.review_approved!==undefined && body.review_approved!==job.review_approved)throw new HttpError(409,'resume_review_approval_cannot_change');
             job.review_approved=job.review_approved??(body.review_approved===true);
             if (job.mapping && JSON.stringify(mapping) !== JSON.stringify(job.mapping)) throw new HttpError(409, 'resume_scope_cannot_change');
-            job.mapping = mapping; job.state = 'running'; delete job.error; await putJob(job);
+            job.mapping=mapping;job.workflow='pending';delete job.error;await putJob(job);
+            const confirmed=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/confirm',body:{id,configuration_hash:importConfiguration(job.preview,mapping,job.review_approved),review_approved:job.review_approved,total:job.preview.messages,completed:job.completed,duplicates:job.duplicates,resume:['failed','cancelled','interrupted'].includes(job.state)}}));
+            if(confirmed.owned===true){job.workflow='inngest';job.state='running';await putJob(job);return json(res,202,await getJob(id));}
+            if(confirmed.owned!==false)throw new HttpError(503,'import_admission_unavailable');
+            delete job.workflow;job.state='running';await putJob(job);
             launch(job, {operation: 'import.run', job: id, mapping, after: job.completed});
             return json(res, 202, job);
           });
           if (req.method === 'POST' && action === 'cancel') {
             if (job.kind !== 'import' || job.state !== 'running') throw new HttpError(409, 'job_not_cancellable');
+            if(job.workflow){await python({operation:'workflow.api',path:'/v1/workflows/imports/cancel',body:{id}});return json(res,200,await getJob(id));}
             const running = activeJobs.get(id); if (running) running.state = 'cancelled';
             active.get(id)?.kill('SIGTERM'); job.state = 'cancelled'; await putJob(job);
             return json(res, 200, job);

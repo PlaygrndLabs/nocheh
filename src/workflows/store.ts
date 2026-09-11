@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS workflow_owners (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO workflow_owners(family) VALUES ${families.map(f=>`('${f}')`).join(',')} ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS workflow_worker_registrations (
+  family text PRIMARY KEY REFERENCES workflow_owners(family),version integer NOT NULL,
+  app text NOT NULL CHECK(app IN ('pipeline','host')),seen_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS workflow_registry (
   id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'),
   family text NOT NULL REFERENCES workflow_owners(family), job_id text NOT NULL,
@@ -101,6 +105,7 @@ export async function switchFamily(pool:pg.Pool,family:WorkflowFamily,epoch:numb
     if(uncertain.rowCount)throw new HttpError(409,'workflow_receipts_unreconciled');
     const domainQueries:Partial<Record<WorkflowFamily,string>>={
       telegram:"SELECT 1 FROM dispatches WHERE state='running' LIMIT 1",
+      imports:"SELECT 1 FROM workflow_imports WHERE state='running' LIMIT 1",
       actions:"SELECT 1 FROM action_requests WHERE state='running' LIMIT 1",
       tools:"SELECT 1 FROM controlled_actions WHERE state IN ('claimed','running') LIMIT 1",
       memory_review:"SELECT 1 FROM memory_review_jobs WHERE state='running' LIMIT 1",
@@ -118,6 +123,11 @@ export async function switchFamily(pool:pg.Pool,family:WorkflowFamily,epoch:numb
 }
 
 export type WorkflowEvent={name:'nocheh/workflow.requested';id:string;data:{workflow_id:string;dispatch:number;family:WorkflowFamily}};
+/** Record only after Connect confirms function registration; refresh while ACTIVE. */
+export async function registerWorker(pool:pg.Pool,app:'pipeline'|'host',registered:WorkflowFamily[],version=1){
+  for(const family of registered)await pool.query(`INSERT INTO workflow_worker_registrations(family,version,app) VALUES($1,$2,$3)
+    ON CONFLICT(family) DO UPDATE SET version=excluded.version,app=excluded.app,seen_at=now()`,[family,version,app]);
+}
 export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Promise<unknown>,limit=25):Promise<number> {
   let published=0;
   for(let i=0;i<limit;i++) {
@@ -127,6 +137,7 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
         JOIN workflow_registry w ON w.id=candidate.workflow_id JOIN workflow_owners f ON f.family=w.family
         WHERE candidate.published_at IS NULL AND candidate.next_attempt<=now()
         AND (candidate.lease_until IS NULL OR candidate.lease_until<now()) AND f.owner='inngest' AND f.admission
+        AND EXISTS(SELECT 1 FROM workflow_worker_registrations r WHERE r.family=w.family AND r.version=w.version AND r.seen_at>now()-interval '30 seconds')
         AND w.state IN ('queued','waiting','retryable_failed','running')
         ORDER BY candidate.created_at,candidate.id FOR UPDATE OF candidate SKIP LOCKED LIMIT 1)
       RETURNING o.id,o.workflow_id,o.dispatch,(SELECT family FROM workflow_registry WHERE id=o.workflow_id) AS family`,[token]);

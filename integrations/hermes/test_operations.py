@@ -55,8 +55,11 @@ class SnapshotTests(unittest.TestCase):
             with patch('scripts.operations.compose',return_value=['fixture']),patch('scripts.operations.environment',return_value={}),\
                  patch('scripts.operations.subprocess.check_output',side_effect=['','fixture-revision']),\
                  patch('scripts.operations.fingerprints',return_value={name:'hash' for name in TABLES}),\
-                 patch('scripts.operations.subprocess.run',side_effect=run):
+                 patch('scripts.operations.subprocess.run',side_effect=run),\
+                 patch('scripts.workflow_worker.running',return_value=True),\
+                 patch('scripts.workflow_worker.stop') as stop_host,patch('scripts.workflow_worker.start') as start_host:
                 backup(state,root/'backup')
+                stop_host.assert_called_once_with(state,wait=True);start_host.assert_called_once_with(state)
             manifest=validate_snapshot(root/'backup')
             self.assertEqual(manifest['version'],3)
             self.assertEqual(manifest['files']['admin/jobs/fixture/job.json']['sha256'],sha(job))
