@@ -201,11 +201,67 @@ services:
       POSTGRES_DB: nocheh
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
     volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [default, workflows]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
       interval: 3s
       timeout: 3s
       retries: 20
+
+  workflow-database:
+    <<: *service
+    profiles: [workflows]
+    restart: "no"
+    command: [node, dist/src/workflows/bootstrap.js]
+    environment:
+      PGHOST: postgres
+      PGUSER: nocheh
+      PGDATABASE: nocheh
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:-}
+    networks: [workflows]
+    volumes: []
+    healthcheck: {disable: true}
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  workflow-redis:
+    image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
+    profiles: [workflows]
+    restart: unless-stopped
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]
+    volumes: ["${NOCHEH_STATE_DIR:-./data/local}/workflows/redis:/data"]
+    networks: [workflows]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  inngest:
+    image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
+    profiles: [workflows]
+    restart: unless-stopped
+    command: [inngest, start]
+    environment:
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
+      INNGEST_POSTGRES_URI: postgres://nocheh_inngest:${INNGEST_POSTGRES_PASSWORD:-}@postgres:5432/nocheh_inngest?sslmode=disable
+      INNGEST_REDIS_URI: redis://workflow-redis:6379
+      INNGEST_POSTGRES_MAX_OPEN_CONNS: "10"
+      INNGEST_POSTGRES_MAX_IDLE_CONNS: "3"
+      LOG_LEVEL: warn
+    networks: [workflows]
+    depends_on:
+      workflow-database: {condition: service_completed_successfully}
+      workflow-redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, inngest, alpha, doctor, healthcheck]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   archive:
     <<: *service
@@ -314,6 +370,8 @@ volumes:
   postgres_data:
 
 networks:
+  workflows:
+    internal: true
   agent:
     name: ${NOCHEH_AGENT_NETWORK:-nocheh-agent}
     internal: true

@@ -92,11 +92,12 @@ class SnapshotTests(unittest.TestCase):
                 if command[:3]==['docker','volume','inspect']:return SimpleNamespace(returncode=1)
                 if 'up' in command:
                     starts.append(command)
-                    for name in ('spool/.restore-inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json','provider/auth.restore-pending/codex.json'):
+                    for name in ('spool/.restore-inactive','workflows/inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json','provider/auth.restore-pending/codex.json'):
                         self.assertTrue((state/name).is_file(),name)
                     self.assertFalse((state/'hermes/auth.json').exists())
                     self.assertFalse(any((state/'provider/auth').glob('*.json')))
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
+                    self.assertIn("NOCHEH_WORKFLOWS_ENABLED='false'",(state/'.env').read_text())
                 return SimpleNamespace(returncode=0)
             with patch('scripts.operations.validate_snapshot',return_value=manifest),\
                  patch('scripts.operations.initialize',return_value={'TELEGRAM_ENABLED':'true'}),\
