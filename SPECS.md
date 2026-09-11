@@ -101,6 +101,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Telegram, browser, and scheduled turns use the same managed capture, audience, guard, and tool-policy boundaries. One supervisor owns Telegram polling and scheduler lifecycle. Profile locks prevent concurrent native-memory and conversation writers.
 - Browser input defaults to owner-private scope; explicit group selection remains group-scoped through capture, tools, sessions, and memory. Reconnect and resume reuse stable stored identities and profile-bound sessions without duplicate submission.
 - Durable claims, leases, heartbeats, and result receipts distinguish completion, interruption, and late evidence. Lost responses are reconciled; abandoned work is not automatically rerun as a new external effect.
+- Runtime operations provide asynchronous `run.start`, `run.events`, `run.resume`, and `run.cancel` for Telegram, browser, and scheduled channels. Resume reconciles the same execution identity and preserves browser streaming, reconnect, cancellation, and session identities.
 - Useful proactive conversation is permitted in selected Telegram groups. Intentional silence is a valid captured outcome. Group participants cannot approve actions or change administrative, provider, privacy, or guard settings.
 
 <area name="Security and controlled tools">
@@ -118,7 +119,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 <area name="Scheduling">
 
-- Hermes owns native profile schedule definitions, parsing, editing, and session history. Nocheh supervises exactly one scheduler. Definitions and each scheduled or explicit manual fire are captured before managed execution, with stable identities and separate generated results.
+- Hermes owns native profile schedule definitions, parsing, editing, cadence calculation, revision checks, occurrence accounting, and session history. Inngest durable waits coordinate scheduled occurrences under Nocheh's single execution authority. Definitions and each scheduled or explicit manual fire are captured before managed execution, with stable identities and separate generated results.
 - Schedule configuration shares global/profile/job preference inheritance. Profile locks prevent overlapping browser, Telegram, and scheduled turns. Scheduled tools obey the same approvals and executor settings as other turns.
 - Results default to local storage. Selecting Telegram produces an exact approval proposal for each completed result in that job's selected scope. Empty, cancelled, interrupted, overlong, or stale-audience results are not implicit deliveries.
 - Owner-private and selected-group schedules support native schedule fields, conflict revisions, cancellation, run limits, and explicit catch-up. Topic schedules and interactive/script/skill jobs are outside the supported capability.
@@ -126,6 +127,21 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Pause prevents future starts; cancellation requests interruption without undoing completed effects. Crashes reconcile stored receipts without repeating uncertain execution. Restored schedulers are inactive.
 
 </area>
+</area>
+
+<area name="Workflow orchestration">
+
+- All product workflows use local Inngest: Telegram attachment retrieval, transcription, guarded preparation and dispatch; confirmed imports; native memory review and Honcho synchronization, rebuilding and reconciliation; browser turns; scheduled occurrences; and approved actions. Synchronous security checks and the native agent's internal reasoning loop retain their own boundaries.
+- Inngest and persistent Redis run in the installation's Docker Compose project. Inngest has a dedicated database and role in the existing PostgreSQL instance, separate from the owned archive. TypeScript Connect workers have distinct Compose and host app identities and versions; Python adapters remain thin. Inngest Cloud and VPS deployment are outside this local workflow architecture.
+- Each workflow request or relevant state change commits an outbox record in the same archive transaction. A supervised publisher retries delivery independently of Inngest. Source capture and spool draining continue during orchestration outages.
+- Inngest events, step outputs, errors, and logs contain only opaque IDs, versions, counts, timestamps, and allowlisted status codes. Messages, transcripts, prompts, results, tool arguments, and credentials stay in protected stores and are resolved inside executing steps.
+- Nocheh owns the workflow registry linking source/job IDs, workflow versions, Inngest runs, attempts, and receipts. Permanent deduplication does not depend on Inngest's finite event-deduplication window. Each workflow family has one fenced execution authority.
+- Inngest owns retry timing. Prerequisite waits are distinct from failed attempts; profile locks and bounded concurrency apply. Current audience, guarded revisions, import consent, and permissions are checked before execution. Terminal, cancelled, denied, suppressed, and ambiguous outcomes cannot automatically restart. Lost responses and uncertain effects require receipt reconciliation, never blind replacement execution.
+- Telegram processing and delivery form one receipt-protected native runtime operation with separately visible assistant and delivery progress. Stored transcripts and guarded revisions are reusable. Intentional silence is a valid outcome; uncertain sends stop for reconciliation.
+- Confirmed imports use bounded checkpointed batches, preserve upload validation, mapping, identities, progress, cancellation, and explicit learning consent across retries, and send no historical replies. Source preparation, owner edits, consent, and memory generation changes request the appropriate follow-up work. Honcho execution requires its existing attachment and acceptance gates.
+- Workflow list/detail and validated retry/cancel operations are available at `/api/nocheh/workflows` and through the CLI, preserving existing job IDs, browser protocols, and compatibility routes. Nocheh shows family/status filters, stage, attempts, next retry, waiting reason, timestamps, source links, outbox backlog, oldest waiting work, connectivity, and stale observations with accessible status text and ten-second refresh.
+- The detailed Inngest UI is inspection-only behind the Nocheh owner session; execution controls use Nocheh authorization. Monitoring distinguishes retryable and terminal failure, waiting, intentional skip, cancellation, and uncertain effect. No external workflow notifications are sent.
+
 </area>
 
 <area name="Dashboard and CLI">
@@ -151,6 +167,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 <area name="Operations and acceptance">
 
 - Backups quiesce ingress before writers and preserve PostgreSQL records, originals, files, durable journals/receipts, native state, configuration, and a conservative spending-ledger snapshot. Checksums and table fingerprints verify recovery; rebuildable dependency caches are explicitly excluded.
+- Backups include Inngest PostgreSQL history and Redis queue/run state at the same quiesced recovery point as Nocheh evidence. Restored workers, schedules, and event publication remain inactive. Backup, restore, and service shutdown execute through the host independently of Inngest, with maintenance progress visible in Nocheh.
 - Restore uses a separate project and state directory with Telegram disabled, OAuth held inactive, and archive workers, tool execution, scheduling, and Honcho attachment held. Restore does not activate services or reset a newer spending ledger.
 - Recovery cutover reconciles snapshot-era pending work with source evidence and shuts down source authorities before activation. Rollback uses the matching code/images and a verified inactive snapshot, never an older runtime against a newer live database.
 - Candidate compatibility checks build pinned runtime/native assets in isolation without live state, credentials, or test network. They do not activate candidates or change saved pins. Upgrade acceptance covers capture, guards, audience access, approvals, native memory, restore, and single-authority operation.

@@ -55,3 +55,4 @@ and governs subsequent agent work without changing those product decisions.
 | [0038](0038-observed-telegram-health-and-local-oauth-callback.md) | Observed Telegram polling health, recovery supervision and local OAuth callback | Active locally; shared-provider sign-in and cutover pending |
 | [0039](0039-main-refactor-consolidation.md) | Owner-directed refactor integration into main, separate from release acceptance | Supersedes earlier merge sequencing; remaining live gates stay pending |
 | [0040](0040-specifications-and-agent-workflow.md) | Canonical SPECS.md, AGENTS.md workflow, separate status/evidence, and session integration | Active documentation and coding workflow; product/activation gates preserved |
+| [0041](0041-local-inngest-workflows.md) | Local Inngest for product workflows, owned outbox/receipts, phased cutover and independent host recovery | Accepted; implementation and activation tracked in TASK.md |
