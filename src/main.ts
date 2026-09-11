@@ -24,6 +24,7 @@ import {hostTransport} from './workflows/host-transport.js';
 import {confirmImport,cancelImport,enterImportWrite} from './workflows/imports.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from './workflows/host-coordinator.js';
 import {registerWorker} from './workflows/store.js';
+import {hostActionAuthority} from './workflows/host-tools.js';
 
 const config = settings();
 const runtime = hermesAdapter({url: config.hermesUrl, token: config.token});
@@ -63,7 +64,7 @@ const server = createServer((req, res) => { void (async () => {
       if(path==='/v1/workflows/host/renew')return json(res,200,await renewHostWorkflow(pool,body));
       if(path==='/v1/workflows/host/finish')return json(res,200,await finishHostWorkflow(pool,body));
       if(path==='/v1/workflows/host/continue')return json(res,200,await continueHostWorkflow(pool,body));
-      if(path==='/v1/workflows/host/heartbeat'){await registerWorker(pool,'host',['imports']);await heartbeat(pool,'workflow-host');return json(res,200,{ok:true});}
+      if(path==='/v1/workflows/host/heartbeat'){await registerWorker(pool,'host',['imports','tools']);await heartbeat(pool,'workflow-host');return json(res,200,{ok:true});}
     }
     if(req.method==='GET'&&/^\/v1\/workflows\/imports\/[a-f0-9-]{36}$/.test(path)){
       const job=(await pool.query('SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at FROM workflow_imports WHERE id=$1',[path.split('/').at(-1)])).rows[0];
@@ -220,9 +221,9 @@ const server = createServer((req, res) => { void (async () => {
     if(path==='/v1/tools/decide')return json(res,200,await decideControlled(pool,principal,body));
     if(path==='/v1/tools/telegram-decision')return json(res,200,await decideTelegram(pool,principal,body));
     if(path==='/v1/tools/grant')return json(res,200,await grantPermission(pool,principal,body));
-    if(path==='/v1/tools/start')return json(res,200,await startControlled(pool,body));
+    if(path==='/v1/tools/start')return json(res,200,await startControlled(pool,body,object(body).workflow_id?await hostActionAuthority(pool,body):undefined));
     if(path==='/v1/tools/revoke')return json(res,200,await revokePermission(pool,principal,body));
-    if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body));
+    if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body,object(body).id===undefined?null:String(object(body).id),object(body).workflow_id?await hostActionAuthority(pool,body):undefined));
     if(path==='/v1/tools/finish')return json(res,200,await finishControlled(pool,body));
   }
   if (config.service==='archive' && req.method==='GET' && path==='/v1/runtime') {

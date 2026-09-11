@@ -87,4 +87,24 @@ class ToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run)
         self.assertEqual(calls[-1][1]['state'],'failed')
 
+    def test_targeted_workflow_authority_is_checked_before_start_and_not_stored_in_receipt(self):
+        calls=[];action='d'*64;workflow={'workflow_id':'e'*64,'workflow_token':'private-lease-fixture'}
+        class API:
+            def call(self,path,body):
+                calls.append((path,body))
+                if path.endswith('/claim'):return {'claimed':True,'id':action}
+                if path.endswith('/start'):return {'started':True}
+                raise OSError('receipt publication unavailable')
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(OSError):tick(folder,API(),'wf-'+workflow['workflow_id'],lambda *_:{'exit_code':0},action_id=action,workflow=workflow)
+            self.assertEqual(calls[0][1]['id'],action)
+            self.assertEqual(calls[1][1]['workflow_token'],workflow['workflow_token'])
+            receipt=(Path(folder)/'admin/tools/receipts'/(action+'.json')).read_text()
+            self.assertNotIn('workflow_token',receipt);self.assertNotIn('private-lease',receipt)
+
+    def test_expired_batch_admission_never_claims_a_tool(self):
+        class API:
+            def call(self,*_):raise AssertionError('no claim after batch admission deadline')
+        with tempfile.TemporaryDirectory() as folder:self.assertFalse(tick(folder,API(),'actor',admit=lambda:False))
+
 if __name__=='__main__':unittest.main()

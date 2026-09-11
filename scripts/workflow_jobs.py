@@ -2,9 +2,27 @@
 import fcntl
 import json
 import re
+import time
 from .archive import API, canonical, digest
 from .configuration import load
 from .import_job import run
+
+
+def tool_tick(state,body):
+    from .tool_worker import tick
+    for key in ('action_id','workflow_id'):
+        if not isinstance(body.get(key),str) or not re.fullmatch('[a-f0-9]{64}',body[key]):raise ValueError('invalid_workflow_identity')
+    if not isinstance(body.get('workflow_token'),str) or not re.fullmatch(r'[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}',body['workflow_token']):raise ValueError('invalid_workflow_lease')
+    # The executor's existing exact approval, current native preference check,
+    # sandbox and durable receipt path are shared with the legacy adapter.
+    class WorkerAPI(API):
+        def call(self,path,body=None,binary=False,timeout=10):
+            return super().call(path,body,binary,15 if path.endswith('/finish') else 10)
+    # Leave time for the executor's 90-second overall bound and receipt commit.
+    # A large receipt backlog cannot cause the parent to kill a newly started tool.
+    admission_deadline=time.monotonic()+120
+    worked=tick(state,WorkerAPI(),'wf-'+body['workflow_id'],action_id=body['action_id'],workflow={k:body[k] for k in ('workflow_id','workflow_token')},admit=lambda:time.monotonic()<admission_deadline)
+    return {'completed':int(worked)}
 
 
 def import_batch(state, body):
