@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""Local Compose entrypoint. No provider keys, package installs or VPS required."""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from configuration import initialize, load, write_env, env_path, compose_environment
+
+ROOT = Path(__file__).resolve().parents[1]
+STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(ROOT / "data/local"))).resolve()
+
+
+def bootstrap():
+    initialize(STATE)
+    # Transfer the dedicated test login once. There must be only one refresh owner.
+    prior = ROOT / "data/compat/hermes-auth/auth.json"
+    current = STATE / "hermes/auth.json"
+    if STATE == ROOT / "data/local" and prior.is_file() and not current.exists():
+        shutil.move(prior, current)
+        current.chmod(0o600)
+        print("Transferred the dedicated Hermes login into the Compose runtime.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility"))
+    args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
+    if args.command=='export':
+        sys.path.insert(0,str(ROOT))
+        from scripts.portable import main as portable
+        return portable(STATE,rest)
+    if args.command=='compatibility':
+        sys.path.insert(0,str(ROOT))
+        from scripts.compatibility import main as compatibility
+        return compatibility(STATE,rest)
+    if args.command=='cron':
+        bootstrap();sys.path.insert(0,str(ROOT))
+        from scripts.cron import main as cron
+        return cron(STATE,rest)
+    if args.command in ('backup','restore','diagnose'):
+        sys.path.insert(0,str(ROOT))
+        from scripts.operations import main as operations
+        return operations(args.command,STATE,rest)
+    bootstrap()
+    if args.command=='provider':
+        sys.path.insert(0,str(ROOT))
+        from scripts.provider import main as provider
+        return provider(STATE,rest)
+    if args.command=='approvals':
+        sys.path.insert(0,str(ROOT))
+        from scripts.approvals import main as approvals
+        return approvals(STATE,rest)
+    if args.command in ('runtime', 'policy'):
+        sys.path.insert(0, str(ROOT))
+        from scripts.native import main as native
+        return native(STATE, args.command, rest)
+    if args.command == 'honcho':
+        sys.path.insert(0, str(ROOT))
+        from scripts.honcho import main as honcho
+        return honcho(rest)
+    if args.command == 'memory':
+        sys.path.insert(0, str(ROOT))
+        if rest and rest[0] in ('honcho','spaces','policy','shares','share','revoke','preview','recall','reviews','review','pause','resume'):
+            from scripts.memory import main as memory
+            return memory(rest)
+        from scripts.management import dispatch
+        memory_parser=argparse.ArgumentParser(description='Inspect native Hermes memory without model calls.')
+        memory_parser.add_argument('action',choices=('list','show','preferences','graph'))
+        memory_parser.add_argument('--output',type=Path);memory_parser.add_argument('--after',default='');memory_parser.add_argument('--scope');memory_parser.add_argument('--session')
+        memory_parser.add_argument('--offset',type=int,default=0);memory_parser.add_argument('--profile')
+        selected=memory_parser.parse_args(rest)
+        if selected.action!='list' and not selected.scope:memory_parser.error('--scope is required')
+        if selected.action=='graph':
+            from scripts.graph import read
+            result=read(selected.scope,selected.after)
+            encoded=json.dumps(result,ensure_ascii=False,indent=2)
+            if selected.output:
+                with selected.output.open('x') as file:file.write(encoded+'\n')
+                selected.output.chmod(0o600)
+            else:print(encoded)
+            return 0
+        result=dispatch({'operation':'hermes.manage','request':{'action':{'list':'profiles','show':'memory','preferences':'preferences'}[selected.action],
+                        'scope':selected.scope,'profile':selected.profile,'session':selected.session,'offset':selected.offset}})
+        print(json.dumps(result,ensure_ascii=False,indent=2));return 0
+    if args.command in ('dashboard', 'jobs', 'import'):
+        sys.path.insert(0, str(ROOT))
+        if args.command == 'dashboard':
+            from scripts.dashboard import start
+            return start(STATE, rest)
+        if args.command == 'jobs':
+            from scripts.dashboard import request
+            if rest == ['list']: result = request(STATE, '/jobs')
+            elif len(rest) == 2 and rest[0] == 'show': result = request(STATE, '/jobs/' + rest[1])
+            else: parser.error('Use jobs list or jobs show JOB_ID.')
+            print(json.dumps(result, indent=2)); return 0
+        if not rest or rest[0] != 'telegram': parser.error('Use import telegram FILE [--scope ID].')
+        return subprocess.call([sys.executable, str(ROOT/'scripts/archive.py'), 'import-telegram'] + rest[1:], cwd=ROOT)
+    if args.command == 'config' and rest:
+        from settings import view, save, apply
+        action, *parts = rest
+        if action == 'show' and not parts: result = view(STATE)
+        elif action == 'apply' and not parts: result = apply(STATE)
+        elif action == 'set' and len(parts) in (1, 2):
+            from settings import SECRETS
+            key = parts[0]
+            if key in SECRETS and len(parts) == 2:
+                parser.error('Use a hidden prompt or piped stdin for secret values.')
+            if len(parts) == 2: value = parts[1]
+            elif sys.stdin.isatty():
+                from getpass import getpass
+                value = getpass(key + ': ')
+            else: value = sys.stdin.read(65536).rstrip('\r\n')
+            result = save(STATE, {key: value}, view(STATE)['revision'])
+        else: parser.error('Use config show, config set KEY [VALUE], or config apply.')
+        print(json.dumps(result, indent=2)); return 1 if result.get('status') == 'apply_failed' else 0
+    if args.command == "init":
+        print("Local configuration ready. Edit " + str(env_path(STATE))); return 0
+    if args.command=='configure-telegram':
+        config_parser=argparse.ArgumentParser(description='Enable the owner DM and explicitly selected groups; token stays in .env.')
+        config_parser.add_argument('--owner-id',required=True)
+        config_parser.add_argument('--group-id',action='append',default=[])
+        selected=config_parser.parse_args(rest)
+        if not re.fullmatch(r'[1-9]\d{0,18}',selected.owner_id) or any(not re.fullmatch(r'-\d{1,19}',g) for g in selected.group_id):config_parser.error('Use numeric Telegram IDs; group IDs are negative.')
+        values=load(STATE)
+        if not values['TELEGRAM_BOT_TOKEN']:config_parser.error('Set TELEGRAM_BOT_TOKEN in .env first.')
+        values.update(TELEGRAM_ENABLED='true',TELEGRAM_OWNER_ID=selected.owner_id,TELEGRAM_GROUP_IDS=','.join(dict.fromkeys(selected.group_id)))
+        write_env(env_path(STATE),values)
+        print('Telegram policy saved. Run ./scripts/nocheh up to apply it.');return 0
+    env = compose_environment(STATE)
+    if args.command in ('up','dev','build','test'):
+        sys.path.insert(0,str(ROOT))
+        from scripts.provider import ensure_source,ensure_monitor_source
+        ensure_source();ensure_monitor_source()
+        from compatibility.setup import checkout,LOCK
+        checkout('hermes-agent',LOCK['hermes'])
+    command = ["docker", "compose", "--env-file", str(env_path(STATE)), "-f", str(ROOT / "docker-compose.yml")]
+    if args.command in ("dev", "test"):
+        command += ["-f", str(ROOT / "docker-compose.dev.yml")]
+    if args.command == 'db':
+        from database_viewer import start
+        return start(STATE, command, ROOT)
+    if args.command in ('down', 'status', 'logs'):
+        command += ['--profile', 'tools']
+    if args.command=='down':
+        sys.path.insert(0,str(ROOT))
+        from scripts.tool_worker import stop
+        stop(STATE,wait=True)
+    actions = {
+        "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
+        "dev": ["up", "--build", "--watch"], "down": ["down"], "status": ["ps"],
+        "logs": ["logs", "--tail", "100", "-f"], "build": ["build"],
+        "test": ["run", "--rm", "--build", "--no-deps", "archive", "npm", "test"],
+        "verify": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.verify", "--live"],
+        "config": ["config", "--quiet"],
+        "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.discover_telegram"],
+        "login": ["exec", "hermes", "python", "-c",
+            "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
+    }
+    if args.command == 'test':
+        ready = subprocess.call(command + ['up', '-d', '--wait', 'postgres'], cwd=ROOT, env=env)
+        if ready:
+            return ready
+    result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
+    if args.command=='up' and result==0:
+        result=subprocess.call(['docker','build','-f',str(ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(ROOT)],cwd=ROOT,env=env)
+        if result==0:
+            sys.path.insert(0,str(ROOT))
+            from scripts.tool_worker import start
+            print(json.dumps(start(STATE)))
+    if args.command == 'test' and result == 0:
+        return subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
+            '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes', 'python', '-m', 'unittest',
+            'discover', '-s', 'integrations/hermes', '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
+    return result
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

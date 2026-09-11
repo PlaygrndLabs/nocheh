@@ -1,0 +1,104 @@
+name: nocheh-honcho-experiment
+
+x-honcho: &honcho
+  image: nocheh-honcho-experiment:be543555
+  build:
+    context: ../../data/compat/upstreams/honcho
+    dockerfile: ${HONCHO_EXPERIMENT_DOCKERFILE:?run scripts/honcho-experiment init}
+  env_file: ../../data/honcho-experiment/honcho.env
+  networks: [isolated]
+  restart: "no"
+
+services:
+  database:
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    environment:
+      POSTGRES_DB: honcho_experiment
+      POSTGRES_USER: experiment
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    secrets: [database_password]
+    volumes: [database:/var/lib/postgresql/data]
+    networks: [isolated]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U experiment -d honcho_experiment]
+      interval: 3s
+      retries: 30
+  redis:
+    image: redis:8.2@sha256:7d1e4ce8b9395088377ab382d1f6cfdbd13b3690795198a0399ab8d683064d6d
+    networks: [isolated]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      retries: 20
+  honcho:
+    <<: *honcho
+    entrypoint: [sh, docker/entrypoint.sh]
+    depends_on:
+      database: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      meter: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, /app/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+  deriver:
+    <<: *honcho
+    entrypoint: [/app/.venv/bin/python, -m, src.deriver]
+    depends_on:
+      honcho: {condition: service_healthy}
+  meter:
+    image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
+    command: [python, /experiment/meter.py]
+    env_file: ../../data/honcho-experiment/meter.env
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    volumes:
+      - ./meter.py:/experiment/meter.py:ro
+      - ../../scripts/embedding_config.py:/experiment/embedding_config.py:ro
+      - ../../data/honcho-experiment/internal_token:/state/internal_token:ro
+      - ../../data/honcho-experiment/ledger:/ledger
+      - ${NOCHEH_STATE_DIR:?run scripts/honcho-experiment init}/provider/keys/honcho.key:/run/secrets/cliproxy_honcho_key:ro
+    secrets: [temporary_embedding_key]
+    networks: [isolated, egress, memory]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8790/health',timeout=2)"]
+      interval: 5s
+      retries: 15
+  cli:
+    image: nocheh-honcho-cli:0.1.4
+    build: {context: ., dockerfile: cli.Dockerfile}
+    profiles: [runner]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - ../../data/honcho-experiment/internal_token:/state/internal_token:ro
+    networks: [isolated]
+  baseline:
+    # Reuses the pinned Hermes image, with only experiment state and no Telegram.
+    image: nocheh-hermes:local
+    profiles: [runner]
+    entrypoint: [python, /experiment/baseline.py]
+    environment:
+      HERMES_HOME: /experiment-state
+      NOCHEH_CAPTURE_ENABLED: '0'
+      GUARD_MODE: 'off'
+    volumes:
+      - .:/experiment:ro
+      - ../../data/honcho-experiment/baseline:/experiment-state
+      - ../../data/honcho-experiment/internal_token:/run/secrets/experiment_token:ro
+    networks: [isolated]
+
+networks:
+  isolated: {internal: true}
+  egress: {}
+  memory:
+    external: true
+    name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
+volumes:
+  database: {}
+secrets:
+  database_password:
+    file: ../../data/honcho-experiment/database_password
+  temporary_embedding_key:
+    file: ../../data/honcho-experiment/temporary_embedding_key

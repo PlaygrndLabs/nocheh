@@ -1,0 +1,241 @@
+import {captureInput,claimRun,finishRun,renewRun,prepareRun,cancelScheduled,recoverScheduled,scheduleDefinition,scheduledRuns,scheduledDelivery} from './managed-runs.js';
+import {ownerSecurityRoute} from './security/owner-api.js';
+import { createServer } from 'node:http';
+import { evidenceGraph } from './graph.js';
+import { listSpaces, spacePolicy, saveSpace,parentSpace } from './spaces.js';
+import {approveLearning,listReviews,controlReview} from './learning.js';
+import { settings } from './config.js';
+import { connectDatabase, heartbeat, initialize } from './database.js';
+import { HttpError, json, readJson, object,authorize } from './http.js';
+import {honchoClient,memoryStatus,setMemoryConnection,recallMemory,prepareMemoryRequest,acceptMemoryVerification} from './honcho.js';
+import { archiveStatus, envelope, ingest } from './archive.js';
+import { startWorker } from './worker.js';
+import { hermesAdapter } from './hermes-adapter.js';
+import { runtimeCall, type RuntimeOperation } from './runtime.js';
+import { guardPayload,inspectRequest } from './guard.js';
+import {prepareContext,allowPrepared} from './prepared-context.js';
+import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState,prepareGuarded} from './guarded.js';
+import { requestAction,telegramActions,decideTelegram } from './actions.js';
+import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,startControlled,finishControlled} from './controlled-actions.js';
+import { reader, admin,assertAudience,turnToken } from './access.js';
+import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
+import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
+
+const config = settings();
+const runtime = hermesAdapter({url: config.hermesUrl, token: config.token});
+const call = runtimeCall(runtime);
+const honcho=honchoClient(config.honchoUrl);
+// Each service owns its connection pool; an outage must be visible in health.
+const pool = connectDatabase(config);
+await initialize(pool);
+if(config.service==='archive')await setGuardMode(pool,config.guardMode);
+await heartbeat(pool, config.service);
+const timer = setInterval(() => { void heartbeat(pool, config.service).catch(() => {}); }, 5000);
+timer.unref();
+const stopWorker = config.service === 'worker' ? startWorker(pool, config) : () => {};
+
+const server = createServer((req, res) => { void (async () => {
+  const url = new URL(req.url ?? '/', 'http://local'), path=url.pathname;
+  if (req.method === 'GET' && path === '/health') {
+    await pool.query('SELECT 1');
+    return json(res, 200, {ok: true, service: config.service, database: 'ready'});
+  }
+  if(config.service==='archive'&&req.method==='POST'&&path==='/internal/honcho/prepare') {
+    if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
+    return json(res,200,await prepareMemoryRequest(pool,await readJson(req,1024*1024),async text=>(await call('guard.detect',{text})).literals));
+  }
+  const principal=reader(req, config.token);
+  await assertAudience(pool,principal);
+  if(config.service==='archive'&&await ownerSecurityRoute(pool,principal,req,res,url))return;
+  const prepare=(value:unknown)=>prepareContext(pool,principal,value,async text=>(await call('guard.detect',{text})).literals);
+  const agentResult=async(value:unknown,prepared=false)=>{
+    const result=principal.admin?value:prepared?(await allowPrepared(pool,principal,value),value):await prepare(value);
+    await assertAudience(pool,principal);return json(res,200,result);
+  };
+  const claim=async(body:unknown,channel:'browser'|'scheduler')=>{
+    if((await guardState(pool)).mode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,String(object(body).event_id));
+    return claimRun(pool,config,body,channel);
+  };
+  if(config.service==='guard' && !principal.admin && req.method==='POST' && path==='/v1/guard') {
+    const body=object(await readJson(req,1024*1024));
+    if(typeof body.destination!=='string')throw new HttpError(400,'invalid_destination');
+    const destination=new URL(body.destination);if(!['http:','https:'].includes(destination.protocol)||destination.username||destination.password)throw new HttpError(400,'invalid_destination');
+    if((await guardState(pool)).mode==='on')inspectRequest(body.payload);
+    return json(res,200,{guarded:true,payload:await prepare(body.payload)});
+  }
+  if(config.service==='archive' && !principal.admin && req.method==='POST' && path==='/v1/context/prepare')return agentResult(await readJson(req,1024*1024));
+  if(config.service==='archive' && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
+  if(config.service==='archive'&&path==='/v1/memory/honcho') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,await memoryStatus(pool));
+    if(req.method==='POST')return json(res,200,await setMemoryConnection(pool,await readJson(req)));
+  }
+  if(config.service==='archive'&&path==='/v1/memory/honcho/verify'&&req.method==='POST') {
+    admin(principal);return json(res,200,await acceptMemoryVerification(pool,await readJson(req)));
+  }
+  if(config.service==='archive'&&path==='/v1/guarded/prepare'&&req.method==='POST') {
+    admin(principal);const body=object(await readJson(req));
+    if(typeof body.event_id!=='string'||!/^[a-f0-9]{64}$/.test(body.event_id))throw new HttpError(400,'invalid_source');
+    await pool.query("UPDATE guard_sources SET next_attempt=now() WHERE event_id=$1 AND active_revision IS NULL",[body.event_id]);
+    await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,body.event_id);
+    return json(res,200,await inspectGuarded(pool,principal,body.event_id));
+  }
+  if(config.service==='archive'&&path==='/v1/memory/honcho/recall'&&req.method==='POST') {
+    if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');
+    const body=object(await readJson(req));return agentResult(await recallMemory(pool,principal,String(body.query??''),honcho,async text=>(await call('guard.detect',{text})).literals),true);
+  }
+  if(config.service==='archive' && path==='/v1/memory/preview' && req.method==='GET') {
+    admin(principal);const policy=await spacePolicy(pool,url.searchParams.get('space')??'');
+    const preview={scope:parentSpace(policy.id)??policy.id,space:policy.id,revision:policy.revision,admin:false,guard_epoch:(await guardState(pool)).epoch};
+    const q=url.searchParams.get('q')??'';
+    const originals=q.trim()?await search(pool,preview,q):[];
+    const shares=policy.effective.mode==='isolated'?[]:(await listShares(pool,policy.id)).filter(s=>!s.revoked_at).map(s=>({source:'nocheh:shared:'+s.id,text:s.content}));
+    await assertAudience(pool,preview);
+    return json(res,200,{policy,originals,shares,filtered_sources:policy.effective.mode==='filtered'?policy.effective.sources:[],filter_run:false});
+  }
+  if(config.service==='archive' && path==='/v1/memory/shares') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,await listShares(pool,url.searchParams.get('space')??''));
+    if(req.method==='POST')return json(res,200,await shareKnowledge(pool,await readJson(req)));
+  }
+  if(config.service==='archive' && path==='/v1/memory/shares/revoke' && req.method==='POST') {
+    admin(principal);const b=object(await readJson(req));return json(res,200,await revokeShare(pool,String(b.id),b.revision));
+  }
+  if(config.service==='archive' && path==='/v1/memory/context' && req.method==='GET')return agentResult(await sharedContext(pool,principal,url.searchParams.get('q')??'',async(operation,input,timeout)=>{
+    if(operation!=='memory.filter'||(await guardState(pool)).mode==='off')return call(operation,input,timeout);
+    if(!principal.turnEvent)throw new HttpError(403,'bound_guard_context_required');
+    const policy={space:config.assistant.owner_id!,revision:principal.revision!,guard_epoch:(await guardState(pool)).epoch};
+    const preparer={...policy,admin:false,scope:null,turnEvent:principal.turnEvent};
+    await allowPrepared(pool,preparer,input.candidates);
+    return call(operation,{...input,archive_credential:turnToken(config.token,null,Date.now()+600000,principal.turnEvent,{...policy,purpose:'filter'})},timeout);
+  }));
+  const shared=path.match(/^\/v1\/memory\/(shared|filtered)\/([a-f0-9]{64})$/);
+  if(config.service==='archive' && shared && req.method==='GET')return agentResult(await readShared(pool,principal,shared[1]!,shared[2]!,call));
+  if(config.service==='archive' && path==='/v1/memory/recall') {
+    if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
+    if(req.method==='POST')return agentResult(await call('memory.recall',{...object(await readJson(req)),...(principal.admin?{}:{guard_epoch:(await guardState(pool)).epoch})}));
+  }
+  if(config.service==='archive' && path==='/v1/memory/reviews') {
+    admin(principal);
+    if(req.method==='GET')return json(res,200,await listReviews(pool,url.searchParams.get('after')??''));
+    if(req.method==='POST')return json(res,200,await approveLearning(pool,await readJson(req)));
+  }
+  if(config.service==='archive' && path==='/v1/memory/reviews/control' && req.method==='POST') {
+    admin(principal);const b=object(await readJson(req));return json(res,200,await controlReview(pool,String(b.id),b.action));
+  }
+  if(config.service==='archive' && path==='/v1/memory/spaces') {
+    admin(principal);
+    if(req.method==='GET') {
+      if(url.searchParams.has('id')) {
+        const policy=await spacePolicy(pool,url.searchParams.get('id')!);
+        return json(res,200,{...policy,private_owner:policy.id===config.assistant.owner_id});
+      }
+      return json(res,200,{...await listSpaces(pool,url.searchParams.get('after')??''),owner_space:config.assistant.owner_id});
+    }
+    if(req.method==='POST'){const b=object(await readJson(req));return json(res,200,await saveSpace(pool,String(b.id),b.overrides,b.revision));}
+  }
+  if(config.service==='archive' && req.method==='GET' && path==='/v1/scopes') {
+    admin(principal);
+    const {rows}=await pool.query('SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 GROUP BY scope ORDER BY scope LIMIT 101',[url.searchParams.get('after') ?? '']);
+    return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99]?.scope:null});
+  }
+  if(config.service==='archive' && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
+  if(config.service==='archive' && path==='/v1/tools/propose' && req.method==='POST')return json(res,200,await proposeControlled(pool,principal,await readJson(req)));
+  if(config.service==='archive' && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path))return agentResult(await controlledAction(pool,principal,path.split('/').at(-1)));
+  if (config.service === 'archive' && req.method === 'GET') {
+    if (path==='/v1/graph') {admin(principal);return json(res,200,await evidenceGraph(pool,principal,url.searchParams.get('scope') ?? '',url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit')),url.searchParams.get('focus') ?? ''));}
+    if (path==='/v1/search') return agentResult(await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))),true);
+    const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
+    if (event?.[1]) return agentResult(await readEvent(pool,principal,event[1]),true);
+    const artifact=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
+    if (artifact?.[1]) {
+      const bytes=await readArtifact(pool,principal,config.dataDir,artifact[1]);
+      res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store','content-length':bytes.length});
+      return res.end(bytes);
+    }
+  }
+  admin(principal);
+  if(config.service==='archive' && path==='/v1/data' && req.method==='GET')return json(res,200,await browseData(pool,principal,url.searchParams.get('after')??''));
+  const projection=path.match(/^\/v1\/data\/([a-f0-9]{64})\/guarded(?:\/(history))?$/);
+  if(config.service==='archive' && projection) {
+    if(req.method==='GET' && projection[2] && url.searchParams.has('revision'))return json(res,200,await inspectRevision(pool,principal,projection[1]!,url.searchParams.get('source_id')??'',Number(url.searchParams.get('revision'))));
+    if(req.method==='GET' && projection[2])return json(res,200,await guardedHistory(pool,principal,projection[1]!,url.searchParams.get('source_id')??'',Number(url.searchParams.get('before')??2147483647)));
+    if(req.method==='GET')return json(res,200,await inspectGuarded(pool,principal,projection[1]!));
+    if(req.method==='POST' && !projection[2])return json(res,200,await editGuarded(pool,principal,projection[1]!,await readJson(req,8*1024*1024)));
+  }
+  if(config.service==='archive'&&req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
+    const body=await readJson(req);
+    if(path==='/v1/scheduler/input')return json(res,200,await captureInput(pool,config,body,'scheduler'));
+    if(path==='/v1/scheduler/claim')return json(res,200,await claim(body,'scheduler'));
+    if(path==='/v1/scheduler/finish')return json(res,200,await finishRun(pool,body));
+    if(path==='/v1/scheduler/heartbeat')return json(res,200,await renewRun(pool,body));
+    if(path==='/v1/scheduler/cancel')return json(res,200,await cancelScheduled(pool,body));
+    if(path==='/v1/scheduler/recover')return json(res,200,await recoverScheduled(pool));
+    if(path==='/v1/scheduler/definition')return json(res,200,await scheduleDefinition(pool,config,body));
+    if(path==='/v1/scheduler/runs')return json(res,200,await scheduledRuns(pool,body));
+    if(path==='/v1/scheduler/delivery')return json(res,200,await scheduledDelivery(pool,body));
+  }
+  if(config.service==='archive' && path==='/v1/tools/actions' && req.method==='GET')return json(res,200,{...await controlledList(pool,principal),telegram:await telegramActions(pool,principal)});
+  if(config.service==='archive' && path.startsWith('/v1/tools/') && req.method==='POST') {
+    const body=await readJson(req,2*1024*1024);
+    if(path==='/v1/tools/decide')return json(res,200,await decideControlled(pool,principal,body));
+    if(path==='/v1/tools/telegram-decision')return json(res,200,await decideTelegram(pool,principal,body));
+    if(path==='/v1/tools/grant')return json(res,200,await grantPermission(pool,principal,body));
+    if(path==='/v1/tools/start')return json(res,200,await startControlled(pool,body));
+    if(path==='/v1/tools/revoke')return json(res,200,await revokePermission(pool,principal,body));
+    if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body));
+    if(path==='/v1/tools/finish')return json(res,200,await finishControlled(pool,body));
+  }
+  if (config.service==='archive' && req.method==='GET' && path==='/v1/runtime') {
+    const status = await call('status', {}, 5000).catch(() => ({ok:false,error:'runtime_unavailable'}));
+    return json(res,200,{id:runtime.id,capabilities:runtime.capabilities,status});
+  }
+  if(config.service==='archive' && req.method==='POST' && path.startsWith('/v1/browser/')) {
+    const body=await readJson(req,36*1024*1024);
+    if(path==='/v1/browser/input')return json(res,200,await captureInput(pool,config,body));
+    if(path==='/v1/browser/claim')return json(res,200,await claim(body,'browser'));
+    if(path==='/v1/browser/finish')return json(res,200,await finishRun(pool,body));
+    if(path==='/v1/browser/heartbeat')return json(res,200,await renewRun(pool,body));
+    if(path==='/v1/browser/prepare')return json(res,200,await prepareRun(pool,config,body,call));
+  }
+  if(config.service==='archive' && req.method==='POST' && path==='/v1/manage/hermes') {
+    const input=object(await readJson(req));
+    const operation:RuntimeOperation|undefined=input.action==='profiles'?'profiles.list':input.action==='memory'?'memory.read':input.action==='preferences'?(input.changes?'config.write':'config.read'):undefined;
+    if(!operation)throw new HttpError(400,'unknown_management_action');
+    return json(res,200,await call(operation,input));
+  }
+  if (config.service==='guard' && req.method==='POST' && path==='/v1/guard') {
+    const body=object(await readJson(req,1024*1024));
+    if (typeof body.destination!=='string') throw new HttpError(400,'invalid_destination');
+    return json(res,200,await guardPayload(body.payload,{mode:config.guardMode,trusted:config.guardTrusted,detectorVersion:config.detectorVersion},body.destination,
+      async(text)=>(await call('guard.detect',{text})).literals,pool));
+  }
+  if (config.service === 'archive') {
+    if (req.method==='GET' && path==='/v1/export') return json(res,200,await exportPage(pool,url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit'))));
+    if (req.method==='POST' && path==='/v1/import') return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024),url.searchParams.get('restore_guarded')==='true'));
+    if (req.method==='POST' && path==='/v1/replay') return json(res,200,await replay(pool,object(await readJson(req)).event_ids));
+    const upload=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
+    if (req.method==='POST' && upload?.[1]) return json(res,200,await uploadArtifact(pool,config.dataDir,upload[1],await readJson(req,70*1024*1024)));
+  }
+  if (req.method === 'GET' && path === '/v1/status') {
+    admin(principal);
+    const {rows} = await pool.query<{service: string; seen_at: Date}>('SELECT service, seen_at FROM service_heartbeats ORDER BY service');
+    return json(res, 200, {service: config.service, guard_mode: config.guardMode, services: rows, archive: await archiveStatus(pool)});
+  }
+  if (config.service === 'archive' && req.method === 'POST' && path === '/v1/ingest') {
+    return json(res, 200, await ingest(pool, envelope(await readJson(req, 16*1024*1024))));
+  }
+  throw new HttpError(404, 'not_found');
+})().catch((error: unknown) => {
+  json(res, error instanceof HttpError ? error.status : 503,
+    {error: error instanceof HttpError ? error.code : 'service_unavailable'});
+}); });
+server.requestTimeout = 30000;
+server.listen(config.port, config.host, () => console.log(JSON.stringify({event: 'ready', service: config.service, port: config.port})));
+let stopping=false;
+function stop() {
+  if(stopping)return;stopping=true;clearInterval(timer);
+  const closed=new Promise<void>(resolve=>server.close(()=>resolve()));
+  void Promise.all([closed,stopWorker()]).then(()=>pool.end()).then(()=>process.exit(0));
+}
+process.on('SIGTERM', stop); process.on('SIGINT', stop);

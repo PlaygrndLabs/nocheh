@@ -1,0 +1,50 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import pg from 'pg';
+import {initialize} from '../src/database.js';
+import {ingest,type Envelope} from '../src/archive.js';
+import {spacePolicy,saveSpace} from '../src/spaces.js';
+import {shareKnowledge,revokeShare,sharedContext,readShared} from '../src/sharing.js';
+import {search,readEvent} from '../src/retrieval.js';
+import {evidenceGraph} from '../src/graph.js';
+import type {Reader} from '../src/access.js';
+
+test('real PostgreSQL: shares, topic isolation, filtering, private provenance and revocation across all reads',{skip:!process.env.PGHOST},async()=>{
+ const admin=new pg.Pool(),namespace=`sharing_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);
+ const pool=new pg.Pool({options:`-c search_path=${namespace}`});
+ const base:Envelope={version:1,key:'topic:1',scope:'-20',bot_id:'fixture',source_id:'1',revision:'1',origin:'import',kind:'telegram_update',occurred_at:null,text:'Juniper topic one',payload:{message:{message_thread_id:1}}};
+ const principal=async(space:string):Promise<Reader>=>({scope:'-20',space,revision:(await spacePolicy(pool,space)).revision,admin:false});
+ const unused=async()=>{throw Error('filter must not run');};
+ try{await initialize(pool);
+  const a=await ingest(pool,base),b=await ingest(pool,{...base,key:'topic:2',text:'Juniper topic two',payload:{message:{message_thread_id:2}}});
+  const secret=await ingest(pool,{...base,key:'private',scope:'123',text:'Juniper: private medical appointment',payload:{}});
+  const draft=await ingest(pool,{...base,key:'draft',origin:'generated',text:'Juniper unposted draft'});
+  let who=await principal('-20/topic/1');
+  assert.deepEqual((await search(pool,who,'Juniper')).map(r=>r.id),[a.id]);
+  for(const id of [b.id,secret.id,draft.id])await assert.rejects(readEvent(pool,who,id),{code:'source_not_found'});
+  assert.equal((await evidenceGraph(pool,who,who.space!)).nodes.filter(n=>n.kind==='message').length,1);
+  const share=await shareKnowledge(pool,{destination:'-20',content:'Juniper public checklist',source_ids:[secret.id],revision:who.revision});
+  await assert.rejects(search(pool,who,'Juniper'),{code:'space_policy_changed'});
+  who=await principal('-20/topic/1');
+  const approved=await sharedContext(pool,who,'Juniper',unused);
+  assert.equal(approved.sources[0]?.text,'Juniper public checklist');assert.ok(!JSON.stringify(approved).includes(secret.id));
+  await assert.rejects(readEvent(pool,who,secret.id),{code:'source_not_found'});
+  await saveSpace(pool,who.space!,{mode:'isolated'},who.revision);who=await principal(who.space!);
+  assert.equal((await sharedContext(pool,who,'Juniper',unused)).sources.length,0);
+  await saveSpace(pool,who.space!,{mode:'filtered',sources:['123']},who.revision);who=await principal(who.space!);
+  const result=await sharedContext(pool,who,'Juniper',async(op,input)=>{
+    assert.equal(op,'memory.filter');assert.match(JSON.stringify(input),/medical/);
+    return {items:[{text:'Juniper has a reusable project checklist.',source_ids:[secret.id]}]};});
+  const filtered=result.sources.find(r=>r.kind==='privacy_filtered_inference')!;
+  assert.ok(filtered);assert.ok(!JSON.stringify(result).includes(secret.id));
+  assert.equal((await readShared(pool,who,'filtered',filtered.id)).text,filtered.text);
+  await assert.rejects(readShared(pool,await principal('-20/topic/2'),'filtered',filtered.id),{code:'shared_source_not_found'});
+  const unavailable=await sharedContext(pool,who,'Juniper',async()=>{throw Error('provider down');});
+  assert.equal(unavailable.filter_status,'unavailable');assert.equal(unavailable.sources.length,1);
+  const forged=await sharedContext(pool,who,'Juniper',async()=>({items:[{text:'Leak',source_ids:['b'.repeat(64)]}]}));
+  assert.equal(forged.filter_status,'unavailable');
+  await revokeShare(pool,share.id,who.revision);
+  for(const run of [()=>search(pool,who,'Juniper'),()=>readEvent(pool,who,a.id),()=>readShared(pool,who,'filtered',filtered.id),()=>evidenceGraph(pool,who,who.space!)])await assert.rejects(run,{code:'space_policy_changed'});
+  who=await principal(who.space!);await assert.rejects(readShared(pool,who,'shared',share.id),{code:'shared_source_not_found'});
+ }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
+});

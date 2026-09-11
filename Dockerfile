@@ -1,28 +1,29 @@
-FROM node:22-bookworm AS build
-
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS development
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+ARG LOCAL_UID=1000
+ARG LOCAL_GID=1000
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
+COPY scripts ./scripts
+COPY compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
+COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
+COPY web ./web
 COPY src ./src
 COPY test ./test
-RUN npm run build
+RUN npm run build && chown -R ${LOCAL_UID}:${LOCAL_GID} /app
+USER node
+CMD ["npm", "run", "dev"]
 
-FROM node:22-bookworm AS web-build
+FROM development AS build
+USER root
+RUN npm prune --omit=dev
 
-WORKDIR /app/web
-COPY web/package.json ./
-RUN npm install
-COPY web ./
-RUN npm run build
-
-FROM node:22-bookworm AS runtime
-
-ENV NODE_ENV=production
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-COPY --from=build /app/dist ./dist
-COPY --from=web-build /app/web/dist ./web/dist
-EXPOSE 3000
-CMD ["node", "dist/src/dev-server.js"]
+COPY --from=build --chown=node:node /app/package.json ./
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+USER node
+CMD ["node", "dist/src/main.js"]

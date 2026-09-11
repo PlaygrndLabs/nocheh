@@ -1,86 +1,322 @@
-services:
-  nocheh:
-    build: .
-    restart: unless-stopped
-    # Publish the dashboard to the host for local use. On a VPS fronted by the
-    # Cloudflare Tunnel this is optional; bind to localhost so it is not exposed
-    # publicly. Override with HOST_PORT if 3000 is taken.
-    ports:
-      - "127.0.0.1:${HOST_PORT:-3000}:3000"
-    environment:
-      HOST: 0.0.0.0
-      PORT: 3000
-      DATA_DIR: /app/data
-      DATABASE_PATH: /app/data/nocheh.sqlite
-      LOCAL_ENCRYPTION_SECRET: ${LOCAL_ENCRYPTION_SECRET:-local-development-secret-change-me}
-      APP_AUTH_USERNAME: ${APP_AUTH_USERNAME:-}
-      APP_AUTH_PASSWORD: ${APP_AUTH_PASSWORD:-}
-      APP_AUTH_SESSION_SECRET: ${APP_AUTH_SESSION_SECRET:-}
-      APP_AUTH_SECURE_COOKIE: ${APP_AUTH_SECURE_COOKIE:-false}
-      # Model roles. Credentials are per provider; model ids are per role.
-      # A blank role provider disables that role only; a blank AI_PROVIDER keeps
-      # text analysis in dry-run mode.
-      # Values are read from the host .env by compose interpolation.
-      AI_PROVIDER: ${AI_PROVIDER:-}
-      AI_IMAGE_PROVIDER: ${AI_IMAGE_PROVIDER:-}
-      AI_AUDIO_PROVIDER: ${AI_AUDIO_PROVIDER:-}
-      AI_GUARD_PROVIDER: ${AI_GUARD_PROVIDER:-}
-      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
-      NVIDIA_MODEL: ${NVIDIA_MODEL:-}
-      NVIDIA_IMAGE_MODEL: ${NVIDIA_IMAGE_MODEL:-}
-      NVIDIA_AUDIO_MODEL: ${NVIDIA_AUDIO_MODEL:-}
-      NVIDIA_GUARD_MODEL: ${NVIDIA_GUARD_MODEL:-}
-      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-}
-      NVIDIA_JSON_RESPONSE_FORMAT: ${NVIDIA_JSON_RESPONSE_FORMAT:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
-      ANTHROPIC_GUARD_MODEL: ${ANTHROPIC_GUARD_MODEL:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-}
-      GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-}
-      GEMINI_AUDIO_MODEL: ${GEMINI_AUDIO_MODEL:-}
-      GEMINI_GUARD_MODEL: ${GEMINI_GUARD_MODEL:-}
-      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-}
-      MESSAGE_ANALYSIS_MODE: ${MESSAGE_ANALYSIS_MODE:-batch}
-      LIVE_ANALYSIS_INTERVAL_SECONDS: ${LIVE_ANALYSIS_INTERVAL_SECONDS:-300}
-      LIVE_MAX_MESSAGES_PER_BATCH: ${LIVE_MAX_MESSAGES_PER_BATCH:-50}
-      FLUSH_SWEEP_INTERVAL_SECONDS: ${FLUSH_SWEEP_INTERVAL_SECONDS:-60}
-      MAX_AI_CONTEXT_TOKENS: ${MAX_AI_CONTEXT_TOKENS:-4000}
-      MAX_AI_OUTPUT_TOKENS: ${MAX_AI_OUTPUT_TOKENS:-4000}
-      MAX_RETRIEVED_MEMORIES: ${MAX_RETRIEVED_MEMORIES:-12}
-      MAX_RECENT_MESSAGES: ${MAX_RECENT_MESSAGES:-30}
-      SUMMARY_EVERY_MESSAGES: ${SUMMARY_EVERY_MESSAGES:-100}
-      SUMMARY_EVERY_MINUTES: ${SUMMARY_EVERY_MINUTES:-60}
-      MEDIA_MAX_ATTACHMENTS_PER_WINDOW: ${MEDIA_MAX_ATTACHMENTS_PER_WINDOW:-8}
-      MEDIA_MAX_DOWNLOAD_BYTES: ${MEDIA_MAX_DOWNLOAD_BYTES:-20971520}
-      MEDIA_MAX_INLINE_BYTES: ${MEDIA_MAX_INLINE_BYTES:-5242880}
-      SECRET_GUARD_MAX_ATTEMPTS: ${SECRET_GUARD_MAX_ATTEMPTS:-5}
-      SECRET_GUARD_MAX_INPUT_CHARACTERS: ${SECRET_GUARD_MAX_INPUT_CHARACTERS:-24000}
-      SECRET_GUARD_MAX_OUTPUT_TOKENS: ${SECRET_GUARD_MAX_OUTPUT_TOKENS:-4000}
-      SECRET_GUARD_ON_FAILURE: ${SECRET_GUARD_ON_FAILURE:-}
-      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
-      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
-    volumes:
-      - ./data:/app/data
-      # The dashboard writes provider keys and the Telegram token to /app/.env.
-      # Mounting the host file keeps those writes across container rebuilds and
-      # keeps one source of truth for compose interpolation and the app.
-      # The host .env must exist before `up`; scripts/bootstrap.sh guarantees it,
-      # otherwise Docker creates a directory here.
-      - ./.env:/app/.env
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+name: nocheh
 
-  # Ingress for VPS deployments. Started only with the "tunnel" profile so it
-  # does not crash-loop locally when CLOUDFLARE_TUNNEL_TOKEN is unset:
-  #   docker compose --profile tunnel up -d --build
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    profiles: ["tunnel"]
-    restart: unless-stopped
+x-service: &service
+  image: nocheh-services:local
+  build:
+    context: .
+    target: runtime
+    args:
+      LOCAL_UID: ${NOCHEH_UID:-1000}
+      LOCAL_GID: ${NOCHEH_GID:-1000}
+  user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  environment: &environment
+    PGHOST: postgres
+    PGUSER: nocheh
+    PGDATABASE: nocheh
+    PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
+    SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+    NOCHEH_DATA_DIR: /data
+    HERMES_URL: http://hermes:8781
+    HONCHO_URL: http://honcho-memory:8000
+    NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
+    GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
+    GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]}
+    TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+    TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+    TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
+  volumes:
+    - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files
+    - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
+  healthcheck:
+    test: [CMD, node, -e, "fetch('http://127.0.0.1:8780/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 5s
+    timeout: 5s
+    retries: 12
+    start_period: 10s
+
+services:
+  security:
+    <<: *service
+    command: [node, dist/src/security/main.js]
+    networks: [default, agent]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes: []
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8786/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     depends_on:
-      - nocheh
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      archive: {condition: service_healthy}
+
+  security-launcher:
+    image: nocheh-hermes:local
+    command: [python, -m, integrations.hermes.security_launcher]
+    user: "0:0"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: [no-new-privileges:true]
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      NOCHEH_AGENT_NETWORK: ${NOCHEH_AGENT_NETWORK:-nocheh-agent}
+      NOCHEH_UID: ${NOCHEH_UID:-1000}
+      NOCHEH_GID: ${NOCHEH_GID:-1000}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles:/profiles:ro
+    depends_on:
+      security: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  cliproxy:
+    image: nocheh-cliproxy:c76dfd4e
+    build:
+      context: ./data/compat/upstreams/CLIProxyAPI
+      dockerfile: ../../../../deploy/cliproxy.Dockerfile
+      args:
+        COMMIT: c76dfd4e0edabab9000628b1560ab8ab379eadb8
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [./CLIProxyAPI, -config, /state/config.yaml]
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/config.yaml:/state/config.yaml:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/auth:/auth
+    networks:
+      default: {}
+      memory: {aliases: [shared-provider]}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8317/healthz]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  provider-monitor:
+    image: nocheh-cpamp:1ae656c
+    build:
+      context: ./data/compat/upstreams/cpa-manager-plus
+      dockerfile: ../../../../deploy/cpamp.Dockerfile
+      additional_contexts:
+        nocheh_source: .
+      args:
+        CPAMP_REVISION: 1ae656c82990c480f3f104326a08c6e0001eeb4c
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      HTTP_ADDR: 0.0.0.0:18317
+      USAGE_DATA_DIR: /data
+      USAGE_DB_PATH: /data/usage.sqlite
+      CPA_UPSTREAM_URL: http://cliproxy:8317
+      CPA_MANAGEMENT_KEY_FILE: /run/secrets/cpa_management_key
+      CPA_MANAGER_ADMIN_KEY_FILE: /run/secrets/cpamp_admin_key
+      CPA_MANAGER_DATA_KEY_FILE: /run/secrets/cpamp_data_key
+      USAGE_COLLECTOR_MODE: http
+      USAGE_CORS_ORIGINS: ''
+      USAGE_QUOTA_COOLDOWN_ENABLED: 'false'
+      USAGE_ACCOUNT_ACTIONS_ENABLED: 'false'
+      USAGE_ACCOUNT_ACTIONS_AUTO_DISABLE: 'false'
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/monitor:/data
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/management.key:/run/secrets/cpa_management_key:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/monitor-admin.key:/run/secrets/cpamp_admin_key:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/monitor-data.key:/run/secrets/cpamp_data_key:ro
+    ports: ["127.0.0.1:${NOCHEH_PROVIDER_MONITOR_PORT:-18317}:18317"]
+    depends_on:
+      cliproxy: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:18317/health]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  dashboard:
+    image: nocheh-dashboard:local
+    build:
+      context: .
+      dockerfile: deploy/dashboard.Dockerfile
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    environment:
+      HERMES_HOME: /dashboard-state/home
+      NOCHEH_CAPTURE_ENABLED: '0'
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard:/dashboard-state:rw
+    ports: ["127.0.0.1:8784:9119"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9119/nocheh',timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 15
+
+  db-viewer:
+    image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
+    profiles: [tools]
+    restart: unless-stopped
+    command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
+    environment:
+      PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@postgres:5432/nocheh?sslmode=disable
+    ports: ["127.0.0.1:8782:8081"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8081/]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  postgres:
+    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nocheh
+      POSTGRES_DB: nocheh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  archive:
+    <<: *service
+    networks: [default, memory]
+    environment:
+      <<: *environment
+      NOCHEH_SERVICE: archive
+      NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
+    ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  worker:
+    <<: *service
+    networks: [default, memory]
+    environment:
+      <<: *environment
+      NOCHEH_SERVICE: worker
+    depends_on:
+      archive: {condition: service_healthy}
+
+  guard:
+    <<: *service
+    environment:
+      <<: *environment
+      NOCHEH_SERVICE: guard
+    depends_on:
+      archive: {condition: service_healthy}
+
+  speech:
+    image: nocheh-hermes:local
+    command: [python, -m, integrations.hermes.speech_gateway]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      CLIPROXY_AUTH_DIR: /provider-auth
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/auth:/provider-auth:ro
+    depends_on:
+      cliproxy: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8783/health', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  hermes:
+    image: nocheh-hermes:local
+    build:
+      context: .
+      dockerfile: deploy/hermes.Dockerfile
+      additional_contexts:
+        hermes_source: ./data/compat/upstreams/hermes-agent
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 120s
+    ports: ["127.0.0.1:${NOCHEH_NATIVE_ADMIN_PORT:-8785}:8785"]
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      NOCHEH_CAPTURE_ENABLED: '1'
+      NOCHEH_BROWSER_CHAT: '1'
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+      TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
+      GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
+      GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]}
+      NOCHEH_REASONING_ROUTE: ${NOCHEH_REASONING_ROUTE:-native}
+      NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-legacy}
+      NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-legacy}
+      CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
+      SPEECH_URL: http://speech:8783
+      NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
+      ARCHIVE_URL: http://archive:8780
+      GUARD_URL: http://guard:8780
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/hermes:/workspace/data/local/hermes
+      - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
+      - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/hermes.key:/run/secrets/cliproxy_hermes_key:ro
+    depends_on:
+      archive: {condition: service_healthy}
+      guard: {condition: service_healthy}
+      cliproxy: {condition: service_healthy}
+      speech: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+volumes:
+  postgres_data:
+
+networks:
+  agent:
+    name: ${NOCHEH_AGENT_NETWORK:-nocheh-agent}
+    internal: true
+  memory:
+    name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
+    internal: true

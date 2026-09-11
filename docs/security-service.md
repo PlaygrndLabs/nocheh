@@ -1,0 +1,106 @@
+# Security service
+
+The versioned `nocheh.security` service brokers isolated assistant requests.
+Its policy library also runs inside the trusted archive executor, using the same
+database and precedence. Thus an unavailable optional UI or broker does not remove
+effect authorization. An isolated model has no direct provider fallback.
+See [phase status and acceptance evidence](security-service-plan.md).
+
+From the repository root:
+
+```sh
+python3 -m scripts.security show
+python3 -m scripts.security plugin
+python3 -m scripts.security preview ACTION_ID --policy /absolute/path/policy.json
+python3 -m scripts.security apply /absolute/path/policy.json --expected-revision 1
+python3 -m scripts.security effects --effect ACTION_ID
+```
+
+The policy document is strict and versioned. Global rules omit selectors; scope,
+profile, job and exact fingerprint selectors combine. All matching denies win,
+then a valid bounded grant, then an explicit ask, then defaults. Example:
+
+```json
+{"version":1,"rules":[{"id":"pause-project-shell","kind":"shell","outcome":"deny","profile":"project"}]}
+```
+
+Supported configurable boundaries: controlled shell/browser/MCP operations,
+explicit Telegram action requests, and isolated model/archive/memory reads.
+Native memory writes stay inside the writable profile data directories; no
+setting claims to intercept arbitrary filesystem writes. Guard on/off and sharing
+policy remain separate mandatory controls. Existing selected-group conversation
+and approved scheduled delivery keep their existing delivery policy.
+
+Use the exact fingerprint returned by Activity or a policy preview to grant a
+repeated operation. The owner explicitly chooses both limits; no hidden grants:
+
+```sh
+python3 -m scripts.security grant ACTION_ID --fingerprint FINGERPRINT --uses 100 --minutes 10080
+python3 -m scripts.security revoke PERMISSION_ID
+```
+
+Grants bind exact arguments, scope and profile. A scheduled operation also binds
+its job. Limits are 1–1000 uses and 1–43200 minutes (30 days). Changed arguments,
+expiry or revocation need new authority. Ordinary authorized recall, drafting,
+model calls and native memory work never request permission. This version does
+not grant arbitrary shell commands or arbitrary URL/parameter combinations.
+
+Owner policy edits use a required expected revision. Preview is read-only and
+does not consume grants. Group members and model processes cannot edit policies,
+grant permissions or read owner effect logs. Runtime policy applies at the next
+authorization; an action already sent cannot be undone.
+
+Effect records contain IDs, scope/profile, source reference, rule, origin, policy
+revision and permission ID. They omit prompts, URLs, credentials and result text.
+Inspect originals/results through the linked action and existing archive UI.
+`allowed` means permission, `claimed` means an executor reservation, `started`
+means a trusted executor/provider request attempt began, and `completed` means a
+result was observed. Missing results are `ambiguous`; the executor never repeats
+the effect automatically. Telegram recovery reads the runtime's durable receipt
+using the existing idempotent action ID. A completed HTTP response is not a claim
+that the model's answer was correct. Successful routine activity creates no alerts.
+
+Owner API routes are `/v1/security/plugin`, `/policy`, `/preview` and `/effects`
+(each prefixed by `/v1/security`). They are available through the owner archive
+API and the service itself; scoped turn credentials cannot access them.
+
+The trusted launcher is part of the host's security boundary: it owns Docker
+authority. Agent containers do not. It pins the installed image ID at startup,
+disables external DNS, mounts only native data plus read-only configuration, and
+discards the turn filesystem on exit. Replacing it requires a trusted compatible
+implementation; arbitrary plugin installation does not confer privileges.
+
+`NOCHEH_MEMORY_CONTEXT=evidence` moves complete native memory blocks and recalled
+objects into a labelled data message on each provider attempt. It leaves native
+history and memory files unchanged. The same evidence participates in initial
+context-size estimates; the layer does not lower limits or summarize sources.
+The pinned native compaction instruction is adjusted so it does not label memory
+as administrative authority. The memory and process-isolation settings remain independently configurable.
+The local installation uses `NOCHEH_SECURITY_RUNTIME=isolated` and
+`NOCHEH_MEMORY_CONTEXT=evidence`; fresh configurations retain explicit opt-in
+defaults until their own acceptance and profile conversion are complete.
+
+
+For an existing installation, stop Hermes and its native writers before running
+`python3 -m scripts.security_profiles /absolute/path/to/hermes --hermes-stopped`.
+The converter checkpoints SQLite, validates integrity, moves the same database
+bytes into `native-state`, and reports their hash. It never replaces history with
+a model output. Browser history, native recall and portable export use the same
+path. A shared memory-lock file coordinates trusted writers and exports.
+
+The launcher derives the host profile path from its read-only Docker mount and
+pins the installed image ID. `NOCHEH_AGENT_NETWORK` selects its internal network;
+restored projects receive a separate network and do not clean up another project's
+turns. Backups stop both security services and include policy/history receipts.
+
+To return to the previous execution mode, set `NOCHEH_SECURITY_RUNTIME=legacy`
+and `NOCHEH_MEMORY_CONTEXT=legacy` and restart Hermes with this version's image.
+The converted history remains readable. An older image that predates this layout
+requires an offline reverse conversion; do not start it against converted profiles.
+There is no automatic fallback when a required security service is unavailable.
+
+Secret detection remains the existing ADR-0033 mechanism. It can produce false
+positives: the live acceptance run observed a harmless synthetic colour being
+masked. The exact saved owner-edit path is checked separately. This service adds
+no classifier that discards memory, and finite fixture results do not establish
+identical accuracy for every future conversation.

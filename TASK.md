@@ -1,355 +1,315 @@
-# Tasks
-
-Open work only. Delivered work lives in the code and in `docs/adr/`.
-
-The refactor to MVP is phased below. Decisions behind it: ADR-0013 (importer core),
-ADR-0014 (Postgres, plaintext, `owner_id`), ADR-0015 (the constraints Honcho must satisfy),
-ADR-0016 (answer path and amended rule 3), and ADR-0017 (choose the memory backend from an
-early bake-off, not from assumption).
-
-## How These Phases Are Sequenced
-
-**One phase at a time, each shipping alone on `main`, each with `npm test` and
-`npm run test:web` green.** The provider swap, storage swap, pipeline inversion and selected
-memory implementation can each break the system independently; combining them would make a
-failure unattributable.
-
-Phase order is not preference. Phase 0 freezes the corpus, rubric and cost ceiling before
-results can move them. Phase 1 changes the provider numbers, reruns Nocheh fairly, and closes
-the memory decision with a new ADR. **Phase 2 does not start without that ADR.** Phase 2 is
-the only cheap moment to add `owner_id`; Phase 3 needs its schema; Phase 4 implements only
-the selected memory branch. Phase 5 is the MVP. It can precede Phase 3 only when the selected
-memory backend can consume the existing post-guard path without weakening the gate.
-
-Rules in `AGENTS.md` that change, and when: rule 1 in Phase 3 (guarded chat becomes
-long-term memory, bytes still never persisted), rule 3 in Phase 5 (bounded autonomous
-sending), the encryption line in the Memory Policy in Phase 2. Rules 2, 4, 5, 6, 7 and 8 are
-untouched — in particular the guard still runs before anything, it just runs earlier.
-
-### Provisional private pilot — 2026-09-06
-
-The first same-manifest run covered 161 guarded messages and 34 questions. Honcho raw-message
-search beat Nocheh structured-memory retrieval on source-valid recall (67.65% vs 47.30%) and
-expected-fact recall (69.12% vs 21.57%), while Nocheh was faster at p95 (923 ms vs 1,593 ms).
-Honcho's p95 context was smaller (1,367 vs 2,417 tokens), but its queue took 426 seconds and
-its provider cost was not observable. Honcho also derived 60 source-linked explicit documents,
-but the winning score came from raw-message search, not from querying those documents. Full
-aggregate results and the selection rule are in
-`docs/evaluation/results/2026-09-06-private-memory-bakeoff.md`.
-
-This makes **owned guarded-source retrieval** the required third arm. No production memory
-backend is selected yet: the sample is below the frozen target, answer accuracy is unmeasured,
-and Honcho cost/recovery telemetry is missing.
-
----
-
-## Phase 0: Prove The Memory Choice — 3–5 days, evaluation only
-
-ADR-0017. The current Nocheh memory and Honcho are both unproven on the owner's long-term,
-mixed Persian/English Telegram corpus. This phase creates evidence before production work
-deepens either bet. Evaluation code may be temporary; private corpus content and personal
-answer keys are never committed.
-
-- [x] Write the pilot benchmark manifest **before running either system**: exact versions, model
-      ids, configuration, context budget, quality margin, maximum acceptable monthly cost,
-      one salted aggregate corpus hash, network destinations and numeric pass thresholds.
-- [ ] Expand the private chronological quality corpus from 161 to at least 1,000 guarded messages
-      across at least three months when the export contains that much. No pre-guard text and
-      no media bytes may enter either system.
-- [ ] Expand the 34 owner-graded questions to 60–100: factual recall, Persian, corrections over time,
-      contradictions, multi-hop links, tasks/deadlines, preferences and long-range coaching
-      patterns. Keep retrieval grading separate from answer-model grading.
-- [x] Build a deterministic non-personal scale fixture at 1k, 10k and 100k messages with
-      seeded facts, corrections, duplicates and known answers.
-- [ ] Run 20–30 live Nocheh windows. Confirm nodes, edges, suggestions and tasks land; inspect
-      `errorLogs`, grounding duplication, `reasoningTokens`, throughput and `context_build`.
-- [x] Run the pilot corpus through the current Nocheh stack and a pinned self-hosted Honcho
-      stack in strict chronological order. Record the Honcho server version, model setup and
-      every enabled background job.
-- [x] Compare both retrieval outputs under the same token budget, with answer-model grading
-      explicitly disabled for the pilot. Report a
-      separate native Honcho context/chat run rather than mixing its answer model into the
-      retrieval score.
-- [ ] Add an evaluation-only owned guarded-message PostgreSQL/pgvector arm with the same
-      OpenAI embedding model, Persian normalisation, source ids, and 4,000-token budget.
-- [ ] Score Honcho's derived documents separately from raw-message search. Record document
-      source coverage and extraction yield; do not describe message-search quality as
-      conclusion quality.
-- [ ] Measure source-valid recall, answer accuracy, stale facts, duplicates, contradictions,
-      Persian, multi-hop and coaching quality; p50/p95/max context tokens and retrieval
-      latency; queue lag; ingest/query/maintenance calls, tokens and cost; database/index
-      growth; replay, deletion/export, backup/restore and provider/worker failure recovery.
-- [ ] Derive 10k/100k reasoning cost from measured representative batches and exact call/token
-      counts. Do not pay to send 100k private messages through a model merely to estimate it.
-- [ ] Produce a provisional three-column result: owned Nocheh, Honcho-primary, hybrid. Do not
-      write a production Honcho adapter and do not delete the graph during the spike.
-
-**Done when:** the frozen manifest, aggregate result table and raw measurement method are
-recorded without private content. Phase 1 owes the final OpenAI-backed Nocheh rerun and the
-decision ADR. **If the graph is empty, the contract is widely violated, or either system
-crosses the secret gate, stop; later refactors cannot make that result trustworthy.**
-
----
-
-## Phase 1: One Provider For All Five Roles — 1–2 days
-
-OpenAI now exists for `text_analysis` and `embedding`; the pilot used GPT-5 mini and
-`text-embedding-3-small`. Image, audio, and secret-guard roles still need provider coverage
-before OpenAI can be the single provider for all five roles.
-
-- [x] Add `openai` catalog and adapters for `text_analysis` and `embedding`.
-- [ ] Add OpenAI `image_understanding`, `audio_understanding`, and `secret_guard` adapters.
-- [ ] Decide whether chat completions should use `response_format: json_schema` generated
-      from the same `as const` vocabularies the prompt renders.
-- [ ] Re-run Phase 0's complete Nocheh quality and cost pack against OpenAI. Compare recall,
-      grounded answers, latency, throughput, warning count and dropped-item count directly;
-      do not rerun Honcho unless its pinned configuration changed.
-- [ ] Decide whether `response_format: json_schema` replaces prompt-only vocabulary
-      enforcement. Prompt-only works in tests; a schema makes it structural.
-- [ ] Re-grade the guard. `nvidia/nvidia-nemotron-nano-9b-v2` caught every planted secret
-      with no false positives; `nvidia/nemotron-3-nano-30b-a3b` returned `{"segments":[]}`
-      and must not be used. Whatever fills the role must pass the same planted-secret set.
-- [ ] Decide whether the perception model should return a confidence-weighted summary rather
-      than near-verbatim OCR, given it reproduces credentials it was told to omit.
-- [ ] Apply ADR-0017's frozen gates to the final result and write the follow-up ADR selecting
-      exactly one production branch: owned memory, Honcho-primary semantic memory, or hybrid.
-      State which graph responsibilities remain and which are retired; do not leave two
-      implicit sources of truth.
-
-**Done when:** a role-by-role table of latency, throughput and cost for both providers is in
-this file, `FLUSH_SWEEP_INTERVAL_SECONDS` is set deliberately from measured analysis latency,
-and the memory-selection ADR is accepted. **Phase 2 is blocked until all three exist.**
-
----
-
-## Phase 2: Postgres Foundation — 4–6 days, no behaviour change
-
-ADR-0014. Same behaviour, different engine, plaintext payloads, indexed reads, `owner_id`.
-Nothing user-visible changes; this phase is judged entirely by tests staying green and by
-one performance number moving.
-
-- [ ] Forward-only numbered SQL migrations, one applied-migrations table. Delete the four
-      `CREATE TABLE IF NOT EXISTS` bootstrap functions.
-- [ ] Postgres adapters for all 13 repositories. Port signatures already return `Promise`
-      and do not change; every body becomes `await`.
-- [ ] Payloads become plaintext `jsonb`. Keep AES-GCM for `app_config` secret values only.
-      Delete the `"local-development-secret-change-me"` fallback — unset means fail closed.
-      Replace the hardcoded scrypt salt with a per-install random salt.
-- [ ] Promote every JavaScript-side filter to an indexed column: `source_message_id`,
-      `conversation_id`, `occurred_at`, `owner_id`, `kind`, `relation`, `status`,
-      `confidence`, `project_id`, `due_at`.
-- [ ] `owner_id` on every table, in every primary key, leading every index, and on
-      `SourceReference`. One value, no auth changes, no UI changes.
-- [ ] Kill the three silent-failure hazards: hardcoded `person:mak` under
-      `ON CONFLICT DO UPDATE`, the process-local `flushing` set (becomes a Postgres advisory
-      lock), and the process-global vector cache.
-- [ ] Fix the four known Postgres traps: `AS "conversationId"` quoting, `row.encrypted === 1`,
-      the synchronous `database.transaction()` callbacks, and `@named` → `$n` parameters.
-- [ ] Wrap graph persistence in a real transaction. Today a window can be half-persisted and
-      the code compensates with per-item try/catch.
-- [ ] One-shot offline migration script: read SQLite, decrypt with the existing key, write
-      plaintext `jsonb`, verify row counts and a payload sample. Delete the script afterwards.
-- [ ] `pg_dump` on a schedule to an encrypted destination, **and a restore rehearsal recorded
-      in `docs/deploy.md`**. An unrehearsed backup is not a backup.
-- [ ] Remove `better-sqlite3`.
-
-**Done when:** all tests green against Postgres, and a test asserts that building grounding
-for one window performs a bounded number of queries rather than ~17 full graph scans.
-
----
-
-## Phase 3: Importer Core — 4–6 days
-
-ADR-0013. The chain becomes a log plus projections. This is the phase that makes changing
-the model, the memory, or the workflow a replay instead of a rewrite.
-
-- [ ] `raw_messages`: append-only, guarded, `seq` monotonic per conversation, unique on
-      `(owner_id, platform, conversation_id, message_id)`, `attachments` holding
-      `file_unique_id` plus derived description and transcript, `guard_state` on the row.
-      Bytes are never persisted.
-- [ ] `ImportMessageUseCase` owns the gate: pattern redaction → media understanding →
-      secret guard → append. Nothing downstream of the log ever sees unguarded text.
-- [ ] `projection_cursors` per `(owner_id, projection, conversation_id)`.
-- [ ] Rewrite the analyzer path as a projection over an unconsumed range. The batch window
-      becomes a view over the log, not a queue that drains by deletion.
-- [ ] Rewrite the embedding indexer as a projection.
-- [ ] Rewrite `HistoryImportService` to append in strict chronological order, idempotent on
-      re-import of the same export.
-- [ ] `POST /api/replay`: projection, optional conversation, optional range. Reports an
-      estimated call count before running, writes an audit record, returns 409 when the
-      projection's provider is unconfigured.
-- [ ] Prove idempotency: replay the analyzer over the same range twice, assert an identical
-      graph.
-- [ ] Retire `live_message_buffer` and its repository. Quarantine becomes `guard_state`.
-- [ ] Amend rule 1 in `AGENTS.md`.
-
-**Done when:** 200 imported messages can be replayed through the analyzer twice with
-identical output, no `DELETE` remains on the ingestion path, and a quarantined message is
-visible and retryable rather than stuck.
-
----
-
-## Phase 4: Implement The Selected Memory Backend — 2–5 days
-
-ADR-0017 and the Phase 1 decision ADR choose this implementation. Do **not** implement all
-branches. Every branch has the same invariant: corpus growth may increase storage and index
-work, but it must not increase prompt context beyond the configured budget.
-
-Common work:
-
-- [ ] Define the selected memory read/write ports in `src/application` before its adapter.
-      Keep provider types and Honcho SDK types out of the domain.
-- [ ] Give recent messages, typed facts/rules and optional narrative memory explicit context
-      sub-budgets. Trim within sections; never let a large memory section cut off the current
-      question by slicing one concatenated string.
-- [ ] Apply Persian normalisation consistently at ingest and query time: ZWNJ, Arabic versus
-      Persian ye and kaf, digit forms and diacritics.
-- [ ] Emit retrieval latency, returned-source count, context tokens, queue lag where relevant,
-      provider calls/tokens and estimated cost through the existing metrics and audit ports.
-- [ ] Preserve source ids in the answer context. Narrative conclusions may be labelled as
-      advisory, but they may not masquerade as stored `MemoryRecord`s.
-
-Only the selected branch:
-
-- [ ] **Owned:** vectors into pgvector with model id and dimension; measure the cosine
-      distribution before setting `DEFAULT_SIMILARITY_FLOOR` and `DEFAULT_LEXICAL_WEIGHT`;
-      make `POST /api/memory/reindex` a replay of the embedding projection.
-- [ ] **Honcho-primary:** add `PeerRepresentationPort` and a pinned self-hosted adapter;
-      map owner/person to peers and `conversation_id` to sessions; `observe` consumes only
-      guarded log rows and `recall` returns labelled conclusions plus every available remote
-      source/conclusion id. Add timeouts, queue-health metrics and a no-op fallback.
-- [ ] **Hybrid:** implement both adapters with fixed separate budgets. Typed Nocheh state wins
-      factual conflicts; Honcho remains advisory; surface disagreement instead of silently
-      choosing or writing Honcho conclusions into the graph.
-
-**Done when:** the selected branch passes Phase 0's Persian, temporal, contradiction and
-source-valid recall gates; p95 retrieval and maximum context stay inside the frozen limits at
-the 1k and 10k fixture sizes; and measured/projected cost stays inside the owner's ceiling.
-
----
-
-## Phase 5: The Answer Path — 5–8 days. This is the MVP.
-
-ADR-0016. Nothing answers today: no `sendMessage`, `AssistantAiPort` unimplemented,
-`AssistantReplyMode` branched on by nothing, no reply field in any contract, no scheduler.
-This phase depends on the Phase 1 memory decision and Phase 2. It may ship before Phase 3
-only if the selected backend can consume the existing post-guard path without bypassing the
-secret gate or creating an unreplayable second source of truth.
-
-- [ ] `AnswerQuestionUseCase`: grounding under a token budget → its own small reply contract
-      → answer text, source ids, confidence, explicit "I don't know". Never writes memory.
-- [ ] Answers cite the local record/node ids and any remote conclusion/source ids they were
-      built from. Advisory narrative context is visibly distinguished from typed fact.
-- [ ] `TelegramClientPort.sendMessage`.
-- [ ] `OutboundDeliveryService` as the single egress. Every send writes an audit record with
-      what, to whom, why, which policy allowed it, and whether a human approved it.
-- [ ] Wire `AssistantReplyMode`: `silent`, `mention`, `active`, `digest`.
-- [ ] Autonomy policy in the domain, not the prompt: risk ceiling, no first contact, content
-      exclusions (money, credentials, commitments), daily cap falling back to `pending`, kill
-      switch that needs no model or network, visible "sent by Nocheh" attribution, mandatory
-      dry-run period before autonomy can be enabled at all.
-- [ ] Delete `AssistantAiPort`.
-- [ ] Amend rule 3 in `AGENTS.md`.
-
-**Done when:** a question asked in Telegram returns a grounded, sourced answer at a measured
-p50 under 5 seconds; every send is in `/api/audit`; and the kill switch is verified to stop
-egress with the model provider unreachable.
-
----
-
-## Phase 6: Scheduler And Briefings — 2–3 days
-
-- [ ] Generalise the flush sweep into a job scheduler. Jobs carry a prompt, a query or
-      projection, a delivery target, and a cadence — first-class agent tasks, not shell tasks.
-- [ ] Daily brief and weekly review as the first two jobs, delivered through the Phase 5
-      egress and subject to the same policy.
-- [ ] Surface job history and next run in the dashboard.
-
-**Done when:** a brief arrives on schedule, is auditable, and is stoppable by the kill switch.
-
----
-
-## Phase 7: Close The Loop In The UI — 2–3 days
-
-- [ ] Approve / edit / reject / archive controls. `/api/brain/suggestions/*` and the domain
-      lifecycle already exist; nothing calls them from the UI.
-- [ ] Surface quarantined messages, with retry.
-- [ ] Surface projection cursors, replay controls, and lag per projection.
-- [ ] Surface `summaryEveryMessages` and `summaryEveryMinutes` in Settings — persisted and
-      used, but not editable.
-- [ ] Autonomy settings, the dry-run review queue, and the kill switch.
-- [ ] Make brain routes return the same `{ ok: true, ... }` envelope as the rest of the API.
-
----
-
-## Phase 8: Maintain The Selected Memory — 3–5 days
-
-The long-term side effects depend on the Phase 1 choice. Maintenance is incremental,
-budgeted and observable; no backend receives permission to rescan an unbounded corpus on a
-schedule without a cursor, candidate selector and cost ceiling.
-
-- [ ] **Owned:** scheduled projection over affected graph neighborhoods for contradiction
-      detection, duplicate merging, supersession **with history preserved** and confidence
-      decay. Do not full-scan the graph on every run.
-- [ ] **Honcho-primary:** monitor derivation/dream queue age, last successful maintenance,
-      duplicate/stale conclusion rate, provider failures and per-run tokens/cost. Verify
-      export, deletion and rebuild procedures against the pinned version.
-- [ ] **Hybrid:** run the owned typed-fact maintenance and Honcho health checks; detect and
-      surface cross-backend contradictions with the typed graph taking factual precedence.
-- [ ] Every local consolidation is audited and reversible. Any irreversible remote mutation
-      is rejected or preceded by an auditable snapshot/reference that permits rebuild from
-      the guarded log.
-- [ ] Enforce daily and per-run model-call/token ceilings. Exceeding a ceiling pauses
-      maintenance and raises visible lag; it never silently starts a second run.
-- [ ] Surface contradictions, stale memory, projection/worker lag and last successful run in
-      the dashboard rather than resolving or hiding them silently.
-
-**Done when:** a maintenance run changes only its selected candidates, a repeated run is
-idempotent, failure leaves replayable state, and the monthly maintenance projection remains
-inside the Phase 0 cost ceiling.
-
----
-
-## Phase 9: Long-Horizon Proof — 2–3 days
-
-Phase 0 selected an architecture using prototypes. This phase tests the production
-implementation before it is called durable.
-
-- [ ] Replay the full available guarded history and the deterministic 1k/10k fixtures through
-      every selected projection. Load the 100k fixture through storage/index/retrieval and
-      measure representative projection batches instead of paying to reason over all 100k.
-      Do not send private fixtures to a hosted service.
-- [ ] Re-run the frozen Phase 0 question set and report quality deltas, not only the final
-      score. Investigate every stale correction, invalid source and new duplicate.
-- [ ] Assert that maximum prompt context is unchanged across corpus sizes and that p95
-      retrieval, queue lag, database/index size and projected monthly ingest/query/
-      maintenance cost remain inside the frozen gates.
-- [ ] Rehearse a model/embedding change, bounded replay, tombstone/delete, backup restore and
-      optional-memory outage. Verify no input is lost and no unsafe outbound send occurs.
-- [ ] Write the operating limits and failure runbook into `docs/deploy.md`: capacity,
-      expected lag, cost alarms, replay estimate, backup/restore and rollback procedure.
-
-**Done when:** the production memory passes the same predeclared gates that selected it,
-restore/replay has been demonstrated, and the owner has one measured monthly cost rather
-than an extrapolation from constants.
-
----
-
-## Later
-
-- [ ] Document understanding (PDF, docx). Documents are recorded today but never sent to a
-      model. Borrow Hermes's extraction-before-model shape.
-- [ ] Media in Telegram Desktop history imports. Export entries reference local file paths,
-      not `file_id`s, so the Bot API cannot fetch them.
-- [ ] A second input channel (email or calendar). The importer core makes this an adapter
-      plus a source id rather than a pipeline change.
-- [ ] Activate multi-user: auth, a real user store, per-owner provider credentials, per-owner
-      allow-lists. The `owner_id` column from Phase 2 is the prerequisite, not the feature.
-
-## Verify
-
-```bash
-npm test
-npm run test:web
-npm run graphify:update
-```
+## Main consolidation — 2026-09-11
+
+The owner requested that all refactor work move to `main`.
+[ADR-0039](docs/adr/0039-main-refactor-consolidation.md) separates that integration
+from release acceptance. The memory branches are already ancestors of the rebuild;
+their controlled-tools draft is superseded by the completed P5 implementation.
+Legacy history remains preserved on `codex/legacy-nocheh`.
+
+Final verification: 57 service tests and 125 Hermes tests pass; one optional Docker
+security fixture is skipped. The service rerun exposed a database-wide memory
+review lock shared with the live worker; it now follows the schema-scoped locking
+used by the other preparation workers, with isolation and exclusion assertions.
+[Integration evidence](compatibility/results/2026-09-11-main-consolidation.json).
+Both temporary memory worktrees are retired. The superseded draft remains in stash
+`f4e3bcee`; complete worktree archives, including ignored test backups, are preserved
+under the ignored `data/worktree-archives/2026-09-11/` directory.
+
+At integration, shared-provider login count is zero and the native subscription route
+remains active. Provider cutover, Honcho activation and the remaining live Telegram
+gates below stay pending. Inngest remains a proposal. Remote synchronization could
+not be checked because GitHub HTTPS authentication is unavailable locally.
+
+## Telegram recovery and owner monitoring — 2026-09-11
+
+Fixed a fatal native polling recovery that remained reported as connected.
+The supervisor now exits on retryable fatal adapter failure for Compose recovery,
+retains a safe incident and reports actual polling progress. The waiting real
+Telegram update completed on its first attempt after recovery.
+
+Monitoring is active in the owner dashboard: recent Telegram workflows, retries,
+blockers, successes/skips, provider route/login and services. OAuth now uses a
+temporary state-validated host callback at port 1455. A real login start reached
+the OpenAI sign-in page; owner completion and shared-provider cutover remain pending.
+57 service checks pass; 124 Hermes checks pass with two optional checks skipped.
+[Evidence](compatibility/results/2026-09-11-telegram-monitoring-oauth.json).
+Inngest was evaluated; [migration is proposed](docs/workflow-monitoring-plan.md),
+not activated. This repair does not complete the remaining release gates.
+
+Security service: [SEC1–SEC5 complete; active locally](docs/security-service-plan.md).
+Phased implementation and automatic per-phase commits authorized under ADR-0037.
+Existing provider and Honcho activation gates remain separate.
+
+# Shared CLIProxyAPI provider and monitoring (ADR-0035)
+
+Owner-approved implementation plan: [shared-provider-plan.md](docs/shared-provider-plan.md).
+
+| Phase | Actual status |
+| --- | --- |
+| S1 — Contract | Complete in the ADR/plan increment; implementation follows in separate commits |
+| S2 — Shared provider service | Complete: pinned image builds, private per-client credentials and locked no-retry/no-fallback configuration; container health and 8 focused tests pass. Fresh proxy login remains a cutover gate |
+| S3 — Hermes, voice and Honcho routes | Complete: all reasoning clients use scoped shared-provider keys; speech alone has read-only OAuth access; 47 service, 101 Hermes and 13 Honcho checks pass. Fresh provider login remains a live cutover gate |
+| S4 — CPA Manager Plus dashboard integration | Complete: pinned Full Mode image, isolated SQLite state, owner-session/CSRF proxy and browser UI pass; real service rejects unauthenticated access and exposes no provider secrets |
+| S5 — Local acceptance and cutover | Acceptance command and recovery-safe backup/restore implemented; fresh provider device login and live cutover currently pending |
+
+The native Hermes subscription route remains active until the candidate shared route
+passes its live checks. Honcho attachment remains gated by its separate embedding and
+memory acceptance; the recorded HTTP 429 is still pending.
+
+## Unified local Compose project — 2026-09-10
+
+ADR-0036 places the native dashboard service in the main `nocheh` Compose project.
+Complete: lifecycle tests, 47 service tests, 107 Hermes tests and a no-cache rebuild
+pass. Docker reports one `nocheh` project with 10 healthy services, including the
+native dashboard and optional database viewer. The old `nocheh-dashboard` project
+is removed. The owner management server remains host-managed and healthy.
+
+# Guarded projections and primary Honcho memory (ADR-0033)
+
+Owner-approved replacement plan: [guarded-memory-plan.md](docs/guarded-memory-plan.md).
+These phases are distinct from the earlier runtime-platform phases below.
+Commits: G1 `7d474a1`, G2 `c99d324`, G3 `c22c50e`, G4 infrastructure `9194ed7`,
+G5 `c84369a`, G6 `3e671e1`, G7 local acceptance `96bf60d`.
+
+| Phase | Actual status |
+| --- | --- |
+| G1 — Durable guarded versions | Complete; 42 JS/TS checks and 91 pinned Hermes Python checks passed at this increment |
+| G2 — Owner dashboard editor | Complete; owner API, conflict/race tests and synthetic browser edit/history/restore pass |
+| G3 — On/off throughout | Complete; 45 JS/TS and 94 pinned Hermes checks passed at this increment; activated locally in G7 |
+| G4 — Live Honcho connection | Pinned images build and isolated Compose startup pass. Shared subscription reasoning is implemented under ADR-0035. One synthetic request to the dedicated paid embedding route returned HTTP 429, so memory attachment remains pending |
+| G5 — Primary Honcho memory | Implemented; 46 JS/TS and 94 Hermes checks pass. Attachment remains gated by G4 live acceptance |
+| G6 — Edits, switching and recovery | Implemented; 47 JS/TS and 94 native checks pass. Portable owner revisions, inactive recovery, generation invalidation and optional catch-up verified with fixtures |
+| G7 — Local acceptance and final graph | Guarded workflow passes live subscription recall, dashboard editing and restart. Backfill: 439 ready, zero pending/failed. Final 47 JS/TS, 94 Hermes and 12 Honcho fixture checks pass. Real Honcho activation and opted-in history pilot remain pending G4 credentials/gates |
+
+G7 [local acceptance](compatibility/results/2026-09-09-guarded-memory-acceptance.json)
+and [live guarded recall](compatibility/results/2026-09-09-guarded-copies.json).
+The [current system graph and instructions](docs/guarded-memory-system.md) distinguish
+the shared reasoning implementation from the pending Honcho memory activation.
+Hermes retains its tested native route until the ADR-0035 live cutover passes.
+Under [ADR-0034](docs/adr/0034-explicit-embedding-environment.md), `.env`
+now has an owner-supplied `OPENAI_API_KEY`, provider `openai`, and model
+`text-embedding-3-small`. Configuration, redaction and spending checks pass: 15 pinned
+Honcho and 94 Hermes tests. The [live embedding attempt](compatibility/results/2026-09-09-openai-embeddings.json)
+returned HTTP 429 and retained a $0.01 reservation. The former separate bridge login
+has been replaced by the one shared provider login; memory attachment remains disabled
+until both shared reasoning and the dedicated embedding gate pass. Original G7 evidence
+above is a historical snapshot from before the embedding credential was supplied.
+
+G1 evidence: isolated PostgreSQL covers byte preservation, duplicate/concurrent capture,
+restart, partial detector failure recovery, derived text and consent separation. Host
+suite setup failures were resolved using explicit fixture DB credentials and the pinned
+Hermes image. AST graph refreshed without model calls.
+
+# Rebuild progress
+
+Memory/privacy work is tracked separately in [space-memory-plan.md](docs/space-memory-plan.md)
+and ADR-0030, on the isolated `codex/memory-space-policies` worktree.
+
+## Owner dashboard extension — 2026-09-07
+
+Accepted [dashboard/CLI plan](docs/dashboard-cli-plan.md), ADR-0025. Each increment
+is committed separately; these do not replace the production release gates below.
+
+| Increment | Actual status |
+| --- | --- |
+| D1 — Compatibility and configuration | Complete: native preferences persist, validated config show/set/apply with redaction/conflict/recovery; 12 configuration/scope tests plus one pinned dashboard auth/extension test pass |
+| D2 — Dashboard and import jobs | Complete: local native dashboard extension, shared owner API, settings, archive search and durable manual imports; 16 TypeScript tests and 39 pinned Python tests pass |
+| D3 — Native memory and isolated Honcho CLI | Pending |
+| D4 — Source graph and operations | Pending |
+
+D1 also built the pinned upstream dashboard frontend successfully from its npm
+lockfile in a temporary directory. Packaging and serving it are D2 work. No live
+provider requests or production setting changes were required for D1 verification.
+
+D2 [dashboard instructions](docs/dashboard.md). The local browser renders live
+archive status, redacted settings and upload controls. HTTP acceptance verifies
+unauthorized/cross-site rejection and cancellation/restart/resume using isolated
+fixtures. ZIP traversal/symlink and changed-export failures pass. Existing real
+PostgreSQL import/export tests verify exact originals and silent replay. Native
+agent/mutation routes are denied at the dashboard ASGI boundary. Production
+Telegram/provider configuration was not changed by these dashboard checks.
+
+After the requested reset on 2026-09-07, a fresh Compose runtime was started with
+the supplied Telegram bot token and owner/group IDs in the ignored `.env`.
+All five services are healthy. Fresh Hermes sign-in and live subscription checks
+pass. Telegram is enabled: the owner's real `/start` was captured, dispatched and
+answered with confirmed Telegram delivery. Four real text messages in the selected
+group were also captured and answered; no batch of older history arrived.
+An optional read-only pgweb browser is available with `./scripts/nocheh db`.
+The rebuild is **not released**: remaining Telegram acceptance and cutover are
+pending. Main consolidation was authorized separately on 2026-09-11 under ADR-0039.
+
+Accepted plan: [docs/rebuild-plan.md](docs/rebuild-plan.md).
+Baseline: `9dd0b58` on `codex/legacy-nocheh`. The refactor from
+`codex/hermes-rebuild` is consolidated into `main` under ADR-0039.
+No legacy data migration is required. VPS work is deferred by ADR-0019.
+
+| Phase | Actual status |
+| --- | --- |
+| 0 — Preserve baseline and architecture | Complete: `add2341` |
+| 1 — Subscription compatibility | Complete locally: `8fd69cc` |
+| 2 — Compose runtime | Complete: `9d72c32` |
+| 3 — Durable capture and archive | Complete: `d29dbab` |
+| 4 — Import, search, export, replay | Complete: `aa39e60` |
+| 5 — Optional outgoing guard | Complete: `eb6d319` |
+| 6 — Scoped assistant and voice | Implemented at `43eea5e`; real owner DM and four group replies pass; full group isolation/silence, voice, approval and reconnect checks pending |
+| 7 — Honcho comparison, maximum $5 | Runnable harness at `2d27262`; live comparison pending separate credentials; optional |
+| 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate and cutover pending; main integration authorized separately by ADR-0039 |
+
+## Last validation before the reset — 2026-09-07
+
+- 14 TypeScript tests pass against real Compose PostgreSQL where required;
+  30 Python native integration/operations tests pass. No main-suite skips.
+- 21 subscription contracts pass with simulated transport failures. Five Honcho
+  budget/scoring tests pass; no paid requests or live comparison occurred.
+- Live subscription refresh, native chat, literal detection and Ogg/Opus
+  transcription pass again after configuration and worker cleanup.
+  [Latest report](compatibility/results/2026-09-07-cleanup-subscription.json).
+- Native memory store, recall across process restarts and another-group isolation
+  passed the [synthetic live rehearsal](compatibility/results/2026-09-07-assistant-memory.json).
+  Recall reached 152 seconds in that run; it is not a latency guarantee.
+- Required guard failure/retry/redirect tests pass. Native guarded chat passed
+  again after cleanup with one required boundary attempt and no guard failures;
+  the saved `auto` policy is restored. Earlier transient failures remain in the
+  [historical guard report](compatibility/results/2026-09-07-guard.json).
+- `.env` configuration checkpoint `4f3fade` preserves archive credentials and keeps
+  Hermes OAuth in its native file. Format-2 backup/restore matched eight table
+  fingerprints and 38 state files; five restored services were healthy and inactive.
+  The rehearsal is stopped. [Report](compatibility/results/2026-09-07-environment.json).
+
+## Cleanup and behavior fixes
+
+The retired application is recoverable on the legacy branch. Its remaining local
+`web/` build output and dependencies were removed. Active documentation describes
+this runtime; historical research and accepted ADRs remain available.
+
+Edit only the ignored root `.env` for local configuration. The requested fresh
+reset removed the entire `data/` directory, including previous configuration,
+archive files, backups, experiment state and the dedicated Hermes login.
+Committed synthetic evidence and historical decisions remain in Git.
+
+Archive capture, attachments, assistant work and approved actions progress in
+independent non-overlapping loops. Slow inference cannot block capture/downloads.
+Committed media avoids native duplicate downloads and unscoped sticker vision;
+round video notes use the transcript path. Malformed source messages remain
+archived with a visible suppressed dispatch and do not starve subsequent work.
+
+## Remaining release gates
+
+The first real owner-DM capture and reply passed after enabling the gateway.
+Fresh subscription refresh, chat, detector and Ogg/Opus checks also passed.
+[Content-free live evidence](compatibility/results/2026-09-07-telegram-dm.json).
+Selected-group membership and send permissions now pass; membership events are
+archived. [Access evidence](compatibility/results/2026-09-07-telegram-group-access.json).
+After the earlier privacy-mode check, four ordinary owner-authored group messages
+were delivered and answered. This proves those messages' capture/replies, not
+visibility of every group member's messages. Credentials and IDs are already saved
+locally. Follow [Telegram setup and acceptance](docs/telegram.md).
+Intentional group silence, private/group isolation, voice persistence,
+owner-approved delivery and reconnect/restart checks remain **unrun**.
+Container health does not prove these.
+Do not merge until they pass; commit the completed phase and proceed automatically.
+
+## Local inspection and latency — 2026-09-07
+
+The [pgweb browser](docs/database-viewer.md) is running on loopback port 8782.
+UI queries and PostgreSQL read-only privileges were verified, including a denied
+zero-row update after disabling transaction read-only mode.
+[Viewer evidence](compatibility/results/2026-09-07-database-viewer.json).
+
+Four observed group replies took 16.55–35.17 seconds after archive receipt.
+Capture was about one second after Telegram's source timestamp. The slowest turn
+spent about 1 second queued, 4 seconds preparing Hermes, 28 seconds in the agent
+phase (two model rounds, two archive searches), and 2 seconds completing delivery.
+Archive searches themselves took about 0.1 seconds. Per-turn process startup,
+serial assistant dispatch, and non-streamed responses remain latency limitations.
+The trusted ChatGPT route bypasses guard detection under `auto`.
+This diagnosis does not claim a performance fix or a completed release gate.
+
+The optional [Honcho experiment](experiments/honcho/README.md) uses the shared
+reasoning login and an explicitly supplied dedicated embedding key. Live embedding,
+derivation and recall comparison remain pending. Its $5 budget has one $0.01
+conservative reservation from the rejected embedding canary.
+
+### Owner dashboard D3 — native memory and isolated Honcho CLI
+
+- [x] Owner-only profile enumeration, bounded native notes and paginated SQLite
+  session inspection; selected profiles cannot open another profile's session.
+- [x] Native preference forms use the shared revision-checked resolver.
+- [x] Official Honcho CLI 0.1.4 and SDK 2.4.0 pinned in a separate internal-only
+  runner; stored data commands, JSON output, pagination, lifecycle aliases and
+  honest unavailable dashboard state. Read lookups cannot create records.
+- [x] Compose regression: 16 TypeScript tests and 41 Hermes integration tests;
+  two CLI boundary tests and one real upstream CLI/SDK fixture test pass.
+- [ ] Optional live Honcho compatibility remains pending separate credentials.
+
+### Owner dashboard D4 — evidence graph and operations
+
+The owner's 3D graph revision replaces fixed SVG columns with a local Three.js
+space, deterministic spatial layout, orbit/pan/zoom, node search, direct-connection
+highlighting and source inspection. See ADR-0026 and the dashboard instructions.
+This presentation change does not advance the pending production release gates.
+Verification: nine graph/layout/failure tests, two owner HTTP tests and two pinned
+dashboard compatibility tests pass. Live desktop and 375px browser checks cover
+node picking, original sources, orbit/zoom, search, scope pagination and full screen.
+
+- [x] Deterministic graph over one archive scope, with cursor pagination, original
+  chat identities, author/reply/revision links, files, derived provenance and
+  explicit native-note citations. No model calls or graph database.
+- [x] Interactive keyboard-accessible graph, source detail, original file download,
+  graph JSON and portable archive ZIP export.
+- [x] Durable jobs for diagnosis, backup, restart and inactive restore; generated
+  destinations, operation exclusion, and no preference writes during inspection.
+- [x] Regression: 17 TypeScript and 43 pinned Hermes integration tests pass,
+  including graph scope/provenance and operation failure/concurrency paths.
+- [x] Local dashboard acceptance: graph node opens original source; diagnostics
+  healthy; backup/restore verified all 8 tables and 89 state files with credentials
+  inactive; portable ZIP exported 65 records with manifest/count/integrity checks.
+- [x] Browser-native authenticated ZIP download verified; download-only HttpOnly
+  cookie cannot access settings, and cross-origin downloads are denied.
+
+### Owner dashboard clarity — 2026-09-07
+
+- [x] Navigation grouped into Explore, Manage and Experiments, with purpose text
+  and an overview explaining Nocheh's controls and native Hermes responsibilities.
+- [x] Separate Nocheh settings and per-profile Hermes preferences; clear save/apply
+  timing, masked credential review, and empty secret edits preserve the saved value.
+- [x] Three-step import guidance, read-only memory explanations, readable Honcho
+  status and maintenance results, with technical details collapsed by default.
+- [x] Browser acceptance covers navigation, unchanged native preference save,
+  masked credential review/discard, diagnostics and responsive layout. Build and
+  owner-management HTTP regression pass; AST-only code graph refreshed.
+
+### Nocheh runtime platform (ADR-0027)
+
+Accepted [seven-phase plan](docs/runtime-platform-plan.md). Complete and verify each
+phase, commit separately, then continue automatically. Existing release gates above
+remain active. This direction supersedes the earlier Hermes-hosted presentation.
+
+| Phase | Actual status |
+| --- | --- |
+| P1 — Ownership and runtime adapters | Complete: cbe3022; 30 JS/TS and 44 Python tests pass |
+| P2 — Independent Nocheh dashboard | Complete: 1438674; independent root, native return page, desktop/mobile and 3D graph pass; 32 JS/TS and 44 Python tests pass |
+| P3 — Configuration and native administration | Complete: 67d6a05; actual native state, shared config revisions, preference inheritance, scoped sessions/files and private profile management; 32 JS/TS and 52 Python tests pass |
+| P4 — Native browser chat | Complete: 4effeac; isolated managed turns, original/file capture, native resume/cancel, scoped reconnect, durable receipts and Activity; 33 JS/TS and 64 Python tests plus live owner-private browser chat pass |
+| P5 — Controlled broader tools and approvals | Complete: 75f7c39; exact approvals, bounded/revoked permissions, isolated shell and offline browser, public HTTPS MCP; 39 JS/TS + 78 Python full-suite and 16 targeted follow-up tests; live UI/CLI/worker acceptance passes |
+| P6 — Native cron | Complete: 725983b; native editor and CLI, one supervised scheduler, durable fires/results, explicit catch-up, cancellation and local delivery; 40 JS/TS + 86 Python tests and live native scheduled subscription turn pass |
+| P7 — Compatibility and release acceptance | Tooling verified and committed in the P7 increment: candidate runtime/native/UI builds, portable archive + memory export, inactive recovery with all 18 tables and 175 state files preserved across restart; 41 JS/TS + 91 Python tests and 2 host management checks pass. Real Telegram gates remain pending |
+
+
+### P7 operations evidence — 2026-09-08
+
+[Content-free report](compatibility/results/2026-09-08-runtime-platform-operations.json).
+The native candidate builds and tests with no live state, credentials or test
+network. UI/CLI export verified 135 sources and two native SQLite databases. The
+current archive had no attachment or native note files; synthetic tests verify
+those byte-preservation paths. Full backup and inactive restore preserve all 18
+tables and 175 state files. Restored workers, tools, scheduler and copied OAuth
+remain held; table fingerprints survive restart unchanged. The rehearsal is stopped.
+
+The first cache-link backup and closed-SQLite export failures are retained in the
+report; both were fixed and successfully repeated. No Telegram test messages were
+sent. P7 **release acceptance remains incomplete** until the owner supplies the
+[remaining Telegram test inputs](docs/release-acceptance.md). Cutover remains
+pending. ADR-0039 subsequently authorizes main integration without waiving those
+release gates.
