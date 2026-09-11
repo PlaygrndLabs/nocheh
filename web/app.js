@@ -2,6 +2,7 @@ import * as React from 'react';
 import {createRoot} from 'react-dom/client';
 import {fetchJSON,authedFetch} from './client.js';
 import {GuardedEditor} from './guarded-editor.js';
+import {Monitoring} from './monitoring.js';
 
 (() => {
   const sdk = {React,fetchJSON,authedFetch};
@@ -32,7 +33,7 @@ import {GuardedEditor} from './guarded-editor.js';
 
   function Status({refresh}) {
     const [data,error] = useLoad('/status',refresh);
-    return h('div',null,
+    return h('div',null,h(Monitoring,{call,compact:true}),
       h('div',{className:'n-shortcuts'},...[
         ['imports','Bring in a chat','Upload a Telegram export and choose who can use it.'],
         ['memory','Read native working notes','Inspect Hermes notes and conversation history.'],
@@ -401,10 +402,10 @@ import {GuardedEditor} from './guarded-editor.js';
     useEffect(()=>{const change=()=>{setPage(location.hash.slice(1)||'overview');setNotice(null);};addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
     useEffect(()=>{heading.current?.focus({preventScroll:true});},[page]);
     const notify=(text,error=false)=>setNotice({text,error});
-    const pages={spaces:'Memory access',overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho memory'};
-    const descriptions={spaces:'Connect your private knowledge and control what each group or topic can use.',overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect primary memory, preparation and connection status.'};
+    const pages={monitoring:'Monitoring',spaces:'Memory access',overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho memory'};
+    const descriptions={monitoring:'See what succeeded, what failed, and where work is waiting.',spaces:'Connect your private knowledge and control what each group or topic can use.',overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect primary memory, preparation and connection status.'};
     descriptions.activity='Review proposed actions, manage permissions and inspect conversation results.';
-    const groups=[['Explore',['overview','archive','memory','honcho','graph','activity']],['Manage',['imports','spaces','integrations','settings','operations']]];
+    const groups=[['Explore',['overview','monitoring','archive','memory','honcho','graph','activity']],['Manage',['imports','spaces','integrations','settings','operations']]];
     const Current=extensions[page]?.component;
     return h('div',{className:'nocheh-app'+(page==='graph'?' n-graph-active':'')},
       h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'ن'),h('span',null,'Nocheh',h('small',null,'Your conversations & memory'))),
@@ -413,7 +414,7 @@ import {GuardedEditor} from './guarded-editor.js';
         h('div',{className:'n-sidebar-foot'},h('a',{href:'/hermes/nocheh',className:'n-text-link'},'Open Hermes ↗'),h('a',{href:'/providers/management.html',className:'n-text-link'},'Provider monitor ↗'),h('small',null,'Local owner dashboard'))),
       h('main',{className:'n-main'},h('header',{className:'n-header'},h('div',null,h('h1',{ref:heading,tabIndex:-1},pages[page]||'Overview'),h('p',{className:'n-page-description'},descriptions[page]||descriptions.overview)),button('Refresh',()=>setTick(v=>v+1))),
         notice&&h('div',{className:'n-notice '+(notice.error?'n-error':''),role:notice.error?'alert':'status'},notice.text,button('Dismiss',()=>setNotice(null))),
-        h('div',{key:page+tick},page==='activity'?h(Activity,{notify}):page==='integrations'?h(Integrations):page==='settings'?h(Settings,{notify}):page==='imports'?h(Jobs,{notify}):page==='archive'?h(Archive,{notify}):Current?h(Current,{notify,call,h,sdk}):h(Status,{refresh:tick})),
+        h('div',{key:page+tick},page==='monitoring'?h(Monitoring,{call,renderSource:record=>h(Source,{record,notify})}):page==='activity'?h(Activity,{notify}):page==='integrations'?h(Integrations):page==='settings'?h(Settings,{notify}):page==='imports'?h(Jobs,{notify}):page==='archive'?h(Archive,{notify}):Current?h(Current,{notify,call,h,sdk}):h(Status,{refresh:tick})),
         h('footer',null,'Owned archive · Native Hermes memory · Local administration')));
   }
   createRoot(document.getElementById('root')).render(h(App));

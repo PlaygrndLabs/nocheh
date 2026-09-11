@@ -137,5 +137,17 @@ export async function archiveStatus(pool:pg.Pool) {
   const runs = await pool.query(`SELECT r.event_id,r.state,r.error_code,r.created_at,r.updated_at,e.scope,e.channel,r.job_id,
     e.payload FROM managed_runs r JOIN events e ON e.id=r.event_id ORDER BY r.created_at DESC LIMIT 50`);
   const managedRuns=runs.rows.map(({payload,...row})=>({...row,profile:JSON.parse((payload as Buffer).toString()).profile,job_name:JSON.parse((payload as Buffer).toString()).definition?.name}));
-  return {events:Number(events.rows[0]?.count),artifacts:artifacts.rows,dispatches:dispatches.rows,transcriptions:transcriptions.rows,actions:actions.rows,dispatch_failures:dispatchFailures.rows,spool_failures:failures.rows,managed_runs:managedRuns};
+  const workflows=await pool.query(`SELECT e.id AS event_id,e.received_at,d.state,d.error_code,d.attempts,d.next_attempt,d.updated_at,
+    (SELECT count(*)::integer FROM artifacts a WHERE a.event_id=e.id) AS files,
+    (SELECT count(*)::integer FROM artifacts a WHERE a.event_id=e.id AND a.state<>'ready') AS files_waiting,
+    (SELECT count(*)::integer FROM guard_sources g WHERE g.event_id=e.id AND g.state<>'ready') AS guard_waiting,
+    (SELECT g.error_code FROM guard_sources g WHERE g.event_id=e.id AND g.error_code IS NOT NULL ORDER BY g.created_at DESC LIMIT 1) AS guard_error,
+    (SELECT t.error_code FROM transcription_jobs t JOIN artifacts a ON a.id=t.artifact_id WHERE a.event_id=e.id AND t.error_code IS NOT NULL LIMIT 1) AS transcription_error
+    FROM events e JOIN dispatches d ON d.event_id=e.id WHERE e.origin='live' AND e.kind='telegram_update'
+    ORDER BY e.received_at DESC,e.id DESC LIMIT 50`);
+  const preparation=await pool.query('SELECT state,count(*)::integer AS count FROM guard_sources GROUP BY state');
+  const telegram=await pool.query(`SELECT d.state,count(*)::integer AS count FROM dispatches d JOIN events e ON e.id=d.event_id
+    WHERE e.origin='live' AND e.kind='telegram_update' GROUP BY d.state`);
+  return {events:Number(events.rows[0]?.count),artifacts:artifacts.rows,dispatches:dispatches.rows,transcriptions:transcriptions.rows,actions:actions.rows,dispatch_failures:dispatchFailures.rows,spool_failures:failures.rows,managed_runs:managedRuns,
+    workflows:workflows.rows,preparation:preparation.rows,telegram:telegram.rows};
 }

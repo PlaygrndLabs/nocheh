@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .capture import Capture, DISPATCH_KEY, canonical, digest, immutable_file, captured_adapter_class
@@ -103,10 +104,13 @@ def committed_adapter_class():
 
 
 class AssistantGateway:
-    def __init__(self,root,spool,policy,token,model,credentials):
+    def __init__(self,root,spool,policy,token,model,credentials,on_failure=None):
         self.root,self.spool,self.scopes,self.token,self.model,self.credentials=Path(root),Path(spool),policy,token,model,credentials
         self.status='disabled' if not policy.enabled else 'starting'
         self.loop=None;self.adapter=None;self.lock=None;self.action_lock=None
+        self.on_failure=on_failure
+        self.stopping=False
+        self.failure_reported=False
         self.receipts=self.spool/'dispatch';self.receipts.mkdir(parents=True,exist_ok=True)
         for intent in self.receipts.glob('*.intent'):
             result=intent.with_suffix('.result')
@@ -116,6 +120,45 @@ class AssistantGateway:
         if not self.scopes.enabled:return
         if not self.token:self.status='credentials_missing';return
         threading.Thread(target=self._serve,name='nocheh-telegram',daemon=True).start()
+
+    def health(self):
+        adapter=self.adapter
+        polling=dict(getattr(getattr(adapter,'capture',None),'polling',{}))
+        state=self.status
+        code=polling.get('error_code')
+        if adapter and getattr(adapter,'has_fatal_error',False):
+            state='failed'
+            # Upstream messages may contain URLs or credentials; only allow codes.
+            native=getattr(adapter,'fatal_error_code',None)
+            code=native if native in ('telegram_network_error','telegram_polling_conflict','invalid_token','missing_credentials','telegram-bot-token_lock') else 'telegram_adapter_failed'
+        elif state=='connected':
+            last=polling.get('last_poll_at')
+            age=(datetime.now(timezone.utc)-datetime.fromisoformat(last)).total_seconds() if last else None
+            updater=getattr(getattr(adapter,'_app',None),'updater',None)
+            if not updater or not updater.running or getattr(adapter,'send_path_degraded',False) or age is None or age>120:
+                state='recovering'
+        return {**polling,'state':state,'error_code':code}
+
+    def failed(self):
+        if self.stopping or self.failure_reported:return
+        self.failure_reported=True
+        info=self.health()
+        self.status='failed'
+        # Persist a content-free incident across the supervised process restart.
+        path=self.root/'telegram-incident.json';temporary=path.with_suffix('.tmp')
+        try:
+            temporary.write_bytes(canonical({**info,'state':'failed','recorded_at':datetime.now(timezone.utc).isoformat()}))
+            temporary.chmod(0o600);temporary.replace(path)
+        except OSError:pass # Failed diagnostics must not prevent recovery.
+        if self.on_failure and (not self.adapter or getattr(self.adapter,'fatal_error_retryable',True)):
+            self.on_failure()
+
+    async def supervise(self):
+        while not self.stopping:
+            if self.adapter.has_fatal_error:
+                self.failed()
+                return
+            await asyncio.sleep(1)
 
     def _serve(self):
         async def run():
@@ -134,9 +177,12 @@ class AssistantGateway:
                 return result['text']
             self.adapter.set_message_handler(message)
             self.status='connected' if await self.adapter.connect() else 'connection_failed'
-            await asyncio.Event().wait()
+            if self.status=='connection_failed':self.failed();return
+            await self.supervise()
         try:asyncio.run(run())
-        except Exception:self.status='runtime_failed'
+        except Exception:
+            self.status='runtime_failed'
+            self.failed()
 
     async def dispatch(self,body):
         from telegram import Update
@@ -199,6 +245,7 @@ class AssistantGateway:
         return asyncio.run_coroutine_threadsafe(self.send_action(body),self.loop).result(timeout=55)
 
     def stop(self):
+        self.stopping=True
         if self.loop and self.adapter:
             try:asyncio.run_coroutine_threadsafe(self.adapter.disconnect(),self.loop).result(timeout=20)
             except Exception:pass

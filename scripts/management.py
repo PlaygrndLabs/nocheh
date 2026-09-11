@@ -9,6 +9,9 @@ from .configuration import ROOT, load
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
+    if operation == 'monitoring.status':
+        from .monitoring import status
+        return status(state)
     if operation == 'tools.manage':
         from .archive import API
         from urllib.error import HTTPError

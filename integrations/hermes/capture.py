@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -56,6 +57,7 @@ def immutable_file(directory: Path, name: str, data: bytes):
 class Capture:
     def __init__(self, root: Path, bot_id: str):
         self.root, self.bot_id = root, bot_id
+        self.polling = {'last_poll_at': None, 'last_update_at': None, 'error_code': None}
         self.recover()
 
     def recover(self):
@@ -147,9 +149,21 @@ def instrument_request(request, capture: Capture, polling=False):
             url = kwargs.get('url', args[0] if args else '')
             method = urlsplit(url).path.rsplit('/', 1)[-1]
             if polling:
-                result = await super().do_request(*args, **kwargs)
-                if method == 'getUpdates':
-                    await asyncio.to_thread(capture.updates, result)
+                try:
+                    result = await super().do_request(*args, **kwargs)
+                    if method == 'getUpdates':
+                        await asyncio.to_thread(capture.updates, result)
+                        status, raw = result
+                        if status == 200 and json.loads(raw).get('ok'):
+                            now = datetime.now(timezone.utc).isoformat()
+                            capture.polling.update(last_poll_at=now, error_code=None)
+                            if json.loads(raw).get('result'):
+                                capture.polling['last_update_at'] = now
+                        else:
+                            capture.polling['error_code'] = {401:'telegram_unauthorized',409:'telegram_polling_conflict',429:'telegram_rate_limited'}.get(status,'telegram_poll_failed')
+                except Exception:
+                    capture.polling['error_code'] = 'telegram_poll_or_capture_failed'
+                    raise
                 return result
             if method.startswith('get') or '/file/bot' in url:
                 return await super().do_request(*args, **kwargs)

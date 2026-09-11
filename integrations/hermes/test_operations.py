@@ -84,15 +84,18 @@ class SnapshotTests(unittest.TestCase):
             with tarfile.open(snapshot/'state.tar.gz','w:gz') as tar:
                 raw=b'{"synthetic":"login"}';info=tarfile.TarInfo('state/hermes/auth.json');info.size=len(raw)
                 tar.addfile(info,io.BytesIO(raw))
-            manifest={'version':1,'tables':{'events':'exact-hash'},'files':{'hermes/auth.json':{}}}
+                provider=b'{"type":"codex","access_token":"shared"}';info=tarfile.TarInfo('state/provider/auth/codex.json');info.size=len(provider)
+                tar.addfile(info,io.BytesIO(provider))
+            manifest={'version':1,'tables':{'events':'exact-hash'},'files':{'hermes/auth.json':{},'provider/auth/codex.json':{}}}
             starts=[]
             def run(command,**kwargs):
                 if command[:3]==['docker','volume','inspect']:return SimpleNamespace(returncode=1)
                 if 'up' in command:
                     starts.append(command)
-                    for name in ('spool/.restore-inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json'):
+                    for name in ('spool/.restore-inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json','provider/auth.restore-pending/codex.json'):
                         self.assertTrue((state/name).is_file(),name)
                     self.assertFalse((state/'hermes/auth.json').exists())
+                    self.assertFalse(any((state/'provider/auth').glob('*.json')))
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
                 return SimpleNamespace(returncode=0)
             with patch('scripts.operations.validate_snapshot',return_value=manifest),\

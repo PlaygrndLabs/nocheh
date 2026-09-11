@@ -4,7 +4,6 @@ import json
 import os
 import secrets
 import subprocess
-import urllib.request
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -26,6 +25,24 @@ def _secret(path):
     value=path.read_text().strip()
     if len(value)<32:raise ValueError('shared_provider_secret_too_short')
     return value
+
+
+def login_state(state):
+    _,auth,_,_=paths(state);files=active=invalid=0
+    for path in auth.glob('*.json'):
+        files+=1
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size>1024*1024:
+                raise ValueError()
+            body=json.loads(path.read_text())
+            if not isinstance(body,dict):raise ValueError()
+            if (body.get('type')=='codex' and body.get('disabled') is not True
+                    and isinstance(body.get('access_token'),str) and body['access_token'].strip()
+                    and isinstance(body.get('refresh_token'),str) and body['refresh_token'].strip()):
+                active+=1
+        except (OSError,ValueError,UnicodeError):invalid+=1
+    return {'login_present':active==1 and files==1 and invalid==0,'login_count':active,
+            'login_files':files,'invalid_login_files':invalid}
 
 
 def initialize(state):
@@ -50,7 +67,7 @@ def initialize(state):
     if not config.exists() or config.read_text()!=encoded:
         temporary=config.with_suffix('.tmp');temporary.write_text(encoded);temporary.chmod(0o600);temporary.replace(config)
     config.chmod(0o600)
-    return {'root':str(root),'login_present':bool(list(auth.glob('*.json'))),'clients':list(CLIENTS)}
+    return {'root':str(root),**login_state(state),'clients':list(CLIENTS)}
 
 
 def _ensure_source(directory,pin,error_prefix,run):
@@ -82,7 +99,7 @@ def compose(state):
 
 
 def status(state):
-    info=initialize(state);info.update(revision=LOCK['revision'],running=False,healthy=False,
+    info={'root':str(paths(state)[0]),**login_state(state),'clients':list(CLIENTS)};info.update(revision=LOCK['revision'],running=False,healthy=False,
         monitor={'revision':MONITOR_LOCK['revision'],'running':False,'healthy':False})
     command,env=compose(state)
     try:
@@ -112,19 +129,31 @@ def verify(state):
 
 def login(state):
     ensure_source();initialize(state);command,env=compose(state)
+    current=login_state(state)
+    if current['login_files']:
+        raise SystemExit('A provider login already exists; refusing to create a second refresh owner.')
     was_running='cliproxy' in subprocess.check_output(command+['ps','--services','--status','running'],cwd=ROOT,env=env,text=True).split()
     if was_running:subprocess.run(command+['stop','cliproxy'],cwd=ROOT,env=env,check=True)
     try:
-        return subprocess.call(command+['run','--rm','--no-deps','cliproxy','./CLIProxyAPI','-config','/state/config.yaml','-codex-device-login','-no-browser'],cwd=ROOT,env=env)
+        result=subprocess.call(command+['run','--rm','--no-deps','cliproxy','./CLIProxyAPI','-config','/state/config.yaml','-codex-device-login','-no-browser'],cwd=ROOT,env=env)
+        if result==0 and not login_state(state)['login_present']:
+            print('Device login returned without exactly one active Codex credential.',file=os.sys.stderr);return 1
+        return result
     finally:
         if was_running:subprocess.run(command+['up','-d','--no-build','--wait','cliproxy'],cwd=ROOT,env=env,check=True)
 
 
 def main(state,args):
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=('init','status','verify','login'))
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=('init','status','verify','login','cutover'))
     selected=parser.parse_args(args)
     if selected.action=='init':ensure_source();ensure_monitor_source();result=initialize(state)
     elif selected.action=='status':result=status(state)
     elif selected.action=='verify':result=verify(state)
-    else:return login(state)
-    print(json.dumps(result,indent=2));return 0 if selected.action!='verify' or result['verified'] else 1
+    elif selected.action=='login':return login(state)
+    else:
+        from scripts.provider_acceptance import cutover
+        result=cutover(state)
+    print(json.dumps(result,indent=2))
+    if selected.action=='verify':return 0 if result['verified'] else 1
+    if selected.action=='cutover':return 0 if result['status']=='passed' else 2 if result['status']=='credentials_pending' else 1
+    return 0

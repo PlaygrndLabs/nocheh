@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.request
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -79,6 +80,15 @@ def chat(text: str):
         agent.close()
 
 
+def login_present():
+    if reasoning_route() == 'native':return (PROFILE_HOME/'auth.json').is_file()
+    try:
+        opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(os.environ.get('SPEECH_URL','http://speech:8783')+'/health',timeout=3) as response:
+            return json.load(response).get('login_present') is True
+    except Exception:return False
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -95,8 +105,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/health":
             return self.reply(404, {"error": "not_found"})
+        route=reasoning_route()
         return self.reply(200, {"ok": True, "service": "hermes", "model": MODEL,
-                                "login_present": (PROFILE_HOME / "auth.json").is_file(), "telegram": ASSISTANT.status if ASSISTANT else 'not_started',
+                                "login_present": login_present(), "reasoning_route":route,
+                                "refresh_owner":"cliproxy" if route=='shared' else 'hermes',
+                                "telegram": ASSISTANT.health()['state'] if ASSISTANT else 'not_started',
+                                "telegram_details": ASSISTANT.health() if ASSISTANT else {},
                                 "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable",
                                 "scheduler": SCHEDULER.status if SCHEDULER else 'not_started'})
 
@@ -227,8 +241,15 @@ def main():
     from integrations.hermes.scopes import Scopes
     policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
     bot_token=environment_secret('TELEGRAM_BOT_TOKEN', required=False)
-    ASSISTANT=AssistantGateway(PROFILE_HOME,os.environ.get('NOCHEH_SPOOL_DIR','/data/spool'),policy,bot_token,MODEL,resolve_credentials)
     server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8781"))), Handler)
+    restarting=threading.Event()
+    def restart_after_failure():
+        if restarting.is_set():return
+        restarting.set()
+        # Let diagnostics observe the failure, then exit the entire process so no
+        # orphaned getUpdates request can compete with the replacement adapter.
+        timer=threading.Timer(15,server.shutdown);timer.daemon=True;timer.start()
+    ASSISTANT=AssistantGateway(PROFILE_HOME,os.environ.get('NOCHEH_SPOOL_DIR','/data/spool'),policy,bot_token,MODEL,resolve_credentials,restart_after_failure)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"event": "ready", "service": "hermes"}), flush=True)
     # One process-wide redirect, installed before starting threads. Per-request
@@ -247,6 +268,7 @@ def main():
             try: admin.wait(timeout=10)
             except subprocess.TimeoutExpired: admin.kill(); admin.wait()
             ASSISTANT.stop()
+    if restarting.is_set():raise SystemExit(1)
 
 
 if __name__ == "__main__":

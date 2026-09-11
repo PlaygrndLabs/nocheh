@@ -62,5 +62,6 @@ and gateway controls use Nocheh's supervisor; no second poller/scheduler/refresh
 
 Keep Bash and the existing optional Honcho CLI. Honcho production use, additional
 messaging platforms, a second harness, a plugin marketplace and VPS are deferred.
-Stay on codex/hermes-rebuild; do not merge main until release gates pass. Missing
-live credentials/evidence remain pending and cannot be reported as a completed phase.
+ADR-0039 supersedes the original branch sequencing: the owner authorized refactor
+integration into `main` on 2026-09-11. Missing live credentials/evidence remain
+pending and cannot be reported as a completed phase or release.
