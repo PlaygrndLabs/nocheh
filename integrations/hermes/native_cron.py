@@ -46,10 +46,28 @@ def definition(job,profile):
     return {'profile':profile,'name':job.get('name'),'prompt':job['prompt'],'schedule':job['schedule'],
         'deliver':job.get('deliver','local'),'repeat':(job.get('repeat') or {}).get('times'),
         'enabled':job.get('enabled',True),'removed':job.get('nocheh_removed',False),
-        'preferences':job.get('nocheh_preferences',{})}
+        'preferences':job.get('nocheh_preferences',{}),'execution_version':job.get('nocheh_definition_version')}
 
 
 def revision(job,profile):return hashlib.sha256(canonical(definition(job,profile))).hexdigest()
+
+
+def workflow_cursor(job,profile):
+    return hashlib.sha256(canonical({'definition':definition(job,profile),'next':job.get('next_run_at'),
+        'pending':job.get('nocheh_pending'),'running':job.get('nocheh_running'),
+        'completed':(job.get('repeat') or {}).get('completed',0)})).hexdigest()
+
+
+def sync_job(call,job,home,bound):
+    from cron import jobs as native
+    # Persist order before publishing so a delayed older acknowledgment cannot
+    # replace a later native definition or occurrence checkpoint in the archive.
+    updates={'nocheh_workflow_revision':int(job.get('nocheh_workflow_revision',0))+1}
+    if job.get('state')=='completed' and not job.get('enabled'):updates['next_run_at']=None
+    job=native.update_job(job['id'],updates)
+    call('definition',{'scope':bound.chat_id,'profile':home.name,'job_id':job['id'],'definition':definition(job,home.name),
+        'workflow_cursor':workflow_cursor(job,home.name),'workflow_sequence':job['nocheh_workflow_revision']})
+    return native.update_job(job['id'],{'nocheh_registered':True,'nocheh_workflow_synced':True})
 
 
 def fields(body,model):
@@ -148,6 +166,7 @@ def manage(admin,path,method,query,body,headers,call=None):
         if not job.get('nocheh_registered'):
             # A failed archive write leaves the native definition intact but inert.
             # Resume retries capture; the scheduler never executes an uncaptured job.
-            call('definition',{'scope':bound.chat_id,'profile':home.name,'job_id':job['id'],'definition':definition(job,home.name)})
-            job=native.update_job(job['id'],{'nocheh_registered':True})
+            job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex})
+        job=native.update_job(job['id'],{'nocheh_workflow_synced':False})
+        job=sync_job(call,job,home,bound)
         return {'ok':True} if method=='DELETE' else annotate(job,home,name)
