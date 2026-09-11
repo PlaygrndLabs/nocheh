@@ -11,11 +11,12 @@ import { HttpError } from './http.js';
 import type { RuntimeCall } from './runtime.js';
 import {guardState,guardedValue,prepareGuarded} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 type Call=RuntimeCall;
 const TRANSCRIPTION_VERSION='codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4';
 
-export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call):Promise<string[]|null> {
+export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call,authority:ExecutionAuthority=legacyAuthority):Promise<string[]|null> {
   const {rows}=await client.query<{id:string;file_hash:string;kind:string;state:string;metadata:{file_name?:string}}>(
     "SELECT id,file_hash,kind,state,metadata FROM artifacts WHERE event_id=$1 AND kind IN ('voice','audio','video_note') ORDER BY id",[eventId]);
   const texts:string[]=[];
@@ -24,6 +25,9 @@ export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eve
     const previous=await client.query<{content:Buffer}>('SELECT content FROM derived_artifacts WHERE id=$1',[id]);
     if (previous.rows[0]) {texts.push(previous.rows[0].content.toString());continue;}
     if (artifact.state!=='ready') return null;
+    const fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);
+    if(!fenced)return null;
+    try {
     await client.query('INSERT INTO transcription_jobs(artifact_id) VALUES($1) ON CONFLICT DO NOTHING',[artifact.id]);
     const due=await client.query("UPDATE transcription_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes' WHERE artifact_id=$1 AND next_attempt<=now() RETURNING artifact_id",[artifact.id]);
     if (!due.rowCount)return null;
@@ -44,20 +48,22 @@ export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eve
       await client.query("UPDATE transcription_jobs SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second' WHERE artifact_id=$1",[artifact.id,error instanceof HttpError?error.code:'transcription_unavailable']);
       return null;
     }
+    }finally{await leaveFamily(client,'preparation');}
   }
   return texts;
 }
 
-export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call):Promise<void> {
+export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,eventId:string|null=null,authority:ExecutionAuthority=legacyAuthority):Promise<void> {
   if (!config.assistant.enabled)return;
-  const client=await pool.connect();let held=false;
+  const client=await pool.connect();let held=false,fenced=false;
   try {
+    fenced=await enterFamily(client,'telegram',authority.owner,authority.epoch);if(!fenced)return;
     held=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803302) AS locked')).rows[0]!.locked;
     if (!held)return;
     const {rows}=await client.query<{id:string;scope:string;source_key:string;payload:Buffer;original_text:Buffer|null;state:string;attempts:number}>(
       `SELECT e.id,e.scope,e.source_key,e.payload,e.original_text,d.state,d.attempts FROM dispatches d JOIN events e ON e.id=d.event_id
        WHERE d.state IN ('pending','failed','running') AND d.next_attempt<=now() AND e.origin='live' AND e.kind='telegram_update'
-       ORDER BY d.next_attempt,e.received_at LIMIT 1`);
+       AND ($1::text IS NULL OR e.id=$1) ORDER BY d.next_attempt,e.received_at LIMIT 1`,[eventId]);
     const event=rows[0];if(!event)return;
     let payload:unknown,scope:ReturnType<typeof conversationScope>;
     try {
@@ -100,5 +106,5 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call):
       // it never blindly launches a second turn after an uncertain HTTP result.
       await client.query("UPDATE dispatches SET error_code='awaiting_dispatch_receipt',next_attempt=now()+interval '30 seconds',updated_at=now() WHERE event_id=$1",[event.id]);
     }
-  } finally {if(held)await client.query('SELECT pg_advisory_unlock(803302)');client.release();}
+  } finally {await releaseOperation(client,async()=>{if(held)await client.query('SELECT pg_advisory_unlock(803302)');if(fenced)await leaveFamily(client,'telegram');});}
 }

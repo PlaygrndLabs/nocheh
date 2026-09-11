@@ -3,6 +3,7 @@ import {canonical,digest} from './archive.js';
 import {DETECTOR_VERSION,literalSpans,mask,patternSpans} from './guard.js';
 import {HttpError,object,string} from './http.js';
 import {admin,type Reader} from './access.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 // The archive is evidence. These independently versioned projections are disposable
 // except for owner revisions, which must be retained and never overwritten by jobs.
@@ -126,9 +127,10 @@ async function prepareValue(client:pg.PoolClient,id:string,input:unknown,version
   return replaceValues(input,replacements);
 }
 
-export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null) {
-  const client=await pool.connect();let locked=false;
+export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+  const client=await pool.connect();let locked=false,fenced=false;
   try {
+    fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);if(!fenced)return;
     if(!eventId)locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803308)) AS locked')).rows[0].locked;
     if(!eventId&&!locked)return;
     const {rows}=await client.query("SELECT * FROM guard_sources WHERE state<>'ready' AND next_attempt<=now() AND ($2::text IS NULL OR event_id=$2) ORDER BY next_attempt,id LIMIT $1",[count,eventId]);
@@ -159,7 +161,7 @@ export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<
         await client.query(`UPDATE guard_sources SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second' WHERE id=$1 AND active_revision IS NULL`,[source.id,error instanceof HttpError?error.code:'guard_preparation_unavailable']);
       }finally{if(sourceHeld)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema()||$1,803312))',[source.id]);}
     }
-  } finally {if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803308))').catch(()=>{});client.release();}
+  } finally {await releaseOperation(client,async()=>{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803308))');if(fenced)await leaveFamily(client,'preparation');});}
 }
 
 export async function guardedValue(pool:pg.Pool,id:string) {
