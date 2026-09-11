@@ -99,6 +99,17 @@ export async function switchFamily(pool:pg.Pool,family:WorkflowFamily,epoch:numb
     const uncertain=await client.query(`SELECT 1 FROM workflow_registry w WHERE family=$1 AND (state='running' OR EXISTS(
       SELECT 1 FROM workflow_receipts r WHERE r.workflow_id=w.id AND r.state='started')) LIMIT 1`,[family]);
     if(uncertain.rowCount)throw new HttpError(409,'workflow_receipts_unreconciled');
+    const domainQueries:Partial<Record<WorkflowFamily,string>>={
+      telegram:"SELECT 1 FROM dispatches WHERE state='running' LIMIT 1",
+      actions:"SELECT 1 FROM action_requests WHERE state='running' LIMIT 1",
+      tools:"SELECT 1 FROM controlled_actions WHERE state IN ('claimed','running') LIMIT 1",
+      memory_review:"SELECT 1 FROM memory_review_jobs WHERE state='running' LIMIT 1",
+      honcho:"SELECT 1 FROM honcho_receipts WHERE state='uncertain' LIMIT 1",
+      browser:"SELECT 1 FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE e.channel='browser' AND r.state='running' LIMIT 1",
+      schedules:"SELECT 1 FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE e.channel='scheduler' AND r.state='running' LIMIT 1",
+    };
+    const query=domainQueries[family];
+    if(query&&(await client.query(query)).rowCount)throw new HttpError(409,'workflow_receipts_unreconciled');
     const changed=await client.query(`UPDATE workflow_owners SET owner=$3,epoch=epoch+1,admission=true,updated_at=now()
       WHERE family=$1 AND epoch=$2 AND admission=false RETURNING epoch`,[family,epoch,owner]);
     if(!changed.rowCount)throw new HttpError(409,'workflow_owner_changed');
@@ -106,7 +117,7 @@ export async function switchFamily(pool:pg.Pool,family:WorkflowFamily,epoch:numb
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 
-export type WorkflowEvent={name:'nocheh/workflow.requested';id:string;data:{workflow_id:string;dispatch:number}};
+export type WorkflowEvent={name:'nocheh/workflow.requested';id:string;data:{workflow_id:string;dispatch:number;family:WorkflowFamily}};
 export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Promise<unknown>,limit=25):Promise<number> {
   let published=0;
   for(let i=0;i<limit;i++) {
@@ -118,10 +129,10 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
         AND (candidate.lease_until IS NULL OR candidate.lease_until<now()) AND f.owner='inngest' AND f.admission
         AND w.state IN ('queued','waiting','retryable_failed','running')
         ORDER BY candidate.created_at,candidate.id FOR UPDATE OF candidate SKIP LOCKED LIMIT 1)
-      RETURNING o.id,o.workflow_id,o.dispatch`,[token]);
+      RETURNING o.id,o.workflow_id,o.dispatch,(SELECT family FROM workflow_registry WHERE id=o.workflow_id) AS family`,[token]);
     const row=result.rows[0];if(!row)break;
     try {
-      await send({name:'nocheh/workflow.requested',id:row.id,data:{workflow_id:row.workflow_id,dispatch:row.dispatch}});
+      await send({name:'nocheh/workflow.requested',id:row.id,data:{workflow_id:row.workflow_id,dispatch:row.dispatch,family:row.family}});
       await pool.query(`UPDATE workflow_outbox SET published_at=now(),lease_token=NULL,lease_until=NULL,error_code=NULL WHERE id=$1 AND lease_token=$2`,[row.id,token]);
       published++;
     }catch {

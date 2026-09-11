@@ -15,7 +15,8 @@ function contract(name: string, adapter: RuntimeAdapter, observed: Array<{operat
     await call('config.write',{scope:'-20',revision:'old',changes:{'agent.max_iterations':9}});
     assert.equal(observed.at(-1)?.body.revision,'old');
     const count=observed.length;
-    await assert.rejects(call('run.cancel',{id:'unknown'}),{code:'runtime_capability_unavailable'});
+    const unavailable=runtimeOperations.find(operation=>!adapter.capabilities[operation]);assert.ok(unavailable);
+    await assert.rejects(call(unavailable,{id:'unknown'}),{code:'runtime_capability_unavailable'});
     assert.equal(observed.length,count,'unavailable operations never reach the harness');
   });
 }
@@ -38,6 +39,17 @@ test('adapter preserves public error codes without exposing a provider response'
   }
   const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async()=>{throw Error('must not run');}}));
   await assert.rejects(call('run.start',{channel:'browser'}),{code:'runtime_channel_unavailable'});
+});
+
+test('asynchronous Telegram runtime operations retain one source and attempt identity',async()=>{
+  const seen:Array<{path:string;body:unknown}>=[];
+  const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
+    seen.push({path:new URL(String(url)).pathname,body:JSON.parse(String(init?.body))});return Response.json({state:'running'});
+  }}));
+  const source={channel:'telegram',event_id:'a'.repeat(64),attempt:7,asynchronous:true};
+  for(const operation of ['run.start','run.resume','run.events','run.cancel'] as const)await call(operation,source);
+  assert.deepEqual(seen.map(row=>row.path),['/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel']);
+  assert.ok(seen.every(row=>JSON.stringify(row.body)===JSON.stringify(source)));
 });
 
 test('browser and scheduled originals have their own identities and preserve text exactly',()=>{

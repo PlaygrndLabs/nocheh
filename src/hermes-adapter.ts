@@ -12,6 +12,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
     'guard.detect': '/internal/detect', 'action.execute': '/internal/action',
     'memory.review':'/internal/memory/review', 'memory.recall':'/internal/memory/recall',
     'memory.filter':'/internal/memory/filter',
+    'run.resume':'/internal/run/resume','run.events':'/internal/run/events','run.cancel':'/internal/run/cancel',
   };
   const actions: Partial<Record<RuntimeOperation, string>> = {
     'profiles.list': 'profiles', 'config.read': 'preferences', 'config.write': 'preferences', 'memory.read': 'memory',
@@ -20,12 +21,12 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
     id: 'hermes',
     capabilities: Object.freeze(Object.fromEntries(runtimeOperations.map(op => [op, !!routes[op]]))) as Record<RuntimeOperation, boolean>,
     async call(operation, input, timeout = 120000) {
-      const path = routes[operation];
+      const path = operation==='run.start'&&input.asynchronous===true?'/internal/run/start':routes[operation];
       if (!path) throw new HttpError(409, 'runtime_capability_unavailable');
       // Unsupported channels cannot accidentally enter the Telegram runner.
       if (operation === 'run.start' && input.channel !== undefined && input.channel !== 'telegram')
         throw new HttpError(409, 'runtime_channel_unavailable');
-      const {channel: _channel, ...body} = input;
+      const body=path.startsWith('/internal/run/')?input:(({channel:_channel,...rest})=>rest)(input);
       const payload = actions[operation] ? {...body, action: actions[operation]} : body;
       const response = await transport(new URL(path, options.url), {
         method: operation === 'status' ? 'GET' : 'POST',

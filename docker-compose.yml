@@ -286,6 +286,22 @@ services:
     depends_on:
       archive: {condition: service_healthy}
 
+  workflow-worker:
+    <<: *service
+    profiles: [workflows]
+    command: [node, dist/src/workflows/main.js]
+    stop_grace_period: 300s
+    networks: [default, memory, workflows]
+    environment:
+      <<: *environment
+      NOCHEH_SERVICE: worker
+      NOCHEH_WORKFLOWS_ENABLED: ${NOCHEH_WORKFLOWS_ENABLED:-false}
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
+    depends_on:
+      archive: {condition: service_healthy}
+      inngest: {condition: service_healthy}
+
   guard:
     <<: *service
     environment:

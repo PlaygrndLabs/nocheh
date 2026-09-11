@@ -36,14 +36,14 @@ def prepare_profile(root,scope,model):
     return profile
 
 
-async def native_turn(root,scope,body,model,credentials):
+async def native_turn(root,scope,body,model,credentials,cancelled=None):
     profile=prepare_profile(root,scope,model)
     thread=str(body['payload']['message'].get('message_thread_id','main'))
     logical=digest(scope.chat_id+':'+thread)
     cursor=profile/('active-'+logical+'.json')
     session_id=json.loads(cursor.read_text())['session_id'] if cursor.exists() else 'nocheh-'+logical
     from .turn_process import run_process
-    result = await run_process(root, scope, body, model, credentials, session_id)
+    result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled)
     if result.get('state')=='done':
         temporary=cursor.with_suffix('.tmp')
         with temporary.open('wb') as file:
@@ -91,11 +91,14 @@ def committed_adapter_class():
             turn=TURN.get()
             if turn is None:raise RuntimeError('uncommitted_message')
             response=await self._message_handler(event)
-            if not response:turn['delivery_success']=True;return
+            if not response:turn['delivery_success']=True;turn['delivery_skipped']=True;return
+            if turn.get('cancelled') and turn['cancelled'].is_set():
+                turn['agent_result']={'state':'cancelled'};return
             if not await asyncio.to_thread(check_delivery_policy,turn['body']['archive_credential']):
                 turn['agent_result']={'state':'failed','error_code':'space_policy_changed'}
                 return
             from gateway.platforms.base import _thread_metadata_for_event
+            if turn.get('progress'):turn['progress']('delivery')
             # Use native Telegram formatting/splitting and the durable
             # outbound journal, without implicit MEDIA/file/TTS delivery.
             delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=_thread_metadata_for_event(event))
@@ -115,6 +118,17 @@ class AssistantGateway:
         for intent in self.receipts.glob('*.intent'):
             result=intent.with_suffix('.result')
             if not result.exists():immutable_file(self.receipts,result.name,canonical({'state':'ambiguous','error_code':'runtime_restart_during_dispatch'}))
+        from .async_runs import AsyncRuns
+        self.runs=AsyncRuns(self.spool/'async-runs',self._execute_run,self._reconcile_run)
+
+    def _execute_run(self,body,progress,cancelled):
+        if self.loop is None:raise RuntimeError('telegram_not_ready')
+        return asyncio.run_coroutine_threadsafe(self.dispatch(body,progress,cancelled),self.loop).result()
+
+    def _reconcile_run(self,body):
+        name=digest(body['event_id']+':'+str(body['attempt']))
+        result=self.receipts/(name+'.result')
+        return json.loads(result.read_bytes()) if result.exists() else None
 
     def start(self):
         if not self.scopes.enabled:return
@@ -169,8 +183,9 @@ class AssistantGateway:
             async def message(event):
                 turn=TURN.get()
                 if turn is None:raise RuntimeError('uncommitted_turn')
-                result={'state':'done','text':turn['body']['control_reply'],'session_id':'owner-control'} if turn['body'].get('control_reply') is not None else await native_turn(self.root,turn['scope'],turn['body'],self.model,await asyncio.to_thread(self.credentials))
+                result={'state':'done','text':turn['body']['control_reply'],'session_id':'owner-control'} if turn['body'].get('control_reply') is not None else await native_turn(self.root,turn['scope'],turn['body'],self.model,await asyncio.to_thread(self.credentials),cancelled=turn.get('cancelled'))
                 turn['agent_result']=result
+                if result['state']=='cancelled':return None
                 if result['state']!='done':raise RuntimeError('assistant_turn_failed')
                 self.adapter.capture.enqueue(self.adapter.capture.event('assistant:'+turn['body']['event_id']+':'+str(turn['body']['attempt']),
                     'assistant_result',{'event_id':turn['body']['event_id'],'session_id':result['session_id']},turn['scope'].chat_id,result['text']))
@@ -184,7 +199,7 @@ class AssistantGateway:
             self.status='runtime_failed'
             self.failed()
 
-    async def dispatch(self,body):
+    async def dispatch(self,body,progress=None,cancelled=None):
         from telegram import Update
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
         scope=self.scopes.resolve(body['payload'],body['scope'])
@@ -196,9 +211,12 @@ class AssistantGateway:
         async with self.lock:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())
+            if cancelled and cancelled.is_set():
+                result={'state':'cancelled'};immutable_file(self.receipts,name+'.result',canonical(result));return result
             immutable_file(self.receipts,name+'.intent',canonical({'event_id':body['event_id'],'attempt':body['attempt']}))
-            turn={'scope':scope,'body':body};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(body['source_key'])
+            turn={'scope':scope,'body':body,'progress':progress,'cancelled':cancelled};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(body['source_key'])
             try:
+                if progress:progress('assistant')
                 await self.adapter._app.process_update(Update.de_json(body['payload'],self.adapter._bot))
                 # Native text/album batching uses delayed tasks. Keep the durable
                 # dispatch open until those tasks and their native delivery finish.
@@ -210,7 +228,9 @@ class AssistantGateway:
                     await asyncio.gather(*tasks)
                 agent=turn.get('agent_result')
                 if not agent:result={'state':'suppressed','error_code':'unsupported_message'}
+                elif agent['state']=='cancelled':result={'state':'cancelled'}
                 elif agent['state']!='done':result={'state':'failed','error_code':agent.get('error_code','model_unavailable')}
+                elif turn.get('delivery_skipped'):result={'state':'suppressed','error_code':'intentional_silence'}
                 elif turn.get('delivery_success'):result={'state':'done'}
                 else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
             except Exception:result={'state':'ambiguous','error_code':'dispatch_interrupted'}
