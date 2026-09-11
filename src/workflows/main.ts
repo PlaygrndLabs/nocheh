@@ -8,12 +8,16 @@ import {hermesAdapter} from '../hermes-adapter.js';
 import {workflowClient,connectWorkflows} from './client.js';
 import {workflowFunctions} from './engine.js';
 import {pipelineOperations} from './pipeline.js';
+import {memoryOperations} from './memory.js';
+import {honchoClient} from '../honcho.js';
 
 const config=settings(),pool=connectDatabase(config);
 await initialize(pool);
 const inactive=process.env.NOCHEH_WORKFLOWS_ENABLED!=='true'||existsSync(join(config.dataDir,'spool/.restore-inactive'))||existsSync(join(config.dataDir,'workflows/inactive'));
 const client=workflowClient('pipeline');
-const connection=inactive?null:await connectWorkflows('pipeline',client,workflowFunctions(client,pool,pipelineOperations(pool,config,runtimeCall(hermesAdapter({url:config.hermesUrl,token:config.token})))));
+const runtime=runtimeCall(hermesAdapter({url:config.hermesUrl,token:config.token}));
+const operations={...pipelineOperations(pool,config,runtime),...memoryOperations(pool,config,runtime,honchoClient(config.honchoUrl))};
+const connection=inactive?null:await connectWorkflows('pipeline',client,workflowFunctions(client,pool,operations));
 const timer=setInterval(()=>{if(connection?.state==='ACTIVE')void heartbeat(pool,'workflow-pipeline').catch(()=>{});},5000);
 const server=createServer((_request,response)=>{void pool.query('SELECT 1').then(()=>{
   const connected=connection?.state==='ACTIVE';response.writeHead(inactive||connected?200:503,{'content-type':'application/json'});

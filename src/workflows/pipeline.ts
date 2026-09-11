@@ -10,12 +10,13 @@ import type {ExecutionAuthority,WorkflowFamily,WorkflowState} from './store.js';
 
 export type Observation={state:WorkflowState;stage:string;attempts:number;next_attempt:number;waiting_reason:string|null};
 export type WorkflowOperation=(jobId:string,authority:ExecutionAuthority)=>Promise<Observation>;
-const observation=(state:WorkflowState,stage:string,attempts=0,next=Date.now(),reason:string|null=null):Observation=>({state,stage,attempts,next_attempt:Math.max(Date.now()+100,Number(next)),waiting_reason:reason});
+export const observation=(state:WorkflowState,stage:string,attempts=0,next=Date.now(),reason:string|null=null):Observation=>({state,stage,attempts,next_attempt:Math.max(Date.now()+100,Number(next)),waiting_reason:reason});
 
 async function preparationStatus(pool:pg.Pool,eventId:string):Promise<Observation> {
   const files=(await pool.query(`SELECT count(*)::int AS count,coalesce(max(attempts),0)::int AS attempts,
-    min(next_attempt) AS next,bool_or(state='failed') AS failed FROM artifacts WHERE event_id=$1 AND state<>'ready'`,[eventId])).rows[0];
-  if(files.count)return observation(files.failed?'retryable_failed':'waiting','attachments',files.attempts,files.next?.getTime()??Date.now()+30000,files.failed?'provider_unavailable':'prerequisite');
+    min(next_attempt) AS next,bool_or(state='failed' AND error_code IS DISTINCT FROM 'import_bytes_pending') AS failed,
+    bool_and(source_ref LIKE 'desktop:%' OR error_code='import_bytes_pending') AS upload_pending FROM artifacts WHERE event_id=$1 AND state<>'ready'`,[eventId])).rows[0];
+  if(files.count)return observation(files.failed&&!files.upload_pending?'retryable_failed':'waiting','attachments',files.attempts,files.upload_pending?Date.now()+30000:files.next?.getTime()??Date.now()+30000,files.failed&&!files.upload_pending?'provider_unavailable':'prerequisite');
   const media=(await pool.query(`SELECT count(*)::int AS count,coalesce(max(t.attempts),0)::int AS attempts,min(t.next_attempt) AS next,bool_or(t.state='failed') AS failed
     FROM artifacts a LEFT JOIN transcription_jobs t ON t.artifact_id=a.id WHERE a.event_id=$1 AND a.state='ready'
     AND NOT EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.artifact_id=a.id AND d.kind IN ('transcript','extracted_text','extraction_status'))`,[eventId])).rows[0];

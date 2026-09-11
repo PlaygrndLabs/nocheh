@@ -5,7 +5,7 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
-## Current recorded state — 2026-09-11
+## Current recorded state — 2026-09-12
 
 | Area | Actual implementation and activation | Evidence / execution plan |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ runs, not tests repeated by the documentation migration.
 | Honcho | Infrastructure and scoped integration implemented; attachment disabled pending live provider, embedding, and memory gates. Dedicated embedding attempt returned HTTP 429 with a retained $0.01 reservation. | [Embedding evidence](compatibility/results/2026-09-09-openai-embeddings.json), [memory instructions](docs/guarded-memory-system.md) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
-| Inngest workflows | I1 infrastructure/recovery, I2 outbox/registry/service fences, and I3 Connect source preparation plus asynchronous Telegram verified with synthetic fixtures. Host/native remaining family migrations, owner UI and local cutover are pending; no active family switched. | [Foundation evidence](compatibility/results/2026-09-12-inngest-foundation.json), [Outbox evidence](compatibility/results/2026-09-12-inngest-outbox.json), [Job-operation evidence](compatibility/results/2026-09-12-inngest-job-operations.json), [Telegram evidence](compatibility/results/2026-09-12-inngest-telegram.json), [execution plan](docs/workflow-monitoring-plan.md) |
+| Inngest workflows | I1 infrastructure/recovery, I2 outbox/registry/service fences, and I3 Connect source preparation plus asynchronous Telegram, and I4 memory requests/review/Honcho reconciliation verified with synthetic fixtures. Imports and host/native remaining family migrations, owner UI and local cutover are pending; no active family switched. | [Foundation evidence](compatibility/results/2026-09-12-inngest-foundation.json), [Outbox evidence](compatibility/results/2026-09-12-inngest-outbox.json), [Job-operation evidence](compatibility/results/2026-09-12-inngest-job-operations.json), [Telegram evidence](compatibility/results/2026-09-12-inngest-telegram.json), [Memory evidence](compatibility/results/2026-09-12-inngest-memory.json), [execution plan](docs/workflow-monitoring-plan.md) |
 
 Latest recorded runtime regression: 57 service tests and 125 Hermes tests passed;
 one optional Docker security fixture was skipped. These are the main-consolidation

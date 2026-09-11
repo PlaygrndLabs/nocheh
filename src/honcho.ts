@@ -85,7 +85,7 @@ export async function prepareMemoryRequest(pool:pg.Pool,input:unknown,detect:(te
 }
 export async function queueMemory(pool:pg.Pool) {
  await memoryStatus(pool);
- const connection=(await pool.query('SELECT * FROM honcho_connection')).rows[0];if(!connection.attached||!connection.verified)return;
+ const connection=(await pool.query('SELECT * FROM honcho_connection')).rows[0];if(!connection.attached||!connection.verified)return 0;
  const guard=await guardState(pool),policy=await policyRevision(pool);
  await pool.query("UPDATE honcho_generations SET state='retired' WHERE guard_epoch<>$1 OR policy_revision<>$2",[guard.epoch,policy]);
  // Explicit learning approvals include imported history. A successful live turn
@@ -120,6 +120,29 @@ export async function queueMemory(pool:pg.Pool) {
   }
   await pool.query('INSERT INTO honcho_prepared_sources VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,guard.epoch,policy]);
  }
+ return sources.length;
+}
+export async function observeGeneration(pool:pg.Pool,id:string,call:HonchoCall):Promise<boolean> {
+ await currentGeneration(pool,id);
+ const pending=Number((await pool.query("SELECT count(*) AS count FROM honcho_receipts WHERE generation=$1 AND state<>'done'",[id])).rows[0].count);
+ const queue=await call('/v3/workspaces/'+id+'/queue/status');
+ await currentGeneration(pool,id);
+ const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0;
+ await pool.query("UPDATE honcho_generations SET state=$2,error_code=NULL WHERE id=$1 AND state<>'retired'",[id,ready?'ready':'building']);
+ return ready;
+}
+export async function reconcileHonchoReceipt(pool:pg.Pool,id:string,call:HonchoCall):Promise<boolean> {
+ const connection=(await memoryStatus(pool)).connection;if(!connection.attached||!connection.verified)return false;
+ const row=(await pool.query('SELECT * FROM honcho_receipts WHERE id=$1',[id])).rows[0];
+ if(!row)throw new HttpError(404,'honcho_receipt_missing');
+ if(row.state==='done')return true;
+ if(row.state!=='uncertain')return false;
+ const found=(await call('/v3/workspaces/'+row.generation+'/sessions/'+row.id+'/messages/list',{filters:{metadata:{nocheh_receipt:row.id}}})).items;
+ if(!Array.isArray(found)||found.length>1)throw new HttpError(409,'honcho_receipt_conflict');
+ if(!found.length)return false;
+ if(found[0].content!==row.content.toString()||found[0].metadata?.nocheh_receipt!==row.id)throw new HttpError(409,'honcho_receipt_conflict');
+ await pool.query("UPDATE honcho_receipts SET state='done',remote_id=$2,error_code=NULL,updated_at=now() WHERE id=$1 AND state='uncertain'",[id,String(found[0].id)]);
+ return true;
 }
 export async function syncMemory(pool:pg.Pool,call:HonchoCall,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
  const client=await pool.connect();let locked=false,fenced=false;
