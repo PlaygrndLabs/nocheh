@@ -14,13 +14,17 @@ import {join} from 'node:path';
 import {prepareGuarded,guardState} from './guarded.js';
 import {prepareArchiveFiles} from './preparation.js';
 import {syncMemory,honchoClient} from './honcho.js';
+import {publishOutbox} from './workflows/store.js';
+import {workflowClient} from './workflows/client.js';
 
 export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
   // A snapshot cannot prove whether its pending work ran after it was taken.
   // Recovered state stays inspectable until an explicit cutover reconciles it.
   if(existsSync(join(config.dataDir,'spool','.restore-inactive')))return async()=>{};
   const call = runtimeCall(hermesAdapter({url: config.hermesUrl, token: config.token}));
+  const publisher=process.env.NOCHEH_WORKFLOWS_ENABLED==='true'&&!existsSync(join(config.dataDir,'workflows/inactive'))?workflowClient('pipeline'):null;
   return startLoops({
+    ...(publisher?{outbox:()=>publishOutbox(pool,event=>publisher.send(event))}:{}),
     browser:()=>recoverRuns(pool),
     capture:()=>drainSpool(pool,config.dataDir),
     media:()=>prepareArchiveFiles(pool,config.dataDir,call),

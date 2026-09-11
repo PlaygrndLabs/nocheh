@@ -1,6 +1,7 @@
 import {Inngest, type InngestFunction} from 'inngest';
 import {connect, type WorkerConnection} from 'inngest/connect';
 import {hostname} from 'node:os';
+import {WorkflowBoundary} from './boundary.js';
 
 export type WorkflowApp='pipeline'|'host';
 export type WorkflowConfig={baseUrl:string;gatewayUrl:string;eventKey:string;signingKey:string;version:string};
@@ -27,11 +28,11 @@ export function workflowClient(app:WorkflowApp,config=workflowConfig()):Inngest 
   const transport:typeof fetch=async(input,init)=>{
     const url=new URL(input instanceof Request?input.url:String(input));
     if(url.origin!==origin)throw Error('workflow_destination_denied');
-    return fetch(input,{...init,redirect:'error'});
+    return fetch(input,{...init,redirect:'error',signal:init?.signal?AbortSignal.any([init.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
   };
   return new Inngest({id:'nocheh-'+app,appVersion:config.version,isDev:false,
     baseUrl:config.baseUrl,eventKey:config.eventKey,signingKey:config.signingKey,
-    logger:quietLogger,internalLogger:quietLogger,fetch:transport});
+    logger:quietLogger,internalLogger:quietLogger,fetch:transport,middleware:[WorkflowBoundary]});
 }
 
 export async function connectWorkflows(app:WorkflowApp,client:Inngest,functions:InngestFunction.Like[],

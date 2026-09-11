@@ -28,6 +28,7 @@ TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'ev
         'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
         'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id',
         'security_policy_versions':'revision','security_policy':'singleton','security_events':'id'}
+TABLES.update(workflow_owners='family',workflow_registry='id',workflow_outbox='id',workflow_runs='workflow_id,run_id',workflow_receipts='workflow_id,step,attempt')
 
 
 def compose(state,project=None):

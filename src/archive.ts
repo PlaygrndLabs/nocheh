@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import { HttpError, object, string } from './http.js';
 import { eventSpace } from './spaces.js';
+import {requestWorkflow} from './workflows/store.js';
 
 export const digest = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 export function canonical(value: unknown): string {
@@ -121,6 +122,9 @@ export async function ingest(pool: pg.Pool, value: Envelope, dispatch=true): Pro
       }
       await client.query('INSERT INTO dispatches(event_id,state) VALUES($1,$2)',
         [id, dispatch && (value.channel === undefined || value.channel === 'telegram') && value.origin === 'live' && value.kind === 'telegram_update' ? 'pending' : 'suppressed']);
+      await requestWorkflow(client,'preparation',id);
+      if(dispatch && (value.channel===undefined||value.channel==='telegram')&&value.origin==='live'&&value.kind==='telegram_update')
+        await requestWorkflow(client,'telegram',id);
     }
     await client.query('COMMIT'); return {id, duplicate: !added.rowCount};
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
