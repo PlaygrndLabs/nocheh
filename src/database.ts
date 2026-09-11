@@ -13,6 +13,7 @@ import {securitySchema} from './security/store.js';
 import {workflowSchema} from './workflows/store.js';
 import {workflowRequestSchema} from './workflows/requests.js';
 import {importWorkflowSchema} from './workflows/imports.js';
+import {approvalWorkflowSchema} from './workflows/approvals.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   const pool = new pg.Pool({
@@ -47,6 +48,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
     await client.query(workflowSchema);
     await client.query(workflowRequestSchema);
     await client.query(importWorkflowSchema);
+    await client.query(approvalWorkflowSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
