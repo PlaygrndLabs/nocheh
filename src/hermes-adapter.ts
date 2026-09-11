@@ -24,7 +24,8 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
       const path = operation==='run.start'&&input.asynchronous===true?'/internal/run/start':routes[operation];
       if (!path) throw new HttpError(409, 'runtime_capability_unavailable');
       // Unsupported channels cannot accidentally enter the Telegram runner.
-      if (operation === 'run.start' && input.channel !== undefined && input.channel !== 'telegram')
+      if (operation === 'run.start' && input.channel !== undefined && input.channel !== 'telegram' &&
+          !(input.asynchronous===true&&input.channel==='browser'))
         throw new HttpError(409, 'runtime_channel_unavailable');
       const body=path.startsWith('/internal/run/')?input:(({channel:_channel,...rest})=>rest)(input);
       const payload = actions[operation] ? {...body, action: actions[operation]} : body;
