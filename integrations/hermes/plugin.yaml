@@ -1,0 +1,8 @@
+name: nocheh
+version: 0.1.0
+description: Nocheh archive and subscription integrations for Hermes.
+author: Nocheh
+kind: standalone
+platforms:
+  - linux
+  - macos

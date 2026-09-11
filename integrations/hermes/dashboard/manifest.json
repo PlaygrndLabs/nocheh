@@ -1,0 +1,16 @@
+{
+  "name": "nocheh",
+  "label": "Nocheh",
+  "description": "Return to the Nocheh owner dashboard",
+  "icon": "Database",
+  "version": "2.0.0",
+  "tab": {
+    "path": "/nocheh",
+    "position": "before:config"
+  },
+  "entry": "index.js",
+  "css": "style.css",
+  "slots": [
+    "pre-main"
+  ]
+}
