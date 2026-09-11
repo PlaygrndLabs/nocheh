@@ -104,6 +104,39 @@ class BrowserGatewayTests(unittest.TestCase):
         self.assertIn('error',next(row for row in rows if row.get('id')==2))
         self.assertFalse((home/'auth.json').exists())
 
+    def test_durable_reconnect_follows_existing_stream_without_new_execution(self):
+        import time
+        original=self.call;state=['running'];read=threading.Event()
+        def call(route,body):
+            if route.endswith('/admit'):return {'owned':True,'state':'captured'}
+            if route.endswith('/active'):return {'active':True,'event_id':'event-one'}
+            if route=='/internal/browser/events':
+                read.set();return {'state':state[0],'visible':True,'text':'durable answer',
+                    'events':[] if body['after'] else [{'sequence':1,'text':'durable delta'}]}
+            if route.endswith('/cancel'):state[0]='cancelled';return {'cancel_requested':True}
+            return original(route,body)
+        self.gateway.call=call;self.capture()
+        self.invoke('prompt.submit',text=' exact\r\n ',nocheh_event_id='event-one');self.assertTrue(read.wait(2))
+        session=self.server._sessions['sid'];self.gateway.running['sid'].set();session['_nocheh_thread'].join(2)
+        self.assertEqual(state[0],'running');self.assertEqual(self.run_count,0)
+        self.gateway.original['session.resume']=lambda rid,params:self.server._ok(rid,{'session_id':'sid'})
+        self.assertIn('result',self.invoke('session.resume'));self.assertTrue(session['running'])
+        state[0]='done';session['_nocheh_thread'].join(2)
+        self.assertFalse(session['running']);self.assertEqual(self.run_count,0)
+        complete=[payload for kind,_,payload in self.events if kind=='message.complete']
+        self.assertEqual(complete[-1]['text'],'durable answer')
+
+    def test_durable_interrupt_cancels_the_archive_request(self):
+        original=self.call;state=['running'];entered=threading.Event();cancelled=[]
+        def call(route,body):
+            if route.endswith('/admit'):return {'owned':True}
+            if route=='/internal/browser/events':entered.set();return {'state':state[0],'visible':True,'text':'','events':[]}
+            if route.endswith('/cancel'):cancelled.append(body['event_id']);state[0]='cancelled';return {}
+            return original(route,body)
+        self.gateway.call=call;self.capture();self.invoke('prompt.submit',text=' exact\r\n ',nocheh_event_id='event-one')
+        self.assertTrue(entered.wait(2));self.invoke('session.interrupt');self.server._sessions['sid']['_nocheh_thread'].join(2)
+        self.assertEqual(cancelled,['event-one']);self.assertEqual(self.run_count,0)
+
     def test_actual_native_tui_capture_failure_keeps_composer(self):
         import fcntl,select,struct,termios,time
         from .browser_launch import launch

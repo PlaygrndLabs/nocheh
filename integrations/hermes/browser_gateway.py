@@ -107,6 +107,10 @@ class BrowserGateway:
             if session.get('running'):
                 if session.get('_nocheh_event')==event: return self.server._ok(rid,{'status':'streaming','duplicate':True})
                 return self.server._err(rid,4091,'session busy')
+            admitted=self.call('/v1/browser/admit',self.workflow_context(session,event))
+            if admitted.get('owned'):
+                self.follow(sid,session,event)
+                return self.server._ok(rid,{'status':'streaming','event_id':event})
             claim = self.call('/v1/browser/claim',{'event_id':event,'actor':self.actor,
                 'scope':self.scope.chat_id,'profile':self.scope.profile})
             if not claim.get('claimed'):
@@ -121,6 +125,42 @@ class BrowserGateway:
         thread = threading.Thread(target=self.execute,args=(sid,session,claim,cancel),daemon=True)
         session['_nocheh_thread'] = thread;thread.start()
         return self.server._ok(rid,{'status':'streaming','event_id':event})
+
+    def workflow_context(self,session,event=None):
+        return {'scope':self.scope.chat_id,'profile':self.scope.profile,'conversation':session['session_key'],
+                **({'event_id':event} if event else {})}
+
+    def follow(self,sid,session,event):
+        session.update(running=True,_nocheh_event=event,_nocheh_durable=True,_nocheh_attachments={})
+        stopped=threading.Event();self.running[sid]=stopped
+        def observe():
+            after=0
+            try:
+                while not stopped.is_set():
+                    try:status=self.call('/internal/browser/events',{**self.workflow_context(session,event),'after':after})
+                    except Exception:
+                        stopped.wait(1);continue
+                    for row in status.get('events',[]):
+                        self.server._emit('message.delta',sid,{'text':row['text']});after=row['sequence']
+                    if status['state'] not in ('captured','running'):
+                        # Drain the bounded journal page before delivering completion.
+                        if len(status.get('events',[]))==100:continue
+                        with contextlib.suppress(Exception):
+                            from hermes_state import SessionDB
+                            from .isolated_profile import database_path
+                            db=SessionDB(database_path(self.home),read_only=True)
+                            try:session['history']=db.get_messages_as_conversation(session['session_key'])
+                            finally:db.close()
+                        done=status['state']=='done' and status.get('visible')
+                        self.server._emit('message.complete',sid,{'text':status['text'] if done else 'The managed turn ended. Its original input and execution evidence are preserved.',
+                            'usage':{},'status':'complete' if done else 'interrupted' if status['state']=='cancelled' else 'error'})
+                        return
+                    stopped.wait(.25)
+            finally:
+                with self.lock:
+                    session['running']=False;self.running.pop(sid,None)
+                self.server._emit('session.info',sid,self.info(session))
+        thread=threading.Thread(target=observe,daemon=True);session['_nocheh_thread']=thread;thread.start()
 
     def finish(self, body):
         directory = self.home / 'nocheh-browser-receipts'
@@ -201,8 +241,10 @@ class BrowserGateway:
                 'lazy':False,'managed_execution':'isolated_per_turn','approval_mode':'manual','yolo':False,'nocheh_scope':'owner-private' if self.scope.owner else 'selected-group'}
 
     def interrupt(self, rid, params):
-        sid, _ = self.session(params)
-        if sid in self.running: self.running[sid].set()
+        sid, session = self.session(params)
+        if session.get('_nocheh_durable') and session.get('running'):
+            self.call('/v1/browser/cancel',self.workflow_context(session,session['_nocheh_event']))
+        elif sid in self.running:self.running[sid].set()
         return self.server._ok(rid,{'status':'interrupted'})
 
     def invoke(self, name, rid, params):
@@ -235,12 +277,17 @@ class BrowserGateway:
             if name == 'session.close':
                 sid, session = self.session(params)
                 if sid in self.running:
-                    self.running[sid].set(); session['_nocheh_thread'].join(timeout=5)
+                    self.interrupt(rid,params)
+                    session['_nocheh_thread'].join(timeout=5)
                     if session.get('running'): raise ValueError('wait_for_cancellation')
             result=self.original[name](rid,params)
             if name in ('session.create','session.resume') and 'result' in result:
                 data=result['result'];session=self.server._sessions.get(data.get('session_id'))
                 if session:
+                    try:active=self.call('/v1/browser/active',self.workflow_context(session))
+                    except Exception:active={}
+                    if active.get('active') and not session.get('running'):
+                        with self.lock:self.follow(data['session_id'],session,active['event_id'])
                     data['info']={**data.get('info',{}),**self.info(session)}
             return result
         except Exception as error:
