@@ -53,7 +53,8 @@ normal guard policy. Historical import/replay never sends old replies.
 - Phase 1 is a feasibility gate: subscription transcription must work on the
   account locally, with container verification in Phase 2. If it fails, retain evidence and stop dependent release work;
   no silent API-key or local-model fallback. Continue independent work if possible.
-- Use `codex/legacy-nocheh` for preservation and `codex/hermes-rebuild` for changes.
+- Preserve `codex/legacy-nocheh`. ADR-0039 authorizes consolidating the rebuild
+  into `main`; use `codex/` branches from main for subsequent changes.
   No old-data migration. Keep unrelated work and credentials out of commits.
 - Preserve originals exactly. Test Unicode, repeated secrets, overlapping matches,
   and malformed detector output. Measure secret detection; do not promise omniscience.
@@ -67,6 +68,7 @@ normal guard policy. Historical import/replay never sends old replies.
   and Telegram authentication remain required configuration.
 - Honcho is optional and isolated. If no temporary key is supplied, commit the
   runnable experiment and mark live evaluation pending; it does not block release.
-- Cutover and merge require passing production checks and no release blocker.
-  Do not describe a partial implementation as complete. Local Compose is the current
+- Cutover and release require passing production checks and no release blocker.
+  ADR-0039 separately authorizes main integration before those gates are complete.
+  Do not describe a partial implementation as complete. Local Compose is the
   release target; VPS deployment and verification remain deferred.

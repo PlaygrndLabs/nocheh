@@ -77,7 +77,7 @@ export async function prepareReviews(pool:pg.Pool,live:boolean) {
 export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCall) {
   if(!config.assistant.owner_id)return;
   const client=await pool.connect();let locked=false;
-  try{locked=(await client.query('SELECT pg_try_advisory_lock(803304) AS locked')).rows[0].locked;if(!locked)return;
+  try{locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803304)) AS locked')).rows[0].locked;if(!locked)return;
     await prepareReviews(pool,config.assistant.enabled);
     const guard=await guardState(pool);
     const {rows}=await client.query("SELECT * FROM memory_review_jobs WHERE state IN ('pending','failed','running') AND next_attempt<=now() AND guard_epoch=$1 ORDER BY created_at,id LIMIT 1",[guard.epoch]);
@@ -92,5 +92,5 @@ export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCal
       if(!['done','ambiguous'].includes(String(result.state)))throw new HttpError(503,'review_failed');
       await client.query('UPDATE memory_review_jobs SET state=$2,error_code=$3,updated_at=now() WHERE id=$1',[job.id,result.state,result.state==='ambiguous'?'review_interrupted':null]);
     }catch(error){await client.query("UPDATE memory_review_jobs SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second',updated_at=now() WHERE id=$1",[job.id,error instanceof HttpError?error.code:'review_unavailable']);}
-  }finally{if(locked)await client.query('SELECT pg_advisory_unlock(803304)');client.release();}
+  }finally{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803304))');client.release();}
 }

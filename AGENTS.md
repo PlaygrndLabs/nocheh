@@ -48,9 +48,10 @@ VPS work is deferred. Do not mistake planned phases for completed behavior.
 
 ## Implementation agreements
 
-- Preserve `codex/legacy-nocheh`; work on `codex/hermes-rebuild`. Old persisted data
-  is disposable and requires no migration. Do not merge to `main` before release
-  gates pass.
+- Preserve `codex/legacy-nocheh`. ADR-0039 authorizes the owner's refactor
+  consolidation into `main`; use `codex/` branches from that baseline for new work.
+  Old persisted data requires no migration. Main integration does not complete
+  outstanding live acceptance or authorize provider/memory activation.
 - Complete and verify each phase, commit it, report its hash, and continue
   automatically. Do not ask for repeated permission for authorized phase work.
 - Phase 1 proves subscription chat, detection, transcription, refresh/failure

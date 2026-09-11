@@ -10,6 +10,7 @@ import {DashboardSessions} from './dashboard-auth.js';
 import type {Duplex} from 'node:stream';
 import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 import {proxyProviderMonitor} from './provider-monitor-proxy.js';
+import {ProviderOAuth} from './provider-oauth.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -155,6 +156,7 @@ export async function startManagement() {
   const monitorKey=(await readFile(monitorKeyPath,'utf8')).trim();
   if(monitorKey.length<32)throw new Error('provider_monitor_key_missing');
   const sessions=new DashboardSessions();
+  const providerOAuth=new ProviderOAuth(MONITOR,monitorKey,PORT);
   const sockets=new Set<Duplex>();
   for (const job of await listJobs(Infinity)) if (['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
@@ -184,6 +186,7 @@ export async function startManagement() {
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
       if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
+      if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
       if(route==='/tools/actions' && req.method==='GET')return json(res,200,await python({operation:'tools.manage'}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
@@ -313,6 +316,12 @@ export async function startManagement() {
       const page=req.method==='GET'&&path==='/providers/management.html';
       const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
       if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
+      if(req.method==='GET'&&path==='/providers/v0/management/codex-auth-url') {
+        sessions.authorize(req,true);
+        const credentials=await readdir(join(STATE,'provider/auth')).catch(()=>[] as string[]);
+        if(credentials.some(name=>name.endsWith('.json')))throw new HttpError(409,'provider_login_already_exists');
+        return json(res,200,await providerOAuth.start());
+      }
       proxyProviderMonitor(req,res,MONITOR,monitorKey,session.csrf);return;
     }
     if(path.startsWith('/hermes/')) {
@@ -352,6 +361,7 @@ export async function startManagement() {
     if(stopping)return;stopping=true;
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
+    providerOAuth.close();
     server.close(()=>{void Promise.allSettled([...runningTasks]).then(()=>process.exit(0));});
   };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);

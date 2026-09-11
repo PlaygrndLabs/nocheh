@@ -18,7 +18,7 @@ try: from .configuration import compose_environment, env_path, initialize, load,
 except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env
 
 ROOT=Path(__file__).resolve().parents[1]
-SERVICES=['hermes','worker','security-launcher','security','guard','archive']
+SERVICES=['hermes','worker','security-launcher','security','guard','archive','speech','provider-monitor','cliproxy']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -92,9 +92,9 @@ def backup(state,output,leave_stopped=False):
         dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
-            for name in ('.env','files','spool','hermes','admin/jobs','admin/tools/receipts'):
+            for name in ('.env','files','spool','hermes','provider','admin/jobs','admin/tools/receipts'):
                 base=env_path(state) if name=='.env' else state/name
-                if name.startswith('admin/') and not base.exists(): continue
+                if (name=='provider' or name.startswith('admin/')) and not base.exists(): continue
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
                 for path in candidates:
                     relative='.env' if name=='.env' else path.relative_to(state).as_posix()
@@ -169,10 +169,15 @@ def restore(snapshot,state,project,port):
             destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             with tar.extractfile(member) as source,destination.open('xb') as target: shutil.copyfileobj(source,target)
             destination.chmod(0o600)
-    for directory in ('reports','files','spool','hermes','secrets'): (state/directory).mkdir(exist_ok=True,mode=0o700)
+    for directory in ('reports','files','spool','hermes','provider','secrets'): (state/directory).mkdir(exist_ok=True,mode=0o700)
     # Retain the saved settings, but don't activate duplicate bot/OAuth owners.
     auth=state/'hermes/auth.json'
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')
+    provider_auth=state/'provider/auth'
+    if provider_auth.is_dir() and any(provider_auth.iterdir()):
+        provider_auth.rename(state/'provider/auth.restore-pending')
+    from scripts.provider import initialize as initialize_provider
+    initialize_provider(state)
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
     config.update(TELEGRAM_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
@@ -213,7 +218,7 @@ def main(command,state,rest):
             'workers':(state/'spool/.restore-inactive').exists(),
             'tools':(state/'admin/tools/inactive').exists(),
             'scheduler':(state/'hermes/scheduler-inactive').exists(),
-            'subscription_login':(state/'hermes/auth.restore-pending.json').exists(),
+            'subscription_login':(state/'hermes/auth.restore-pending.json').exists() or (state/'provider/auth.restore-pending').exists(),
         }
         config=load(state)
         port=int(config.get('NOCHEH_PORT','8780'))

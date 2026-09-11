@@ -218,6 +218,7 @@ const server = createServer((req, res) => { void (async () => {
     if (req.method==='POST' && upload?.[1]) return json(res,200,await uploadArtifact(pool,config.dataDir,upload[1],await readJson(req,70*1024*1024)));
   }
   if (req.method === 'GET' && path === '/v1/status') {
+    admin(principal);
     const {rows} = await pool.query<{service: string; seen_at: Date}>('SELECT service, seen_at FROM service_heartbeats ORDER BY service');
     return json(res, 200, {service: config.service, guard_mode: config.guardMode, services: rows, archive: await archiveStatus(pool)});
   }

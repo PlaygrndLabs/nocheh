@@ -30,10 +30,10 @@ class API:
         self.url='http://127.0.0.1:'+str(int(port))
         self.token=config['SERVICE_TOKEN']
 
-    def call(self,path,body=None,binary=False):
+    def call(self,path,body=None,binary=False,timeout=120):
         req=urllib.request.Request(self.url+path,data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
                                    headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
-        with urllib.request.urlopen(req,timeout=120) as response:
+        with urllib.request.urlopen(req,timeout=timeout) as response:
             return response.read() if binary else json.load(response)
 
 

@@ -12,10 +12,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def valid_refresh(route, result):
+    if route == "shared":
+        return result.get("refreshed") is False and result.get("owner") == "cliproxy"
+    return result.get("refreshed") is True and result.get("owner") == "hermes"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--output", default="/reports/container-compatibility.json")
+    parser.add_argument("--check", action="append", choices=("refresh", "chat", "detector", "transcription"))
     args = parser.parse_args()
     if not args.live:
         parser.error("--live is required to use subscription quota")
@@ -26,12 +33,17 @@ def main():
         with urllib.request.urlopen(request, timeout=120) as response:
             return json.load(response)
     checks = {}
+    route = os.environ.get("NOCHEH_REASONING_ROUTE", "native")
+    def refresh():
+        return valid_refresh(route, call("/internal/refresh", {}))
     cases = {
-        "refresh": lambda: call("/internal/refresh", {})["refreshed"] is True,
+        "refresh": refresh,
         "chat": lambda: call("/internal/chat", {"text": "Reply exactly NOCHEH_COMPAT_OK with no other text."})["text"].strip() == "NOCHEH_COMPAT_OK",
         "detector": lambda: call("/internal/detect", {"text": "Aws password: juniper-ONLY-7642. Friday is the deadline."})["literals"] == ["juniper-ONLY-7642"],
         "transcription": lambda: "friday" in call("/internal/transcribe", {"audio_base64": base64.b64encode(Path("/workspace/compatibility/fixtures/subscription-speech.ogg").read_bytes()).decode()})["transcript"].lower(),
     }
+    if args.check:
+        cases = {name: cases[name] for name in args.check}
     for name, fn in cases.items():
         start = time.monotonic()
         try:
@@ -41,7 +53,8 @@ def main():
         checks[name]["duration_ms"] = round(1000 * (time.monotonic() - start))
         print(json.dumps({"check": name, **checks[name]}), flush=True)
     report = {"recorded_at": datetime.now(timezone.utc).isoformat(), "environment": "local-compose",
-              "os": platform.system(), "machine": platform.machine(), "synthetic_inputs_only": True, "checks": checks}
+              "os": platform.system(), "machine": platform.machine(), "synthetic_inputs_only": True,
+              "reasoning_route": route, "checks": checks}
     Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
     return 0 if all(c["status"] == "passed" for c in checks.values()) else 1
 

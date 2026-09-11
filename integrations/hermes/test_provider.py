@@ -5,8 +5,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.configuration import initialize as initialize_configuration
-from scripts.provider import CLIENTS,initialize,status
+from scripts.provider import CLIENTS,initialize,login_state,status
+from scripts.provider_acceptance import _retire_native_login,cutover
 from integrations.hermes.subscription import SHARED_BASE_URL,resolve_credentials
+from integrations.hermes.verify import valid_refresh
 
 
 class SharedProviderTests(unittest.TestCase):
@@ -56,3 +58,36 @@ class SharedProviderTests(unittest.TestCase):
         dockerfile=path.read_text()
         self.assertIn("grep -c 'false && okRefresh'",dockerfile)
         self.assertIn('test \"$(grep -c',dockerfile)
+
+    def test_exactly_one_active_codex_login_is_required(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize(state);auth=state/'provider/auth'
+            (auth/'one.json').write_text(json.dumps({'type':'codex','access_token':'token-one','refresh_token':'refresh-one'}))
+            self.assertTrue(login_state(state)['login_present'])
+            (auth/'two.json').write_text(json.dumps({'type':'codex','access_token':'token-two','refresh_token':'refresh-two'}))
+            current=login_state(state)
+            self.assertFalse(current['login_present']);self.assertEqual(current['login_count'],2)
+            (auth/'two.json').write_text('{')
+            current=login_state(state)
+            self.assertFalse(current['login_present']);self.assertEqual(current['invalid_login_files'],1)
+
+    def test_cutover_stays_native_without_fresh_provider_login(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize_configuration(state)
+            result=cutover(state)
+            self.assertEqual(result['status'],'credentials_pending')
+            saved=json.loads((state/'reports/shared-provider-acceptance.json').read_text())
+            self.assertEqual(saved['status'],'credentials_pending')
+            from scripts.configuration import load
+            self.assertEqual(load(state)['NOCHEH_REASONING_ROUTE'],'native')
+
+    def test_native_login_retires_and_refresh_owner_is_route_specific(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);source=state/'hermes/auth.json';source.parent.mkdir(parents=True)
+            source.write_text('{\"refresh_token\":\"private\"}')
+            self.assertEqual(_retire_native_login(state),'retired');self.assertFalse(source.exists())
+            retired=list((state/'provider/retired').glob('*.json'));self.assertEqual(len(retired),1)
+            self.assertEqual(retired[0].stat().st_mode&0o777,0o600)
+        self.assertTrue(valid_refresh('shared',{'refreshed':False,'owner':'cliproxy'}))
+        self.assertFalse(valid_refresh('shared',{'refreshed':True,'owner':'hermes'}))
+        self.assertTrue(valid_refresh('native',{'refreshed':True,'owner':'hermes'}))

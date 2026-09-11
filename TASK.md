@@ -1,3 +1,41 @@
+## Main consolidation — 2026-09-11
+
+The owner requested that all refactor work move to `main`.
+[ADR-0039](docs/adr/0039-main-refactor-consolidation.md) separates that integration
+from release acceptance. The memory branches are already ancestors of the rebuild;
+their controlled-tools draft is superseded by the completed P5 implementation.
+Legacy history remains preserved on `codex/legacy-nocheh`.
+
+Final verification: 57 service tests and 125 Hermes tests pass; one optional Docker
+security fixture is skipped. The service rerun exposed a database-wide memory
+review lock shared with the live worker; it now follows the schema-scoped locking
+used by the other preparation workers, with isolation and exclusion assertions.
+[Integration evidence](compatibility/results/2026-09-11-main-consolidation.json).
+Both temporary memory worktrees are retired. The superseded draft remains in stash
+`f4e3bcee`; complete worktree archives, including ignored test backups, are preserved
+under the ignored `data/worktree-archives/2026-09-11/` directory.
+
+At integration, shared-provider login count is zero and the native subscription route
+remains active. Provider cutover, Honcho activation and the remaining live Telegram
+gates below stay pending. Inngest remains a proposal. Remote synchronization could
+not be checked because GitHub HTTPS authentication is unavailable locally.
+
+## Telegram recovery and owner monitoring — 2026-09-11
+
+Fixed a fatal native polling recovery that remained reported as connected.
+The supervisor now exits on retryable fatal adapter failure for Compose recovery,
+retains a safe incident and reports actual polling progress. The waiting real
+Telegram update completed on its first attempt after recovery.
+
+Monitoring is active in the owner dashboard: recent Telegram workflows, retries,
+blockers, successes/skips, provider route/login and services. OAuth now uses a
+temporary state-validated host callback at port 1455. A real login start reached
+the OpenAI sign-in page; owner completion and shared-provider cutover remain pending.
+57 service checks pass; 124 Hermes checks pass with two optional checks skipped.
+[Evidence](compatibility/results/2026-09-11-telegram-monitoring-oauth.json).
+Inngest was evaluated; [migration is proposed](docs/workflow-monitoring-plan.md),
+not activated. This repair does not complete the remaining release gates.
+
 Security service: [SEC1–SEC5 complete; active locally](docs/security-service-plan.md).
 Phased implementation and automatic per-phase commits authorized under ADR-0037.
 Existing provider and Honcho activation gates remain separate.
@@ -12,7 +50,7 @@ Owner-approved implementation plan: [shared-provider-plan.md](docs/shared-provid
 | S2 — Shared provider service | Complete: pinned image builds, private per-client credentials and locked no-retry/no-fallback configuration; container health and 8 focused tests pass. Fresh proxy login remains a cutover gate |
 | S3 — Hermes, voice and Honcho routes | Complete: all reasoning clients use scoped shared-provider keys; speech alone has read-only OAuth access; 47 service, 101 Hermes and 13 Honcho checks pass. Fresh provider login remains a live cutover gate |
 | S4 — CPA Manager Plus dashboard integration | Complete: pinned Full Mode image, isolated SQLite state, owner-session/CSRF proxy and browser UI pass; real service rejects unauthenticated access and exposes no provider secrets |
-| S5 — Local acceptance and cutover | Pending |
+| S5 — Local acceptance and cutover | Acceptance command and recovery-safe backup/restore implemented; fresh provider device login and live cutover currently pending |
 
 The native Hermes subscription route remains active until the candidate shared route
 passes its live checks. Honcho attachment remains gated by its separate embedding and
@@ -38,7 +76,7 @@ G5 `c84369a`, G6 `3e671e1`, G7 local acceptance `96bf60d`.
 | G1 — Durable guarded versions | Complete; 42 JS/TS checks and 91 pinned Hermes Python checks passed at this increment |
 | G2 — Owner dashboard editor | Complete; owner API, conflict/race tests and synthetic browser edit/history/restore pass |
 | G3 — On/off throughout | Complete; 45 JS/TS and 94 pinned Hermes checks passed at this increment; activated locally in G7 |
-| G4 — Live Honcho connection | Pinned images build and isolated Compose startup pass. Dedicated OpenAI key now configured; one synthetic embedding attempt returned HTTP 429. Live provider gates and bridge sign-in remain pending |
+| G4 — Live Honcho connection | Pinned images build and isolated Compose startup pass. Shared subscription reasoning is implemented under ADR-0035. One synthetic request to the dedicated paid embedding route returned HTTP 429, so memory attachment remains pending |
 | G5 — Primary Honcho memory | Implemented; 46 JS/TS and 94 Hermes checks pass. Attachment remains gated by G4 live acceptance |
 | G6 — Edits, switching and recovery | Implemented; 47 JS/TS and 94 native checks pass. Portable owner revisions, inactive recovery, generation invalidation and optional catch-up verified with fixtures |
 | G7 — Local acceptance and final graph | Guarded workflow passes live subscription recall, dashboard editing and restart. Backfill: 439 ready, zero pending/failed. Final 47 JS/TS, 94 Hermes and 12 Honcho fixture checks pass. Real Honcho activation and opted-in history pilot remain pending G4 credentials/gates |
@@ -46,15 +84,16 @@ G5 `c84369a`, G6 `3e671e1`, G7 local acceptance `96bf60d`.
 G7 [local acceptance](compatibility/results/2026-09-09-guarded-memory-acceptance.json)
 and [live guarded recall](compatibility/results/2026-09-09-guarded-copies.json).
 The [current system graph and instructions](docs/guarded-memory-system.md) distinguish
-implemented routing from the pending Honcho activation. Hermes retains its tested
-native subscription route; a shared Hermes-through-CLIProxyAPI route has not been
-activated. Under [ADR-0034](docs/adr/0034-explicit-embedding-environment.md), `.env`
+the shared reasoning implementation from the pending Honcho memory activation.
+Hermes retains its tested native route until the ADR-0035 live cutover passes.
+Under [ADR-0034](docs/adr/0034-explicit-embedding-environment.md), `.env`
 now has an owner-supplied `OPENAI_API_KEY`, provider `openai`, and model
 `text-embedding-3-small`. Configuration, redaction and spending checks pass: 15 pinned
 Honcho and 94 Hermes tests. The [live embedding attempt](compatibility/results/2026-09-09-openai-embeddings.json)
-returned HTTP 429 and retained a $0.01 reservation. The separate bridge device login
-expired without credentials, so attachment remains disabled. Original G7 evidence
-above is a historical snapshot from before this credential was supplied.
+returned HTTP 429 and retained a $0.01 reservation. The former separate bridge login
+has been replaced by the one shared provider login; memory attachment remains disabled
+until both shared reasoning and the dedicated embedding gate pass. Original G7 evidence
+above is a historical snapshot from before the embedding credential was supplied.
 
 G1 evidence: isolated PostgreSQL covers byte preservation, duplicate/concurrent capture,
 restart, partial detector failure recovery, derived text and consent separation. Host
@@ -97,12 +136,12 @@ pass. Telegram is enabled: the owner's real `/start` was captured, dispatched an
 answered with confirmed Telegram delivery. Four real text messages in the selected
 group were also captured and answered; no batch of older history arrived.
 An optional read-only pgweb browser is available with `./scripts/nocheh db`.
-The rebuild is
-**not released**: remaining Telegram acceptance,
-cutover and the merge to `main` remain pending.
+The rebuild is **not released**: remaining Telegram acceptance and cutover are
+pending. Main consolidation was authorized separately on 2026-09-11 under ADR-0039.
 
 Accepted plan: [docs/rebuild-plan.md](docs/rebuild-plan.md).
-Baseline: `9dd0b58` on `codex/legacy-nocheh`. Work: `codex/hermes-rebuild`.
+Baseline: `9dd0b58` on `codex/legacy-nocheh`. The refactor from
+`codex/hermes-rebuild` is consolidated into `main` under ADR-0039.
 No legacy data migration is required. VPS work is deferred by ADR-0019.
 
 | Phase | Actual status |
@@ -115,7 +154,7 @@ No legacy data migration is required. VPS work is deferred by ADR-0019.
 | 5 — Optional outgoing guard | Complete: `eb6d319` |
 | 6 — Scoped assistant and voice | Implemented at `43eea5e`; real owner DM and four group replies pass; full group isolation/silence, voice, approval and reconnect checks pending |
 | 7 — Honcho comparison, maximum $5 | Runnable harness at `2d27262`; live comparison pending separate credentials; optional |
-| 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate, cutover and merge pending |
+| 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate and cutover pending; main integration authorized separately by ADR-0039 |
 
 ## Last validation before the reset — 2026-09-07
 
@@ -187,9 +226,10 @@ serial assistant dispatch, and non-streamed responses remain latency limitations
 The trusted ChatGPT route bypasses guard detection under `auto`.
 This diagnosis does not claim a performance fix or a completed release gate.
 
-The optional [Honcho experiment](experiments/honcho/README.md) needs a separate
-bridge login and an explicitly supplied temporary key. Live compatibility,
-derivation and recall comparison remain pending. Its $5 budget is unused.
+The optional [Honcho experiment](experiments/honcho/README.md) uses the shared
+reasoning login and an explicitly supplied dedicated embedding key. Live embedding,
+derivation and recall comparison remain pending. Its $5 budget has one $0.01
+conservative reservation from the rejected embedding canary.
 
 ### Owner dashboard D3 — native memory and isolated Honcho CLI
 
@@ -270,5 +310,6 @@ remain held; table fingerprints survive restart unchanged. The rehearsal is stop
 The first cache-link backup and closed-SQLite export failures are retained in the
 report; both were fixed and successfully repeated. No Telegram test messages were
 sent. P7 **release acceptance remains incomplete** until the owner supplies the
-[remaining Telegram test inputs](docs/release-acceptance.md). Cutover and `main`
-merge remain pending; this tooling commit does not waive those gates.
+[remaining Telegram test inputs](docs/release-acceptance.md). Cutover remains
+pending. ADR-0039 subsequently authorizes main integration without waiving those
+release gates.

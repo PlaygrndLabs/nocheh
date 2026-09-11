@@ -5,7 +5,8 @@ import threading
 import unittest
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -48,3 +49,19 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                 result=workers.submit(resolve)
                 self.assertTrue(attempted.wait(1));self.assertFalse(called.is_set())
             self.assertEqual(result.result(timeout=1).access_token,'synthetic')
+
+    def test_health_reads_login_presence_from_the_shared_speech_boundary(self):
+        from . import runtime
+        class Health(BaseHTTPRequestHandler):
+            def log_message(self,*_):pass
+            def do_GET(self):
+                body=b'{"login_present":true}';self.send_response(200)
+                self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        server=ThreadingHTTPServer(('127.0.0.1',0),Health)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            with patch.dict(os.environ,{'NOCHEH_REASONING_ROUTE':'shared','SPEECH_URL':f'http://127.0.0.1:{server.server_port}'}):
+                self.assertTrue(runtime.login_present())
+            with tempfile.TemporaryDirectory() as folder,patch.object(runtime,'PROFILE_HOME',Path(folder)),patch.dict(os.environ,{'NOCHEH_REASONING_ROUTE':'native'}):
+                self.assertFalse(runtime.login_present());(Path(folder)/'auth.json').touch();self.assertTrue(runtime.login_present())
+        finally:server.shutdown();server.server_close();thread.join()

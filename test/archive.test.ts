@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
-import { canonical, digest, ingest, type Envelope } from '../src/archive.js';
+import { canonical, digest, ingest, archiveStatus, type Envelope } from '../src/archive.js';
 import { initialize } from '../src/database.js';
 import { settings } from '../src/config.js';
 import { drainSpool, fetchAttachments, immutableFile } from '../src/storage.js';
@@ -75,6 +75,13 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
       assert.equal(exported.artifacts.length,0,'non-Telegram payloads cannot trigger Telegram downloads');
     }
     assert.equal((await ingest(pool,{...value,channel:'telegram'})).duplicate,true,'explicit default channel preserves legacy identity');
+    await pool.query("UPDATE dispatches SET state='failed',error_code='model_unavailable',attempts=2 WHERE event_id=$1",[digest(value.key)]);
+    const monitoring=await archiveStatus(pool);
+    assert.equal(monitoring.workflows.length,2,'imports and browser/scheduler records are excluded from Telegram workflows');
+    const failed=monitoring.workflows.find(row=>row.event_id===digest(value.key));
+    assert.equal(failed.state,'failed');assert.equal(failed.attempts,2);assert.equal(failed.files,1);assert.equal(failed.files_waiting,0);
+    assert.ok(!JSON.stringify(monitoring.workflows).includes('Hey Mak'),'workflow metadata does not copy message content');
+    assert.equal(monitoring.telegram.reduce((count,row)=>count+row.count,0),2);
   } finally {
     await pool.end(); await admin.query(`DROP SCHEMA ${namespace} CASCADE`); await admin.end();
     await rm(root,{recursive:true,force:true});

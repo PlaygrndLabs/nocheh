@@ -35,7 +35,9 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 | --- | --- |
 | `.env` | Model, optional guard, port, Telegram settings and internal passwords |
 | `.env.example` | Committed template without credentials |
-| `data/local/hermes/` | Hermes-owned OAuth login, profiles, memory and session state |
+| `data/local/hermes/` | Hermes profiles, memory, session state and inactive native rollback login until cutover |
+| `data/local/provider/auth/` | CLIProxyAPI-owned OAuth login; its only active refresh store after cutover |
+| `data/local/provider/monitor/` | CPA Manager Plus request and usage history |
 | `data/local/files/` | Original attachment bytes |
 | `data/local/spool/` | Durable capture and retry data |
 | `data/local/reports/` | Local validation reports |
@@ -50,25 +52,28 @@ The API binds only to loopback; PostgreSQL has no host port.
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.
 Environment values are visible to someone who can inspect Docker containers. The
 previous file-based Compose secrets were another storage choice, not encrypted
-storage or an architectural requirement. Hermes keeps OAuth in its native file
-because it persists refreshed tokens there. See [ADR-0024](adr/0024-single-environment-configuration.md).
+storage or an architectural requirement. CLIProxyAPI owns the only active OAuth
+store after shared-provider cutover. See [ADR-0024](adr/0024-single-environment-configuration.md)
+and [shared provider operations](provider.md).
 
 The one-time configuration update preserves the old root `.env` privately in
 `data/local/previous-configuration/legacy.env`; unrelated provider keys are not
 imported. Existing rebuild database and service credentials are retained.
 
-The bootstrap transfers the dedicated Phase 1 login into the runtime once. It does
-not share the Codex desktop application's token store. For a new login:
+The bootstrap may retain the dedicated Phase 1 Hermes login as a rollback before
+cutover. It does not share the Codex desktop application's token store. For the
+single shared login and guarded cutover:
 
 ```bash
-./scripts/nocheh login
-./scripts/nocheh verify
+./scripts/nocheh provider login
+./scripts/nocheh provider cutover
 ```
 
 If requested by OpenAI, enable device-code authorization in ChatGPT Security
 settings, then restart login for a fresh code. Verification uses only synthetic
-input; it consumes subscription quota. It exercises token refresh, native chat,
-literal detection and Ogg/Opus transcription inside the running Hermes container.
+input and consumes subscription quota. It checks single-owner refresh behavior,
+Hermes and Honcho reasoning, literal detection, Ogg/Opus transcription, monitoring,
+monitor failure isolation and restart recovery.
 
 ## Daily commands
 
@@ -99,9 +104,9 @@ its own `.env` in that state directory and its own login; do not duplicate a ref
   --state data/restored --project nocheh-restored --port 8795
 ```
 
-Backup stops Telegram ingress first, then archive writers. It takes a PostgreSQL
+Backup stops Telegram ingress first, then archive and provider writers. It takes a PostgreSQL
 custom-format dump and copies the file store, durable spool, native Hermes state,
-configuration and credentials while those writers are stopped. It records file
+provider OAuth/monitor state, configuration and credentials while those writers are stopped. It records file
 checksums and deterministic fingerprints of all 18 current archive, policy,
 review, managed-run and action tables, then
 restarts the previously running services. Backups are private local directories
@@ -115,7 +120,7 @@ validates every saved file before extraction, restores the database, compares al
 table fingerprints, and starts the same images. Unsafe archive paths, links,
 missing files and checksum mismatches fail validation. A report is written under
 the restored state's `reports/` directory. The restored Telegram policy is
-disabled and the saved OAuth file is held as `hermes/auth.restore-pending.json`.
+disabled; saved native and shared OAuth files are held outside their active paths.
 `spool/.restore-inactive`, `admin/tools/inactive` and `hermes/scheduler-inactive`
 hold archive workers, controlled tools and scheduled runs. No second bot, executor
 or refresh owner is activated by the rehearsal. Diagnostics expose these holds.

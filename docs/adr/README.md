@@ -45,3 +45,5 @@ status before the rebuild.**
 | [0035](0035-shared-cliproxy-provider-and-monitoring.md) | One CLIProxyAPI login for Hermes and Honcho, with CPA Manager Plus monitoring | Active implementation plan |
 | [0036](0036-one-compose-project.md) | All local containers in one Compose project while the owner server stays host-managed | Active local packaging |
 | [0037](0037-external-security-plugin-service.md) | Configurable external security service, bounded autonomy and memory-preserving runtime isolation | Accepted; see security-service-plan.md |
+| [0038](0038-observed-telegram-health-and-local-oauth-callback.md) | Observed Telegram polling health, recovery supervision and local OAuth callback | Active locally; shared-provider sign-in and cutover pending |
+| [0039](0039-main-refactor-consolidation.md) | Owner-directed refactor integration into main, separate from release acceptance | Supersedes earlier merge sequencing; remaining live gates stay pending |

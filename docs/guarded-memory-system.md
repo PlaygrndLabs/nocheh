@@ -17,18 +17,21 @@ flowchart TD
     V -->|Learning consent| J[Durable ingestion receipts]
     J --> N["Honcho primary long-term memory<br/>Separate audience and mode generations"]
     N -->|Current recall| H
-    H --> R[Native ChatGPT subscription route]
+    H --> C["Shared CLIProxyAPI reasoning<br/>One ChatGPT subscription login"]
     N --> B[Scoped preparation and spending gateway]
-    B --> C["CLIProxyAPI<br/>Separate ChatGPT subscription sign-in"]
+    B --> C
+    C --> M["CPA Manager Plus<br/>Owner-only monitoring"]
+    C --> T["Read-only speech boundary<br/>Subscription transcription"]
     B --> E["Dedicated embeddings<br/>$5 pilot then $5 per month"]
     G -->|Edit invalidates old context| I["Retire old profiles, caches and memory<br/>Rebuild current authorized sources"]
     I --> H
     I --> J
 ```
 
-Hermes currently retains its tested native subscription route. Honcho's separate
-CLIProxyAPI route requires its own live checks; this diagram does not imply those
-checks passed or that Hermes has been moved to the proxy.
+The shared route stays inactive until `./scripts/nocheh provider cutover` passes
+the live checks recorded in `TASK.md`. The native Hermes route remains the rollback
+during that gate. Honcho memory attachment still requires its separate embedding
+and recall acceptance.
 
 1. Import `Database password: mango123`. The original is archived unchanged.
 2. Preparation saves `Database password: ***`. You can inspect both versions.
@@ -78,9 +81,9 @@ wins, including an empty value. Only the isolated meter receives the paid key.
 Settings displays credential presence, never its value. Edit these fields in `.env`
 and restart the Honcho stack (`up` while isolated, `runtime-up` when attached).
 
-`./scripts/honcho-experiment login` starts CLIProxyAPI's separate device login.
+`./scripts/nocheh provider login` starts the one shared CLIProxyAPI device login.
 The isolated stack uses pinned revisions and cannot bypass the spending gateway.
-After saving the dedicated key and completing the separate login, run these in
+After saving the dedicated embedding key and completing the shared login, run these in
 order, keeping failures pending:
 
 ```sh

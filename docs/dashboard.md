@@ -13,6 +13,9 @@ then run:
 Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
 Open Hermes from the sidebar for its dedicated native dashboard at `/hermes/`;
 its return link brings you back to Nocheh. Old `/nocheh#…` bookmarks still work.
+Open Provider monitor for the CPA Manager Plus Full Mode UI at
+`/providers/management.html`; it reuses the Nocheh owner session and keeps all
+provider credentials server-side.
 
 The launcher starts Nocheh before building the optional native page. If Hermes is
 unavailable, the Nocheh archive/import/maintenance screens remain accessible.
@@ -34,7 +37,7 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Settings → Nocheh settings | Manage Telegram access, model routing and guarding across the installation. Review, save, then apply to running services. |
 | Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
 | Maintenance | Check health, prepare archive downloads, create backups, restart or verify an inactive restore; inspect settings-apply results. |
-| Integrations | Inspect runtime status and capabilities, or open the native Hermes dashboard. |
+| Integrations | Inspect runtime status and capabilities, or open Hermes and provider monitoring. |
 | Honcho memory | Inspect primary-memory readiness, attachment, generations and receipts, plus stored Honcho data. |
 
 Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
@@ -387,3 +390,21 @@ owner revision. Original file downloads remain read only.
 Local Compose now uses the saved guarded version when guarding is on. A synthetic
 live subscription test verified import, edit, scoped retrieval and native Hermes
 archive recall. See TASK.md G7 for evidence and remaining Honcho/release checks.
+
+## System monitoring and subscription login
+
+Open **Monitoring** in Nocheh for observed Telegram polling, captured workflows,
+failed/uncertain outcomes, retries, guarded-copy preparation and provider state.
+It refreshes every ten seconds. A healthy container does not certify model access
+or Telegram reception. **Inspect original** opens the archived evidence.
+
+The provider panel's **OAuth Login → Codex** uses a temporary callback listener on
+the host at port 1455. Start a fresh login after an expired attempt. If that port
+is busy with another login, finish it first or use `./scripts/nocheh provider login`
+for device authentication. Once the shared login is present, run
+`./scripts/nocheh provider cutover` to validate and switch the active route.
+
+The three API keys shown in the provider panel are generated local access keys
+for Hermes, Honcho and guarded-text preparation. The management key protects the
+local administration API. Neither kind is an OpenAI billing key or a substitute
+for the subscription OAuth login.
