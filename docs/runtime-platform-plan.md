@@ -1,67 +1,24 @@
-# Nocheh runtime platform implementation
+# Nocheh runtime platform execution
 
-Accepted 2026-09-07, ADR-0027. Nocheh is the product and Hermes is its first runtime
-adapter. Each phase is verified and committed separately; continue automatically.
-Preserve the archive, native profiles and memory, current credentials and 3D graph.
-
-## Dashboard
-
-Nocheh owns Overview, Archive, Imports, Memory, Graph, Activity/approvals,
-Integrations, Settings and Maintenance. Imports retain upload/preview/start/cancel/
-resume. Memory distinguishes generated notes from cited originals. Hermes opens
-on its own native page for chat, sessions, profiles, files, models, configuration,
-skills/plugins/MCP, cron, channels and system controls. Native operations use actual
-runtime state and become available only after their integration is verified.
+Product requirements live in [SPECS.md](../SPECS.md); implementation and remaining
+live gates live in [TASK.md](../TASK.md). This is the seven-phase execution sequence
+from ADR-0027, interpreted with later memory, guarding, provider, and security ADRs.
+Use [AGENTS.md](../AGENTS.md) for commit/integration workflow.
 
 ## Phases and acceptance
 
-1. **Ownership and adapters:** isolate native RPCs behind capability-checked runtime
-   operations; preserve Telegram identities; represent browser/scheduler originals.
-   Acceptance: existing dispatch, management, errors and archive round-trips pass;
-   a replacement fixture satisfies the runtime contract.
-2. **Independent dashboard:** own React application at `/`; native page at `/hermes/`
-   with a return link, authenticated HTTP/WebSocket proxy and legacy route aliases.
-   Acceptance: navigation, refresh, downloads and mobile work; Nocheh starts with
-   Hermes unavailable and never loads a covering interface over native content.
-3. **Configuration and administration:** actual native data; shared revision-checked
-   writes; global/profile/job policy settings and effective-value provenance; preserve
-   native configuration and scope bindings. Acceptance: real state, CLI/UI round-trip,
-   write conflicts, credential protection and side-effect-free inspection.
-4. **Native browser chat:** native TUI through mandatory managed bootstrap; capture
-   submitted originals and files before execution; owner-private default and explicit
-   group scope; guard every model attempt; single refresh authority and reconnect IDs.
-   Acceptance: chat, resume/cancel, capture failure, scope, guard, quota/refresh and
-   reconnect without duplicate submission. Start with the existing restricted tools.
-5. **Broader tools and approvals:** controlled shell/browser/MCP, scoped workspaces,
-   mediated network/external writes; exact action approvals and revocable bounded
-   standing permissions. Dashboard and owner Telegram commands share decisions.
-   Acceptance: approval/denial, revocation, argument changes, escape prevention and
-   uncertain delivery handling. Default external policy is review each action.
-6. **Native cron:** native management and one supervised scheduler; shared managed
-   execution, explicit scope, local default results, configurable delivery approval,
-   durable fire IDs, visible missed runs and explicit catch-up option. Acceptance:
-   restart, overlap, cancellation, approval, missed runs and no duplicate effects.
-7. **Compatibility and release acceptance:** pinned image-built native assets, small
-   compatibility patch, candidate-upgrade tests, isolated state rehearsal, backup and
-   rollback; CLI runtime/policy/approval operations; portable sources and memory with
-   provenance; AST-only Graphify refresh. Acceptance: UI/CLI regression, outage,
-   rollback and remaining real Telegram/voice/isolation/approval/reconnect gates.
+| Phase | Work | Acceptance procedure |
+| --- | --- | --- |
+| P1 | Capability-checked runtime adapter and captured source identities | Exercise existing dispatch/management errors and archive round-trips; satisfy the runtime contract with a replacement fixture. |
+| P2 | Independent Nocheh root and dedicated native Hermes page | Check navigation, refresh, downloads, HTTP/WebSocket auth, mobile layout, graph, route aliases, and startup with Hermes unavailable. |
+| P3 | Shared native configuration and owner administration | Verify actual runtime state, CLI/UI round-trip, effective-value provenance, stale-write conflicts, credential protection, scoped profiles, and inspection without side effects. |
+| P4 | Managed native browser chat | Test capture before interpretation, files, resume/cancel, profile binding, guard/quota/refresh failure, and reconnect without duplicate submission. Run live owner-private chat acceptance. |
+| P5 | Controlled broader tools and approvals | Test exact approval/denial, standing grants, revocation, changed arguments, scoped workspace/network escape attempts, and uncertain outcomes through UI, CLI, and executor. |
+| P6 | Managed native schedules | Test definitions/fires, restart, overlap, cancellation, delivery approval, missed runs, explicit catch-up, and receipt recovery; verify a live subscription scheduled turn. |
+| P7 | Compatibility and release | Build pinned candidate/runtime/native assets; rehearse isolated state, portable archive/native memory, backup/rollback, and UI/CLI failure cases. Complete real Telegram voice, isolation, approval, silence, and reconnect gates. |
 
-## Compatibility and defaults
+## Related execution
 
-Primary owner API: `/api/nocheh/*`. Preserve `/api/plugins/nocheh/*` and `/nocheh#…`
-aliases. Browser auth belongs to Nocheh; provider and internal credentials never go
-to the browser. Native transport contracts live in the Hermes integration only.
-Persist settings revisions and reject stale writes. New profiles are owner-private;
-managed group profile mappings cannot be widened through native forms.
-
-Owner policies expose defaults, profile overrides and job overrides, including
-guard/trust, tools, approvals, model preferences, memory limits, run budgets,
-scheduling and retries. Global production invariants remain enforced. Native update
-and gateway controls use Nocheh's supervisor; no second poller/scheduler/refresh owner.
-
-Keep Bash and the existing optional Honcho CLI. Honcho production use, additional
-messaging platforms, a second harness, a plugin marketplace and VPS are deferred.
-ADR-0039 supersedes the original branch sequencing: the owner authorized refactor
-integration into `main` on 2026-09-11. Missing live credentials/evidence remain
-pending and cannot be reported as a completed phase or release.
+- [Space memory](space-memory-plan.md), [guarded memory](guarded-memory-plan.md), [shared provider](shared-provider-plan.md), and [security](security-service-plan.md) have separate acceptance/activation checkpoints.
+- [Dashboard operations](dashboard.md) describes actual UI and CLI commands. [Release acceptance](release-acceptance.md) supplies the remaining real input procedure.
+- New native capabilities become available only after their integration checks pass. An offline compatibility pass or merge into main does not satisfy live release or activation gates.

@@ -1,4 +1,54 @@
-## Main consolidation — 2026-09-11
+# Nocheh implementation status
+
+[SPECS.md](SPECS.md) defines the intended product. [AGENTS.md](AGENTS.md) defines
+how agents work. Plans below provide execution order and acceptance procedures;
+this file records actual status. Historical counts are evidence from their recorded
+runs, not tests repeated by the documentation migration.
+
+## Current recorded state — 2026-09-11
+
+| Area | Actual implementation and activation | Evidence / execution plan |
+| --- | --- | --- |
+| Main integration | Refactor consolidated on main; legacy preserved. Release acceptance is incomplete. | [Integration evidence](compatibility/results/2026-09-11-main-consolidation.json), [rebuild plan](docs/rebuild-plan.md) |
+| Runtime and owner dashboard | P1–P6 and dashboard D1–D4 implemented; P7 compatibility/recovery tooling verified, real Telegram gates pending. | [Runtime plan](docs/runtime-platform-plan.md), [operations evidence](compatibility/results/2026-09-08-runtime-platform-operations.json) |
+| Guarded projections | G1–G3 and G5–G6 implemented; on/off guarding and owner edits active locally. G7 guarded recall/restart acceptance passed; Honcho/history acceptance remains separate. | [Guarded-memory plan](docs/guarded-memory-plan.md), [guarded acceptance](compatibility/results/2026-09-09-guarded-memory-acceptance.json) |
+| Security service | SEC1–SEC5 verified; isolated execution and evidence memory active locally. | [Security plan](docs/security-service-plan.md), [activation](compatibility/results/security-service-activation.json) |
+| Telegram monitoring | Recovery supervision, observed polling health, workflow monitoring, and local OAuth callback implemented. | [Recovery evidence](compatibility/results/2026-09-11-telegram-monitoring-oauth.json) |
+| Shared provider | S1–S4 implemented; S5 acceptance/cutover tooling implemented. Native Hermes subscription route remains active; shared-provider login/cutover pending. | [Provider plan](docs/shared-provider-plan.md) |
+| Honcho | Infrastructure and scoped integration implemented; attachment disabled pending live provider, embedding, and memory gates. Dedicated embedding attempt returned HTTP 429 with a retained $0.01 reservation. | [Embedding evidence](compatibility/results/2026-09-09-openai-embeddings.json), [memory instructions](docs/guarded-memory-system.md) |
+| Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
+| Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
+
+Latest recorded runtime regression: 57 service tests and 125 Hermes tests passed;
+one optional Docker security fixture was skipped. These are the main-consolidation
+results, not a new runtime check. No legacy persisted-data migration is required;
+VPS work remains deferred.
+
+## Outstanding acceptance and blockers
+
+- **Telegram / release:** intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
+- **Shared provider:** complete the fresh CLIProxyAPI login and live S5 reasoning, refresh, transcription, monitoring, and recovery checks before cutover. The last recorded shared login count is zero; native routing stays active until acceptance.
+- **Honcho:** resolve embedding capacity/credentials after the HTTP 429; complete shared reasoning and live ingestion, retrieval, restart, and failure checks before attachment. The opted-in history pilot and monthly budget cutover remain pending. Do not reset the spending reservation or infer learning consent.
+- **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
+- **Optional comparison:** the isolated Honcho comparison remains pending and does not block release; production Honcho activation has separate gates.
+- **Remote synchronization:** the documentation increment repeated the fetch and confirmed that local GitHub HTTPS authentication is unavailable. Local integration and remote push outcomes must be reported separately; do not infer synchronization from a local merge.
+
+## Development follow-ups and proposals
+
+- **Per-session previews — not implemented:** add explicit isolation of Compose projects, networks, image tags, ports, state, and credentials before concurrent worktree previews. No duplicate Telegram poller, scheduler, or OAuth refresh owner may use the active installation.
+- **Makefile — not implemented:** `dev` is declared phony but has no recipe. Existing `./scripts/nocheh dev` runs the installation's Compose Watch workflow; it is not an isolated-session setup command. Wiring `make dev`, fresh-worktree setup, and visible persistent preview startup are follow-up tooling work.
+- **Inngest — proposal only:** [workflow-monitoring proposal](docs/workflow-monitoring-plan.md). No orchestration migration or hosted service is activated or included in SPECS.md.
+
+## Historical implementation records
+
+The following entries are retained snapshots. Their old phase statuses, topology,
+provider routes, and instructions describe their recording time. Use the current
+sections above for status and SPECS.md/AGENTS.md for requirements and workflow.
+
+<details>
+<summary>Earlier phase reports and evidence</summary>
+
+#### Main consolidation — 2026-09-11
 
 The owner requested that all refactor work move to `main`.
 [ADR-0039](docs/adr/0039-main-refactor-consolidation.md) separates that integration
@@ -20,7 +70,7 @@ remains active. Provider cutover, Honcho activation and the remaining live Teleg
 gates below stay pending. Inngest remains a proposal. Remote synchronization could
 not be checked because GitHub HTTPS authentication is unavailable locally.
 
-## Telegram recovery and owner monitoring — 2026-09-11
+#### Telegram recovery and owner monitoring — 2026-09-11
 
 Fixed a fatal native polling recovery that remained reported as connected.
 The supervisor now exits on retryable fatal adapter failure for Compose recovery,
@@ -40,7 +90,7 @@ Security service: [SEC1–SEC5 complete; active locally](docs/security-service-p
 Phased implementation and automatic per-phase commits authorized under ADR-0037.
 Existing provider and Honcho activation gates remain separate.
 
-# Shared CLIProxyAPI provider and monitoring (ADR-0035)
+### Shared CLIProxyAPI provider and monitoring (ADR-0035)
 
 Owner-approved implementation plan: [shared-provider-plan.md](docs/shared-provider-plan.md).
 
@@ -56,7 +106,7 @@ The native Hermes subscription route remains active until the candidate shared r
 passes its live checks. Honcho attachment remains gated by its separate embedding and
 memory acceptance; the recorded HTTP 429 is still pending.
 
-## Unified local Compose project — 2026-09-10
+#### Unified local Compose project — 2026-09-10
 
 ADR-0036 places the native dashboard service in the main `nocheh` Compose project.
 Complete: lifecycle tests, 47 service tests, 107 Hermes tests and a no-cache rebuild
@@ -64,7 +114,7 @@ pass. Docker reports one `nocheh` project with 10 healthy services, including th
 native dashboard and optional database viewer. The old `nocheh-dashboard` project
 is removed. The owner management server remains host-managed and healthy.
 
-# Guarded projections and primary Honcho memory (ADR-0033)
+### Guarded projections and primary Honcho memory (ADR-0033)
 
 Owner-approved replacement plan: [guarded-memory-plan.md](docs/guarded-memory-plan.md).
 These phases are distinct from the earlier runtime-platform phases below.
@@ -100,12 +150,12 @@ restart, partial detector failure recovery, derived text and consent separation.
 suite setup failures were resolved using explicit fixture DB credentials and the pinned
 Hermes image. AST graph refreshed without model calls.
 
-# Rebuild progress
+### Rebuild progress
 
 Memory/privacy work is tracked separately in [space-memory-plan.md](docs/space-memory-plan.md)
 and ADR-0030, on the isolated `codex/memory-space-policies` worktree.
 
-## Owner dashboard extension — 2026-09-07
+#### Owner dashboard extension — 2026-09-07
 
 Accepted [dashboard/CLI plan](docs/dashboard-cli-plan.md), ADR-0025. Each increment
 is committed separately; these do not replace the production release gates below.
@@ -156,7 +206,7 @@ No legacy data migration is required. VPS work is deferred by ADR-0019.
 | 7 — Honcho comparison, maximum $5 | Runnable harness at `2d27262`; live comparison pending separate credentials; optional |
 | 8 — Operations, cutover, merge | Backup/restore implemented at `4efe7c3`; real Telegram gate and cutover pending; main integration authorized separately by ADR-0039 |
 
-## Last validation before the reset — 2026-09-07
+#### Last validation before the reset — 2026-09-07
 
 - 14 TypeScript tests pass against real Compose PostgreSQL where required;
   30 Python native integration/operations tests pass. No main-suite skips.
@@ -177,7 +227,7 @@ No legacy data migration is required. VPS work is deferred by ADR-0019.
   fingerprints and 38 state files; five restored services were healthy and inactive.
   The rehearsal is stopped. [Report](compatibility/results/2026-09-07-environment.json).
 
-## Cleanup and behavior fixes
+#### Cleanup and behavior fixes
 
 The retired application is recoverable on the legacy branch. Its remaining local
 `web/` build output and dependencies were removed. Active documentation describes
@@ -194,7 +244,7 @@ Committed media avoids native duplicate downloads and unscoped sticker vision;
 round video notes use the transcript path. Malformed source messages remain
 archived with a visible suppressed dispatch and do not starve subsequent work.
 
-## Remaining release gates
+#### Remaining release gates
 
 The first real owner-DM capture and reply passed after enabling the gateway.
 Fresh subscription refresh, chat, detector and Ogg/Opus checks also passed.
@@ -208,9 +258,9 @@ locally. Follow [Telegram setup and acceptance](docs/telegram.md).
 Intentional group silence, private/group isolation, voice persistence,
 owner-approved delivery and reconnect/restart checks remain **unrun**.
 Container health does not prove these.
-Do not merge until they pass; commit the completed phase and proceed automatically.
+The original restriction on merging was superseded by ADR-0039; these release checks remain separate from Git integration.
 
-## Local inspection and latency — 2026-09-07
+#### Local inspection and latency — 2026-09-07
 
 The [pgweb browser](docs/database-viewer.md) is running on loopback port 8782.
 UI queries and PostgreSQL read-only privileges were verified, including a denied
@@ -231,7 +281,7 @@ reasoning login and an explicitly supplied dedicated embedding key. Live embeddi
 derivation and recall comparison remain pending. Its $5 budget has one $0.01
 conservative reservation from the rejected embedding canary.
 
-### Owner dashboard D3 — native memory and isolated Honcho CLI
+##### Owner dashboard D3 — native memory and isolated Honcho CLI
 
 - [x] Owner-only profile enumeration, bounded native notes and paginated SQLite
   session inspection; selected profiles cannot open another profile's session.
@@ -243,7 +293,7 @@ conservative reservation from the rejected embedding canary.
   two CLI boundary tests and one real upstream CLI/SDK fixture test pass.
 - [ ] Optional live Honcho compatibility remains pending separate credentials.
 
-### Owner dashboard D4 — evidence graph and operations
+##### Owner dashboard D4 — evidence graph and operations
 
 The owner's 3D graph revision replaces fixed SVG columns with a local Three.js
 space, deterministic spatial layout, orbit/pan/zoom, node search, direct-connection
@@ -268,7 +318,7 @@ node picking, original sources, orbit/zoom, search, scope pagination and full sc
 - [x] Browser-native authenticated ZIP download verified; download-only HttpOnly
   cookie cannot access settings, and cross-origin downloads are denied.
 
-### Owner dashboard clarity — 2026-09-07
+##### Owner dashboard clarity — 2026-09-07
 
 - [x] Navigation grouped into Explore, Manage and Experiments, with purpose text
   and an overview explaining Nocheh's controls and native Hermes responsibilities.
@@ -280,7 +330,7 @@ node picking, original sources, orbit/zoom, search, scope pagination and full sc
   masked credential review/discard, diagnostics and responsive layout. Build and
   owner-management HTTP regression pass; AST-only code graph refreshed.
 
-### Nocheh runtime platform (ADR-0027)
+##### Nocheh runtime platform (ADR-0027)
 
 Accepted [seven-phase plan](docs/runtime-platform-plan.md). Complete and verify each
 phase, commit separately, then continue automatically. Existing release gates above
@@ -297,7 +347,7 @@ remain active. This direction supersedes the earlier Hermes-hosted presentation.
 | P7 — Compatibility and release acceptance | Tooling verified and committed in the P7 increment: candidate runtime/native/UI builds, portable archive + memory export, inactive recovery with all 18 tables and 175 state files preserved across restart; 41 JS/TS + 91 Python tests and 2 host management checks pass. Real Telegram gates remain pending |
 
 
-### P7 operations evidence — 2026-09-08
+##### P7 operations evidence — 2026-09-08
 
 [Content-free report](compatibility/results/2026-09-08-runtime-platform-operations.json).
 The native candidate builds and tests with no live state, credentials or test
@@ -313,3 +363,5 @@ sent. P7 **release acceptance remains incomplete** until the owner supplies the
 [remaining Telegram test inputs](docs/release-acceptance.md). Cutover remains
 pending. ADR-0039 subsequently authorizes main integration without waiving those
 release gates.
+
+</details>

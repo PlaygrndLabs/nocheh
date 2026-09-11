@@ -1,7 +1,9 @@
 # Space memory implementation
 
-Accepted in ADR-0030. Hermes handles learning; Nocheh handles owned source delivery
-and audience access. Import review needs explicit approval at import confirmation.
+[SPECS.md](../SPECS.md) defines memory, audience access, and import consent.
+[TASK.md](../TASK.md) records current status; ADR-0030 and ADR-0033 explain the
+native/primary-memory decisions. This file retains the M1–M5 checkpoints and
+recorded limitations. Follow [AGENTS.md](../AGENTS.md) for Git integration.
 
 | Phase | Deliverable | Status |
 |---|---|---|
@@ -24,12 +26,14 @@ Acceptance: owner cross-source recall; inherited topic overrides; exact sharing 
 revocation; no cross-audience originals/citations/notes; native review lifecycle;
 import-without-review and explicitly approved review; restart/retry/quota handling;
 STT preservation; UI/CLI round-trip; reproducible compatibility tests. Missing live
-credentials remain pending. No production deployment or main merge is implied.
+credentials remain pending. Acceptance here does not activate providers or declare
+a release. Verified Git integration follows AGENTS.md independently.
 
 Final fixture evidence: [2026-09-08-space-memory.json](../compatibility/results/2026-09-08-space-memory.json).
-This branch is not release-complete. Live native review/filter quality, real Telegram
+Release acceptance is incomplete. Live native review/filter quality, real Telegram
 acceptance, the blocked filtering extension and the browser policy-save check remain
-pending. The five checkpoints are integrated with the current runtime-platform branch.
+pending. The five checkpoints were integrated with the runtime-platform work and
+subsequently consolidated into main under ADR-0039.
 The Nocheh dashboard hosts memory controls; native browser chat and administration
 are retained. Integration build and 37 TypeScript tests pass; native tests cover
 72 cases, with the browser tool-count expectation updated for memory recall.

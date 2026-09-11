@@ -1,51 +1,29 @@
-# Security service implementation
+# Security service execution and acceptance
 
-Authorized 2026-09-10 under [ADR-0037](adr/0037-external-security-plugin-service.md).
-The owner requested automatic progression and a commit after each verified phase.
-This document tracks security work independently of pending shared-provider and
-Honcho activation. Local Compose is the release target.
+[SPECS.md](../SPECS.md) defines security, authority, and memory preservation.
+[TASK.md](../TASK.md) records actual activation. ADR-0037 supplies the rationale;
+[AGENTS.md](../AGENTS.md) defines the increment and integration workflow.
 
-| Phase | Deliverable and acceptance | Status |
-|---|---|---|
-| SEC1 | Boundary inventory; versioned plugin/policy contract; precedence, autonomy and baseline tests | Complete |
-| SEC2 | External provider/context broker and isolated turn launcher; no credential/root-profile/egress escape; failure tests | Complete; active locally after SEC5 |
-| SEC3 | Durable configuration, bounded authority and clear decision/effect records; owner CLI/API; concurrency/revocation tests | Complete |
-| SEC4 | Memory evidence separated from instruction authority without truncation; exact context and retrieval parity checks | Complete; live comparison passed in SEC5 |
-| SEC5 | Adversarial and local Compose acceptance, lifecycle/failure evidence and quality/autonomy gate; documented activation status | Complete; local activation verified |
+## Phases and acceptance
 
-Each phase records its checks here before committing. Tests that skip for absent
-services do not count as acceptance. Live model quality is reported separately
-from deterministic transport/recall preservation. Retain current runtime routing
-until the candidate passes its applicable acceptance checks.
+| Phase | Work and acceptance procedure |
+| --- | --- |
+| SEC1 | Inventory provider/context, Telegram, scheduled delivery, owner administration, detection, and transcription boundaries. Verify versioned policy/protocol contracts and baseline authority/recall behavior. |
+| SEC2 | Implement external broker and isolated launcher; test denied credential, filesystem, network, hosted-tool, and opaque-context escapes, stale scopes/epochs, and broker failures. |
+| SEC3 | Connect durable owner policy, bounded grants, and effect receipts through CLI/API. Test concurrency, revocation between claim/start, explicit-deny precedence, and uncertain outcomes. |
+| SEC4 | Preserve full authorized memory as evidence. Compare exact requests, citations, native histories, model/reasoning settings, and context accounting; reject lossy or approval-heavy context handling. |
+| SEC5 | Run adversarial and real Compose isolation/recovery checks, live recall/grounding comparison, backup/inactive-state checks, then record deliberate activation and quality limits. |
 
-## Boundary inventory and baseline
+SEC1–SEC5 are verified and active locally; shared-provider and Honcho activation
+remain separately gated. [Owner operations](security-service.md) contains commands
+and rollback instructions. Quality measurements are finite observations, separate
+from deterministic transport and authorization checks.
 
-* Before SEC2, `turn_process.py` spawned a child with a provider token, native profile
-  and shared container filesystem. The child lacks native shell tools, but that
-  is not operating-system isolation. Replace this managed path with a trusted
-  isolated launcher and scoped broker credential.
-* `request_boundary.py` guards HTTPX requests; `prepared-context.ts` preserves
-  durable projections. Keep their exact preparation semantics; enforce provider
-  forwarding externally so bypassing the patch cannot bypass preparation.
-* `access.ts` checks signed turn identity, sharing revision and guard epoch.
-  Reuse it at the broker. Relay only known scoped archive endpoints, never admin
-  routes. Private recall must retain its existing authorized source coverage.
-* `controlled-actions.ts` already binds exact arguments, bounded grants and
-  durable execution receipts. Extend it instead of creating a second executor.
-  `scripts/tool_execution.py` remains responsible for restricted public HTTPS
-  and offline/shell containers. A proposal's URL is not permission to send it.
-* Telegram delivery, scheduled delivery, owner administration, trusted secret
-  detection and trusted transcription are separate paths. Their existing gates
-  remain mandatory and must be listed in final coverage, not implied covered by
-  a managed-turn proxy. No claim to isolate a compromised trusted host or Docker.
-* Native memory currently enters the system prompt. Move complete evidence to
-  a lower-trust context message while preserving the text, session retrieval,
-  selected model and context limits. Measure actual requests and recall.
+## Historical verification and activation evidence
 
-Acceptance baseline: exact prepared text and owner edits; all authorized source
-references; native notes/history; model and reasoning configuration; no prompts
-for routine context; one bounded approval usable across matching turns; no
-automatic replay after an uncertain effect. Missing live providers remain pending.
+The following records describe their phase checkpoints, including temporary
+candidate switches and pending activation at those times. TASK.md is the current
+status entry point; SPECS.md supplies the product requirements.
 
 SEC1 verification: TypeScript build, four contract behavior tests and nine existing
 Hermes controlled-tool/turn-process baseline tests passed without skips. Graphify

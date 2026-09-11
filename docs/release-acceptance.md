@@ -1,6 +1,7 @@
 # Remaining local release acceptance
 
-Nocheh's runtime-platform implementation is tracked in [TASK.md](../TASK.md).
+[SPECS.md](../SPECS.md) defines release requirements; [TASK.md](../TASK.md) records
+actual implementation and acceptance. This file supplies the remaining live procedure.
 These checks need actual incoming Telegram traffic; synthetic archive events and
 healthy containers cannot substitute for it. Credentials are already configured.
 No VPS or Honcho key is required.
@@ -23,5 +24,7 @@ approving an external delivery on the owner's behalf requires explicit owner
 authorization for those actions. Group members cannot approve or change policy.
 
 Before cutover, all checks must pass and restored pending work must be reconciled
-against the source installation. Keep `main` untouched until then. The optional
-Honcho comparison remains independent and does not block this production gate.
+against the source installation. Verified Git integration follows
+[AGENTS.md](../AGENTS.md) independently under ADRs 0039–0040; it does not complete
+these checks or activate the runtime. The optional Honcho comparison remains
+independent and does not block this production gate.
