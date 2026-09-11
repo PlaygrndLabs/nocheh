@@ -10,6 +10,7 @@ import { guardedSchema } from './guarded.js';
 import {contextSchema} from './prepared-context.js';
 import {honchoSchema} from './honcho.js';
 import {securitySchema} from './security/store.js';
+import {workflowSchema} from './workflows/store.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   const pool = new pg.Pool({
@@ -41,6 +42,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
     await client.query(contextSchema);
     await client.query(honchoSchema);
     await client.query(securitySchema);
+    await client.query(workflowSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
