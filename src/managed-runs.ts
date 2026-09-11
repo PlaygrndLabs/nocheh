@@ -14,6 +14,7 @@ import {requestAction} from './actions.js';
 import {guardState,guardedValue,prepareGuarded} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
 import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {recordSchedule} from './workflows/schedules.js';
 
 export const managedRunSchema=`CREATE TABLE IF NOT EXISTS managed_runs (
   event_id text PRIMARY KEY REFERENCES events(id),
@@ -36,7 +37,28 @@ function scopeFor(config:Settings,value:unknown) {
   if(!config.assistant.owner_id||(!owner&&!config.assistant.group_ids.includes(scope)))throw new HttpError(403,'run_scope_denied');
   return {scope,owner};
 }
-export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser') {
+export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority:ExecutionAuthority=legacyAuthority) {
+  if(channel==='browser')return captureRunInput(pool,config,input,channel);
+  const client=await pool.connect();let held=false,capacity=false;
+  try {
+    held=await enterFamily(client,'schedules',authority.owner,authority.epoch);if(!held)throw new HttpError(409,'workflow_owner_changed');
+    await client.query("SELECT pg_advisory_lock(hashtext(current_schema()),hashtext('schedule-capacity'))");capacity=true;
+    const b=object(input),key=JSON.stringify([channel,b.scope,b.conversation,b.id]);
+    const previous=(await client.query('SELECT payload FROM events WHERE source_key=$1',[key])).rows[0];
+    let reason=b.fire_reason;
+    if(previous)reason=JSON.parse(previous.payload.toString()).fire_reason;
+    else if(authority.owner==='inngest'&&!['missed','overlap'].includes(String(reason))){
+      const active=(await client.query(`SELECT count(*)::int AS total,bool_or(convert_from(e.payload,'UTF8')::jsonb->>'profile'=$1) AS busy
+        FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE e.channel='scheduler' AND r.state IN ('captured','running')`,[b.profile])).rows[0];
+      if(active.total>=4||active.busy)reason='overlap';
+    }
+    return await captureRunInput(pool,config,{...b,fire_reason:reason},channel);
+  }finally{await releaseOperation(client,async()=>{
+    if(capacity)await client.query("SELECT pg_advisory_unlock(hashtext(current_schema()),hashtext('schedule-capacity'))");
+    if(held)await leaveFamily(client,'schedules');
+  });}
+}
+async function captureRunInput(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler') {
   const body=object(input),{scope}=scopeFor(config,body.scope);
   const id=identifier(body.id),conversation=identifier(body.conversation),profile=identifier(body.profile);
   const space=validateSpace(body.space??scope),revision=body.revision??0;
@@ -71,10 +93,11 @@ export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,ch
         [digest(captured.id+':'+ref),captured.id,file.kind,ref,JSON.stringify({file_name:file.name}),file.sha256,file.bytes]);
     }
     const missed=channel==='scheduler'&&['missed','overlap'].includes(String(body.fire_reason));
-    await client.query('INSERT INTO managed_runs(event_id,state,error_code,job_id,logical_profile) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',
-      [captured.id,missed?'cancelled':'captured',missed?'scheduled_'+body.fire_reason:null,channel==='scheduler'?body.job_id:null,channel==='scheduler'?identifier(object(body.definition).profile):null]);
+    await client.query('INSERT INTO managed_runs(event_id,state,error_code,job_id,logical_profile,admitted) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',
+      [captured.id,missed?'cancelled':'captured',missed?'scheduled_'+body.fire_reason:null,channel==='scheduler'?body.job_id:null,channel==='scheduler'?identifier(object(body.definition).profile):null,channel==='scheduler']);
+    if(channel==='scheduler')await client.query("SELECT nocheh_workflow_request('schedules',$1)",['run:'+captured.id]);
     await client.query('COMMIT');
-    return {event_id:captured.id,source_key:value.key,duplicate:captured.duplicate,attachments};
+    return {event_id:captured.id,source_key:value.key,duplicate:captured.duplicate,attachments,...(channel==='scheduler'?{fire_reason:body.fire_reason}:{})};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 export async function claimRun(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority:ExecutionAuthority=legacyAuthority) {
@@ -147,14 +170,16 @@ export async function cancelScheduled(pool:pg.Pool,input:unknown) {
 }
 export async function recoverScheduled(pool:pg.Pool) {
   await pool.query(`UPDATE managed_runs r SET state='interrupted',error_code='scheduler_restarted',lease_until=NULL,updated_at=now()
-    FROM events e WHERE r.event_id=e.id AND e.channel='scheduler' AND r.state IN ('captured','running')`);
+    FROM events e WHERE r.event_id=e.id AND e.channel='scheduler' AND r.state IN ('captured','running')
+    AND EXISTS(SELECT 1 FROM workflow_owners WHERE family='schedules' AND owner='legacy')`);
   return {recovered:true};
 }
 export async function scheduleDefinition(pool:pg.Pool,config:Settings,input:unknown) {
   const body=object(input),{scope}=scopeFor(config,body.scope),profile=identifier(body.profile),job=identifier(body.job_id);
   const definition=object(body.definition),version=digest(canonical(definition));
-  return ingest(pool,{version:1,key:'schedule-definition:'+digest(canonical({profile,job,version})),channel:'scheduler',origin:'live',kind:'schedule_definition',
+  const captured=await ingest(pool,{version:1,key:'schedule-definition:'+digest(canonical({profile,job,version})),channel:'scheduler',origin:'live',kind:'schedule_definition',
     bot_id:'',scope,source_id:job,revision:version,occurred_at:null,text:string(definition.prompt,100000),payload:{profile,job_id:job,definition}});
+  await recordSchedule(pool,captured.id,body);return captured;
 }
 export async function scheduledRuns(pool:pg.Pool,input:unknown) {
   const body=object(input),profile=body.profile?identifier(body.profile):null,job=body.job_id?identifier(body.job_id):null;

@@ -1,5 +1,6 @@
 import {captureInput,claimRun,finishRun,renewRun,prepareRun,cancelScheduled,recoverScheduled,scheduleDefinition,scheduledRuns,scheduledDelivery} from './managed-runs.js';
 import {admitBrowser,browserObservation,activeBrowser,cancelBrowser,browserWorkflowContext,browserAuthority} from './workflows/browser.js';
+import {scheduleOwnership,scheduledContext,scheduledAuthority,scheduledObservation} from './workflows/schedules.js';
 import {ownerSecurityRoute} from './security/owner-api.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
@@ -95,7 +96,8 @@ const server = createServer((req, res) => { void (async () => {
   };
   const claim=async(body:unknown,channel:'browser'|'scheduler')=>{
     if((await guardState(pool)).mode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,String(object(body).event_id));
-    return claimRun(pool,config,body,channel,channel==='browser'&&object(body).owner_epoch!==undefined?await browserAuthority(pool,config,body):undefined);
+    const authority=object(body).owner_epoch===undefined?undefined:channel==='browser'?await browserAuthority(pool,config,body):await scheduledAuthority(pool,config,body);
+    return claimRun(pool,config,body,channel,authority);
   };
   if(config.service==='guard' && !principal.admin && req.method==='POST' && path==='/v1/guard') {
     const body=object(await readJson(req,1024*1024));
@@ -206,7 +208,11 @@ const server = createServer((req, res) => { void (async () => {
   }
   if(config.service==='archive'&&req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
     const body=await readJson(req);
-    if(path==='/v1/scheduler/input')return json(res,200,await captureInput(pool,config,body,'scheduler'));
+    if(path==='/v1/scheduler/input')return json(res,200,await captureInput(pool,config,body,'scheduler',object(body).owner_epoch===undefined?undefined:{owner:'inngest',epoch:Number(object(body).owner_epoch)}));
+    if(path==='/v1/scheduler/ownership')return json(res,200,await scheduleOwnership(pool));
+    if(path==='/v1/scheduler/workflow-context')return json(res,200,await scheduledContext(pool,config,body));
+    if(path==='/v1/scheduler/observe')return json(res,200,await scheduledObservation(pool,body));
+    if(path==='/v1/scheduler/prepare')return json(res,200,await prepareRun(pool,config,body,call));
     if(path==='/v1/scheduler/claim')return json(res,200,await claim(body,'scheduler'));
     if(path==='/v1/scheduler/finish')return json(res,200,await finishRun(pool,body));
     if(path==='/v1/scheduler/heartbeat')return json(res,200,await renewRun(pool,body));

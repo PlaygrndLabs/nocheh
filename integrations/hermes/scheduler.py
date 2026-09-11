@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from .capture import canonical,digest,immutable_file
-from .native_cron import archive,store,inspect,profiles,definition,revision
+from .native_cron import archive,store,inspect,profiles,definition,revision,workflow_cursor,sync_job
 from .native_memory import save_receipt
 
 
@@ -25,6 +25,7 @@ class Scheduler:
             runner=run_process
         self.runner=runner;self.stopping=threading.Event();self.active={};self.thread=None;self.status='starting'
         self.receipts=self.root/'nocheh-scheduler-receipts'
+        self.managed_flush=lambda:None
 
     def publish(self,receipt):
         outcome=self.call('finish',receipt['finish'])
@@ -37,7 +38,8 @@ class Scheduler:
                 native.update_job(job['id'],{'nocheh_running':None,'last_run_at':receipt['at'],
                     'last_status':'success' if outcome['state']=='done' else 'error',
                     'last_error':None if outcome['state']=='done' else receipt['finish'].get('error_code') or outcome['state'],
-                    'last_delivery_error':delivery.get('reason'),'nocheh_delivery':delivery})
+                    'last_delivery_error':delivery.get('reason'),'nocheh_delivery':delivery,'nocheh_workflow_synced':False})
+        return outcome
 
     def flush(self):
         self.receipts.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -48,6 +50,7 @@ class Scheduler:
 
     def recover(self):
         self.flush();self.call('recover',{})
+        if self.call('ownership',{}).get('owner')=='inngest':return
         from cron import jobs as native
         for _,home,_ in profiles(self.admin):
             if not (home/'cron/jobs.json').exists():continue
@@ -56,18 +59,33 @@ class Scheduler:
                     if job.get('nocheh_running'):
                         native.update_job(job['id'],{'nocheh_running':None,'last_status':'error','last_error':'scheduler_restarted'})
 
-    def tick(self,at=None):
+    def tick(self,at=None,target=None,expected=None,epoch=None):
         at=at or now();self.flush()
+        ownership=self.call('ownership',{})
+        if not ownership.get('admission',True):return {'state':'waiting','next_attempt':int((at+timedelta(seconds=30)).timestamp()*1000)}
+        owner=ownership.get('owner','legacy')
+        if epoch is not None and (owner!='inngest' or ownership.get('epoch')!=epoch):raise ValueError('workflow_owner_changed')
+        if epoch is None and owner!='legacy':return
         from cron import jobs as native
         for name,home,bound in profiles(self.admin):
+            if target and home.name!=target[0]:continue
             if not (home/'cron/jobs.json').exists():continue
             with store(home):
                 for job in inspect(home):
+                    if target and job['id']!=target[1]:continue
                     if self.stopping.is_set():return
-                    if not job.get('nocheh_registered') or job.get('nocheh_removed'):continue
+                    if expected and expected!=workflow_cursor(job,home.name):return {'state':'skipped'}
+                    if not job.get('nocheh_registered'):
+                        if target:return {'state':'waiting','next_attempt':int((at+timedelta(seconds=30)).timestamp()*1000)}
+                        continue
+                    if job.get('nocheh_removed'):
+                        if target:return {'state':'completed'}
+                        continue
                     pending=job.get('nocheh_pending')
                     due=job.get('next_run_at')
-                    if not pending and (not job.get('enabled',True) or not due or date(due)>at):continue
+                    if not pending and (not job.get('enabled',True) or not due or date(due)>at):
+                        if target:return {'state':'waiting','next_attempt':int(date(due).timestamp()*1000)} if job.get('enabled',True) and due else {'state':'completed'}
+                        continue
                     scheduled_for=pending['at'] if pending else due
                     reason=pending['reason'] if pending else 'scheduled'
                     if job.get('nocheh_running') or bound.profile in self.active or len(self.active)>=4:reason='overlap'
@@ -78,8 +96,9 @@ class Scheduler:
                     captured=self.call('input',{'id':fire,'conversation':job['id'],'scope':bound.chat_id,'profile':bound.profile,
                         'space':bound.space,'revision':bound.revision,'text':job['prompt'],'files':[],
                         'job_id':job['id'],'job_revision':revision(job,home.name),'scheduled_for':scheduled_for,
-                        'fire_reason':reason,'definition':snapshot})
-                    updates={'nocheh_pending':None}
+                        'fire_reason':reason,'definition':snapshot,**({'owner_epoch':epoch} if epoch is not None else {})})
+                    reason=captured.get('fire_reason',reason)
+                    updates={'nocheh_pending':None,'nocheh_workflow_synced':False}
                     if not pending:
                         if reason=='missed' and job['schedule']['kind']=='interval':
                             seconds=job['schedule']['minutes']*60
@@ -90,15 +109,19 @@ class Scheduler:
                         completed=(job.get('repeat') or {}).get('completed',0)+1
                         times=(job.get('repeat') or {}).get('times')
                         updates.update(next_run_at=next_run,repeat={'completed':completed,'times':times})
-                        if not next_run or times is not None and completed>=times:updates.update(enabled=False,state='completed')
+                        if not next_run or times is not None and completed>=times:updates.update(enabled=False,state='completed',next_run_at=None)
                     if reason in ('missed','overlap'):
                         updates.update(nocheh_missed={'from':scheduled_for,'until':at.isoformat(),'reason':reason},last_status='skipped',last_error='scheduled_'+reason)
-                        native.update_job(job['id'],updates);continue
+                        saved=native.update_job(job['id'],updates)
+                        if target:sync_job(self.call,saved,home,bound);return {'state':'completed'}
+                        continue
                     # Schedule advancement follows durable capture, before execution.
                     # Retrying the same fire can only return its previous claim.
                     updates['nocheh_running']=captured['event_id']
                     if reason=='catch_up':updates['nocheh_missed']=None
-                    native.update_job(job['id'],updates)
+                    saved=native.update_job(job['id'],updates)
+                    if epoch is not None:
+                        sync_job(self.call,saved,home,bound);return {'state':'completed'}
                     try:claim=self.call('claim',{'event_id':captured['event_id'],'actor':self.actor,'scope':bound.chat_id,'profile':bound.profile})
                     except Exception:
                         # No child has started. Retire this uncertain claim; never
@@ -112,6 +135,34 @@ class Scheduler:
                     cancelled=threading.Event()
                     thread=threading.Thread(target=self.execute,args=(home,bound,job,claim,cancelled),daemon=True)
                     self.active[bound.profile]=(thread,cancelled);thread.start()
+        if target:return {'state':'skipped'}
+
+    def advance(self,body):
+        if (self.root/'scheduler-inactive').exists():return {'state':'waiting','next_attempt':int((now()+timedelta(seconds=30)).timestamp()*1000)}
+        return self.tick(target=(body['logical_profile'],body['job_id']),expected=body['cursor'],epoch=body['owner_epoch'])
+
+    def sync(self):
+        from cron import jobs as native
+        for _,home,bound in profiles(self.admin):
+            if not (home/'cron/jobs.json').exists():continue
+            with store(home):
+                for job in inspect(home):
+                    if job.get('nocheh_workflow_synced'):continue
+                    if not job.get('nocheh_definition_version'):job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex})
+                    sync_job(self.call,job,home,bound)
+
+    def context(self,body,claim=False):
+        if (self.root/'scheduler-inactive').exists():return {'state':'waiting'}
+        context=self.call('workflow-context',body)
+        for _,home,bound in profiles(self.admin):
+            if home.name!=context['logical_profile']:continue
+            with store(home):
+                job=next((job for job in inspect(home) if job['id']==context['job_id']),None)
+                if not job or job.get('nocheh_removed') or bound.profile!=context['profile'] or job.get('nocheh_definition_version')!=context['definition'].get('execution_version'):
+                    self.call('cancel',{'event_id':context['event_id']});return {'state':'cancelled'}
+                if job.get('nocheh_running')!=context['event_id']:return {'state':'waiting'}
+                return {'state':'ready','context':context,'scope':bound,**({'claim':self.call('claim',context)} if claim else {})}
+        self.call('cancel',{'event_id':context['event_id']});return {'state':'cancelled'}
 
     def execute(self,home,bound,job,claim,cancelled):
         event=claim['event_id'];session='cron_'+job['id']+'_'+event[:24]
@@ -157,7 +208,10 @@ class Scheduler:
                 else:
                     try:
                         if not recovered:self.recover();recovered=True
-                        self.tick();self.status='ready'
+                        ownership=self.call('ownership',{})
+                        self.managed_flush();self.sync()
+                        if ownership.get('owner')=='inngest':self.flush();self.status='workflow_owned'
+                        else:self.tick();self.status='ready'
                     except Exception:self.status='waiting_for_archive'
                 save_receipt(self.root/'scheduler-status.json',json.dumps({'state':self.status,'actor':self.actor,'at':now().isoformat(),'active':len(self.active)}))
                 self.stopping.wait(2)

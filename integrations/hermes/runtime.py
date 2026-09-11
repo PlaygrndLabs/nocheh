@@ -154,8 +154,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def dispatch(self, body):
         if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
-            if body.get('channel')=='browser':
+            if body.get('channel') in ('browser','scheduler'):
                 if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
+                if self.path.endswith('/start'):return MANAGED.start(body)
                 return getattr(MANAGED.runs,self.path.rsplit('/',1)[-1])(body)
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             if body.get('channel','telegram')!='telegram':raise ValueError('runtime_channel_unavailable')
@@ -164,6 +165,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path=='/internal/browser/events':
             if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
             return MANAGED.events(body)
+        if self.path=='/internal/schedule/advance':
+            if SCHEDULER is None:raise RuntimeError('scheduler_not_started')
+            return SCHEDULER.advance(body)
         if self.path == '/internal/security/transport':
             from .security_transport import broker_transport
             return broker_transport(resolve_credentials(),MODEL if body.get('metadata') is True else None)
@@ -275,8 +279,9 @@ def main():
         administration=Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space))
         from .managed_async import ManagedAsync
         global MANAGED
-        MANAGED=ManagedAsync(administration,resolve_credentials)
         SCHEDULER=Scheduler(administration,resolve_credentials)
+        MANAGED=ManagedAsync(administration,resolve_credentials,scheduler=SCHEDULER)
+        SCHEDULER.managed_flush=MANAGED.flush
         SCHEDULER.start()
         try: server.serve_forever()
         finally:

@@ -131,5 +131,64 @@ class SchedulerTests(unittest.TestCase):
             self.assertEqual(json.loads(archive_tools.controlled_tool('shell',{'command':'pwd'}))['error'],'tool_disabled_by_owner')
             request.assert_not_called()
 
+    def migrate(self):
+        from .managed_async import ManagedAsync
+        original=self.call
+        def call(route,body):
+            if route=='ownership':return {'owner':'inngest','epoch':2,'admission':True}
+            if route=='workflow-context':
+                source=self.inputs[body['event_id']]
+                return {'event_id':body['event_id'],'actor':'run_'+body['event_id'],'scope':source['scope'],'profile':source['profile'],
+                    'logical_profile':source['definition']['profile'],'job_id':source['job_id'],'job_revision':source['job_revision'],
+                    'definition':source['definition'],'conversation':'cron_'+source['job_id']+'_'+body['event_id'][:24],'owner_epoch':2}
+            if route=='prepare':return {'files':[],'transcripts':[]}
+            if route=='observe':return {'state':self.finished.get(body['event_id'],{}).get('state','running')}
+            return original(route,body)
+        async def runner(*args,emit=None,cancelled=None):return await self.runner(*args,cancelled=cancelled)
+        self.scheduler.call=call
+        managed=ManagedAsync(self.admin,lambda:SimpleNamespace(access_token='ephemeral'),runner=runner,scheduler=self.scheduler)
+        self.addCleanup(managed.stop);self.scheduler.managed_flush=managed.flush
+        return managed
+
+    def workflow(self,job):
+        from .native_cron import workflow_cursor
+        home=Path(job['hermes_home']);stored=next(row for row in inspect(home) if row['id']==job['id'])
+        return {'logical_profile':home.name,'job_id':job['id'],'cursor':workflow_cursor(stored,home.name),'owner_epoch':2}
+
+    def finish_managed(self,managed,body):
+        for _ in range(200):
+            state=managed.runs.resume(body)
+            if state['state'] in ('done','cancelled','failed','ambiguous'):return state
+            time.sleep(.01)
+        self.fail('scheduled async run did not settle')
+
+    def test_inngest_waits_keep_native_cadence_and_final_repeat_runs_once(self):
+        job=self.create(repeat=1);managed=self.migrate()
+        future=self.workflow(job);self.assertEqual(self.scheduler.advance(future)['state'],'waiting')
+        home=self.due(job);request=self.workflow(job)
+        self.scheduler.tick();self.assertEqual(self.inputs,{},'legacy execution loop is inactive')
+        self.assertEqual(self.scheduler.advance(request)['state'],'completed');self.assertEqual(self.executions,0)
+        stored=inspect(home)[0];self.assertFalse(stored['enabled']);self.assertEqual(stored['repeat']['completed'],1)
+        event=stored['nocheh_running'];body={'channel':'scheduler','event_id':event,'attempt':1,'owner_epoch':2}
+        self.assertEqual(self.scheduler.advance(request)['state'],'skipped')
+        managed.start(body);self.assertEqual(self.finish_managed(managed,body)['state'],'done')
+        managed.start(body);self.assertEqual(self.executions,1);self.assertIsNone(inspect(home)[0]['nocheh_running'])
+        self.assertTrue(managed.path(body,'.receipt').exists());self.assertTrue(managed.path(body,'.published').exists())
+        self.assertNotIn('Synthetic result',json.dumps(managed.runs.events(body)))
+
+    def test_inngest_missed_slot_explicit_catchup_and_edit_before_execution(self):
+        job=self.create();managed=self.migrate();home=self.due(job,120)
+        self.assertEqual(self.scheduler.advance(self.workflow(job))['state'],'completed');self.assertEqual(self.executions,0)
+        self.assertEqual(next(iter(self.inputs.values()))['fire_reason'],'missed')
+        self.request('/api/cron/jobs/'+job['id']+'/catch-up','POST',{'request_id':'one-catchup'})
+        request=self.workflow(job);self.assertEqual(self.scheduler.advance(request)['state'],'completed')
+        event=inspect(home)[0]['nocheh_running'];body={'channel':'scheduler','event_id':event,'attempt':1,'owner_epoch':2}
+        self.scheduler.recover();self.assertEqual(inspect(home)[0]['nocheh_running'],event,'restart retains workflow occurrence')
+        current=self.request('/api/cron/jobs/'+job['id'])
+        self.request('/api/cron/jobs/'+job['id'],'PUT',{'updates':{'prompt':'Owner edited during wait','_nocheh_revision':current['_nocheh_revision']}})
+        self.assertEqual(managed.start(body)['state'],'cancelled');self.assertEqual(self.executions,0)
+        self.assertFalse(managed.path(body,'.started').exists())
+        self.assertEqual(self.scheduler.advance(request)['state'],'skipped')
+
 
 if __name__=='__main__':unittest.main()

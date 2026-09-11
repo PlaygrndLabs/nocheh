@@ -80,13 +80,17 @@ export async function browserAuthority(pool:pg.Pool,config:Settings,input:unknow
 }
 
 export function browserOperation(pool:pg.Pool,config:Settings,call:RuntimeCall):WorkflowOperation {
+  return managedRunOperation(pool,config,call,'browser');
+}
+export function managedRunOperation(pool:pg.Pool,config:Settings,call:RuntimeCall,channel:'browser'|'scheduler'):WorkflowOperation {
+  const family=channel==='browser'?'browser':'schedules';
   return async(event,authority)=>{
     const load=async()=> (await pool.query('SELECT * FROM managed_runs WHERE event_id=$1',[event])).rows[0];
     let row=await load();if(!row?.admitted)return observation('skipped','admission');
     if(row.state==='captured'&&!row.cancel_requested&&(await guardState(pool)).mode==='on'&&(await pool.query("SELECT 1 FROM guard_sources WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event])).rowCount)
       return observation('waiting','preparation',0,Date.now()+5000,'guard_pending');
     if(['captured','running'].includes(row.state)) {
-      const body={channel:'browser',event_id:event,attempt:1,owner_epoch:authority.epoch,asynchronous:true};
+      const body={channel,event_id:event,attempt:1,owner_epoch:authority.epoch,asynchronous:true};
       let runtime:Record<string,unknown>;
       try {
         if(row.cancel_requested)await call('run.cancel',body);
@@ -103,11 +107,11 @@ export function browserOperation(pool:pg.Pool,config:Settings,call:RuntimeCall):
       }
       row=await load();
     }
-    const state:WorkflowState=row.state==='done'?'completed':row.state==='interrupted'?'ambiguous':row.state==='captured'?'waiting':row.state;
+    const state:WorkflowState=row.state==='done'?'completed':row.state==='interrupted'?'ambiguous':row.state==='captured'?'waiting':row.state==='cancelled'&&/^scheduled_(missed|overlap)$/.test(row.error_code??'')?'skipped':row.state;
     if(row.actor)await pool.query(`INSERT INTO workflow_receipts(workflow_id,step,attempt,state,receipt_id)
-      SELECT id,'browser',1,$2,$3 FROM workflow_registry WHERE family='browser' AND job_id=$1
+      SELECT id,$4,1,$2,$3 FROM workflow_registry WHERE family=$4 AND job_id=$1
       ON CONFLICT(workflow_id,step,attempt) DO UPDATE SET state=excluded.state,receipt_id=excluded.receipt_id,updated_at=now() WHERE workflow_receipts.state='started'`,
-      [event,row.state==='running'?'started':row.state==='interrupted'?'ambiguous':row.state==='done'?'done':'failed',row.result_id]);
+      [channel==='browser'?event:'run:'+event,row.state==='running'?'started':row.state==='interrupted'?'ambiguous':row.state==='done'?'done':'failed',row.result_id,family]);
     return observation(state,row.state==='captured'?'admission':'assistant',row.actor?1:0,Date.now()+1000,state==='running'?'receipt_pending':state==='waiting'?'prerequisite':null);
   };
 }
