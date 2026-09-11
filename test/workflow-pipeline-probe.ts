@@ -13,43 +13,64 @@ import {pauseFamily,switchFamily,publishOutbox,registerWorker} from '../src/work
 import {pipelineOperations} from '../src/workflows/pipeline.js';
 import {workflowFunctions} from '../src/workflows/engine.js';
 import {workflowClient,connectWorkflows} from '../src/workflows/client.js';
+import {captureInput,claimRun,finishRun} from '../src/managed-runs.js';
+import {admitBrowser,browserOperation,browserWorkflowContext,browserAuthority} from '../src/workflows/browser.js';
+import type {RuntimeCall} from '../src/runtime.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_required');
 const admin=new pg.Pool(),namespace='pipeline_probe_'+Date.now();await admin.query(`CREATE SCHEMA ${namespace}`);
 const pool=new pg.Pool({options:`-c search_path=${namespace}`,max:8});
 const root=await mkdtemp(join(tmpdir(),'pipeline-probe-'));
 const config={...settings(),dataDir:root,assistant:{enabled:true,owner_id:'123',group_ids:[] as string[]}};
 const client=workflowClient('pipeline');let connection:Awaited<ReturnType<typeof connectWorkflows>>|undefined;
-const calls={download:0,transcribe:0,start:0,resume:0};
+const calls={download:0,transcribe:0,start:0,resume:0,browserStart:0,browserResume:0};
 try {
   await initialize(pool);await setGuardMode(pool,'on');
-  for(const family of ['preparation','telegram'] as const){await pauseFamily(pool,family,1);await switchFamily(pool,family,1,'inngest');}
-  const operations=pipelineOperations(pool,config,async(operation,input)=>{
+  for(const family of ['preparation','telegram','browser'] as const){await pauseFamily(pool,family,1);await switchFamily(pool,family,1,'inngest');}
+  const runtime:RuntimeCall=async(operation,input)=>{
+    if(input.channel==='browser') {
+      if(operation==='run.resume'){
+        calls.browserResume++;
+        if(!calls.browserStart)return {state:'not_found'};
+        await finishRun(pool,{event_id:input.event_id,actor:'run_'+input.event_id,state:'done',session:'native-'+namespace,text:'Synthetic private browser result canary'});
+        return {state:'done'};
+      }
+      if(operation==='run.start'){
+        if(++calls.browserStart!==1)throw Error('duplicate_browser_effect');
+        const context=await browserWorkflowContext(pool,config,input);
+        await claimRun(pool,config,context,'browser',await browserAuthority(pool,config,context));
+        throw Error('synthetic lost browser response');
+      }
+      throw Error('unexpected_browser_operation');
+    }
     if(operation==='source.file') {calls.download++;if(calls.download===1)throw Error('synthetic download outage');return {bytes_base64:Buffer.from('synthetic Ogg bytes').toString('base64')};}
     if(operation==='perception.transcribe'){calls.transcribe++;return {success:true,transcript:'Synthetic private transcript canary'};}
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='run.start'){calls.start++;if(calls.start!==1||input.attempt!==1||input.asynchronous!==true)throw Error('duplicate_runtime_effect');throw Error('synthetic lost start response after acceptance');}
     if(operation==='run.resume'){calls.resume++;if(input.attempt!==1)throw Error('replacement_attempt');return {state:'done'};}
     throw Error('unexpected_runtime_operation');
-  });
+  };
+  const operations={...pipelineOperations(pool,config,runtime),browser:browserOperation(pool,config,runtime)};
   connection=await connectWorkflows('pipeline',client,workflowFunctions(client,pool,operations));
   const source:Envelope={version:1,key:'telegram:fixture:'+namespace+':update:1',origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'1',revision:'1',occurred_at:null,text:null,
     payload:{update_id:1,message:{message_id:1,chat:{id:123,type:'private'},from:{id:123,is_bot:false},voice:{file_id:'voice1'}}}};
   await ingest(pool,source);await ingest(pool,source);
+  const browserInput={id:'browser-'+namespace,scope:'123',profile:'owner',conversation:'native-'+namespace,text:'Synthetic private browser input canary',files:[]};
+  const browser=await captureInput(pool,config,browserInput);await admitBrowser(pool,config,{...browserInput,event_id:browser.event_id});
   const deadline=Date.now()+120000;
   while(Date.now()<deadline) {
-    if(connection.state==='ACTIVE')await registerWorker(pool,'pipeline',['preparation','telegram']);
+    if(connection.state==='ACTIVE')await registerWorker(pool,'pipeline',['preparation','telegram','browser']);
     await publishOutbox(pool,event=>client.send(event));
-    const rows=(await pool.query("SELECT family,state,stage FROM workflow_registry WHERE family IN ('preparation','telegram') ORDER BY family")).rows;
+    const rows=(await pool.query("SELECT family,state,stage FROM workflow_registry WHERE family IN ('preparation','telegram','browser') ORDER BY family")).rows;
     if(rows.length>=2&&rows.every(row=>['completed','skipped'].includes(row.state)))break;
     await delay(250);
   }
-  const rows=(await pool.query("SELECT id,family,state,stage,attempts FROM workflow_registry WHERE family IN ('preparation','telegram') ORDER BY family")).rows;
+  const rows=(await pool.query("SELECT id,family,state,stage,attempts FROM workflow_registry WHERE family IN ('preparation','telegram','browser') ORDER BY family")).rows;
   if(rows.length<2||rows.some(row=>!['completed','skipped'].includes(row.state))||!rows.some(row=>row.family==='preparation'&&row.state==='completed'))throw Error('pipeline_did_not_complete');
   // A new transport event beyond any event dedup guarantee still cannot create
   // another effect for this permanently completed Nocheh workflow identity.
   const telegram=rows.find(row=>row.family==='telegram')!;
   await client.send({id:randomBytes(32).toString('hex'),name:'nocheh/workflow.requested',data:{workflow_id:telegram.id,dispatch:1,family:'telegram'}});
   await delay(1500);
-  if(calls.start!==1||calls.transcribe!==1||calls.download!==2||calls.resume!==1)throw Error('pipeline_effect_count_mismatch');
+  if(calls.start!==1||calls.transcribe!==1||calls.download!==2||calls.resume!==1||calls.browserStart!==1||calls.browserResume!==2)throw Error('pipeline_effect_count_mismatch');
   console.log(JSON.stringify({pipeline_probe:'passed',calls,workflows:rows.map(({id,...row})=>row),receipts:(await pool.query('SELECT step,attempt,state FROM workflow_receipts')).rows}));
 }finally{await connection?.close();await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}

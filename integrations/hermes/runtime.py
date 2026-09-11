@@ -34,6 +34,7 @@ ERRORS = deque(maxlen=20)
 ASSISTANT = None
 ADMIN = None
 SCHEDULER = None
+MANAGED = None
 
 
 def configure():
@@ -112,6 +113,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "telegram": ASSISTANT.health()['state'] if ASSISTANT else 'not_started',
                                 "telegram_details": ASSISTANT.health() if ASSISTANT else {},
                                 "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable",
+                                "managed_runs":len(MANAGED.runs.active) if MANAGED else 0,
                                 "scheduler": SCHEDULER.status if SCHEDULER else 'not_started'})
 
     def do_POST(self):
@@ -152,10 +154,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def dispatch(self, body):
         if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
+            if body.get('channel')=='browser':
+                if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
+                return getattr(MANAGED.runs,self.path.rsplit('/',1)[-1])(body)
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             if body.get('channel','telegram')!='telegram':raise ValueError('runtime_channel_unavailable')
             if self.path.endswith(('/start','/resume')) and (ASSISTANT.loop is None or ASSISTANT.status!='connected'):raise RuntimeError('telegram_not_ready')
             return getattr(ASSISTANT.runs,self.path.rsplit('/',1)[-1])(body)
+        if self.path=='/internal/browser/events':
+            if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
+            return MANAGED.events(body)
         if self.path == '/internal/security/transport':
             from .security_transport import broker_transport
             return broker_transport(resolve_credentials(),MODEL if body.get('metadata') is True else None)
@@ -264,10 +272,15 @@ def main():
         ADMIN = admin = subprocess.Popen([sys.executable, '-m', 'integrations.hermes.native_admin'], stdout=quiet, stderr=quiet)
         from .native_admin import Administration,audience_revision
         from .scheduler import Scheduler
-        SCHEDULER=Scheduler(Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space)),resolve_credentials)
+        administration=Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space))
+        from .managed_async import ManagedAsync
+        global MANAGED
+        MANAGED=ManagedAsync(administration,resolve_credentials)
+        SCHEDULER=Scheduler(administration,resolve_credentials)
         SCHEDULER.start()
         try: server.serve_forever()
         finally:
+            MANAGED.stop()
             SCHEDULER.stop()
             admin.terminate()
             try: admin.wait(timeout=10)

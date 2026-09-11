@@ -13,6 +13,7 @@ import {validateSpace,parentSpace,policyRevision} from './spaces.js';
 import {requestAction} from './actions.js';
 import {guardState,guardedValue,prepareGuarded} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
+import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
 
 export const managedRunSchema=`CREATE TABLE IF NOT EXISTS managed_runs (
   event_id text PRIMARY KEY REFERENCES events(id),
@@ -25,6 +26,8 @@ ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS cancel_requested boolean NOT N
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS job_id text;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS logical_profile text;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS guard_epoch bigint;
+ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS admitted boolean NOT NULL DEFAULT false;
+ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS owner_epoch integer;
 CREATE INDEX IF NOT EXISTS managed_runs_job ON managed_runs(logical_profile,job_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS managed_runs_lease ON managed_runs(lease_until) WHERE state='running';`;
 const identifier=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_run_identity');return id;};
@@ -74,11 +77,13 @@ export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,ch
     return {event_id:captured.id,source_key:value.key,duplicate:captured.duplicate,attachments};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
-export async function claimRun(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser') {
+export async function claimRun(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority:ExecutionAuthority=legacyAuthority) {
   const body=object(input),event=string(body.event_id,64),actor=identifier(body.actor),profile=identifier(body.profile);
   const {scope,owner}=scopeFor(config,body.scope);
-  const client=await pool.connect();
+  const client=await pool.connect();const family=channel==='browser'?'browser':'schedules';let held=false;
   try {
+    held=await enterFamily(client,family,authority.owner,authority.epoch);
+    if(!held)throw new HttpError(409,'workflow_owner_changed');
     await client.query('BEGIN');
     const {rows}=await client.query<{state:string;actor:string|null;original_text:Buffer;payload:Buffer;source_key:string;content:Buffer|null;error_code:string|null}>(
       `SELECT r.state,r.actor,e.original_text,e.payload,e.source_key,d.content,r.error_code FROM managed_runs r JOIN events e ON e.id=r.event_id
@@ -92,12 +97,13 @@ export async function claimRun(pool:pg.Pool,config:Settings,input:unknown,channe
     const guard=await guardState(client);
     const text=guard.mode==='on'?(await guardedValue(pool,'events:'+event)).value.text:row.original_text.toString();
     if(!owner&&(payload.revision!==revision||profile!=='nocheh-'+digest(space+':policy:'+revision).slice(0,24)))throw new HttpError(409,'browser_audience_changed');
-    await client.query("UPDATE managed_runs SET state='running',actor=$2,guard_epoch=$3,lease_until=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1",[event,actor,guard.epoch]);
+    if(authority.owner==='inngest'&&!(await client.query('SELECT 1 FROM managed_runs WHERE event_id=$1 AND admitted',[event])).rowCount)throw new HttpError(409,'run_not_admitted');
+    await client.query("UPDATE managed_runs SET state='running',actor=$2,guard_epoch=$3,owner_epoch=$4,lease_until=now()+interval '60 seconds',updated_at=now() WHERE event_id=$1",[event,actor,guard.epoch,authority.epoch??null]);
     await client.query('COMMIT');
     await allowPrepared(pool,{scope:owner?null:scope,admin:false,turnEvent:event,space,revision,guard_epoch:guard.epoch},{text});
     return {event_id:event,state:'running',claimed:true,text,payload,source_key:row.source_key,channel,guard_mode:guard.mode,
       archive_credential:turnToken(config.token,owner?null:scope,Date.now()+600000,event,{space,revision,guard_epoch:guard.epoch}),owner,scope};
-  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{await releaseOperation(client,async()=>{if(held)await leaveFamily(client,family);});}
 }
 export async function finishRun(pool:pg.Pool,input:unknown) {
   const body=object(input),event=string(body.event_id,64),actor=identifier(body.actor),state=string(body.state,32);

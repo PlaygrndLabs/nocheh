@@ -1,4 +1,5 @@
 import {captureInput,claimRun,finishRun,renewRun,prepareRun,cancelScheduled,recoverScheduled,scheduleDefinition,scheduledRuns,scheduledDelivery} from './managed-runs.js';
+import {admitBrowser,browserObservation,activeBrowser,cancelBrowser,browserWorkflowContext,browserAuthority} from './workflows/browser.js';
 import {ownerSecurityRoute} from './security/owner-api.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
@@ -94,7 +95,7 @@ const server = createServer((req, res) => { void (async () => {
   };
   const claim=async(body:unknown,channel:'browser'|'scheduler')=>{
     if((await guardState(pool)).mode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,String(object(body).event_id));
-    return claimRun(pool,config,body,channel);
+    return claimRun(pool,config,body,channel,channel==='browser'&&object(body).owner_epoch!==undefined?await browserAuthority(pool,config,body):undefined);
   };
   if(config.service==='guard' && !principal.admin && req.method==='POST' && path==='/v1/guard') {
     const body=object(await readJson(req,1024*1024));
@@ -233,6 +234,11 @@ const server = createServer((req, res) => { void (async () => {
   if(config.service==='archive' && req.method==='POST' && path.startsWith('/v1/browser/')) {
     const body=await readJson(req,36*1024*1024);
     if(path==='/v1/browser/input')return json(res,200,await captureInput(pool,config,body));
+    if(path==='/v1/browser/admit')return json(res,200,await admitBrowser(pool,config,body));
+    if(path==='/v1/browser/observe')return json(res,200,await browserObservation(pool,config,body));
+    if(path==='/v1/browser/active')return json(res,200,await activeBrowser(pool,config,body));
+    if(path==='/v1/browser/cancel')return json(res,200,await cancelBrowser(pool,config,body));
+    if(path==='/v1/browser/workflow-context')return json(res,200,await browserWorkflowContext(pool,config,body));
     if(path==='/v1/browser/claim')return json(res,200,await claim(body,'browser'));
     if(path==='/v1/browser/finish')return json(res,200,await finishRun(pool,body));
     if(path==='/v1/browser/heartbeat')return json(res,200,await renewRun(pool,body));
