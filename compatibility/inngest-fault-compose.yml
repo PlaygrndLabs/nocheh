@@ -1,0 +1,21 @@
+# Combine only with inngest-compose.yml and a unique synthetic fixture project.
+x-fault: &fault
+  extends: {file: inngest-compose.yml, service: checks}
+  profiles: [faults]
+  environment:
+    NOCHEH_FAULT_SCHEMA: ${NOCHEH_FAULT_SCHEMA:?Explicit synthetic schema required}
+  volumes:
+    - ${NOCHEH_FAULT_STATE:?Explicit synthetic fixture state required}:/fixture
+services:
+  fault-runtime:
+    <<: *fault
+    command: [node, dist/test/workflow-fault-probe.js, runtime]
+  fault-worker:
+    <<: *fault
+    command: [node, dist/test/workflow-fault-probe.js, worker]
+  fault-publisher:
+    <<: *fault
+    command: [node, dist/test/workflow-fault-probe.js, publisher]
+  fault-check:
+    <<: *fault
+    command: [node, dist/test/workflow-fault-probe.js, status]
