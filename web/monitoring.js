@@ -1,4 +1,5 @@
 import * as React from 'react';
+import {Workflows} from './workflows.js';
 const {createElement:h,useState,useEffect}=React;
 const time=value=>value?new Date(value).toLocaleString():'Not observed';
 const names={pending:'Queued',running:'Running',failed:'Failed · will retry',done:'Completed',ambiguous:'Delivery uncertain',suppressed:'Skipped',ready:'Ready',connected:'Receiving',recovering:'Recovering',disabled:'Disabled',starting:'Starting',credentials_missing:'Login missing',connection_failed:'Connection failed',runtime_failed:'Runtime failed'};
@@ -29,6 +30,7 @@ export function Monitoring({call,compact=false,renderSource}){
   const counts=(archive.telegram||[]).reduce((all,row)=>({...all,[row.state]:row.count}),{});
   const visible=rows.filter(row=>filter==='all'||filter==='attention'&&['pending','running','failed','ambiguous'].includes(row.state)||row.state===filter);
   return h('div',{className:'n-monitor'},banner,error&&h('p',{role:'alert'},error),
+    h(Workflows,{call,health:data.workflows,onSource:open}),
     h('div',{className:'n-metrics'},...[
       ['Completed',counts.done||0,'Completed Telegram turns; some may intentionally be silent.'],
       ['Waiting or running',(counts.pending||0)+(counts.running||0),'Captured work waiting for its next stage.'],

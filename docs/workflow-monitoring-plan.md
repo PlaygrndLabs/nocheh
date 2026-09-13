@@ -51,6 +51,29 @@ runtime run.start, run.events, run.resume and run.cancel instead of exposing
 Hermes identifiers or credential transport through the owner interface. Inngest
 permits inspection; Nocheh endpoints validate retry/cancel requests.
 
+<monitoring_implementation>
+
+I6 exposes `/api/nocheh/workflows` list/detail and revision-validated retry/cancel,
+with `./scripts/nocheh workflows list|show|status|retry|cancel` equivalents. Closed
+outcomes and active effects reject generic controls. Native schedule definitions
+and source/consent policies retain their existing controls. An explicitly resumed
+cancelled memory review creates a new generation while preserving its closed
+receipt. Domain state reconciles observations; stored errors and protected source
+content never enter the owner metadata projection.
+
+The pinned native Inngest UI is served under `/inngest` with an existing owner
+session. Only parsed, allowlisted GraphQL queries reach its backend; mutations,
+event ingestion and debugger paths are denied. Its pinned route/client adapters
+and local read-only value renderer are covered by fixture and browser checks.
+See [ADR-0043](adr/0043-owner-workflow-inspection.md) and
+[monitoring evidence](../compatibility/results/2026-09-14-inngest-monitoring.json).
+
+The synthetic Monitoring preview uses an explicit fixture-only network, generated
+credentials, no runtime/executor, and dedicated loopback ports. This does not
+implement general installation preview isolation or `make dev`.
+
+</monitoring_implementation>
+
 </implementation>
 
 <acceptance>

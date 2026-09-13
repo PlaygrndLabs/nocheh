@@ -1,6 +1,8 @@
 import {captureInput,claimRun,finishRun,renewRun,prepareRun,cancelScheduled,recoverScheduled,scheduleDefinition,scheduledRuns,scheduledDelivery} from './managed-runs.js';
 import {admitBrowser,browserObservation,activeBrowser,cancelBrowser,browserWorkflowContext,browserAuthority} from './workflows/browser.js';
 import {scheduleOwnership,scheduledContext,scheduledAuthority,scheduledObservation} from './workflows/schedules.js';
+import {listWorkflows,workflowDetail,workflowHealth,controlWorkflow} from './workflows/owner.js';
+import {proxyInngestInspection} from './workflows/inspection.js';
 import {ownerSecurityRoute} from './security/owner-api.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
@@ -56,10 +58,20 @@ const server = createServer((req, res) => { void (async () => {
   const principal=reader(req, config.token);
   await assertAudience(pool,principal);
   if(config.service==='archive'&&await ownerSecurityRoute(pool,principal,req,res,url))return;
-  if(config.service==='archive'&&path.startsWith('/v1/workflows/')){
+  if(config.service==='archive'&&(path==='/v1/workflows'||path.startsWith('/v1/workflows/'))){
     admin(principal);
+    if(path.startsWith('/v1/workflows/inspection/')){
+      if(process.env.NOCHEH_WORKFLOWS_ENABLED!=='true')throw new HttpError(503,'workflows_unavailable');
+      return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
+    }
+    if(req.method==='GET'){
+      if(path==='/v1/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
+      if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(pool));
+      if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(pool,path.split('/').at(-1)!));
+    }
     if(req.method==='POST'){
       const body=await readJson(req);
+      if(/^\/v1\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(path))return json(res,200,await controlWorkflow(pool,path.split('/')[3]!,path.split('/')[4]!,body));
       if(path==='/v1/workflows/imports/confirm')return json(res,200,await confirmImport(pool,body));
       if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(pool,object(body).id));
       if(path==='/v1/workflows/host/claim')return json(res,200,await claimHostWorkflow(pool,body));
