@@ -25,6 +25,7 @@ DO $$ BEGIN
 END $$;
 ALTER ROLE nocheh_viewer WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '%s';
 GRANT pg_read_all_data TO nocheh_viewer;
+GRANT CONNECT ON DATABASE nocheh TO nocheh_viewer;
 ALTER ROLE nocheh_viewer SET default_transaction_read_only = on;
 ALTER ROLE nocheh_viewer SET statement_timeout = '15s';
 """ % password

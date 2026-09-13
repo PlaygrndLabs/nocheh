@@ -33,10 +33,13 @@ test('owner workflow metadata preserves cursor precision, domain truth and stale
     assert.equal(browser.registry_state,'queued');assert.equal(browser.state,'completed');assert.equal(browser.can_retry,false);
     const detail=await workflowDetail(pool,browser.id);assert.equal(detail.source_event_id,captured.event_id);assert.equal(detail.outbox.length,1);
     assert.ok(!JSON.stringify(detail).includes('canary'));assert.ok(!JSON.stringify(detail).includes('lease_token'));
-    await registerWorker(pool,'pipeline',['browser']);await heartbeat(pool,'workflow-worker');
+    await registerWorker(pool,'pipeline',['browser']);await heartbeat(pool,'workflow-pipeline');
     let health=await workflowHealth(pool);assert.equal(health.workers.find(row=>row.family==='browser').connected,true);
+    assert.equal(health.services.find(row=>row.service==='workflow-pipeline').fresh,true);
     await pool.query("UPDATE workflow_worker_registrations SET seen_at=now()-interval '2 minutes'");
+    await pool.query("UPDATE service_heartbeats SET seen_at=now()-interval '2 minutes' WHERE service='workflow-pipeline'");
     health=await workflowHealth(pool);assert.equal(health.workers.find(row=>row.family==='browser').connected,false);
+    assert.equal(health.services.find(row=>row.service==='workflow-pipeline').fresh,false);
     assert.ok(health.counts.some(row=>row.family==='browser'&&row.state==='completed'&&row.count===1));
     assert.equal(health.outbox.admitted,0);assert.ok(health.outbox.pending>0);
     assert.ok(!JSON.stringify(health).includes('canary'));
