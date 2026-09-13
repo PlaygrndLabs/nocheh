@@ -117,9 +117,41 @@ completion is mirrored to the registry's domain record, with a protected host
 receipt retained until acknowledged. Host-ready status is durable and required
 for both directions of imports/tools ownership changes.
 
-The full candidate outage/recovery rehearsal and real local activation remain
-pending. These commands alone do not establish that the active installation has
-passed its cutover gates.
+The fresh candidate fault rehearsal passed with separate synthetic Compose
+projects. It covers Inngest, Redis, PostgreSQL, worker, publisher and runtime
+outages; durable capture; crash after a runtime effect but before acknowledgment;
+worker kill; legacy scanner rollback; and quiesced inactive restore. Real local
+activation remains pending. Fixture evidence does not establish that the active
+installation has passed its cutover gates.
+
+<fault_rehearsal>
+
+Combine `compatibility/inngest-compose.yml` with
+`compatibility/inngest-fault-compose.yml`. Supply a fresh synthetic dotenv file
+with a unique `NOCHEH_FIXTURE_PROJECT` matching `nocheh-inngest-fault-HEX`,
+`NOCHEH_FAULT_SCHEMA=fault_HEX`, an absolute `NOCHEH_FAULT_STATE` under this
+worktree's `data/`, a separately tagged `NOCHEH_FIXTURE_IMAGE`, and independently
+generated 64-hex PostgreSQL, Inngest and service credentials. No ports are
+published and the network is internal. Services use production restart policies.
+
+The `fault-check` command `node dist/test/workflow-fault-probe.js` accepts `init`,
+`capture LABEL`, `migrate inngest|legacy`, `status`, `verify SOURCE_COUNT`,
+`crash-receipt`, and `legacy-drain SOURCE_COUNT`. Start `fault-runtime`,
+`fault-worker`, and `fault-publisher` only inside that project. Stop/restart each
+dependency separately and wait for its expected source count before the next
+fault. `crash-receipt` arms an exit after the next synthetic runtime receipt is
+fsynced, before its HTTP response. Runtime requests never reach a provider.
+
+`python3 -m scripts.workflow_fixture_recovery FIXTURE_ENV FRESH_DESTINATION`
+stops the fixture's execution authorities and Inngest, then uses the production
+workflow snapshot/restore functions. A fresh restore project verifies archive and
+Inngest table fingerprints, protected file hashes, Redis AOF conversion and a
+database restart. Only restored PostgreSQL and Redis are started. Pending capture
+and inactive markers remain available for inspection; restored workers and event
+publication are not enabled. See
+[fault and recovery evidence](../compatibility/results/2026-09-14-inngest-fault-recovery.json).
+
+</fault_rehearsal>
 
 </cutover_implementation>
 

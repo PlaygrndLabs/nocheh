@@ -3,6 +3,7 @@ name: ${NOCHEH_FIXTURE_PROJECT:?Explicit fixture project required}
 services:
   postgres:
     image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    restart: unless-stopped
     environment:
       POSTGRES_USER: nocheh
       POSTGRES_DB: nocheh
@@ -27,6 +28,7 @@ services:
       postgres: {condition: service_healthy}
   workflow-redis:
     image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
+    restart: unless-stopped
     command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]
     volumes: [redis_data:/data]
     healthcheck:
@@ -36,6 +38,7 @@ services:
       retries: 30
   inngest:
     image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
+    restart: unless-stopped
     command: [inngest, start]
     environment:
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
