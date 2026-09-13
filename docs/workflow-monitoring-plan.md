@@ -105,6 +105,10 @@ unfinished jobs are adopted, with the same upload hash, scope mapping, explicit
 learning choice and checkpoint. Closed jobs remain closed. A legacy import
 interrupted by admission pause becomes resumable instead of a terminal failure.
 
+Before tool cutover, verify the local `nocheh-tools:local` image exists; build it
+from `deploy/tools.Dockerfile` when absent. Host worker connectivity alone does
+not prove sandbox availability.
+
 Tool handoff drains both host executors and publishes retained receipts through
 the existing actor-validated finish endpoint. It never claims another action.
 A lost acknowledgment retains the receipt for replay. Previously running
