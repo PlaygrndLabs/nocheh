@@ -18,13 +18,54 @@ runs, not tests repeated by the documentation migration.
 | Honcho | Infrastructure and scoped integration implemented; attachment disabled pending live provider, embedding, and memory gates. Dedicated embedding attempt returned HTTP 429 with a retained $0.01 reservation. | [Embedding evidence](compatibility/results/2026-09-09-openai-embeddings.json), [memory instructions](docs/guarded-memory-system.md) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
-| Inngest workflows | I1 infrastructure/recovery, I2 outbox/registry/service fences, and I3 Connect source preparation plus asynchronous Telegram, and I4 memory requests/review/Honcho reconciliation and bounded host Connect imports, plus I5 approved Telegram actions, host controlled tools, durable browser turns and native schedule controllers/occurrences verified with synthetic fixtures and real local Connect. I6 owner API/CLI, validated controls, unified Monitoring and protected inspection-only Inngest history are verified. I7 atomic family migration, native receipt observation, host import adoption, tool receipt handoff, fresh candidate outages, rollback and quiesced inactive restore are fixture-verified; local orchestration services and both Connect apps are healthy. Imports, controlled tools, approved messages, memory review and Honcho orchestration now use Inngest ownership at epoch 2. Live import, sandbox, denial, consent and detached-Honcho checks pass; existing memory retries retain their deadlines and uncertain records stay closed. Browser is also active through Inngest: live native streaming, replay, stable resume, cancellation and its native memory review pass. Schedules, preparation and Telegram retain legacy ownership. Preparation/Telegram cutover is held by failed subscription transcription (speech provider login absent). | [Foundation evidence](compatibility/results/2026-09-12-inngest-foundation.json), [Outbox evidence](compatibility/results/2026-09-12-inngest-outbox.json), [Job-operation evidence](compatibility/results/2026-09-12-inngest-job-operations.json), [Telegram evidence](compatibility/results/2026-09-12-inngest-telegram.json), [Memory evidence](compatibility/results/2026-09-12-inngest-memory.json), [Host import evidence](compatibility/results/2026-09-12-inngest-host-imports.json), [Approved-action evidence](compatibility/results/2026-09-12-inngest-approved-actions.json), [Host-tool evidence](compatibility/results/2026-09-12-inngest-host-tools.json), [Browser and fresh-image evidence](compatibility/results/2026-09-12-inngest-browser.json), [Schedule evidence](compatibility/results/2026-09-12-inngest-schedules.json), [Monitoring evidence](compatibility/results/2026-09-14-inngest-monitoring.json), [Cutover core evidence](compatibility/results/2026-09-14-inngest-cutover-core.json), [Host handoff evidence](compatibility/results/2026-09-14-inngest-host-handoff.json), [Fault and recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [Local infrastructure evidence](compatibility/results/2026-09-14-inngest-local-infrastructure.json), [Local import cutover](compatibility/results/2026-09-14-inngest-local-imports.json), [Local tool cutover](compatibility/results/2026-09-14-inngest-local-tools.json), [Local approval cutover](compatibility/results/2026-09-14-inngest-local-actions.json), [Local memory cutover](compatibility/results/2026-09-14-inngest-local-memory.json), [Local Honcho ownership](compatibility/results/2026-09-14-inngest-local-honcho.json), [Local browser cutover](compatibility/results/2026-09-14-inngest-local-browser.json), [execution plan](docs/workflow-monitoring-plan.md) |
+| Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, detached Honcho orchestration, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership: subscription transcription failed because speech login is absent, and real owner Telegram acceptance remains pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
 
 Latest fresh-image workflow regression: 73 service tests and 152 Hermes tests passed;
 one optional Docker security fixture was skipped. Real local Connect outages,
 crash-after-effect recovery, legacy rollback, privacy and inactive restore passed. These synthetic
 checks do not replace the live acceptance below. No legacy persisted-data migration is required;
 VPS work remains deferred.
+
+<local_inngest_cutover>
+
+The active local installation has both Connect apps and nine connected family
+registrations. Seven ownership switches used separate validated format-4 snapshots
+and the pause/drain/reconcile protocol. The final snapshot before schedules contains
+44 archive tables, 14 Inngest tables and 430 protected files. The live history scan
+checked 2,521 rows for five internal credentials and synthetic source/tool markers;
+none appeared. Owner-only Inngest history loads with its inspection-only banner.
+
+- [Infrastructure](compatibility/results/2026-09-14-inngest-local-infrastructure.json)
+  and [imports](compatibility/results/2026-09-14-inngest-local-imports.json).
+- [Controlled tools](compatibility/results/2026-09-14-inngest-local-tools.json)
+  and [approved-message denial](compatibility/results/2026-09-14-inngest-local-actions.json).
+  The first tool canary encountered a missing sandbox image and stays closed as
+  uncertain. After building the pinned image, a distinct approved canary passed.
+- [Memory consent/retry preservation](compatibility/results/2026-09-14-inngest-local-memory.json)
+  and [detached Honcho ownership](compatibility/results/2026-09-14-inngest-local-honcho.json).
+  Four existing failed memory reviews retain their retry deadlines. A new browser
+  review subsequently completed on its first attempt. Honcho remains unattached.
+- [Browser streaming/replay/cancellation](compatibility/results/2026-09-14-inngest-local-browser.json)
+  and [native schedule wait/edit/pause/occurrence](compatibility/results/2026-09-14-inngest-local-schedules.json).
+  The guard masked the browser's identifier-like test marker; its response matched
+  the guarded input. Schedule output stayed local and created no delivery proposal.
+
+Earlier implementation evidence covers the
+[foundation](compatibility/results/2026-09-12-inngest-foundation.json),
+[outbox](compatibility/results/2026-09-12-inngest-outbox.json),
+[job operations](compatibility/results/2026-09-12-inngest-job-operations.json),
+[Telegram](compatibility/results/2026-09-12-inngest-telegram.json),
+[memory](compatibility/results/2026-09-12-inngest-memory.json),
+[imports](compatibility/results/2026-09-12-inngest-host-imports.json),
+[approvals](compatibility/results/2026-09-12-inngest-approved-actions.json),
+[tools](compatibility/results/2026-09-12-inngest-host-tools.json),
+[browser](compatibility/results/2026-09-12-inngest-browser.json),
+[schedules](compatibility/results/2026-09-12-inngest-schedules.json),
+[Monitoring](compatibility/results/2026-09-14-inngest-monitoring.json),
+[atomic migration](compatibility/results/2026-09-14-inngest-cutover-core.json) and
+[host handoff](compatibility/results/2026-09-14-inngest-host-handoff.json).
+
+</local_inngest_cutover>
 
 ## Outstanding acceptance and blockers
 
@@ -34,13 +75,13 @@ VPS work remains deferred.
 - **Honcho:** resolve embedding capacity/credentials after the HTTP 429; complete shared reasoning and live ingestion, retrieval, restart, and failure checks before attachment. The opted-in history pilot and monthly budget cutover remain pending. Do not reset the spending reservation or infer learning consent.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
 - **Optional comparison:** the isolated Honcho comparison remains pending and does not block release; production Honcho activation has separate gates.
-- **Remote synchronization:** the documentation increment repeated the fetch and confirmed that local GitHub HTTPS authentication is unavailable. Local integration and remote push outcomes must be reported separately; do not infer synchronization from a local merge.
+- **Remote synchronization:** each verified increment was merged locally under the shared Git lock; fetch and push repeatedly confirmed that local GitHub HTTPS authentication is unavailable. Local integration and remote push outcomes must be reported separately; do not infer synchronization from a local merge.
 
 ## Development follow-ups and proposals
 
 - **Per-session previews — not implemented:** add explicit isolation of Compose projects, networks, image tags, ports, state, and credentials before concurrent worktree previews. No duplicate Telegram poller, scheduler, or OAuth refresh owner may use the active installation.
 - **Makefile — not implemented:** `dev` is declared phony but has no recipe. Existing `./scripts/nocheh dev` runs the installation's Compose Watch workflow; it is not an isolated-session setup command. Wiring `make dev`, fresh-worktree setup, and visible persistent preview startup are follow-up tooling work.
-- **Inngest — accepted implementation:** [workflow execution plan](docs/workflow-monitoring-plan.md), I1–I7. Local orchestration infrastructure, imports, controlled tools, approved messages, memory review, detached Honcho orchestration and browser turns are active; other family ownership switches remain pending. Independent host recovery and existing provider/Honcho/release gates apply.
+- **Inngest — accepted implementation:** [workflow execution plan](docs/workflow-monitoring-plan.md), I1–I7. Local orchestration infrastructure and seven families are active; preparation and Telegram cutover remain pending. Independent host recovery and existing provider/Honcho/release gates apply.
 
 ## Historical implementation records
 
