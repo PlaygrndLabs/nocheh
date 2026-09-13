@@ -12,6 +12,7 @@ import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 import {proxyProviderMonitor} from './provider-monitor-proxy.js';
 import {ProviderOAuth} from './provider-oauth.js';
 import {importConfiguration} from './workflows/imports.js';
+import {proxyOwnerInspection} from './inspection-proxy.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -167,6 +168,7 @@ export async function startManagement() {
   const monitorKey=(await readFile(monitorKeyPath,'utf8')).trim();
   if(monitorKey.length<32)throw new Error('provider_monitor_key_missing');
   const sessions=new DashboardSessions();
+  const archiveConnection=object(await python({operation:'archive.connection'}));
   const providerOAuth=new ProviderOAuth(MONITOR,monitorKey,PORT);
   const sockets=new Set<Duplex>();
   for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
@@ -198,6 +200,8 @@ export async function startManagement() {
       if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
       if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
+      if(req.method==='GET'&&/^\/workflows(?:\/(?:health|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
+      if(req.method==='POST'&&/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route,body:await readJson(req)}));
       if(route==='/tools/actions' && req.method==='GET')return json(res,200,await python({operation:'tools.manage'}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
@@ -339,6 +343,10 @@ export async function startManagement() {
         return json(res,200,await providerOAuth.start());
       }
       proxyProviderMonitor(req,res,MONITOR,monitorKey,session.csrf);return;
+    }
+    if(path.startsWith('/inngest/')){
+      const session=sessions.authorize(req,req.method!=='GET');
+      await proxyOwnerInspection(req,res,Number(archiveConnection.port),string(archiveConnection.token),session.csrf);return;
     }
     if(path.startsWith('/hermes/')) {
       if(req.method==='POST'&&path==='/hermes/api/auth/ws-ticket') {

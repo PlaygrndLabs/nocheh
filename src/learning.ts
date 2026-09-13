@@ -38,7 +38,7 @@ export async function listReviews(pool:pg.Pool,after='') {
 export async function controlReview(pool:pg.Pool,id:string,action:unknown) {
   if(!['pause','resume'].includes(String(action)))throw new HttpError(400,'invalid_review_action');
   const result=await pool.query(`UPDATE memory_review_jobs SET state=$2,error_code=NULL,next_attempt=now(),updated_at=now(),
-    generation=generation+CASE WHEN state='ambiguous' THEN 1 ELSE 0 END WHERE id=$1 AND state NOT IN ('done','running') RETURNING id,state`,[id,action==='pause'?'paused':'pending']);
+    generation=generation+CASE WHEN state='ambiguous' OR (error_code='owner_cancelled' AND $2='pending') THEN 1 ELSE 0 END WHERE id=$1 AND state NOT IN ('done','running') RETURNING id,state`,[id,action==='pause'?'paused':'pending']);
   if(!result.rowCount)throw new HttpError(409,'review_not_controllable');return result.rows[0];
 }
 export async function prepareReviews(pool:pg.Pool,live:boolean,eventId:string|null=null) {

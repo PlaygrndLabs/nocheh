@@ -9,6 +9,9 @@ from .configuration import ROOT, load
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
+    if operation=='archive.connection':
+        config=load(state)
+        return {'port':int(config['NOCHEH_PORT']),'token':config['SERVICE_TOKEN']}
     if operation=='workflow.import.batch':
         from .workflow_jobs import import_batch
         return import_batch(state,body)
@@ -19,7 +22,10 @@ def dispatch(body):
         from .archive import API
         import re
         path=body['path']
-        if not re.fullmatch(r'/v1/workflows/(?:imports/(?:confirm|cancel|[a-f0-9-]{36})|host/(?:claim|renew|finish|continue|heartbeat))',path):raise ValueError('workflow_route_denied')
+        read_path=path.split('?',1)[0]
+        public=re.fullmatch(r'/v1/workflows(?:/(?:health|[a-f0-9]{64}))?',read_path) and 'body' not in body
+        internal=re.fullmatch(r'/v1/workflows/(?:[a-f0-9]{64}/(?:retry|cancel)|imports/(?:confirm|cancel|[a-f0-9-]{36})|host/(?:claim|renew|finish|continue|heartbeat))',path)
+        if not public and not internal:raise ValueError('workflow_route_denied')
         return API().call(path,body.get('body'))
     if operation == 'monitoring.status':
         from .monitoring import status

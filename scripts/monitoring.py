@@ -18,10 +18,11 @@ def status(state):
     def attempt(fn):
         try:return fn()
         except Exception:return {'unavailable':True}
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         jobs={name:executor.submit(attempt,fn) for name,fn in {
             'archive':lambda:API().call('/v1/status',timeout=5), 'runtime':lambda:API().call('/v1/runtime',timeout=5),
-            'provider':lambda:provider_status(state),'containers':containers}.items()}
+            'provider':lambda:provider_status(state),'containers':containers,
+            'workflows':lambda:API().call('/v1/workflows/health',timeout=5)}.items()}
         result={name:future.result() for name,future in jobs.items()}
     provider=result['provider'];provider.pop('root',None)
     result['checked_at']=datetime.now(timezone.utc).isoformat()

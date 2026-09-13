@@ -137,7 +137,7 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
     const result=await pool.query(`UPDATE workflow_outbox o SET lease_token=$1,lease_until=now()+interval '30 seconds',attempts=o.attempts+1
       WHERE o.id=(SELECT candidate.id FROM workflow_outbox candidate
         JOIN workflow_registry w ON w.id=candidate.workflow_id JOIN workflow_owners f ON f.family=w.family
-        WHERE candidate.published_at IS NULL AND candidate.next_attempt<=now()
+        WHERE candidate.published_at IS NULL AND candidate.dispatch=w.dispatch AND candidate.next_attempt<=now()
         AND (candidate.lease_until IS NULL OR candidate.lease_until<now()) AND f.owner='inngest' AND f.admission
         AND EXISTS(SELECT 1 FROM workflow_worker_registrations r WHERE r.family=w.family AND r.version=w.version AND r.seen_at>now()-interval '30 seconds')
         AND w.state IN ('queued','waiting','retryable_failed','running')

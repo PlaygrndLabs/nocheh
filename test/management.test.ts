@@ -25,6 +25,8 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const body=JSON.parse(raw || '{}');
     if(slow) await new Promise(r=>setTimeout(r,300));
     let result:unknown={};
+    if(req.url?.startsWith('/v1/workflows?'))result={workflows:[{id:'a'.repeat(64),state:'waiting'}],next:null};
+    if(req.url==='/v1/workflows/'+'a'.repeat(64)+'/retry')result={id:'a'.repeat(64),revision:body.revision+1};
     if(req.url==='/v1/workflows/imports/confirm')result={owned:false};
     if(req.url==='/v1/import') {const duplicate=records.has(body.event.key);records.set(body.event.key,body);result={duplicate};}
     else if(req.url==='/v1/memory/reviews') reviews.push(body);
@@ -59,6 +61,20 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const health=await fetch(base+'/health',{headers});assert.match(health.headers.get('set-cookie')??'',/HttpOnly; SameSite=Strict/);
     assert.equal((await fetch(base+'/settings',{headers:{Cookie:'nocheh_download='+token}})).status,401,'download cookies cannot administer settings');
     const settings=await request('/settings');assert.ok(!JSON.stringify(settings).includes('test-owner-token'));
+    assert.equal((await fetch(base+'/workflows')).status,401);
+    assert.equal((await fetch(base+'/workflows',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);
+    assert.equal((await request('/workflows?limit=1')).workflows[0].state,'waiting');
+    const root=await fetch(base.replace('/api/plugins/nocheh','/'));
+    const sessionCookie=root.headers.get('set-cookie')!.split(';')[0]!;
+    const csrf=/window.__NOCHEH_CSRF__="([^"]+)"/.exec(await root.text())![1]!;
+    const controlPath='/workflows/'+'a'.repeat(64)+'/retry';
+    assert.equal((await fetch(base+controlPath,{method:'POST',headers:{Cookie:sessionCookie,'Content-Type':'application/json'},body:'{"revision":1}'})).status,403);
+    assert.equal((await fetch(base+controlPath,{method:'POST',headers:{Cookie:sessionCookie,'X-Nocheh-CSRF':csrf,Origin:'https://untrusted.example'},body:'{"revision":1}'})).status,403);
+    const controlled=await fetch(base+controlPath,{method:'POST',headers:{Cookie:sessionCookie,'X-Nocheh-CSRF':csrf,'Content-Type':'application/json'},body:'{"revision":1}'});assert.equal(controlled.status,200);assert.equal((await controlled.json() as any).revision,2);
+    const inspection=base.replace('/api/plugins/nocheh','/inngest');
+    assert.equal((await fetch(inspection+'/runs')).status,401);
+    assert.equal((await fetch(inspection+'/v0/gql',{method:'POST',headers:{Cookie:sessionCookie},body:'{}'})).status,403);
+    assert.equal((await fetch(inspection+'/runs',{headers:{Cookie:sessionCookie,Origin:'https://untrusted.example'}})).status,403);
     const job=await request('/jobs',{});
     const document={id:77,type:'private_group',name:'Synthetic export',messages:Array.from({length:12},(_,id)=>({id,type:'message',text:'Exact متن  '+id}))};
     const put=await fetch(base+'/jobs/'+job.id+'/upload?name=result.json',{method:'PUT',headers,body:JSON.stringify(document)});assert.equal(put.status,200);

@@ -1,0 +1,11 @@
+# Explicit synthetic owner-UI fixture. Only its authenticated API has a loopback
+# port. Database, Redis and Inngest stay on the internal fixture network.
+services:
+  monitoring-preview:
+    extends: {file: inngest-compose.yml, service: checks}
+    command: [node, dist/test/workflow-monitoring-preview.js]
+    networks: [default, preview]
+    ports: ["127.0.0.1:${NOCHEH_FIXTURE_PREVIEW_PORT:?Unique preview API port required}:8780"]
+networks:
+  preview:
+    name: ${NOCHEH_FIXTURE_PROJECT:?Explicit fixture project required}-preview
