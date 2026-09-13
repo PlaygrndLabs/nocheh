@@ -3,7 +3,7 @@ import {admitBrowser,browserObservation,activeBrowser,cancelBrowser,browserWorkf
 import {scheduleOwnership,scheduledContext,scheduledAuthority,scheduledObservation} from './workflows/schedules.js';
 import {listWorkflows,workflowDetail,workflowHealth,controlWorkflow} from './workflows/owner.js';
 import {proxyInngestInspection} from './workflows/inspection.js';
-import {beginMigration,migrationStatus,finishMigration,reconcileMigration} from './workflows/migrations.js';
+import {beginMigration,migrationStatus,finishMigration,reconcileMigration,migrationHostReady,stageMigrationImport} from './workflows/migrations.js';
 import {ownerSecurityRoute} from './security/owner-api.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
@@ -26,7 +26,7 @@ import { reader, admin,assertAudience,turnToken } from './access.js';
 import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 import {hostTransport} from './workflows/host-transport.js';
-import {confirmImport,cancelImport,enterImportWrite} from './workflows/imports.js';
+import {confirmImport,cancelImport,enterImportWrite,finishLegacyImport} from './workflows/imports.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from './workflows/host-coordinator.js';
 import {registerWorker} from './workflows/store.js';
 import {hostActionAuthority} from './workflows/host-tools.js';
@@ -74,10 +74,13 @@ const server = createServer((req, res) => { void (async () => {
     if(req.method==='POST'){
       const body=await readJson(req);
       if(path==='/v1/workflows/migrations')return json(res,200,await beginMigration(pool,body));
+      if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/host-ready$/.test(path))return json(res,200,await migrationHostReady(pool,path.split('/')[4]!));
+      if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/imports$/.test(path))return json(res,200,await stageMigrationImport(pool,path.split('/')[4]!,body));
       if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/reconcile$/.test(path))return json(res,200,await reconcileMigration(pool,path.split('/')[4]!,call,config.assistant.owner_id));
       if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/(switch|abort)$/.test(path))return json(res,200,await finishMigration(pool,path.split('/')[4]!,path.split('/')[5]! as 'switch'|'abort'));
       if(/^\/v1\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(path))return json(res,200,await controlWorkflow(pool,path.split('/')[3]!,path.split('/')[4]!,body));
       if(path==='/v1/workflows/imports/confirm')return json(res,200,await confirmImport(pool,body));
+      if(path==='/v1/workflows/imports/legacy-finish')return json(res,200,await finishLegacyImport(pool,body));
       if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(pool,object(body).id));
       if(path==='/v1/workflows/host/claim')return json(res,200,await claimHostWorkflow(pool,body));
       if(path==='/v1/workflows/host/renew')return json(res,200,await renewHostWorkflow(pool,body));
@@ -87,7 +90,8 @@ const server = createServer((req, res) => { void (async () => {
     }
     if(req.method==='GET'&&/^\/v1\/workflows\/imports\/[a-f0-9-]{36}$/.test(path)){
       const job=(await pool.query('SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at FROM workflow_imports WHERE id=$1',[path.split('/').at(-1)])).rows[0];
-      return json(res,200,{owned:!!job,job});
+      const owner=(await pool.query("SELECT owner FROM workflow_owners WHERE family='imports'")).rows[0].owner;
+      return json(res,200,{owned:!!job,owner,job});
     }
     throw new HttpError(404,'not_found');
   }

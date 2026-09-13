@@ -133,7 +133,20 @@ def dispatch(body):
             with (directory/'execution.lock').open('a') as lock:
                 try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 except BlockingIOError:raise ValueError('import_batch_busy') from None
-                return run(directory,mapping,body.get('after',0),API(job,import_owner='legacy'))
+                import urllib.error
+                from .archive import digest,canonical
+                from .tool_worker import atomic
+                try:result=run(directory,mapping,body.get('after',0),API(job,import_owner='legacy'))
+                except urllib.error.HTTPError as error:
+                    if error.code==409 and json.loads(error.read(4096)).get('error')=='import_owner_paused':return {'status':'import_paused'}
+                    raise
+                if body.get('legacy_workflow') is not True:return result
+                metadata=json.loads((directory/'job.json').read_text());preview=metadata['preview']
+                receipt={'id':job,'configuration_hash':digest(canonical({'sha256':preview['sha256'],'mapping':mapping,'review_approved':metadata.get('review_approved') is True,'total':preview['messages']})),
+                         'completed':result['completed'],'duplicates':result['duplicates'],'learning_after':preview['messages'] if metadata.get('review_approved') is True else 0}
+                path=directory/'workflow-receipt.json';atomic(path,receipt)
+                API().call('/v1/workflows/imports/legacy-finish',receipt);path.unlink()
+                return result
     raise ValueError('unknown_operation')
 
 

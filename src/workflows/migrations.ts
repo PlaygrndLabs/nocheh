@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS workflow_migrations (
  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),CHECK(from_owner<>to_owner)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS workflow_migration_active ON workflow_migrations(family) WHERE state='paused';
+ALTER TABLE workflow_migrations ADD COLUMN IF NOT EXISTS host_ready boolean NOT NULL DEFAULT false;
 `;
 const fence="SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema()||':workflow:'||$1,803321)) AS held";
 function family(value:unknown):WorkflowFamily {
@@ -45,6 +46,34 @@ export async function beginMigration(pool:pg.Pool,input:unknown){
     await client.query('COMMIT');
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   return migrationStatus(pool,id);
+}
+export async function migrationHostReady(pool:pg.Pool,id:string){
+  workflowIdentity(id);
+  const changed=await pool.query("UPDATE workflow_migrations SET host_ready=true,updated_at=now() WHERE id=$1 AND state='paused' AND family IN ('imports','tools') RETURNING id",[id]);
+  if(!changed.rowCount)throw new HttpError(409,'migration_host_not_paused');return migrationStatus(pool,id);
+}
+export async function stageMigrationImport(pool:pg.Pool,id:string,input:unknown){
+  workflowIdentity(id);const b=object(input),job=String(b.id);
+  if(!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(job)||typeof b.configuration_hash!=='string'||!/^[a-f0-9]{64}$/.test(b.configuration_hash)||typeof b.review_approved!=='boolean')throw new HttpError(400,'invalid_import_configuration');
+  for(const name of ['total','completed','duplicates','learning_after'])if(!Number.isSafeInteger(b[name])||Number(b[name])<0)throw new HttpError(400,'invalid_import_checkpoint');
+  if(Number(b.completed)>Number(b.total)||Number(b.learning_after)>Number(b.total)||!b.review_approved&&b.learning_after!==0)throw new HttpError(400,'invalid_import_checkpoint');
+  const client=await pool.connect();try{
+    await client.query('BEGIN');
+    const migration=(await client.query("SELECT * FROM workflow_migrations WHERE id=$1 AND family='imports' AND state='paused' AND to_owner='inngest' FOR UPDATE",[id])).rows[0];
+    if(!migration)throw new HttpError(409,'migration_host_not_paused');
+    if(!(await client.query(fence,['imports'])).rows[0].held)throw new HttpError(409,'workflow_family_not_drained');
+    const owner=(await client.query("SELECT * FROM workflow_owners WHERE family='imports' FOR NO KEY UPDATE")).rows[0];
+    if(owner.epoch!==migration.from_epoch||owner.admission)throw new HttpError(409,'workflow_owner_changed');
+    await client.query(`INSERT INTO workflow_imports(id,configuration_hash,review_approved,total,completed,duplicates,learning_after)
+      VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,[job,b.configuration_hash,b.review_approved,b.total,b.completed,b.duplicates,b.learning_after]);
+    const current=(await client.query('SELECT * FROM workflow_imports WHERE id=$1 FOR UPDATE',[job])).rows[0];
+    if(current.configuration_hash!==b.configuration_hash||current.review_approved!==b.review_approved||current.total!==b.total)throw new HttpError(409,'import_configuration_changed');
+    if(current.state==='queued'){
+      await client.query('UPDATE workflow_imports SET completed=greatest(completed,$2),duplicates=greatest(duplicates,$3),learning_after=greatest(learning_after,$4),updated_at=now() WHERE id=$1',[job,b.completed,b.duplicates,b.learning_after]);
+      await client.query("SELECT nocheh_workflow_request('imports',$1,$2)",[job,current.generation]);
+    }
+    await client.query('COMMIT');return {id:job,state:current.state};
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 
 // Eligibility uses only durable domain identities. It never infers import
@@ -89,6 +118,10 @@ async function reconcileRecorded(client:pg.PoolClient,f:WorkflowFamily){
     WHERE w.id=o.id AND w.family=$1 AND w.state IN ('queued','waiting','running','retryable_failed')
     AND o.state IN ('completed','failed','skipped','cancelled','ambiguous','denied','retryable_failed') AND w.state<>o.state`,[f]);
   if(f==='imports')await client.query("UPDATE workflow_registry w SET state='queued',lease_token=NULL,lease_until=NULL WHERE family='imports' AND state='running' AND EXISTS(SELECT 1 FROM workflow_imports i WHERE i.id::text=w.job_id AND i.state='queued')");
+  if(f==='tools')await client.query(`UPDATE workflow_registry w SET state=o.state,lease_token=NULL,lease_until=NULL,
+    revision=w.revision+1,updated_at=now() FROM workflow_observations o WHERE w.id=o.id AND w.family='tools'
+    AND w.state='running' AND o.state IN ('queued','waiting')
+    AND NOT EXISTS(SELECT 1 FROM workflow_receipts r WHERE r.workflow_id=w.id AND r.state IN ('started','done','ambiguous'))`);
   return (rows.rowCount??0)+(receipts.rowCount??0);
 }
 /** Observe existing native identities only. Missing receipts stay unresolved. */
@@ -151,6 +184,7 @@ export async function finishMigration(pool:pg.Pool,id:string,action:'switch'|'ab
       await client.query('UPDATE workflow_owners SET admission=true,updated_at=now() WHERE family=$1',[row.family]);
       await client.query("UPDATE workflow_migrations SET state='aborted',updated_at=now() WHERE id=$1",[id]);
     }else{
+      if(['imports','tools'].includes(row.family)&&!row.host_ready)throw new HttpError(409,'migration_host_handoff_required');
       if((await client.query('SELECT 1 FROM workflow_registry WHERE family=$1 AND lease_until>now() LIMIT 1',[row.family])).rowCount)throw new HttpError(409,'workflow_family_not_drained');
       if(row.to_owner==='inngest'&&!(await client.query("SELECT 1 FROM workflow_worker_registrations WHERE family=$1 AND version=1 AND seen_at>now()-interval '30 seconds'",[row.family])).rowCount)throw new HttpError(409,'workflow_worker_not_ready');
       const reconciled=await reconcileRecorded(client,row.family),registered=await registerMissing(client,row.family);

@@ -10,13 +10,17 @@ from .archive import API
 
 def main(state,args):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('list','show','status','retry','cancel','pause-family','migration','reconcile','switch','abort'))
+    parser.add_argument('action',choices=('list','show','status','retry','cancel','pause-family','migration','reconcile','switch','abort','host-handoff'))
     parser.add_argument('id',nargs='?')
     parser.add_argument('--family');parser.add_argument('--state');parser.add_argument('--after');parser.add_argument('--limit',type=int,default=50)
     parser.add_argument('--revision',type=int)
     parser.add_argument('--epoch',type=int);parser.add_argument('--owner',choices=('legacy','inngest'))
     parser.add_argument('--migration-id')
     options=parser.parse_args(args)
+    if options.action=='host-handoff':
+        if not options.id or not re.fullmatch('[a-f0-9]{64}',options.id):parser.error('Provide the paused migration ID.')
+        from .workflow_handoff import handoff
+        print(json.dumps(handoff(state,options.id),indent=2));return 0
     if options.action=='pause-family':
         if not options.id or not options.owner or not options.epoch:parser.error('Provide the family, --owner and current --epoch from workflows status.')
         identity=options.migration_id or hashlib.sha256(uuid.uuid4().bytes).hexdigest()

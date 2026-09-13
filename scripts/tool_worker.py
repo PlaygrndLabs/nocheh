@@ -32,12 +32,19 @@ def atomic(path,value):
     finally:os.close(fd)
 
 
-def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None,admit=None):
+def flush_receipts(state,api,admit=None):
     receipts=Path(state)/'admin/tools/receipts';receipts.mkdir(parents=True,exist_ok=True,mode=0o700)
-    # Publish existing receipts before claiming new work. Never repeat execution.
+    completed=0
     for path in sorted(receipts.glob('*.json')):
-        if admit is not None and not admit():return False
-        body=json.loads(path.read_text());api.call('/v1/tools/finish',body);path.unlink()
+        if admit is not None and not admit():break
+        if path.is_symlink():raise ValueError('tool_receipt_path_denied')
+        body=json.loads(path.read_text());api.call('/v1/tools/finish',body);path.unlink();completed+=1
+    return completed
+
+
+def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None,admit=None):
+    # Publish existing receipts before claiming new work. Never repeat execution.
+    flush_receipts(state,api,admit)
     if admit is not None and not admit():return False
     action=api.call('/v1/tools/claim',{'actor':actor,**({'id':action_id} if action_id else {}),**(workflow or {})})
     if not action.get('claimed'):return False
@@ -50,7 +57,7 @@ def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None
         # A timeout or response failure may follow an already-sent remote request.
         # Do not infer safe retry from the exception class or response body.
         body.update(state='ambiguous',result={'error':'execution_outcome_unconfirmed'})
-    path=receipts/(action['id']+'.json');atomic(path,body)
+    path=Path(state)/'admin/tools/receipts'/(action['id']+'.json');atomic(path,body)
     api.call('/v1/tools/finish',body);path.unlink();return True
 
 
