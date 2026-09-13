@@ -120,9 +120,10 @@ for both directions of imports/tools ownership changes.
 The fresh candidate fault rehearsal passed with separate synthetic Compose
 projects. It covers Inngest, Redis, PostgreSQL, worker, publisher and runtime
 outages; durable capture; crash after a runtime effect but before acknowledgment;
-worker kill; legacy scanner rollback; and quiesced inactive restore. Real local
-activation remains pending. Fixture evidence does not establish that the active
-installation has passed its cutover gates.
+worker kill; legacy scanner rollback; and quiesced inactive restore. Active local infrastructure and imports have passed their recorded checks.
+See [local import evidence](../compatibility/results/2026-09-14-inngest-local-imports.json)
+and TASK.md for remaining family gates. Fixture evidence alone does not establish
+that the active installation has passed its cutover gates.
 
 <fault_rehearsal>
 
