@@ -261,6 +261,11 @@ class AssistantGateway:
             return result
 
     def action(self,body):
+        if body.get('observe_only') is True:
+            import re
+            if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_action')
+            path=self.receipts/('action-'+body['id']+'.result')
+            return json.loads(path.read_bytes()) if path.exists() else {'state':'not_found'}
         if self.loop is None:raise RuntimeError('telegram_not_ready')
         return asyncio.run_coroutine_threadsafe(self.send_action(body),self.loop).result(timeout=55)
 

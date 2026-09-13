@@ -34,6 +34,7 @@ TABLES.update(workflow_imports='id',workflow_host_receipts='token')
 TABLES.update(workflow_worker_registrations='family')
 TABLES.update(workflow_schedules='id')
 TABLES.update(workflow_controls='workflow_id,revision,action')
+TABLES.update(workflow_migrations='id')
 
 
 def compose(state,project=None):

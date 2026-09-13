@@ -160,8 +160,12 @@ class Handler(BaseHTTPRequestHandler):
                 return getattr(MANAGED.runs,self.path.rsplit('/',1)[-1])(body)
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             if body.get('channel','telegram')!='telegram':raise ValueError('runtime_channel_unavailable')
-            if self.path.endswith(('/start','/resume')) and (ASSISTANT.loop is None or ASSISTANT.status!='connected'):raise RuntimeError('telegram_not_ready')
-            return getattr(ASSISTANT.runs,self.path.rsplit('/',1)[-1])(body)
+            inspecting=self.path.endswith('/resume') and body.get('observe_only') is True
+            if self.path.endswith(('/start','/resume')) and not inspecting and (ASSISTANT.loop is None or ASSISTANT.status!='connected'):raise RuntimeError('telegram_not_ready')
+            result=getattr(ASSISTANT.runs,self.path.rsplit('/',1)[-1])(body)
+            if self.path.endswith('/resume') and body.get('observe_only') is True and result.get('state')=='not_found':
+                return ASSISTANT._reconcile_run(body) or result
+            return result
         if self.path=='/internal/browser/events':
             if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
             return MANAGED.events(body)
@@ -178,8 +182,9 @@ class Handler(BaseHTTPRequestHandler):
             from .native_memory import recall
             return recall(PROFILE_HOME,body)
         if self.path == '/internal/memory/review':
-            from .review_worker import review
+            from .review_worker import review,observe
             from .scopes import Scopes
+            if body.get('observe_only') is True:return observe(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),body)
             return review(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),MODEL,resolve_credentials(),body)
         if self.path == '/internal/manage':
             from .management import dispatch

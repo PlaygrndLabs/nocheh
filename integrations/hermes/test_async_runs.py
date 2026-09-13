@@ -40,6 +40,8 @@ class AsyncRunTests(unittest.TestCase):
             self.assertEqual(runs.resume(body)['state'],'not_found');self.assertEqual(list(Path(folder).iterdir()),[])
             with patch('threading.Thread.start'):runs.start(body)
             restored=AsyncRuns(folder,lambda *args:(calls.append(1) or {'state':'done'}),lambda body:None)
+            self.assertEqual(restored.resume({**body,'observe_only':True})['state'],'queued')
+            self.assertEqual(calls,[],'cutover observation cannot launch a queued effect')
             self.assertEqual(self.wait(restored,body)['state'],'done');self.assertEqual(calls,[1])
 
     def test_restart_reconciles_native_receipt_or_closes_ambiguous_without_replacement(self):
