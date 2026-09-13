@@ -4,7 +4,8 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {settings} from '../src/config.js';
 import {ingest,type Envelope} from '../src/archive.js';
-import {beginMigration,finishMigration,migrationStatus,reconcileMigration} from '../src/workflows/migrations.js';
+import {beginMigration,finishMigration,migrationStatus,reconcileMigration,migrationHostReady,stageMigrationImport} from '../src/workflows/migrations.js';
+import {cancelImport,confirmImport,finishLegacyImport} from '../src/workflows/imports.js';
 import {hash,enterFamily,leaveFamily,registerWorker,publishOutbox,claimWorkflow,families} from '../src/workflows/store.js';
 
 test('family cutover survives lost responses, atomic rollback, capture during pause and compatible ownership rollback',{skip:!process.env.PGHOST},async()=>{
@@ -72,9 +73,30 @@ test('family cutover survives lost responses, atomic rollback, capture during pa
       await registerWorker(pool,['imports','tools'].includes(f)?'host':'pipeline',[f]);
       const forward=hash('forward-'+f),back=hash('back-'+f);
       await beginMigration(pool,{id:forward,family:f,owner:'inngest',epoch:1});
+      if(['imports','tools'].includes(f)){
+        await assert.rejects(finishMigration(pool,forward,'switch'),{code:'migration_host_handoff_required'});
+        if(f==='imports'){
+          const body={id:'11111111-1111-4111-8111-111111111111',configuration_hash:hash('private configuration'),review_approved:false,total:4,completed:1,duplicates:0,learning_after:0};
+          await stageMigrationImport(pool,forward,body);await stageMigrationImport(pool,forward,body);
+          assert.equal((await pool.query('SELECT count(*)::int AS n FROM workflow_imports')).rows[0].n,1);
+          await assert.rejects(stageMigrationImport(pool,forward,{...body,review_approved:true}),{code:'import_configuration_changed'});
+        }
+        if(f==='tools'){
+          await pool.query("INSERT INTO controlled_actions(id,event_id,scope,profile,kind,arguments,fingerprint,state) VALUES($1,$2,'42','owner','shell',$3,$1,'approved')",[hash('unclaimed-tool'),pending.id,Buffer.from('{"command":"synthetic only"}')]);
+          await pool.query("UPDATE workflow_registry SET state='running' WHERE family='tools'");
+        }
+        await migrationHostReady(pool,forward);
+      }
       assert.equal((await finishMigration(pool,forward,'switch')).to_epoch,2);
       await beginMigration(pool,{id:back,family:f,owner:'legacy',epoch:2});
+      if(['imports','tools'].includes(f))await migrationHostReady(pool,back);
       assert.equal((await finishMigration(pool,back,'switch')).to_epoch,3);
+      if(f==='imports'){
+        const job='11111111-1111-4111-8111-111111111111';await cancelImport(pool,job);
+        const resumed=await confirmImport(pool,{id:job,configuration_hash:hash('private configuration'),review_approved:false,total:4,completed:1,duplicates:0,resume:true});
+        assert.equal(resumed.owned,false);assert.equal(resumed.job.generation,2,'explicit legacy resume creates a fresh generation after cancellation');
+        assert.equal((await finishLegacyImport(pool,{id:job,configuration_hash:hash('private configuration'),completed:4,duplicates:1,learning_after:0})).state,'completed');
+      }
     }
   }finally{client.release();await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });

@@ -47,6 +47,7 @@ async function getJob(id: string): Promise<Job> {
       const status=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/'+id}));
       if(status.owned){
         const current=object(status.job);job.state=current.state==='completed'?'complete':['queued','running'].includes(String(current.state))?'running':String(current.state);
+        if(status.owner==='legacy'&&job.state==='running')job.state='interrupted';
         job.completed=Number(current.completed);job.duplicates=Number(current.duplicates);
         if(job.state==='complete')job.result={completed:job.completed,duplicates:job.duplicates,telegram_replies:0,review_approved:job.review_approved};
       }
@@ -121,7 +122,7 @@ function launch(job: Job, body: Record<string, unknown>) {
     const snapshot = {...job}; writes = writes.then(() => putJob(snapshot));
   }, child => active.set(job.id, child)).then(async result => {
     await writes; job.result = result;
-    if (job.state !== 'cancelled') job.state = object(result).status === 'apply_failed' ? 'failed' : 'complete';
+    if (job.state !== 'cancelled') job.state = object(result).status === 'import_paused'?'interrupted':object(result).status === 'apply_failed' ? 'failed' : 'complete';
   }).catch(async error => {
     await writes.catch(() => {});
     if (job.state !== 'cancelled') { job.state = 'failed'; job.error = error instanceof HttpError ? error.code : 'operation_failed'; }
@@ -302,7 +303,7 @@ export async function startManagement() {
             if(confirmed.owned===true){job.workflow='inngest';job.state='running';await putJob(job);return json(res,202,await getJob(id));}
             if(confirmed.owned!==false)throw new HttpError(503,'import_admission_unavailable');
             delete job.workflow;job.state='running';await putJob(job);
-            launch(job, {operation: 'import.run', job: id, mapping, after: job.completed});
+            launch(job, {operation: 'import.run', job: id, mapping, after: job.completed,legacy_workflow:confirmed.job!==undefined});
             return json(res, 202, job);
           });
           if (req.method === 'POST' && action === 'cancel') {

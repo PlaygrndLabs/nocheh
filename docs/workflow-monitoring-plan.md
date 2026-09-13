@@ -97,9 +97,29 @@ closed registry outcome to an eligible old scanner. Abort reopens the existing
 owner without changing its epoch. Both operations preserve source data and native
 receipts; neither restores an old database snapshot over new evidence.
 
-Host import-job adoption, host receipt flushing, full candidate outage/recovery
-rehearsal and real local activation are follow-up I7 work. These commands alone do
-not establish that the active installation has passed its cutover gates.
+Imports and tools additionally require `workflows host-handoff ID` before
+switching. The host worker is drained independently of Inngest. For imports,
+stop the owner dashboard first; handoff reserves its port without serving traffic
+and locks each existing job while reading its protected record. Only confirmed,
+unfinished jobs are adopted, with the same upload hash, scope mapping, explicit
+learning choice and checkpoint. Closed jobs remain closed. A legacy import
+interrupted by admission pause becomes resumable instead of a terminal failure.
+
+Tool handoff drains both host executors and publishes retained receipts through
+the existing actor-validated finish endpoint. It never claims another action.
+A lost acknowledgment retains the receipt for replay. Previously running
+supervisors resume after handoff while the family admission fence remains closed.
+
+Rollback preserves import checkpoints and exposes the existing explicit Resume
+import action. Its learning choice cannot change. A resumed cancelled import gets
+a new generation; the original closed receipt remains permanent. Legacy import
+completion is mirrored to the registry's domain record, with a protected host
+receipt retained until acknowledged. Host-ready status is durable and required
+for both directions of imports/tools ownership changes.
+
+The full candidate outage/recovery rehearsal and real local activation remain
+pending. These commands alone do not establish that the active installation has
+passed its cutover gates.
 
 </cutover_implementation>
 
