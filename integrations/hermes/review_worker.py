@@ -9,6 +9,28 @@ from .scopes import Scopes, Scope
 from .assistant_gateway import prepare_profile
 
 
+def observe(root,policy,body):
+    """Read a durable review receipt without login, preparation or execution."""
+    import fcntl
+    from .native_memory import registered_profiles
+    if not policy.owner or body.get('scope')!=policy.owner:raise ValueError('owner_review_required')
+    if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_review_request')
+    found=[]
+    for profile in registered_profiles(root):
+        receipt=profile/'reviews'/body['id']
+        if not receipt.exists():continue
+        if receipt.is_symlink() or not receipt.resolve().is_relative_to(profile.resolve()):raise ValueError('review_receipt_path_denied')
+        with receipt.open('r') as file:value=file.read(32)
+        if value=='done':found.append('done');continue
+        lock=profile/'.memory.lock'
+        if lock.is_symlink():raise ValueError('review_receipt_path_denied')
+        if not lock.exists():found.append('ambiguous');continue
+        with lock.open('rb') as file:
+            try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB);found.append('ambiguous')
+            except BlockingIOError:found.append('running')
+    return {'state':'running' if 'running' in found else 'ambiguous' if 'ambiguous' in found else 'done' if found else 'not_found'}
+
+
 def review(root, policy, model, credentials, body):
     if not policy.owner or body.get('scope') != policy.owner:
         raise ValueError('owner_review_required')

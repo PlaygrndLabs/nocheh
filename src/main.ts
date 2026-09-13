@@ -3,6 +3,7 @@ import {admitBrowser,browserObservation,activeBrowser,cancelBrowser,browserWorkf
 import {scheduleOwnership,scheduledContext,scheduledAuthority,scheduledObservation} from './workflows/schedules.js';
 import {listWorkflows,workflowDetail,workflowHealth,controlWorkflow} from './workflows/owner.js';
 import {proxyInngestInspection} from './workflows/inspection.js';
+import {beginMigration,migrationStatus,finishMigration,reconcileMigration} from './workflows/migrations.js';
 import {ownerSecurityRoute} from './security/owner-api.js';
 import { createServer } from 'node:http';
 import { evidenceGraph } from './graph.js';
@@ -65,12 +66,16 @@ const server = createServer((req, res) => { void (async () => {
       return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
     }
     if(req.method==='GET'){
+      if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}$/.test(path))return json(res,200,await migrationStatus(pool,path.split('/').at(-1)!));
       if(path==='/v1/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
       if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(pool));
       if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(pool,path.split('/').at(-1)!));
     }
     if(req.method==='POST'){
       const body=await readJson(req);
+      if(path==='/v1/workflows/migrations')return json(res,200,await beginMigration(pool,body));
+      if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/reconcile$/.test(path))return json(res,200,await reconcileMigration(pool,path.split('/')[4]!,call,config.assistant.owner_id));
+      if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/(switch|abort)$/.test(path))return json(res,200,await finishMigration(pool,path.split('/')[4]!,path.split('/')[5]! as 'switch'|'abort'));
       if(/^\/v1\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(path))return json(res,200,await controlWorkflow(pool,path.split('/')[3]!,path.split('/')[4]!,body));
       if(path==='/v1/workflows/imports/confirm')return json(res,200,await confirmImport(pool,body));
       if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(pool,object(body).id));

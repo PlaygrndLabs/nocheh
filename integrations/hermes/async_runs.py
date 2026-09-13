@@ -100,7 +100,7 @@ class AsyncRuns:
             if not path.exists():return {'run_id':run,'state':'not_found'}
             request=json.loads(path.read_bytes())
             state=self._snapshot(run,request)
-            if state['state']=='queued':
+            if state['state']=='queued' and body.get('observe_only') is not True:
                 if 'archive_credential' in body:request['archive_credential']=body['archive_credential']
                 self._launch(run,request)
             return self._snapshot(run,request)

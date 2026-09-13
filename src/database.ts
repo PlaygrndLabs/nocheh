@@ -13,6 +13,7 @@ import {securitySchema} from './security/store.js';
 import {workflowSchema} from './workflows/store.js';
 import {scheduleWorkflowSchema} from './workflows/schedules.js';
 import {workflowOwnerSchema} from './workflows/owner.js';
+import {migrationSchema} from './workflows/migrations.js';
 import {workflowRequestSchema} from './workflows/requests.js';
 import {importWorkflowSchema} from './workflows/imports.js';
 import {approvalWorkflowSchema} from './workflows/approvals.js';
@@ -55,6 +56,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
     await client.query(toolWorkflowSchema);
     await client.query(scheduleWorkflowSchema);
     await client.query(workflowOwnerSchema);
+    await client.query(migrationSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

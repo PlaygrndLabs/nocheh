@@ -74,6 +74,35 @@ implement general installation preview isolation or `make dev`.
 
 </monitoring_implementation>
 
+<cutover_implementation>
+
+The first I7 increment provides durable migration records and host commands:
+`workflows pause-family FAMILY --owner inngest --epoch EPOCH`,
+`workflows migration ID`, `workflows reconcile ID`, `workflows switch ID`, and
+`workflows abort ID`. Use the family epoch from `workflows status`. Reuse the
+returned migration ID after a lost response. `--migration-id` supplies a known ID
+when retrying a pause whose response was lost.
+
+Pause closes admission independently of Inngest. Reconciliation reads existing
+native identities with `observe_only`; it never launches a queued or replacement
+effect. A missing receipt stays unresolved. Switching requires drained family
+locks, no live step leases, reconciled domain records and a recently registered
+worker. Existing eligible archive identities are backfilled; completed, denied,
+cancelled, suppressed and ambiguous outcomes stay closed. Ownership, new dispatch
+IDs, outbox entries and the migration receipt commit together. Failure leaves the
+family paused at its previous epoch.
+
+Rollback uses the same commands with `--owner legacy`. It refuses to expose a
+closed registry outcome to an eligible old scanner. Abort reopens the existing
+owner without changing its epoch. Both operations preserve source data and native
+receipts; neither restores an old database snapshot over new evidence.
+
+Host import-job adoption, host receipt flushing, full candidate outage/recovery
+rehearsal and real local activation are follow-up I7 work. These commands alone do
+not establish that the active installation has passed its cutover gates.
+
+</cutover_implementation>
+
 </implementation>
 
 <acceptance>
