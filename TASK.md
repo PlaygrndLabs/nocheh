@@ -165,10 +165,34 @@ accepted by these synthetic checks.
 
 </honcho_production_activation>
 
+<telegram_live_latency>
+
+The first real owner text turn after Honcho activation completed once, but took
+128.1 seconds from archive capture to its runtime receipt. The source was prepared
+in 4.9 seconds, Honcho recall took 26.0 seconds, and two actual reply-model calls
+combined took 9.5 seconds. Context preparation, native memory/tool processing,
+startup and waits account for the remainder; exact attribution still needs more
+instrumentation. Twelve provider calls were observed in the turn window, all
+successful. Later shared-engine load cannot establish its contribution to that
+specific turn.
+
+The owner's follow-up was captured 270.4 seconds after its Telegram timestamp
+and then closed as ambiguous with dispatch_interrupted on its first attempt,
+with no recorded model request. Background native memory review overlapped it;
+profile contention is a hypothesis because the persisted exception is generic.
+No replacement execution or send was started. Real Telegram acceptance is failed,
+so preparation/Telegram cutover and release remain blocked on diagnosis, fixes,
+and a repeated owner test. The earlier isolated Honcho checks are historical
+passes and do not establish full-chat latency or follow-up reliability.
+
+[Content-free timing evidence](compatibility/results/2026-09-15-telegram-latency-diagnosis.json).
+
+</telegram_live_latency>
+
 ## Outstanding acceptance and blockers
 
 - **Subscription transcription:** shared-login Ogg/Opus transcription and full provider restart acceptance passed on 2026-09-14. Actual owner Telegram voice persistence remains pending; preparation and Telegram ownership remain legacy.
-- **Telegram / release:** intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
+- **Telegram / release:** real owner text completed slowly and its follow-up failed as recorded above. Intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
 - **Shared provider:** the owner explicitly approved the switch after the earlier testing-only rejection. S5 passed and the shared route is active; the old native login is privately retired. No provider cutover blocker remains. The refresh check verifies authority delegation, not a newly forced token-expiration event.
 - **Honcho:** attached and verified; scoped production ingestion/recall, native-tool access, isolation, outage and restart acceptance pass. The opted-in history pilot and monthly budget cutover remain pending. Preserve the durable pilot ledger and explicit learning consent. See the production acceptance evidence above.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
