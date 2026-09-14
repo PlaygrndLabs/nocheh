@@ -1,15 +1,16 @@
 """Read stored experiment data with the pinned official CLI; no global account."""
 import json
 import subprocess
-from experiments.honcho.control import ROOT, STATE, COMPOSE
+from experiments.honcho.control import ROOT, STATE, COMPOSE, PROVIDER_STATE
 from experiments.honcho.cli_runner import validate
+from scripts.provider import login_state
 
 
 def status():
     result={'isolated':True,'running':False,'cli_version':'0.1.4','api_budget_usd':5,
-            'live_compatibility':'pending separate experiment credentials',
+            'live_compatibility':'pending live memory checks',
             'embedding_credential':bool((STATE/'temporary_embedding_key').exists() and (STATE/'temporary_embedding_key').stat().st_size),
-            'subscription_login':any((STATE/'bridge-auth').glob('*.json'))}
+            'subscription_login':login_state(PROVIDER_STATE)['login_present']}
     if (STATE/'compose.env').exists():
         try:
             raw=subprocess.check_output(COMPOSE+['ps','--services','--status','running'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL,timeout=15)

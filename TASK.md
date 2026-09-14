@@ -14,11 +14,11 @@ runs, not tests repeated by the documentation migration.
 | Guarded projections | G1–G3 and G5–G6 implemented; on/off guarding and owner edits active locally. G7 guarded recall/restart acceptance passed; Honcho/history acceptance remains separate. | [Guarded-memory plan](docs/guarded-memory-plan.md), [guarded acceptance](compatibility/results/2026-09-09-guarded-memory-acceptance.json) |
 | Security service | SEC1–SEC5 verified; isolated execution and evidence memory active locally. | [Security plan](docs/security-service-plan.md), [activation](compatibility/results/security-service-activation.json) |
 | Telegram monitoring | Recovery supervision, observed polling health, workflow monitoring, and local OAuth callback implemented. | [Recovery evidence](compatibility/results/2026-09-11-telegram-monitoring-oauth.json) |
-| Shared provider | S1–S4 implemented; S5 acceptance/cutover tooling implemented. Native Hermes subscription route remains active; shared-provider login/cutover pending. | [Provider plan](docs/shared-provider-plan.md) |
-| Honcho | Infrastructure and scoped integration implemented; attachment disabled pending live provider, embedding, and memory gates. Dedicated embedding attempt returned HTTP 429 with a retained $0.01 reservation. | [Embedding evidence](compatibility/results/2026-09-09-openai-embeddings.json), [memory instructions](docs/guarded-memory-system.md) |
+| Shared provider | One shared CPA login verified. Live reasoning through all three keys, transcription, literal detection, streaming, tool-call protocol and request monitoring pass. Native Hermes routing remains active; S5 switch/restart acceptance needs explicit approval after automatic review rejection. | [Provider plan](docs/shared-provider-plan.md) |
+| Honcho | Shared reasoning passes; attachment remains disabled. The fresh dedicated embedding request returned HTTP 429; total pilot reservations are $0.02. Ingestion, recall and recovery gates remain pending. | [Fresh embedding evidence](compatibility/results/2026-09-14-shared-provider-login.json), [memory instructions](docs/guarded-memory-system.md) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
-| Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, detached Honcho orchestration, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership: subscription transcription failed because speech login is absent, and real owner Telegram acceptance remains pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
+| Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, detached Honcho orchestration, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership. Shared-login transcription now passes; provider switch/recovery and real owner Telegram acceptance remain pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
 
 Latest fresh-image workflow regression: 73 service tests and 152 Hermes tests passed;
 one optional Docker security fixture was skipped. Real local Connect outages,
@@ -67,12 +67,33 @@ Earlier implementation evidence covers the
 
 </local_inngest_cutover>
 
+<shared_provider_login_acceptance>
+
+[Fresh login evidence](compatibility/results/2026-09-14-shared-provider-login.json)
+records the active installation's synthetic provider and speech checks, owner-session
+and cross-site rejection, connected Telegram polling and nine workflow registrations.
+No external owner messages or controlled actions were sent. The single embedding
+attempt failed with HTTP 429, and the temporary meter was stopped afterwards.
+
+Honcho status now reads CPA's single-login state instead of its retired bridge-auth
+folder. Its dashboard label is **Shared ChatGPT login**. The internal key aliases
+identify Hermes assistant replies, Honcho long-term memory and content privacy
+preparation. This display fix does not activate provider routing or memory.
+
+The offline Hermes suite ran 153 tests (151 passed, two optional skips), ten focused
+host tests pass, and six targeted owner/OAuth/workflow checks pass (one live fixture
+check skipped). The build passes and Graphify was refreshed without model calls.
+The new label was inspected in the existing isolated preview; its unrelated primary
+memory panel lacks fixture support and is not claimed as a full live-memory pass.
+
+</shared_provider_login_acceptance>
+
 ## Outstanding acceptance and blockers
 
-- **Subscription transcription:** the local synthetic audio check failed on 2026-09-14; the speech service reports `login_present=false`. Preparation and Telegram ownership remain legacy until the provider login is available and transcription passes. Independent workflow cutover can continue.
+- **Subscription transcription:** the fresh shared-login Ogg/Opus fixture passed on 2026-09-14. Provider restart acceptance and actual owner Telegram voice persistence remain pending; preparation and Telegram ownership remain legacy.
 - **Telegram / release:** intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
-- **Shared provider:** complete the fresh CLIProxyAPI login and live S5 reasoning, refresh, transcription, monitoring, and recovery checks before cutover. The last recorded shared login count is zero; native routing stays active until acceptance.
-- **Honcho:** resolve embedding capacity/credentials after the HTTP 429; complete shared reasoning and live ingestion, retrieval, restart, and failure checks before attachment. The opted-in history pilot and monthly budget cutover remain pending. Do not reset the spending reservation or infer learning consent.
+- **Shared provider:** exactly one CPA login is configured and live probes pass. Complete the persistent switch, refresh-owner, monitoring-outage and restart acceptance after explicit owner approval. Automatic approval review rejected the switch as outside the testing-only request; no cutover command ran and native routing remains active.
+- **Honcho:** shared reasoning through both the client key and capped meter passes. A fresh embedding attempt again returned HTTP 429; resolve provider capacity/credentials and complete ingestion, retrieval, restart and failure checks before attachment. Pilot reservations total $0.02. The opted-in history pilot and monthly budget cutover remain pending; do not reset reservations or infer learning consent.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
 - **Optional comparison:** the isolated Honcho comparison remains pending and does not block release; production Honcho activation has separate gates.
 - **Remote synchronization:** each verified increment was merged locally under the shared Git lock; fetch and push repeatedly confirmed that local GitHub HTTPS authentication is unavailable. Local integration and remote push outcomes must be reported separately; do not infer synchronization from a local merge.
