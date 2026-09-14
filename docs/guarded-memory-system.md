@@ -46,6 +46,21 @@ Normal reuse reads the saved copy without detecting the stored text again. A new
 question, new tool result or new generated summary can require its own preparation.
 Automatic preparation never replaces an original or an owner-edited projection.
 
+<speech_path>
+
+Hermes uses its native STT provider interface with Nocheh's
+`nocheh-subscription` adapter. The adapter sends audio to the local speech service,
+which runs pinned `codex-asr` through the shared ChatGPT login. This supplies the
+subscription speech route and keeps OAuth access outside the agent; the pinned
+CPA proxy supplies text reasoning and does not expose this speech route.
+
+The separate speech service is not required by guarding itself. The transcript is
+stored as derived source text and prepared for guarded downstream use. Audio must
+reach the trusted transcription endpoint before there is text to guard. This
+does not require another login or a paid transcription key.
+
+</speech_path>
+
 ## Operating the local system
 
 - Apply configuration with `./scripts/nocheh up`. `auto` migrates to `on`.
@@ -112,6 +127,7 @@ After saving the dedicated embedding key and completing the shared login, run th
 order, keeping failures pending:
 
 ```sh
+./scripts/honcho-experiment up # Build pinned images and start the isolated stack.
 ./scripts/honcho-experiment verify-memory
 ./scripts/honcho-experiment accept-memory
 ./scripts/honcho-experiment runtime-init
@@ -126,6 +142,10 @@ rejects incomplete reports. `runtime-init` installs the private gateway credenti
 the runtime overlay binds model attempts to current Nocheh audiences. A scoped
 Nocheh ingestion/recall and opted-in history pilot still needs verification after
 attachment. These commands do not grant import-learning consent.
+
+For verification only, stop after `accept-memory` and run
+`./scripts/honcho-experiment down`. It preserves the database volume and spending
+ledger. The later commands explicitly prepare and attach production memory.
 
 The total pilot cap stays at $5. After the pilot, `./scripts/honcho-experiment monthly`
 enables the agreed $5 per UTC calendar month cap; it requires accepted, attached

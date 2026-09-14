@@ -15,7 +15,7 @@ runs, not tests repeated by the documentation migration.
 | Security service | SEC1–SEC5 verified; isolated execution and evidence memory active locally. | [Security plan](docs/security-service-plan.md), [activation](compatibility/results/security-service-activation.json) |
 | Telegram monitoring | Recovery supervision, observed polling health, workflow monitoring, and local OAuth callback implemented. | [Recovery evidence](compatibility/results/2026-09-11-telegram-monitoring-oauth.json) |
 | Shared provider | S1–S5 pass locally. Hermes uses the shared CPA route; exactly one CPA login is configured and the native login is retired. Text, privacy detection, voice, monitoring outage and full restart acceptance pass. | [Cutover evidence](compatibility/results/2026-09-14-shared-provider-cutover.json), [provider plan](docs/shared-provider-plan.md) |
-| Honcho | Shared reasoning passes; attachment remains disabled. The fresh dedicated embedding request returned HTTP 429; total pilot reservations are $0.02. Ingestion, recall and recovery gates remain pending. | [Fresh embedding evidence](compatibility/results/2026-09-14-shared-provider-login.json), [memory instructions](docs/guarded-memory-system.md) |
+| Honcho | Replacement embedding key passes. All six live synthetic gates pass and verification is recorded; attachment remains disabled. Pilot reservations total $0.07. | [Live acceptance](compatibility/results/2026-09-14-honcho-live-acceptance.json), [memory instructions](docs/guarded-memory-system.md) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
 | Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, detached Honcho orchestration, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership. Shared-provider cutover and transcription/restart checks pass; real owner Telegram acceptance remains pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
@@ -97,12 +97,38 @@ Honcho remains detached; this cutover made no additional paid embedding request.
 
 </shared_provider_login_acceptance>
 
+<honcho_live_acceptance>
+
+After the owner replaced the dedicated embedding key, the metered request returned
+HTTP 200. [Fresh live acceptance](compatibility/results/2026-09-14-honcho-live-acceptance.json)
+passes shared subscription reasoning, ingestion, retrieval, guarded embedding
+evidence, persistence and recall after Honcho restart, and failure/recovery across
+a brief CPA outage. The archive accepted the report: `verified=true`, `attached=false`.
+The isolated Honcho services are stopped with their database and ledger preserved.
+Pilot reservations total $0.07, including earlier failed requests; this is a
+conservative reservation total, not an invoice.
+
+Fresh live Hermes text, privacy detection, transcription and refresh-ownership
+checks pass. All 73 service regressions and 19 Honcho tests pass. The offline Hermes
+suite ran 153 tests: 151 passed, with the optional Docker security fixture and the
+deployment-source check skipped. Missing host test dependencies and a read-only
+test build-output mount were corrected before those suites passed. Fifteen active
+containers are healthy, Telegram polling is connected, and all nine workflow
+registrations are connected. The service test fixture was stopped after verification.
+
+Production Honcho attachment, scoped production ingestion/recall, opted-in history
+and monthly-cap activation remain separate pending work. This run did not repeat
+backup/restore or real owner Telegram acceptance. Only documentation and safe
+evidence changed, so the AST graph does not require rebuilding.
+
+</honcho_live_acceptance>
+
 ## Outstanding acceptance and blockers
 
 - **Subscription transcription:** shared-login Ogg/Opus transcription and full provider restart acceptance passed on 2026-09-14. Actual owner Telegram voice persistence remains pending; preparation and Telegram ownership remain legacy.
 - **Telegram / release:** intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
 - **Shared provider:** the owner explicitly approved the switch after the earlier testing-only rejection. S5 passed and the shared route is active; the old native login is privately retired. No provider cutover blocker remains. The refresh check verifies authority delegation, not a newly forced token-expiration event.
-- **Honcho:** shared reasoning through both the client key and capped meter passes. A fresh embedding attempt again returned HTTP 429; resolve provider capacity/credentials and complete ingestion, retrieval, restart and failure checks before attachment. Pilot reservations total $0.02. The opted-in history pilot and monthly budget cutover remain pending; do not reset reservations or infer learning consent.
+- **Honcho:** all six live synthetic gates pass with the replacement embedding key; verification is accepted and memory remains detached. Production attachment, scoped ingestion/recall, the opted-in history pilot and monthly budget cutover remain pending. Pilot reservations total $0.07; do not reset reservations or infer learning consent.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
 - **Optional comparison:** the isolated Honcho comparison remains pending and does not block release; production Honcho activation has separate gates.
 - **Remote synchronization:** each verified increment was merged locally under the shared Git lock; fetch and push repeatedly confirmed that local GitHub HTTPS authentication is unavailable. Local integration and remote push outcomes must be reported separately; do not infer synchronization from a local merge.
