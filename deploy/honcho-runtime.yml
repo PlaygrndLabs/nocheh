@@ -1,17 +1,24 @@
 # Overlay for the pinned Honcho stack. Only the archive and worker join this
 # internal network; Hermes never receives a direct Honcho endpoint or credential.
 services:
+  database:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
   honcho:
+    restart: unless-stopped
     entrypoint: [sh, -c, '/app/.venv/bin/python scripts/provision_db.py && exec /app/.venv/bin/python /nocheh/run.py api']
     volumes: [../../integrations/honcho:/nocheh:ro]
     networks:
       isolated: {}
       memory: {aliases: [honcho-memory]}
   deriver:
+    restart: unless-stopped
     entrypoint: [/app/.venv/bin/python, /nocheh/run.py, deriver]
     volumes: [../../integrations/honcho:/nocheh:ro]
     networks: [isolated]
   meter:
+    restart: unless-stopped
     environment:
       NOCHEH_ARCHIVE_URL: http://archive:8780
     networks: [isolated, egress, memory]
