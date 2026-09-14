@@ -14,11 +14,11 @@ runs, not tests repeated by the documentation migration.
 | Guarded projections | G1–G3 and G5–G6 implemented; on/off guarding and owner edits active locally. G7 guarded recall/restart acceptance passed; Honcho/history acceptance remains separate. | [Guarded-memory plan](docs/guarded-memory-plan.md), [guarded acceptance](compatibility/results/2026-09-09-guarded-memory-acceptance.json) |
 | Security service | SEC1–SEC5 verified; isolated execution and evidence memory active locally. | [Security plan](docs/security-service-plan.md), [activation](compatibility/results/security-service-activation.json) |
 | Telegram monitoring | Recovery supervision, observed polling health, workflow monitoring, and local OAuth callback implemented. | [Recovery evidence](compatibility/results/2026-09-11-telegram-monitoring-oauth.json) |
-| Shared provider | One shared CPA login verified. Live reasoning through all three keys, transcription, literal detection, streaming, tool-call protocol and request monitoring pass. Native Hermes routing remains active; S5 switch/restart acceptance needs explicit approval after automatic review rejection. | [Provider plan](docs/shared-provider-plan.md) |
+| Shared provider | S1–S5 pass locally. Hermes uses the shared CPA route; exactly one CPA login is configured and the native login is retired. Text, privacy detection, voice, monitoring outage and full restart acceptance pass. | [Cutover evidence](compatibility/results/2026-09-14-shared-provider-cutover.json), [provider plan](docs/shared-provider-plan.md) |
 | Honcho | Shared reasoning passes; attachment remains disabled. The fresh dedicated embedding request returned HTTP 429; total pilot reservations are $0.02. Ingestion, recall and recovery gates remain pending. | [Fresh embedding evidence](compatibility/results/2026-09-14-shared-provider-login.json), [memory instructions](docs/guarded-memory-system.md) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
-| Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, detached Honcho orchestration, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership. Shared-login transcription now passes; provider switch/recovery and real owner Telegram acceptance remain pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
+| Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, detached Honcho orchestration, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership. Shared-provider cutover and transcription/restart checks pass; real owner Telegram acceptance remains pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
 
 Latest fresh-image workflow regression: 73 service tests and 152 Hermes tests passed;
 one optional Docker security fixture was skipped. Real local Connect outages,
@@ -86,13 +86,22 @@ check skipped). The build passes and Graphify was refreshed without model calls.
 The new label was inspected in the existing isolated preview; its unrelated primary
 memory panel lacks fixture support and is not claimed as a full live-memory pass.
 
+The owner subsequently approved [S5 local cutover](compatibility/results/2026-09-14-shared-provider-cutover.json).
+A validated format-4 backup contains 44 archive tables, 14 Inngest tables and 494
+protected files. Text, literal detection and transcription pass through Hermes;
+chat continues during monitor shutdown; text and transcription pass again after
+restarting CPA, speech, Hermes and monitoring. The native login is retired and the
+saved/runtime route is `shared`, with CPA as refresh owner. Fifteen containers are
+healthy, nine workflow registrations are connected, and Telegram polling is observed.
+Honcho remains detached; this cutover made no additional paid embedding request.
+
 </shared_provider_login_acceptance>
 
 ## Outstanding acceptance and blockers
 
-- **Subscription transcription:** the fresh shared-login Ogg/Opus fixture passed on 2026-09-14. Provider restart acceptance and actual owner Telegram voice persistence remain pending; preparation and Telegram ownership remain legacy.
+- **Subscription transcription:** shared-login Ogg/Opus transcription and full provider restart acceptance passed on 2026-09-14. Actual owner Telegram voice persistence remains pending; preparation and Telegram ownership remain legacy.
 - **Telegram / release:** intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
-- **Shared provider:** exactly one CPA login is configured and live probes pass. Complete the persistent switch, refresh-owner, monitoring-outage and restart acceptance after explicit owner approval. Automatic approval review rejected the switch as outside the testing-only request; no cutover command ran and native routing remains active.
+- **Shared provider:** the owner explicitly approved the switch after the earlier testing-only rejection. S5 passed and the shared route is active; the old native login is privately retired. No provider cutover blocker remains. The refresh check verifies authority delegation, not a newly forced token-expiration event.
 - **Honcho:** shared reasoning through both the client key and capped meter passes. A fresh embedding attempt again returned HTTP 429; resolve provider capacity/credentials and complete ingestion, retrieval, restart and failure checks before attachment. Pilot reservations total $0.02. The opted-in history pilot and monthly budget cutover remain pending; do not reset reservations or infer learning consent.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
 - **Optional comparison:** the isolated Honcho comparison remains pending and does not block release; production Honcho activation has separate gates.

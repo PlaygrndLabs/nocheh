@@ -64,13 +64,36 @@ Automatic preparation never replaces an original or an owner-edited projection.
   restores trusted guarded history from your own export. Ordinary imports prepare
   copies again and do not accept supplied guarded text as already trusted.
 
-Configure embeddings in the root `.env`:
+Configure embeddings in the root `.env`. Use `/Users/owner/Develop/Personal/nocheh/.env` for the active local installation.
+The `OPENAI_API_KEY` value is the dedicated paid embedding credential. CPA's API
+Keys list contains local client credentials for subscription reasoning; adding the
+paid OpenAI key there does not configure Nocheh's embedding gateway.
 
 ```dotenv
 NOCHEH_EMBEDDING_PROVIDER='openai'
 NOCHEH_EMBEDDING_MODEL='text-embedding-3-small'
 OPENAI_API_KEY='' # Set your dedicated key locally; never commit it.
 ```
+
+For initial setup or an embedding HTTP 429:
+
+1. Open [API billing](https://platform.openai.com/settings/organization/billing/overview)
+   for the organization/project that owns the key. ChatGPT subscription billing
+   is separate from API billing. Check available credit and applicable limits;
+   a 429 can mean rate, credit, spending or usage limits, so key presence alone
+   does not establish provider access.
+2. Use the existing dedicated project key, or create a replacement on the
+   [API keys page](https://platform.openai.com/api-keys) when needed. Save it as
+   `OPENAI_API_KEY` in the root `.env` above, preserving the other settings. Do not
+   paste it into chat or CPA's client-key list.
+3. Keep the configured `text-embedding-3-small` model for an existing small-model
+   ledger. Changing a model is a memory rebuild operation, not a quota repair.
+4. Run the verification and activation sequence below from the repository root.
+   Stop at any failed command. `verify-memory` must pass before `accept-memory`;
+   setting a key or starting containers does not attach memory.
+
+OpenAI documents [separate API billing](https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform)
+and [429 diagnosis](https://help.openai.com/en/articles/5955604-troubleshooting-api-rate-limits-and-429-errors).
 
 OpenAI is the only enabled provider. `text-embedding-3-large` is also supported
 for a fresh setup; both models use 1536 dimensions. After the first paid attempt,
