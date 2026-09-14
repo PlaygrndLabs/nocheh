@@ -241,7 +241,7 @@ import {Monitoring} from './monitoring.js';
       error&&h('p',{role:'alert'},error),!status&&!error&&h('p',{role:'status'},'Checking the experiment…'),status&&h('div',null,
         h('p',{className:'n-badge'},status.running?'Experiment services running':'Experiment stopped'),
         h('div',{className:'n-row'},h('b',null,'Live compatibility'),h('span',null,status.live_compatibility)),
-        h('div',{className:'n-row'},h('b',null,'Separate subscription login'),h('span',null,status.subscription_login?'Configured':'Not configured')),
+        h('div',{className:'n-row'},h('b',null,'Shared ChatGPT login'),h('span',null,status.subscription_login?'Configured':'Not configured')),
         h('div',{className:'n-row'},h('b',null,'Experiment embedding credential'),h('span',null,status.embedding_credential?'Configured':'Not configured')),
         h('div',{className:'n-row'},h('b',null,'Metered API budget cap'),h('span',null,'$'+status.api_budget_usd+' · not a live spending balance')),
         !status.running&&h('p',{className:'n-empty'},'Stored-data browsing becomes available when the isolated experiment is running. Setup and lifecycle controls currently use the Honcho CLI.'),

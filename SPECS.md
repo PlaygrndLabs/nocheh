@@ -90,6 +90,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Pinned CPA Manager Plus Full Mode runs as a separate service behind the Nocheh owner session. It shows request history, usage, latency, failures, and account/quota observations. Provider/admin keys stay server-side; automatic credential actions, external notifications, and request-body logging are disabled. Monitoring failure does not block inference.
 - Nocheh monitoring exposes observed Telegram polling progress and incidents, recent workflows, retries, waiting, success, skips, failures, uncertain delivery, provider routes, and service state. A fatal polling failure cannot remain reported as connected; retryable fatal adapter failures enter supervised recovery.
 - Host OAuth callbacks are temporary and state-validated. Login status is observable without exposing credential values.
+- Internal API keys are labeled with their service name and usage. Hermes, Honcho, and preparation show their shared ChatGPT login without implying separate subscription accounts.
 
 </area>
 </area>
