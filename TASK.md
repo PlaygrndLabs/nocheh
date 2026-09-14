@@ -15,7 +15,7 @@ runs, not tests repeated by the documentation migration.
 | Security service | SEC1–SEC5 verified; isolated execution and evidence memory active locally. | [Security plan](docs/security-service-plan.md), [activation](compatibility/results/security-service-activation.json) |
 | Telegram monitoring | Recovery supervision, observed polling health, workflow monitoring, and local OAuth callback implemented. | [Recovery evidence](compatibility/results/2026-09-11-telegram-monitoring-oauth.json) |
 | Shared provider | S1–S5 pass locally. Hermes uses the shared CPA route; exactly one CPA login is configured and the native login is retired. Text, privacy detection, voice, monitoring outage and full restart acceptance pass. | [Cutover evidence](compatibility/results/2026-09-14-shared-provider-cutover.json), [provider plan](docs/shared-provider-plan.md) |
-| Honcho | Attached for owner-authorized production validation, without history backfill. One synthetic consented source was ingested once; production recall returned limited memory. The timeout fix and final acceptance are pending container-engine recovery. Pilot reservations total $0.10. | [Activation progress](compatibility/results/2026-09-15-honcho-activation-progress.json), [prior live acceptance](compatibility/results/2026-09-14-honcho-live-acceptance.json) |
+| Honcho | Attached for owner-authorized production validation, without history backfill. One synthetic consented source was ingested once; production recall returned limited memory. The recall timeout fix passes 74 service and 152 Hermes tests after an approved OrbStack restart; applying it and final production acceptance remain pending. Pilot reservations total $0.10. | [Activation progress](compatibility/results/2026-09-15-honcho-activation-progress.json), [prior live acceptance](compatibility/results/2026-09-14-honcho-live-acceptance.json) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
 | Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, detached Honcho orchestration, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership. Shared-provider cutover and transcription/restart checks pass; real owner Telegram acceptance remains pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
@@ -136,15 +136,18 @@ receipt and one attempt. An unconsented source was excluded, and test imports
 produced no replies. The first scoped recall returned limited memory. Inspection
 found a 15-second native tool deadline and 120-second service/broker deadlines
 that are too short for cold guarded recall. A longer, bounded recall-only deadline
-change is being tested in the session worktree; it is not yet applied or accepted.
+change is verified in candidate images; it is not yet applied to production.
 
-The host build, one slow-recall transport test and 23 focused Python tests pass.
-Full container regressions stalled, including an offline gateway timeout; Docker
-could not stop the isolated test container and reported that it did not receive
-an exit event. The redundant image build was cancelled. OrbStack supplies this
-Docker engine and also runs another project's containers, so restarting it awaits
-owner approval. Nocheh's archive and Telegram polling still respond. Production
-recall, native-tool use, isolation and restart acceptance remain incomplete.
+The owner approved a graceful OrbStack restart after the earlier engine stall.
+The engine and existing services recovered without a forced stop. Both candidate
+images build, all 74 service tests pass, and the offline Hermes suite passes 152
+tests with two optional checks skipped. The service suite includes scoped recall
+deadlines and cancellation, consent, receipts, and owner-session protections. The
+initial test shortcut omitted generated dashboard assets; the normal full build
+and suite pass. The earlier 23 focused Python checks also passed; Graphify was
+refreshed using AST extraction only. See the [recall regression evidence](compatibility/results/2026-09-15-honcho-recall-regression.json).
+Production recall, native-tool use, isolation and restart acceptance remain pending
+installation of the verified candidates.
 
 </honcho_production_activation>
 
@@ -153,7 +156,7 @@ recall, native-tool use, isolation and restart acceptance remain incomplete.
 - **Subscription transcription:** shared-login Ogg/Opus transcription and full provider restart acceptance passed on 2026-09-14. Actual owner Telegram voice persistence remains pending; preparation and Telegram ownership remain legacy.
 - **Telegram / release:** intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
 - **Shared provider:** the owner explicitly approved the switch after the earlier testing-only rejection. S5 passed and the shared route is active; the old native login is privately retired. No provider cutover blocker remains. The refresh check verifies authority delegation, not a newly forced token-expiration event.
-- **Honcho:** attached for production validation; final recall/isolation/restart acceptance is pending the recall timeout fix and OrbStack recovery. The prior isolated six-gate verification remains accepted, but is not production acceptance. The opted-in history pilot and monthly budget cutover remain pending. Pilot reservations total $0.10; do not reset reservations or infer learning consent.
+- **Honcho:** attached for production validation; the recall timeout fix is verified after OrbStack recovery; installation and final recall/isolation/restart acceptance remain pending. The prior isolated six-gate verification remains accepted, but is not production acceptance. The opted-in history pilot and monthly budget cutover remain pending. Pilot reservations total $0.10; do not reset reservations or infer learning consent.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
 - **Optional comparison:** the isolated Honcho comparison remains pending and does not block release; production Honcho activation has separate gates.
 - **Remote synchronization:** each verified increment was merged locally under the shared Git lock; fetch and push repeatedly confirmed that local GitHub HTTPS authentication is unavailable. Local integration and remote push outcomes must be reported separately; do not infer synchronization from a local merge.

@@ -53,7 +53,10 @@ export function brokerServer(options:BrokerOptions) {
     if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url))return;
     const binding=await turnBinding(options.pool,principal);
     const credential=req.headers.authorization!;
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),120000);
+    // A cold Honcho recall includes multiple guarded provider calls. Keep other
+    // broker operations on their shorter deadline; cancellation still aborts both.
+    const timeout=req.method==='POST'&&path==='/v1/memory/honcho/recall'?600000:120000;
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
     const closed=()=>{if(!res.writableEnded)controller.abort();};res.on('close',closed);
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
     const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{

@@ -1,4 +1,5 @@
 import json
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,20 @@ from . import archive_tools
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_slow_honcho_read_can_finish_without_extending_normal_archive_reads(self):
+        def slow_read(request,timeout):
+            if timeout < 30: raise TimeoutError()
+            return io.BytesIO(b'{"sources":[{"kind":"memory_inference"}]}')
+        token=archive_tools.ARCHIVE_CREDENTIAL.set('signed-synthetic-credential')
+        try:
+            with patch.object(archive_tools,'_PROCESS_CREDENTIAL',None),patch('urllib.request.urlopen',side_effect=slow_read) as network:
+                result=archive_tools.request('/v1/memory/honcho/recall',{'query':'Synthetic recall'})
+                self.assertEqual(result['sources'][0]['kind'],'memory_inference')
+                self.assertGreater(network.call_args.kwargs['timeout'],600)
+                with self.assertRaises(TimeoutError): archive_tools.request('/v1/search?q=synthetic')
+                self.assertEqual(network.call_args.kwargs['timeout'],15)
+        finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)
+
     def test_telegram_entities_and_supplied_media_roundtrip_without_rewriting(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'voice.ogg').write_bytes(b'OggS\x00\xff')
