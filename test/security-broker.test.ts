@@ -13,16 +13,24 @@ test('broker supports only explicit scoped routes and fixed subscription destina
   assert.throws(()=>providerTarget({base_url:'https://attacker.example',api_mode:'codex_responses'},'/codex/responses'));
   assert.throws(()=>providerTarget({base_url:'https://chatgpt.com/backend-api/codex',api_mode:'codex_responses'},'/codex/models'));
 });
-test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async()=>{
+test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async t=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_broker_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
   const pool=new pg.Pool({...connection,options:'-c search_path='+namespace});
   const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string}[]=[];
   const secret='synthetic-provider-credential-never-returned';
-  let guardDown=false,streamRevocation=false;
+  let guardDown=false,streamRevocation=false,slowMemory=false;
   const mock:typeof fetch=async(url,init)=>{
     const body=init?.body?JSON.parse(String(init.body)):null;
     calls.push({url:String(url),body,auth:new Headers(init?.headers).get('authorization')??''});
+    if(slowMemory&&String(url).includes('/memory/')) {
+      init?.signal?.throwIfAborted();
+      await new Promise<void>((resolve,reject)=>{
+        const timer=setTimeout(resolve,40);
+        init?.signal?.addEventListener('abort',()=>{clearTimeout(timer);reject(init.signal?.reason);},{once:true});
+      });
+      return Response.json({sources:[]});
+    }
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://chatgpt.com/backend-api/codex',api_mode:'codex_responses',api_key:secret});
     if(String(url).endsWith('/v1/guard'))return guardDown?new Response('unavailable',{status:503}):Response.json({guarded:true,payload:body.payload});
     if(streamRevocation)return new Response(new ReadableStream({start(controller){
@@ -51,6 +59,16 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     assert.equal((await pool.query("SELECT rule FROM security_events WHERE state='blocked' ORDER BY id DESC LIMIT 1")).rows[0].rule,'hosted_provider_tools_denied');
     assert.equal((await request('/codex/responses',payload,token)).status,403);
     assert.equal(calls.length,before,'denied calls never reach upstreams');
+    // Compress only broker deadlines so this covers a slow recall without a
+    // multi-minute test. The normal memory route still times out and cancels.
+    const setTimer=globalThis.setTimeout;
+    const clock=t.mock.method(globalThis,'setTimeout',((fn:any,ms?:number,...args:any[])=>
+      setTimer(fn,ms===600000?1000:ms===120000?5:ms,...args)) as typeof setTimeout);
+    slowMemory=true;
+    try {
+      assert.equal((await request('/v1/memory/honcho/recall',{query:'Synthetic recall'})).status,200);
+      assert.equal((await request('/v1/memory/recall',{query:'Synthetic recall'})).status,503);
+    }finally{slowMemory=false;clock.mock.restore();}
     guardDown=true;
     assert.equal((await request('/codex/responses',payload)).status,503);
     assert.equal(calls.filter(x=>x.url==='https://chatgpt.com/backend-api/codex/responses').length,1,'guard outage never falls back to a direct provider call');

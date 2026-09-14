@@ -5,7 +5,19 @@ import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {approveLearning} from '../src/learning.js';
 import {prepareGuarded,setGuardMode,guardState,editGuarded} from '../src/guarded.js';
-import {syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,prepareMemoryRequest,type HonchoCall} from '../src/honcho.js';
+import {honchoClient,syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,prepareMemoryRequest,type HonchoCall} from '../src/honcho.js';
+
+test('slow Honcho recall can finish while ordinary calls retain their deadline',async t=>{
+ const timeout=AbortSignal.timeout.bind(AbortSignal);
+ t.mock.method(AbortSignal,'timeout',(ms:number)=>timeout(ms/10000));
+ t.mock.method(globalThis,'fetch',(_url:unknown,init:RequestInit)=>new Promise<Response>((resolve,reject)=>{
+  const timer=setTimeout(()=>resolve(Response.json({content:'Synthetic memory'})),25);
+  init.signal!.addEventListener('abort',()=>{clearTimeout(timer);reject(init.signal!.reason);},{once:true});
+ }));
+ const call=honchoClient('http://synthetic-honcho');
+ assert.equal((await call('/v3/workspaces/test/peers/source/chat',{})).content,'Synthetic memory');
+ await assert.rejects(call('/v3/workspaces/test/queue/status'),{code:'honcho_unavailable'});
+});
 
 test('durable Honcho receipts, consent, isolation, uncertain writes and current-only egress',{skip:!process.env.PGHOST},async()=>{
  const admin=new pg.Pool(),namespace=`honcho_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);const pool=new pg.Pool({options:`-c search_path=${namespace}`});

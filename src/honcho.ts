@@ -30,7 +30,8 @@ export type HonchoCall=(path:string,body?:unknown)=>Promise<any>;
 export function honchoClient(base:string):HonchoCall {
  const url=new URL(base);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('invalid_honcho_url');
  return async(path,body)=>{
-  let response:Response;try{response=await fetch(url.origin+path,{method:body===undefined?'GET':'POST',redirect:'error',signal:AbortSignal.timeout(120000),
+  // Recall includes guarded query preparation, embeddings and subscription reasoning.
+  let response:Response;try{response=await fetch(url.origin+path,{method:body===undefined?'GET':'POST',redirect:'error',signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
    headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});}catch{throw new HttpError(503,'honcho_unavailable');}
   if(!response.ok)throw new HttpError(503,'honcho_upstream_rejected');
   const text=await response.text();if(text.length>2*1024*1024)throw new HttpError(503,'honcho_response_limit');
