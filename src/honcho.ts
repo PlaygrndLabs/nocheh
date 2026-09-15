@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS honcho_generations(id text PRIMARY KEY,audience text 
  guard_epoch bigint NOT NULL,policy_revision integer NOT NULL,event_id text NOT NULL REFERENCES events(id),
  state text NOT NULL DEFAULT 'building',error_code text,created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(audience,guard_epoch,policy_revision));
+ALTER TABLE honcho_generations ADD COLUMN IF NOT EXISTS last_ready_at timestamptz;
+UPDATE honcho_generations SET last_ready_at=now() WHERE state='ready' AND last_ready_at IS NULL;
 CREATE TABLE IF NOT EXISTS honcho_receipts(id text PRIMARY KEY,generation text NOT NULL REFERENCES honcho_generations(id),
  source_id text NOT NULL REFERENCES guard_sources(id),source_revision text NOT NULL,guarded_revision integer,
  audience text NOT NULL,content_hash text NOT NULL,content bytea NOT NULL,state text NOT NULL DEFAULT 'pending',
@@ -42,10 +44,12 @@ export async function memoryStatus(pool:pg.Pool) {
  await pool.query('INSERT INTO honcho_connection(singleton,instance) VALUES(true,$1) ON CONFLICT DO NOTHING',[randomUUID()]);
  const connection=(await pool.query('SELECT attached,verified,attached_at,include_history FROM honcho_connection')).rows[0];
  const guard=await guardState(pool),policy=await policyRevision(pool);
- const generations=(await pool.query(`SELECT id,audience,mode,state,error_code,guard_epoch FROM honcho_generations
+ const generations=(await pool.query(`SELECT id,audience,mode,state,error_code,guard_epoch,last_ready_at FROM honcho_generations
    WHERE guard_epoch=$1 AND policy_revision=$2 ORDER BY audience`,[guard.epoch,policy])).rows;
  const receipts=(await pool.query('SELECT state,count(*)::int AS count FROM honcho_receipts GROUP BY state')).rows;
- return {connection,generations,receipts,guard,policy,primary:'honcho',native_notes:['MEMORY.md','USER.md'],limited_memory:!connection.attached||!connection.verified||!generations.length||generations.some(g=>g.state!=='ready')};
+ return {connection,generations,receipts,guard,policy,primary:'honcho',native_notes:['MEMORY.md','USER.md'],
+  syncing:generations.some(g=>g.state==='building'),
+  limited_memory:!connection.attached||!connection.verified||!generations.length||generations.some(g=>g.state!=='ready'&&!(g.state==='building'&&g.last_ready_at))};
 }
 export async function setMemoryConnection(pool:pg.Pool,input:unknown) {
  const b=object(input);if(typeof b.attached!=='boolean'||(b.include_history!==undefined&&typeof b.include_history!=='boolean')||(b.catch_up!==undefined&&typeof b.catch_up!=='boolean'))throw new HttpError(400,'invalid_memory_connection');
@@ -129,7 +133,7 @@ export async function observeGeneration(pool:pg.Pool,id:string,call:HonchoCall):
  const queue=await call('/v3/workspaces/'+id+'/queue/status');
  await currentGeneration(pool,id);
  const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0;
- await pool.query("UPDATE honcho_generations SET state=$2,error_code=NULL WHERE id=$1 AND state<>'retired'",[id,ready?'ready':'building']);
+ await pool.query("UPDATE honcho_generations SET state=$2,error_code=NULL,last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END WHERE id=$1 AND state<>'retired'",[id,ready?'ready':'building']);
  return ready;
 }
 export async function reconcileHonchoReceipt(pool:pg.Pool,id:string,call:HonchoCall):Promise<boolean> {
@@ -195,7 +199,7 @@ export async function syncMemory(pool:pg.Pool,call:HonchoCall,jobId:string|null=
     const pending=Number((await pool.query("SELECT count(*) AS count FROM honcho_receipts WHERE generation=$1 AND state<>'done'",[generation.id])).rows[0].count);
     const queue=await call('/v3/workspaces/'+generation.id+'/queue/status');
     const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0;
-    await pool.query('UPDATE honcho_generations SET state=$2,error_code=NULL WHERE id=$1 AND state<>\'retired\'',[generation.id,ready?'ready':'building']);
+    await pool.query("UPDATE honcho_generations SET state=$2,error_code=NULL,last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END WHERE id=$1 AND state<>'retired'",[generation.id,ready?'ready':'building']);
    }catch{await pool.query("UPDATE honcho_generations SET error_code='honcho_unavailable' WHERE id=$1",[generation.id]);}
   }
  }finally{await releaseOperation(client,async()=>{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803311))');if(fenced)await leaveFamily(client,'honcho');});}
@@ -203,13 +207,17 @@ export async function syncMemory(pool:pg.Pool,call:HonchoCall,jobId:string|null=
 export async function recallMemory(pool:pg.Pool,principal:Reader,query:string,call:HonchoCall,detect:(text:string)=>Promise<unknown>) {
  await assertAudience(pool,principal);string(query,2000);
  const status=await memoryStatus(pool),audience=principal.scope===null?'owner':principal.space??principal.scope;
- const generation=status.generations.find(g=>g.audience===audience),limited={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
+ const generation=status.generations.find(g=>g.audience===audience),limited={sources:[],limited_memory:true,syncing:generation?.state==='building',note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
  if(!status.connection.attached||!generation)return limited;
  try{
   await currentGeneration(pool,generation.id);const question=await prepareContext(pool,principal,query,detect);
   const result=await call('/v3/workspaces/'+generation.id+'/peers/source/chat',{query:question,reasoning_level:'low',stream:false});
   await currentGeneration(pool,generation.id);await assertAudience(pool,principal);
   const text=await prepareContext(pool,principal,string(result.content,20000),detect);
-  return {sources:[{source:'nocheh:honcho:'+generation.id,kind:'memory_inference',text}],limited_memory:generation.state!=='ready',...(generation.state!=='ready'?{note:limited.note}:{})};
+  const current=await currentGeneration(pool,generation.id),initializing=!current.last_ready_at&&current.state!=='ready';
+  // An incremental upload does not make previously derived memory unavailable.
+  // A new guard/policy generation has no readiness history and remains limited
+  // until its first completed synchronization; real recall failures still fall back.
+  return {sources:[{source:'nocheh:honcho:'+generation.id,kind:'memory_inference',text}],limited_memory:initializing,syncing:current.state==='building',...(initializing?{note:limited.note}:{})};
  }catch(error){await assertAudience(pool,principal);return limited;}
 }

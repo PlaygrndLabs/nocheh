@@ -5,7 +5,7 @@ import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {approveLearning} from '../src/learning.js';
 import {prepareGuarded,setGuardMode,guardState,editGuarded} from '../src/guarded.js';
-import {honchoClient,syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,prepareMemoryRequest,type HonchoCall} from '../src/honcho.js';
+import {honchoClient,syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,prepareMemoryRequest,observeGeneration,type HonchoCall} from '../src/honcho.js';
 
 test('slow Honcho recall can finish while ordinary calls retain their deadline',async t=>{
  const timeout=AbortSignal.timeout.bind(AbortSignal);
@@ -60,6 +60,24 @@ test('durable Honcho receipts, consent, isolation, uncertain writes and current-
   assert.equal((await recallMemory(pool,{...group,scope:'-20',space:'-20'},'What tea?',call,detect)).sources.length,0);
   assert.equal(paths.length,before,'no Honcho request for an unpopulated unauthorized audience');
   const generation=(await memoryStatus(pool)).generations.find(g=>g.audience==='-10')!;
+  assert.ok(generation.last_ready_at);
+  await observeGeneration(pool,generation.id,async()=>({pending_work_units:1,in_progress_work_units:0}));
+  const syncing=await recallMemory(pool,group,'What tea?',call,detect);
+  assert.equal(syncing.limited_memory,false,'incremental synchronization preserves usable memory');
+  assert.equal(syncing.syncing,true);
+  assert.equal((await memoryStatus(pool)).limited_memory,false);
+  assert.equal((await recallMemory(pool,group,'What tea?',async()=>{throw Error('private upstream failure');},detect)).limited_memory,true,'actual recall failures still disclose fallback');
+  await pool.query("UPDATE honcho_generations SET last_ready_at=NULL WHERE id=$1",[generation.id]);
+  assert.equal((await recallMemory(pool,group,'What tea?',call,detect)).limited_memory,true,'first generation must finish its initial build');
+  const finishing:HonchoCall=async(path,body)=>{
+   if(path.endsWith('/chat'))await observeGeneration(pool,generation.id,call);
+   return call(path,body);
+  };
+  assert.equal((await recallMemory(pool,group,'What tea?',finishing,detect)).limited_memory,false,'recall observes readiness changes during the request');
+  await pool.query("UPDATE honcho_generations SET state='retired' WHERE id=$1",[generation.id]);
+  assert.equal((await memoryStatus(pool)).limited_memory,true,'past readiness never makes retired memory available');
+  assert.equal((await recallMemory(pool,group,'What tea?',call,detect)).limited_memory,true);
+  await pool.query("UPDATE honcho_generations SET state='ready' WHERE id=$1",[generation.id]);
   let detectorCalls=0;
   const request={workspace:generation.id,route:'/v1/embeddings',payload:{model:'text-embedding-3-small',input:'I like green tea. Password: ***'}};
   const prepared=await prepareMemoryRequest(pool,request,async text=>{detectorCalls++;return detect(text);});
