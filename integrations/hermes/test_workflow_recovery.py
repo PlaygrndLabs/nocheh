@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,7 +8,7 @@ from unittest.mock import patch
 from scripts.configuration import initialize,compose_environment,write_env,env_path
 from scripts.settings import view,save
 from scripts.operations import sha
-from scripts.workflow_recovery import snapshot,validate,restore
+from scripts.workflow_recovery import snapshot,validate,restore,REDIS_RESTORE_SCRIPT
 
 
 class WorkflowRecoveryTests(unittest.TestCase):
@@ -54,3 +57,40 @@ class WorkflowRecoveryTests(unittest.TestCase):
             self.assertEqual(sha(state/'workflows/redis/dump.rdb'),metadata['workflow-redis.rdb']['sha256'])
             self.assertFalse(any('inngest' in c or 'workflow-worker' in c for c in commands))
             self.assertIn('--role=nocheh_inngest',commands[1])
+
+
+class RedisRestoreStartupTests(unittest.TestCase):
+    def run_restore(self, reject_config=False):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            server=root/'redis-server';server.write_text('#!/bin/sh\nexit 0\n');server.chmod(0o700)
+            client=root/'redis-cli'
+            client.write_text('#!'+sys.executable+'\n'+"""
+import os,sys
+from pathlib import Path
+root=Path(os.environ['REDIS_TEST_DIR']);operation=sys.argv[3]
+if operation=='ping':
+    counter=root/'pings';count=int(counter.read_text())+1 if counter.exists() else 1
+    counter.write_text(str(count));print('PONG' if count>=3 else 'LOADING Redis is loading the dataset in memory')
+elif operation=='config':
+    if int((root/'pings').read_text())<3:raise SystemExit(1)
+    (root/'config').touch();print('ERR synthetic refusal' if os.environ['REDIS_TEST_REJECT']=='1' else 'OK')
+elif operation=='info':
+    (root/'info').touch();print('aof_rewrite_in_progress:0\\r\\naof_last_bgrewrite_status:ok')
+elif operation=='shutdown':
+    (root/'shutdown').touch();print('OK')
+else:raise SystemExit(1)
+""")
+            client.chmod(0o700)
+            result=subprocess.run(['sh','-c',REDIS_RESTORE_SCRIPT],env={**os.environ,'PATH':str(root)+os.pathsep+os.environ['PATH'],
+                'REDIS_TEST_DIR':str(root),'REDIS_TEST_REJECT':'1' if reject_config else '0'},capture_output=True,text=True,timeout=15)
+            self.assertGreaterEqual(int((root/'pings').read_text()),3)
+            self.assertTrue((root/'shutdown').exists(),'temporary Redis is stopped on success and rejection')
+            self.assertEqual((root/'info').exists(),not reject_config)
+            return result.returncode
+
+    def test_restore_waits_for_loaded_redis_before_enabling_aof(self):
+        self.assertEqual(self.run_restore(),0)
+
+    def test_redis_cli_error_text_cannot_claim_aof_enabled(self):
+        self.assertNotEqual(self.run_restore(reject_config=True),0)
