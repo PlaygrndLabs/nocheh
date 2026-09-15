@@ -65,4 +65,13 @@ RUN npm ci --workspace ui-tui --workspace apps/shared --ignore-scripts --no-audi
 FROM native-runtime
 COPY --from=tui-assets /usr/local/bin/node /usr/local/bin/node
 COPY --from=tui-assets /opt/hermes/ui-tui/dist /opt/hermes/ui-tui/dist
+# Each isolated turn starts a fresh interpreter on a read-only root. Compile
+# the pinned libraries during the image build instead of recompiling them on
+# every request (runtime bytecode writes remain disabled).
+USER root
+RUN python -m compileall -q /opt/venv/lib/python3.11/site-packages /workspace/integrations \
+    /opt/hermes/agent /opt/hermes/gateway /opt/hermes/tools /opt/hermes/hermes_cli \
+    /opt/hermes/run_agent.py /opt/hermes/hermes_state.py /opt/hermes/model_tools.py \
+    /opt/hermes/toolsets.py /opt/hermes/hermes_constants.py /opt/hermes/utils.py
+USER nocheh
 CMD ["python", "-m", "integrations.hermes.runtime"]
