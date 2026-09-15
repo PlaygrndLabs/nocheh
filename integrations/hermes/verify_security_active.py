@@ -47,7 +47,7 @@ async def main():
         signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=');credential='turn.'+encoded+'.'+signature
         record('saved_owner_copy_exact',call('/v1/events/'+event,credential=credential)['event']['text']==expected)
         runtime=call('/internal/browser-credentials',{'profile':Scopes.profile(owner),'scope':owner,'event_id':event,'archive_credential':credential},url='http://127.0.0.1:8781')
-        binding=call('/v1/security/binding',credential=credential,url='http://security:8786')
+        binding=call('/v1/security/binding',credential=credential,url='http://nocheh-security:8786')
         record('provider_context_preserved',binding['model_context_length']>0 and binding['model']==runtime['model'])
         report['model']=binding['model'];report['model_context_length']=binding['model_context_length']
         scope=Scopes({'enabled':True,'owner_id':owner,'group_ids':[]}).resolve({'message':{'chat':{'id':int(owner),'type':'private'},'from':{'id':int(owner)}}},owner)

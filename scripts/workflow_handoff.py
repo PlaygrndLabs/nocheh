@@ -9,7 +9,7 @@ from pathlib import Path
 from .archive import API,canonical,digest
 from .configuration import load
 from .import_job import safe_name
-from .tool_worker import atomic
+from .tool_receipts import atomic
 
 
 @contextmanager

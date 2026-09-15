@@ -6,9 +6,20 @@ import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from .configuration import ROOT,compose_environment
-from .tool_worker import atomic
+from .tool_receipts import atomic,flush_receipts
+from .archive import API
+from .node_runtime import executable
+
+
+def recover_receipts(state):
+    class ReceiptAPI(API):
+        def call(self,path,body=None,binary=False,timeout=5):
+            return super().call(path,body,binary,5)
+    deadline=time.monotonic()+10
+    return flush_receipts(state,ReceiptAPI(),lambda:time.monotonic()<deadline)
 
 
 def running(state):
@@ -25,6 +36,7 @@ def start(state):
     if (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return {'state':'inactive_restore'}
     directory=state/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     if running(state):return {'state':'running'}
+    executable(env)
     (directory/'stop').unlink(missing_ok=True)
     subprocess.Popen([sys.executable,'-m','scripts.workflow_worker'],cwd=ROOT,env={**os.environ,'NOCHEH_STATE_DIR':str(state)},
                      stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
@@ -46,24 +58,34 @@ def serve(state):
     env=compose_environment(state);port=env['NOCHEH_PORT']
     if env.get('NOCHEH_WORKFLOWS_ENABLED')!='true' or (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return 0
     env.update(INNGEST_BASE_URL='http://127.0.0.1:'+port,INNGEST_CONNECT_GATEWAY_URL='ws://127.0.0.1:'+port+'/v0/connect',NOCHEH_PYTHON=sys.executable)
-    with (directory/'worker.lock').open('a') as lock:
+    node=executable(env)
+    with (directory/'worker.lock').open('a') as lock,ThreadPoolExecutor(max_workers=1) as recovery:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return 0
-        stopping=False;child=None
+        stopping=False;child=None;pending=None;next_recovery=0;next_start=0;receipt_state='starting';next_status=0
         def terminate(*_):
             nonlocal stopping
             stopping=True
         signal.signal(signal.SIGTERM,terminate);signal.signal(signal.SIGINT,terminate)
         while not stopping and not (directory/'stop').exists():
-            child=subprocess.Popen([env.get('NOCHEH_NODE','node'),str(ROOT/'dist/src/workflows/host.js')],cwd=ROOT,env=env,
-                                   stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            atomic(directory/'status.json',{'pid':os.getpid(),'seen_at':time.time(),'state':'running'})
-            while child.poll() is None and not stopping and not (directory/'stop').exists():time.sleep(.2)
-            if child.poll() is None:child.terminate();child.wait();break
-            atomic(directory/'status.json',{'pid':os.getpid(),'seen_at':time.time(),'state':'restarting'})
-            for _ in range(25):
-                if stopping or (directory/'stop').exists():break
-                time.sleep(.2)
+            now=time.monotonic()
+            if pending is not None and pending.done():
+                try:pending.result();receipt_state='ready'
+                except Exception:receipt_state='waiting_for_archive'
+                pending=None;next_recovery=now+2
+            if pending is None and now>=next_recovery:pending=recovery.submit(recover_receipts,state)
+            if child is not None and child.poll() is not None:child=None;next_start=now+5
+            if child is None and now>=next_start:
+                try:
+                    child=subprocess.Popen([node,str(ROOT/'dist/src/workflows/host.js')],cwd=ROOT,env=env,
+                                           stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                except OSError:next_start=now+5
+            if now>=next_status:
+                atomic(directory/'status.json',{'pid':os.getpid(),'seen_at':time.time(),'state':'running',
+                    'connect_process':'running' if child else 'restarting','receipts':receipt_state})
+                next_status=now+5
+            time.sleep(.2)
+        if child is not None and child.poll() is None:child.terminate();child.wait()
         atomic(directory/'status.json',{'pid':os.getpid(),'seen_at':time.time(),'state':'stopped'})
     return 0
 

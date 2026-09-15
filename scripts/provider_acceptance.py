@@ -49,7 +49,7 @@ def _wait_monitor(state,minimum,seconds=45):
 
 def _verify(command,env,state,name,checks=()):
     target=f'/reports/shared-provider-{name}.json'
-    args=command+['exec','-T','hermes','python','-m','integrations.hermes.verify','--live','--output',target]
+    args=command+['exec','-T','hermes-runtime','python','-m','integrations.hermes.verify','--live','--output',target]
     for check in checks:args+=['--check',check]
     _run(args,env=env,cwd=Path(__file__).resolve().parents[1])
     report=json.loads((Path(state)/'reports'/Path(target).name).read_text())
@@ -106,18 +106,18 @@ def cutover(state):
         if changed:
             write_env(env_path(state),{**before,'NOCHEH_REASONING_ROUTE':'shared'})
             env={**env,'NOCHEH_REASONING_ROUTE':'shared'}
-        _run(command+['up','-d','--no-build','--wait','--wait-timeout','180','cliproxy','provider-monitor','speech','hermes'],env=env,cwd=root)
+        _run(command+['up','-d','--no-build','--wait','--wait-timeout','180','cliproxy-api','cliproxy-monitor','chatgpt-speech','hermes-runtime'],env=env,cwd=root)
         report['checks']['initial']=_verify(command,env,state,'initial')
         _honcho_probe(env,state);report['checks']['honcho_reasoning']='passed'
         first=_wait_monitor(state,baseline);report['checks']['monitor_initial']=first
 
-        _run(command+['stop','provider-monitor'],env=env,cwd=root)
+        _run(command+['stop','cliproxy-monitor'],env=env,cwd=root)
         try:report['checks']['monitor_outage_reasoning']=_verify(command,env,state,'monitor-outage',('chat',))
-        finally:_run(command+['up','-d','--no-build','--wait','provider-monitor'],env=env,cwd=root)
+        finally:_run(command+['up','-d','--no-build','--wait','cliproxy-monitor'],env=env,cwd=root)
         second=_wait_monitor(state,first['events']);report['checks']['monitor_recovery']=second
 
-        _run(command+['restart','cliproxy','speech','hermes','provider-monitor'],env=env,cwd=root)
-        _run(command+['up','-d','--no-build','--wait','--wait-timeout','180','cliproxy','provider-monitor','speech','hermes'],env=env,cwd=root)
+        _run(command+['restart','cliproxy-api','chatgpt-speech','hermes-runtime','cliproxy-monitor'],env=env,cwd=root)
+        _run(command+['up','-d','--no-build','--wait','--wait-timeout','180','cliproxy-api','cliproxy-monitor','chatgpt-speech','hermes-runtime'],env=env,cwd=root)
         report['checks']['restart']=_verify(command,env,state,'restart',('refresh','chat','transcription'))
         report['checks']['monitor_after_restart']=_wait_monitor(state,second['events'])
         report['native_login']=_retire_native_login(state)
@@ -127,7 +127,7 @@ def cutover(state):
         if changed:
             try:
                 write_env(env_path(state),before);rollback_env={**env,'NOCHEH_REASONING_ROUTE':before['NOCHEH_REASONING_ROUTE']}
-                _run(command+['up','-d','--no-build','--wait','--wait-timeout','180','cliproxy','provider-monitor','speech','hermes'],env=rollback_env,cwd=root)
+                _run(command+['up','-d','--no-build','--wait','--wait-timeout','180','cliproxy-api','cliproxy-monitor','chatgpt-speech','hermes-runtime'],env=rollback_env,cwd=root)
                 report['rollback']='passed'
             except Exception:report['rollback']='failed'
         _save(state,report);return report

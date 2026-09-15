@@ -24,7 +24,7 @@ def main():
     for index,(text,expected) in enumerate(fixtures):
         start=time.monotonic()
         try:
-            response=call('http://guard:8780/v1/guard',{'destination':'https://protected.invalid/responses','payload':{'input':[{'role':'user','content':text}]}})
+            response=call('http://nocheh-security:8786/v1/guard',{'destination':'https://protected.invalid/responses','payload':{'input':[{'role':'user','content':text}]}})
             actual=response['payload']['input'][0]['content']
             results.append({'fixture':index,'exact_expected_mask':actual==expected,'guarded':response['guarded'],'masked_spans':response['masked_spans']})
         except Exception as error:

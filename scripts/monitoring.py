@@ -7,23 +7,23 @@ from pathlib import Path
 from .configuration import load
 from .provider import status as provider_status, compose
 from .archive import API
+from .services import containers,describe,host_status
 
 
 def status(state):
     config=load(state)
     command,env=compose(state)
-    def containers():
-        raw=subprocess.check_output(command+['ps','--format','json'],env=env,text=True,stderr=subprocess.DEVNULL,timeout=10)
-        return [{key:row.get(source) for key,source in [('service','Service'),('state','State'),('health','Health')]} for row in map(json.loads,raw.splitlines()) if row]
     def attempt(fn):
         try:return fn()
         except Exception:return {'unavailable':True}
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=7) as executor:
         jobs={name:executor.submit(attempt,fn) for name,fn in {
             'archive':lambda:API().call('/v1/status',timeout=5), 'runtime':lambda:API().call('/v1/runtime',timeout=5),
-            'provider':lambda:provider_status(state),'containers':containers,
+            'provider':lambda:provider_status(state),'containers':lambda:containers(command,env),'hosts':lambda:host_status(state),
+            'application':lambda:API().call('/health',timeout=5),
             'workflows':lambda:API().call('/v1/workflows/health',timeout=5)}.items()}
         result={name:future.result() for name,future in jobs.items()}
+    result['services']=describe(result['containers'],config,result['hosts']) if isinstance(result['containers'],list) else None
     provider=result['provider'];provider.pop('root',None)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'

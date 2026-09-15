@@ -18,7 +18,7 @@ try: from .configuration import compose_environment, env_path, initialize, load,
 except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env
 
 ROOT=Path(__file__).resolve().parents[1]
-SERVICES=['hermes','workflow-worker','worker','honcho','deriver','meter','redis','inngest','security-launcher','security','guard','archive','speech','provider-monitor','cliproxy']
+SERVICES=['hermes-runtime','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-launcher','nocheh-security','chatgpt-speech','cliproxy-monitor','cliproxy-api']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -60,14 +60,14 @@ def sync(path):
 def fingerprints(command,env,tables=None):
     result={}
     if tables is None:
-        raw=subprocess.check_output(command+['exec','-T','postgres','psql','-X','-A','-t','-U','nocheh','-d','nocheh','-c',
+        raw=subprocess.check_output(command+['exec','-T','nocheh-postgres','psql','-X','-A','-t','-U','nocheh','-d','nocheh','-c',
             "SELECT tablename FROM pg_tables WHERE schemaname='public'"],env=env,text=True)
         tables=[name for name in raw.split() if name in TABLES]
     if not set(tables).issubset(TABLES): raise ValueError('Unknown snapshot table')
     for table in tables:
         key=TABLES[table]
         query=f'COPY (SELECT row_to_json(t) FROM (SELECT * FROM public.{table} ORDER BY {key}) t) TO STDOUT'
-        process=subprocess.Popen(command+['exec','-T','postgres','psql','-X','-q','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',query],env=env,stdout=subprocess.PIPE)
+        process=subprocess.Popen(command+['exec','-T','nocheh-postgres','psql','-X','-q','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',query],env=env,stdout=subprocess.PIPE)
         digest=hashlib.sha256()
         while chunk:=process.stdout.read(1024*1024): digest.update(chunk)
         if process.wait(): raise RuntimeError('database_fingerprint_failed')
@@ -88,26 +88,30 @@ def backup(state,output,leave_stopped=False):
     tool_was_running=tools_running(state)
     workflow_was_running=workflows_running(state)
     try:
-        if 'hermes' in stopped:subprocess.run(command+['stop','hermes'],env=env,check=True)
+        if 'hermes-runtime' in stopped:subprocess.run(command+['stop','hermes-runtime'],env=env,check=True)
         if workflow_was_running:stop_workflows(state,wait=True)
         if tool_was_running:stop_tools(state,wait=True)
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
         for service in stopped:
-            if service!='hermes':subprocess.run(command+['stop',service],env=env,check=True)
+            if service!='hermes-runtime':subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                   'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
         manifest['tables']=fingerprints(command,env)
         dump=stage/'archive.dump'
         with dump.open('xb') as file:
-            subprocess.run(command+['exec','-T','postgres','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
+            subprocess.run(command+['exec','-T','nocheh-postgres','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
         dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
         from scripts.workflow_recovery import enabled_or_present,snapshot as workflow_snapshot
         if enabled_or_present(state,env):
             manifest.update(version=4,workflows=workflow_snapshot(command,env,stage,sha))
+        memory_state=Path(env.get('NOCHEH_HONCHO_STATE_DIR') or state/'honcho')
+        if env.get('NOCHEH_HONCHO_ENABLED')=='true':
+            from scripts.honcho_recovery import snapshot as memory_snapshot
+            manifest.update(version=5,honcho=memory_snapshot(command,env,stage,sha))
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
-            for name in ('.env','files','spool','hermes','provider','admin/jobs','admin/tools/receipts'):
+            for name in ('.env','files','spool','hermes','provider','admin/jobs','admin/tools/receipts','admin/dashboard/home'):
                 base=env_path(state) if name=='.env' else state/name
                 if (name=='provider' or name.startswith('admin/')) and not base.exists(): continue
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
@@ -125,6 +129,13 @@ def backup(state,output,leave_stopped=False):
                         raise ValueError('Unsupported state symlink: '+relative)
                     if path.is_dir(): continue
                     if not path.is_file(): raise ValueError('Missing/non-regular state file: '+relative)
+                    manifest['files'][relative]={'sha256':sha(path),'size':path.stat().st_size}
+                    tar.add(path,arcname='state/'+relative,recursive=False)
+            if manifest.get('honcho'):
+                for name in ('honcho.env','meter.env','internal_token','database_password','temporary_embedding_key','honcho.Dockerfile'):
+                    path=memory_state/name
+                    if path.is_symlink() or not path.is_file():raise ValueError('honcho_backup_state_missing')
+                    relative='honcho/'+name
                     manifest['files'][relative]={'sha256':sha(path),'size':path.stat().st_size}
                     tar.add(path,arcname='state/'+relative,recursive=False)
             # Provider reservations live outside the archive. Snapshot them with
@@ -155,11 +166,14 @@ def backup(state,output,leave_stopped=False):
 
 def validate_snapshot(snapshot):
     manifest=json.loads((snapshot/'manifest.json').read_text())
-    if manifest.get('version') not in (1,2,3,4) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
+    if manifest.get('version') not in (1,2,3,4,5) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
         raise ValueError('Backup checksum mismatch')
-    if manifest['version']==4:
+    if manifest['version']==4 or manifest.get('workflows'):
         from scripts.workflow_recovery import validate
         validate(snapshot,manifest.get('workflows'),sha)
+    if manifest['version']==5:
+        from scripts.honcho_recovery import validate as validate_honcho
+        validate_honcho(snapshot,manifest.get('honcho'),sha)
     seen=set()
     with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
         for member in tar:
@@ -203,6 +217,7 @@ def restore(snapshot,state,project,port):
     config.update(TELEGRAM_ENABLED='false',NOCHEH_WORKFLOWS_ENABLED='false',NOCHEH_HONCHO_ENABLED='false',NOCHEH_HONCHO_STATE_DIR=str(state/'honcho'),
                   NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
                   NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
+                  NOCHEH_PROVIDER_MONITOR_PORT=str(port+10 if port<=65525 else port-10),
                   NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
@@ -212,17 +227,20 @@ def restore(snapshot,state,project,port):
     (state/'workflows/inactive').touch()
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
-    subprocess.run(command+['up','-d','--wait','postgres'],env=env,check=True)
+    subprocess.run(command+['up','-d','--wait','nocheh-postgres'],env=env,check=True)
     with (snapshot/'archive.dump').open('rb') as file:
-        subprocess.run(command+['exec','-T','postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
+        subprocess.run(command+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
     # Old snapshots predate the policy tables; verify exactly their recorded set.
     actual=fingerprints(command,env,manifest['tables'])
     if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
     if manifest.get('workflows'):
         from scripts.workflow_recovery import restore as restore_workflows
         restore_workflows(command,env,snapshot,state,manifest['workflows'],sha)
+    if manifest.get('honcho'):
+        from scripts.honcho_recovery import restore as restore_honcho
+        restore_honcho(command,env,snapshot,state,manifest['honcho'],sha)
     if 'honcho_connection' in manifest['tables']:
-        subprocess.run(command+['exec','-T','postgres','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
+        subprocess.run(command+['exec','-T','nocheh-postgres','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
             "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
     subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
@@ -238,9 +256,8 @@ def main(command,state,rest):
     parser=argparse.ArgumentParser(description=__doc__)
     if command=='diagnose':
         parser.parse_args(rest)
-        rows=subprocess.check_output(compose(state)+['ps','--format','json'],env=environment(state),text=True)
-        containers=[json.loads(line) for line in rows.splitlines() if line.strip()]
-        result={'containers':[{'service':row['Service'],'state':row['State'],'health':row.get('Health')} for row in containers]}
+        from scripts.services import containers,describe,host_status
+        result={'containers':describe(containers(compose(state),environment(state)),load(state),host_status(state))}
         result['execution_holds']={
             'workflows':(state/'workflows/inactive').exists(),
             'workers':(state/'spool/.restore-inactive').exists(),
@@ -255,7 +272,7 @@ def main(command,state,rest):
             with urllib.request.urlopen(request,timeout=10) as response: result['archive']=json.load(response)
         except Exception as error: result['archive']={'error':type(error).__name__}
         try:
-            raw=subprocess.check_output(compose(state)+['exec','-T','hermes','python','-c',
+            raw=subprocess.check_output(compose(state)+['exec','-T','hermes-runtime','python','-c',
                 "import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:8781/health',timeout=5))))"],env=environment(state),text=True)
             result['hermes']=json.loads(raw)
         except Exception as error: result['hermes']={'error':type(error).__name__}

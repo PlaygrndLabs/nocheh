@@ -24,7 +24,7 @@ async def main():
     root=Path(os.environ['HERMES_HOME'])/'synthetic-assistant-rehearsal'
     scopes=Scopes({'enabled':True,'owner_id':'9000000000123','group_ids':['-9000000000020','-9000000000030']})
     def archive(event):
-        request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://archive:8780')+'/v1/ingest',data=canonical(event),headers={'Authorization':'Bearer '+secret,'Content-Type':'application/json'})
+        request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/ingest',data=canonical(event),headers={'Authorization':'Bearer '+secret,'Content-Type':'application/json'})
         with urllib.request.urlopen(request,timeout=20) as response:return json.load(response)['id']
     async def turn(chat,label,prompt):
         update={'update_id':label,'message':{'message_id':label,'chat':{'id':chat,'type':'group'},'from':{'id':9000000000123,'is_bot':False},'text':prompt}}

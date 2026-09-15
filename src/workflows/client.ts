@@ -7,11 +7,11 @@ export type WorkflowApp='pipeline'|'host';
 export type WorkflowConfig={baseUrl:string;gatewayUrl:string;eventKey:string;signingKey:string;version:string};
 
 export function workflowConfig(env:NodeJS.ProcessEnv=process.env):WorkflowConfig {
-  const baseUrl=env.INNGEST_BASE_URL??'http://inngest:8288';
-  const gatewayUrl=env.INNGEST_CONNECT_GATEWAY_URL??'ws://inngest:8289/v0/connect';
+  const baseUrl=env.INNGEST_BASE_URL??'http://inngest-server:8288';
+  const gatewayUrl=env.INNGEST_CONNECT_GATEWAY_URL??'ws://inngest-server:8289/v0/connect';
   for(const [value,protocol] of [[baseUrl,'http:'],[gatewayUrl,'ws:']]) {
     const url=new URL(value!);
-    if(url.protocol!==protocol||!['inngest','127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.username||url.password||url.search||url.hash)
+    if(url.protocol!==protocol||!['inngest-server','127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.username||url.password||url.search||url.hash)
       throw Error('workflow_local_endpoint_required');
   }
   const eventKey=env.INNGEST_EVENT_KEY??'',signingKey=env.INNGEST_SIGNING_KEY??'';

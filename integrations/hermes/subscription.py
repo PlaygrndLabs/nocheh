@@ -6,7 +6,7 @@ from threading import RLock
 import os
 
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
-SHARED_BASE_URL = "http://cliproxy:8317/v1"
+SHARED_BASE_URL = "http://cliproxy-api:8317/v1"
 AUTH_LOCK = RLock()
 
 
@@ -25,8 +25,8 @@ class SubscriptionCredentials:
         allowed = {
             (CODEX_BASE_URL, "openai-codex", "codex_responses"),
             (SHARED_BASE_URL, "openai", "chat_completions"),
-            ('http://security:8786/codex', 'openai-codex', 'codex_responses'),
-            ('http://security:8786/v1', 'openai', 'chat_completions'),
+            ('http://nocheh-security:8786/codex', 'openai-codex', 'codex_responses'),
+            ('http://nocheh-security:8786/v1', 'openai', 'chat_completions'),
         }
         route = (self.base_url.rstrip("/"), self.provider, self.api_mode)
         if (not isinstance(self.access_token, str) or not self.access_token.strip()

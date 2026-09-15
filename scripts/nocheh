@@ -136,6 +136,10 @@ def main():
         write_env(env_path(STATE),values)
         print('Telegram policy saved. Run ./scripts/nocheh up to apply it.');return 0
     env = compose_environment(STATE)
+    if args.command in ('up','dev') and env.get('NOCHEH_HONCHO_ENABLED')=='true':
+        sys.path.insert(0,str(ROOT))
+        from scripts.honcho_runtime import normalize_endpoints
+        normalize_endpoints(env.get('NOCHEH_HONCHO_STATE_DIR') or STATE/'honcho')
     if args.command in ('up','dev','build','test'):
         sys.path.insert(0,str(ROOT))
         from scripts.provider import ensure_source,ensure_monitor_source
@@ -150,6 +154,12 @@ def main():
         return start(STATE, command, ROOT)
     if args.command in ('down', 'status', 'logs'):
         command += ['--profile', 'tools','--profile','workflows','--profile','honcho','--profile','honcho-tools']
+    if args.command=='status':
+        sys.path.insert(0,str(ROOT))
+        from scripts.services import containers,describe,host_status
+        for row in describe(containers(command,env),load(STATE),host_status(STATE)):
+            print(f"{row['service']}: {row['state']} (expected {row['expected_state']})\n  {row['tool']} · {row['location']} · {row['purpose']}")
+        return 0
     if args.command=='down':
         sys.path.insert(0,str(ROOT))
         from scripts.tool_worker import stop
@@ -160,15 +170,15 @@ def main():
         "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
         "dev": ["up", "--build", "--watch"], "down": ["down"], "status": ["ps"],
         "logs": ["logs", "--tail", "100", "-f"], "build": ["build"],
-        "test": ["run", "--rm", "--build", "--no-deps", "archive", "npm", "test"],
-        "verify": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.verify", "--live"],
+        "test": ["run", "--rm", "--build", "--no-deps", "nocheh-app", "npm", "test"],
+        "verify": ["exec", "-T", "hermes-runtime", "python", "-m", "integrations.hermes.verify", "--live"],
         "config": ["config", "--quiet"],
-        "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.discover_telegram"],
-        "login": ["exec", "hermes", "python", "-c",
+        "discover-telegram": ["exec", "-T", "hermes-runtime", "python", "-m", "integrations.hermes.discover_telegram"],
+        "login": ["exec", "hermes-runtime", "python", "-c",
             "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
     }
     if args.command == 'test':
-        ready = subprocess.call(command + ['up', '-d', '--wait', 'postgres'], cwd=ROOT, env=env)
+        ready = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-postgres'], cwd=ROOT, env=env)
         if ready:
             return ready
     result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
@@ -176,15 +186,14 @@ def main():
         result=subprocess.call(['docker','build','-f',str(ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(ROOT)],cwd=ROOT,env=env)
         if result==0:
             sys.path.insert(0,str(ROOT))
-            from scripts.tool_worker import start
-            print(json.dumps(start(STATE)))
             if env.get('NOCHEH_WORKFLOWS_ENABLED')=='true':
-                subprocess.run(['npm','run','build'],cwd=ROOT,env=env,check=True)
+                from scripts.node_runtime import build
+                build(env)
                 from scripts.workflow_worker import start as start_workflows
                 print(json.dumps(start_workflows(STATE)))
     if args.command == 'test' and result == 0:
         return subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
-            '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes', 'python', '-m', 'unittest',
+            '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes-runtime', 'python', '-m', 'unittest',
             'discover', '-s', 'integrations/hermes', '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
     return result
 

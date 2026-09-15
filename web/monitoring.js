@@ -63,5 +63,6 @@ export function Monitoring({call,compact=false,renderSource}){
       archive.spool_failures?.length>0&&h('p',{role:'alert'},archive.spool_failures.length+' archive spool failures require attention.'),
       h('a',{href:'#activity'},'Open browser runs and approvals →')),
     h('section',{className:'n-panel'},h('h2',null,'Services'),h('p',{className:'n-muted'},'Container health reports availability. Telegram polling and workflow outcomes above show whether useful work is progressing.'),
-      Array.isArray(data.containers)?data.containers.map(row=>h('div',{className:'n-row',key:row.service},h('b',null,row.service),h('span',null,row.state+' · '+(row.health||'No health check')))):h('p',{role:'alert'},'Container status is unavailable.')));
+      data.application&&!data.application.unavailable&&h('p',null,'API: '+(data.application.ok?'ready':'unavailable')+' · Capture: '+(data.application.capture?.capture||'unavailable')+' · Inngest: '+(data.application.workflows||'unavailable')),
+      Array.isArray(data.services)?data.services.map(row=>h('div',{className:'n-row',key:row.service},h('div',null,h('b',null,row.service),h('p',{className:'n-muted'},row.tool+' · '+row.location+' · '+row.purpose)),h('span',null,row.state+' · expected '+row.expected_state))):h('p',{role:'alert'},'Service status is unavailable.')));
 }

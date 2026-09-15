@@ -25,7 +25,7 @@ class ManagedAsync:
         self.runs=AsyncRuns(self.directory,self.execute,self.reconcile)
 
     def http(self,route,body):
-        request=Request(os.environ.get('ARCHIVE_URL','http://archive:8780')+'/v1/browser/'+route,
+        request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/browser/'+route,
             data=canonical(body),headers={'Authorization':'Bearer '+self.admin.token,'Content-Type':'application/json'})
         try:
             with urlopen(request,timeout=230 if route=='prepare' else 15) as response:return json.load(response)

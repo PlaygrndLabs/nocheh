@@ -1,26 +1,23 @@
 services:
-  archive:
+  nocheh-app:
     image: nocheh-services:dev
     build: {target: development}
     command: [npm, run, dev]
     develop:
-      watch: &ts-watch
+      watch:
         - {action: sync+restart, path: ./src, target: /app/src}
         - {action: sync+restart, path: ./test, target: /app/test}
         - {action: rebuild, path: ./package-lock.json}
         - {action: rebuild, path: ./tsconfig.json}
         - {action: rebuild, path: ./scripts/build.mjs}
-  worker:
+  nocheh-security:
     image: nocheh-services:dev
     build: {target: development}
-    command: [npm, run, dev]
-    develop: {watch: *ts-watch}
-  guard:
-    image: nocheh-services:dev
-    build: {target: development}
-    command: [npm, run, dev]
-    develop: {watch: *ts-watch}
-  hermes:
+    command: [sh, -c, "npm run build && node dist/src/security/main.js"]
+    develop:
+      watch:
+        - {action: sync+restart, path: ./src, target: /app/src}
+  hermes-runtime:
     develop:
       watch:
         - {action: sync+restart, path: ./integrations, target: /workspace/integrations}

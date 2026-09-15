@@ -28,7 +28,7 @@ def request(path,body=None):
     credential = _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()
     if not credential:
         raise RuntimeError('archive_scope_not_bound')
-    req = urllib.request.Request(os.environ.get('ARCHIVE_URL','http://archive:8780') + path,
+    req = urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780') + path,
                                  data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Leave time for the broker's bounded Honcho recall, including cold guarding.

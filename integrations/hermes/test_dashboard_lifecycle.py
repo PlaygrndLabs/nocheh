@@ -15,14 +15,14 @@ class DashboardLifecycleTests(unittest.TestCase):
         self.assertNotIn('-p', command)
         self.assertFalse(any('docker-compose.dashboard.yml' in item for item in command))
 
-    def test_dashboard_stop_only_stops_its_main_project_service(self):
+    def test_dashboard_stop_does_not_stop_runtime_containers(self):
         with tempfile.TemporaryDirectory() as folder, \
              patch('scripts.dashboard.request', return_value={'ok': True}), \
              patch('scripts.dashboard.compose_environment', return_value={}), \
              patch('scripts.dashboard.subprocess.call', return_value=0) as call:
             result = start(Path(folder), ['--stop'])
         self.assertEqual(result, 0)
-        self.assertEqual(call.call_args.args[0][-2:], ['stop', 'dashboard'])
+        call.assert_not_called()
 
 
 if __name__ == '__main__':

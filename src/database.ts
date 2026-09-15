@@ -21,7 +21,7 @@ import {toolWorkflowSchema} from './workflows/host-tools.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   const pool = new pg.Pool({
-    host: process.env.PGHOST ?? 'postgres', port: Number(process.env.PGPORT ?? 5432),
+    host: process.env.PGHOST ?? 'nocheh-postgres', port: Number(process.env.PGPORT ?? 5432),
     user: process.env.PGUSER ?? 'nocheh', database: process.env.PGDATABASE ?? 'nocheh',
     password: config.databasePassword, max: 8, connectionTimeoutMillis: 5000,
     statement_timeout: 15000, idleTimeoutMillis: 30000,

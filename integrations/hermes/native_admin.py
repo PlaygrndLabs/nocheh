@@ -22,7 +22,7 @@ NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 
 def audience_revision(token,space):
     from urllib.request import Request,urlopen
-    request=Request(os.environ.get('ARCHIVE_URL','http://archive:8780')+'/v1/memory/spaces?'+urlencode({'id':space}),headers={'Authorization':'Bearer '+token})
+    request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/memory/spaces?'+urlencode({'id':space}),headers={'Authorization':'Bearer '+token})
     with urlopen(request,timeout=5) as response:value=json.load(response)['revision']
     if type(value) is not int or value<1:raise ValueError('invalid_audience_revision')
     return value

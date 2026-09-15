@@ -39,14 +39,17 @@ def public_environment():
 
 def commands(revision):
     if not re.fullmatch(r'[a-f0-9]{40}',revision):raise ValueError('full_revision_required')
-    runtime='nocheh-candidate-'+revision[:12]+':runtime';dashboard='nocheh-candidate-'+revision[:12]+':dashboard'
+    runtime='nocheh-candidate-'+revision[:12]+':runtime';dashboard=runtime
     return runtime,dashboard,[
         ('runtime_build',['docker','build','-f','deploy/hermes.Dockerfile','--build-arg','HERMES_REVISION='+revision,
+            '--build-context','hermes_source='+str(ROOT/'data/compat/upstreams/hermes-agent'),
             '--build-arg','LOCAL_UID='+str(os.getuid()),'--build-arg','LOCAL_GID='+str(os.getgid()),'-t',runtime,'.']),
-        ('native_contract_tests',['docker','run','--rm','--network=none','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,mode=1777',
+        ('native_contract_tests',['docker','run','--rm','--network=none','--read-only','--tmpfs','/tmp:rw,exec,nosuid,nodev,mode=1777',
             '--cap-drop=ALL','--security-opt=no-new-privileges','-e','HERMES_HOME=/tmp/nocheh-candidate-tests',
+            '-e','SERVICE_TOKEN='+'0'*64,
             runtime,'python','-m','unittest','discover','-s','integrations/hermes','-t','.','-p','test_*.py','-q']),
-        ('dashboard_build',['docker','build','-f','deploy/dashboard.Dockerfile','--build-arg','HERMES_IMAGE='+runtime,'-t',dashboard,'.']),
+        ('dashboard_assets',['docker','run','--rm','--network=none','--read-only',runtime,'python','-c',
+            "from pathlib import Path; assert Path('/opt/hermes/hermes_cli/web_dist/index.html').is_file(); assert Path('/workspace/integrations/hermes/dashboard/dist/index.js').is_file()"]),
     ]
 
 

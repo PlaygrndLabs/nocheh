@@ -32,7 +32,7 @@ class BrowserGateway:
         self.original = dict(server._methods)
 
     def http(self, route, body):
-        base = os.environ.get('ARCHIVE_URL','http://archive:8780') if route.startswith('/v1/') else 'http://127.0.0.1:8781'
+        base = os.environ.get('ARCHIVE_URL','http://nocheh-app:8780') if route.startswith('/v1/') else 'http://127.0.0.1:8781'
         request = Request(base + route, data=canonical(body), headers={
             'Authorization':'Bearer ' + os.environ['SERVICE_TOKEN'], 'Content-Type':'application/json'})
         try:

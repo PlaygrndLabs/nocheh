@@ -41,7 +41,7 @@ def container_spec(profile,host_root,image,network,uid,gid):
     return {'Image':image,'User':f'{uid}:{gid}','WorkingDir':'/workspace',
       'Cmd':['python','-m','integrations.hermes.assistant_turn'],
       'Env':['HOME=/tmp/home','HERMES_HOME=/profile','NOCHEH_CAPTURE_ENABLED=0','NOCHEH_ISOLATED_TURN=1',
-             'ARCHIVE_URL=http://security:8786','GUARD_URL=http://security:8786'],
+             'ARCHIVE_URL=http://nocheh-security:8786','GUARD_URL=http://nocheh-security:8786'],
       'OpenStdin':True,'StdinOnce':True,'AttachStdin':True,'AttachStdout':True,'AttachStderr':False,'Tty':False,
       'Labels':{'nocheh.role':'isolated-turn','nocheh.profile':profile},
       'HostConfig':{'ReadonlyRootfs':True,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],
@@ -95,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=2*1024*1024:raise ValueError('turn_size_limit')
             body=json.loads(self.rfile.read(length));credential=body['archive_credential']
-            request=Request('http://security:8786/v1/security/binding',headers={'Authorization':'Bearer '+credential})
+            request=Request('http://nocheh-security:8786/v1/security/binding',headers={'Authorization':'Bearer '+credential})
             with build_opener(ProxyHandler({})).open(request,timeout=120) as response:binding=json.load(response)
             profile=binding['profile'];validate_local_profile(profile)
             with ACTIVE_LOCK:

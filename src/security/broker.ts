@@ -18,7 +18,7 @@ const relayRoutes:[string,RegExp][]=[
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 export function providerTarget(transport:Record<string,unknown>,path:string):string {
   if(transport.base_url==='https://chatgpt.com/backend-api/codex'&&transport.api_mode==='codex_responses'&&path==='/codex/responses')return transport.base_url+'/responses';
-  if(transport.base_url==='http://cliproxy:8317/v1'&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return transport.base_url+'/chat/completions';
+  if(transport.base_url==='http://cliproxy-api:8317/v1'&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return transport.base_url+'/chat/completions';
   throw new HttpError(403,'provider_route_denied');
 }
 export async function turnBinding(pool:pg.Pool,principal:Reader) {

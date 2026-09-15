@@ -12,7 +12,7 @@ class DashboardCompatibilityTests(unittest.TestCase):
         @router.get('/api/plugins/nocheh-probe/check')
         def check(): return {'ok': True}
         server.app.include_router(router)
-        client = TestClient(server.app)  # No lifespan: no gateway/background work.
+        client = TestClient(server.app,base_url='http://127.0.0.1')  # No lifespan: no gateway/background work.
         self.assertEqual(client.get('/api/plugins/nocheh-probe/check').status_code, 401)
         self.assertEqual(client.get('/api/config', headers={
             'X-Hermes-Session-Token': server._SESSION_TOKEN}).status_code, 200)
@@ -21,29 +21,30 @@ class DashboardCompatibilityTests(unittest.TestCase):
         self.assertIsNotNone(_plugin_api_mount_skip_reason(
             {'name': 'nocheh', 'source': 'user'}, set(), set()))
 
-    def test_restricted_shell_rejects_native_agent_and_mutation_routes(self):
-        from fastapi import FastAPI
+    def test_managed_server_rejects_stock_lifecycle_routes(self):
+        import tempfile
+        from pathlib import Path
         from fastapi.testclient import TestClient
-        from .dashboard_server import RestrictedDashboard
-        app=FastAPI(); calls=[]
-        @app.api_route('/{path:path}',methods=['GET','POST','PUT','DELETE'])
-        def backend(path):calls.append(path);return {'ok':True}
-        client=TestClient(RestrictedDashboard(app))
-        for method,path in [('POST','/api/gateway/start'),('PUT','/api/config'),('GET','/api/pty'),
-                            ('GET','/api/env'),('GET','/api/files'),('POST','/api/plugins/other/action')]:
-            self.assertEqual(client.request(method,path).status_code,403)
-        self.assertFalse(calls)
-        self.assertEqual(client.get('/api/dashboard/plugins').status_code,200)
+        from .native_admin import create_app
+        from .scopes import Scopes
+        with tempfile.TemporaryDirectory() as folder:
+            from .profile_config import configure_profile
+            configure_profile(Path(folder)/'profiles'/Scopes.profile('42'),'gpt-5.6-sol')
+            client=TestClient(create_app(Path(folder),'gpt-5.6-sol',Scopes({'enabled':False,'owner_id':'42','group_ids':[]}),'fixture-token'),base_url='http://127.0.0.1')
+            for method,path in [('POST','/api/gateway/start'),('GET','/api/env/reveal'),('POST','/api/mcp/test')]:
+                self.assertEqual(client.request(method,path,headers={'X-Hermes-Session-Token':'fixture-token'}).status_code,409)
 
-    def test_presentation_preferences_do_not_open_runtime_mutations(self):
-        from fastapi import FastAPI
+    def test_presentation_preferences_require_the_owner_session(self):
+        import tempfile
+        from pathlib import Path
         from fastapi.testclient import TestClient
-        from .dashboard_server import RestrictedDashboard
-        app=FastAPI()
-        @app.put('/{path:path}')
-        def backend(path): return {'ok': True}
-        client=TestClient(RestrictedDashboard(app))
-        self.assertEqual(client.put('/api/dashboard/theme',json={'name':'default'}).status_code,200)
-        self.assertEqual(client.put('/api/dashboard/font',json={'font':'default'}).status_code,200)
-        self.assertEqual(client.put('/api/config',json={}).status_code,403)
-        self.assertEqual(client.put('/api/profiles/owner',json={}).status_code,403)
+        from .native_admin import create_app
+        from .scopes import Scopes
+        from .profile_config import read
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            client=TestClient(create_app(root,'gpt-5.6-sol',Scopes({'enabled':False,'owner_id':'42','group_ids':[]}),'fixture-token'),base_url='http://127.0.0.1')
+            self.assertEqual(client.put('/api/dashboard/font',json={'font':'system-mono'}).status_code,401)
+            self.assertNotIn('dashboard',read(root/'dashboard-presentation/config.yaml'))
+            self.assertEqual(client.put('/api/dashboard/font',json={'font':'system-mono'},headers={'X-Hermes-Session-Token':'fixture-token'}).status_code,200)
+            self.assertEqual(read(root/'dashboard-presentation/config.yaml')['dashboard']['font'],'system-mono')

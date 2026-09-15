@@ -27,7 +27,7 @@ def install_transport(httpx):
     # has no direct Internet route; unbound global reconciliation fails closed.
     original=httpx.AsyncClient._send_single_request
     async def send(self,request):
-        if str(request.url).startswith('http://meter:8790/v1/'):
+        if str(request.url).startswith('http://honcho-provider-gateway:8790/v1/'):
             workspace=WORKSPACE.get()
             if not workspace: raise RuntimeError('honcho_workspace_required')
             request.headers['X-Nocheh-Workspace']=workspace
