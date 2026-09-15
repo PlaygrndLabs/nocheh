@@ -47,8 +47,16 @@ BEGIN
  ELSIF TG_TABLE_NAME='memory_review_jobs' THEN
    PERFORM nocheh_workflow_request('memory_review','review:'||NEW.id,NEW.generation+1);
  ELSIF TG_TABLE_NAME='honcho_receipts' THEN
-   IF TG_OP='UPDATE' THEN PERFORM nocheh_workflow_request('honcho','reconcile:'||NEW.id);
-   ELSE PERFORM nocheh_workflow_request('honcho','receipt:'||NEW.id); END IF;
+   IF TG_OP='INSERT' THEN
+     PERFORM nocheh_workflow_request('honcho','receipt:'||NEW.id);
+   ELSIF NEW.state='uncertain' THEN
+     PERFORM nocheh_workflow_request('honcho','reconcile:'||NEW.id);
+   END IF;
+   -- A generation can become busy again after its first observer completed.
+   -- New observation identities never reopen a completed ingestion effect.
+   IF TG_OP='INSERT' OR NEW.state='done' THEN
+     PERFORM nocheh_workflow_touch('honcho','generation:'||NEW.generation);
+   END IF;
  ELSIF TG_TABLE_NAME='honcho_generations' THEN
    PERFORM nocheh_workflow_request('honcho','generation:'||NEW.id);
  ELSE
@@ -76,6 +84,8 @@ DROP TRIGGER IF EXISTS workflow_honcho_receipt ON honcho_receipts;
 CREATE TRIGGER workflow_honcho_receipt AFTER INSERT ON honcho_receipts FOR EACH ROW EXECUTE FUNCTION nocheh_workflow_domain_change();
 DROP TRIGGER IF EXISTS workflow_honcho_reconcile ON honcho_receipts;
 CREATE TRIGGER workflow_honcho_reconcile AFTER UPDATE OF state ON honcho_receipts FOR EACH ROW WHEN(NEW.state='uncertain' AND OLD.state<>'uncertain') EXECUTE FUNCTION nocheh_workflow_domain_change();
+DROP TRIGGER IF EXISTS workflow_honcho_ready ON honcho_receipts;
+CREATE TRIGGER workflow_honcho_ready AFTER UPDATE OF state ON honcho_receipts FOR EACH ROW WHEN(NEW.state='done' AND OLD.state<>'done') EXECUTE FUNCTION nocheh_workflow_domain_change();
 DROP TRIGGER IF EXISTS workflow_honcho_generation ON honcho_generations;
 CREATE TRIGGER workflow_honcho_generation AFTER INSERT ON honcho_generations FOR EACH ROW EXECUTE FUNCTION nocheh_workflow_domain_change();
 DROP TRIGGER IF EXISTS workflow_guard_epoch ON guard_state;

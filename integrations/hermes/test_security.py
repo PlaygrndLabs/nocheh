@@ -9,6 +9,18 @@ from .security_transport import scoped_transport,isolated_enabled
 from .isolated_profile import prepare,database_path,DATA_DIRS,DATA_FILES
 
 class SecurityTests(unittest.TestCase):
+    def test_managed_startup_never_installs_optional_provider_dependencies(self):
+        from .assistant_turn import sealed_dependencies
+        from tools import lazy_deps
+        with patch.dict(os.environ,{'HERMES_LAZY_INSTALL_TARGET':'/tmp/untrusted-target'}), \
+             patch.object(lazy_deps,'feature_missing',return_value=('boto3',)), \
+             patch.object(lazy_deps,'_venv_pip_install') as installer, \
+             patch('hermes_cli.config.get_managed_system',return_value=''):
+            sealed_dependencies()
+            with self.assertRaises(lazy_deps.FeatureUnavailable):
+                lazy_deps.ensure('provider.bedrock',prompt=False)
+            installer.assert_not_called()
+
     def test_no_ambient_authority_in_container(self):
         spec=container_spec('nocheh-'+'a'*24,'/owned/profiles','sha256:'+'b'*64,'nocheh-agent',1000,1000)
         host=spec['HostConfig'];encoded=json.dumps(spec)

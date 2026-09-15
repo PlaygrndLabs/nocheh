@@ -29,7 +29,16 @@ def restrict_session_search():
     return restore
 
 
+def sealed_dependencies():
+    # Managed turns use build-time pinned dependencies. Native OpenAI client
+    # construction also imports the optional Bedrock adapter, whose lazy
+    # installer otherwise waits on blocked egress on every fresh process.
+    os.environ['HERMES_DISABLE_LAZY_INSTALLS']='1'
+    os.environ.pop('HERMES_LAZY_INSTALL_TARGET',None)
+
+
 def run(body, emit=None):
+    sealed_dependencies()
     from .timing import record
     from time import perf_counter
     phase=perf_counter()
