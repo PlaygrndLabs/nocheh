@@ -48,6 +48,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await asyncio.wait_for(task,2))['state'],'done')
                 self.assertIs(child.call_args.args[2],body)
                 self.assertEqual(child.call_args.args[5],'same-session')
+                self.assertTrue((profile/'.foreground').exists())
 
     async def test_cancel_and_revocation_while_waiting_never_start_child(self):
         import fcntl
@@ -79,3 +80,17 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         with patch('integrations.hermes.turn_process.asyncio.create_subprocess_exec',side_effect=AssertionError('must not spawn')):
             result=await _run_process(Path('/unused'),None,{},None,None,'session',None,cancel)
             self.assertEqual(result['state'],'cancelled')
+
+    async def test_review_waits_for_conversation_quiet_interval_without_losing_identity(self):
+        from .review_worker import review
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder);activity=profile/'.foreground';activity.touch()
+            body={'scope':'42','id':'a'*64,'content':'synthetic','archive_credential':'turn.e30.signature'}
+            with patch('integrations.hermes.review_worker.prepare_profile',return_value=profile),patch('integrations.hermes.review_worker._review',return_value={'state':'done'}) as child:
+                now=activity.stat().st_mtime
+                with patch('integrations.hermes.review_worker.time.time',return_value=now+30):
+                    self.assertEqual(review(profile,SimpleNamespace(owner='42'),'model',None,body),{'state':'waiting','error_code':'profile_busy'})
+                    child.assert_not_called()
+                with patch('integrations.hermes.review_worker.time.time',return_value=now+61):
+                    self.assertEqual(review(profile,SimpleNamespace(owner='42'),'model',None,body),{'state':'done'})
+                    self.assertIs(child.call_args.args[-1],body)

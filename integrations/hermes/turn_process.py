@@ -25,6 +25,7 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
     claims=json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'==='))
     scope=Scopes.apply_revision(scope,claims)
     profile = await asyncio.to_thread(prepare_profile, root, scope, model)
+    await asyncio.to_thread((profile/'.foreground').touch)
     with (profile / '.turn.lock').open('a') as lock:
         # Wait before starting a child, keeping the same execution identity.
         # Reviews use this lock too. Cancellation and policy changes remain live.
@@ -39,7 +40,10 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
                 break
             except BlockingIOError:
                 await asyncio.sleep(.25)
-        return await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled)
+        try:
+            return await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled)
+        finally:
+            await asyncio.to_thread((profile/'.foreground').touch)
 
 
 async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled):

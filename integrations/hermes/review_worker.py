@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from .scopes import Scopes, Scope
 from .assistant_gateway import prepare_profile
@@ -44,6 +45,12 @@ def review(root, policy, model, credentials, body):
     with (profile/'.turn.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return {'state':'waiting','error_code':'profile_busy'}
+        # Leave a short quiet interval for conversational follow-ups. This
+        # parent-owned timestamp contains no content and is not agent-mounted.
+        # Existing review receipts stay authoritative; no running work is killed.
+        activity=profile/'.foreground'
+        if activity.exists() and time.time()-activity.stat().st_mtime<60:
+            return {'state':'waiting','error_code':'profile_busy'}
         return _review(profile,policy,model,credentials,body)
 
 

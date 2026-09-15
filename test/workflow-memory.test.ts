@@ -16,13 +16,13 @@ test('memory requests preserve consent, native receipt identity, owner revisions
   const options={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
   const admin=new pg.Pool(options),namespace='workflow_memory_'+Date.now();await admin.query(`CREATE SCHEMA ${namespace}`);
   const pool=new pg.Pool({...options,options:`-c search_path=${namespace}`,max:8});
-  const calls:string[]=[],saved=new Map<string,any[]>();let writes=0,reads=0;
+  const calls:string[]=[],saved=new Map<string,any[]>();let writes=0,reads=0,queuePending=0;
   const ops=memoryOperations(pool,config,async(operation,body)=>{
     assert.equal(operation,'memory.review');calls.push(String(body.id));if(calls.length===1)throw Error('synthetic lost receipt response');return {state:'done'};
   },async(path,body:any)=>{
     if(path.endsWith('/messages/list')){reads++;return {items:saved.get(path.slice(0,-5))??[]};}
     if(path.endsWith('/messages')){writes++;saved.set(path,body.messages.map((m:any)=>({...m,id:'remote-fixture'})));throw Error('synthetic lost write acknowledgment');}
-    if(path.endsWith('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
+    if(path.endsWith('/queue/status'))return {pending_work_units:queuePending,in_progress_work_units:0};
     return {};
   });
   const authority={owner:'inngest' as const,epoch:2};
@@ -63,6 +63,30 @@ test('memory requests preserve consent, native receipt identity, owner revisions
     assert.equal(writes,1,'reconciliation cannot repeat the write');
     assert.equal((await pool.query('SELECT state FROM workflow_registry WHERE id=$1',[original.id])).rows[0].state,'completed');
     await advanceWorkflow(pool,original.id,original.dispatch,'honcho','fixture-duplicate',ops.honcho!);assert.equal(writes,1);
+    const generation=(await pool.query('SELECT generation FROM honcho_receipts WHERE id=$1',[receipt])).rows[0].generation;
+    const observe=async(label:string)=>{
+      const row=await request('generation:'+generation);
+      return advanceWorkflow(pool,row.id,row.dispatch,'honcho',label,ops.honcho!);
+    };
+    assert.equal((await observe('initial-ready')).state,'completed');
+    const firstObserver=await request('generation:'+generation);
+    const later=await ingest(pool,{...source,key:'import:later-memory',source_id:'2',text:'Later consented source'});
+    await prepareGuarded(pool,async()=>[],'fixture',100,later.id);
+    await approveLearning(pool,{approved:true,event_ids:[later.id]});
+    await ops.honcho!('refresh',authority);
+    assert.notEqual((await request('generation:'+generation)).id,firstObserver.id,'later sources have a new read-only observer');
+    queuePending=1;
+    assert.equal((await observe('later-building')).state,'waiting');
+    // Acknowledged ingestion (including receipt reconciliation) must wake
+    // another observation after an earlier observer has already completed.
+    await pool.query("UPDATE honcho_receipts SET state='done' WHERE state='pending'");
+    assert.equal((await observe('deriver-busy')).state,'waiting');
+    queuePending=0;
+    await pool.query("UPDATE workflow_registry SET next_attempt=now() WHERE family='honcho' AND job_id=$1 AND state='waiting'",['generation:'+generation]);
+    assert.equal((await observe('later-ready')).state,'completed');
+    assert.equal((await pool.query('SELECT state FROM honcho_generations WHERE id=$1',[generation])).rows[0].state,'ready');
+    assert.equal((await pool.query('SELECT state FROM workflow_registry WHERE id=$1',[firstObserver.id])).rows[0].state,'completed','old observations stay closed');
+    assert.equal(writes,1,'readiness observations never repeat source writes');
     await pool.query('DELETE FROM memory_learning_sources WHERE event_id=$1',[event.id]);
     const latest=(await pool.query('SELECT id FROM memory_review_jobs ORDER BY created_at DESC LIMIT 1')).rows[0].id;
     assert.equal((await ops.memory_review!('review:'+latest,authority)).state,'denied');

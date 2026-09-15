@@ -195,7 +195,7 @@ running identities before any repeated start. All 74 service checks pass in the
 isolated Compose fixture with serial test-file execution; six focused admission
 checks pass. The initial parallel service run hit database timeouts. The broader
 Hermes run passed 151 checks with two existing skips, but three native startup
-checks timed out under host load and remain pending retest. The final candidate passes all 155 non-optional Hermes checks across the full
+checks timed out under host load. The final candidate subsequently passed all 155 non-optional Hermes checks across the full
 run and a solitary repeat of its one timing-sensitive TUI check; two existing
 optional checks are skipped. The code is installed locally; real Telegram acceptance still needs a new owner
 message and the remaining live gates.
@@ -225,6 +225,26 @@ with 253 files and no model calls.
 [Installed response-fix evidence](compatibility/results/2026-09-15-telegram-response-fixes.json).
 The owner should send one fresh private follow-up so the new runtime receipt and
 phase timings can establish real delivery and remaining latency.
+
+The next two real owner messages were captured within 1.497 and 2.581 seconds,
+and each completed once on attempt one, but capture-to-receipt still took 143.043
+and 141.018 seconds. Both replies carried a limited-memory notice. Profiling found
+that the pinned native OpenAI client imports the optional Bedrock adapter, which
+tries to install missing dependencies and spends 30.842 seconds on blocked
+installation. Sealing managed-turn dependencies reduces synthetic native agent
+construction from 41.088 to 4.378 seconds. Native reasoning, memory, tools and the
+external guard remain enabled.
+
+Honcho had four completed source receipts and no pending or running derivation,
+but its generation remained building: the first readiness observer had completed
+before later uploads. Transactional receipt creation and acknowledgment now request
+fresh read-only observations without reopening an ingestion receipt. Background
+native review overlapped the second turn and held its profile; reviews now wait
+for a 60-second quiet interval after foreground activity, without consuming an
+attempt or replacing a native receipt. All 75 service checks passed. All 157
+non-optional Hermes checks passed across the full run and an isolated repeat of
+three startup checks that timed out under shared-engine load; two optional checks
+were skipped. Installation and post-installation live checks are pending. [Follow-up evidence](compatibility/results/2026-09-15-telegram-followup-fixes.json).
 
 </telegram_live_latency>
 
