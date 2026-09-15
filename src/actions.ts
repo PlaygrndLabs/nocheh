@@ -10,7 +10,7 @@ import {evaluate,recordEffect} from './security/store.js';
 import type {Effect,Decision} from './security/contract.js';
 import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
 import {controlledAction,controlledList,decideControlled,revokePermission} from './controlled-actions.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 export async function telegramActions(pool:pg.Pool,principal:Reader) {
   admin(principal);
@@ -35,11 +35,12 @@ export async function requestAction(pool:pg.Pool,principal:Reader,value:unknown)
   await assertAudience(pool,principal);
   if (!principal.turnEvent)throw new HttpError(403,'assistant_turn_required');
   if(principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
-  const input=object(value),destination=string(input.destination,32),text=string(input.text,3500);
-  if (!/^-?[1-9]\d{0,18}$/.test(destination) || !text.trim())throw new HttpError(400,'invalid_action');
-  const event=(await pool.query<{scope:string;bot_id:string;origin:string}>('SELECT scope,bot_id,origin FROM events WHERE id=$1',[principal.turnEvent])).rows[0];
+  const input=object(value),requested=string(input.destination,32),text=string(input.text,3500);
+  const event=(await pool.query<{scope:string;bot_id:string;origin:string;channel:string}>('SELECT scope,bot_id,origin,channel FROM events WHERE id=$1',[principal.turnEvent])).rows[0];
   if(!event || (principal.scope!==null && principal.scope!==event.scope))throw new HttpError(403,'action_scope_denied');
   if(event.origin!=='live')throw new HttpError(403,'external_effect_requires_live_turn');
+  const destination=requested==='current'&&event.channel==='telegram'?event.scope:requested;
+  if (!/^-?[1-9]\d{0,18}$/.test(destination) || !text.trim())throw new HttpError(400,'invalid_action');
   const id=digest(canonical({event_id:principal.turnEvent,destination,text}));
   await ingest(pool,{version:1,key:'action-request:'+id,origin:'generated',kind:'action_request',bot_id:event.bot_id,scope:event.scope,
     source_id:id,revision:'0',occurred_at:null,text,payload:{source_event_id:principal.turnEvent,kind:'telegram_message',destination}});
@@ -104,7 +105,7 @@ export async function controlReply(pool:pg.Pool,policy:AssistantPolicy,eventId:s
   return reply;
 }
 
-export async function executeApproved(pool:pg.Pool,call:RuntimeCall,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+export async function executeApproved(pool:pg.Pool,call:RuntimeCall,jobId:string|null=null,authority:ExecutionAuthority) {
   const client=await pool.connect();let held=false,fenced=false;
   try {
     fenced=await enterFamily(client,'actions',authority.owner,authority.epoch);if(!fenced)return;

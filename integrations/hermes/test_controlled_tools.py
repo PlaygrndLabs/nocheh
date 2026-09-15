@@ -2,7 +2,7 @@ import json,sys,tempfile,unittest,subprocess
 from pathlib import Path
 from unittest.mock import patch
 from scripts.tool_execution import public_target,workspace,sandbox_command,mcp_call,execute
-from scripts.tool_worker import tick
+from scripts.tool_receipts import tick
 
 class ToolTests(unittest.TestCase):
     def test_public_resolver_denies_every_private_candidate_and_pins_public_ip(self):
@@ -57,9 +57,9 @@ class ToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             api=API();executions=[]
             def run(*args):executions.append(1);return {'text':'done'}
-            with self.assertRaises(OSError):tick(folder,api,'actor',run)
+            with self.assertRaises(OSError):tick(folder,api,'actor',run,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
             self.assertEqual(len(list((Path(folder)/'admin/tools/receipts').glob('*.json'))),1)
-            api.outage=False;tick(folder,api,'new-actor',run)
+            api.outage=False;tick(folder,api,'new-actor',run,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
             self.assertEqual(len(executions),1);self.assertEqual(api.finishes,2)
             self.assertEqual(list((Path(folder)/'admin/tools/receipts').glob('*.json')),[])
 
@@ -71,7 +71,7 @@ class ToolTests(unittest.TestCase):
                 if path.endswith('/start'):return {'started':True}
                 return {'claimed':True,'id':'b'*64} if path.endswith('/claim') else {}
         def run(*args):raise TimeoutError('sensitive remote response must not appear')
-        with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run)
+        with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
         self.assertEqual(calls[-1][1]['state'],'ambiguous')
         self.assertNotIn('sensitive',json.dumps(calls))
 
@@ -84,7 +84,7 @@ class ToolTests(unittest.TestCase):
                 if path.endswith('/start'):return {'started':False,'reason':'permission_no_longer_valid'}
                 return {}
         def run(*args):raise AssertionError('executor must not run')
-        with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run)
+        with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
         self.assertEqual(calls[-1][1]['state'],'failed')
 
     def test_targeted_workflow_authority_is_checked_before_start_and_not_stored_in_receipt(self):

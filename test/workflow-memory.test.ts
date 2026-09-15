@@ -31,7 +31,7 @@ test('memory requests preserve consent, native receipt identity, owner revisions
   const source:Envelope={version:1,key:'import:workflow-memory',origin:'import',bot_id:'fixture',kind:'message',scope:'123',source_id:'1',revision:'1',occurred_at:null,text:'Consented synthetic history',payload:{message:{from:{id:123}}}};
   try {
     await initialize(pool);await setGuardMode(pool,'on');const event=await ingest(pool,source);
-    await prepareGuarded(pool,async()=>[],'fixture',100,event.id);
+    await prepareGuarded(pool,async()=>[],'fixture',100,event.id,{owner:'inngest',epoch:1});
     for(const family of ['memory_review','honcho'] as const){await pauseFamily(pool,family,1);await switchFamily(pool,family,1,'inngest');}
     assert.equal((await ops.memory_review!('source:'+event.id,authority)).state,'denied');assert.equal(calls.length,0);
     assert.equal((await ops.honcho!('refresh',authority)).state,'waiting');assert.equal(reads+writes,0,'detached Honcho cannot execute');
@@ -77,7 +77,7 @@ test('memory requests preserve consent, native receipt identity, owner revisions
     assert.ok(context.next_attempt>Date.now()+100000,'idle conversations keep warm context through a durable wait');
     const firstObserver=await request('generation:'+generation);
     const later=await ingest(pool,{...source,key:'import:later-memory',source_id:'2',text:'Later consented source'});
-    await prepareGuarded(pool,async()=>[],'fixture',100,later.id);
+    await prepareGuarded(pool,async()=>[],'fixture',100,later.id,{owner:'inngest',epoch:1});
     await approveLearning(pool,{approved:true,event_ids:[later.id]});
     await ops.honcho!('refresh',authority);
     assert.notEqual((await request('generation:'+generation)).id,firstObserver.id,'later sources have a new read-only observer');

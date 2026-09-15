@@ -14,7 +14,7 @@ def tool_tick(state,body):
         if not isinstance(body.get(key),str) or not re.fullmatch('[a-f0-9]{64}',body[key]):raise ValueError('invalid_workflow_identity')
     if not isinstance(body.get('workflow_token'),str) or not re.fullmatch(r'[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}',body['workflow_token']):raise ValueError('invalid_workflow_lease')
     # The executor's existing exact approval, current native preference check,
-    # sandbox and durable receipt path are shared with the legacy adapter.
+    # sandbox and durable receipt path remain outside the event engine.
     class WorkerAPI(API):
         def call(self,path,body=None,binary=False,timeout=10):
             return super().call(path,body,binary,15 if path.endswith('/finish') else 10)

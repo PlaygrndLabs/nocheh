@@ -14,6 +14,13 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
+import {admitBrowser} from '../src/workflows/browser.js';
+async function captureAndAdmit(...args:Parameters<typeof captureInput>){
+  const result=await captureInput(...args);
+  await admitBrowser(args[0],args[1],{...args[2] as Record<string,unknown>,event_id:result.event_id});
+  return result;
+}
+
 test('prepared passages survive formatting without splitting different identifiers',()=>{
   assert.deepEqual(segments('Before\nowner text\nAfter',['owner text']),[{text:'Before\n',prepared:false},{text:'owner text',prepared:true},{text:'\nAfter',prepared:false}]);
   assert.deepEqual(segments('secret-value',['secret']),[{text:'secret',prepared:true},{text:'-value',prepared:false}]);
@@ -27,21 +34,21 @@ test('ingestion prepares text files and transcripts once, retains binaries and f
   try {
     await initialize(pool);await setGuardMode(pool,'on');
     const original=Buffer.from('Database password: planted-SECRET\r\n');
-    const captured=await captureInput(pool,config,{id:'files',conversation:'files',profile:'owner',scope:'42',text:'Read my files',files:[
+    const captured=await captureAndAdmit(pool,config,{id:'files',conversation:'files',profile:'owner',scope:'42',text:'Read my files',files:[
       {name:'notes.txt',kind:'file',bytes_base64:original.toString('base64')},
       {name:'voice.wav',kind:'audio',bytes_base64:Buffer.from([0,1,2,3]).toString('base64')},
       {name:'photo.png',kind:'image',bytes_base64:Buffer.from([0,4,5,6]).toString('base64')}]});
     let transcriptions=0;const call=async(operation:string)=>{assert.equal(operation,'perception.transcribe');transcriptions++;return {success:true,transcript:'Voice password: planted-SECRET'};};
-    await prepareArchiveFiles(pool,root,call);await prepareArchiveFiles(pool,root,call);assert.equal(transcriptions,1);
+    await prepareArchiveFiles(pool,root,call,undefined,{owner:'inngest',epoch:1});await prepareArchiveFiles(pool,root,call,undefined,{owner:'inngest',epoch:1});assert.equal(transcriptions,1);
     assert.deepEqual(await readFile(join(root,'files',captured.attachments[0]!.sha256)),original);
     const kinds=(await pool.query('SELECT kind FROM derived_artifacts WHERE event_id=$1',[captured.event_id])).rows.map(r=>r.kind).sort();
     assert.deepEqual(kinds,['extracted_text','extraction_status','transcript']);
-    await prepareGuarded(pool,async text=>text.includes('planted-SECRET')?['planted-SECRET']:[],undefined,100,captured.event_id);
+    await prepareGuarded(pool,async text=>text.includes('planted-SECRET')?['planted-SECRET']:[],undefined,100,captured.event_id,{owner:'inngest',epoch:1});
     const guard=await guardState(pool),principal={admin:false,scope:null,guard_epoch:guard.epoch,turnEvent:captured.event_id};
     const visible=await readEvent(pool,principal,captured.event_id);
     assert.ok(!JSON.stringify(visible).includes('planted-SECRET'));
     const claim={event_id:captured.event_id,actor:'worker',scope:'42',profile:'owner'};
-    await claimRun(pool,config,claim);
+    await claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1});
     await editGuarded(pool,{admin:true,scope:null},captured.event_id,{source_id:'events:'+captured.event_id,expected_revision:1,content:{text:'Owner changed this context',payload:{}}});
     await assert.rejects(renewRun(pool,claim),{code:'run_lease_lost'});
     assert.equal((await finishRun(pool,{...claim,state:'done',text:'Obsolete answer retained as evidence',session:'files'})).state,'interrupted');
@@ -55,7 +62,7 @@ test('PostgreSQL on/off: prepared source reuse, authoritative edits, generation 
   const owner={admin:true,scope:null};
   const detect=async(text:string)=>text.includes('planted-SECRET')?['planted-SECRET']:[];
   try {
-    await initialize(pool);const {id}=await ingest(pool,event,false);await prepareGuarded(pool,detect);
+    await initialize(pool);const {id}=await ingest(pool,event,false);await prepareGuarded(pool,detect,undefined,undefined,undefined,{owner:'inngest',epoch:1});
     const guard=await setGuardMode(pool,'on');
     const reader={admin:false,scope:null,turnEvent:id,guard_epoch:guard.epoch};
     const group={...reader,scope:'-20'};

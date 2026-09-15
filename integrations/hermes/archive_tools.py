@@ -85,7 +85,7 @@ def register(ctx):
         ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence.',
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
         ('nocheh_action_request','Propose an external Telegram message. Nothing is sent until the owner reviews and approves the exact action in their private DM.',
-         {'destination':{'type':'string','description':'Numeric Telegram chat ID'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
+         {'destination':{'type':'string','description':'Use current for this Telegram chat, or an explicit numeric Telegram chat ID. The server resolves current from the authenticated source turn.'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
     ):
         ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},

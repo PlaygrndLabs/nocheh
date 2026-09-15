@@ -283,7 +283,6 @@ services:
 
   inngest-db-init:
     <<: *service
-    profiles: [workflows]
     restart: "no"
     command: [node, dist/src/workflows/bootstrap.js]
     environment:
@@ -300,7 +299,6 @@ services:
 
   inngest-redis:
     image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
-    profiles: [workflows]
     restart: unless-stopped
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]
@@ -314,7 +312,6 @@ services:
 
   inngest-server:
     image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
-    profiles: [workflows]
     restart: unless-stopped
     command: [inngest, start]
     environment:
@@ -345,7 +342,6 @@ services:
       NOCHEH_SERVICE: nocheh-app
       NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
-      NOCHEH_WORKFLOWS_ENABLED: ${NOCHEH_WORKFLOWS_ENABLED:-false}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
     depends_on:
@@ -401,9 +397,9 @@ services:
       TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
       GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]}
-      NOCHEH_REASONING_ROUTE: ${NOCHEH_REASONING_ROUTE:-native}
-      NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-legacy}
-      NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-legacy}
+      NOCHEH_REASONING_ROUTE: ${NOCHEH_REASONING_ROUTE:-shared}
+      NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-isolated}
+      NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-evidence}
       CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
       SPEECH_URL: http://chatgpt-speech:8783
       NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}

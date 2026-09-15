@@ -17,7 +17,7 @@ import {scheduleOperation} from './schedules.js';
 import {superviseConnection} from './supervisor.js';
 
 export function startWorkflowService(pool:pg.Pool,config:Settings) {
-  const inactive=process.env.NOCHEH_WORKFLOWS_ENABLED!=='true'||existsSync(join(config.dataDir,'spool/.restore-inactive'))||existsSync(join(config.dataDir,'workflows/inactive'));
+  const inactive=existsSync(join(config.dataDir,'spool/.restore-inactive'))||existsSync(join(config.dataDir,'workflows/inactive'));
   if(inactive)return {state:()=> 'inactive',close:async()=>{}};
   let stopping=false;
   const runtime=runtimeCall(hermesAdapter({url:config.hermesUrl,token:config.token}));

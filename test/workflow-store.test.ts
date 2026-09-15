@@ -40,13 +40,13 @@ test('transactional outbox, permanent identity, lost acknowledgments, publisher 
     assert.equal((await pool.query('SELECT count(*) FROM workflow_outbox')).rows[0].count,'2');
     const id=await requestWorkflow(client,'telegram',hash(value.key));
     const sent:WorkflowEvent[]=[];
-    assert.equal(await publishOutbox(pool,async e=>{sent.push(e);}),0,'legacy family never publishes');
-    assert.equal(await enterFamily(client,'telegram','legacy'),true);
+    assert.equal(await publishOutbox(pool,async e=>{sent.push(e);}),0,'a family waits for worker registration');
+    assert.equal(await enterFamily(client,'telegram','inngest',1),true);
     await pauseFamily(pool,'telegram',1);
     await assert.rejects(switchFamily(pool,'telegram',1,'inngest'),{code:'workflow_family_not_drained'});
     await leaveFamily(client,'telegram');
     assert.equal(await switchFamily(pool,'telegram',1,'inngest'),2);
-    assert.equal(await enterFamily(client,'telegram','legacy'),false);
+    assert.equal(await enterFamily(client,'telegram','legacy',1),false);
     assert.equal(await enterFamily(client,'telegram','inngest',1),false);
     assert.equal(await publishOutbox(pool,async e=>{sent.push(e);}),0,'requests wait until a compatible worker has registered');
     await registerWorker(pool,'pipeline',['telegram']);
@@ -75,15 +75,16 @@ test('transactional outbox, permanent identity, lost acknowledgments, publisher 
     assert.equal((await beginEffect(client,id,resumed.lease_token,'delivery',1)).execute,false);
     assert.equal((await beginEffect(client,id,resumed.lease_token,'delivery',2)).execute,false,'a different attempt cannot bypass an uncertain effect');
     await pauseFamily(pool,'telegram',2);
-    await assert.rejects(switchFamily(pool,'telegram',2,'legacy'),{code:'workflow_receipts_unreconciled'});
+    await assert.rejects(switchFamily(pool,'telegram',2,'legacy'),{code:'legacy_execution_removed'});
+    await assert.rejects(switchFamily(pool,'telegram',2,'inngest'),{code:'workflow_receipts_unreconciled'});
     await finishEffect(client,id,'delivery',1,'done',hash('native-receipt'));
     await finishEffect(client,id,'delivery',1,'done',hash('native-receipt'));
     await assert.rejects(finishEffect(client,id,'delivery',1,'done',hash('different-receipt')),{code:'workflow_receipt_conflict'});
     await pool.query("UPDATE workflow_registry SET state='completed',lease_token=NULL,lease_until=NULL,created_at=now()-interval '2 days' WHERE id=$1",[id]);
-    assert.equal(await switchFamily(pool,'telegram',2,'legacy'),3);
+    assert.equal(await switchFamily(pool,'telegram',2,'inngest'),3);
     await pauseFamily(pool,'telegram',3);await switchFamily(pool,'telegram',3,'inngest');
     assert.equal(await requestWorkflow(client,'telegram',hash(value.key)),id);
-    assert.equal(await claimWorkflow(client,id,1,'delayed-duplicate',4),null,'closed identity survives event dedup window and rollback');
+    assert.equal(await claimWorkflow(client,id,1,'delayed-duplicate',4),null,'closed identity survives event dedup window and epoch rotation');
     assert.equal((await pool.query('SELECT count(*) FROM workflow_runs')).rows[0].count,'2');
     for(const state of ['failed','cancelled','denied','ambiguous','skipped']) {
       await pool.query('UPDATE workflow_registry SET state=$2 WHERE id=$1',[id,state]);

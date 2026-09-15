@@ -5,11 +5,11 @@ import {digest} from './archive.js';
 import {prepareTranscripts} from './assistant.js';
 import type {RuntimeCall} from './runtime.js';
 import {HttpError} from './http.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 // Imports and live capture share the same preparation path. Unsupported bytes
 // remain in the original file store; a binary is never labelled guarded text.
-export async function prepareArchiveFiles(pool:pg.Pool,root:string,call:RuntimeCall,eventId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+export async function prepareArchiveFiles(pool:pg.Pool,root:string,call:RuntimeCall,eventId:string|null=null,authority:ExecutionAuthority) {
   const client=await pool.connect();let locked=false,fenced=false;
   try {
     fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);if(!fenced)return;

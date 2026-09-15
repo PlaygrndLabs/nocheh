@@ -6,7 +6,7 @@ import {guardState} from './guarded.js';
 import {admin,assertAudience,type Reader} from './access.js';
 import {evaluate,recordEffect,type EffectState} from './security/store.js';
 import type {Effect,Decision} from './security/contract.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 export const controlledSchema=`
 CREATE TABLE IF NOT EXISTS controlled_actions (
@@ -143,7 +143,7 @@ export async function revokePermission(pool:pg.Pool,principal:Reader,value:unkno
   await pool.query('UPDATE action_permissions SET revoked_at=coalesce(revoked_at,now()) WHERE id=$1',[id]);
   return {id,revoked:true};
 }
-export async function claimControlled(pool:pg.Pool,value:unknown,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+export async function claimControlled(pool:pg.Pool,value:unknown,jobId:string|null=null,authority:ExecutionAuthority) {
   const actor=string(object(value).actor,128);if(!/^[\w-]{1,128}$/.test(actor))throw new HttpError(400,'invalid_actor');
   if(jobId!==null)idValue(jobId);
   const client=await pool.connect();let fenced=false;
@@ -191,7 +191,7 @@ export async function claimControlled(pool:pg.Pool,value:unknown,jobId:string|nu
     await client.query('COMMIT');return {claimed:true,...view({...row,state:'running',actor,permission_id:permission})};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{await releaseOperation(client,async()=>{if(fenced)await leaveFamily(client,'tools');});}
 }
-export async function startControlled(pool:pg.Pool,value:unknown,authority:ExecutionAuthority=legacyAuthority) {
+export async function startControlled(pool:pg.Pool,value:unknown,authority:ExecutionAuthority) {
   const input=object(value),id=idValue(input.id),actor=string(input.actor,128),client=await pool.connect();
   let fenced=false;
   try {

@@ -31,10 +31,9 @@ export async function confirmImport(pool:pg.Pool,input:unknown) {
   if(!Number.isSafeInteger(completed)||Number(completed)<0||Number(completed)>Number(b.total)||!Number.isSafeInteger(duplicates)||Number(duplicates)<0)throw new HttpError(400,'invalid_import_checkpoint');
   const client=await pool.connect();let held=false;
   try {
-    const owner=(await client.query("SELECT owner,admission FROM workflow_owners WHERE family='imports'")).rows[0];
+    const owner=(await client.query("SELECT owner,epoch,admission FROM workflow_owners WHERE family='imports'")).rows[0];
     if(!owner?.admission)throw new HttpError(409,'import_owner_paused');
-    if(owner.owner==='legacy'&&!(await client.query('SELECT 1 FROM workflow_imports WHERE id=$1',[id])).rowCount)return {owned:false};
-    held=await enterFamily(client,'imports',owner.owner);if(!held)throw new HttpError(409,'import_owner_paused');
+    held=await enterFamily(client,'imports',owner.owner,owner.epoch);if(!held)throw new HttpError(409,'import_owner_paused');
     await client.query('BEGIN');
     await client.query(`INSERT INTO workflow_imports(id,configuration_hash,review_approved,total,completed,duplicates) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,[id,b.configuration_hash,b.review_approved,b.total,completed,duplicates]);
     let job=(await client.query('SELECT * FROM workflow_imports WHERE id=$1 FOR UPDATE',[id])).rows[0];
@@ -47,16 +46,17 @@ export async function confirmImport(pool:pg.Pool,input:unknown) {
     await client.query('COMMIT');return {owned:owner.owner==='inngest',job};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{await releaseOperation(client,async()=>{if(held)await leaveFamily(client,'imports');});}
 }
-export async function finishLegacyImport(pool:pg.Pool,input:unknown){
+/** Reconcile a retained receipt while admission is paused; never execute an import. */
+export async function reconcileImportReceipt(pool:pg.Pool,input:unknown){
   const b=object(input),id=uuid(b.id);
   if(typeof b.configuration_hash!=='string'||!/^[a-f0-9]{64}$/.test(b.configuration_hash))throw new HttpError(400,'invalid_import_configuration');
   for(const key of ['completed','duplicates','learning_after'])if(!Number.isSafeInteger(b[key])||Number(b[key])<0)throw new HttpError(400,'invalid_import_checkpoint');
   const client=await pool.connect();try{
     await client.query('BEGIN');
-    const owner=(await client.query("SELECT owner FROM workflow_owners WHERE family='imports' FOR NO KEY UPDATE")).rows[0];
+    const owner=(await client.query("SELECT owner,admission FROM workflow_owners WHERE family='imports' FOR NO KEY UPDATE")).rows[0];
     const row=(await client.query('SELECT * FROM workflow_imports WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(!row){await client.query('COMMIT');return {owned:false};}
-    if(owner.owner!=='legacy')throw new HttpError(409,'workflow_owner_changed');
+    if(owner.admission)throw new HttpError(409,'import_reconciliation_requires_pause');
     if(row.configuration_hash!==b.configuration_hash||row.total!==b.completed||b.learning_after!==(row.review_approved?row.total:0))throw new HttpError(409,'import_receipt_conflict');
     if(['queued','running'].includes(row.state))await client.query("UPDATE workflow_imports SET state='completed',completed=$2,duplicates=greatest(duplicates,$3),learning_after=$4,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[id,b.completed,b.duplicates,b.learning_after]);
     await client.query('COMMIT');return {owned:true,state:['queued','running'].includes(row.state)?'completed':row.state};
@@ -86,13 +86,14 @@ export async function finishImportBatch(client:pg.PoolClient,id:string,token:str
 }
 /** Held around each archive write, so cancellation and ownership cannot race the write. */
 export async function enterImportWrite(pool:pg.Pool,id:unknown,token:unknown,owner:unknown='inngest') {
-  uuid(id);if(!['legacy','inngest'].includes(String(owner)))throw new HttpError(400,'invalid_import_owner');
+  uuid(id);if(owner!=='inngest')throw new HttpError(400,'invalid_import_owner');
   const client=await pool.connect();let held=false;
   try {
-    held=await enterFamily(client,'imports',owner as 'legacy'|'inngest');
+    const authority=(await client.query("SELECT epoch FROM workflow_owners WHERE family='imports'")).rows[0];
+    held=await enterFamily(client,'imports','inngest',authority.epoch);
     if(!held)throw new HttpError(409,'import_owner_paused');
     await client.query('BEGIN');
-    const job=owner==='legacy'?{review_approved:true}:(await client.query("SELECT * FROM workflow_imports WHERE id=$1 AND lease_token=$2 AND state='running' AND lease_until>now() FOR SHARE",[uuid(id),uuid(token)])).rows[0];
+    const job=(await client.query("SELECT * FROM workflow_imports WHERE id=$1 AND lease_token=$2 AND state='running' AND lease_until>now() FOR SHARE",[uuid(id),uuid(token)])).rows[0];
     if(!job)throw new HttpError(409,'import_execution_closed');
     return {job,release:async()=>{await releaseOperation(client,async()=>{await client.query('COMMIT');await leaveFamily(client,'imports');});}};
   }catch(error){await releaseOperation(client,async()=>{await client.query('ROLLBACK');if(held)await leaveFamily(client,'imports');});throw error;}

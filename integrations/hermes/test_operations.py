@@ -103,7 +103,7 @@ class SnapshotTests(unittest.TestCase):
                     self.assertFalse((state/'hermes/auth.json').exists())
                     self.assertFalse(any((state/'provider/auth').glob('*.json')))
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
-                    self.assertIn("NOCHEH_WORKFLOWS_ENABLED='false'",(state/'.env').read_text())
+                    self.assertNotIn("NOCHEH_WORKFLOWS_ENABLED",(state/'.env').read_text())
                     from scripts.configuration import read_env
                     restored=read_env(state/'.env')
                     self.assertEqual(restored['NOCHEH_HONCHO_ENABLED'],'false')

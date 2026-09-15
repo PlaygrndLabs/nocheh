@@ -4,12 +4,20 @@ import pg from 'pg';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {prepareArchiveFiles} from '../src/preparation.js';
 import {settings} from '../src/config.js';
 import {initialize} from '../src/database.js';
 import {captureInput,claimRun,finishRun,renewRun,recoverRuns,prepareRun} from '../src/managed-runs.js';
 import {reader} from '../src/access.js';
 import type {IncomingMessage} from 'node:http';
 import {archiveStatus,digest} from '../src/archive.js';
+
+import {admitBrowser} from '../src/workflows/browser.js';
+async function captureAndAdmit(...args:Parameters<typeof captureInput>){
+  const result=await captureInput(...args);
+  await admitBrowser(args[0],args[1],{...args[2] as Record<string,unknown>,event_id:result.event_id});
+  return result;
+}
 
 test('real PostgreSQL: browser originals, files, scoped claims and idempotent results',{skip:!process.env.PGHOST},async()=>{
   const config=settings(),connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
@@ -23,16 +31,16 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     const profile='nocheh-'+digest('-10:policy:1').slice(0,24);
     const body={id:'input-one',conversation:'session-one',profile,scope:'-10',space:'-10',revision:1,text,
       files:[{name:'original.bin',kind:'file',bytes_base64:bytes.toString('base64')}]};
-    const first=await captureInput(pool,config,body),second=await captureInput(pool,config,body);
+    const first=await captureAndAdmit(pool,config,body),second=await captureAndAdmit(pool,config,body);
     assert.equal(first.event_id,second.event_id);assert.equal(second.duplicate,true);
     assert.deepEqual(await readFile(join(root,'files',first.attachments[0]!.sha256)),bytes);
-    await assert.rejects(captureInput(pool,config,{...body,text:'changed'}),/source_identity_conflict/);
-    await assert.rejects(captureInput(pool,config,{...body,id:'other',scope:'-20'}),/run_scope_denied/);
-    await assert.rejects(captureInput(pool,config,{...body,id:'other',files:[{...body.files[0],name:'../outside'}]}),/invalid_attachment/);
+    await assert.rejects(captureAndAdmit(pool,config,{...body,text:'changed'}),/source_identity_conflict/);
+    await assert.rejects(captureAndAdmit(pool,config,{...body,id:'other',scope:'-20'}),/run_scope_denied/);
+    await assert.rejects(captureAndAdmit(pool,config,{...body,id:'other',files:[{...body.files[0],name:'../outside'}]}),/invalid_attachment/);
     const claim={event_id:first.event_id,actor:'actor-one',scope:'-10',profile};
-    await assert.rejects(claimRun(pool,config,{...claim,profile:'private-profile'}),/run_profile_mismatch/);
-    await assert.rejects(claimRun(pool,config,{...claim,scope:'42'}),/captured_run_not_found/);
-    const claims=await Promise.all([claimRun(pool,config,claim),claimRun(pool,config,claim)]);
+    await assert.rejects(claimRun(pool,config,{...claim,profile:'private-profile'},undefined,{owner:'inngest',epoch:1}),/run_profile_mismatch/);
+    await assert.rejects(claimRun(pool,config,{...claim,scope:'42'},undefined,{owner:'inngest',epoch:1}),/captured_run_not_found/);
+    const claims=await Promise.all([claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1}),claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1})]);
     const won=claims.find(c=>c.claimed)!;
     assert.equal(claims.filter(c=>c.claimed).length,1);assert.equal(won.text,text);
     const principal=reader({headers:{authorization:'Bearer '+won.archive_credential}} as IncomingMessage,config.token);
@@ -45,31 +53,34 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     const row=(await pool.query('SELECT original_text FROM events WHERE id=$1',[first.event_id])).rows[0];
     assert.deepEqual(row.original_text,Buffer.from(text));
     assert.equal((await pool.query("SELECT content FROM derived_artifacts WHERE event_id=$1 AND kind='browser_result'",[first.event_id])).rows[0].content.toString(),'Generated answer');
-    assert.equal((await claimRun(pool,config,claim)).claimed,false);
-    assert.equal((await claimRun(pool,config,claim)).text,'Generated answer');
-    const restart=await captureInput(pool,config,{...body,id:'restart',files:[]});
-    const restartClaim={...claim,event_id:restart.event_id};await claimRun(pool,config,restartClaim);
+    assert.equal((await claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1})).claimed,false);
+    assert.equal((await claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1})).text,'Generated answer');
+    const restart=await captureAndAdmit(pool,config,{...body,id:'restart',files:[]});
+    const restartClaim={...claim,event_id:restart.event_id};await claimRun(pool,config,restartClaim,undefined,{owner:'inngest',epoch:1});
     await assert.rejects(renewRun(pool,{...restartClaim,actor:'wrong'}),/run_lease_lost/);
     await renewRun(pool,restartClaim);await recoverRuns(pool);
-    assert.equal((await claimRun(pool,config,restartClaim)).state,'running');
+    assert.equal((await claimRun(pool,config,restartClaim,undefined,{owner:'inngest',epoch:1})).state,'running');
     await pool.query("UPDATE managed_runs SET lease_until=now()-interval '1 second' WHERE event_id=$1",[restart.event_id]);
     await assert.rejects(renewRun(pool,restartClaim),/run_lease_lost/);
-    await recoverRuns(pool);assert.equal((await claimRun(pool,config,restartClaim)).state,'interrupted');
+    await recoverRuns(pool);assert.equal((await claimRun(pool,config,restartClaim,undefined,{owner:'inngest',epoch:1})).state,'interrupted');
     const late={...restartClaim,state:'done',session:'session-one',text:'late result evidence'};
     assert.equal((await finishRun(pool,late)).state,'interrupted');assert.equal((await finishRun(pool,late)).duplicate,true);
-    assert.equal((await claimRun(pool,config,restartClaim)).text,'late result evidence');
-    const audio=await captureInput(pool,config,{...body,id:'audio',files:[{name:'voice.wav',kind:'audio',bytes_base64:bytes.toString('base64')},{name:'notes.txt',kind:'file',bytes_base64:Buffer.from('exact file\r\n').toString('base64')}]});
-    const audioClaim={...claim,event_id:audio.event_id};await claimRun(pool,config,audioClaim);
+    assert.equal((await claimRun(pool,config,restartClaim,undefined,{owner:'inngest',epoch:1})).text,'late result evidence');
+    const audio=await captureAndAdmit(pool,config,{...body,id:'audio',files:[{name:'voice.wav',kind:'audio',bytes_base64:bytes.toString('base64')},{name:'notes.txt',kind:'file',bytes_base64:Buffer.from('exact file\r\n').toString('base64')}]});
+    const audioClaim={...claim,event_id:audio.event_id};await claimRun(pool,config,audioClaim,undefined,{owner:'inngest',epoch:1});
     let transcriptions=0;
-    const prepared=await prepareRun(pool,config,audioClaim,async(operation)=>{assert.equal(operation,'perception.transcribe');transcriptions++;return {success:true,transcript:'derived transcript'};});
+    await prepareArchiveFiles(pool,root,async(operation)=>{assert.equal(operation,'perception.transcribe');transcriptions++;return {success:true,transcript:'derived transcript'};},audio.event_id,{owner:'inngest',epoch:1});
+    const prepared=await prepareRun(pool,config,audioClaim,async()=>{throw Error('turn cannot prepare inputs');});
     assert.deepEqual(prepared.transcripts,['derived transcript']);assert.equal(prepared.files.find(f=>f.name==='notes.txt')?.text,'exact file\r\n');
     await prepareRun(pool,config,audioClaim,async()=>{throw Error('must reuse transcript');});assert.equal(transcriptions,1);
     const unavailable=new pg.Pool(connection);await unavailable.end();
-    await assert.rejects(captureInput(unavailable,config,{...body,id:'outage',files:[]}));
+    await assert.rejects(captureAndAdmit(unavailable,config,{...body,id:'outage',files:[]}));
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM managed_runs')).rows[0].count,3);
     assert.equal((await archiveStatus(pool)).managed_runs.length,3);
-    const stale=await captureInput(pool,config,{...body,id:'after-policy-change',files:[]});
+    await assert.rejects(captureAndAdmit(pool,config,{...body,id:'busy',files:[]}),{code:'session_busy'});
+    await finishRun(pool,{...audioClaim,state:'done',text:'Prepared reply',session:'session-one'});
+    const stale=await captureAndAdmit(pool,config,{...body,id:'after-policy-change',files:[]});
     await pool.query('UPDATE memory_policy_state SET revision=revision+1');
-    await assert.rejects(claimRun(pool,config,{...claim,event_id:stale.event_id}),{code:'browser_audience_changed'});
+    await assert.rejects(claimRun(pool,config,{...claim,event_id:stale.event_id},undefined,{owner:'inngest',epoch:1}),{code:'browser_audience_changed'});
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });

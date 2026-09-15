@@ -27,9 +27,10 @@ class WorkflowRecoveryTests(unittest.TestCase):
                 save(root,{'NOCHEH_WORKFLOWS_ENABLED':'true'},view(root)['revision'])
             with patch.dict('os.environ',{'COMPOSE_PROFILES':'tools,workflows'}):
                 self.assertEqual(compose_environment(root)['COMPOSE_PROFILES'],'tools')
-            values['NOCHEH_WORKFLOWS_ENABLED']='true';write_env(env_path(root),values);initialize(root)
+            values['NOCHEH_WORKFLOWS_ENABLED']='false';write_env(env_path(root),values)
+            self.assertNotIn('NOCHEH_WORKFLOWS_ENABLED',initialize(root))
             self.assertTrue((root/'workflows/redis').is_dir())
-            self.assertIn('workflows',compose_environment(root)['COMPOSE_PROFILES'])
+            self.assertNotIn('workflows',compose_environment(root)['COMPOSE_PROFILES'])
 
     def test_snapshot_requires_both_quiesced_stores_and_detects_corruption(self):
         with tempfile.TemporaryDirectory() as folder:

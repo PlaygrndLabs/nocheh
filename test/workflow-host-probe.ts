@@ -51,7 +51,7 @@ try{
   await writeFile(join(directory,'job.json'),JSON.stringify({id,kind:'import',state:'running',preview,mapping:{},review_approved:false}),{mode:0o600});
   await writeFile(join(state,'.env'),Object.entries({NOCHEH_CONFIG_VERSION:'1',NOCHEH_PORT:String(port),SERVICE_TOKEN:serviceToken}).map(([k,v])=>k+'='+v).join('\n')+'\n',{mode:0o600});
   await confirmImport(pool,{id,configuration_hash:importConfiguration(preview,{},false),review_approved:false,total:103});
-  child=spawn(process.execPath,[resolve('dist/src/workflows/host.js')],{env:{...process.env,NOCHEH_STATE_DIR:state,NOCHEH_WORKFLOWS_ENABLED:'true',NOCHEH_PORT:String(port),INNGEST_BASE_URL:'http://127.0.0.1:'+port,INNGEST_CONNECT_GATEWAY_URL:'ws://127.0.0.1:'+port+'/v0/connect'},stdio:'ignore'});
+  child=spawn(process.execPath,[resolve('dist/src/workflows/host.js')],{env:{...process.env,NOCHEH_STATE_DIR:state,NOCHEH_PORT:String(port),INNGEST_BASE_URL:'http://127.0.0.1:'+port,INNGEST_CONNECT_GATEWAY_URL:'ws://127.0.0.1:'+port+'/v0/connect'},stdio:'ignore'});
   const publisher=workflowClient('pipeline'),deadline=Date.now()+90000;
   while(Date.now()<deadline){
     if(child.exitCode!==null)throw Error('host_worker_exited');

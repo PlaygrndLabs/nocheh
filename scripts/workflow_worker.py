@@ -32,7 +32,6 @@ def running(state):
 
 def start(state):
     state=Path(state);env=compose_environment(state)
-    if env.get('NOCHEH_WORKFLOWS_ENABLED')!='true':return {'state':'disabled'}
     if (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return {'state':'inactive_restore'}
     directory=state/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     if running(state):return {'state':'running'}
@@ -56,7 +55,7 @@ def stop(state,wait=False):
 def serve(state):
     directory=Path(state)/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     env=compose_environment(state);port=env['NOCHEH_PORT']
-    if env.get('NOCHEH_WORKFLOWS_ENABLED')!='true' or (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return 0
+    if (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return 0
     env.update(INNGEST_BASE_URL='http://127.0.0.1:'+port,INNGEST_CONNECT_GATEWAY_URL='ws://127.0.0.1:'+port+'/v0/connect',NOCHEH_PYTHON=sys.executable)
     node=executable(env)
     with (directory/'worker.lock').open('a') as lock,ThreadPoolExecutor(max_workers=1) as recovery:

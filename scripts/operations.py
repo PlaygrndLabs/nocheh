@@ -76,8 +76,6 @@ def fingerprints(command,env,tables=None):
 
 
 def backup(state,output,leave_stopped=False):
-    try:from .tool_worker import running as tools_running,stop as stop_tools,start as start_tools
-    except ImportError:from scripts.tool_worker import running as tools_running,stop as stop_tools,start as start_tools
     from scripts.workflow_worker import running as workflows_running,stop as stop_workflows,start as start_workflows
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
@@ -85,12 +83,10 @@ def backup(state,output,leave_stopped=False):
     stage=Path(tempfile.mkdtemp(prefix='.backup-',dir=output.parent));stage.chmod(0o700)
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
     stopped=[name for name in SERVICES if name in running]
-    tool_was_running=tools_running(state)
     workflow_was_running=workflows_running(state)
     try:
         if 'hermes-runtime' in stopped:subprocess.run(command+['stop','hermes-runtime'],env=env,check=True)
         if workflow_was_running:stop_workflows(state,wait=True)
-        if tool_was_running:stop_tools(state,wait=True)
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
         for service in stopped:
             if service!='hermes-runtime':subprocess.run(command+['stop',service],env=env,check=True)
@@ -160,7 +156,6 @@ def backup(state,output,leave_stopped=False):
     finally:
         # Resume precisely the services that were running before the snapshot.
         if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180']+stopped,env=env,check=True)
-        if tool_was_running and not leave_stopped:start_tools(state)
         if workflow_was_running and not leave_stopped:start_workflows(state)
 
 
@@ -214,7 +209,7 @@ def restore(snapshot,state,project,port):
     initialize_provider(state)
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
-    config.update(TELEGRAM_ENABLED='false',NOCHEH_WORKFLOWS_ENABLED='false',NOCHEH_HONCHO_ENABLED='false',NOCHEH_HONCHO_STATE_DIR=str(state/'honcho'),
+    config.update(TELEGRAM_ENABLED='false',NOCHEH_HONCHO_ENABLED='false',NOCHEH_HONCHO_STATE_DIR=str(state/'honcho'),
                   NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
                   NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
                   NOCHEH_PROVIDER_MONITOR_PORT=str(port+10 if port<=65525 else port-10),

@@ -4,18 +4,18 @@ import {HttpError} from '../http.js';
 
 export const families=['preparation','telegram','imports','memory_review','honcho','browser','schedules','actions','tools'] as const;
 export type WorkflowFamily=typeof families[number];
-export type ExecutionAuthority={owner:'legacy'|'inngest';epoch?:number};
-export const legacyAuthority:ExecutionAuthority={owner:'legacy'};
+export type ExecutionAuthority={owner:'inngest';epoch:number};
 export const closedStates=['completed','failed','skipped','cancelled','ambiguous','denied'] as const;
 export type WorkflowState='queued'|'waiting'|'running'|'retryable_failed'|typeof closedStates[number];
 export const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const workflowSchema=`
 CREATE TABLE IF NOT EXISTS workflow_owners (
   family text PRIMARY KEY CHECK(family IN (${families.map(f=>`'${f}'`).join(',')})),
-  owner text NOT NULL DEFAULT 'legacy' CHECK(owner IN ('legacy','inngest')),
+  owner text NOT NULL DEFAULT 'inngest' CHECK(owner IN ('legacy','inngest')),
   epoch integer NOT NULL DEFAULT 1, admission boolean NOT NULL DEFAULT true,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE workflow_owners ALTER COLUMN owner SET DEFAULT 'inngest';
 INSERT INTO workflow_owners(family) VALUES ${families.map(f=>`('${f}')`).join(',')} ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS workflow_worker_registrations (
   family text PRIMARY KEY REFERENCES workflow_owners(family),version integer NOT NULL,
@@ -69,14 +69,15 @@ export async function requestWorkflow(client:pg.PoolClient,family:WorkflowFamily
 
 const lockKey="hashtextextended(current_schema()||':workflow:'||$1,803321)";
 /** Hold on the operation's existing database connection through receipt commit. */
-export async function enterFamily(client:pg.PoolClient,family:WorkflowFamily,owner:'legacy'|'inngest',epoch?:number,draining=false):Promise<boolean> {
+export async function enterFamily(client:pg.PoolClient,family:WorkflowFamily,owner:'legacy'|'inngest',epoch:number,draining=false):Promise<boolean> {
+  if(owner!=='inngest'||!Number.isSafeInteger(epoch)||epoch<1)return false;
   const locked=(await client.query(`SELECT pg_try_advisory_lock_shared(${lockKey}) AS locked`,[family])).rows[0].locked;
   if(!locked)return false;
   try {
     const row=(await client.query('SELECT owner,epoch,admission FROM workflow_owners WHERE family=$1',[family])).rows[0];
     // Draining is only for a domain operation already durably claimed under
     // this exact epoch. It cannot grant admission to new work.
-    if(row?.owner===owner&&(row.admission||(draining&&epoch!==undefined))&&(epoch===undefined||row.epoch===epoch))return true;
+    if(row?.owner===owner&&(row.admission||draining)&&row.epoch===epoch)return true;
   } catch(error) {await leaveFamily(client,family);throw error;}
   await leaveFamily(client,family);return false;
 }
@@ -103,6 +104,7 @@ export async function switchFamily(pool:pg.Pool,family:WorkflowFamily,epoch:numb
 }
 /** Caller holds its transaction through backfill and migration-receipt commit. */
 export async function switchFamilyTransaction(client:pg.PoolClient,family:WorkflowFamily,epoch:number,owner:'legacy'|'inngest'):Promise<number> {
+  if(owner!=='inngest')throw new HttpError(409,'legacy_execution_removed');
   const locked=(await client.query(`SELECT pg_try_advisory_xact_lock(${lockKey}) AS locked`,[family])).rows[0].locked;
   if(!locked)throw new HttpError(409,'workflow_family_not_drained');
   // Expiry cannot prove an effect did not happen. Reconciliation must clear

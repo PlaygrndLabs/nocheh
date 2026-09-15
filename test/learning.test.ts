@@ -21,7 +21,7 @@ test('real PostgreSQL: explicit import consent, complete chunking, retries and d
   assert.equal(jobs.length,3);assert.equal(jobs.map(j=>j.content.split('\n').slice(1).join('\n')).join(''),value.text);
   await approveLearning(pool,{approved:true,event_ids:[id]});await prepareReviews(pool,false);
   assert.equal((await pool.query('SELECT count(*) FROM memory_review_jobs')).rows[0].count,'3');
-  await runReviewJobs(pool,config,async()=>({state:'waiting',error_code:'profile_busy'}));
+  await runReviewJobs(pool,config,async()=>({state:'waiting',error_code:'profile_busy'}),undefined,{owner:'inngest',epoch:1});
   const deferred=(await pool.query("SELECT state,attempts,error_code FROM memory_review_jobs WHERE error_code='waiting_for_profile'")).rows[0];
   assert.deepEqual(deferred,{state:'pending',attempts:0,error_code:'waiting_for_profile'});
   await pool.query('UPDATE memory_review_jobs SET next_attempt=now()');
@@ -30,12 +30,12 @@ test('real PostgreSQL: explicit import consent, complete chunking, retries and d
   let calls=0;const held=await pool.connect(),other=await admin.connect();let legacyHeld=false;
   try{
    await held.query('SELECT pg_advisory_lock(hashtextextended(current_schema(),803304))');
-   await runReviewJobs(pool,config,async()=>{calls++;return {state:'done'};});
+   await runReviewJobs(pool,config,async()=>{calls++;return {state:'done'};},undefined,{owner:'inngest',epoch:1});
    assert.equal(calls,0,'the same archive permits only one review runner');
    await held.query('SELECT pg_advisory_unlock(hashtextextended(current_schema(),803304))');
    legacyHeld=(await other.query('SELECT pg_try_advisory_lock(803304) AS locked')).rows[0].locked;
    await other.query('SELECT pg_advisory_lock(hashtextextended(current_schema(),803304))');
-   await runReviewJobs(pool,config,async()=>{calls++;throw new HttpError(429,'quota_paused');});
+   await runReviewJobs(pool,config,async()=>{calls++;throw new HttpError(429,'quota_paused');},undefined,{owner:'inngest',epoch:1});
    assert.equal(calls,1,'another archive cannot suppress the review');
   }finally{
    await held.query('SELECT pg_advisory_unlock_all()');held.release();
@@ -47,7 +47,7 @@ test('real PostgreSQL: explicit import consent, complete chunking, retries and d
   await controlReview(pool,pending,'pause');assert.equal((await pool.query('SELECT state FROM memory_review_jobs WHERE id=$1',[pending])).rows[0].state,'paused');
   await controlReview(pool,pending,'resume');
   await pool.query('UPDATE memory_review_jobs SET next_attempt=now()');
-  for(let i=0;i<4;i++)await runReviewJobs(pool,config,async(op,b)=>{assert.equal(op,'memory.review');assert.equal(b.scope,'123');assert.match(String(b.content),new RegExp(id));calls++;return {state:'done'};});
+  for(let i=0;i<4;i++)await runReviewJobs(pool,config,async(op,b)=>{assert.equal(op,'memory.review');assert.equal(b.scope,'123');assert.match(String(b.content),new RegExp(id));calls++;return {state:'done'};},undefined,{owner:'inngest',epoch:1});
   assert.equal(calls,4);assert.equal((await pool.query("SELECT count(*) FROM memory_review_jobs WHERE state='done'")).rows[0].count,'3');
  }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });

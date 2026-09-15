@@ -7,14 +7,12 @@ from scripts.workflow_worker import start,running
 
 
 class HostWorkerTests(unittest.TestCase):
-    def test_disabled_and_restored_installations_never_launch_workers(self):
+    def test_restored_installations_never_launch_workers(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder)
-            with patch('scripts.workflow_worker.compose_environment',return_value={'NOCHEH_WORKFLOWS_ENABLED':'false'}),patch('scripts.workflow_worker.subprocess.Popen') as launch:
-                self.assertEqual(start(state)['state'],'disabled');launch.assert_not_called()
             for marker in ('workflows/inactive','spool/.restore-inactive'):
                 path=state/marker;path.parent.mkdir(parents=True,exist_ok=True);path.touch()
-                with patch('scripts.workflow_worker.compose_environment',return_value={'NOCHEH_WORKFLOWS_ENABLED':'true'}),patch('scripts.workflow_worker.subprocess.Popen') as launch:
+                with patch('scripts.workflow_worker.compose_environment',return_value={}),patch('scripts.workflow_worker.subprocess.Popen') as launch:
                     self.assertEqual(start(state)['state'],'inactive_restore');launch.assert_not_called()
                 path.unlink()
 
@@ -24,7 +22,7 @@ class HostWorkerTests(unittest.TestCase):
             with (directory/'worker.lock').open('a') as lock:
                 fcntl.flock(lock,fcntl.LOCK_EX)
                 self.assertTrue(running(state))
-                with patch('scripts.workflow_worker.compose_environment',return_value={'NOCHEH_WORKFLOWS_ENABLED':'true'}),patch('scripts.workflow_worker.subprocess.Popen') as launch:
+                with patch('scripts.workflow_worker.compose_environment',return_value={}),patch('scripts.workflow_worker.subprocess.Popen') as launch:
                     self.assertEqual(start(state)['state'],'running');launch.assert_not_called()
             self.assertFalse(running(state))
 
@@ -38,7 +36,7 @@ class HostWorkerTests(unittest.TestCase):
             receipt.write_text(json.dumps(body));calls=[]
             def acknowledge(_api,path,value,*args):
                 calls.append((path,value));(state/'admin/workflows/stop').touch();return {'ok':True}
-            with patch('scripts.workflow_worker.compose_environment',return_value={'NOCHEH_WORKFLOWS_ENABLED':'true','NOCHEH_PORT':'18780'}),\
+            with patch('scripts.workflow_worker.compose_environment',return_value={'NOCHEH_PORT':'18780'}),\
                  patch('scripts.workflow_worker.executable',return_value='/node24'),\
                  patch('scripts.workflow_worker.signal.signal'),\
                  patch('scripts.workflow_worker.subprocess.Popen',side_effect=OSError('unavailable')),\

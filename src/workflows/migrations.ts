@@ -32,7 +32,8 @@ export async function migrationStatus(pool:pg.Pool,id:string){
 }
 export async function beginMigration(pool:pg.Pool,input:unknown){
   const b=object(input),id=workflowIdentity(b.id),f=family(b.family),epoch=Number(b.epoch),target=b.owner;
-  if(!Number.isSafeInteger(epoch)||epoch<1||!['legacy','inngest'].includes(String(target)))throw new HttpError(400,'invalid_migration');
+  if(target!=='inngest')throw new HttpError(409,'legacy_execution_removed');
+  if(!Number.isSafeInteger(epoch)||epoch<1)throw new HttpError(400,'invalid_migration');
   const client=await pool.connect();try{
     await client.query('BEGIN');
     const owner=(await client.query('SELECT * FROM workflow_owners WHERE family=$1 FOR NO KEY UPDATE',[f])).rows[0];
@@ -170,29 +171,22 @@ export async function reconcileMigration(pool:pg.Pool,id:string,runtime:RuntimeC
   return {...await migrationStatus(pool,id),observed,unavailable};
 }
 export async function finishMigration(pool:pg.Pool,id:string,action:'switch'|'abort'){
-  workflowIdentity(id);const client=await pool.connect();
+  workflowIdentity(id);if(action!=='switch')throw new HttpError(409,'legacy_execution_removed');
+  const client=await pool.connect();
   try{
     await client.query('BEGIN');
     const row=(await client.query('SELECT * FROM workflow_migrations WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(!row)throw new HttpError(404,'migration_not_found');
-    if(row.state===(action==='switch'?'switched':'aborted')){await client.query('COMMIT');return migrationStatus(pool,id);}
+    if(row.state==='switched'){await client.query('COMMIT');return migrationStatus(pool,id);}
     if(row.state!=='paused')throw new HttpError(409,'migration_closed');
     if(!(await client.query(fence,[row.family])).rows[0].held)throw new HttpError(409,'workflow_family_not_drained');
     const owner=(await client.query('SELECT * FROM workflow_owners WHERE family=$1 FOR NO KEY UPDATE',[row.family])).rows[0];
     if(owner.epoch!==row.from_epoch||owner.owner!==row.from_owner||owner.admission)throw new HttpError(409,'workflow_owner_changed');
-    if(action==='abort'){
-      await client.query('UPDATE workflow_owners SET admission=true,updated_at=now() WHERE family=$1',[row.family]);
-      await client.query("UPDATE workflow_migrations SET state='aborted',updated_at=now() WHERE id=$1",[id]);
-    }else{
+    {
       if(['imports','tools'].includes(row.family)&&!row.host_ready)throw new HttpError(409,'migration_host_handoff_required');
       if((await client.query('SELECT 1 FROM workflow_registry WHERE family=$1 AND lease_until>now() LIMIT 1',[row.family])).rowCount)throw new HttpError(409,'workflow_family_not_drained');
       if(row.to_owner==='inngest'&&!(await client.query("SELECT 1 FROM workflow_worker_registrations WHERE family=$1 AND version=1 AND seen_at>now()-interval '30 seconds'",[row.family])).rowCount)throw new HttpError(409,'workflow_worker_not_ready');
       const reconciled=await reconcileRecorded(client,row.family),registered=await registerMissing(client,row.family);
-      // Rollback cannot hand a closed registry outcome to an eligible legacy
-      // scanner. Reconcile its domain receipt before restoring that owner.
-      if(row.to_owner==='legacy'&&(await client.query(`WITH candidates AS (${candidates[row.family as WorkflowFamily]})
-        SELECT 1 FROM candidates c JOIN workflow_registry w ON w.family=$1 AND w.job_id=c.job
-        WHERE w.state=ANY($2::text[]) AND w.generation=(SELECT max(generation) FROM workflow_registry latest WHERE latest.family=w.family AND latest.job_id=w.job_id) LIMIT 1`,[row.family,closedStates])).rowCount)throw new HttpError(409,'rollback_closed_domain_unreconciled');
       const epoch=await switchFamilyTransaction(client,row.family,row.from_epoch,row.to_owner);
       const work=(await client.query(`UPDATE workflow_registry SET dispatch=dispatch+1,owner_epoch=NULL,lease_token=NULL,lease_until=NULL,
         revision=revision+1,updated_at=now() WHERE family=$1 AND state IN ('queued','waiting','retryable_failed') RETURNING id,dispatch`,[row.family])).rows;

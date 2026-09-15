@@ -51,11 +51,11 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     assert.deepEqual(JSON.parse(original.rows[0].payload.toString()),value.payload);
     assert.equal((await pool.query('SELECT count(*) FROM events')).rows[0].count,'2');
     assert.equal((await pool.query("SELECT count(*) FROM dispatches WHERE state='pending'")).rows[0].count,'2');
-    await fetchAttachments(pool,root,async()=>{throw new Error('network failed');});
+    await fetchAttachments(pool,root,async()=>{throw new Error('network failed');},undefined,{owner:'inngest',epoch:1});
     assert.equal((await pool.query('SELECT state FROM artifacts LIMIT 1')).rows[0].state,'failed');
     await pool.query('UPDATE artifacts SET next_attempt=now()');
     const audio=Buffer.from([79,103,103,83,0,1,255]);
-    await fetchAttachments(pool,root,async()=>audio);
+    await fetchAttachments(pool,root,async()=>audio,undefined,{owner:'inngest',epoch:1});
     assert.deepEqual(await readFile(join(root,'files',digest(audio))),audio);
     assert.equal((await pool.query("SELECT count(*) FROM artifacts WHERE state='ready'")).rows[0].count,'2');
     await ingest(pool,{...value,key:'import:fixture:3',origin:'import'});

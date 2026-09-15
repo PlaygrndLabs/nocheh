@@ -153,7 +153,7 @@ def main():
         from database_viewer import start
         return start(STATE, command, ROOT)
     if args.command in ('down', 'status', 'logs'):
-        command += ['--profile', 'tools','--profile','workflows','--profile','honcho','--profile','honcho-tools']
+        command += ['--profile', 'tools','--profile','honcho','--profile','honcho-tools']
     if args.command=='status':
         sys.path.insert(0,str(ROOT))
         from scripts.services import containers,describe,host_status
@@ -162,8 +162,6 @@ def main():
         return 0
     if args.command=='down':
         sys.path.insert(0,str(ROOT))
-        from scripts.tool_worker import stop
-        stop(STATE,wait=True)
         from scripts.workflow_worker import stop as stop_workflows
         stop_workflows(STATE,wait=True)
     actions = {
@@ -186,11 +184,10 @@ def main():
         result=subprocess.call(['docker','build','-f',str(ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(ROOT)],cwd=ROOT,env=env)
         if result==0:
             sys.path.insert(0,str(ROOT))
-            if env.get('NOCHEH_WORKFLOWS_ENABLED')=='true':
-                from scripts.node_runtime import build
-                build(env)
-                from scripts.workflow_worker import start as start_workflows
-                print(json.dumps(start_workflows(STATE)))
+            from scripts.node_runtime import build
+            build(env)
+            from scripts.workflow_worker import start as start_workflows
+            print(json.dumps(start_workflows(STATE)))
     if args.command == 'test' and result == 0:
         return subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
             '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes-runtime', 'python', '-m', 'unittest',

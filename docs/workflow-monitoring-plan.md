@@ -23,7 +23,7 @@ in [TASK.md](../TASK.md). This plan does not claim any runtime gate has passed.
 | I4 — Imports and memory | Bounded import batches/checkpoints, native review, Honcho reconciliation/rebuild; source/edit/consent/generation triggers | Cancellation/resume, stable identities, zero historical replies, consent separation, stale revisions/generations, detached Honcho and uncertain writes |
 | I5 — Browser, schedules, approvals | Durable browser submission with native streaming/resume; Inngest schedule waits and native definition helpers; exact approved actions | Browser reconnect/cancel, profile exclusion, schedule revision/cadence/missed/overlap/repeat/catch-up, revocation and uncertain effects |
 | I6 — Monitoring | Owner API/CLI list/detail/retry/cancel; dashboard summaries and read-only authenticated Inngest inspection | Pagination, status distinctions, data boundary, session/CSRF checks, unavailable/stale services, UI interaction/accessibility |
-| I7 — Local cutover | Per-family pause/drain/reconcile/fenced switch/backfill of eligible unfinished work; compatible rollback | Isolated fault suite, quiesced recovery, actual local family checks, real Telegram text/voice/group/isolation/approval/restart acceptance |
+| I7 — Local cutover | Per-family pause/drain/reconcile/fenced switch/backfill of eligible unfinished work; Inngest-only retirement | Isolated fault suite, quiesced recovery, actual local family checks, real Telegram text/voice/group/isolation/approval/restart acceptance |
 
 Each phase may contain smaller independently verified commits. Follow the shared
 Git lock/integration workflow in AGENTS.md. Continue independent work when a live
@@ -39,7 +39,7 @@ Keep the Compose and host workers as separate Connect applications with stable
 function/step IDs and build versions. Bind requests to existing source/job
 identities and resolve protected data only inside steps. Domain receipts remain
 authoritative when runtime responses or Inngest checkpoints are lost. Family
-ownership fences apply to old and new runners before any effect.
+ownership fences reject stale epochs and retired runners before any effect.
 
 Capture/spool draining and outbox delivery are supervised outside Inngest. Host
 maintenance is independent so it can stop or recover Inngest. Native reasoning
@@ -77,9 +77,8 @@ implement general installation preview isolation or `make dev`.
 <cutover_implementation>
 
 The first I7 increment provides durable migration records and host commands:
-`workflows pause-family FAMILY --owner inngest --epoch EPOCH`,
-`workflows migration ID`, `workflows reconcile ID`, `workflows switch ID`, and
-`workflows abort ID`. Use the family epoch from `workflows status`. Reuse the
+`workflows pause-family FAMILY --epoch EPOCH`,
+`workflows migration ID`, `workflows reconcile ID`, and `workflows switch ID`. Use the family epoch from `workflows status`. Reuse the
 returned migration ID after a lost response. `--migration-id` supplies a known ID
 when retrying a pause whose response was lost.
 
@@ -92,42 +91,35 @@ cancelled, suppressed and ambiguous outcomes stay closed. Ownership, new dispatc
 IDs, outbox entries and the migration receipt commit together. Failure leaves the
 family paused at its previous epoch.
 
-Rollback uses the same commands with `--owner legacy`. It refuses to expose a
-closed registry outcome to an eligible old scanner. Abort reopens the existing
-owner without changing its epoch. Both operations preserve source data and native
-receipts; neither restores an old database snapshot over new evidence.
+After the accepted consolidation, fresh databases assign all nine families to
+Inngest. Migration commands only move forward to Inngest or rotate its fenced
+epoch; legacy execution, abort-to-old-runner and engine-selection flags are
+removed. Historical ownership and migration records remain readable. A failed
+handoff remains paused until reconciliation and the forward switch succeed.
 
 Imports and tools additionally require `workflows host-handoff ID` before
 switching. The host worker is drained independently of Inngest. For imports,
 stop the owner dashboard first; handoff reserves its port without serving traffic
 and locks each existing job while reading its protected record. Only confirmed,
 unfinished jobs are adopted, with the same upload hash, scope mapping, explicit
-learning choice and checkpoint. Closed jobs remain closed. A legacy import
-interrupted by admission pause becomes resumable instead of a terminal failure.
+learning choice and checkpoint. Closed jobs remain closed. Retained completion
+receipts are reconciled only while import admission is paused, with the exact
+configuration hash and learning checkpoint; this path cannot execute an import.
 
 Before tool cutover, verify the local `nocheh-tools:local` image exists; build it
 from `deploy/tools.Dockerfile` when absent. Host worker connectivity alone does
 not prove sandbox availability.
 
-Tool handoff drains both host executors and publishes retained receipts through
+Tool handoff drains the host executor and publishes retained receipts through
 the existing actor-validated finish endpoint. It never claims another action.
 A lost acknowledgment retains the receipt for replay. Previously running
 supervisors resume after handoff while the family admission fence remains closed.
 
-Rollback preserves import checkpoints and exposes the existing explicit Resume
-import action. Its learning choice cannot change. A resumed cancelled import gets
-a new generation; the original closed receipt remains permanent. Legacy import
-completion is mirrored to the registry's domain record, with a protected host
-receipt retained until acknowledged. Host-ready status is durable and required
-for both directions of imports/tools ownership changes.
-
-The fresh candidate fault rehearsal passed with separate synthetic Compose
-projects. It covers Inngest, Redis, PostgreSQL, worker, publisher and runtime
-outages; durable capture; crash after a runtime effect but before acknowledgment;
-worker kill; legacy scanner rollback; and quiesced inactive restore. Active local infrastructure and imports have passed their recorded checks.
-See [local import evidence](../compatibility/results/2026-09-14-inngest-local-imports.json)
-and TASK.md for remaining family gates. Fixture evidence alone does not establish
-that the active installation has passed its cutover gates.
+An explicitly resumed cancelled import gets a new generation; its original closed
+receipt remains permanent. Learning consent cannot change on resume. Independent
+host receipt recovery continues during Inngest outages. Historical migration and
+rollback evidence is retained in compatibility/results; see TASK.md for current
+activation and release gates.
 
 <fault_rehearsal>
 
@@ -140,8 +132,8 @@ generated 64-hex PostgreSQL, Inngest and service credentials. No ports are
 published and the network is internal. Services use production restart policies.
 
 The `fault-check` command `node dist/test/workflow-fault-probe.js` accepts `init`,
-`capture LABEL`, `migrate inngest|legacy`, `status`, `verify SOURCE_COUNT`,
-`crash-receipt`, and `legacy-drain SOURCE_COUNT`. Start `fault-runtime`,
+`capture LABEL`, `migrate inngest`, `status`, `verify SOURCE_COUNT`, and
+`crash-receipt`. Start `fault-runtime`,
 `fault-worker`, and `fault-publisher` only inside that project. Stop/restart each
 dependency separately and wait for its expected source count before the next
 fault. `crash-receipt` arms an exit after the next synthetic runtime receipt is
@@ -175,7 +167,7 @@ synthetic secret canaries to verify the data boundary.
 Before each local family switch, back up, pause admission, drain its old runner,
 reconcile outstanding receipts and change authority transactionally. Queue only
 eligible unfinished identities. Never reopen completed, cancelled, suppressed,
-denied or ambiguous work. Test rollback using compatible schema/receipts; never
+denied or ambiguous work. Test stale-owner rejection and forward recovery; never
 restore stale snapshots over later source evidence.
 
 Repeat real Telegram owner text/voice, selected-group silence, isolation, exact

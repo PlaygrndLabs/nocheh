@@ -5,16 +5,16 @@ import {initialize} from '../src/database.js';
 import {settings} from '../src/config.js';
 import {ingest,type Envelope} from '../src/archive.js';
 import {beginMigration,finishMigration,migrationStatus,reconcileMigration,migrationHostReady,stageMigrationImport} from '../src/workflows/migrations.js';
-import {cancelImport,confirmImport,finishLegacyImport} from '../src/workflows/imports.js';
+import {cancelImport,confirmImport} from '../src/workflows/imports.js';
 import {hash,enterFamily,leaveFamily,registerWorker,publishOutbox,claimWorkflow,families} from '../src/workflows/store.js';
 
-test('family cutover survives lost responses, atomic rollback, capture during pause and compatible ownership rollback',{skip:!process.env.PGHOST},async()=>{
+test('one-way family migration survives lost responses, transaction rollback and capture during pause',{skip:!process.env.PGHOST},async()=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:settings().databasePassword};
   const admin=new pg.Pool(connection),schema='migration_'+Date.now();await admin.query(`CREATE SCHEMA ${schema}`);
   const pool=new pg.Pool({...connection,options:`-c search_path=${schema}`,max:8}),client=await pool.connect();
   const source=(key:string):Envelope=>({version:1,key,origin:'live',channel:'telegram',kind:'telegram_update',bot_id:'fixture',scope:'42',source_id:key,revision:'1',occurred_at:null,text:'private migration canary',payload:{message:{text:'private migration canary'}}});
   try{
-    await initialize(pool);
+    await initialize(pool);await pool.query("UPDATE workflow_owners SET owner='legacy'");
     const pending=await ingest(pool,source('pending')),done=await ingest(pool,source('done')),ambiguous=await ingest(pool,source('ambiguous'));
     await pool.query("UPDATE dispatches SET state='done',attempts=1 WHERE event_id=$1",[done.id]);
     const ids=(await pool.query("SELECT job_id,id FROM workflow_registry WHERE family='telegram'")).rows;
@@ -23,13 +23,14 @@ test('family cutover survives lost responses, atomic rollback, capture during pa
     await pool.query("UPDATE workflow_registry SET state='running' WHERE id=$1",[wid(done.id)]);
     await pool.query("INSERT INTO workflow_receipts(workflow_id,step,attempt,state) VALUES($1,'telegram',1,'started')",[wid(done.id)]);
     const id=hash('migration-one'),request={id,family:'telegram',owner:'inngest',epoch:1};
-    assert.equal(await enterFamily(client,'telegram','legacy'),true);
+    assert.equal(await enterFamily(client,'telegram','legacy',1),false,'retired runners cannot acquire execution authority');
+    await client.query("SELECT pg_advisory_lock_shared(hashtextextended(current_schema()||':workflow:telegram',803321))");
     assert.equal((await beginMigration(pool,request)).state,'paused');
     assert.equal((await beginMigration(pool,request)).id,id,'lost pause response is idempotent');
-    await assert.rejects(beginMigration(pool,{...request,owner:'legacy'}),{code:'migration_identity_conflict'});
+    await assert.rejects(beginMigration(pool,{...request,owner:'legacy'}),{code:'legacy_execution_removed'});
     await assert.rejects(finishMigration(pool,id,'switch'),{code:'workflow_family_not_drained'});
     await leaveFamily(client,'telegram');
-    assert.equal(await enterFamily(client,'telegram','legacy'),false);
+    assert.equal(await enterFamily(client,'telegram','legacy',1),false);
     assert.equal(await publishOutbox(pool,async()=>{throw Error('must not publish');}),0);
     const during=await ingest(pool,source('captured-while-paused'));assert.ok(during.id);
     const native=await ingest(pool,source('native-receipt'));await pool.query("UPDATE dispatches SET state='running',attempts=1 WHERE event_id=$1",[native.id]);
@@ -53,22 +54,14 @@ test('family cutover survives lost responses, atomic rollback, capture during pa
     assert.equal((await pool.query('SELECT state FROM workflow_receipts WHERE workflow_id=$1',[wid(done.id)])).rows[0].state,'done');
     assert.equal((await pool.query('SELECT state FROM workflow_registry WHERE id=$1',[wid(ambiguous.id)])).rows[0].state,'ambiguous');
     assert.equal(await claimWorkflow(client,wid(pending.id),1,'old-dispatch',2),null);
-    assert.equal(await enterFamily(client,'telegram','legacy'),false);
+    assert.equal(await enterFamily(client,'telegram','legacy',1),false);
     const published:unknown[]=[];assert.equal(await publishOutbox(pool,async e=>{published.push(e);}),2);
     assert.ok(!JSON.stringify(result).includes('private migration canary'));assert.ok(!JSON.stringify(published).includes('private migration canary'));
-    const rollback=hash('migration-rollback');await beginMigration(pool,{id:rollback,family:'telegram',owner:'legacy',epoch:2});
-    await assert.rejects(finishMigration(pool,rollback,'switch'),{code:'rollback_closed_domain_unreconciled'});
-    await pool.query("UPDATE dispatches SET state='ambiguous' WHERE event_id=$1",[ambiguous.id]);
-    assert.equal((await finishMigration(pool,rollback,'switch')).to_epoch,3);
-    assert.equal(await enterFamily(client,'telegram','inngest',2),false);
-    assert.equal(await enterFamily(client,'telegram','legacy',3),true);await leaveFamily(client,'telegram');
-    assert.equal(await publishOutbox(pool,async()=>{}),0);
-    const abort=hash('migration-abort');await beginMigration(pool,{id:abort,family:'telegram',owner:'inngest',epoch:3});
-    assert.equal((await finishMigration(pool,abort,'abort')).state,'aborted');
-    assert.equal((await finishMigration(pool,abort,'abort')).owner.epoch,3);
-    // Every family executes its real registration query and both ownership paths.
-    // Only existing durable domain jobs are candidates; no host import or native
-    // schedule identity is inferred from an archive event.
+    await assert.rejects(beginMigration(pool,{id:hash('migration-rollback'),family:'telegram',owner:'legacy',epoch:2}),{code:'legacy_execution_removed'});
+    assert.equal((await migrationStatus(pool,id)).owner.epoch,2);
+    await assert.rejects(finishMigration(pool,id,'abort'),{code:'legacy_execution_removed'});
+    // Every family uses its real backfill query. Existing jobs are adopted;
+    // no native schedule or import consent is inferred from source content.
     for(const f of families.filter(f=>f!=='telegram')){
       await registerWorker(pool,['imports','tools'].includes(f)?'host':'pipeline',[f]);
       const forward=hash('forward-'+f),back=hash('back-'+f);
@@ -88,14 +81,11 @@ test('family cutover survives lost responses, atomic rollback, capture during pa
         await migrationHostReady(pool,forward);
       }
       assert.equal((await finishMigration(pool,forward,'switch')).to_epoch,2);
-      await beginMigration(pool,{id:back,family:f,owner:'legacy',epoch:2});
-      if(['imports','tools'].includes(f))await migrationHostReady(pool,back);
-      assert.equal((await finishMigration(pool,back,'switch')).to_epoch,3);
+      await assert.rejects(beginMigration(pool,{id:back,family:f,owner:'legacy',epoch:2}),{code:'legacy_execution_removed'});
       if(f==='imports'){
         const job='11111111-1111-4111-8111-111111111111';await cancelImport(pool,job);
         const resumed=await confirmImport(pool,{id:job,configuration_hash:hash('private configuration'),review_approved:false,total:4,completed:1,duplicates:0,resume:true});
-        assert.equal(resumed.owned,false);assert.equal(resumed.job.generation,2,'explicit legacy resume creates a fresh generation after cancellation');
-        assert.equal((await finishLegacyImport(pool,{id:job,configuration_hash:hash('private configuration'),completed:4,duplicates:1,learning_after:0})).state,'completed');
+        assert.equal(resumed.owned,true);assert.equal(resumed.job.generation,2,'explicit resume creates a fresh generation after cancellation');
       }
     }
   }finally{client.release();await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}

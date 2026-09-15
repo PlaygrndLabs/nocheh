@@ -7,7 +7,7 @@ import {guardState,guardedValue} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
 import {turnToken} from './access.js';
 import {policyRevision} from './spaces.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 export const learningSchema=`
 CREATE TABLE IF NOT EXISTS memory_learning_sources (event_id text PRIMARY KEY REFERENCES events(id), reason text NOT NULL, batch text, prepared boolean NOT NULL DEFAULT false, approved_at timestamptz NOT NULL DEFAULT now());
@@ -77,7 +77,7 @@ export async function prepareReviews(pool:pg.Pool,live:boolean,eventId:string|nu
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
 }
-export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCall,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCall,jobId:string|null=null,authority:ExecutionAuthority) {
   if(!config.assistant.owner_id)return;
   const client=await pool.connect();let locked=false,fenced=false;
   try{fenced=await enterFamily(client,'memory_review',authority.owner,authority.epoch);if(!fenced)return;

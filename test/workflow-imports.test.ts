@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {randomUUID} from 'node:crypto';
 import {initialize} from '../src/database.js';
-import {confirmImport,cancelImport,enterImportWrite,importConfiguration} from '../src/workflows/imports.js';
+import {confirmImport,cancelImport,enterImportWrite,importConfiguration,reconcileImportReceipt} from '../src/workflows/imports.js';
 import {claimHostWorkflow,finishHostWorkflow,renewHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {pauseFamily,switchFamily} from '../src/workflows/store.js';
 
@@ -12,11 +12,9 @@ test('host import authority survives lost receipts, lease expiry, cancellation a
   const pool=new pg.Pool({options:`-c search_path=${schema}`,max:8});
   try{
     await initialize(pool);const id=randomUUID(),input={id,configuration_hash:importConfiguration({sha256:'a'.repeat(64),messages:103},{},true),review_approved:true,total:103};
-    assert.deepEqual(await confirmImport(pool,input),{owned:false});
-    const legacy=await enterImportWrite(pool,id,undefined,'legacy');await pauseFamily(pool,'imports',1);
-    await assert.rejects(switchFamily(pool,'imports',1,'inngest'),{code:'workflow_family_not_drained'});await legacy.release();
-    await switchFamily(pool,'imports',1,'inngest');
-    await assert.rejects(enterImportWrite(pool,id,undefined,'legacy'),{code:'import_owner_paused'});
+    assert.equal((await confirmImport(pool,input)).owned,true,'fresh installs immediately use Inngest');
+    await assert.rejects(enterImportWrite(pool,id,undefined,'legacy'),{code:'invalid_import_owner'});
+    await pauseFamily(pool,'imports',1);await switchFamily(pool,'imports',1,'inngest');
     await confirmImport(pool,input);await confirmImport(pool,input);
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM workflow_registry WHERE family='imports'")).rows[0].n,1);
     const workflow=(await pool.query("SELECT * FROM workflow_registry WHERE family='imports'")).rows[0];
@@ -51,5 +49,13 @@ test('host import authority survives lost receipts, lease expiry, cancellation a
     const existingId=randomUUID();await confirmImport(pool,{...input,id:existingId,completed:25,duplicates:2});
     await confirmImport(pool,{...input,id:existingId,completed:0,duplicates:0});
     assert.equal((await pool.query('SELECT completed FROM workflow_imports WHERE id=$1',[existingId])).rows[0].completed,25,'legacy checkpoint seeds once and cannot be overwritten by replay');
+    const retained={id:existingId,configuration_hash:input.configuration_hash,completed:103,duplicates:2,learning_after:103};
+    await assert.rejects(reconcileImportReceipt(pool,retained),{code:'import_reconciliation_requires_pause'});
+    await pauseFamily(pool,'imports',2);
+    await assert.rejects(reconcileImportReceipt(pool,{...retained,learning_after:0}),{code:'import_receipt_conflict'});
+    await assert.rejects(reconcileImportReceipt(pool,{...retained,configuration_hash:'b'.repeat(64)}),{code:'import_receipt_conflict'});
+    assert.equal((await reconcileImportReceipt(pool,retained)).state,'completed');
+    assert.equal((await reconcileImportReceipt(pool,retained)).state,'completed','lost acknowledgment only reconciles the existing receipt');
+    assert.equal((await pool.query('SELECT completed FROM workflow_imports WHERE id=$1',[existingId])).rows[0].completed,103);
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });

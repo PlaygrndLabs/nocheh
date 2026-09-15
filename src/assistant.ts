@@ -11,7 +11,7 @@ import { HttpError } from './http.js';
 import type { RuntimeCall } from './runtime.js';
 import {guardState,guardedValue,prepareGuarded} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 type Call=RuntimeCall;
 const TRANSCRIPTION_VERSION='codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4';
@@ -32,7 +32,7 @@ export async function storedTranscripts(client:pg.Pool|pg.PoolClient,eventId:str
   return rows.some(row=>row.content===null)?null:rows.map(row=>row.content!.toString());
 }
 
-export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call,authority:ExecutionAuthority=legacyAuthority):Promise<string[]|null> {
+export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call,authority:ExecutionAuthority):Promise<string[]|null> {
   const {rows}=await client.query<{id:string;file_hash:string;kind:string;state:string;metadata:{file_name?:string}}>(
     "SELECT id,file_hash,kind,state,metadata FROM artifacts WHERE event_id=$1 AND kind IN ('voice','audio','video_note') ORDER BY id",[eventId]);
   const texts:string[]=[];
@@ -69,7 +69,7 @@ export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eve
   return texts;
 }
 
-export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,eventId:string|null=null,authority:ExecutionAuthority=legacyAuthority):Promise<void> {
+export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,eventId:string|null=null,authority:ExecutionAuthority):Promise<void> {
   if (!config.assistant.enabled)return;
   const client=await pool.connect();let held=false,fenced=false;
   try {
@@ -102,14 +102,13 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,e
     if (!scope) {await client.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[event.id]);return;}
     const missing=await client.query("SELECT id FROM artifacts WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event.id]);
     if (missing.rowCount) {await client.query("UPDATE dispatches SET error_code='waiting_for_attachments',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
-    const transcripts=authority.owner==='inngest'?await storedTranscripts(client,event.id):await prepareTranscripts(client,config.dataDir,event.id,call);
+    const transcripts=await storedTranscripts(client,event.id);
     if (transcripts===null) {await client.query("UPDATE dispatches SET error_code='waiting_for_transcription',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
     const attempt=event.state==='running'?event.attempts:event.attempts+1;
     const control=await controlReply(pool,config.assistant,event.id);
     const guard=await guardState(pool);
     let text=event.original_text?.toString()??null,selectedTranscripts=transcripts;
     if(guard.mode==='on') {
-      if(authority.owner==='legacy')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event.id);
       try {
         text=(await guardedValue(pool,'events:'+event.id)).value.text;
         const derived=await pool.query("SELECT id FROM derived_artifacts WHERE event_id=$1 AND kind='transcript' ORDER BY id",[event.id]);

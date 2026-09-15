@@ -52,6 +52,8 @@ def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None
     # Publish existing receipts before claiming new work. Never repeat execution.
     flush_receipts(state,api,admit)
     if admit is not None and not admit():return False
+    if not action_id or not workflow or not workflow.get('workflow_id') or not workflow.get('workflow_token'):
+        raise ValueError('workflow_authority_required')
     action=api.call('/v1/tools/claim',{'actor':actor,**({'id':action_id} if action_id else {}),**(workflow or {})})
     if not action.get('claimed'):return False
     body={'id':action['id'],'actor':actor}

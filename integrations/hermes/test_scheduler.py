@@ -20,7 +20,6 @@ class SchedulerTests(unittest.TestCase):
 
     def tearDown(self):
         self.scheduler.stop()
-        for thread,cancel in list(self.scheduler.active.values()):cancel.set();thread.join(timeout=5)
         self.env.stop();self.temp.cleanup()
 
     def call(self,route,body):
@@ -47,10 +46,6 @@ class SchedulerTests(unittest.TestCase):
     def create(self,**extra):
         return self.request(method='POST',body={'name':'Fixture','prompt':'  Original\r\n\0 text  ','schedule':'every 1h',**extra})
 
-    def settle(self):
-        for thread,_ in list(self.scheduler.active.values()):thread.join(timeout=5)
-        self.assertFalse(self.scheduler.active)
-
     def due(self,job,seconds=0):
         from cron import jobs as native
         home=Path(job['hermes_home'])
@@ -71,41 +66,52 @@ class SchedulerTests(unittest.TestCase):
         self.assertFalse(inspect(home)[-1]['nocheh_registered'])
 
     def test_one_fire_original_provenance_schedule_advance_and_no_repeat(self):
-        job=self.create();home=self.due(job);before=inspect(home)[0]['next_run_at'];self.failed='input'
-        with self.assertRaises(OSError):self.scheduler.tick()
+        job=self.create();managed=self.migrate();home=self.due(job);request=self.workflow(job);before=inspect(home)[0]['next_run_at'];self.failed='input'
+        with self.assertRaises(OSError):self.scheduler.advance(request)
         self.assertEqual(inspect(home)[0]['next_run_at'],before);self.assertEqual(self.executions,0)
-        self.failed=None;self.scheduler.tick();self.settle()
-        self.assertEqual(self.executions,1);self.assertEqual(next(iter(self.inputs.values()))['text'],job['prompt'])
-        self.assertEqual(next(iter(self.finished.values()))['state'],'done')
-        self.scheduler.tick();self.settle();self.assertEqual(self.executions,1)
+        self.failed=None;self.assertEqual(self.scheduler.advance(request)['state'],'completed')
+        event=inspect(home)[0]['nocheh_running'];body={'channel':'scheduler','event_id':event,'attempt':1,'owner_epoch':2}
+        self.assertEqual(next(iter(self.inputs.values()))['text'],job['prompt'])
+        managed.start(body);self.assertEqual(self.finish_managed(managed,body)['state'],'done')
+        self.assertEqual(self.scheduler.advance(request)['state'],'skipped');managed.start(body);self.assertEqual(self.executions,1)
         self.assertEqual(self.request('/api/cron/jobs/'+job['id'])['last_status'],'success')
 
-    def test_unconfirmed_claim_never_starts_or_permanently_blocks_a_job(self):
-        job=self.create();home=self.due(job);self.failed='claim';self.scheduler.tick()
-        self.assertEqual(self.executions,0);self.assertIsNone(inspect(home)[0]['nocheh_running'])
-        self.assertEqual(inspect(home)[0]['last_error'],'claim_unconfirmed')
-        self.failed=None;self.scheduler.tick();self.settle();self.assertEqual(self.executions,0)
+    def test_unconfirmed_claim_never_launches_a_replacement_effect(self):
+        job=self.create();managed=self.migrate();home=self.due(job);self.scheduler.advance(self.workflow(job));self.failed='claim'
+        body={'channel':'scheduler','event_id':inspect(home)[0]['nocheh_running'],'attempt':1,'owner_epoch':2}
+        managed.start(body);self.assertIn(self.finish_managed(managed,body)['state'],('failed','ambiguous'))
+        self.assertEqual(self.executions,0)
+        self.failed=None;managed.start(body);self.assertEqual(self.executions,0)
+        self.assertTrue(managed.path(body,'.request').exists())
 
     def test_missed_runs_require_explicit_one_catch_up_and_manual_identity(self):
-        job=self.create();home=self.due(job,120);before=inspect(home)[0]['next_run_at']
-        self.scheduler.tick();self.assertEqual(self.executions,0)
+        job=self.create();managed=self.migrate();home=self.due(job,120);before=inspect(home)[0]['next_run_at']
+        self.scheduler.advance(self.workflow(job));self.assertEqual(self.executions,0)
         from .scheduler import date
         self.assertEqual((date(inspect(home)[0]['next_run_at'])-date(before)).total_seconds(),3600)
         self.assertEqual(next(iter(self.inputs.values()))['fire_reason'],'missed')
         path='/api/cron/jobs/'+job['id']+'/catch-up'
-        self.request(path,'POST',{'request_id':'one-catch-up'});self.scheduler.tick();self.settle()
+        self.request(path,'POST',{'request_id':'one-catch-up'});request=self.workflow(job);self.scheduler.advance(request)
+        body={'channel':'scheduler','event_id':inspect(home)[0]['nocheh_running'],'attempt':1,'owner_epoch':2}
+        managed.start(body);self.assertEqual(self.finish_managed(managed,body)['state'],'done')
         self.assertEqual(self.executions,1);self.assertIsNone(self.request('/api/cron/jobs/'+job['id'])['nocheh_missed'])
-        self.request(path,'POST',{'request_id':'one-catch-up'});self.scheduler.tick();self.settle();self.assertEqual(self.executions,1)
+        self.request(path,'POST',{'request_id':'one-catch-up'});self.assertEqual(self.scheduler.advance(request)['state'],'skipped')
+        managed.start(body);self.assertEqual(self.executions,1)
 
     def test_receipt_outage_restart_and_overlap_do_not_repeat_execution(self):
-        job=self.create();self.due(job);self.failed='finish';self.scheduler.tick();self.settle()
-        self.assertEqual(self.executions,1);self.assertEqual(len(list(self.scheduler.receipts.glob('*.json'))),1)
-        self.failed=None;self.scheduler.recover();self.scheduler.tick();self.settle();self.assertEqual(self.executions,1)
-        first=self.create(name='First overlapping');second=self.create(name='Second overlapping');self.due(first);self.due(second)
-        self.hold=True;self.scheduler.tick()
-        self.assertIn('overlap',[value['fire_reason'] for value in self.inputs.values()])
-        for _,cancel in list(self.scheduler.active.values()):cancel.set()
-        self.settle();self.assertIn('cancelled',[result['state'] for result in self.finished.values()])
+        job=self.create();managed=self.migrate();home=self.due(job);self.scheduler.advance(self.workflow(job));self.failed='finish'
+        body={'channel':'scheduler','event_id':inspect(home)[0]['nocheh_running'],'attempt':1,'owner_epoch':2}
+        managed.start(body)
+        for _ in range(200):
+            if managed.path(body,'.receipt').exists():break
+            time.sleep(.01)
+        self.assertEqual(self.executions,1);self.assertTrue(managed.path(body,'.receipt').exists())
+        self.failed=None;managed.flush();self.scheduler.recover();managed.runs.resume(body);self.assertEqual(self.executions,1)
+        # A concurrent occurrence of this same job is captured as overlap.
+        from cron import jobs as native
+        with store(home):native.update_job(job['id'],{'nocheh_running':'existing-effect','next_run_at':now().isoformat()})
+        self.scheduler.advance(self.workflow(job))
+        self.assertIn('overlap',[value['fire_reason'] for value in self.inputs.values()]);self.assertEqual(self.executions,1)
 
     def test_one_supervisor_and_inactive_restore(self):
         (self.root/'scheduler-inactive').touch();self.scheduler.start()
@@ -166,7 +172,8 @@ class SchedulerTests(unittest.TestCase):
         job=self.create(repeat=1);managed=self.migrate()
         future=self.workflow(job);self.assertEqual(self.scheduler.advance(future)['state'],'waiting')
         home=self.due(job);request=self.workflow(job)
-        self.scheduler.tick();self.assertEqual(self.inputs,{},'legacy execution loop is inactive')
+        self.assertFalse(hasattr(self.scheduler,'tick'),'the standalone execution scanner is removed')
+        self.assertEqual(self.inputs,{})
         self.assertEqual(self.scheduler.advance(request)['state'],'completed');self.assertEqual(self.executions,0)
         stored=inspect(home)[0];self.assertFalse(stored['enabled']);self.assertEqual(stored['repeat']['completed'],1)
         event=stored['nocheh_running'];body={'channel':'scheduler','event_id':event,'attempt':1,'owner_epoch':2}

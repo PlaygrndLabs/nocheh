@@ -31,7 +31,7 @@ test('host tool workflows fence targets, preserve one executor, recheck revocati
     const first=await propose('first');let work=await acquire(first);
     assert.equal((await claimControlled(pool,work.input,first.id,await hostActionAuthority(pool,work.input))).claimed,false);
     assert.equal((await work.finish()).waiting_reason,'approval_required');await approve(first);work=await acquire(first);
-    assert.equal((await claimControlled(pool,{actor:'legacy'})).claimed,false);
+    assert.equal((await claimControlled(pool,{actor:'legacy'},undefined,{owner:'inngest',epoch:1})).claimed,false);
     await assert.rejects(hostActionAuthority(pool,{...work.input,workflow_token:randomUUID()}),{code:'workflow_lease_closed'});
     const authority=await hostActionAuthority(pool,work.input);
     assert.equal((await claimControlled(pool,work.input,first.id,authority)).claimed,true);
