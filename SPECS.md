@@ -66,6 +66,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 <area name="Honcho and native memory">
 
 - Honcho is the primary long-term memory, with subscription reasoning through CLIProxyAPI and dedicated capped embeddings. Hermes keeps small native `MEMORY.md` and `USER.md` notes alongside Honcho and retains its native sessions.
+- Every assistant turn receives bounded, current, authorized Honcho context automatically. Background workflows refresh protected context; deeper Honcho recall retrieves relevant details missing from that context. Ordinary turns do not require an unconditional Honcho reasoning call. Cached context never crosses audiences or survives revocation, representation changes, or its freshness limit as usable memory.
 - Nocheh is the sole Honcho ingestion writer. Source, revision, audience, generation, and chunk receipts support reconciliation. An uncertain write is reconciled from evidence; absence of confirmation is not permission to resend blindly.
 - Every Honcho reasoning or embedding attempt is bound to a current authorized workspace and prepared representation. Retired workspaces and unbound jobs fail closed. Agent processes do not receive Honcho credentials or a direct route around the Nocheh gateway.
 - Attachment and detachment are explicit owner operations. Attachment requires accepted live reasoning, embeddings, ingestion, retrieval, restart, and failure checks. Detachment preserves source data, owner edits, and receipts.

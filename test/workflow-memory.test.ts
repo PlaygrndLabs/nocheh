@@ -18,10 +18,12 @@ test('memory requests preserve consent, native receipt identity, owner revisions
   const pool=new pg.Pool({...options,options:`-c search_path=${namespace}`,max:8});
   const calls:string[]=[],saved=new Map<string,any[]>();let writes=0,reads=0,queuePending=0;
   const ops=memoryOperations(pool,config,async(operation,body)=>{
+    if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'memory.review');calls.push(String(body.id));if(calls.length===1)throw Error('synthetic lost receipt response');return {state:'done'};
   },async(path,body:any)=>{
     if(path.endsWith('/messages/list')){reads++;return {items:saved.get(path.slice(0,-5))??[]};}
     if(path.endsWith('/messages')){writes++;saved.set(path,body.messages.map((m:any)=>({...m,id:'remote-fixture'})));throw Error('synthetic lost write acknowledgment');}
+    if(path.endsWith('/representation'))return {representation:'Stored synthetic memory'};
     if(path.endsWith('/queue/status'))return {pending_work_units:queuePending,in_progress_work_units:0};
     return {};
   });
@@ -69,6 +71,10 @@ test('memory requests preserve consent, native receipt identity, owner revisions
       return advanceWorkflow(pool,row.id,row.dispatch,'honcho',label,ops.honcho!);
     };
     assert.equal((await observe('initial-ready')).state,'completed');
+    const contextRequest=await request('context:'+generation);assert.ok(contextRequest,'generation creation requests periodic context refresh');
+    const context=await advanceWorkflow(pool,contextRequest.id,contextRequest.dispatch,'honcho','context-refresh',ops.honcho!);
+    assert.equal(context.state,'waiting');assert.equal(context.waiting_reason,'refresh_interval');assert.equal(context.attempts,0);
+    assert.ok(context.next_attempt>Date.now()+100000,'idle conversations keep warm context through a durable wait');
     const firstObserver=await request('generation:'+generation);
     const later=await ingest(pool,{...source,key:'import:later-memory',source_id:'2',text:'Later consented source'});
     await prepareGuarded(pool,async()=>[],'fixture',100,later.id);

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS honcho_receipts(id text PRIMARY KEY,generation text N
 CREATE INDEX IF NOT EXISTS honcho_receipts_pending ON honcho_receipts(generation,state,next_attempt);
 CREATE TABLE IF NOT EXISTS honcho_prepared_sources(source_id text NOT NULL REFERENCES guard_sources(id),guard_epoch bigint NOT NULL,
  policy_revision integer NOT NULL,PRIMARY KEY(source_id,guard_epoch,policy_revision));
+CREATE TABLE IF NOT EXISTS honcho_context_cache(generation text PRIMARY KEY REFERENCES honcho_generations(id),
+ content bytea NOT NULL CHECK(octet_length(content)<=80000),refreshed_at timestamptz NOT NULL DEFAULT now());
 `;
 export type HonchoCall=(path:string,body?:unknown)=>Promise<any>;
 export function honchoClient(base:string):HonchoCall {
@@ -76,7 +78,9 @@ export async function acceptMemoryVerification(pool:pg.Pool,input:unknown) {
 async function currentGeneration(pool:pg.Pool,id:string) {
  const row=(await pool.query(`SELECT g.* FROM honcho_generations g,guard_state s,memory_policy_state p,honcho_connection c
  WHERE g.id=$1 AND s.singleton AND p.singleton AND c.singleton AND c.attached AND c.verified
- AND g.guard_epoch=s.epoch AND g.policy_revision=p.revision AND g.state<>'retired'`,[id])).rows[0];
+ AND g.guard_epoch=s.epoch AND g.policy_revision=p.revision AND g.state<>'retired'
+ AND NOT EXISTS(SELECT 1 FROM honcho_receipts r JOIN guard_sources source ON source.id=r.source_id
+ WHERE r.generation=g.id AND NOT EXISTS(SELECT 1 FROM memory_learning_sources learning WHERE learning.event_id=source.event_id))`,[id])).rows[0];
  if(!row)throw new HttpError(409,'memory_context_retired');return row;
 }
 function generationReader(row:any):Reader {return {admin:false,scope:row.audience==='owner'?null:parentSpace(row.audience)??row.audience,
@@ -135,6 +139,50 @@ export async function observeGeneration(pool:pg.Pool,id:string,call:HonchoCall):
  const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0;
  await pool.query("UPDATE honcho_generations SET state=$2,error_code=NULL,last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END WHERE id=$1 AND state<>'retired'",[id,ready?'ready':'building']);
  return ready;
+}
+/** Refresh protected, audience-bound context from Honcho's stored conclusions.
+ * No query or reasoning request is involved. Only the generation ID travels in
+ * workflow records; neither the representation nor guard output leaves the archive.
+ */
+export async function refreshMemoryContext(pool:pg.Pool,id:string,call:HonchoCall,detect:(text:string)=>Promise<unknown>) {
+ const generation=await currentGeneration(pool,id);
+ if(!generation.last_ready_at&&generation.state!=='ready')return false;
+ const fetchedAt=new Date();
+ const result=await call('/v3/workspaces/'+id+'/peers/source/representation',{include_most_frequent:true,max_conclusions:50});
+ await currentGeneration(pool,id);
+ const bounded=Array.from(string(result.representation,2*1024*1024)).slice(0,20000).join('');
+ const text=String(await prepareContext(pool,generationReader(generation),bounded,detect));
+ await currentGeneration(pool,id);
+ await pool.query(`INSERT INTO honcho_context_cache(generation,content,refreshed_at) VALUES($1,$2,$3)
+ ON CONFLICT(generation) DO UPDATE SET content=excluded.content,refreshed_at=excluded.refreshed_at
+ WHERE honcho_context_cache.refreshed_at<=excluded.refreshed_at`,[id,Buffer.from(text),fetchedAt]);
+ // A concurrent revocation can leave evidence at rest but can never make it readable.
+ await currentGeneration(pool,id);return true;
+}
+/** Every turn gets primary Honcho context without a foreground provider call.
+ * Empty or expired context requests one durable refresh; deeper query-specific
+ * recall remains a separate operation and never populates this base-context cache.
+ */
+export async function memoryContext(pool:pg.Pool,principal:Reader) {
+ await assertAudience(pool,principal);
+ const status=await memoryStatus(pool),audience=principal.scope===null?'owner':principal.space??principal.scope;
+ const generation=status.generations.find(g=>g.audience===audience);
+ const limited={sources:[],limited_memory:true,syncing:generation?.state==='building',note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
+ if(!status.connection.attached||!status.connection.verified||!generation)return limited;
+ try {
+  const current=await currentGeneration(pool,generation.id);
+  const cached=(await pool.query(`SELECT content,refreshed_at,refreshed_at>now()-interval '5 minutes' AS usable,
+    refreshed_at>now()-interval '1 minute' AS fresh FROM honcho_context_cache WHERE generation=$1`,[current.id])).rows[0];
+  // Permanent identity makes concurrent cold reads converge. It also preserves
+  // an owner's cancellation instead of creating a replacement refresh effect.
+  if(!cached?.fresh)await pool.query("SELECT nocheh_workflow_request('honcho',$1)",['context:'+current.id]);
+  if(!cached?.usable||!current.last_ready_at&&current.state!=='ready')return limited;
+  const text=cached.content.toString();
+  await allowPrepared(pool,principal,{text});await currentGeneration(pool,current.id);await assertAudience(pool,principal);
+  return {sources:text?[{source:'nocheh:honcho:'+current.id,kind:'memory_inference',text}]:[],limited_memory:false,
+   syncing:current.state==='building',context_refreshed_at:cached.refreshed_at.toISOString(),
+   note:'Bounded stored Honcho context. Use nocheh_memory_recall when relevant details are missing; absence here does not mean the memory is absent.'};
+ }catch{await assertAudience(pool,principal);return limited;}
 }
 export async function reconcileHonchoReceipt(pool:pg.Pool,id:string,call:HonchoCall):Promise<boolean> {
  const connection=(await memoryStatus(pool)).connection;if(!connection.attached||!connection.verified)return false;

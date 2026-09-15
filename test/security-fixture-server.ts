@@ -35,7 +35,7 @@ const backend=createServer((req,res)=>{void(async()=>{
   if(url.pathname==='/v1/guard'){inspectRequest(object(body).payload);return json(res,200,{guarded:true,payload:await prepare(object(body).payload)});}
   if(url.pathname==='/v1/context/prepare')return json(res,200,await prepare(body));
   if(url.pathname==='/v1/memory/check')return json(res,200,{valid:true});
-  if(url.pathname==='/v1/memory/honcho/recall')return json(res,200,await prepare(recalled));
+  if(['/v1/memory/honcho/recall','/v1/memory/honcho/context'].includes(url.pathname))return json(res,200,await prepare(recalled));
   if(url.pathname==='/v1/memory/recall')return json(res,200,{hits:[],truncated:false,next_profile:null});
   if(url.pathname==='/v1/search')return json(res,200,await search(pool,principal,url.searchParams.get('q')??'',10));
   if(/^\/v1\/events\/[a-f0-9]{64}$/.test(url.pathname))return json(res,200,await readEvent(pool,principal,url.pathname.split('/').at(-1)!));

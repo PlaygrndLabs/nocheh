@@ -66,6 +66,7 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(manifest['files']['hermes/review-receipt']['sha256'],sha(receipt))
             self.assertIn('memory_review_jobs',manifest['tables'])
             self.assertIn('memory_shares',manifest['tables'])
+            self.assertIn('honcho_context_cache',manifest['tables'])
             self.assertEqual(manifest['excluded_rebuildable_caches'],['hermes/profiles/fixture/.cache/uv'])
             self.assertFalse(any('.cache/uv' in name for name in manifest['files']))
             (state/'hermes/unknown-link').symlink_to('/not-read-by-backup')

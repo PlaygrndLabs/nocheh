@@ -58,3 +58,4 @@ and governs subsequent agent work without changing those product decisions.
 | [0041](0041-local-inngest-workflows.md) | Local Inngest for product workflows, owned outbox/receipts, phased cutover and independent host recovery | Accepted; implementation and activation tracked in TASK.md |
 | [0042](0042-host-workflow-archive-coordination.md) | Host Connect over the archive listener, protected checkpoints, registration-aware publication and independent supervision | Implementation of ADR-0041; activation pending |
 | [0043](0043-owner-workflow-inspection.md) | Owner workflow controls, metadata observations and authenticated inspection-only native Inngest history | Implementation of ADR-0041; activation pending |
+| [0044](0044-automatic-honcho-context.md) | Automatic primary Honcho context, protected generation cache and background refresh | Implementation and activation tracked in TASK.md |

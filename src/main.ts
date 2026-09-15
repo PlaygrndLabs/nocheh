@@ -12,7 +12,7 @@ import {approveLearning,listReviews,controlReview} from './learning.js';
 import { settings } from './config.js';
 import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object,authorize } from './http.js';
-import {honchoClient,memoryStatus,setMemoryConnection,recallMemory,prepareMemoryRequest,acceptMemoryVerification} from './honcho.js';
+import {honchoClient,memoryStatus,setMemoryConnection,memoryContext,recallMemory,prepareMemoryRequest,acceptMemoryVerification} from './honcho.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
 import { startWorker } from './worker.js';
 import { hermesAdapter } from './hermes-adapter.js';
@@ -143,6 +143,10 @@ const server = createServer((req, res) => { void (async () => {
     await pool.query("UPDATE guard_sources SET next_attempt=now() WHERE event_id=$1 AND active_revision IS NULL",[body.event_id]);
     await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,body.event_id);
     return json(res,200,await inspectGuarded(pool,principal,body.event_id));
+  }
+  if(config.service==='archive'&&path==='/v1/memory/honcho/context'&&req.method==='POST') {
+    if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');
+    object(await readJson(req));return agentResult(await memoryContext(pool,principal),true);
   }
   if(config.service==='archive'&&path==='/v1/memory/honcho/recall'&&req.method==='POST') {
     if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');

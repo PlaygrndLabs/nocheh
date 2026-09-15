@@ -23,7 +23,7 @@ TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'ev
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
         'honcho_connection':'singleton','honcho_generations':'id','honcho_receipts':'id',
-        'honcho_prepared_sources':'source_id,guard_epoch,policy_revision',
+        'honcho_prepared_sources':'source_id,guard_epoch,policy_revision','honcho_context_cache':'generation',
         'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
         'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
         'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id',

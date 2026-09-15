@@ -59,6 +59,7 @@ BEGIN
    END IF;
  ELSIF TG_TABLE_NAME='honcho_generations' THEN
    PERFORM nocheh_workflow_request('honcho','generation:'||NEW.id);
+   PERFORM nocheh_workflow_request('honcho','context:'||NEW.id);
  ELSE
    PERFORM nocheh_workflow_touch('honcho','refresh');
    IF TG_TABLE_NAME<>'honcho_connection' THEN PERFORM nocheh_workflow_touch('memory_review','refresh'); END IF;
@@ -95,4 +96,5 @@ CREATE TRIGGER workflow_policy_revision AFTER UPDATE OF revision ON memory_polic
 DROP TRIGGER IF EXISTS workflow_honcho_connection ON honcho_connection;
 CREATE TRIGGER workflow_honcho_connection AFTER UPDATE OF attached,verified,include_history ON honcho_connection FOR EACH ROW
  WHEN(NEW.attached IS DISTINCT FROM OLD.attached OR NEW.verified IS DISTINCT FROM OLD.verified OR NEW.include_history IS DISTINCT FROM OLD.include_history) EXECUTE FUNCTION nocheh_workflow_domain_change();
+SELECT nocheh_workflow_request('honcho','context:'||id) FROM honcho_generations WHERE state<>'retired';
 `;
