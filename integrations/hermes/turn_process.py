@@ -24,10 +24,21 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
     import base64
     claims=json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'==='))
     scope=Scopes.apply_revision(scope,claims)
-    profile = prepare_profile(root, scope, model)
+    profile = await asyncio.to_thread(prepare_profile, root, scope, model)
     with (profile / '.turn.lock').open('a') as lock:
-        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError: raise RuntimeError('profile_busy') from None
+        # Wait before starting a child, keeping the same execution identity.
+        # Reviews use this lock too. Cancellation and policy changes remain live.
+        while True:
+            if cancelled and cancelled.is_set():
+                return {'state':'cancelled','text':'','session_id':session_id}
+            from .assistant_gateway import check_delivery_policy
+            if not await asyncio.to_thread(check_delivery_policy,body['archive_credential']):
+                return {'state':'failed','error_code':'space_policy_changed','text':'','session_id':session_id}
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                await asyncio.sleep(.25)
         return await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled)
 
 

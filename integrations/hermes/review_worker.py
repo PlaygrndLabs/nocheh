@@ -40,6 +40,14 @@ def review(root, policy, model, credentials, body):
     import base64
     scope=Scopes.apply_revision(scope,json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'===')))
     profile=prepare_profile(root,scope,model)
+    import fcntl
+    with (profile/'.turn.lock').open('a') as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return {'state':'waiting','error_code':'profile_busy'}
+        return _review(profile,policy,model,credentials,body)
+
+
+def _review(profile,policy,model,credentials,body):
     env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE') if key in os.environ}
     env.update(HERMES_HOME=str(profile),NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
     transport = credentials.runtime() if hasattr(credentials,'runtime') else {

@@ -84,6 +84,7 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     await dispatchCommitted(pool,config,async(path,body)=>{
       calls++;
       if(path==='perception.transcribe')return {success:true,transcript};
+      assert.equal(path,'run.start');assert.equal(body.asynchronous,true);
       const request=body as {attempt:number;archive_credential:string;transcripts:string[]};firstAttempt=request.attempt;
       assert.deepEqual(request.transcripts,[transcript]);
       const claims=JSON.parse(Buffer.from(request.archive_credential.split('.')[1]!,'base64url').toString());assert.equal(claims.scope,'-20');
@@ -92,7 +93,7 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     });
     assert.equal((await pool.query('SELECT state FROM dispatches')).rows[0].state,'running');
     await pool.query('UPDATE dispatches SET next_attempt=now()');
-    await dispatchCommitted(pool,config,async(path,body)=>{assert.equal(path,'run.start');assert.equal((body as {attempt:number}).attempt,firstAttempt);return {state:'done'};});
+    await dispatchCommitted(pool,config,async(path,body)=>{assert.equal(path,'run.resume');assert.equal((body as {attempt:number}).attempt,firstAttempt);return {state:'done'};});
     assert.equal((await pool.query('SELECT content FROM derived_artifacts')).rows[0].content.toString(),transcript);
     assert.equal((await pool.query('SELECT original_text FROM events')).rows[0].original_text,null);
     await ingest(pool,{...value,key:'historical:voice1',origin:'import'});

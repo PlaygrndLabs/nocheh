@@ -21,6 +21,10 @@ test('real PostgreSQL: explicit import consent, complete chunking, retries and d
   assert.equal(jobs.length,3);assert.equal(jobs.map(j=>j.content.split('\n').slice(1).join('\n')).join(''),value.text);
   await approveLearning(pool,{approved:true,event_ids:[id]});await prepareReviews(pool,false);
   assert.equal((await pool.query('SELECT count(*) FROM memory_review_jobs')).rows[0].count,'3');
+  await runReviewJobs(pool,config,async()=>({state:'waiting',error_code:'profile_busy'}));
+  const deferred=(await pool.query("SELECT state,attempts,error_code FROM memory_review_jobs WHERE error_code='waiting_for_profile'")).rows[0];
+  assert.deepEqual(deferred,{state:'pending',attempts:0,error_code:'waiting_for_profile'});
+  await pool.query('UPDATE memory_review_jobs SET next_attempt=now()');
   // Another runner for this archive must not overlap. A live worker in another
   // schema (including the older database-wide lock) must not suppress this one.
   let calls=0;const held=await pool.connect(),other=await admin.connect();let legacyHeld=false;
