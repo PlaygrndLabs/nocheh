@@ -267,7 +267,11 @@ memory. All 75 service checks and ten focused checks passed; the final three Hon
 and workflow-memory checks passed after adding explicit retired-state coverage.
 All 157 non-optional Hermes checks passed across the full run and a repeat of
 one TUI startup check that missed its deadline; two optional checks were skipped.
-Candidate installation remains pending.
+Both code increments are merged locally (f3ba380, 0931255); GitHub HTTPS
+authentication still blocks remote push. Candidate installation awaits explicit
+approval: automatic approval review rejected pausing admission across all nine
+families as broad service-disruption risk. That command did not execute and
+active images/admission were not changed.
 
 The memory query omits the per-execution archive footer while the full native
 agent prompt retains its source reference. A candidate image also precompiles
@@ -287,6 +291,12 @@ native Honcho setting alone does not change that adapter. Hybrid retrieval with
 bounded context and fresh audience/guard checks is a recommendation, not an
 implemented or activated mode. The blanket reasoning call remains a latency
 limitation. [Native provider reference](https://github.com/NousResearch/hermes-agent/blob/main/plugins/memory/honcho/README.md).
+
+The standard services rebuild stalled resolving the pinned Node base metadata
+and was cancelled. An offline candidate copies only the tested compiled Honcho
+module onto the verified installed services image, with unchanged dependencies;
+its module hash matches the test artifact exactly. The Hermes candidate built
+from its normal pinned recipe. Both candidate image digests are recorded.
 
 [Memory availability and startup evidence](compatibility/results/2026-09-15-memory-availability.json).
 
