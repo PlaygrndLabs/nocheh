@@ -98,6 +98,7 @@ services:
     depends_on:
       honcho: {condition: service_healthy}
   meter:
+    init: true
     environment: {NOCHEH_ARCHIVE_URL: "http://archive:8780"}
     profiles: [honcho]
     restart: unless-stopped
