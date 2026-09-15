@@ -149,7 +149,7 @@ def main():
         from database_viewer import start
         return start(STATE, command, ROOT)
     if args.command in ('down', 'status', 'logs'):
-        command += ['--profile', 'tools','--profile','workflows']
+        command += ['--profile', 'tools','--profile','workflows','--profile','honcho','--profile','honcho-tools']
     if args.command=='down':
         sys.path.insert(0,str(ROOT))
         from scripts.tool_worker import stop

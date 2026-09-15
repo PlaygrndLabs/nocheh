@@ -7,15 +7,17 @@ import subprocess
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
-STATE=ROOT/'data/honcho-experiment'
 PROVIDER_STATE=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local')).resolve()
+from scripts.configuration import read_env,env_path
+STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
+           (ROOT/'data/honcho-experiment' if PROVIDER_STATE==ROOT/'data/local' else PROVIDER_STATE/'honcho')).resolve()
 COMPOSE=['docker','compose','--env-file',str(STATE/'compose.env'),'-f',str(ROOT/'experiments/honcho/compose.yml')]
 
 
 def initialize():
     from scripts.configuration import read_env
     from scripts.embedding_config import embeddings
-    values=read_env(ROOT/'.env');embedding=embeddings(values)
+    values=read_env(env_path(PROVIDER_STATE));embedding=embeddings(values)
     for directory in ('','ledger','baseline','reports'):
         (STATE/directory).mkdir(parents=True,exist_ok=True,mode=0o700)
     for name in ('internal_token','database_password','temporary_embedding_key'):
@@ -87,7 +89,14 @@ def provider_ready():
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=('init','up','down','status','login','run','test','config','runtime-init','runtime-up','verify-memory','accept-memory','monthly'))
-    args=parser.parse_args();initialize()
+    args=parser.parse_args()
+    from scripts.honcho_runtime import enabled
+    if enabled(PROVIDER_STATE) and args.command in ('up','down','status'):
+        from scripts.honcho_runtime import operate
+        return operate(PROVIDER_STATE,args.command)
+    if enabled(PROVIDER_STATE) and args.command in ('run','verify-memory'):
+        raise SystemExit('Use the production memory acceptance procedure; isolated experiment commands cannot target active memory.')
+    initialize()
     if args.command=='verify-memory':
         from .verify import main as verify
         return verify()
@@ -106,16 +115,18 @@ def main():
         print('Embeddings now use the durable $5 monthly cap. Pilot reservations are preserved.');return 0
     if args.command=='runtime-init':
         from scripts.configuration import read_env,write_env
-        path=ROOT/'.env';values=read_env(path)
+        path=env_path(PROVIDER_STATE);values=read_env(path)
         values['NOCHEH_MEMORY_TOKEN']=(STATE/'internal_token').read_text().strip()
         write_env(path,values)
         print('Dedicated memory gateway credential installed. Apply Nocheh Compose before runtime-up.');return 0
     if args.command=='runtime-up':
         from scripts.configuration import read_env
-        if read_env(ROOT/'.env').get('NOCHEH_MEMORY_TOKEN')!=(STATE/'internal_token').read_text().strip():
+        if read_env(env_path(PROVIDER_STATE)).get('NOCHEH_MEMORY_TOKEN')!=(STATE/'internal_token').read_text().strip():
             raise SystemExit('Run runtime-init and apply Nocheh Compose first.')
         if not provider_ready(): raise SystemExit('Shared provider is not ready. Run ./scripts/nocheh provider login, then ./scripts/nocheh up.')
-        return subprocess.call(COMPOSE+['-f',str(ROOT/'deploy/honcho-runtime.yml'),'up','-d','--wait','--wait-timeout','240'],cwd=ROOT)
+        from scripts.honcho_runtime import enable,operate
+        enable(PROVIDER_STATE,STATE)
+        return operate(PROVIDER_STATE,'up')
     if args.command=='init':
         sources();print('Experiment initialized; no provider requests were made.');return 0
     if args.command=='test': return subprocess.call(['python3','-m','unittest','experiments.honcho.test_meter','experiments.honcho.test_compare','-v'],cwd=ROOT)

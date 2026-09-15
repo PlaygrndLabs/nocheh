@@ -4,6 +4,15 @@ import subprocess
 from experiments.honcho.control import ROOT, STATE, COMPOSE, PROVIDER_STATE
 from experiments.honcho.cli_runner import validate
 from scripts.provider import login_state
+from scripts.honcho_runtime import enabled,operate
+from scripts.provider import compose
+
+
+def selection():
+    if enabled(PROVIDER_STATE):
+        command,env=compose(PROVIDER_STATE)
+        return command+['--profile','honcho','--profile','honcho-tools'],env
+    return COMPOSE,None
 
 
 def status():
@@ -11,9 +20,10 @@ def status():
             'live_compatibility':'pending live memory checks',
             'embedding_credential':bool((STATE/'temporary_embedding_key').exists() and (STATE/'temporary_embedding_key').stat().st_size),
             'subscription_login':login_state(PROVIDER_STATE)['login_present']}
-    if (STATE/'compose.env').exists():
+    command,env=selection()
+    if enabled(PROVIDER_STATE) or (STATE/'compose.env').exists():
         try:
-            raw=subprocess.check_output(COMPOSE+['ps','--services','--status','running'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL,timeout=15)
+            raw=subprocess.check_output(command+['ps','--services','--status','running'],cwd=ROOT,env=env,text=True,stderr=subprocess.DEVNULL,timeout=15)
             result['running']='honcho' in raw.split()
         except (subprocess.SubprocessError,OSError): pass
     return result
@@ -21,8 +31,9 @@ def status():
 
 def read(args):
     validate(args)
-    if not status()['running']: return {'error':'honcho_experiment_not_running','complete':False}
-    process=subprocess.run(COMPOSE+['run','--rm','--no-deps','-T','cli']+args,cwd=ROOT,capture_output=True,text=True,timeout=120)
+    if not status()['running']: return {'error':'honcho_not_running','complete':False}
+    command,env=selection()
+    process=subprocess.run(command+['run','--rm','--no-deps','-T','cli']+args,cwd=ROOT,env=env,capture_output=True,text=True,timeout=120)
     try: result=json.loads(process.stdout)
     except ValueError: result={'error':'honcho_cli_unavailable_run_honcho_install','complete':False}
     return result
@@ -33,7 +44,10 @@ def main(args):
     elif args==['install']:
         if not (STATE/'compose.env').exists():
             print(json.dumps({'error':'initialize_with_scripts_honcho_experiment_init'}));return 1
-        return subprocess.call(COMPOSE+['build','cli'],cwd=ROOT)
+        command,env=selection()
+        return subprocess.call(command+['build','cli'],cwd=ROOT,env=env)
+    elif args and args[0] in ('up','down','status') and enabled(PROVIDER_STATE):
+        return operate(PROVIDER_STATE,args[0])
     elif args and args[0] in ('init','up','down','status','login'):
         return subprocess.call([str(ROOT/'scripts/honcho-experiment')]+args,cwd=ROOT)
     else:
