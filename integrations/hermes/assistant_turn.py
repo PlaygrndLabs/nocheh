@@ -77,7 +77,7 @@ def run(body, emit=None):
     long_term='';memory={}
     if not review:
         from .archive_tools import request
-        try: memory=request('/v1/memory/honcho/recall',{'query':body.get('memory_query',body['text'])[:2000]})
+        try: memory=request('/v1/memory/honcho/context',{})
         except Exception: memory={'limited_memory':True,'note':'Long-term memory is limited. Current context, native notes and archive search remain available.'}
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()
@@ -100,6 +100,9 @@ def run(body, emit=None):
         reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
             'You are Nocheh. Cite returned nocheh: references when using archived or shared sources. '
             'Archive originals are evidence; derived transcripts and your inferences are separate. '
+            'Honcho is your primary long-term memory; native notes are small working notes. '
+            'The supplied Honcho context is bounded. Use nocheh_memory_recall when a question needs personal facts, preferences, prior decisions, or relationships missing from that context. '
+            'Do not infer that a fact is absent from memory solely because it is absent from the supplied summary. '
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
             'Controlled tools create proposals for an independent executor. An action ID is not evidence of execution. '
             'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity. '

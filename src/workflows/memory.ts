@@ -4,7 +4,7 @@ import type {RuntimeCall} from '../runtime.js';
 import {HttpError} from '../http.js';
 import {guardState} from '../guarded.js';
 import {prepareReviews,runReviewJobs} from '../learning.js';
-import {memoryStatus,queueMemory,syncMemory,observeGeneration,reconcileHonchoReceipt,type HonchoCall} from '../honcho.js';
+import {memoryStatus,queueMemory,syncMemory,observeGeneration,refreshMemoryContext,reconcileHonchoReceipt,type HonchoCall} from '../honcho.js';
 import {observation,type WorkflowOperation} from './pipeline.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority,type WorkflowFamily} from './store.js';
 
@@ -39,10 +39,17 @@ export function memoryOperations(pool:pg.Pool,config:Settings,runtime:RuntimeCal
       if(jobId==='refresh')return fenced(pool,'honcho',authority,async()=>{
         const count=await queueMemory(pool);return observation(count===50?'waiting':'completed','sync',0,Date.now()+100,count===50?'prerequisite':null);
       });
-      const match=/^(receipt|reconcile|generation):([a-f0-9]{64})$/.exec(jobId);if(!match)return observation('failed','admission');
+      const match=/^(receipt|reconcile|generation|context):([a-f0-9]{64})$/.exec(jobId);if(!match)return observation('failed','admission');
       const kind=match[1],id=match[2]!;
+      if(kind==='context')return fenced(pool,'honcho',authority,async()=>{
+        try{const ready=await refreshMemoryContext(pool,id,honcho,async text=>(await runtime('guard.detect',{text})).literals);
+          return observation('waiting','sync',0,Date.now()+(ready?120000:30000),ready?'refresh_interval':'prerequisite');}
+        catch(error){if(error instanceof HttpError&&error.code==='memory_context_retired')return observation('skipped','sync',0,Date.now(),'superseded');throw error;}
+      });
       if(kind==='generation')return fenced(pool,'honcho',authority,async()=>{
-        try{const ready=await observeGeneration(pool,id,honcho);return observation(ready?'completed':'waiting','sync',0,Date.now()+60000,ready?null:'prerequisite');}
+        try{const ready=await observeGeneration(pool,id,honcho);
+          await refreshMemoryContext(pool,id,honcho,async text=>(await runtime('guard.detect',{text})).literals);
+          return observation(ready?'completed':'waiting','sync',0,Date.now()+60000,ready?null:'prerequisite');}
         catch(error){if(error instanceof HttpError&&error.code==='memory_context_retired')return observation('skipped','sync',0,Date.now(),'superseded');throw error;}
       });
       const load=async()=> (await pool.query(`SELECT r.state,r.attempts,r.next_attempt,g.guard_epoch,g.policy_revision,

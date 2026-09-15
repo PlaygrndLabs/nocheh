@@ -59,6 +59,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     assert.equal((await pool.query("SELECT rule FROM security_events WHERE state='blocked' ORDER BY id DESC LIMIT 1")).rows[0].rule,'hosted_provider_tools_denied');
     assert.equal((await request('/codex/responses',payload,token)).status,403);
     assert.equal(calls.length,before,'denied calls never reach upstreams');
+    assert.equal((await request('/v1/memory/honcho/context',{})).status,200);
     // Compress only broker deadlines so this covers a slow recall without a
     // multi-minute test. The normal memory route still times out and cancels.
     const setTimer=globalThis.setTimeout;
@@ -67,6 +68,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     slowMemory=true;
     try {
       assert.equal((await request('/v1/memory/honcho/recall',{query:'Synthetic recall'})).status,200);
+      assert.equal((await request('/v1/memory/honcho/context',{})).status,503,'automatic context keeps the ordinary short deadline');
       assert.equal((await request('/v1/memory/recall',{query:'Synthetic recall'})).status,503);
     }finally{slowMemory=false;clock.mock.restore();}
     guardDown=true;

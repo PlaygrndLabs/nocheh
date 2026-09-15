@@ -13,7 +13,7 @@ import {providerPayload} from './provider-request.js';
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; guard:string; hermes:string; model:string; fetch?:typeof fetch;}
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|tools\/actions\/[a-f0-9]{64})$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/recall)|tools\/propose|action-requests)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|action-requests)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 export function providerTarget(transport:Record<string,unknown>,path:string):string {
