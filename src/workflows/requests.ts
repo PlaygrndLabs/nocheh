@@ -60,6 +60,15 @@ BEGIN
  ELSIF TG_TABLE_NAME='honcho_generations' THEN
    PERFORM nocheh_workflow_request('honcho','generation:'||NEW.id);
    PERFORM nocheh_workflow_request('honcho','context:'||NEW.id);
+ ELSIF TG_TABLE_NAME='guard_state' THEN
+   -- Preparation may have completed while guarding was off. A mode change
+   -- admits a new preparation generation without reopening any past effect.
+   IF NEW.mode='on' AND OLD.mode='off' THEN
+     PERFORM nocheh_workflow_touch('preparation',pending.event_id)
+       FROM (SELECT DISTINCT event_id FROM guard_sources WHERE state<>'ready') pending;
+   END IF;
+   PERFORM nocheh_workflow_touch('honcho','refresh');
+   PERFORM nocheh_workflow_touch('memory_review','refresh');
  ELSE
    PERFORM nocheh_workflow_touch('honcho','refresh');
    IF TG_TABLE_NAME<>'honcho_connection' THEN PERFORM nocheh_workflow_touch('memory_review','refresh'); END IF;

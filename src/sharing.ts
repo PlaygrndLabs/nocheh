@@ -5,7 +5,7 @@ import {assertAudience,type Reader} from './access.js';
 import {spacePolicy,parentSpace,validateSpace} from './spaces.js';
 import {digest,ingest} from './archive.js';
 import type {RuntimeCall} from './runtime.js';
-import {guardState,prepareGuarded,guardedValue} from './guarded.js';
+import {guardState,guardedValue} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
 
 export const sharingSchema=`CREATE TABLE IF NOT EXISTS memory_filtered (
@@ -35,11 +35,11 @@ export async function revokeShare(pool:pg.Pool,id:string,revision:unknown) {
 export async function listShares(pool:pg.Pool,destination:string) {
   return (await pool.query('SELECT * FROM memory_shares WHERE destination=ANY($1::text[]) ORDER BY created_at DESC LIMIT 200',[[validateSpace(destination),parentSpace(destination)??destination]])).rows;
 }
-async function selectedShare(pool:pg.Pool,row:{id:string;content:string;destination:string},call?:RuntimeCall):Promise<string> {
+async function selectedShare(pool:pg.Pool,row:{id:string;content:string;destination:string}):Promise<string> {
   if((await guardState(pool)).mode==='off')return row.content;
-  if(!call)throw new HttpError(409,'guard_preparation_pending');
   const source=await ingest(pool,{version:1,key:'memory-share:'+row.id,channel:'browser',origin:'generated',bot_id:'',scope:row.destination,source_id:row.id,revision:'1',kind:'shared_knowledge',occurred_at:null,text:row.content,payload:{}},false);
-  await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,undefined,10,source.id);
+  // Ingestion commits the preparation request. Reads can consume only the
+  // saved result; they never start a detector or a legacy preparation scanner.
   return (await guardedValue(pool,'events:'+source.id)).value.text;
 }
 export async function sharedContext(pool:pg.Pool,principal:Reader,query:string,call:RuntimeCall) {
@@ -50,7 +50,7 @@ export async function sharedContext(pool:pg.Pool,principal:Reader,query:string,c
   const {rows}=await pool.query(`SELECT id,content,destination FROM memory_shares WHERE destination=ANY($1::text[]) AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 200`,[[principal.space,parentSpace(principal.space)??principal.space]]);
   const sources=[];
   for(const row of rows) {
-    try {const text=await selectedShare(pool,row,call);if(query.toLowerCase().split(/\s+/).every(word=>text.toLowerCase().includes(word)))sources.push({id:row.id,source:'nocheh:shared:'+row.id,kind:'owner_approved',text});}
+    try {const text=await selectedShare(pool,row);if(query.toLowerCase().split(/\s+/).every(word=>text.toLowerCase().includes(word)))sources.push({id:row.id,source:'nocheh:shared:'+row.id,kind:'owner_approved',text});}
     catch(error){if(!(error instanceof HttpError)||error.code!=='guard_preparation_pending')throw error;}
     if(sources.length===10)break;
   }
@@ -78,14 +78,14 @@ export async function sharedContext(pool:pg.Pool,principal:Reader,query:string,c
     await assertAudience(pool,principal);return {sources:[...sources,...filtered],filter_status:'passed'};
   }catch(error){await assertAudience(pool,principal);return {sources,filter_status:'unavailable',note:'Wider knowledge was withheld.'};}
 }
-export async function readShared(pool:pg.Pool,principal:Reader,kind:string,id:string,call?:RuntimeCall) {
+export async function readShared(pool:pg.Pool,principal:Reader,kind:string,id:string) {
   if(!principal.space || principal.scope===null)throw new HttpError(403,'space_context_required');
   await assertAudience(pool,principal);const policy=await spacePolicy(pool,principal.space);
   let rows:Record<string,unknown>[]=[];
   if(kind==='shared' && policy.effective.mode!=='isolated')rows=(await pool.query('SELECT id,content,destination FROM memory_shares WHERE id=$1 AND destination=ANY($2::text[]) AND revoked_at IS NULL',[id,[principal.space,parentSpace(principal.space)??principal.space]])).rows;
   if(kind==='filtered' && policy.effective.mode==='filtered')rows=(await pool.query('SELECT content FROM memory_filtered WHERE id=$1 AND space_id=$2 AND policy_revision=$3 AND expires_at>now() AND guard_epoch=(SELECT epoch FROM guard_state WHERE singleton)',[id,principal.space,principal.revision])).rows;
   if(!rows.length)throw new HttpError(404,'shared_source_not_found');await assertAudience(pool,principal);
-  const text=kind==='shared'?await selectedShare(pool,rows[0] as {id:string;content:string;destination:string},call):rows[0]!.content;
+  const text=kind==='shared'?await selectedShare(pool,rows[0] as {id:string;content:string;destination:string}):rows[0]!.content;
   if(kind==='shared')await allowPrepared(pool,principal,{text});
   await assertAudience(pool,principal);
   return {source:`nocheh:${kind}:${id}`,text,kind:kind==='shared'?'owner_approved':'privacy_filtered_inference'};

@@ -43,6 +43,13 @@ backup/inactive restore passed archive, Inngest and Honcho fingerprints; restore
 capture and workflows report inactive. The restore starts no execution authority
 or Honcho writers. Existing format-3/4 backups remain readable.
 
+Preparation admission now queues/observes stored requests in the owner API and
+shared-memory reads; those callers no longer invoke a legacy detector. Turning
+guarding back on admits new preparation generations while preserving closed
+identities. Browser/scheduler claims require the current Inngest epoch. Eight
+focused PostgreSQL tests pass, including mode changes, stale authority, duplicate
+requests and withholding shared text until its saved projection is ready.
+
 The active installation still uses its old service names and seven Inngest-owned
 families; preparation and Telegram remain legacy-owned. Its initial format-4
 snapshot is retained at `data/backups/20260916-consolidation`. A fresh live synthetic
