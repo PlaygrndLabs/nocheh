@@ -37,7 +37,7 @@ def prepare_profile(root,scope,model):
 
 
 async def native_turn(root,scope,body,model,credentials,cancelled=None):
-    profile=prepare_profile(root,scope,model)
+    profile=await asyncio.to_thread(prepare_profile,root,scope,model)
     thread=str(body['payload']['message'].get('message_thread_id','main'))
     logical=digest(scope.chat_id+':'+thread)
     cursor=profile/('active-'+logical+'.json')
@@ -45,13 +45,15 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
     from .turn_process import run_process
     result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled)
     if result.get('state')=='done':
-        temporary=cursor.with_suffix('.tmp')
-        with temporary.open('wb') as file:
-            file.write(canonical({'session_id':result['session_id']}));file.flush();os.fsync(file.fileno())
-        temporary.replace(cursor)
-        directory=os.open(profile,os.O_RDONLY)
-        try:os.fsync(directory)
-        finally:os.close(directory)
+        def save_cursor():
+            temporary=cursor.with_suffix('.tmp')
+            with temporary.open('wb') as file:
+                file.write(canonical({'session_id':result['session_id']}));file.flush();os.fsync(file.fileno())
+            temporary.replace(cursor)
+            directory=os.open(profile,os.O_RDONLY)
+            try:os.fsync(directory)
+            finally:os.close(directory)
+        await asyncio.to_thread(save_cursor)
     return result
 
 
@@ -187,7 +189,7 @@ class AssistantGateway:
                 turn['agent_result']=result
                 if result['state']=='cancelled':return None
                 if result['state']!='done':raise RuntimeError('assistant_turn_failed')
-                self.adapter.capture.enqueue(self.adapter.capture.event('assistant:'+turn['body']['event_id']+':'+str(turn['body']['attempt']),
+                await asyncio.to_thread(self.adapter.capture.enqueue,self.adapter.capture.event('assistant:'+turn['body']['event_id']+':'+str(turn['body']['attempt']),
                     'assistant_result',{'event_id':turn['body']['event_id'],'session_id':result['session_id']},turn['scope'].chat_id,result['text']))
                 return result['text']
             self.adapter.set_message_handler(message)
@@ -212,8 +214,8 @@ class AssistantGateway:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())
             if cancelled and cancelled.is_set():
-                result={'state':'cancelled'};immutable_file(self.receipts,name+'.result',canonical(result));return result
-            immutable_file(self.receipts,name+'.intent',canonical({'event_id':body['event_id'],'attempt':body['attempt']}))
+                result={'state':'cancelled'};await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result));return result
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id'],'attempt':body['attempt']}))
             turn={'scope':scope,'body':body,'progress':progress,'cancelled':cancelled};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(body['source_key'])
             try:
                 if progress:progress('assistant')
@@ -235,7 +237,10 @@ class AssistantGateway:
                 else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
             except Exception:result={'state':'ambiguous','error_code':'dispatch_interrupted'}
             finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
-            immutable_file(self.receipts,name+'.result',canonical(result))
+            from .timing import safe
+            timings=safe(turn.get('agent_result',{}).get('timings'))
+            if timings:result['timings']=timings
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
             return result
 
     def call(self,body):
@@ -250,14 +255,14 @@ class AssistantGateway:
         async with self.action_lock:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())
-            immutable_file(self.receipts,name+'.intent',canonical({'action_id':body['id']}))
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
             token=DISPATCH_KEY.set('action:'+body['id'])
             try:
                 sent=await self.adapter.send(body['destination'],body['text'],metadata={'notify':True})
                 result={'state':'done' if sent.success else 'ambiguous'}
             except Exception:result={'state':'ambiguous'}
             finally:DISPATCH_KEY.reset(token)
-            immutable_file(self.receipts,name+'.result',canonical(result))
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
             return result
 
     def action(self,body):

@@ -93,3 +93,35 @@ test('PostgreSQL on/off: prepared source reuse, authoritative edits, generation 
     assert.equal((await guardState(pool)).mode,'on');
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });
+
+test('context batches preserve all fragments and roll back failed persistence without leaking partial trust',{skip:!process.env.PGHOST},async()=>{
+  const admin=new pg.Pool(),namespace=`context_batch_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);
+  const pool=new pg.Pool({options:`-c search_path=${namespace}`});
+  let statements=0,fail=false;
+  const query=(client:pg.Pool|pg.PoolClient)=>async(sql:string,...args:unknown[])=>{
+    statements++;
+    if(fail&&sql.includes('INSERT INTO guard_revisions')){fail=false;throw Error('synthetic persistence failure');}
+    return (client.query as Function).call(client,sql,...args);
+  };
+  const measured={query:query(pool),connect:async()=>{
+    const client=await pool.connect();return {query:query(client),release:()=>client.release()};
+  }} as unknown as pg.Pool;
+  try {
+    await initialize(pool);const event=await ingest(pool,{version:1,key:'context-batch',origin:'import',bot_id:'fixture',scope:'42',source_id:'1',revision:'1',kind:'message',occurred_at:null,text:'Synthetic fixture',payload:{}});
+    const state=await setGuardMode(pool,'on'),reader={admin:false,scope:null,turnEvent:event.id,guard_epoch:state.epoch};
+    const input=Array.from({length:100},(_,i)=>`Fragment ${i}: exact\0 Unicode 😃; planted-SECRET-${i}.\r\n`);
+    const detector=async(text:string)=>[...new Set(text.match(/planted-SECRET-\d+/g)??[])];
+    fail=true;
+    await assert.rejects(prepareContext(measured,reader,input,detector),/synthetic persistence failure/);
+    assert.equal((await pool.query("SELECT count(*) FROM derived_artifacts WHERE kind='runtime_context'")).rows[0].count,'0');
+    assert.equal((await pool.query('SELECT count(*) FROM guard_context_inputs')).rows[0].count,'0');
+    assert.equal((await pool.query('SELECT count(*) FROM guard_context_values')).rows[0].count,'0');
+    statements=0;let calls=0;
+    const output=await prepareContext(measured,reader,input,async text=>{calls++;return detector(text);});
+    assert.deepEqual(output,input.map(text=>text.replace(/planted-SECRET-\d+/g,'***')));
+    assert.equal(calls,1);
+    assert.ok(statements<30,`100 fragments should use bounded database batches, observed ${statements}`);
+    assert.equal((await pool.query("SELECT count(*) FROM derived_artifacts WHERE kind='runtime_context'")).rows[0].count,'100');
+    assert.deepEqual(await prepareContext(pool,reader,input,async()=>{throw Error('cached fragments must not repeat detection');}),output);
+  }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
+});

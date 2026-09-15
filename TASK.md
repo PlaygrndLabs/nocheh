@@ -195,8 +195,25 @@ running identities before any repeated start. All 74 service checks pass in the
 isolated Compose fixture with serial test-file execution; six focused admission
 checks pass. The initial parallel service run hit database timeouts. The broader
 Hermes run passed 151 checks with two existing skips, but three native startup
-checks timed out under host load and remain pending retest. This code increment
-is not yet installed and does not complete live Telegram acceptance.
+checks timed out under host load and remain pending retest. The final candidate passes all 155 non-optional Hermes checks across the full
+run and a solitary repeat of its one timing-sensitive TUI check; two existing
+optional checks are skipped. The code is not yet installed and does not complete
+live Telegram acceptance.
+
+Guard context persistence now batches the cache reads, prepared-value inserts,
+and one atomic write per bounded detector batch. A 100-fragment regression proves
+exact originals/guarded outputs, cached reuse, fewer than 30 database statements,
+and rollback without partial trust. All 21 affected privacy, recovery, broker,
+policy and memory checks pass. Native phase timings use fixed names and numeric
+counts/durations only; Telegram health separates network and spool-write timing.
+Profile preparation, session cursor writes and dispatch/action receipt writes run
+off the polling event loop while retaining their fsync-before-delivery ordering.
+
+Current host pressure was measured at about 92% CPU use, 15 GB RAM used and 6.6 GB
+compressed. This is current evidence, not proof of the original capture delay.
+The separate project was left running; the synthetic fixture is stopped again.
+Both candidate images are built and rollback-compatible with the existing schema.
+Graphify was refreshed with 253 files and no model calls.
 
 </telegram_live_latency>
 

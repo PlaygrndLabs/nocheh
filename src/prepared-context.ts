@@ -20,8 +20,13 @@ export async function allowPrepared(pool:pg.Pool,principal:Reader,value:unknown)
   if(principal.admin)return;
   await assertAudience(pool,principal);const state=await guardState(pool);if(state.mode==='off')return;
   const scope=contextAudience(principal);
-  for(const text of new Set(leaves(value).flatMap(text=>[text,JSON.stringify(text).slice(1,-1)])))await pool.query('INSERT INTO guard_context_values(id,audience,epoch,content) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',
-    [digest(canonical({scope,epoch:state.epoch,text})),scope,state.epoch,Buffer.from(text)]);
+  const values=[...new Set(leaves(value).flatMap(text=>[text,JSON.stringify(text).slice(1,-1)]))];
+  for(let offset=0;offset<values.length;offset+=500) {
+    const batch=values.slice(offset,offset+500);
+    await pool.query(`INSERT INTO guard_context_values(id,audience,epoch,content)
+      SELECT id,$2,$3,content FROM unnest($1::text[],$4::bytea[]) AS prepared(id,content) ON CONFLICT DO NOTHING`,
+      [batch.map(text=>digest(canonical({scope,epoch:state.epoch,text}))),scope,state.epoch,batch.map(text=>Buffer.from(text))]);
+  }
 }
 
 // Preserve complete prepared passages inside native formatting. Word boundaries
@@ -52,10 +57,11 @@ export async function prepareContext(pool:pg.Pool,principal:Reader,value:unknown
     // auxiliary calls. No unrelated audience's prepared content is reusable.
     await client.query('SELECT pg_advisory_lock(hashtextextended($1,803309))',[scope]);
     const known=(await client.query('SELECT content FROM guard_context_values WHERE audience=$1 AND epoch=$2',[scope,state.epoch])).rows.map(r=>r.content.toString() as string);
+    const knownSet=new Set(known);
     const replacements=new Map<string,string>(),plans=new Map<string,{text:string;prepared:boolean}[]>();
     const fresh=new Map<string,string>(),outputs=new Map<string,string>();
     for(const original of new Set(textValues(value))) {
-      if(!original||known.includes(original)){replacements.set(original,original);continue;}
+      if(!original||knownSet.has(original)){replacements.set(original,original);continue;}
       const parts=segments(original,known).flatMap(part=>{
         if(part.prepared||part.text.length<=24000)return [part];
         const chunks=[];let offset=0;
@@ -65,10 +71,16 @@ export async function prepareContext(pool:pg.Pool,principal:Reader,value:unknown
       for(const part of parts) {
         if(part.prepared||!part.text.trim()||outputs.has(part.text)||fresh.has(part.text))continue;
         const key=digest(canonical({scope,epoch:state.epoch,input:part.text}));
-        const cached=(await client.query(`SELECT r.content FROM guard_context_inputs c JOIN guard_sources s ON s.id=c.source_id
-          JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision WHERE c.id=$1`,[key])).rows[0];
-        if(cached)outputs.set(part.text,JSON.parse(cached.content.toString()).text);else fresh.set(part.text,key);
+        fresh.set(part.text,key);
       }
+    }
+    const candidates=[...fresh.entries()];
+    for(let offset=0;offset<candidates.length;offset+=500) {
+      const cached=await client.query(`SELECT c.id,r.content FROM guard_context_inputs c JOIN guard_sources s ON s.id=c.source_id
+        JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision WHERE c.id=ANY($1::text[])`,
+        [candidates.slice(offset,offset+500).map(([,key])=>key)]);
+      const byId=new Map(cached.rows.map(row=>[row.id,JSON.parse(row.content.toString()).text as string]));
+      for(const [text,key] of candidates.slice(offset,offset+500))if(byId.has(key)){outputs.set(text,byId.get(key)!);fresh.delete(text);}
     }
     const pending=[...fresh.entries()];
     while(pending.length) {
@@ -77,20 +89,32 @@ export async function prepareContext(pool:pg.Pool,principal:Reader,value:unknown
       const joined=batch.map(([text])=>text).join('\n<NOCHEH_FRAGMENT>\n'),literals=await detect(joined);
       literalSpans(joined,literals);
       if(!(literals as string[]).every(value=>batch.some(([text])=>text.includes(value))))throw new HttpError(422,'guard_candidate_rejected');
-      for(const [text,key] of batch) {
+      const provenance={event_id:principal.turnEvent,audience:scope,guard_epoch:state.epoch};
+      const records=batch.map(([text,key])=>{
         const guarded=mask(text,[...literalSpans(text,(literals as string[]).filter(v=>text.includes(v))),...patternSpans(text)]).text;
         const derivedId=digest('guard-context:'+key),sourceId='derived_artifacts:'+derivedId;
-        const input={text,kind:'runtime_context',provenance:{event_id:principal.turnEvent,audience:scope,guard_epoch:state.epoch}};
-        const result={...input,text:guarded},hash=digest(canonical(input));
-        await client.query('BEGIN');
-        await client.query(`INSERT INTO derived_artifacts(id,event_id,kind,content,search_text,provenance) VALUES($1,$2,'runtime_context',$3,$4,$5) ON CONFLICT DO NOTHING`,
-          [derivedId,principal.turnEvent,Buffer.from(text),text.replaceAll('\0',''),JSON.stringify(input.provenance)]);
-        await client.query(`INSERT INTO guard_revisions(id,source_id,revision,content,search_text,input_hash,author,preparation_version)
-          VALUES($1,$2,1,$3,$4,$5,'automatic',$6) ON CONFLICT DO NOTHING`,[digest(sourceId+':1'),sourceId,Buffer.from(canonical(result)),guarded.replaceAll('\0',''),hash,DETECTOR_VERSION]);
-        await client.query("UPDATE guard_sources SET input=$2,input_hash=$3,active_revision=1,state='ready',error_code=NULL WHERE id=$1 AND active_revision IS NULL",[sourceId,Buffer.from(canonical(input)),hash]);
-        await client.query('INSERT INTO guard_context_inputs(id,audience,epoch,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[key,scope,state.epoch,sourceId]);
-        await client.query('COMMIT');outputs.set(text,guarded);
-      }
+        const input={text,kind:'runtime_context',provenance};
+        return {text,key,guarded,derivedId,sourceId,input,hash:digest(canonical(input)),result:{...input,text:guarded}};
+      });
+      // One atomic persistence batch per bounded detector call. Every fragment
+      // retains its own source identity, original, revision and cache entry.
+      await client.query('BEGIN');
+      await client.query(`INSERT INTO derived_artifacts(id,event_id,kind,content,search_text,provenance)
+        SELECT id,$1,'runtime_context',content,search_text,$2::jsonb
+        FROM unnest($3::text[],$4::bytea[],$5::text[]) AS batch(id,content,search_text) ON CONFLICT DO NOTHING`,
+        [principal.turnEvent,JSON.stringify(provenance),records.map(r=>r.derivedId),records.map(r=>Buffer.from(r.text)),records.map(r=>r.text.replaceAll('\0',''))]);
+      await client.query(`INSERT INTO guard_revisions(id,source_id,revision,content,search_text,input_hash,author,preparation_version)
+        SELECT id,source_id,1,content,search_text,input_hash,'automatic',$1
+        FROM unnest($2::text[],$3::text[],$4::bytea[],$5::text[],$6::text[]) AS batch(id,source_id,content,search_text,input_hash) ON CONFLICT DO NOTHING`,
+        [DETECTOR_VERSION,records.map(r=>digest(r.sourceId+':1')),records.map(r=>r.sourceId),records.map(r=>Buffer.from(canonical(r.result))),records.map(r=>r.guarded.replaceAll('\0','')),records.map(r=>r.hash)]);
+      await client.query(`UPDATE guard_sources s SET input=batch.input,input_hash=batch.hash,active_revision=1,state='ready',error_code=NULL
+        FROM unnest($1::text[],$2::bytea[],$3::text[]) AS batch(id,input,hash) WHERE s.id=batch.id AND s.active_revision IS NULL`,
+        [records.map(r=>r.sourceId),records.map(r=>Buffer.from(canonical(r.input))),records.map(r=>r.hash)]);
+      await client.query(`INSERT INTO guard_context_inputs(id,audience,epoch,source_id)
+        SELECT id,$1,$2,source_id FROM unnest($3::text[],$4::text[]) AS batch(id,source_id) ON CONFLICT DO NOTHING`,
+        [scope,state.epoch,records.map(r=>r.key),records.map(r=>r.sourceId)]);
+      await client.query('COMMIT');
+      for(const r of records)outputs.set(r.text,r.guarded);
     }
     for(const [original,parts] of plans)replacements.set(original,parts.map(part=>part.prepared||!part.text.trim()?part.text:outputs.get(part.text)!).join(''));
     const prepared=replaceValues(value,replacements);

@@ -30,6 +30,9 @@ def restrict_session_search():
 
 
 def run(body, emit=None):
+    from .timing import record
+    from time import perf_counter
+    phase=perf_counter()
     # Pinned native imports may initialize session state during module loading.
     # Install the durable path before importing any agent/tool module.
     from .isolated_profile import database_path,install_database_paths
@@ -61,14 +64,17 @@ def run(body, emit=None):
     from .archive_tools import bind_process_preferences
     bind_process_preferences(prefs)
     database=SessionDB(database_path(profile))
+    record('bootstrap',phase);phase=perf_counter()
     long_term='';memory={}
     if not review:
         from .archive_tools import request
         try: memory=request('/v1/memory/honcho/recall',{'query':body['text'][:2000]})
         except Exception: memory={'limited_memory':True,'note':'Long-term memory is limited. Current context, native notes and archive search remain available.'}
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
+    record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
     history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
+    record('history_prepare',phase);phase=perf_counter()
     from . import memory_evidence
     placement=body.get('memory_context','legacy')
     if placement not in ('legacy','evidence'):raise ValueError('invalid_memory_context')
@@ -93,6 +99,7 @@ def run(body, emit=None):
                'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '
                'Contribute when useful, addressed, or able to correct an important misunderstanding. '
                'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')+long_term))
+    record('agent_init',phase)
     try:
         if agent._memory_store is not None:
             agent._memory_store.memory_char_limit=prefs['memory.memory_char_limit']
@@ -127,7 +134,8 @@ def run(body, emit=None):
                 with Image.open(io.BytesIO(data)) as parsed: mime=Image.MIME.get(parsed.format)
                 if not mime: raise ValueError('unsupported_image')
                 message.append({'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(data).decode()}})
-        result=agent.run_conversation(message,**options)
+        from .timing import measure
+        with measure('conversation'):result=agent.run_conversation(message,**options)
         if result.get('failed') or result.get('interrupted') or not result.get('completed'):
             return {'state':'failed','error_code':'model_unavailable'}
         text=result.get('final_response') or ''
@@ -141,6 +149,9 @@ def run(body, emit=None):
 def main():
     logging.disable(logging.CRITICAL)
     output=sys.stdout
+    from .timing import reset,record,safe,VALUES
+    from time import perf_counter
+    reset();started=perf_counter()
     try:
         body=json.loads(sys.stdin.buffer.read(2*1024*1024))
         if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
@@ -169,6 +180,7 @@ def main():
         known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','required_guard_unavailable','invalid_process_scope_binding'}
         result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
+    record('total',started);result['timings']=safe(VALUES)
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()
 
 
