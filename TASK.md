@@ -5,6 +5,24 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<consolidation_implementation>
+
+## Reviewed deployment and Inngest completion — 2026-09-16
+
+Owner approved [ADR-0046](docs/adr/0046-consolidated-inngest-installation.md).
+Implementation is in progress on `codex/system-diagram-01a0a683`.
+The initial increment adds application/capture and supervised Connect composition,
+explicit stored-preparation consumption, a local broker/guard boundary, and native
+dashboard presentation through managed Hermes administration. Isolated PostgreSQL
+tests pass 78/78; pinned Hermes native administration tests pass 12/12 (no network
+or production state). Node 24 build and AST graph refresh pass. The consolidated
+Dockerfile's complete build and merged runtime UI preview remain pending.
+Current installation and ownership are unchanged. Service naming, isolated full
+topology/fault acceptance, local migration, legacy removal, live Telegram and
+fresh inactive restore remain pending.
+
+</consolidation_implementation>
+
 <production_completion>
 
 The owner-approved graceful OrbStack restart succeeded without a force-stop or

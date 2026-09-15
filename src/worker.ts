@@ -39,3 +39,20 @@ export function startWorker(pool:pg.Pool,config:Settings):()=>Promise<void> {
     actions:async()=>{if(config.assistant.enabled)await executeApproved(pool,call);},
   });
 }
+
+export function startCapture(pool:pg.Pool,config:Settings) {
+  const inactive=existsSync(join(config.dataDir,'spool/.restore-inactive'));
+  const status:Record<string,string>={capture:inactive?'inactive':'starting',outbox:inactive?'inactive':'starting'};
+  if(inactive)return {stop:async()=>{},status:()=>status};
+  let publisher:ReturnType<typeof workflowClient>|undefined;
+  const stop=startLoops({
+    capture:async()=>{await drainSpool(pool,config.dataDir);status.capture='ready';},
+    outbox:async()=>{
+      if(process.env.NOCHEH_WORKFLOWS_ENABLED!=='true'||existsSync(join(config.dataDir,'workflows/inactive'))){status.outbox='inactive';return;}
+      publisher??=workflowClient('pipeline');
+      await publishOutbox(pool,event=>publisher!.send(event));status.outbox='ready';
+    },
+    recovery:()=>recoverRuns(pool),
+  },1000,stage=>{status[stage]='unavailable';console.error(JSON.stringify({event:'worker_stage_failed',stage}));});
+  return {stop,status:()=>({...status})};
+}

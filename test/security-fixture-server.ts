@@ -42,7 +42,7 @@ const backend=createServer((req,res)=>{void(async()=>{
   throw new HttpError(403,'fixture_route_denied');
 })().catch(error=>json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'fixture_failed'}));});
 await new Promise<void>(resolve=>backend.listen(8799,'127.0.0.1',resolve));
-const server=brokerServer({pool,token:config.token,model:provider.model,archive:'http://127.0.0.1:8799',guard:'http://127.0.0.1:8799',hermes:'http://127.0.0.1:8799'});
+const server=brokerServer({pool,token:config.token,model:provider.model,archive:'http://127.0.0.1:8799',prepare:async(principal,input)=>{inspectRequest(object(input).payload);return {guarded:true,payload:await prepareContext(pool,principal,object(input).payload,detect)};},hermes:'http://127.0.0.1:8799'});
 await new Promise<void>(resolve=>server.listen(8786,'0.0.0.0',resolve));
 await writeFile('/fixture/ready.json',JSON.stringify({...binding,credential,model:provider.model,api_mode:provider.api_mode,source:'nocheh:event:'+source.id}));
 const timer=setInterval(()=>{void(async()=>{

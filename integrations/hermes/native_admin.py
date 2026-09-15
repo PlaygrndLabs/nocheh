@@ -170,6 +170,9 @@ class Administration:
                 query = parse_qs(scope.get('query_string', b'').decode(), keep_blank_values=True)
                 if any(len(values) != 1 for values in query.values()): raise ValueError('ambiguous_query')
                 path, method = scope['path'], scope['method']
+                from .presentation import presentation_route
+                if presentation_route(path,method):
+                    return await self.app(scope,receive,send)
                 selected=query.get('profile', [''])[0]
                 name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected)
                 if path.startswith('/api/files') and (method, path) in {
@@ -363,13 +366,15 @@ class Administration:
                 await JSONResponse({'error': 'native_administration_unavailable'}, 503)(scope, receive, send)
 
 
-def create_app(root, model, policy, token, browser_enabled=False, revision_reader=None):
+def create_app(root, model, policy, token, browser_enabled=False, revision_reader=None, presentation_home=None):
     from hermes_cli import web_server as native
     from hermes_cli import web_server_sessions as sessions
     from hermes_cli.web_routers import sessions as router
     from hermes_state import SessionDB
     from hermes_cli import web_server_profiles, web_server_cron
     app = Administration(native.app, root, model, policy, token, browser_enabled, revision_reader)
+    from .presentation import install
+    install(presentation_home or Path(root)/'dashboard-presentation')
     web_server_profiles._resolve_profile_dir = lambda name: app.profile(name)[1]
     web_server_cron._cron_profile_home = lambda profile: app.profile(profile)
     # Inspection must never create/migrate/auto-archive native state.
@@ -397,7 +402,7 @@ def main():
     token = os.environ['SERVICE_TOKEN']
     os.environ['HERMES_DASHBOARD_SESSION_TOKEN'] = token
     import uvicorn
-    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'gpt-5.6-sol'), Scopes.load(None), token, os.environ.get('NOCHEH_BROWSER_CHAT')=='1',lambda space:audience_revision(token,space)),
+    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'gpt-5.6-sol'), Scopes.load(None), token, os.environ.get('NOCHEH_BROWSER_CHAT')=='1',lambda space:audience_revision(token,space),os.environ.get('NOCHEH_DASHBOARD_HOME',str(root.parent/'admin/dashboard/home'))),
                 host='0.0.0.0', port=8785, access_log=False, log_level='critical')
 
 

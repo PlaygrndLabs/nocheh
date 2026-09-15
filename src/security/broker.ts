@@ -10,7 +10,7 @@ import {evaluate,recordEffect} from './store.js';
 import {ownerSecurityRoute} from './owner-api.js';
 import {providerPayload} from './provider-request.js';
 
-export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; guard:string; hermes:string; model:string; fetch?:typeof fetch;}
+export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;}
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|tools\/actions\/[a-f0-9]{64})$/],
   ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|action-requests)$/],
@@ -50,6 +50,7 @@ export function brokerServer(options:BrokerOptions) {
     const url=new URL(req.url??'/','http://security'),path=url.pathname;
     if(req.method==='GET'&&path==='/health'){await options.pool.query('SELECT 1');return json(res,200,{ok:true,service:'security',plugin:manifest.id,api_version:1});}
     const principal=reader(req,options.token);
+    if(principal.admin&&path==='/v1/guard'&&req.method==='POST')return json(res,200,await options.prepare(principal,await readJson(req,1024*1024)));
     if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url))return;
     const binding=await turnBinding(options.pool,principal);
     const credential=req.headers.authorization!;
@@ -78,7 +79,7 @@ export function brokerServer(options:BrokerOptions) {
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
         // Preparation is separate from permission to transmit. Destination is not forwarded.
-        return json(res,200,await rpc(options.guard,'/v1/guard',{destination:'https://chatgpt.com/backend-api/codex',payload:body.payload}));
+        return json(res,200,await options.prepare(principal,{destination:'https://chatgpt.com/backend-api/codex',payload:body.payload}));
       }
       let relay=path;
       const file=path.match(/^\/v1\/turn-files\/([a-f0-9]{64})$/);
@@ -115,7 +116,7 @@ export function brokerServer(options:BrokerOptions) {
       const attempt=await authorizeEffect('model.request',payload);
       const transport=object(await rpc(options.hermes,'/internal/security/transport',{},'Bearer '+options.token));
       const destination=providerTarget(transport,path);
-      const prepared=object(await rpc(options.guard,'/v1/guard',{destination,payload}));
+      const prepared=object(await options.prepare(principal,{destination,payload}));
       if(prepared.guarded!==true||!prepared.payload)throw new HttpError(503,'required_guard_unavailable');
       // Every attempt, including SDK retries, repeats current audience enforcement.
       await assertAudience(options.pool,principal);

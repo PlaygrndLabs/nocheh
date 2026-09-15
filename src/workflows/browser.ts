@@ -3,6 +3,7 @@ import type pg from 'pg';
 import type {Settings} from '../config.js';
 import type {RuntimeCall} from '../runtime.js';
 import {HttpError,object,string} from '../http.js';
+import {preparationStatus} from './preparation-status.js';
 import {guardState} from '../guarded.js';
 import {policyRevision} from '../spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority,type WorkflowState} from './store.js';
@@ -87,8 +88,10 @@ export function managedRunOperation(pool:pg.Pool,config:Settings,call:RuntimeCal
   return async(event,authority)=>{
     const load=async()=> (await pool.query('SELECT * FROM managed_runs WHERE event_id=$1',[event])).rows[0];
     let row=await load();if(!row?.admitted)return observation('skipped','admission');
-    if(row.state==='captured'&&!row.cancel_requested&&(await guardState(pool)).mode==='on'&&(await pool.query("SELECT 1 FROM guard_sources WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event])).rowCount)
-      return observation('waiting','preparation',0,Date.now()+5000,'guard_pending');
+    if(row.state==='captured'&&!row.cancel_requested) {
+      const prepared=await preparationStatus(pool,event);
+      if(prepared.state!=='completed')return observation('waiting',prepared.stage,0,prepared.next_attempt,'prerequisite');
+    }
     if(['captured','running'].includes(row.state)) {
       const body={channel,event_id:event,attempt:1,owner_epoch:authority.epoch,asynchronous:true};
       let runtime:Record<string,unknown>;

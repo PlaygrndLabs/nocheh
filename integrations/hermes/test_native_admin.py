@@ -80,6 +80,19 @@ class NativeAdminTests(unittest.TestCase):
                              ('POST','/api/mcp/test')]:
             self.assertEqual(self.client.request(method, path, headers=self.headers).status_code, 409)
 
+    def test_dashboard_preferences_do_not_write_runtime_profiles(self):
+        before=(self.owner/'config.yaml').read_bytes()
+        self.assertEqual(self.client.get('/api/dashboard/font').status_code,401)
+        response=self.client.put('/api/dashboard/font',headers=self.headers,json={'font':'system-mono'})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.client.get('/api/dashboard/font',headers=self.headers).json()['font'],'system-mono')
+        self.assertEqual((self.owner/'config.yaml').read_bytes(),before)
+        self.assertEqual(read(self.root/'dashboard-presentation/config.yaml')['dashboard']['font'],'system-mono')
+        plugins=self.client.get('/api/dashboard/plugins',headers=self.headers)
+        self.assertEqual(plugins.status_code,200,plugins.text)
+        self.assertTrue(any(p['name']=='nocheh' for p in plugins.json()))
+        self.assertEqual(self.client.post('/api/dashboard/agent-plugins/install',headers=self.headers,json={'identifier':'forbidden'}).status_code,409)
+
     def test_native_config_roundtrip_preserves_fields_and_rejects_stale_writer(self):
         before = read(self.owner / 'config.yaml')
         before['custom'] = {'api_key': 'must-never-be-returned', 'field': 'kept'}

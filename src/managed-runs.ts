@@ -7,7 +7,7 @@ import {immutableFile} from './storage.js';
 import {join} from 'node:path';
 import type {Settings} from './config.js';
 import {readFile} from 'node:fs/promises';
-import {prepareTranscripts} from './assistant.js';
+import {prepareTranscripts,storedTranscripts} from './assistant.js';
 import type {RuntimeCall} from './runtime.js';
 import {validateSpace,parentSpace,policyRevision} from './spaces.js';
 import {requestAction} from './actions.js';
@@ -210,9 +210,10 @@ export async function prepareRun(pool:pg.Pool,config:Settings,input:unknown,call
   const body=object(input),event=string(body.event_id,64),actor=identifier(body.actor);
   const client=await pool.connect();
   try {
-    const held=await client.query("SELECT event_id FROM managed_runs WHERE event_id=$1 AND actor=$2 AND state='running' AND lease_until>now()",[event,actor]);
+    const held=await client.query("SELECT event_id,owner_epoch FROM managed_runs WHERE event_id=$1 AND actor=$2 AND state='running' AND lease_until>now()",[event,actor]);
     if(!held.rowCount)throw new HttpError(409,'run_lease_lost');
-    const transcripts=await prepareTranscripts(client,config.dataDir,event,call);
+    const prepared=held.rows[0].owner_epoch!==null;
+    const transcripts=prepared?await storedTranscripts(client,event):await prepareTranscripts(client,config.dataDir,event,call);
     if(transcripts===null)throw new HttpError(503,'transcription_unavailable');
     const {rows}=await client.query<{id:string;file_hash:string;metadata:{file_name:string};kind:string}>('SELECT id,file_hash,metadata,kind FROM artifacts WHERE event_id=$1 ORDER BY id',[event]);
     const files=[];let total=0;
@@ -225,12 +226,12 @@ export async function prepareRun(pool:pg.Pool,config:Settings,input:unknown,call
         try {text=new TextDecoder('utf-8',{fatal:true}).decode(data);total+=data.length;} catch { /* retained binary */ }
       }
       const derivedId=digest(row.id+':text:utf8-v1');
-      if(text!==null)await client.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,search_text,provenance) VALUES($1,$2,$3,'extracted_text',$4,$5,$6) ON CONFLICT DO NOTHING`,
+      if(text!==null&&!prepared)await client.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,search_text,provenance) VALUES($1,$2,$3,'extracted_text',$4,$5,$6) ON CONFLICT DO NOTHING`,
         [derivedId,event,row.id,Buffer.from(text),text.replaceAll('\0',''),JSON.stringify({extractor:'utf8-v1',input_sha256:row.file_hash})]);
       files.push({id:row.id,derivedId,sha256:row.file_hash,name:row.metadata.file_name,kind:row.kind,text});
     }
     if((await guardState(pool)).mode==='on') {
-      await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event);
+      if(!prepared)await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event);
       const selected=[];for(const row of (await pool.query("SELECT id FROM derived_artifacts WHERE event_id=$1 AND kind='transcript' ORDER BY id",[event])).rows)selected.push((await guardedValue(pool,'derived_artifacts:'+row.id)).value.text);
       for(const file of files) {
         file.name=(await guardedValue(pool,'artifacts:'+file.id)).value.metadata.file_name??'attachment';

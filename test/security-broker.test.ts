@@ -19,7 +19,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
   const pool=new pg.Pool({...connection,options:'-c search_path='+namespace});
   const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string}[]=[];
   const secret='synthetic-provider-credential-never-returned';
-  let guardDown=false,streamRevocation=false,slowMemory=false;
+  let guardDown=false,streamRevocation=false,slowMemory=false;const preparedPrincipals:any[]=[];
   const mock:typeof fetch=async(url,init)=>{
     const body=init?.body?JSON.parse(String(init.body)):null;
     calls.push({url:String(url),body,auth:new Headers(init?.headers).get('authorization')??''});
@@ -39,7 +39,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     }}),{headers:{'content-type':'text/event-stream'}});
     return Response.json({ok:true});
   };
-  const server=brokerServer({pool,token,archive:'http://archive',guard:'http://guard',hermes:'http://hermes',model:'same-model',fetch:mock});
+  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(principal,input)=>{preparedPrincipals.push(principal);if(guardDown)throw Error('detector unavailable');return {guarded:true,payload:(input as any).payload};},hermes:'http://hermes',model:'same-model',fetch:mock});
   try {
     await initialize(pool);
     const event=await ingest(pool,{version:1,key:'security-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
@@ -51,7 +51,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const response=await request('/codex/responses',payload);
     assert.equal(response.status,200);assert.equal((await response.text()).includes(secret),false);
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
-    assert.equal(calls.find(x=>x.url==='http://guard/v1/guard')!.auth,'Bearer '+credential);
+    assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);
     const before=calls.length;
     for(const path of ['/internal/security/transport','/v1/tools/claim','/codex/responses?url=https://evil.example'])assert.equal((await request(path,payload)).status,403);
     assert.equal((await request('/codex/responses',{...payload,model:'changed-model'})).status,403);

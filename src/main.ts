@@ -14,7 +14,8 @@ import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object,authorize } from './http.js';
 import {honchoClient,memoryStatus,setMemoryConnection,memoryContext,recallMemory,prepareMemoryRequest,acceptMemoryVerification} from './honcho.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
-import { startWorker } from './worker.js';
+import { startWorker,startCapture } from './worker.js';
+import {startWorkflowService} from './workflows/service.js';
 import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import { guardPayload,inspectRequest } from './guard.js';
@@ -32,34 +33,38 @@ import {registerWorker} from './workflows/store.js';
 import {hostActionAuthority} from './workflows/host-tools.js';
 
 const config = settings();
+const servesArchive=['archive','nocheh-app'].includes(config.service);
 const runtime = hermesAdapter({url: config.hermesUrl, token: config.token});
 const call = runtimeCall(runtime);
 const honcho=honchoClient(config.honchoUrl);
 // Each service owns its connection pool; an outage must be visible in health.
 const pool = connectDatabase(config);
 await initialize(pool);
-if(config.service==='archive')await setGuardMode(pool,config.guardMode);
+if(servesArchive)await setGuardMode(pool,config.guardMode);
 await heartbeat(pool, config.service);
 const timer = setInterval(() => { void heartbeat(pool, config.service).catch(() => {}); }, 5000);
 timer.unref();
-const stopWorker = config.service === 'worker' ? startWorker(pool, config) : () => {};
-const transport=config.service==='archive'&&process.env.NOCHEH_WORKFLOWS_ENABLED==='true'?hostTransport(process.env.INNGEST_SIGNING_KEY??''):null;
+const workflowPool=config.service==='nocheh-app'?connectDatabase(config):null;
+const workflows=workflowPool?startWorkflowService(workflowPool,config):null;
+const capture=config.service==='nocheh-app'?startCapture(pool,config):null;
+const stopWorker = capture?.stop ?? (config.service === 'worker' ? startWorker(pool, config) : async() => {});
+const transport=servesArchive&&process.env.NOCHEH_WORKFLOWS_ENABLED==='true'?hostTransport(process.env.INNGEST_SIGNING_KEY??''):null;
 
 const server = createServer((req, res) => { void (async () => {
   if(transport?.handle(req,res))return;
   const url = new URL(req.url ?? '/', 'http://local'), path=url.pathname;
   if (req.method === 'GET' && path === '/health') {
     await pool.query('SELECT 1');
-    return json(res, 200, {ok: true, service: config.service, database: 'ready'});
+    return json(res, 200, {ok: true, service: config.service, database: 'ready',...(workflows?{workflows:workflows.state(),capture:capture?.status()}: {})});
   }
-  if(config.service==='archive'&&req.method==='POST'&&path==='/internal/honcho/prepare') {
+  if(servesArchive&&req.method==='POST'&&path==='/internal/honcho/prepare') {
     if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
     return json(res,200,await prepareMemoryRequest(pool,await readJson(req,1024*1024),async text=>(await call('guard.detect',{text})).literals));
   }
   const principal=reader(req, config.token);
   await assertAudience(pool,principal);
-  if(config.service==='archive'&&await ownerSecurityRoute(pool,principal,req,res,url))return;
-  if(config.service==='archive'&&(path==='/v1/workflows'||path.startsWith('/v1/workflows/'))){
+  if(servesArchive&&await ownerSecurityRoute(pool,principal,req,res,url))return;
+  if(servesArchive&&(path==='/v1/workflows'||path.startsWith('/v1/workflows/'))){
     admin(principal);
     if(path.startsWith('/v1/workflows/inspection/')){
       if(process.env.NOCHEH_WORKFLOWS_ENABLED!=='true')throw new HttpError(503,'workflows_unavailable');
@@ -97,7 +102,7 @@ const server = createServer((req, res) => { void (async () => {
   }
   // Every migrated import write checks its live batch lease. Hold the family
   // fence and import row through the write so cancellation/cutover can drain it.
-  if(config.service==='archive'&&req.headers['x-nocheh-import-job']){
+  if(servesArchive&&req.headers['x-nocheh-import-job']){
     admin(principal);
     if(req.method!=='POST'||!(path==='/v1/import'||path==='/v1/memory/reviews'||/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)))throw new HttpError(403,'import_route_denied');
     const held=await enterImportWrite(pool,req.headers['x-nocheh-import-job'],req.headers['x-nocheh-import-lease'],req.headers['x-nocheh-import-owner']);
@@ -116,7 +121,7 @@ const server = createServer((req, res) => { void (async () => {
     await assertAudience(pool,principal);return json(res,200,result);
   };
   const claim=async(body:unknown,channel:'browser'|'scheduler')=>{
-    if((await guardState(pool)).mode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,String(object(body).event_id));
+    if(object(body).owner_epoch===undefined&&(await guardState(pool)).mode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,String(object(body).event_id));
     const authority=object(body).owner_epoch===undefined?undefined:channel==='browser'?await browserAuthority(pool,config,body):await scheduledAuthority(pool,config,body);
     return claimRun(pool,config,body,channel,authority);
   };
@@ -127,32 +132,32 @@ const server = createServer((req, res) => { void (async () => {
     if((await guardState(pool)).mode==='on')inspectRequest(body.payload);
     return json(res,200,{guarded:true,payload:await prepare(body.payload)});
   }
-  if(config.service==='archive' && !principal.admin && req.method==='POST' && path==='/v1/context/prepare')return agentResult(await readJson(req,1024*1024));
-  if(config.service==='archive' && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
-  if(config.service==='archive'&&path==='/v1/memory/honcho') {
+  if(servesArchive && !principal.admin && req.method==='POST' && path==='/v1/context/prepare')return agentResult(await readJson(req,1024*1024));
+  if(servesArchive && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
+  if(servesArchive&&path==='/v1/memory/honcho') {
     admin(principal);
     if(req.method==='GET')return json(res,200,await memoryStatus(pool));
     if(req.method==='POST')return json(res,200,await setMemoryConnection(pool,await readJson(req)));
   }
-  if(config.service==='archive'&&path==='/v1/memory/honcho/verify'&&req.method==='POST') {
+  if(servesArchive&&path==='/v1/memory/honcho/verify'&&req.method==='POST') {
     admin(principal);return json(res,200,await acceptMemoryVerification(pool,await readJson(req)));
   }
-  if(config.service==='archive'&&path==='/v1/guarded/prepare'&&req.method==='POST') {
+  if(servesArchive&&path==='/v1/guarded/prepare'&&req.method==='POST') {
     admin(principal);const body=object(await readJson(req));
     if(typeof body.event_id!=='string'||!/^[a-f0-9]{64}$/.test(body.event_id))throw new HttpError(400,'invalid_source');
     await pool.query("UPDATE guard_sources SET next_attempt=now() WHERE event_id=$1 AND active_revision IS NULL",[body.event_id]);
     await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,body.event_id);
     return json(res,200,await inspectGuarded(pool,principal,body.event_id));
   }
-  if(config.service==='archive'&&path==='/v1/memory/honcho/context'&&req.method==='POST') {
+  if(servesArchive&&path==='/v1/memory/honcho/context'&&req.method==='POST') {
     if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');
     object(await readJson(req));return agentResult(await memoryContext(pool,principal),true);
   }
-  if(config.service==='archive'&&path==='/v1/memory/honcho/recall'&&req.method==='POST') {
+  if(servesArchive&&path==='/v1/memory/honcho/recall'&&req.method==='POST') {
     if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');
     const body=object(await readJson(req));return agentResult(await recallMemory(pool,principal,String(body.query??''),honcho,async text=>(await call('guard.detect',{text})).literals),true);
   }
-  if(config.service==='archive' && path==='/v1/memory/preview' && req.method==='GET') {
+  if(servesArchive && path==='/v1/memory/preview' && req.method==='GET') {
     admin(principal);const policy=await spacePolicy(pool,url.searchParams.get('space')??'');
     const preview={scope:parentSpace(policy.id)??policy.id,space:policy.id,revision:policy.revision,admin:false,guard_epoch:(await guardState(pool)).epoch};
     const q=url.searchParams.get('q')??'';
@@ -161,15 +166,15 @@ const server = createServer((req, res) => { void (async () => {
     await assertAudience(pool,preview);
     return json(res,200,{policy,originals,shares,filtered_sources:policy.effective.mode==='filtered'?policy.effective.sources:[],filter_run:false});
   }
-  if(config.service==='archive' && path==='/v1/memory/shares') {
+  if(servesArchive && path==='/v1/memory/shares') {
     admin(principal);
     if(req.method==='GET')return json(res,200,await listShares(pool,url.searchParams.get('space')??''));
     if(req.method==='POST')return json(res,200,await shareKnowledge(pool,await readJson(req)));
   }
-  if(config.service==='archive' && path==='/v1/memory/shares/revoke' && req.method==='POST') {
+  if(servesArchive && path==='/v1/memory/shares/revoke' && req.method==='POST') {
     admin(principal);const b=object(await readJson(req));return json(res,200,await revokeShare(pool,String(b.id),b.revision));
   }
-  if(config.service==='archive' && path==='/v1/memory/context' && req.method==='GET')return agentResult(await sharedContext(pool,principal,url.searchParams.get('q')??'',async(operation,input,timeout)=>{
+  if(servesArchive && path==='/v1/memory/context' && req.method==='GET')return agentResult(await sharedContext(pool,principal,url.searchParams.get('q')??'',async(operation,input,timeout)=>{
     if(operation!=='memory.filter'||(await guardState(pool)).mode==='off')return call(operation,input,timeout);
     if(!principal.turnEvent)throw new HttpError(403,'bound_guard_context_required');
     const policy={space:config.assistant.owner_id!,revision:principal.revision!,guard_epoch:(await guardState(pool)).epoch};
@@ -178,20 +183,20 @@ const server = createServer((req, res) => { void (async () => {
     return call(operation,{...input,archive_credential:turnToken(config.token,null,Date.now()+600000,principal.turnEvent,{...policy,purpose:'filter'})},timeout);
   }));
   const shared=path.match(/^\/v1\/memory\/(shared|filtered)\/([a-f0-9]{64})$/);
-  if(config.service==='archive' && shared && req.method==='GET')return agentResult(await readShared(pool,principal,shared[1]!,shared[2]!,call));
-  if(config.service==='archive' && path==='/v1/memory/recall') {
+  if(servesArchive && shared && req.method==='GET')return agentResult(await readShared(pool,principal,shared[1]!,shared[2]!,call));
+  if(servesArchive && path==='/v1/memory/recall') {
     if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
     if(req.method==='POST')return agentResult(await call('memory.recall',{...object(await readJson(req)),...(principal.admin?{}:{guard_epoch:(await guardState(pool)).epoch})}));
   }
-  if(config.service==='archive' && path==='/v1/memory/reviews') {
+  if(servesArchive && path==='/v1/memory/reviews') {
     admin(principal);
     if(req.method==='GET')return json(res,200,await listReviews(pool,url.searchParams.get('after')??''));
     if(req.method==='POST')return json(res,200,await approveLearning(pool,await readJson(req)));
   }
-  if(config.service==='archive' && path==='/v1/memory/reviews/control' && req.method==='POST') {
+  if(servesArchive && path==='/v1/memory/reviews/control' && req.method==='POST') {
     admin(principal);const b=object(await readJson(req));return json(res,200,await controlReview(pool,String(b.id),b.action));
   }
-  if(config.service==='archive' && path==='/v1/memory/spaces') {
+  if(servesArchive && path==='/v1/memory/spaces') {
     admin(principal);
     if(req.method==='GET') {
       if(url.searchParams.has('id')) {
@@ -202,15 +207,15 @@ const server = createServer((req, res) => { void (async () => {
     }
     if(req.method==='POST'){const b=object(await readJson(req));return json(res,200,await saveSpace(pool,String(b.id),b.overrides,b.revision));}
   }
-  if(config.service==='archive' && req.method==='GET' && path==='/v1/scopes') {
+  if(servesArchive && req.method==='GET' && path==='/v1/scopes') {
     admin(principal);
     const {rows}=await pool.query('SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 GROUP BY scope ORDER BY scope LIMIT 101',[url.searchParams.get('after') ?? '']);
     return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99]?.scope:null});
   }
-  if(config.service==='archive' && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
-  if(config.service==='archive' && path==='/v1/tools/propose' && req.method==='POST')return json(res,200,await proposeControlled(pool,principal,await readJson(req)));
-  if(config.service==='archive' && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path))return agentResult(await controlledAction(pool,principal,path.split('/').at(-1)));
-  if (config.service === 'archive' && req.method === 'GET') {
+  if(servesArchive && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
+  if(servesArchive && path==='/v1/tools/propose' && req.method==='POST')return json(res,200,await proposeControlled(pool,principal,await readJson(req)));
+  if(servesArchive && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path))return agentResult(await controlledAction(pool,principal,path.split('/').at(-1)));
+  if (servesArchive && req.method === 'GET') {
     if (path==='/v1/graph') {admin(principal);return json(res,200,await evidenceGraph(pool,principal,url.searchParams.get('scope') ?? '',url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit')),url.searchParams.get('focus') ?? ''));}
     if (path==='/v1/search') return agentResult(await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))),true);
     const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
@@ -223,15 +228,15 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
-  if(config.service==='archive' && path==='/v1/data' && req.method==='GET')return json(res,200,await browseData(pool,principal,url.searchParams.get('after')??''));
+  if(servesArchive && path==='/v1/data' && req.method==='GET')return json(res,200,await browseData(pool,principal,url.searchParams.get('after')??''));
   const projection=path.match(/^\/v1\/data\/([a-f0-9]{64})\/guarded(?:\/(history))?$/);
-  if(config.service==='archive' && projection) {
+  if(servesArchive && projection) {
     if(req.method==='GET' && projection[2] && url.searchParams.has('revision'))return json(res,200,await inspectRevision(pool,principal,projection[1]!,url.searchParams.get('source_id')??'',Number(url.searchParams.get('revision'))));
     if(req.method==='GET' && projection[2])return json(res,200,await guardedHistory(pool,principal,projection[1]!,url.searchParams.get('source_id')??'',Number(url.searchParams.get('before')??2147483647)));
     if(req.method==='GET')return json(res,200,await inspectGuarded(pool,principal,projection[1]!));
     if(req.method==='POST' && !projection[2])return json(res,200,await editGuarded(pool,principal,projection[1]!,await readJson(req,8*1024*1024)));
   }
-  if(config.service==='archive'&&req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
+  if(servesArchive&&req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
     const body=await readJson(req);
     if(path==='/v1/scheduler/input')return json(res,200,await captureInput(pool,config,body,'scheduler',object(body).owner_epoch===undefined?undefined:{owner:'inngest',epoch:Number(object(body).owner_epoch)}));
     if(path==='/v1/scheduler/ownership')return json(res,200,await scheduleOwnership(pool));
@@ -247,8 +252,8 @@ const server = createServer((req, res) => { void (async () => {
     if(path==='/v1/scheduler/runs')return json(res,200,await scheduledRuns(pool,body));
     if(path==='/v1/scheduler/delivery')return json(res,200,await scheduledDelivery(pool,body));
   }
-  if(config.service==='archive' && path==='/v1/tools/actions' && req.method==='GET')return json(res,200,{...await controlledList(pool,principal),telegram:await telegramActions(pool,principal)});
-  if(config.service==='archive' && path.startsWith('/v1/tools/') && req.method==='POST') {
+  if(servesArchive && path==='/v1/tools/actions' && req.method==='GET')return json(res,200,{...await controlledList(pool,principal),telegram:await telegramActions(pool,principal)});
+  if(servesArchive && path.startsWith('/v1/tools/') && req.method==='POST') {
     const body=await readJson(req,2*1024*1024);
     if(path==='/v1/tools/decide')return json(res,200,await decideControlled(pool,principal,body));
     if(path==='/v1/tools/telegram-decision')return json(res,200,await decideTelegram(pool,principal,body));
@@ -258,11 +263,11 @@ const server = createServer((req, res) => { void (async () => {
     if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body,object(body).id===undefined?null:String(object(body).id),object(body).workflow_id?await hostActionAuthority(pool,body):undefined));
     if(path==='/v1/tools/finish')return json(res,200,await finishControlled(pool,body));
   }
-  if (config.service==='archive' && req.method==='GET' && path==='/v1/runtime') {
+  if (servesArchive && req.method==='GET' && path==='/v1/runtime') {
     const status = await call('status', {}, 5000).catch(() => ({ok:false,error:'runtime_unavailable'}));
     return json(res,200,{id:runtime.id,capabilities:runtime.capabilities,status});
   }
-  if(config.service==='archive' && req.method==='POST' && path.startsWith('/v1/browser/')) {
+  if(servesArchive && req.method==='POST' && path.startsWith('/v1/browser/')) {
     const body=await readJson(req,36*1024*1024);
     if(path==='/v1/browser/input')return json(res,200,await captureInput(pool,config,body));
     if(path==='/v1/browser/admit')return json(res,200,await admitBrowser(pool,config,body));
@@ -275,7 +280,7 @@ const server = createServer((req, res) => { void (async () => {
     if(path==='/v1/browser/heartbeat')return json(res,200,await renewRun(pool,body));
     if(path==='/v1/browser/prepare')return json(res,200,await prepareRun(pool,config,body,call));
   }
-  if(config.service==='archive' && req.method==='POST' && path==='/v1/manage/hermes') {
+  if(servesArchive && req.method==='POST' && path==='/v1/manage/hermes') {
     const input=object(await readJson(req));
     const operation:RuntimeOperation|undefined=input.action==='profiles'?'profiles.list':input.action==='memory'?'memory.read':input.action==='preferences'?(input.changes?'config.write':'config.read'):undefined;
     if(!operation)throw new HttpError(400,'unknown_management_action');
@@ -287,7 +292,7 @@ const server = createServer((req, res) => { void (async () => {
     return json(res,200,await guardPayload(body.payload,{mode:config.guardMode,trusted:config.guardTrusted,detectorVersion:config.detectorVersion},body.destination,
       async(text)=>(await call('guard.detect',{text})).literals,pool));
   }
-  if (config.service === 'archive') {
+  if (servesArchive) {
     if (req.method==='GET' && path==='/v1/export') return json(res,200,await exportPage(pool,url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit'))));
     if (req.method==='POST' && path==='/v1/import') return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024),url.searchParams.get('restore_guarded')==='true'));
     if (req.method==='POST' && path==='/v1/replay') return json(res,200,await replay(pool,object(await readJson(req)).event_ids));
@@ -299,7 +304,7 @@ const server = createServer((req, res) => { void (async () => {
     const {rows} = await pool.query<{service: string; seen_at: Date}>('SELECT service, seen_at FROM service_heartbeats ORDER BY service');
     return json(res, 200, {service: config.service, guard_mode: config.guardMode, services: rows, archive: await archiveStatus(pool)});
   }
-  if (config.service === 'archive' && req.method === 'POST' && path === '/v1/ingest') {
+  if (servesArchive && req.method === 'POST' && path === '/v1/ingest') {
     return json(res, 200, await ingest(pool, envelope(await readJson(req, 16*1024*1024))));
   }
   throw new HttpError(404, 'not_found');
@@ -314,6 +319,6 @@ let stopping=false;
 function stop() {
   if(stopping)return;stopping=true;clearInterval(timer);transport?.close();
   const closed=new Promise<void>(resolve=>server.close(()=>resolve()));
-  void Promise.all([closed,stopWorker()]).then(()=>pool.end()).then(()=>process.exit(0));
+  void Promise.all([closed,stopWorker(),workflows?.close()]).then(()=>Promise.all([pool.end(),workflowPool?.end()])).then(()=>process.exit(0));
 }
 process.on('SIGTERM', stop); process.on('SIGINT', stop);
