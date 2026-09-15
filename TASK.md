@@ -50,7 +50,12 @@ pass; the wider regression encountered failures while the host was unstable.
 The candidate is not installed pending completion of that verification. The
 broader run was interrupted after three reported failures; it is not a pass.
 The Honcho deadline test now uses controlled time and passes independently.
-These source changes remain in the session worktree pending the wider gate.
+After the owner-approved graceful OrbStack restart, the isolated serial service
+regression passed all 76 tests with no skips. All 38 pre-restart containers were
+running again, both host workers restarted, and all nine admissions reopened.
+No force-stop, reset, or volume deletion occurred. The checked-out connection
+recovery fix is verified for integration; installation is recorded separately.
+[Recovery evidence](compatibility/results/2026-09-16-database-recovery.json).
 
 Fresh format-4 backup and inactive restore passed with 45 archive tables, 14
 Inngest tables and 676 protected files. The first restore exposed a Redis

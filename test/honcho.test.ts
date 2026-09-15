@@ -8,15 +8,18 @@ import {prepareGuarded,setGuardMode,guardState,editGuarded} from '../src/guarded
 import {honchoClient,syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,memoryContext,refreshMemoryContext,prepareMemoryRequest,observeGeneration,type HonchoCall} from '../src/honcho.js';
 
 test('slow Honcho recall can finish while ordinary calls retain their deadline',async t=>{
- const timeout=AbortSignal.timeout.bind(AbortSignal);
- t.mock.method(AbortSignal,'timeout',(ms:number)=>timeout(ms/10000));
+ t.mock.timers.enable({apis:['setTimeout']});
+ t.mock.method(AbortSignal,'timeout',(ms:number)=>{
+  const controller=new AbortController();setTimeout(()=>controller.abort(new DOMException('Synthetic deadline','TimeoutError')),ms/10000);return controller.signal;
+ });
  t.mock.method(globalThis,'fetch',(_url:unknown,init:RequestInit)=>new Promise<Response>((resolve,reject)=>{
   const timer=setTimeout(()=>resolve(Response.json({content:'Synthetic memory'})),25);
   init.signal!.addEventListener('abort',()=>{clearTimeout(timer);reject(init.signal!.reason);},{once:true});
  }));
  const call=honchoClient('http://synthetic-honcho');
- assert.equal((await call('/v3/workspaces/test/peers/source/chat',{})).content,'Synthetic memory');
- await assert.rejects(call('/v3/workspaces/test/queue/status'),{code:'honcho_unavailable'});
+ const recall=call('/v3/workspaces/test/peers/source/chat',{});t.mock.timers.tick(25);
+ assert.equal((await recall).content,'Synthetic memory');
+ const rejected=assert.rejects(call('/v3/workspaces/test/queue/status'),{code:'honcho_unavailable'});t.mock.timers.tick(25);await rejected;
 });
 
 test('durable Honcho receipts, consent, isolation, uncertain writes and current-only egress',{skip:!process.env.PGHOST},async()=>{
