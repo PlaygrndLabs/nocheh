@@ -7,6 +7,16 @@ runs, not tests repeated by the documentation migration.
 
 <production_completion>
 
+[ADR-0045](docs/adr/0045-honcho-in-installation-compose.md) moves production
+Honcho lifecycle into the installation Compose project. Twenty focused host checks
+pass, including resolved Compose isolation and inactive restore storage rebinding.
+The pinned Hermes suite passes 161 tests with three optional checks skipped (the
+Compose check is covered on the host). The first host-wide attempt lacked native
+Hermes dependencies; the first container attempt lacked its synthetic service token.
+Both are harness failures, not acceptance passes. The corrected full container run
+passes. Local storage adoption and removal of the old active Honcho group are pending.
+
+
 The owner authorized the full production follow-up and local maintenance window.
 All nine family admissions were reopened after the owner's explicit approval,
 without changing ownership. The initial reopen attempt could not connect during

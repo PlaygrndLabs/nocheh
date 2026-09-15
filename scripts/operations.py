@@ -18,7 +18,7 @@ try: from .configuration import compose_environment, env_path, initialize, load,
 except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env
 
 ROOT=Path(__file__).resolve().parents[1]
-SERVICES=['hermes','workflow-worker','worker','inngest','security-launcher','security','guard','archive','speech','provider-monitor','cliproxy']
+SERVICES=['hermes','workflow-worker','worker','honcho','deriver','meter','redis','inngest','security-launcher','security','guard','archive','speech','provider-monitor','cliproxy']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -129,8 +129,9 @@ def backup(state,output,leave_stopped=False):
                     tar.add(path,arcname='state/'+relative,recursive=False)
             # Provider reservations live outside the archive. Snapshot them with
             # SQLite's backup API; restoring Nocheh never resets the live ledger.
-            ledger=ROOT/'data/honcho-experiment/ledger/budget.sqlite'
-            if state.resolve()==(ROOT/'data/local').resolve() and ledger.is_file():
+            memory_state=env.get('NOCHEH_HONCHO_STATE_DIR') or (ROOT/'data/honcho-experiment' if state.resolve()==(ROOT/'data/local').resolve() else state/'honcho')
+            ledger=Path(memory_state)/'ledger/budget.sqlite'
+            if ledger.is_file():
                 copy=stage/'memory-budget.sqlite';source=sqlite3.connect(ledger.as_uri()+'?mode=ro',uri=True);target=sqlite3.connect(copy)
                 try:source.backup(target);target.commit()
                 finally:source.close();target.close()
@@ -199,7 +200,9 @@ def restore(snapshot,state,project,port):
     initialize_provider(state)
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
-    config.update(TELEGRAM_ENABLED='false',NOCHEH_WORKFLOWS_ENABLED='false',NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
+    config.update(TELEGRAM_ENABLED='false',NOCHEH_WORKFLOWS_ENABLED='false',NOCHEH_HONCHO_ENABLED='false',NOCHEH_HONCHO_STATE_DIR=str(state/'honcho'),
+                  NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
+                  NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
                   NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()

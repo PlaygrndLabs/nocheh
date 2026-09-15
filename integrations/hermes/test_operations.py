@@ -102,9 +102,15 @@ class SnapshotTests(unittest.TestCase):
                     self.assertFalse(any((state/'provider/auth').glob('*.json')))
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
                     self.assertIn("NOCHEH_WORKFLOWS_ENABLED='false'",(state/'.env').read_text())
+                    from scripts.configuration import read_env
+                    restored=read_env(state/'.env')
+                    self.assertEqual(restored['NOCHEH_HONCHO_ENABLED'],'false')
+                    self.assertEqual(restored['NOCHEH_HONCHO_STATE_DIR'],str(state/'honcho'))
+                    self.assertEqual(restored['NOCHEH_HONCHO_DATABASE_VOLUME'],'nocheh-test-restore_honcho_database')
+                    self.assertEqual(restored['NOCHEH_HONCHO_REDIS_VOLUME'],'nocheh-test-restore_honcho_redis')
                 return SimpleNamespace(returncode=0)
             with patch('scripts.operations.validate_snapshot',return_value=manifest),\
-                 patch('scripts.operations.initialize',return_value={'TELEGRAM_ENABLED':'true'}),\
+                 patch('scripts.operations.initialize',return_value={'TELEGRAM_ENABLED':'true','NOCHEH_HONCHO_ENABLED':'true','NOCHEH_HONCHO_STATE_DIR':'/live/memory','NOCHEH_HONCHO_DATABASE_VOLUME':'live-db','NOCHEH_HONCHO_REDIS_VOLUME':'live-cache'}),\
                  patch('scripts.operations.compose',return_value=['fixture']),\
                  patch('scripts.operations.environment',return_value={}),\
                  patch('scripts.operations.fingerprints',return_value=manifest['tables']),\

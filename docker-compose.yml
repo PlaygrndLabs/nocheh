@@ -37,7 +37,96 @@ x-service: &service
     retries: 12
     start_period: 10s
 
+x-honcho-runtime: &honcho-runtime
+  image: nocheh-honcho-experiment:be543555
+  build:
+    context: ./data/compat/upstreams/honcho
+    dockerfile: ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/honcho.Dockerfile
+  profiles: [honcho]
+  env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/honcho.env", required: false}]
+  networks: [honcho-isolated]
+  restart: unless-stopped
+  stop_grace_period: 120s
+
 services:
+  database:
+    profiles: [honcho]
+    restart: unless-stopped
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    environment:
+      POSTGRES_DB: honcho_experiment
+      POSTGRES_USER: experiment
+      POSTGRES_PASSWORD_FILE: /run/secrets/honcho_database_password
+    secrets: [honcho_database_password]
+    volumes: [honcho_database:/var/lib/postgresql/data]
+    networks: [honcho-isolated]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U experiment -d honcho_experiment]
+      interval: 3s
+      retries: 30
+  redis:
+    volumes: [honcho_redis:/data]
+    profiles: [honcho]
+    restart: unless-stopped
+    image: redis:8.2@sha256:7d1e4ce8b9395088377ab382d1f6cfdbd13b3690795198a0399ab8d683064d6d
+    networks: [honcho-isolated]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      retries: 20
+  honcho:
+    <<: *honcho-runtime
+    entrypoint: [sh, -c, '/app/.venv/bin/python scripts/provision_db.py && exec /app/.venv/bin/python /nocheh/run.py api']
+    volumes: [./integrations/honcho:/nocheh:ro]
+    networks:
+      honcho-isolated: {}
+      memory: {aliases: [honcho-memory]}
+    depends_on:
+      database: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      meter: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, /app/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+  deriver:
+    <<: *honcho-runtime
+    entrypoint: [/app/.venv/bin/python, /nocheh/run.py, deriver]
+    volumes: [./integrations/honcho:/nocheh:ro]
+    depends_on:
+      honcho: {condition: service_healthy}
+  meter:
+    environment: {NOCHEH_ARCHIVE_URL: "http://archive:8780"}
+    profiles: [honcho]
+    restart: unless-stopped
+    image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
+    command: [python, /experiment/meter.py]
+    env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/meter.env", required: false}]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    volumes:
+      - ./experiments/honcho/meter.py:/experiment/meter.py:ro
+      - ./scripts/embedding_config.py:/experiment/embedding_config.py:ro
+      - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
+      - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/ledger:/ledger
+      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/honcho.key:/run/secrets/cliproxy_honcho_key:ro
+    secrets: [temporary_embedding_key]
+    networks: [honcho-isolated, honcho-egress, memory]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8790/health',timeout=2)"]
+      interval: 5s
+      retries: 15
+  cli:
+    image: nocheh-honcho-cli:0.1.4
+    build: {context: ./experiments/honcho, dockerfile: cli.Dockerfile}
+    profiles: [honcho-tools]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
+    networks: [honcho-isolated]
+
   security:
     <<: *service
     command: [node, dist/src/security/main.js]
@@ -388,9 +477,18 @@ services:
       start_period: 15s
 
 volumes:
+  honcho_database:
+    external: true
+    name: ${NOCHEH_HONCHO_DATABASE_VOLUME:-nocheh_honcho_database}
+  honcho_redis:
+    external: true
+    name: ${NOCHEH_HONCHO_REDIS_VOLUME:-nocheh_honcho_redis}
   postgres_data:
 
 networks:
+  honcho-isolated:
+    internal: true
+  honcho-egress: {}
   workflows:
     internal: true
   agent:
@@ -399,3 +497,9 @@ networks:
   memory:
     name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
     internal: true
+
+secrets:
+  honcho_database_password:
+    file: ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/database_password
+  temporary_embedding_key:
+    file: ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/temporary_embedding_key

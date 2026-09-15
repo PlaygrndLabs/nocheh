@@ -18,6 +18,7 @@ DEFAULTS = {
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_WORKFLOWS_ENABLED': 'false', 'NOCHEH_WORKFLOW_UI_PORT': '8288',
+    'NOCHEH_HONCHO_ENABLED': 'false',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
 }
@@ -83,6 +84,7 @@ def load(state):
 
 def validate(values):
     embeddings(values)
+    if values.get('NOCHEH_HONCHO_ENABLED','false') not in ('true','false'):raise ValueError('Invalid NOCHEH_HONCHO_ENABLED')
     if values.get('NOCHEH_WORKFLOWS_ENABLED','false') not in ('true','false'):raise ValueError('Invalid NOCHEH_WORKFLOWS_ENABLED')
     if not str(values.get('NOCHEH_WORKFLOW_UI_PORT','8288')).isdigit() or not 1024<=int(values.get('NOCHEH_WORKFLOW_UI_PORT','8288'))<=65535:raise ValueError('Invalid NOCHEH_WORKFLOW_UI_PORT')
     for name in ('INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'):
@@ -159,7 +161,9 @@ def compose_environment(state):
     result['NOCHEH_NATIVE_ADMIN_PORT'] = str(native_admin_port(state))
     result['NOCHEH_STATE_DIR'] = str(Path(state).resolve())
     # Profiles are explicit per installation; a stale shell cannot activate workflows.
-    profiles=[v for v in result.get('COMPOSE_PROFILES','').split(',') if v and v!='workflows']
+    profiles=[v for v in result.get('COMPOSE_PROFILES','').split(',') if v and v not in ('workflows','honcho','honcho-tools')]
     if result.get('NOCHEH_WORKFLOWS_ENABLED')=='true':profiles.append('workflows')
+    if result.get('NOCHEH_HONCHO_ENABLED')=='true' and not (Path(state)/'spool/.restore-inactive').exists():profiles.append('honcho')
+    result['NOCHEH_HONCHO_STATE_DIR']=load(state).get('NOCHEH_HONCHO_STATE_DIR') or str(Path(state).resolve()/'honcho')
     result['COMPOSE_PROFILES']=','.join(profiles)
     return result
