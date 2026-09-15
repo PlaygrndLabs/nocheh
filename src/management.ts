@@ -18,7 +18,6 @@ const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
 const JOBS = join(STATE, 'admin/jobs');
 const PORT = Number(process.env.NOCHEH_DASHBOARD_PORT ?? 8783);
-const NATIVE = Number(process.env.NOCHEH_DASHBOARD_NATIVE_PORT ?? 8784);
 const MONITOR = Number(process.env.NOCHEH_PROVIDER_MONITOR_PORT ?? 18317);
 const PREFIX = '/api/plugins/nocheh';
 const PRIMARY = '/api/nocheh';
@@ -358,12 +357,8 @@ export async function startManagement() {
       const page=req.method==='GET'&&!path.startsWith('/hermes/api/')&&!path.startsWith('/hermes/assets/')&&!path.startsWith('/hermes/dashboard-plugins/');
       const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
       if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
-      const presentation=path.startsWith('/hermes/api/dashboard/')||path==='/hermes/api/auth/me';
-      if(path.startsWith('/hermes/api/')&&!presentation) {
-        const connection=object(await python({operation:'native.connection'}));
-        proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf);return;
-      }
-      proxyNative(req,res,NATIVE,token,session.csrf);return;
+      const connection=object(await python({operation:'native.connection'}));
+      proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf);return;
     }
     throw new HttpError(404,'not_found');
   })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,

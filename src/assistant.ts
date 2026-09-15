@@ -25,6 +25,13 @@ async function dispatchReceipt(client:pg.PoolClient,eventId:string,result:Record
     active?5:60,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:result.state==='done'?'delivery':null]);
 }
 
+export async function storedTranscripts(client:pg.Pool|pg.PoolClient,eventId:string):Promise<string[]|null> {
+  const {rows}=await client.query<{content:Buffer|null}>(`SELECT d.content FROM artifacts a
+    LEFT JOIN derived_artifacts d ON d.id=encode(sha256(convert_to(a.id||':transcript:'||$2,'UTF8')),'hex')
+    WHERE a.event_id=$1 AND a.kind IN ('voice','audio','video_note') ORDER BY a.id`,[eventId,TRANSCRIPTION_VERSION]);
+  return rows.some(row=>row.content===null)?null:rows.map(row=>row.content!.toString());
+}
+
 export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call,authority:ExecutionAuthority=legacyAuthority):Promise<string[]|null> {
   const {rows}=await client.query<{id:string;file_hash:string;kind:string;state:string;metadata:{file_name?:string}}>(
     "SELECT id,file_hash,kind,state,metadata FROM artifacts WHERE event_id=$1 AND kind IN ('voice','audio','video_note') ORDER BY id",[eventId]);
@@ -95,14 +102,14 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,e
     if (!scope) {await client.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[event.id]);return;}
     const missing=await client.query("SELECT id FROM artifacts WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event.id]);
     if (missing.rowCount) {await client.query("UPDATE dispatches SET error_code='waiting_for_attachments',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
-    const transcripts=await prepareTranscripts(client,config.dataDir,event.id,call);
+    const transcripts=authority.owner==='inngest'?await storedTranscripts(client,event.id):await prepareTranscripts(client,config.dataDir,event.id,call);
     if (transcripts===null) {await client.query("UPDATE dispatches SET error_code='waiting_for_transcription',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
     const attempt=event.state==='running'?event.attempts:event.attempts+1;
     const control=await controlReply(pool,config.assistant,event.id);
     const guard=await guardState(pool);
     let text=event.original_text?.toString()??null,selectedTranscripts=transcripts;
     if(guard.mode==='on') {
-      await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event.id);
+      if(authority.owner==='legacy')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event.id);
       try {
         text=(await guardedValue(pool,'events:'+event.id)).value.text;
         const derived=await pool.query("SELECT id FROM derived_artifacts WHERE event_id=$1 AND kind='transcript' ORDER BY id",[event.id]);
