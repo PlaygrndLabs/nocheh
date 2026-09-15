@@ -283,14 +283,21 @@ are synthetic startup timings, not Telegram delivery acceptance. The isolated se
 test stack was stopped; unrelated services were left running. Three active
 Nocheh services had restarted, with Docker reporting no OOM kill at inspection.
 
-The owner asked how relevance should be detected and for Hermes/Honcho setup
-best practice. Native Hermes supports hybrid cached context, asynchronous writes,
-background retrieval and agent-selected recall tools. Nocheh currently uses a
-guarded blocking recall adapter and manages memory.provider itself; editing a
-native Honcho setting alone does not change that adapter. Hybrid retrieval with
-bounded context and fresh audience/guard checks is a recommendation, not an
-implemented or activated mode. The blanket reasoning call remains a latency
-limitation. [Native provider reference](https://github.com/NousResearch/hermes-agent/blob/main/plugins/memory/honcho/README.md).
+The owner reaffirmed ADR-0033: Honcho is the primary long-term memory and Hermes
+keeps small native notes. The earlier use of "hybrid" referred to native Hermes's
+combination of automatic context and recall tools, not a different memory-backend
+decision. The latency recommendation is to provide Honcho context automatically,
+reuse Honcho-provided context where valid, refresh it in the background, and use
+deeper reasoning tools when useful. Small native notes remain complementary;
+the recommendation does not make primary memory depend only on the agent choosing
+a tool. It must preserve full authorized native context and enforce current
+audience, source revisions and memory generations before any cache reuse.
+Nocheh currently uses a guarded blocking recall adapter and manages memory.provider
+itself; editing a native Honcho setting alone does not change that adapter. This
+retrieval optimization is a recommendation, not an implemented or activated mode.
+The blanket reasoning call remains a latency limitation.
+[Accepted memory decision](docs/adr/0033-guarded-projections-and-honcho-memory.md).
+[Native provider reference](https://github.com/NousResearch/hermes-agent/blob/main/plugins/memory/honcho/README.md).
 
 The standard services rebuild stalled resolving the pinned Node base metadata
 and was cancelled. An offline candidate copies only the tested compiled Honcho
