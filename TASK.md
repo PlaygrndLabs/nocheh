@@ -7,77 +7,58 @@ runs, not tests repeated by the documentation migration.
 
 <production_completion>
 
-[ADR-0045](docs/adr/0045-honcho-in-installation-compose.md) moves production
-Honcho lifecycle into the installation Compose project. Twenty focused host checks
-pass, including resolved Compose isolation and inactive restore storage rebinding.
-The pinned Hermes suite passes 161 tests with three optional checks skipped (the
-Compose check is covered on the host). The first host-wide attempt lacked native
-Hermes dependencies; the first container attempt lacked its synthetic service token.
-Both are harness failures, not acceptance passes. The corrected full container run
-passes. Local storage adoption and removal of the old active Honcho group are pending.
-
-
-The owner authorized the full production follow-up and local maintenance window.
-All nine family admissions were reopened after the owner's explicit approval,
-without changing ownership. The initial reopen attempt could not connect during
-a new PostgreSQL recovery; the guarded transaction succeeded after health
-recovered. The memory availability/startup repairs and automatic primary-context
-images are installed. One interrupted native review had no receipt and no active
-isolated turn; it remains ambiguous with its original identity and 25 attempts.
-
-Preflight found repeated PostgreSQL backend exits with code 2 and recovery cycles.
-The database container had no OOM kill, its volume was not shared, and the other
-project's database showed no corresponding failures. A graceful restart was
-followed by further backend exits at 16:25, 19:20 and 19:22 UTC. Temporary
-connection-only diagnostics have been removed and logging is confirmed off.
-The cause remains unresolved. Docker also failed to stop several containers and
-reported a zombie process during the separately approved temporary coopr stop.
-All 17 original coopr containers were confirmed running again at 19:40 UTC.
-A graceful OrbStack restart has been requested; no force-stop is authorized.
-The read-only `orbctl list` attempt timed out waiting for the VM to start, and
-the final PostgreSQL connection check failed. Synthetic fixture services are
-stopped. [Reopening evidence](compatibility/results/2026-09-15-admission-reopening.json)
-records the actual successful transition separately from these later failures.
-
-[ADR-0044](docs/adr/0044-automatic-honcho-context.md) implements automatic primary
-Honcho context with a protected generation cache, a durable two-minute refresh,
-and scoped deeper recall. Native notes stay small. The final isolated service
-run passed all 75 checks; 157 Hermes checks passed with two optional checks
-skipped. Installed image artifacts match the tested code and Graphify is refreshed.
-[Evidence](compatibility/results/2026-09-15-primary-honcho-context.json) records
-fixture corrections and limits. After reopening admission, the regular Inngest
-refresh populated the protected context cache. A scoped live read returned in
-429 ms, reported memory available and contained the expected synthetic garden
-fact. The same permanent context workflow waits for its next two-minute refresh.
-
-Both new owner Telegram messages survived capture and spool draining. Voice
-transcription contains the expected synthetic phrase. Their one-attempt native
-receipts did not pass delivery acceptance: text is ambiguous (`dispatch_interrupted`)
-and voice is suppressed (`unsupported_message`). Neither receipt is reopened.
-An additional database recovery fix handles errors on checked-out clients and
-discards a guard connection even if rollback/unlock fails. Five focused checks
-pass; the wider regression encountered failures while the host was unstable.
-The candidate is not installed pending completion of that verification. The
-broader run was interrupted after three reported failures; it is not a pass.
-The Honcho deadline test now uses controlled time and passes independently.
-After the owner-approved graceful OrbStack restart, the isolated serial service
-regression passed all 76 tests with no skips. All 38 pre-restart containers were
-running again, both host workers restarted, and all nine admissions reopened.
-No force-stop, reset, or volume deletion occurred. The checked-out connection
-recovery fix is verified for integration; installation is recorded separately.
+The owner-approved graceful OrbStack restart succeeded without a force-stop or
+reset. All 38 previously running containers were restored, including the separate
+coopr project. PostgreSQL recorded no further backend exits between its restart
+at 19:58 UTC and the final maintenance check. The earlier backend-exit root cause
+remains unproven. The checked-out database connection and guard cleanup repairs
+are installed; all 76 isolated service tests passed without skips.
 [Recovery evidence](compatibility/results/2026-09-16-database-recovery.json).
 
-Fresh format-4 backup and inactive restore passed with 45 archive tables, 14
-Inngest tables and 676 protected files. The first restore exposed a Redis
-daemon-readiness race; bounded readiness and explicit AOF-configuration checks
-fixed it. Eleven focused host tests and a fresh isolated restore passed. Both
-restore projects are stopped; no restored login, worker, Telegram or Honcho
-activation occurred. The new cache table was empty, so this snapshot proves
-schema inclusion, not recovery of populated cache content.
-[Recovery evidence](compatibility/results/2026-09-15-primary-context-recovery.json)
-records the checks. Real owner Telegram delivery acceptance, stable operation and
-the final preparation/Telegram cutovers remain pending. Local integration succeeded;
-remote fetch/push require GitHub authentication.
+Production Honcho now runs in the main `nocheh` Compose project under
+[ADR-0045](docs/adr/0045-honcho-in-installation-compose.md). The existing PostgreSQL
+and Redis volumes were adopted, with a private database dump, Redis snapshot,
+spending-ledger snapshot, and protected-configuration hashes retained. All 12
+Honcho tables matched before and after adoption. A storage rollback rehearsal
+started the old containers, verified those same fingerprints, then returned to
+the new containers before starting writers. Nocheh attachment, generations and
+receipts, provider credentials and spending policy were preserved. The five old
+containers and two empty private networks were removed; no volume was deleted.
+Twenty focused host checks passed. The pinned Hermes suite passed 161 tests with
+three optional checks skipped; resolved Compose checks ran separately on the host.
+[Consolidation evidence](compatibility/results/2026-09-16-honcho-compose.json).
+
+Only `nocheh` and the unrelated `coopr` Compose groups remain. Nocheh has 20 running
+services with healthy checks and one completed bootstrap container. Both host
+workers run; all nine family admissions are open and all registrations are fresh.
+Seven families retain Inngest ownership at epoch 2. Preparation and Telegram retain
+legacy ownership at epoch 1. No ownership or closed execution identity was changed.
+There is no admitted outbox backlog; legacy-owned pending requests remain visible.
+
+Automatic primary Honcho context under ADR-0044 recovered through its existing
+permanent workflow and dispatch. The maintenance-expired cache initially reported
+limited memory, then the regular refresh restored current authorized context. A
+scoped read returned the expected synthetic garden fact in 97 ms with memory
+available. This is a context-read measurement, not end-to-end Telegram latency.
+Hermes still uses small native notes, with Honcho as primary long-term memory.
+
+The previous owner text and voice survived capture; the stored voice transcript
+contains the expected synthetic phrase. Their one-attempt receipts remain closed:
+text is ambiguous (`dispatch_interrupted`), voice suppressed (`unsupported_message`).
+A captionless synthetic voice fixture passes, but that does not replace real
+Telegram delivery acceptance. A fresh owner text/voice pair has been requested.
+Group silence, isolation, approval and restart acceptance, the final two workflow
+cutovers, and a new backup/inactive restore with populated context remain pending.
+The earlier format-4 backup/inactive restore passed before this maintenance; its
+cache table was empty and it is not fresh evidence for the current populated cache.
+
+Stopped restore, fixture and obsolete dashboard containers were removed without
+removing their recovery data or volumes. Two completed worktrees were removed;
+untracked diagram context and graph artifacts were preserved under
+`data/local/reports/worktree-cleanup-20260915`. The session branch is integrated
+and has no active container mounts. Final worktree cleanup results are recorded
+in the host reports after Git integration. Local commits are merged into main;
+remote fetch/push remain blocked by GitHub HTTPS authentication.
 
 </production_completion>
 
