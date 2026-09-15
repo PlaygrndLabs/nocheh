@@ -1,12 +1,11 @@
 """One supervised scheduler over native jobs; every fire is captured before execution."""
-import asyncio
 import fcntl
 import json
 import threading
 import uuid
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
-from .capture import canonical,digest,immutable_file
+from .capture import canonical,digest
 from .native_cron import archive,store,inspect,profiles,definition,revision,workflow_cursor,sync_job
 from .native_memory import save_receipt
 
@@ -20,10 +19,7 @@ class Scheduler:
         self.admin,self.credentials=admin,credentials
         self.root=Path(admin.root);self.actor=uuid.uuid4().hex
         self.call=call or (lambda route,body:archive(route,body,admin.token))
-        if runner is None:
-            from .turn_process import run_process
-            runner=run_process
-        self.runner=runner;self.stopping=threading.Event();self.active={};self.thread=None;self.status='starting'
+        self.stopping=threading.Event();self.thread=None;self.status='starting'
         self.receipts=self.root/'nocheh-scheduler-receipts'
         self.managed_flush=lambda:None
 
@@ -50,22 +46,12 @@ class Scheduler:
 
     def recover(self):
         self.flush();self.call('recover',{})
-        if self.call('ownership',{}).get('owner')=='inngest':return
-        from cron import jobs as native
-        for _,home,_ in profiles(self.admin):
-            if not (home/'cron/jobs.json').exists():continue
-            with store(home):
-                for job in inspect(home):
-                    if job.get('nocheh_running'):
-                        native.update_job(job['id'],{'nocheh_running':None,'last_status':'error','last_error':'scheduler_restarted'})
 
-    def tick(self,at=None,target=None,expected=None,epoch=None):
+    def _advance(self,target,expected,epoch,at=None):
         at=at or now();self.flush()
         ownership=self.call('ownership',{})
         if not ownership.get('admission',True):return {'state':'waiting','next_attempt':int((at+timedelta(seconds=30)).timestamp()*1000)}
-        owner=ownership.get('owner','legacy')
-        if epoch is not None and (owner!='inngest' or ownership.get('epoch')!=epoch):raise ValueError('workflow_owner_changed')
-        if epoch is None and owner!='legacy':return
+        if not target or not isinstance(epoch,int) or ownership.get('owner')!='inngest' or ownership.get('epoch')!=epoch:raise ValueError('workflow_owner_changed')
         from cron import jobs as native
         for name,home,bound in profiles(self.admin):
             if target and home.name!=target[0]:continue
@@ -88,7 +74,7 @@ class Scheduler:
                         continue
                     scheduled_for=pending['at'] if pending else due
                     reason=pending['reason'] if pending else 'scheduled'
-                    if job.get('nocheh_running') or bound.profile in self.active or len(self.active)>=4:reason='overlap'
+                    if job.get('nocheh_running'):reason='overlap'
                     elif not pending and (at-date(due)).total_seconds()>60:reason='missed'
                     request_id=pending['id'] if pending else due
                     fire=digest(canonical({'profile':home.name,'job':job['id'],'request':request_id,'type':'manual' if pending else 'scheduled'}))
@@ -96,7 +82,7 @@ class Scheduler:
                     captured=self.call('input',{'id':fire,'conversation':job['id'],'scope':bound.chat_id,'profile':bound.profile,
                         'space':bound.space,'revision':bound.revision,'text':job['prompt'],'files':[],
                         'job_id':job['id'],'job_revision':revision(job,home.name),'scheduled_for':scheduled_for,
-                        'fire_reason':reason,'definition':snapshot,**({'owner_epoch':epoch} if epoch is not None else {})})
+                        'fire_reason':reason,'definition':snapshot,'owner_epoch':epoch})
                     reason=captured.get('fire_reason',reason)
                     updates={'nocheh_pending':None,'nocheh_workflow_synced':False}
                     if not pending:
@@ -120,26 +106,12 @@ class Scheduler:
                     updates['nocheh_running']=captured['event_id']
                     if reason=='catch_up':updates['nocheh_missed']=None
                     saved=native.update_job(job['id'],updates)
-                    if epoch is not None:
-                        sync_job(self.call,saved,home,bound);return {'state':'completed'}
-                    try:claim=self.call('claim',{'event_id':captured['event_id'],'actor':self.actor,'scope':bound.chat_id,'profile':bound.profile})
-                    except Exception:
-                        # No child has started. Retire this uncertain claim; never
-                        # retry its model turn or leave the job permanently blocked.
-                        native.update_job(job['id'],{'nocheh_running':None,'last_status':'error','last_error':'claim_unconfirmed'})
-                        try:self.call('cancel',{'event_id':captured['event_id']})
-                        except Exception:pass  # The archive lease will expire.
-                        continue
-                    if not claim.get('claimed'):
-                        native.update_job(job['id'],{'nocheh_running':None,'last_status':'error','last_error':'previous_fire_'+claim['state']});continue
-                    cancelled=threading.Event()
-                    thread=threading.Thread(target=self.execute,args=(home,bound,job,claim,cancelled),daemon=True)
-                    self.active[bound.profile]=(thread,cancelled);thread.start()
+                    sync_job(self.call,saved,home,bound);return {'state':'completed'}
         if target:return {'state':'skipped'}
 
     def advance(self,body):
         if (self.root/'scheduler-inactive').exists():return {'state':'waiting','next_attempt':int((now()+timedelta(seconds=30)).timestamp()*1000)}
-        return self.tick(target=(body['logical_profile'],body['job_id']),expected=body['cursor'],epoch=body['owner_epoch'])
+        return self._advance(target=(body['logical_profile'],body['job_id']),expected=body['cursor'],epoch=body['owner_epoch'])
 
     def sync(self):
         from cron import jobs as native
@@ -164,40 +136,6 @@ class Scheduler:
                 return {'state':'ready','context':context,'scope':bound,**({'claim':self.call('claim',context)} if claim else {})}
         self.call('cancel',{'event_id':context['event_id']});return {'state':'cancelled'}
 
-    def execute(self,home,bound,job,claim,cancelled):
-        event=claim['event_id'];session='cron_'+job['id']+'_'+event[:24]
-        stopped=threading.Event();lost=threading.Event()
-        def heartbeat():
-            while not stopped.wait(5):
-                try:
-                    status=self.call('heartbeat',{'event_id':event,'actor':self.actor})
-                    if status.get('cancel_requested'):cancelled.set()
-                except Exception:lost.set();cancelled.set();return
-        monitor=threading.Thread(target=heartbeat,daemon=True);monitor.start()
-        result={'state':'failed','text':'','session_id':session,'error_code':'scheduled_run_failed'}
-        try:
-            from .scopes import verify_capability
-            verify_capability(claim['archive_credential'],self.admin.token,bound,event)
-            credentials=self.credentials()
-            body={**claim,'channel':'scheduler','job_id':job['id'],'job_preferences':job.get('nocheh_preferences',{})}
-            result=asyncio.run(self.runner(self.root,bound,body,self.admin.model,credentials,session,cancelled=cancelled))
-        except Exception as error:
-            code=str(error) if str(error) in ('profile_busy','quota_paused','subscription_unavailable','browser_audience_changed','space_policy_changed') else 'scheduled_run_failed'
-            result.update(error_code=code)
-        finally:
-            stopped.set();monitor.join(timeout=1)
-            state='interrupted' if lost.is_set() else 'cancelled' if cancelled.is_set() else result['state']
-            receipt={'logical_profile':home.name,'job_id':job['id'],'scope':bound.chat_id,'deliver':job.get('deliver','local'),
-                'at':now().isoformat(),
-                'finish':{'event_id':event,'actor':self.actor,'session':result.get('session_id',session),'state':state,
-                    'text':result.get('text',''),'error_code':result.get('error_code')}}
-            try:
-                self.receipts.mkdir(parents=True,exist_ok=True,mode=0o700)
-                immutable_file(self.receipts,event+'.json',canonical(receipt))
-                self.publish(receipt);(self.receipts/(event+'.json')).unlink(missing_ok=True)
-            except Exception:pass  # Receipt is durable; external execution is never repeated.
-            self.active.pop(bound.profile,None)
-
     def serve(self):
         with (self.root/'.nocheh-scheduler.lock').open('a') as lock:
             try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -208,15 +146,11 @@ class Scheduler:
                 else:
                     try:
                         if not recovered:self.recover();recovered=True
-                        ownership=self.call('ownership',{})
                         self.managed_flush();self.sync()
-                        if ownership.get('owner')=='inngest':self.flush();self.status='workflow_owned'
-                        else:self.tick();self.status='ready'
+                        self.flush();self.status='workflow_owned'
                     except Exception:self.status='waiting_for_archive'
-                save_receipt(self.root/'scheduler-status.json',json.dumps({'state':self.status,'actor':self.actor,'at':now().isoformat(),'active':len(self.active)}))
+                save_receipt(self.root/'scheduler-status.json',json.dumps({'state':self.status,'actor':self.actor,'at':now().isoformat()}))
                 self.stopping.wait(2)
-            for _,cancelled in list(self.active.values()):cancelled.set()
-            for thread,_ in list(self.active.values()):thread.join(timeout=30)
             self.status='stopped'
 
     def start(self):

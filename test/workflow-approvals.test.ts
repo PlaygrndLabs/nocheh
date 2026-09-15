@@ -15,6 +15,12 @@ test('approval workflows wait for exact owner decisions, preserve receipt identi
   try{
     await initialize(pool);await pauseFamily(pool,'actions',1);await switchFamily(pool,'actions',1,'inngest');
     const source=await ingest(pool,{version:1,key:'fixture:approval-source',origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'1',revision:'1',occurred_at:null,text:'Synthetic request',payload:{}});
+    const current=await requestAction(pool,{scope:'123',admin:false,turnEvent:source.id},{destination:'current',text:'Current chat only'});
+    assert.equal((await pool.query('SELECT destination,state FROM action_requests WHERE id=$1',[current.id])).rows[0].destination,'123');
+    assert.equal((await pool.query('SELECT state FROM action_requests WHERE id=$1',[current.id])).rows[0].state,'proposed');
+    await assert.rejects(requestAction(pool,{scope:'999',admin:false,turnEvent:source.id},{destination:'current',text:'Denied'}),{code:'action_scope_denied'});
+    const browser=await ingest(pool,{version:1,key:'fixture:browser-source',origin:'live',channel:'browser',bot_id:'fixture',kind:'message',scope:'123',source_id:'2',revision:'1',occurred_at:null,text:'Synthetic',payload:{}});
+    await assert.rejects(requestAction(pool,{scope:null,admin:true,turnEvent:browser.id},{destination:'current',text:'No inferred Telegram destination'}),{code:'invalid_action'});
     const args={destination:'777',text:'Synthetic exact approved text'},action=await requestAction(pool,{scope:null,admin:true,turnEvent:source.id},args);
     const workflow=(await pool.query("SELECT id FROM workflow_registry WHERE family='actions' AND job_id=$1",[action.id])).rows[0].id;
     let calls=0;const identities:string[]=[];
@@ -23,7 +29,7 @@ test('approval workflows wait for exact owner decisions, preserve receipt identi
     assert.equal((await advance()).waiting_reason,'approval_required');assert.equal(calls,0);
     await assert.rejects(decideTelegram(pool,{scope:null,admin:true},{id:action.id,fingerprint:'wrong',decision:'approve'}),{code:'action_changed'});
     await decideTelegram(pool,{scope:null,admin:true},{id:action.id,fingerprint:digest(canonical(args)),decision:'approve'});
-    await executeApproved(pool,async()=>{throw Error('legacy_runner_must_not_execute');});
+    await executeApproved(pool,async()=>{throw Error('legacy_runner_must_not_execute');},undefined,{owner:'inngest',epoch:1});
     assert.equal((await advance()).state,'running');assert.equal(calls,1);
     assert.equal((await advance()).state,'running');assert.equal(calls,1,'receipt wait is not a failed attempt');
     await pool.query("UPDATE action_requests SET updated_at=now()-interval '31 seconds' WHERE id=$1",[action.id]);

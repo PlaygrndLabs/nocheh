@@ -6,7 +6,7 @@ import {assertAudience,type Reader} from './access.js';
 import {guardState,guardedValue} from './guarded.js';
 import {policyRevision,parentSpace,spacePolicy} from './spaces.js';
 import {allowPrepared,prepareContext} from './prepared-context.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 export const honchoSchema=`
 CREATE TABLE IF NOT EXISTS honcho_connection(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
@@ -197,7 +197,7 @@ export async function reconcileHonchoReceipt(pool:pg.Pool,id:string,call:HonchoC
  await pool.query("UPDATE honcho_receipts SET state='done',remote_id=$2,error_code=NULL,updated_at=now() WHERE id=$1 AND state='uncertain'",[id,String(found[0].id)]);
  return true;
 }
-export async function syncMemory(pool:pg.Pool,call:HonchoCall,jobId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+export async function syncMemory(pool:pg.Pool,call:HonchoCall,jobId:string|null=null,authority:ExecutionAuthority) {
  const client=await pool.connect();let locked=false,fenced=false;
  try{
   fenced=await enterFamily(client,'honcho',authority.owner,authority.epoch);if(!fenced)return;

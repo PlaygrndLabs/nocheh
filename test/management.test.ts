@@ -18,7 +18,8 @@ test('upload paths cannot escape a job or use ambiguous directory components', (
 test('owner HTTP: denied origins, durable upload/preview, cancelled import resumes with stable identities', {timeout:60000}, async () => {
   const state = await mkdtemp(join(tmpdir(), 'nocheh-management-'));
   const token = 'test-owner-token-'.repeat(4);
-  const records = new Map<string, unknown>(); let uploads = 0, slow = false, rolledBack:string|null=null;
+  const records = new Map<string, unknown>(); let uploads = 0, slow = false;
+  const imports=new Map<string,any>(),confirmations:any[]=[];
   const reviews: any[] = [];
   const archive = createServer(async (req,res) => {
     let raw=''; for await(const chunk of req) raw+=chunk;
@@ -27,8 +28,13 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     let result:unknown={};
     if(req.url?.startsWith('/v1/workflows?'))result={workflows:[{id:'a'.repeat(64),state:'waiting'}],next:null};
     if(req.url==='/v1/workflows/'+'a'.repeat(64)+'/retry')result={id:'a'.repeat(64),revision:body.revision+1};
-    if(req.url==='/v1/workflows/imports/confirm')result={owned:false};
-    if(rolledBack&&req.url==='/v1/workflows/imports/'+rolledBack)result={owned:true,owner:'legacy',job:{state:'queued',completed:12,duplicates:2}};
+    if(req.url==='/v1/workflows/imports/confirm'){
+      confirmations.push(body);const previous=imports.get(body.id);
+      const job={...previous,state:'queued',completed:previous?.completed??0,duplicates:previous?.duplicates??0};
+      imports.set(body.id,job);result={owned:true,job};
+    }
+    if(req.url==='/v1/workflows/imports/cancel'){const job=imports.get(body.id);job.state='cancelled';result={owned:true,job};}
+    if(req.method==='GET'&&req.url?.startsWith('/v1/workflows/imports/'))result={owned:true,owner:'inngest',job:imports.get(req.url.split('/').at(-1)!)};
     if(req.url==='/v1/import') {const duplicate=records.has(body.event.key);records.set(body.event.key,body);result={duplicate};}
     else if(req.url==='/v1/memory/reviews') reviews.push(body);
     else if(req.url?.endsWith('/bytes')) uploads++;
@@ -82,26 +88,23 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const bad=await fetch(base+'/jobs/'+job.id+'/upload?name=..%2Fescape',{method:'PUT',headers,body:'x'});assert.equal(bad.status,400);
     const preview=await request('/jobs/'+job.id+'/preview',{});assert.equal(preview.preview.messages,12);
     slow=true; await request('/jobs/'+job.id+'/start',{mapping:{}});
-    await wait(async()=>records.size>0);
-    assert.equal((await fetch(base+'/operations',{method:'POST',headers,body:JSON.stringify({action:'backup'})})).status,409);
+    assert.equal((await request('/jobs/'+job.id)).state,'running');
+    assert.equal(confirmations[0].review_approved,false);assert.equal(confirmations[0].total,12);
     assert.equal((await fetch(base+'/operations',{method:'POST',headers,body:JSON.stringify({action:'shell'})})).status,400);
     await request('/jobs/'+job.id+'/cancel',{});
-    await wait(async()=>JSON.parse(await readFile(join(state,'admin/jobs',job.id,'job.json'),'utf8')).state==='cancelled');
+    assert.equal((await request('/jobs/'+job.id)).state,'cancelled');
     await stop();slow=false;await start();
     assert.equal((await fetch(base+'/jobs/'+job.id+'/start',{method:'POST',headers,body:JSON.stringify({mapping:{},review_approved:true})})).status,409);
     await request('/jobs/'+job.id+'/start',{mapping:{}});
+    imports.set(job.id,{state:'completed',completed:12,duplicates:0});
     await wait(async()=>(await request('/jobs/'+job.id)).state==='complete');
     const finished=await request('/jobs/'+job.id);
     assert.equal(finished.completed,12);assert.equal(finished.result.telegram_replies,0);
     assert.equal(finished.review_approved,false);assert.equal(reviews.length,0,'an import alone never queues learning');
-    assert.equal(records.size,13);assert.ok(uploads>=1);
-    rolledBack=job.id;
-    await writeFile(join(state,'admin/jobs',job.id,'job.json'),JSON.stringify({...finished,state:'running',workflow:'inngest'}));
-    const afterRollback=await request('/jobs/'+job.id);assert.equal(afterRollback.state,'interrupted');assert.equal(afterRollback.completed,12);assert.equal(afterRollback.duplicates,2);
-    await request('/jobs/'+job.id+'/start',{mapping:{}});
-    await wait(async()=>(await request('/jobs/'+job.id)).state==='complete');
-    assert.equal(records.size,13,'explicit rollback resume keeps original source identities');rolledBack=null;
-    assert.ok(JSON.stringify([...records.values()]).includes('Exact متن  0'));
+    assert.equal(records.size,0);assert.equal(uploads,0,'the dashboard never executes imports directly');
+    assert.equal(confirmations.length,2);assert.equal(confirmations[0].configuration_hash,confirmations[1].configuration_hash);
+    assert.equal(confirmations[1].resume,true);
+    assert.ok((await readFile(join(state,'admin/jobs',job.id,'upload/result.json'),'utf8')).includes('Exact متن  0'));
     assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers})).status,409);
     assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download='+token}})).status,409);
     assert.equal((await fetch(base+'/exports/'+job.id+'/download',{headers:{Cookie:'nocheh_download=wrong'}})).status,401);
@@ -110,8 +113,9 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     await fetch(base+'/jobs/'+approved.id+'/upload?name=result.json',{method:'PUT',headers,body:JSON.stringify(document)});
     await request('/jobs/'+approved.id+'/preview',{});
     await request('/jobs/'+approved.id+'/start',{mapping:{},review_approved:true});
+    imports.set(approved.id,{state:'completed',completed:12,duplicates:12});
     await wait(async()=>(await request('/jobs/'+approved.id)).state==='complete');
-    assert.equal(reviews.length,1);assert.equal(reviews[0].approved,true);assert.equal(reviews[0].event_ids.length,12);
+    assert.equal(confirmations.at(-1).review_approved,true);assert.equal(reviews.length,0,'learning is admitted by the import workflow');
     await stop();await start();
     assert.equal((await request('/jobs/'+approved.id)).review_approved,true);
     const invalid=await request('/operations',{action:'restore',options:{backup:'../escape',port:19543}});

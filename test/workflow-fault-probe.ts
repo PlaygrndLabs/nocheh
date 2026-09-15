@@ -8,10 +8,8 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {settings} from '../src/config.js';
 import {initialize} from '../src/database.js';
 import {canonical,digest,type Envelope} from '../src/archive.js';
-import {immutableFile,drainSpool,fetchAttachments} from '../src/storage.js';
-import {setGuardMode,prepareGuarded} from '../src/guarded.js';
-import {prepareArchiveFiles} from '../src/preparation.js';
-import {dispatchCommitted} from '../src/assistant.js';
+import {immutableFile,drainSpool} from '../src/storage.js';
+import {setGuardMode} from '../src/guarded.js';
 import {authorize,readJson,json,object} from '../src/http.js';
 import {startLoops} from '../src/worker-loops.js';
 import {hermesAdapter} from '../src/hermes-adapter.js';
@@ -42,7 +40,7 @@ try{
     const value=source(label);await immutableFile(join(root,'spool/pending'),digest(value.key)+'.json',Buffer.from(canonical(value)));
     console.log(JSON.stringify({capture:'fsynced',id:digest(value.key)}));
   }else if(action==='migrate'){
-    const target=process.argv[3];if(!['legacy','inngest'].includes(target??''))throw Error('invalid_owner');
+    const target=process.argv[3];if(target!=='inngest')throw Error('invalid_owner');
     for(const family of ['preparation','telegram'] as const){
       const owner=(await pool.query('SELECT * FROM workflow_owners WHERE family=$1',[family])).rows[0];
       if(owner.owner===target)continue;
@@ -82,26 +80,16 @@ try{
   }else if(action==='crash-receipt'){
     await writeFile(join(root,'crash-after-effect'),'1',{mode:0o600});
     console.log(JSON.stringify({runtime_crash:'armed'}));
-  }else if(action==='status'||action==='verify'||action==='legacy-drain'){
+  }else if(action==='status'||action==='verify'){
     const expected=Number(process.argv[3]??0),deadline=Date.now()+(action==='status'?0:180000);
     const runtime=runtimeCall(hermesAdapter({url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!}));
     while(true){
-      if(action==='legacy-drain'){
-        await drainSpool(pool,root);
-        await fetchAttachments(pool,root,async ref=>Buffer.from(String((await runtime('source.file',{file_id:ref})).bytes_base64),'base64'));
-        await prepareArchiveFiles(pool,root,runtime);
-        await prepareGuarded(pool,async text=>(await runtime('guard.detect',{text})).literals,config.detectorVersion);
-        await dispatchCommitted(pool,config,runtime);
-      }
       const events=Number((await pool.query('SELECT count(*) FROM events')).rows[0].count);
       const workflows=(await pool.query('SELECT family,state,count(*)::int AS count FROM workflow_registry GROUP BY family,state ORDER BY family,state')).rows;
       const outbox=(await pool.query('SELECT count(*)::int AS count FROM workflow_outbox WHERE published_at IS NULL AND dispatch=(SELECT dispatch FROM workflow_registry WHERE id=workflow_id)')).rows[0].count;
       const pending=(await readdir(join(root,'spool/pending')).catch(()=>[])).length;
       const receipts=(await readdir(join(root,'runtime-receipts')).catch(()=>[])).length;
-      const ready_sources=Number((await pool.query(action==='legacy-drain'?`SELECT count(*) FROM events e WHERE
-        NOT EXISTS(SELECT 1 FROM artifacts a WHERE a.event_id=e.id AND a.state<>'ready')
-        AND NOT EXISTS(SELECT 1 FROM guard_sources g WHERE g.event_id=e.id AND g.state<>'ready')
-        AND EXISTS(SELECT 1 FROM dispatches d WHERE d.event_id=e.id AND d.state='done')`:`SELECT count(*) FROM events e WHERE
+      const ready_sources=Number((await pool.query(`SELECT count(*) FROM events e WHERE
         (SELECT state FROM workflow_registry WHERE job_id=e.id AND family='preparation' ORDER BY generation DESC LIMIT 1)='completed'
         AND EXISTS(SELECT 1 FROM dispatches d WHERE d.event_id=e.id AND d.state='done')`)).rows[0].count);
       if(action==='status'||events===expected&&ready_sources===expected&&receipts===expected&&pending===0){

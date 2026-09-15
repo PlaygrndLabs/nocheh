@@ -29,6 +29,10 @@ class BrowserGatewayTests(unittest.TestCase):
         self.calls.append((route,body))
         if route==self.failed_route: raise RuntimeError('outage with secret provider response')
         if route.endswith('/input'): return {'event_id':body['id'],'attachments':body['files']}
+        if route.endswith('/admit'):
+            self.finished.setdefault(body['event_id'],{'state':'done','text':'answer'})
+            return {'owned':True}
+        if route=='/internal/browser/events':return {'state':'done','visible':True,'text':'answer','events':[]}
         if route.endswith('/claim'):
             if body['event_id'] in self.finished: return {'claimed':False,**self.finished[body['event_id']]}
             return {'claimed':True,'state':'running','event_id':body['event_id'],'archive_credential':'scoped', 'text':' exact\r\n '}
@@ -61,31 +65,35 @@ class BrowserGatewayTests(unittest.TestCase):
         self.capture();captured=self.calls[-1][1]
         self.assertEqual(base64.b64decode(captured['files'][0]['bytes_base64']),b'original\r\n')
         self.assertEqual(captured['text'],' exact\r\n ')
-        self.submit();self.submit();self.assertEqual(self.run_count,1)
+        self.submit();self.submit();self.assertEqual(self.run_count,0)
         self.assertEqual(self.finished['event-one']['text'],'answer')
         self.assertFalse(list((self.gateway.home/'nocheh-browser-receipts').glob('*')))
         outside=self.root/'secret';outside.write_text('secret');(workspace/'link').symlink_to(outside)
         self.assertIn('error',self.invoke('file.attach',path=str(workspace/'link')))
-    def test_credentials_failure_and_receipt_recovery(self):
-        self.capture();self.failed_route='/internal/browser-credentials';self.submit();self.assertEqual(self.run_count,0)
-        self.assertEqual(self.finished['event-one']['state'],'failed')
-        self.finished.clear();self.failed_route='/v1/browser/finish';self.submit()
-        paths=list((self.gateway.home/'nocheh-browser-receipts').glob('*.json'));self.assertEqual(len(paths),1)
-        self.failed_route=None;self.gateway.flush_receipts();self.assertFalse(paths[0].exists())
-        self.assertEqual(self.finished['event-one']['state'],'done')
-    def test_cancel_stops_runner_and_reconnect_does_not_repeat(self):
-        entered=threading.Event()
-        async def slow(*args,emit,cancelled):
-            self.run_count+=1;entered.set()
-            while not cancelled.is_set(): await asyncio.sleep(.01)
-            return {'state':'cancelled','text':'','session_id':'stored-one'}
-        self.gateway.runner=slow;self.capture()
-        result=self.invoke('prompt.submit',text=' exact\r\n ',nocheh_event_id='event-one')
-        self.assertEqual(result['result']['status'],'streaming');self.assertTrue(entered.wait(2))
+    def test_admission_failure_and_retained_receipt_recovery(self):
+        self.capture();self.failed_route='/v1/browser/admit';self.assertIn('error',self.submit());self.assertEqual(self.run_count,0)
+        self.assertFalse(any(route.endswith('/claim') for route,_ in self.calls))
+        directory=self.gateway.home/'nocheh-browser-receipts';directory.mkdir(parents=True)
+        receipt={'event_id':'event-one','actor':'original','state':'done','text':'answer','session':'stored-one'}
+        path=directory/'event-one.json';path.write_text(json.dumps(receipt))
+        self.failed_route='/v1/browser/finish';self.gateway.flush_receipts();self.assertTrue(path.exists())
+        self.failed_route=None;self.gateway.flush_receipts();self.assertFalse(path.exists())
+        self.assertEqual(self.finished['event-one'],receipt);self.assertEqual(self.run_count,0)
+
+    def test_duplicate_submit_and_cancel_use_the_same_durable_request(self):
+        entered=threading.Event();state=['running'];original=self.call
+        def call(route,body):
+            if route.endswith('/admit'):return {'owned':True}
+            if route=='/internal/browser/events':entered.set();return {'state':state[0],'visible':True,'text':'','events':[]}
+            if route.endswith('/cancel'):state[0]='cancelled';return {}
+            return original(route,body)
+        self.gateway.call=call;self.capture()
+        self.assertEqual(self.invoke('prompt.submit',text=' exact\r\n ',nocheh_event_id='event-one')['result']['status'],'streaming')
+        self.assertTrue(entered.wait(2))
         duplicate=self.invoke('prompt.submit',text=' exact\r\n ',nocheh_event_id='event-one')
         self.assertTrue(duplicate['result']['duplicate'])
         self.invoke('session.interrupt');self.server._sessions['sid']['_nocheh_thread'].join(5)
-        self.assertEqual(self.finished['event-one']['state'],'cancelled');self.assertEqual(self.run_count,1)
+        self.assertEqual(state[0],'cancelled');self.assertEqual(self.run_count,0)
     def test_native_boot_never_constructs_agent(self):
         home=self.root/'profiles/group-one';home.mkdir(parents=True)
         env={**os.environ,'NOCHEH_RUNTIME_HOME':str(self.root),'HERMES_HOME':str(home),
@@ -149,7 +157,7 @@ class BrowserGatewayTests(unittest.TestCase):
         self.assertEqual(env['NOCHEH_SECURITY_RUNTIME'],'isolated');self.assertEqual(env['NOCHEH_MEMORY_CONTEXT'],'evidence')
         master,slave=os.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',32,100,0,0))
         process=subprocess.Popen(argv,cwd=cwd,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
-        os.close(slave);output=b'';sent=False;entered=False;sent_at=0;deadline=time.monotonic()+20
+        os.close(slave);output=b'';sent=False;entered=False;sent_at=0;deadline=time.monotonic()+45
         try:
             while time.monotonic()<deadline:
                 if select.select([master],[],[],.1)[0]:

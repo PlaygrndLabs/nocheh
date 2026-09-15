@@ -14,7 +14,8 @@ export async function claimHostWorkflow(pool:pg.Pool,input:unknown) {
   const family=b.family;
   const client=await pool.connect();let held=false;
   try {
-    held=await enterFamily(client,family,'inngest');if(!held)return {claimed:false,observation:observation('waiting','admission',0,Date.now()+30000,'owner_paused')};
+    const authority=(await client.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0];
+    held=await enterFamily(client,family,'inngest',authority.epoch);if(!held)return {claimed:false,observation:observation('waiting','admission',0,Date.now()+30000,'owner_paused')};
     await client.query('BEGIN');
     const row=(await client.query("SELECT w.*,o.epoch FROM workflow_registry w JOIN workflow_owners o USING(family) WHERE w.id=$1 AND w.family=$2 FOR UPDATE OF w",[id,family])).rows[0];
     if(!row||row.dispatch!==dispatch){await client.query('COMMIT');return {claimed:false,observation:observation('skipped','admission')};}

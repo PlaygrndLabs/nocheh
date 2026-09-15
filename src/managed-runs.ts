@@ -7,13 +7,13 @@ import {immutableFile} from './storage.js';
 import {join} from 'node:path';
 import type {Settings} from './config.js';
 import {readFile} from 'node:fs/promises';
-import {prepareTranscripts,storedTranscripts} from './assistant.js';
+import {storedTranscripts} from './assistant.js';
 import type {RuntimeCall} from './runtime.js';
 import {validateSpace,parentSpace,policyRevision} from './spaces.js';
 import {requestAction} from './actions.js';
-import {guardState,guardedValue,prepareGuarded} from './guarded.js';
+import {guardState,guardedValue} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 import {recordSchedule} from './workflows/schedules.js';
 
 export const managedRunSchema=`CREATE TABLE IF NOT EXISTS managed_runs (
@@ -37,10 +37,11 @@ function scopeFor(config:Settings,value:unknown) {
   if(!config.assistant.owner_id||(!owner&&!config.assistant.group_ids.includes(scope)))throw new HttpError(403,'run_scope_denied');
   return {scope,owner};
 }
-export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority:ExecutionAuthority=legacyAuthority) {
+export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority?:ExecutionAuthority) {
   if(channel==='browser')return captureRunInput(pool,config,input,channel);
   const client=await pool.connect();let held=false,capacity=false;
   try {
+    if(!authority)throw new HttpError(409,'workflow_owner_changed');
     held=await enterFamily(client,'schedules',authority.owner,authority.epoch);if(!held)throw new HttpError(409,'workflow_owner_changed');
     await client.query("SELECT pg_advisory_lock(hashtext(current_schema()),hashtext('schedule-capacity'))");capacity=true;
     const b=object(input),key=JSON.stringify([channel,b.scope,b.conversation,b.id]);
@@ -48,9 +49,9 @@ export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,ch
     let reason=b.fire_reason;
     if(previous)reason=JSON.parse(previous.payload.toString()).fire_reason;
     else if(authority.owner==='inngest'&&!['missed','overlap'].includes(String(reason))){
-      const active=(await client.query(`SELECT count(*)::int AS total,bool_or(convert_from(e.payload,'UTF8')::jsonb->>'profile'=$1) AS busy
-        FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE e.channel='scheduler' AND r.state IN ('captured','running')`,[b.profile])).rows[0];
-      if(active.total>=4||active.busy)reason='overlap';
+      const active=(await client.query(`SELECT e.payload FROM managed_runs r JOIN events e ON e.id=r.event_id
+        WHERE e.channel='scheduler' AND r.state IN ('captured','running')`)).rows;
+      if(active.length>=4||active.some(row=>JSON.parse(row.payload.toString()).profile===b.profile))reason='overlap';
     }
     return await captureRunInput(pool,config,{...b,fire_reason:reason},channel);
   }finally{await releaseOperation(client,async()=>{
@@ -100,7 +101,7 @@ async function captureRunInput(pool:pg.Pool,config:Settings,input:unknown,channe
     return {event_id:captured.id,source_key:value.key,duplicate:captured.duplicate,attachments,...(channel==='scheduler'?{fire_reason:body.fire_reason}:{})};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
-export async function claimRun(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority:ExecutionAuthority=legacyAuthority) {
+export async function claimRun(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority:ExecutionAuthority) {
   const body=object(input),event=string(body.event_id,64),actor=identifier(body.actor),profile=identifier(body.profile);
   const {scope,owner}=scopeFor(config,body.scope);
   const client=await pool.connect();const family=channel==='browser'?'browser':'schedules';let held=false;
@@ -169,9 +170,6 @@ export async function cancelScheduled(pool:pg.Pool,input:unknown) {
   return {event_id:event,cancel_requested:!!result.rowCount,state:result.rows[0]?.state??'closed'};
 }
 export async function recoverScheduled(pool:pg.Pool) {
-  await pool.query(`UPDATE managed_runs r SET state='interrupted',error_code='scheduler_restarted',lease_until=NULL,updated_at=now()
-    FROM events e WHERE r.event_id=e.id AND e.channel='scheduler' AND r.state IN ('captured','running')
-    AND EXISTS(SELECT 1 FROM workflow_owners WHERE family='schedules' AND owner='legacy')`);
   return {recovered:true};
 }
 export async function scheduleDefinition(pool:pg.Pool,config:Settings,input:unknown) {
@@ -212,8 +210,8 @@ export async function prepareRun(pool:pg.Pool,config:Settings,input:unknown,call
   try {
     const held=await client.query("SELECT event_id,owner_epoch FROM managed_runs WHERE event_id=$1 AND actor=$2 AND state='running' AND lease_until>now()",[event,actor]);
     if(!held.rowCount)throw new HttpError(409,'run_lease_lost');
-    const prepared=held.rows[0].owner_epoch!==null;
-    const transcripts=prepared?await storedTranscripts(client,event):await prepareTranscripts(client,config.dataDir,event,call);
+    if(held.rows[0].owner_epoch===null)throw new HttpError(409,'workflow_owner_changed');
+    const transcripts=await storedTranscripts(client,event);
     if(transcripts===null)throw new HttpError(503,'transcription_unavailable');
     const {rows}=await client.query<{id:string;file_hash:string;metadata:{file_name:string};kind:string}>('SELECT id,file_hash,metadata,kind FROM artifacts WHERE event_id=$1 ORDER BY id',[event]);
     const files=[];let total=0;
@@ -221,17 +219,13 @@ export async function prepareRun(pool:pg.Pool,config:Settings,input:unknown,call
       if(!/^[a-f0-9]{64}$/.test(row.file_hash))throw new HttpError(503,'file_hash_invalid');
       const data=await readFile(join(config.dataDir,'files',row.file_hash));
       if(digest(data)!==row.file_hash)throw new HttpError(503,'file_hash_mismatch');
-      let text:string|null=null;
-      if(row.kind==='file' && data.length<=200000 && total+data.length<=1000000 && !data.includes(0)) {
-        try {text=new TextDecoder('utf-8',{fatal:true}).decode(data);total+=data.length;} catch { /* retained binary */ }
-      }
       const derivedId=digest(row.id+':text:utf8-v1');
-      if(text!==null&&!prepared)await client.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,search_text,provenance) VALUES($1,$2,$3,'extracted_text',$4,$5,$6) ON CONFLICT DO NOTHING`,
-        [derivedId,event,row.id,Buffer.from(text),text.replaceAll('\0',''),JSON.stringify({extractor:'utf8-v1',input_sha256:row.file_hash})]);
+      const derived=(await client.query("SELECT content FROM derived_artifacts WHERE id=$1 AND kind='extracted_text'",[derivedId])).rows[0];
+      let text:string|null=null;
+      if(row.kind==='file'&&derived&&total+derived.content.length<=1000000){text=derived.content.toString();total+=derived.content.length;}
       files.push({id:row.id,derivedId,sha256:row.file_hash,name:row.metadata.file_name,kind:row.kind,text});
     }
     if((await guardState(pool)).mode==='on') {
-      if(!prepared)await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,event);
       const selected=[];for(const row of (await pool.query("SELECT id FROM derived_artifacts WHERE event_id=$1 AND kind='transcript' ORDER BY id",[event])).rows)selected.push((await guardedValue(pool,'derived_artifacts:'+row.id)).value.text);
       for(const file of files) {
         file.name=(await guardedValue(pool,'artifacts:'+file.id)).value.metadata.file_name??'attachment';

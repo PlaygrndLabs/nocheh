@@ -46,7 +46,6 @@ async function getJob(id: string): Promise<Job> {
       const status=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/'+id}));
       if(status.owned){
         const current=object(status.job);job.state=current.state==='completed'?'complete':['queued','running'].includes(String(current.state))?'running':String(current.state);
-        if(status.owner==='legacy'&&job.state==='running')job.state='interrupted';
         job.completed=Number(current.completed);job.duplicates=Number(current.duplicates);
         if(job.state==='complete')job.result={completed:job.completed,duplicates:job.duplicates,telegram_replies:0,review_approved:job.review_approved};
       }
@@ -300,10 +299,7 @@ export async function startManagement() {
             job.mapping=mapping;job.workflow='pending';delete job.error;await putJob(job);
             const confirmed=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/confirm',body:{id,configuration_hash:importConfiguration(job.preview,mapping,job.review_approved),review_approved:job.review_approved,total:job.preview.messages,completed:job.completed,duplicates:job.duplicates,resume:['failed','cancelled','interrupted'].includes(job.state)}}));
             if(confirmed.owned===true){job.workflow='inngest';job.state='running';await putJob(job);return json(res,202,await getJob(id));}
-            if(confirmed.owned!==false)throw new HttpError(503,'import_admission_unavailable');
-            delete job.workflow;job.state='running';await putJob(job);
-            launch(job, {operation: 'import.run', job: id, mapping, after: job.completed,legacy_workflow:confirmed.job!==undefined});
-            return json(res, 202, job);
+            throw new HttpError(503,'import_admission_unavailable');
           });
           if (req.method === 'POST' && action === 'cancel') {
             if (job.kind !== 'import' || job.state !== 'running') throw new HttpError(409, 'job_not_cancellable');

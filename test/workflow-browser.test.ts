@@ -22,7 +22,7 @@ test('browser workflows admit once, reconnect by native session and close cancel
     await initialize(pool);
     const body={id:'one',scope:'42',profile:'owner',conversation:'native-session',text:'Private browser canary',files:[]};
     const captured=await captureInput(pool,config,body),request={...body,event_id:captured.event_id};
-    assert.equal((await admitBrowser(pool,config,request)).owned,false);
+    assert.equal((await admitBrowser(pool,config,request)).owned,true);
     assert.equal((await pool.query("SELECT count(*)::int n FROM workflow_registry WHERE family='browser'")).rows[0].n,1);
     await pauseFamily(pool,'browser',1);await switchFamily(pool,'browser',1,'inngest');
     await Promise.all([admitBrowser(pool,config,request),admitBrowser(pool,config,request)]);
@@ -30,7 +30,7 @@ test('browser workflows admit once, reconnect by native session and close cancel
     assert.equal((await activeBrowser(pool,config,body)).event_id,captured.event_id);
     const competing=await captureInput(pool,config,{...body,id:'two'});
     await assert.rejects(admitBrowser(pool,config,{...body,event_id:competing.event_id}),/session_busy/);
-    await assert.rejects(claimRun(pool,config,{...request,actor:'legacy'}),/workflow_owner_changed/);
+    await assert.rejects(claimRun(pool,config,{...request,actor:'legacy'},undefined,{owner:'inngest',epoch:1}),/workflow_owner_changed/);
     await assert.rejects(browserWorkflowContext(pool,config,{event_id:captured.event_id,owner_epoch:1}),/workflow_owner_changed/);
     let effects=0,started=false;
     const op=browserOperation(pool,config,hermesAdapter({url:'http://synthetic-runtime.invalid',token:'fixture',fetch:async(url,options)=>{

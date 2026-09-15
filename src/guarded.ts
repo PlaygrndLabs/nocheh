@@ -3,7 +3,7 @@ import {canonical,digest} from './archive.js';
 import {DETECTOR_VERSION,literalSpans,mask,patternSpans} from './guard.js';
 import {HttpError,object,string} from './http.js';
 import {admin,type Reader} from './access.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 // The archive is evidence. These independently versioned projections are disposable
 // except for owner revisions, which must be retained and never overwritten by jobs.
@@ -127,7 +127,7 @@ async function prepareValue(client:pg.PoolClient,id:string,input:unknown,version
   return replaceValues(input,replacements);
 }
 
-export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null,authority:ExecutionAuthority=legacyAuthority) {
+export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null,authority:ExecutionAuthority) {
   const client=await pool.connect();let locked=false,fenced=false;
   try {
     fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);if(!fenced)return;

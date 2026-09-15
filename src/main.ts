@@ -14,11 +14,10 @@ import { connectDatabase, heartbeat, initialize } from './database.js';
 import { HttpError, json, readJson, object,authorize } from './http.js';
 import {honchoClient,memoryStatus,setMemoryConnection,memoryContext,recallMemory,prepareMemoryRequest,acceptMemoryVerification} from './honcho.js';
 import { archiveStatus, envelope, ingest } from './archive.js';
-import { startWorker,startCapture } from './worker.js';
+import { startCapture } from './worker.js';
 import {startWorkflowService} from './workflows/service.js';
 import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
-import { guardPayload,inspectRequest } from './guard.js';
 import {prepareContext,allowPrepared} from './prepared-context.js';
 import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState} from './guarded.js';
 import {requestPreparation} from './workflows/preparation-request.js';
@@ -28,13 +27,13 @@ import { reader, admin,assertAudience,turnToken } from './access.js';
 import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
 import { search, readEvent, readArtifact, exportPage, importRecord, uploadArtifact, replay, limit } from './retrieval.js';
 import {hostTransport} from './workflows/host-transport.js';
-import {confirmImport,cancelImport,enterImportWrite,finishLegacyImport} from './workflows/imports.js';
+import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from './workflows/imports.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from './workflows/host-coordinator.js';
 import {registerWorker} from './workflows/store.js';
 import {hostActionAuthority} from './workflows/host-tools.js';
 
 const config = settings();
-const servesArchive=['archive','nocheh-app'].includes(config.service);
+const servesArchive=true;
 const runtime = hermesAdapter({url: config.hermesUrl, token: config.token});
 const call = runtimeCall(runtime);
 const honcho=honchoClient(config.honchoUrl);
@@ -45,11 +44,11 @@ if(servesArchive)await setGuardMode(pool,config.guardMode);
 await heartbeat(pool, config.service);
 const timer = setInterval(() => { void heartbeat(pool, config.service).catch(() => {}); }, 5000);
 timer.unref();
-const workflowPool=config.service==='nocheh-app'?connectDatabase(config):null;
-const workflows=workflowPool?startWorkflowService(workflowPool,config):null;
-const capture=config.service==='nocheh-app'?startCapture(pool,config):null;
-const stopWorker = capture?.stop ?? (config.service === 'worker' ? startWorker(pool, config) : async() => {});
-const transport=servesArchive&&process.env.NOCHEH_WORKFLOWS_ENABLED==='true'?hostTransport(process.env.INNGEST_SIGNING_KEY??''):null;
+const workflowPool=connectDatabase(config);
+const workflows=startWorkflowService(workflowPool,config);
+const capture=startCapture(pool,config);
+const stopWorker=capture.stop;
+const transport=hostTransport(process.env.INNGEST_SIGNING_KEY??'');
 
 const server = createServer((req, res) => { void (async () => {
   if(transport?.handle(req,res))return;
@@ -68,7 +67,6 @@ const server = createServer((req, res) => { void (async () => {
   if(servesArchive&&(path==='/v1/workflows'||path.startsWith('/v1/workflows/'))){
     admin(principal);
     if(path.startsWith('/v1/workflows/inspection/')){
-      if(process.env.NOCHEH_WORKFLOWS_ENABLED!=='true')throw new HttpError(503,'workflows_unavailable');
       return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
     }
     if(req.method==='GET'){
@@ -83,10 +81,10 @@ const server = createServer((req, res) => { void (async () => {
       if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/host-ready$/.test(path))return json(res,200,await migrationHostReady(pool,path.split('/')[4]!));
       if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/imports$/.test(path))return json(res,200,await stageMigrationImport(pool,path.split('/')[4]!,body));
       if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/reconcile$/.test(path))return json(res,200,await reconcileMigration(pool,path.split('/')[4]!,call,config.assistant.owner_id));
-      if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/(switch|abort)$/.test(path))return json(res,200,await finishMigration(pool,path.split('/')[4]!,path.split('/')[5]! as 'switch'|'abort'));
+      if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}\/(switch)$/.test(path))return json(res,200,await finishMigration(pool,path.split('/')[4]!,path.split('/')[5]! as 'switch'|'abort'));
       if(/^\/v1\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(path))return json(res,200,await controlWorkflow(pool,path.split('/')[3]!,path.split('/')[4]!,body));
       if(path==='/v1/workflows/imports/confirm')return json(res,200,await confirmImport(pool,body));
-      if(path==='/v1/workflows/imports/legacy-finish')return json(res,200,await finishLegacyImport(pool,body));
+      if(path==='/v1/workflows/imports/reconcile-receipt')return json(res,200,await reconcileImportReceipt(pool,body));
       if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(pool,object(body).id));
       if(path==='/v1/workflows/host/claim')return json(res,200,await claimHostWorkflow(pool,body));
       if(path==='/v1/workflows/host/renew')return json(res,200,await renewHostWorkflow(pool,body));
@@ -125,13 +123,7 @@ const server = createServer((req, res) => { void (async () => {
     const authority=channel==='browser'?await browserAuthority(pool,config,body):await scheduledAuthority(pool,config,body);
     return claimRun(pool,config,body,channel,authority);
   };
-  if(config.service==='guard' && !principal.admin && req.method==='POST' && path==='/v1/guard') {
-    const body=object(await readJson(req,1024*1024));
-    if(typeof body.destination!=='string')throw new HttpError(400,'invalid_destination');
-    const destination=new URL(body.destination);if(!['http:','https:'].includes(destination.protocol)||destination.username||destination.password)throw new HttpError(400,'invalid_destination');
-    if((await guardState(pool)).mode==='on')inspectRequest(body.payload);
-    return json(res,200,{guarded:true,payload:await prepare(body.payload)});
-  }
+
   if(servesArchive && !principal.admin && req.method==='POST' && path==='/v1/context/prepare')return agentResult(await readJson(req,1024*1024));
   if(servesArchive && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
   if(servesArchive&&path==='/v1/memory/honcho') {
@@ -257,9 +249,9 @@ const server = createServer((req, res) => { void (async () => {
     if(path==='/v1/tools/decide')return json(res,200,await decideControlled(pool,principal,body));
     if(path==='/v1/tools/telegram-decision')return json(res,200,await decideTelegram(pool,principal,body));
     if(path==='/v1/tools/grant')return json(res,200,await grantPermission(pool,principal,body));
-    if(path==='/v1/tools/start')return json(res,200,await startControlled(pool,body,object(body).workflow_id?await hostActionAuthority(pool,body):undefined));
+    if(path==='/v1/tools/start')return json(res,200,await startControlled(pool,body,await hostActionAuthority(pool,body)));
     if(path==='/v1/tools/revoke')return json(res,200,await revokePermission(pool,principal,body));
-    if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body,object(body).id===undefined?null:String(object(body).id),object(body).workflow_id?await hostActionAuthority(pool,body):undefined));
+    if(path==='/v1/tools/claim')return json(res,200,await claimControlled(pool,body,object(body).id===undefined?null:String(object(body).id),await hostActionAuthority(pool,body)));
     if(path==='/v1/tools/finish')return json(res,200,await finishControlled(pool,body));
   }
   if (servesArchive && req.method==='GET' && path==='/v1/runtime') {
@@ -285,12 +277,7 @@ const server = createServer((req, res) => { void (async () => {
     if(!operation)throw new HttpError(400,'unknown_management_action');
     return json(res,200,await call(operation,input));
   }
-  if (config.service==='guard' && req.method==='POST' && path==='/v1/guard') {
-    const body=object(await readJson(req,1024*1024));
-    if (typeof body.destination!=='string') throw new HttpError(400,'invalid_destination');
-    return json(res,200,await guardPayload(body.payload,{mode:config.guardMode,trusted:config.guardTrusted,detectorVersion:config.detectorVersion},body.destination,
-      async(text)=>(await call('guard.detect',{text})).literals,pool));
-  }
+
   if (servesArchive) {
     if (req.method==='GET' && path==='/v1/export') return json(res,200,await exportPage(pool,url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit'))));
     if (req.method==='POST' && path==='/v1/import') return json(res,200,await importRecord(pool,await readJson(req,32*1024*1024),url.searchParams.get('restore_guarded')==='true'));

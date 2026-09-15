@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE = ROOT / 'data/local'
 DEFAULTS = {
     'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_PROVIDER_MONITOR_PORT': '18317', 'NOCHEH_MODEL': 'gpt-5.6-sol',
-    'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'native', 'NOCHEH_SECURITY_RUNTIME': 'legacy', 'NOCHEH_MEMORY_CONTEXT': 'legacy',
+    'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'shared', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
-    'NOCHEH_WORKFLOWS_ENABLED': 'false', 'NOCHEH_WORKFLOW_UI_PORT': '8288',
+    'NOCHEH_WORKFLOW_UI_PORT': '8288',
     'NOCHEH_HONCHO_ENABLED': 'false',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
@@ -78,6 +78,7 @@ def load(state):
     if values.get('NOCHEH_CONFIG_VERSION') != '1': raise ValueError('Run ./scripts/nocheh init to prepare the active .env')
     if 'OPENAI_API_KEY' not in values and 'NOCHEH_EMBEDDING_API_KEY' in values:values['OPENAI_API_KEY']=values['NOCHEH_EMBEDDING_API_KEY']
     values={**DEFAULTS,**values}
+    values.pop('NOCHEH_WORKFLOWS_ENABLED',None)  # Retired migration setting.
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     return values
 
@@ -85,11 +86,10 @@ def load(state):
 def validate(values):
     embeddings(values)
     if values.get('NOCHEH_HONCHO_ENABLED','false') not in ('true','false'):raise ValueError('Invalid NOCHEH_HONCHO_ENABLED')
-    if values.get('NOCHEH_WORKFLOWS_ENABLED','false') not in ('true','false'):raise ValueError('Invalid NOCHEH_WORKFLOWS_ENABLED')
     if not str(values.get('NOCHEH_WORKFLOW_UI_PORT','8288')).isdigit() or not 1024<=int(values.get('NOCHEH_WORKFLOW_UI_PORT','8288'))<=65535:raise ValueError('Invalid NOCHEH_WORKFLOW_UI_PORT')
     for name in ('INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'):
         if values.get(name) and not re.fullmatch('[a-f0-9]{64}',values[name]):raise ValueError('Invalid '+name)
-        if values.get('NOCHEH_WORKFLOWS_ENABLED')=='true' and not values.get(name):raise ValueError('Missing '+name)
+        if not values.get(name):raise ValueError('Missing '+name)
     if values.get('NOCHEH_SECURITY_RUNTIME','legacy') not in ('legacy','isolated'):raise ValueError('NOCHEH_SECURITY_RUNTIME must be legacy or isolated')
     if values.get('NOCHEH_MEMORY_CONTEXT','legacy') not in ('legacy','evidence'):raise ValueError('NOCHEH_MEMORY_CONTEXT must be legacy or evidence')
     if values['TELEGRAM_ENABLED'] not in ('true', 'false'): raise ValueError('TELEGRAM_ENABLED must be true or false')
@@ -127,14 +127,14 @@ def initialize(state):
         file = state / 'secrets' / old
         if not active and file.exists(): values[name] = file.read_text().strip()
     if active: values.update(existing)
+    values.pop('NOCHEH_WORKFLOWS_ENABLED',None)
     if active and 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))
     for name in ('POSTGRES_PASSWORD','SERVICE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'):
         if not values[name]: values[name] = secrets.token_hex(32)
     validate(values)
-    if values.get('NOCHEH_WORKFLOWS_ENABLED')=='true':
-        (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
+    (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
     if not active and existing:
         preserved = state / 'previous-configuration'; preserved.mkdir(exist_ok=True, mode=0o700)
         saved = preserved / 'legacy.env'
@@ -162,7 +162,6 @@ def compose_environment(state):
     result['NOCHEH_STATE_DIR'] = str(Path(state).resolve())
     # Profiles are explicit per installation; a stale shell cannot activate workflows.
     profiles=[v for v in result.get('COMPOSE_PROFILES','').split(',') if v and v not in ('workflows','honcho','honcho-tools')]
-    if result.get('NOCHEH_WORKFLOWS_ENABLED')=='true':profiles.append('workflows')
     if result.get('NOCHEH_HONCHO_ENABLED')=='true' and not (Path(state)/'spool/.restore-inactive').exists():profiles.append('honcho')
     result['NOCHEH_HONCHO_STATE_DIR']=load(state).get('NOCHEH_HONCHO_STATE_DIR') or str(Path(state).resolve()/'honcho')
     result['COMPOSE_PROFILES']=','.join(profiles)

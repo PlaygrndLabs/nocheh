@@ -22,13 +22,13 @@ test('owner workflow metadata preserves cursor precision, domain truth and stale
     const first=await listWorkflows(pool,{family:'tools',limit:1});assert.equal(first.workflows[0]!.id,ids[2]);
     const second=await listWorkflows(pool,{family:'tools',limit:1,after:first.next});assert.equal(second.workflows[0]!.id,ids[1]);
     const third=await listWorkflows(pool,{family:'tools',limit:1,after:second.next});assert.equal(third.workflows[0]!.id,ids[0]);assert.equal(third.next,null);
-    assert.equal(first.workflows[0]!.control_reason,'legacy_owner');
+    assert.notEqual(first.workflows[0]!.control_reason,'legacy_owner');
     await assert.rejects(listWorkflows(pool,{state:'raw SQL'}),/invalid_workflow_filter/);
     await assert.rejects(listWorkflows(pool,{after:'not-a-cursor'}),/invalid_workflow_cursor/);
     const source={scope:'42',profile:'owner',conversation:'native-session',id:'turn',text:'Owner metadata source canary'};
     const captured=await captureInput(pool,config,source);await admitBrowser(pool,config,{...source,event_id:captured.event_id});
     const claim={scope:'42',profile:'owner',event_id:captured.event_id,actor:'legacy'};
-    await claimRun(pool,config,claim);await finishRun(pool,{...claim,state:'done',session:'native-session',text:'Owner metadata result canary'});
+    await claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1});await finishRun(pool,{...claim,state:'done',session:'native-session',text:'Owner metadata result canary'});
     const browser=(await listWorkflows(pool,{family:'browser',state:'completed'})).workflows[0]!;
     assert.equal(browser.registry_state,'queued');assert.equal(browser.state,'completed');assert.equal(browser.can_retry,false);
     const detail=await workflowDetail(pool,browser.id);assert.equal(detail.source_event_id,captured.event_id);assert.equal(detail.outbox.length,1);
@@ -41,7 +41,7 @@ test('owner workflow metadata preserves cursor precision, domain truth and stale
     health=await workflowHealth(pool);assert.equal(health.workers.find(row=>row.family==='browser').connected,false);
     assert.equal(health.services.find(row=>row.service==='workflow-pipeline').fresh,false);
     assert.ok(health.counts.some(row=>row.family==='browser'&&row.state==='completed'&&row.count===1));
-    assert.equal(health.outbox.admitted,0);assert.ok(health.outbox.pending>0);
+    assert.ok(health.outbox.admitted>0,'all fresh workflow families are admitted to Inngest');assert.ok(health.outbox.pending>0);
     assert.ok(!JSON.stringify(health).includes('canary'));
 
     // A retry changes publication, never the effect identity or attempt count.
@@ -51,7 +51,7 @@ test('owner workflow metadata preserves cursor precision, domain truth and stale
     await pool.query("UPDATE workflow_registry SET state='retryable_failed',attempts=3,next_attempt=now()+interval '1 hour' WHERE id=$1",[id]);
     const fence=await pool.connect();
     try{
-      assert.equal(await enterFamily(fence,'tools','inngest'),true);
+      assert.equal(await enterFamily(fence,'tools','inngest',1),true);
       await assert.rejects(controlWorkflow(pool,id,'retry',{revision:1}),/workflow_execution_in_progress/);
     }finally{await leaveFamily(fence,'tools');fence.release();}
     const retried=await controlWorkflow(pool,id,'retry',{revision:1});

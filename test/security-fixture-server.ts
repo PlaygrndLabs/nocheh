@@ -22,7 +22,7 @@ const evidence='Archive record: The Cedar launch is on 18 October. Its budget is
 const source=await ingest(pool,{version:1,key:'security-acceptance-source',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'source',revision:'0',occurred_at:null,text:evidence,payload:{}},false);
 const turn=await ingest(pool,{version:1,key:'security-acceptance-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'turn',revision:'0',occurred_at:null,text:'Synthetic security acceptance',payload:{profile:'owner'}},false);
 const detect=async(text:string)=>text.includes('SYNTHETIC_TEST_SECRET')?['SYNTHETIC_TEST_SECRET']:[];
-await prepareGuarded(pool,detect);
+await prepareGuarded(pool,detect,undefined,undefined,undefined,{owner:'inngest',epoch:1});
 const credential=turnToken(config.token,null,Date.now()+3600000,turn.id,{space:'1',revision:1,guard_epoch:1});
 const principal=reader({headers:{authorization:'Bearer '+credential}} as any,config.token);
 const binding=await turnBinding(pool,principal);

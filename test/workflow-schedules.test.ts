@@ -34,7 +34,7 @@ test('scheduled workflows preserve native cursors, capacity, occurrence identity
     const authority={owner:'inngest' as const,epoch:2};
     const source={id:'fire',conversation:'native-job',scope:'42',profile:'private',text:definition.prompt,job_id:'native-job',
       job_revision:'revision-one',scheduled_for:'2026-09-12T00:00:00Z',fire_reason:'scheduled',definition};
-    await assert.rejects(captureInput(pool,config,source,'scheduler'),/workflow_owner_changed/);
+    await assert.rejects(captureInput(pool,config,source,'scheduler',{owner:'inngest',epoch:1}),/workflow_owner_changed/);
     const first=await captureInput(pool,config,source,'scheduler',authority);
     const overlap=await captureInput(pool,config,{...source,id:'overlap'},'scheduler',authority);
     assert.equal(overlap.fire_reason,'overlap');

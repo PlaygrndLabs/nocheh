@@ -39,7 +39,7 @@ test('durable Honcho receipts, consent, isolation, uncertain writes and current-
   await initialize(pool);await setGuardMode(pool,'on');
   const first=await ingest(pool,{version:1,key:'memory-a',origin:'import',bot_id:'fixture',scope:'-10',source_id:'a',revision:'1',kind:'message',occurred_at:null,text:'I like green tea. Password: planted-secret',payload:{}},false);
   await ingest(pool,{version:1,key:'memory-b',origin:'import',bot_id:'fixture',scope:'-20',source_id:'b',revision:'1',kind:'message',occurred_at:null,text:'Private other group fact',payload:{}},false);
-  await prepareGuarded(pool,detect);await memoryStatus(pool);
+  await prepareGuarded(pool,detect,undefined,undefined,undefined,{owner:'inngest',epoch:1});await memoryStatus(pool);
   await assert.rejects(setMemoryConnection(pool,{attached:true}),{code:'honcho_live_acceptance_pending'});
   // This report exercises the acceptance interface with a fixture, not a provider pass.
   const verification={format:'nocheh-honcho-live-v1',status:'passed',synthetic_only:true,
@@ -49,13 +49,13 @@ test('durable Honcho receipts, consent, isolation, uncertain writes and current-
   await assert.rejects(acceptMemoryVerification(pool,{...verification,checks:{...verification.checks,embedding_guarded:'pending'}}),{code:'honcho_live_acceptance_pending'});
   assert.equal((await memoryStatus(pool)).connection.verified,false);
   await acceptMemoryVerification(pool,verification);await setMemoryConnection(pool,{attached:true,include_history:true});
-  await syncMemory(pool,call);assert.equal(writes,0,'preparation does not imply learning consent');
-  await approveLearning(pool,{approved:true,event_ids:[first.id]});await syncMemory(pool,call);
+  await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});assert.equal(writes,0,'preparation does not imply learning consent');
+  await approveLearning(pool,{approved:true,event_ids:[first.id]});await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});
   assert.equal(writes,2,'one logical write per owner/group audience');
   assert.ok([...remote.values()].every(rows=>!rows[0].content.includes('planted-secret')));
   assert.ok([...remote.values()].every(rows=>!rows[0].content.includes('other group')));
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM honcho_receipts WHERE state='uncertain'")).rows[0].n,1);
-  await pool.query('UPDATE honcho_receipts SET next_attempt=now()');await syncMemory(pool,call);await initialize(pool);await syncMemory(pool,call);
+  await pool.query('UPDATE honcho_receipts SET next_attempt=now()');await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});await initialize(pool);await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});
   assert.equal(writes,2,'restart reconciles the uncertain committed write without another ingestion');
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM honcho_receipts WHERE state='done'")).rows[0].n,2);
   const guard=await guardState(pool),group={admin:false,scope:'-10',space:'-10',revision:1,guard_epoch:guard.epoch,turnEvent:first.id};
@@ -120,18 +120,18 @@ test('durable Honcho receipts, consent, isolation, uncertain writes and current-
   await assert.rejects(prepareMemoryRequest(pool,request,detect),{code:'memory_context_retired'});
   await assert.rejects(memoryContext(pool,group),{code:'guard_context_changed'});
   await assert.rejects(refreshMemoryContext(pool,generation.id,call,detect),{code:'memory_context_retired'});
-  await syncMemory(pool,call);assert.equal(writes,4);
+  await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});assert.equal(writes,4);
   const current=(await memoryStatus(pool)).generations.find(g=>g.audience==='-10')!;assert.notEqual(current.id,generation.id);
   assert.ok([...remote.entries()].filter(([path])=>path.includes(current.id)).every(([,rows])=>rows[0].content.includes('coffee')&&!rows[0].content.includes('tea')));
-  await setMemoryConnection(pool,{attached:false});const detachedWrites=writes;await syncMemory(pool,call);assert.equal(writes,detachedWrites);
+  await setMemoryConnection(pool,{attached:false});const detachedWrites=writes;await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});assert.equal(writes,detachedWrites);
   const skipped=await ingest(pool,{version:1,key:'detached-no-catchup',origin:'import',bot_id:'fixture',scope:'-10',source_id:'c',revision:'1',kind:'message',occurred_at:null,text:'While detached without catchup',payload:{}},false);
-  await approveLearning(pool,{approved:true,event_ids:[skipped.id]});await prepareGuarded(pool,detect);
-  await setMemoryConnection(pool,{attached:true,include_history:false});await syncMemory(pool,call);
+  await approveLearning(pool,{approved:true,event_ids:[skipped.id]});await prepareGuarded(pool,detect,undefined,undefined,undefined,{owner:'inngest',epoch:1});
+  await setMemoryConnection(pool,{attached:true,include_history:false});await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});
   assert.ok(![...remote.values()].some(rows=>rows[0].content.includes('without catchup')));
   await setMemoryConnection(pool,{attached:false});
   const caught=await ingest(pool,{version:1,key:'detached-with-catchup',origin:'import',bot_id:'fixture',scope:'-10',source_id:'d',revision:'1',kind:'message',occurred_at:null,text:'While detached with catchup',payload:{}},false);
-  await approveLearning(pool,{approved:true,event_ids:[caught.id]});await prepareGuarded(pool,detect);
-  await setMemoryConnection(pool,{attached:true,include_history:false,catch_up:true});await syncMemory(pool,call);
+  await approveLearning(pool,{approved:true,event_ids:[caught.id]});await prepareGuarded(pool,detect,undefined,undefined,undefined,{owner:'inngest',epoch:1});
+  await setMemoryConnection(pool,{attached:true,include_history:false,catch_up:true});await syncMemory(pool,call,undefined,{owner:'inngest',epoch:1});
   assert.ok([...remote.values()].some(rows=>rows[0].content.includes('with catchup')));
   const active=(await memoryStatus(pool)).generations.find(g=>g.audience==='-10')!;
   const freshGroup={...group,guard_epoch:(await guardState(pool)).epoch};

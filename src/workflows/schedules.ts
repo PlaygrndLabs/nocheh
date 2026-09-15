@@ -50,9 +50,9 @@ export async function scheduledAuthority(pool:pg.Pool,config:Settings,input:unkn
   return {owner:'inngest',epoch:Number(b.owner_epoch)};
 }
 export async function scheduledObservation(pool:pg.Pool,input:unknown){
-  const b=object(input),row=(await pool.query(`SELECT r.state FROM managed_runs r JOIN events e ON e.id=r.event_id
-    WHERE r.event_id=$1 AND e.channel='scheduler' AND e.scope=$2 AND convert_from(e.payload,'UTF8')::jsonb->>'profile'=$3`,[b.event_id,b.scope,b.profile])).rows[0];
-  if(!row)throw new HttpError(404,'captured_run_not_found');return row;
+  const b=object(input),row=(await pool.query(`SELECT r.state,e.payload FROM managed_runs r JOIN events e ON e.id=r.event_id
+    WHERE r.event_id=$1 AND e.channel='scheduler' AND e.scope=$2`,[b.event_id,b.scope])).rows[0];
+  if(!row||JSON.parse(row.payload.toString()).profile!==b.profile)throw new HttpError(404,'captured_run_not_found');return {state:row.state};
 }
 export function scheduleOperation(pool:pg.Pool,call:RuntimeCall,run:WorkflowOperation):WorkflowOperation{
   return async(job,authority)=>{

@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 from scripts.archive import digest
 from scripts.workflow_handoff import import_records,stopped_dashboard
-from scripts.tool_worker import flush_receipts
+from scripts.tool_receipts import flush_receipts
 
 
 class WorkflowHandoffTests(unittest.TestCase):
@@ -57,30 +57,29 @@ class WorkflowHandoffTests(unittest.TestCase):
             self.assertTrue(path.exists());api.fail=False
             self.assertEqual(flush_receipts(root,api),1);self.assertFalse(path.exists());self.assertEqual(api.calls,[body,body])
 
-    def test_legacy_import_pause_has_a_resumable_status(self):
+    def test_retired_import_runner_cannot_execute(self):
         from scripts.management import dispatch
-        from urllib.error import HTTPError
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);identity='11111111-1111-4111-8111-111111111111';(root/'admin/jobs'/identity).mkdir(parents=True)
-            error=HTTPError('http://fixture',409,'paused',{},io.BytesIO(b'{"error":"import_owner_paused"}'))
-            with patch.dict('os.environ',{'NOCHEH_STATE_DIR':str(root)}),patch('scripts.management.load',return_value={'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':''}),patch('scripts.archive.API'),patch('scripts.import_job.run',side_effect=error):
-                self.assertEqual(dispatch({'operation':'import.run','job':identity,'mapping':{}}),{'status':'import_paused'})
+            root=Path(directory);identity='11111111-1111-4111-8111-111111111111'
+            with patch.dict('os.environ',{'NOCHEH_STATE_DIR':str(root)}),patch('scripts.import_job.run') as execute:
+                with self.assertRaisesRegex(ValueError,'unknown_operation'):dispatch({'operation':'import.run','job':identity,'mapping':{}})
+                execute.assert_not_called()
 
-    def test_legacy_completion_receipt_survives_lost_ack_and_handoff_never_reimports(self):
-        from scripts.management import dispatch
+    def test_retained_completion_receipt_survives_lost_ack_without_reimport(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);identity='11111111-1111-4111-8111-111111111111';folder=root/'admin/jobs'/identity;folder.mkdir(parents=True)
             job={'id':identity,'kind':'import','state':'failed','review_approved':False,'mapping':{},'preview':{'sha256':'a'*64,'messages':3}}
             (folder/'job.json').write_text(json.dumps(job));policy={'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':''}
-            with patch.dict(os.environ,{'NOCHEH_STATE_DIR':str(root)}),patch('scripts.management.load',return_value=policy),patch('scripts.archive.API') as api,patch('scripts.import_job.run',return_value={'completed':3,'duplicates':1}) as execute:
-                api.return_value.call.side_effect=RuntimeError('lost ack')
-                with self.assertRaisesRegex(RuntimeError,'lost ack'):dispatch({'operation':'import.run','job':identity,'mapping':{},'legacy_workflow':True})
-                execute.assert_called_once()
-            receipt=folder/'workflow-receipt.json';self.assertTrue(receipt.exists())
+            receipt=folder/'workflow-receipt.json';body={'id':identity,'configuration_hash':'b'*64,'completed':3,'duplicates':1,'learning_after':0};receipt.write_text(json.dumps(body))
             class FinishedAPI:
-                def call(self,path,body):
-                    if path!='/v1/workflows/imports/legacy-finish':raise AssertionError('completion was reimported')
+                fail=True
+                def call(self,path,value):
+                    if path!='/v1/workflows/imports/reconcile-receipt' or value!=body:raise AssertionError('completion was reimported')
+                    if self.fail:raise RuntimeError('lost ack')
                     return {'state':'completed'}
+            api=FinishedAPI()
             with patch('scripts.workflow_handoff.load',return_value=policy):
-                self.assertEqual(import_records(root,FinishedAPI(),{'id':'a'*64,'to_owner':'inngest'}),{'staged':0,'closed':1})
+                with self.assertRaisesRegex(RuntimeError,'lost ack'):import_records(root,api,{'id':'a'*64,'to_owner':'inngest'})
+                self.assertTrue(receipt.exists());api.fail=False
+                self.assertEqual(import_records(root,api,{'id':'a'*64,'to_owner':'inngest'}),{'staged':0,'closed':1})
             self.assertFalse(receipt.exists());self.assertEqual(json.loads((folder/'job.json').read_text())['state'],'complete')

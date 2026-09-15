@@ -1,5 +1,4 @@
 """Native TUI session transport; model turns use Nocheh's common isolated runner."""
-import asyncio
 import base64
 import contextlib
 import io
@@ -15,7 +14,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from .scopes import Scope
-from .capture import canonical, immutable_file
+from .capture import canonical
 
 
 class BrowserGateway:
@@ -24,10 +23,6 @@ class BrowserGateway:
         self.home = self.root / 'profiles' / scope.profile
         self.actor = uuid.uuid4().hex
         self.call = call or self.http
-        if runner is None:
-            from .turn_process import run_process
-            runner = run_process
-        self.runner = runner
         self.lock = threading.Lock(); self.running = {}; self.inputs = {}
         self.original = dict(server._methods)
 
@@ -111,20 +106,7 @@ class BrowserGateway:
             if admitted.get('owned'):
                 self.follow(sid,session,event)
                 return self.server._ok(rid,{'status':'streaming','event_id':event})
-            claim = self.call('/v1/browser/claim',{'event_id':event,'actor':self.actor,
-                'scope':self.scope.chat_id,'profile':self.scope.profile})
-            if not claim.get('claimed'):
-                if claim['state']!='running':
-                    self.server._emit('message.complete',sid,{'text':claim.get('text') or 'This input already ended with status: '+claim['state'],
-                        'usage':{},'status':'complete' if claim['state']=='done' else 'interrupted'})
-                return self.server._ok(rid,{'status':claim['state'],'duplicate':True})
-            session['running'] = True
-            session['_nocheh_event']=event
-            session['_nocheh_attachments']={}
-            cancel = threading.Event(); self.running[sid] = cancel
-        thread = threading.Thread(target=self.execute,args=(sid,session,claim,cancel),daemon=True)
-        session['_nocheh_thread'] = thread;thread.start()
-        return self.server._ok(rid,{'status':'streaming','event_id':event})
+            raise RuntimeError('workflow_admission_unavailable')
 
     def workflow_context(self,session,event=None):
         return {'scope':self.scope.chat_id,'profile':self.scope.profile,'conversation':session['session_key'],
@@ -162,15 +144,6 @@ class BrowserGateway:
                 self.server._emit('session.info',sid,self.info(session))
         thread=threading.Thread(target=observe,daemon=True);session['_nocheh_thread']=thread;thread.start()
 
-    def finish(self, body):
-        directory = self.home / 'nocheh-browser-receipts'
-        directory.mkdir(parents=True,exist_ok=True,mode=0o700)
-        name = body['event_id'] + '.json'
-        immutable_file(directory,name,canonical(body))
-        receipt=self.call('/v1/browser/finish',body)
-        (directory/name).unlink(missing_ok=True)
-        return receipt
-
     def flush_receipts(self):
         for path in (self.home/'nocheh-browser-receipts').glob('*.json'):
             try:
@@ -179,59 +152,6 @@ class BrowserGateway:
                 self.call('/v1/browser/finish',body);path.unlink()
             except Exception: pass  # Remains durable and retried at startup/next turn.
 
-    def execute(self, sid, session, claim, cancel):
-        result = {'state':'failed','text':'','session_id':session['session_key'],'error_code':'managed_execution_failed'}
-        stopped=threading.Event();lost=threading.Event()
-        def heartbeat():
-            while not stopped.wait(10):
-                try: self.call('/v1/browser/heartbeat',{'event_id':claim['event_id'],'actor':self.actor})
-                except Exception: lost.set();cancel.set();return
-        monitor=threading.Thread(target=heartbeat,daemon=True);monitor.start()
-        try:
-            self.flush_receipts()
-            prepared=self.call('/v1/browser/prepare',{'event_id':claim['event_id'],'actor':self.actor})
-            if cancel.is_set(): raise RuntimeError('cancelled')
-            credentials = self.call('/internal/browser-credentials',{
-                'event_id':claim['event_id'], 'archive_credential':claim['archive_credential'],
-                'scope':self.scope.chat_id,'profile':self.scope.profile})
-            if cancel.is_set(): raise RuntimeError('cancelled')
-            body = {**claim,**prepared,'channel':'browser'}
-            from .subscription import SubscriptionCredentials
-            runtime=SubscriptionCredentials(credentials['api_key'],credentials['base_url'],credentials['provider'],credentials['api_mode'])
-            result = asyncio.run(self.runner(self.root,self.scope,body,credentials['model'],
-                runtime, session['session_key'],
-                emit=lambda text:self.server._emit('message.delta',sid,{'text':text}),cancelled=cancel))
-        except Exception as error:
-            if str(error) in ('quota_paused','subscription_unavailable','transcription_unavailable','run_lease_lost','profile_busy'):
-                result['error_code']=str(error)
-        try:
-            if cancel.is_set(): result.update(state='cancelled')
-            if lost.is_set(): result.update(state='interrupted',error_code='run_lease_lost')
-            result.setdefault('session_id',session['session_key'])
-            receipt=self.finish({'event_id':claim['event_id'],'actor':self.actor,'state':result['state'],
-                'text':result.get('text',''),'session':result['session_id'],
-                **({'error_code':result['error_code']} if result.get('error_code') else {})})
-            if receipt and receipt.get('state')!='done': result.update(state=receipt['state'])
-        except Exception:
-            result.update(state='failed',error_code='result_commit_pending')
-        finally:
-            stopped.set();monitor.join(timeout=16)
-            with self.lock:
-                session['running'] = False;session['session_key'] = result.get('session_id',session['session_key'])
-                self.running.pop(sid,None)
-            with contextlib.suppress(Exception):
-                from hermes_state import SessionDB
-                from .isolated_profile import database_path
-                db = SessionDB(database_path(self.home),read_only=True)
-                try: session['history'] = db.get_messages_as_conversation(session['session_key'])
-                finally: db.close()
-            state=result['state'];text=result.get('text','')
-            from .assistant_gateway import check_delivery_policy
-            if state=='done' and not check_delivery_policy(claim['archive_credential']): state='interrupted'
-            if state != 'done': text = 'The managed turn did not complete. Its original input is preserved. See Nocheh status before retrying.'
-            self.server._emit('message.complete',sid,{'text':text,'usage':{},
-                'status':'complete' if state=='done' else 'interrupted' if state=='cancelled' else 'error'})
-            self.server._emit('session.info',sid,self.info(session))
 
     def info(self, session):
         from .assistant_turn import ALLOWED_TOOLS

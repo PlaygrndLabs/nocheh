@@ -116,37 +116,12 @@ def dispatch(body):
         if operation == 'settings.save': return save(state, body['changes'], body['revision'])
         if operation == 'settings.apply': return apply(state)
     if operation.startswith('import.'):
-        from .import_job import inspect, run
+        from .import_job import inspect
         import re
         job = body['job']
         if not re.fullmatch(r'[a-f0-9-]{36}', job): raise ValueError('invalid_job')
         directory = state / 'admin/jobs' / job
         if operation == 'import.inspect': return inspect(directory)
-        if operation == 'import.run':
-            import fcntl
-            from .archive import API
-            mapping = body.get('mapping', {})
-            policy = load(state)
-            allowed = set(filter(None, [policy['TELEGRAM_OWNER_ID'], *policy['TELEGRAM_GROUP_IDS'].split(',')]))
-            if not isinstance(mapping, dict) or any(not isinstance(k, str) or v not in allowed for k, v in mapping.items()):
-                raise ValueError('scope_mapping_denied')
-            with (directory/'execution.lock').open('a') as lock:
-                try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                except BlockingIOError:raise ValueError('import_batch_busy') from None
-                import urllib.error
-                from .archive import digest,canonical
-                from .tool_receipts import atomic
-                try:result=run(directory,mapping,body.get('after',0),API(job,import_owner='legacy'))
-                except urllib.error.HTTPError as error:
-                    if error.code==409 and json.loads(error.read(4096)).get('error')=='import_owner_paused':return {'status':'import_paused'}
-                    raise
-                if body.get('legacy_workflow') is not True:return result
-                metadata=json.loads((directory/'job.json').read_text());preview=metadata['preview']
-                receipt={'id':job,'configuration_hash':digest(canonical({'sha256':preview['sha256'],'mapping':mapping,'review_approved':metadata.get('review_approved') is True,'total':preview['messages']})),
-                         'completed':result['completed'],'duplicates':result['duplicates'],'learning_after':preview['messages'] if metadata.get('review_approved') is True else 0}
-                path=directory/'workflow-receipt.json';atomic(path,receipt)
-                API().call('/v1/workflows/imports/legacy-finish',receipt);path.unlink()
-                return result
     raise ValueError('unknown_operation')
 
 

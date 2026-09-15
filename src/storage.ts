@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { digest, envelope, ingest } from './archive.js';
 import { HttpError } from './http.js';
-import {enterFamily,leaveFamily,releaseOperation,legacyAuthority,type ExecutionAuthority} from './workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 export async function syncDirectory(path:string):Promise<void> {
   const dir=await open(path,'r'); try { await dir.sync(); } finally { await dir.close(); }
@@ -50,7 +50,7 @@ export async function drainSpool(pool:pg.Pool,root:string):Promise<void> {
   }
 }
 
-export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref:string)=>Promise<Buffer>,eventId:string|null=null,authority:ExecutionAuthority=legacyAuthority):Promise<void> {
+export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref:string)=>Promise<Buffer>,eventId:string|null=null,authority:ExecutionAuthority):Promise<void> {
   const client=await pool.connect();
   // One short batch per worker. An advisory lock prevents duplicate downloads by extra workers.
   let locked=false,fenced=false;

@@ -25,7 +25,7 @@ test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants 
     await assert.rejects(proposeControlled(pool,{scope:'-20',admin:false},proposal),{code:'assistant_turn_required'});
     await assert.rejects(proposeControlled(pool,{...principal,scope:'-30'},proposal),{code:'action_scope_denied'});
     const first=await proposeControlled(pool,principal,proposal);assert.equal((await proposeControlled(pool,principal,proposal)).id,first.id);
-    assert.equal((await claimControlled(pool,{actor:'worker'})).claimed,false);
+    assert.equal((await claimControlled(pool,{actor:'worker'},undefined,{owner:'inngest',epoch:1})).claimed,false);
     const row=await controlledAction(pool,owner,first.id);
     await assert.rejects(controlledAction(pool,{...principal,scope:'-30'},first.id),{code:'action_scope_denied'});
     await assert.rejects(decideControlled(pool,principal,{id:first.id,fingerprint:row.fingerprint,decision:'approve'}),{code:'owner_required'});
@@ -34,7 +34,7 @@ test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants 
     const command=async(text:string,privateDM=true)=>ingest(pool,{...source,key:'decision:'+text+privateDM,channel:'telegram',kind:'telegram_update',scope:privateDM?'123':'-20',payload:{message:{text,chat:{id:privateDM?123:-20,type:privateDM?'private':'group'},from:{id:123}}}});
     const group=await command('/approve '+first.id,false);assert.match((await controlReply(pool,policy,group.id))!,/Only the owner/);
     const approved=await command('/approve '+first.id);assert.match((await controlReply(pool,policy,approved.id))!,/approved/);
-    const claims=await Promise.all([claimControlled(pool,{actor:'one'}),claimControlled(pool,{actor:'two'})]);assert.equal(claims.filter(c=>c.claimed).length,1);
+    const claims=await Promise.all([claimControlled(pool,{actor:'one'},undefined,{owner:'inngest',epoch:1}),claimControlled(pool,{actor:'two'},undefined,{owner:'inngest',epoch:1})]);assert.equal(claims.filter(c=>c.claimed).length,1);
     const claim=claims.find(c=>c.claimed)!;assert.ok('actor' in claim);
     await assert.rejects(finishControlled(pool,{id:first.id,actor:'wrong',state:'done',result:{text:'ok'}}),{code:'action_actor_denied'});
     const receipt={id:first.id,actor:claim.actor,state:'done',result:{text:'exact\0😃'}};
@@ -45,21 +45,21 @@ test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants 
     const permission=await grantPermission(pool,owner,{action_id:first.id,fingerprint:row.fingerprint,uses:1,minutes:5});
     const nextEvent=await ingest(pool,{...source,key:'controlled:second'}),nextPrincipal={...principal,turnEvent:nextEvent.id};
     const changed=await proposeControlled(pool,nextPrincipal,{kind:'shell',arguments:{command:'different'}});
-    assert.notEqual(changed.id,first.id);assert.equal((await claimControlled(pool,{actor:'three'})).claimed,false);
-    const same=await proposeControlled(pool,nextPrincipal,proposal);const permitted=await claimControlled(pool,{actor:'three'});assert.equal(permitted.claimed,true);
+    assert.notEqual(changed.id,first.id);assert.equal((await claimControlled(pool,{actor:'three'},undefined,{owner:'inngest',epoch:1})).claimed,false);
+    const same=await proposeControlled(pool,nextPrincipal,proposal);const permitted=await claimControlled(pool,{actor:'three'},undefined,{owner:'inngest',epoch:1});assert.equal(permitted.claimed,true);
     assert.equal((await pool.query('SELECT remaining FROM action_permissions WHERE id=$1',[permission.id])).rows[0].remaining,0);
     await pool.query("UPDATE controlled_actions SET lease_until=now()-interval '1 second' WHERE id=$1",[same.id]);
-    assert.equal((await claimControlled(pool,{actor:'four'})).claimed,false);
+    assert.equal((await claimControlled(pool,{actor:'four'},undefined,{owner:'inngest',epoch:1})).claimed,false);
     assert.equal((await controlledAction(pool,owner,same.id)).state,'ambiguous');
     await finishControlled(pool,{id:same.id,actor:'three',state:'done',result:{text:'late receipt'}});
     assert.equal((await controlledAction(pool,owner,same.id)).state,'ambiguous');
     const revoked=await grantPermission(pool,owner,{action_id:changed.id,fingerprint:(await controlledAction(pool,owner,changed.id)).fingerprint,uses:2,minutes:5});
     const revoke=await command('/revoke '+revoked.id);assert.match((await controlReply(pool,policy,revoke.id))!,/revoked/);
-    assert.equal((await claimControlled(pool,{actor:'five'})).claimed,false);
+    assert.equal((await claimControlled(pool,{actor:'five'},undefined,{owner:'inngest',epoch:1})).claimed,false);
     await assert.rejects(grantPermission(pool,owner,{action_id:first.id,fingerprint:row.fingerprint,uses:1001,minutes:5}),{code:'invalid_permission_bounds'});
     const expiring=await grantPermission(pool,owner,{action_id:changed.id,fingerprint:(await controlledAction(pool,owner,changed.id)).fingerprint,uses:2,minutes:1});
     await pool.query("UPDATE action_permissions SET expires_at=now()-interval '1 second' WHERE id=$1",[expiring.id]);
-    assert.equal((await claimControlled(pool,{actor:'five'})).claimed,false);
+    assert.equal((await claimControlled(pool,{actor:'five'},undefined,{owner:'inngest',epoch:1})).claimed,false);
     const denied=await decideControlled(pool,owner,{id:changed.id,fingerprint:(await controlledAction(pool,owner,changed.id)).fingerprint,decision:'deny'});assert.equal(denied.state,'rejected');
     assert.equal((await pool.query('SELECT original_text FROM events WHERE id=$1',[event.id])).rows[0].original_text.toString(),source.text);
   }finally{await pool.end();await root.query(`DROP SCHEMA ${namespace} CASCADE`);await root.end();}

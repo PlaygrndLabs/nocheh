@@ -31,10 +31,10 @@ export async function admitBrowser(pool:pg.Pool,config:Settings,input:unknown) {
     await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema()),hashtext('browser-admission'))");
     const row=await scopedRun(client,config,input,true);
     if(row.state==='captured'&&!row.admitted){
-      const busy=await client.query(`SELECT 1 FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE e.channel='browser'
+      const busy=await client.query(`SELECT e.payload FROM managed_runs r JOIN events e ON e.id=r.event_id WHERE e.channel='browser'
         AND r.event_id<>$1 AND r.admitted AND r.state IN ('captured','running') AND e.scope=$2
-        AND convert_from(e.payload,'UTF8')::jsonb->>'conversation_id'=$3`,[row.event_id,row.scope,row.payload.conversation_id]);
-      if(busy.rowCount)throw new HttpError(409,'session_busy');
+        `,[row.event_id,row.scope]);
+      if(busy.rows.some(item=>JSON.parse(item.payload.toString()).conversation_id===row.payload.conversation_id))throw new HttpError(409,'session_busy');
       await client.query('UPDATE managed_runs SET admitted=true,updated_at=now() WHERE event_id=$1',[row.event_id]);
       await client.query("SELECT nocheh_workflow_request('browser',$1)",[row.event_id]);
     }
@@ -49,12 +49,13 @@ export async function browserObservation(pool:pg.Pool,config:Settings,input:unkn
     text:visible?row.content?.toString()??'':'',conversation:row.payload.conversation_id,owner_epoch:row.owner_epoch};
 }
 export async function activeBrowser(pool:pg.Pool,config:Settings,input:unknown) {
-  const b=object(input),rows=await pool.query(`SELECT r.event_id FROM managed_runs r JOIN events e ON e.id=r.event_id
-    WHERE e.channel='browser' AND e.scope=$1 AND convert_from(e.payload,'UTF8')::jsonb->>'conversation_id'=$2
+  const b=object(input),rows=await pool.query(`SELECT r.event_id,e.payload FROM managed_runs r JOIN events e ON e.id=r.event_id
+    WHERE e.channel='browser' AND e.scope=$1
     AND (r.owner_epoch IS NOT NULL OR EXISTS(SELECT 1 FROM workflow_owners WHERE family='browser' AND owner='inngest'))
-    AND r.admitted AND r.state IN ('captured','running') ORDER BY r.created_at DESC LIMIT 1`,[b.scope,b.conversation]);
-  if(!rows.rowCount)return {active:false,event_id:null};
-  return {active:true,...await browserObservation(pool,config,{...b,event_id:rows.rows[0].event_id})};
+    AND r.admitted AND r.state IN ('captured','running') ORDER BY r.created_at DESC`,[b.scope]);
+  const row=rows.rows.find(item=>JSON.parse(item.payload.toString()).conversation_id===b.conversation);
+  if(!row)return {active:false,event_id:null};
+  return {active:true,...await browserObservation(pool,config,{...b,event_id:row.event_id})};
 }
 export async function cancelBrowser(pool:pg.Pool,config:Settings,input:unknown) {
   const client=await pool.connect();try {

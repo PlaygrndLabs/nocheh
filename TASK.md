@@ -58,13 +58,31 @@ rehearsal passed capture during PostgreSQL/Redis/Inngest outages, store restart,
 crash after effect before acknowledgement, worker kill and duplicate-event
 receipt reconciliation, with exactly three effects for three source identities.
 
-The active installation still uses its old service names and seven Inngest-owned
-families; preparation and Telegram remain legacy-owned. Its initial format-4
-snapshot is retained at `data/backups/20260916-consolidation`. A fresh live synthetic
-subscription transcription check passed before cutover. Complete format-5 local
-backup, local service replacement, preparation/Telegram migration, removal of
-remaining legacy execution paths, and fresh live Telegram acceptance are pending.
-This evidence establishes the verified increment, not release completion.
+The local installation now uses the canonical services and all nine families are
+Inngest-owned at epoch 2. Format-5 snapshots
+`data/backups/20260916-consolidation-complete` (722 files) and
+`data/backups/20260916-pretelegram-complete` (726 files) passed validation before
+the preparation-first, Telegram-second switches. Both handoffs had no live step
+lease or unresolved receipt. Existing archive, provider login, Honcho stores,
+spending ledger and closed effects were preserved; no application reset was used.
+The earlier format-4 snapshot is also retained.
+
+Live owner text and voice each completed once; the unmentioned group note was
+intentionally suppressed. The original 18,346-byte voice file matches its SHA-256
+and the transcript links to that same input hash. The selected group's reply did
+not reveal the private synthetic marker; its scoped credential read the group
+source (200) and was denied the private source (404). Post-cutover subscription
+refresh, chat, detection and Ogg/Opus transcription passed. Exact approval remains
+pending: Hermes asked for a numeric chat ID instead of creating the proposal.
+A tested server-resolved `current` destination fixes this without trusting a
+model-supplied source identity. Final restart acceptance is still pending.
+
+The final retirement increment removes legacy scanners, standalone workers,
+engine-disable flags and rollback execution. Fresh owners default to Inngest;
+retained import receipts only reconcile while paused. Fresh installations select
+isolated execution, shared providers and evidence memory. Historical records and
+inactive restore holds are preserved. Its final candidate and regression checks
+are in progress; the local installation still runs the preceding verified image.
 
 [Consolidation evidence](compatibility/results/2026-09-16-consolidated-services.json).
 

@@ -2,7 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startLoops} from '../src/worker-loops.js';
-import {startWorker} from '../src/worker.js';
+import {startCapture} from '../src/worker.js';
+import {startWorkflowService} from '../src/workflows/service.js';
 import {settings} from '../src/config.js';
 import type pg from 'pg';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
@@ -15,8 +16,11 @@ test('restored state starts no capture, learning, recovery or action loop before
   try {
     await mkdir(join(directory,'spool'));
     await writeFile(join(directory,'spool','.restore-inactive'),'');
-    const stop=startWorker(pool,{...settings(),dataDir:directory});
-    await delay(20);await stop();
+    const config={...settings(),dataDir:directory};
+    const capture=startCapture(pool,config),workflows=startWorkflowService(pool,config);
+    assert.equal(workflows.state(),'inactive');
+    assert.deepEqual(capture.status(),{capture:'inactive',outbox:'inactive'});
+    await delay(20);await capture.stop();await workflows.close();
   } finally {await rm(directory,{recursive:true,force:true});}
 });
 

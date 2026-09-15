@@ -74,6 +74,8 @@ class SharedProviderTests(unittest.TestCase):
     def test_cutover_stays_native_without_fresh_provider_login(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize_configuration(state)
+            from scripts.configuration import load,write_env,env_path
+            values=load(state);values['NOCHEH_REASONING_ROUTE']='native';write_env(env_path(state),values)
             result=cutover(state)
             self.assertEqual(result['status'],'credentials_pending')
             saved=json.loads((state/'reports/shared-provider-acceptance.json').read_text())

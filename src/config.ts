@@ -9,10 +9,10 @@ export function secret(name: string): string {
   return value;
 }
 
-export type Service = 'archive' | 'worker' | 'guard' | 'nocheh-app';
+export type Service = 'nocheh-app';
 export function settings() {
   const service = process.env.NOCHEH_SERVICE ?? 'nocheh-app';
-  if (!['archive', 'worker', 'guard', 'nocheh-app'].includes(service)) throw new Error('Invalid service');
+  if (service!=='nocheh-app') throw new Error('Invalid service');
   const mode = process.env.GUARD_MODE === 'auto' ? 'on' : process.env.GUARD_MODE ?? 'on';
   if (!['off', 'on'].includes(mode)) throw new Error('Invalid guard mode');
   const trusted:unknown=JSON.parse(process.env.GUARD_TRUSTED_ENDPOINTS ?? JSON.stringify(DEFAULT_TRUSTED));
