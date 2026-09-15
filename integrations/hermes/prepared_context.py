@@ -3,7 +3,8 @@ from .archive_tools import request
 
 
 def prepare(value):
-    return request('/v1/context/prepare', value)
+    from .timing import measure
+    with measure('context_prepare'):return request('/v1/context/prepare', value)
 
 
 def install():

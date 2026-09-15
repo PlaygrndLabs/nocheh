@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import uuid
+from time import perf_counter
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -150,9 +151,13 @@ def instrument_request(request, capture: Capture, polling=False):
             method = urlsplit(url).path.rsplit('/', 1)[-1]
             if polling:
                 try:
+                    started=perf_counter()
                     result = await super().do_request(*args, **kwargs)
                     if method == 'getUpdates':
+                        capture.polling['network_ms']=round((perf_counter()-started)*1000)
+                        captured=perf_counter()
                         await asyncio.to_thread(capture.updates, result)
+                        capture.polling['capture_ms']=round((perf_counter()-captured)*1000)
                         status, raw = result
                         if status == 200 and json.loads(raw).get('ok'):
                             now = datetime.now(timezone.utc).isoformat()
