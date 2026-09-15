@@ -74,7 +74,7 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,e
        WHERE d.state IN ('pending','failed','running') AND d.next_attempt<=now() AND e.origin='live' AND e.kind='telegram_update'
        AND ($1::text IS NULL OR e.id=$1) ORDER BY d.next_attempt,e.received_at LIMIT 1`,[eventId]);
     const event=rows[0];if(!event)return;
-    if(authority.owner==='inngest'&&event.state==='running') {
+    if(event.state==='running') {
       try {
         const observed=await call('run.resume',{channel:'telegram',event_id:event.id,attempt:event.attempts},10000);
         if(observed.state!=='not_found'){await dispatchReceipt(client,event.id,observed);return;}
@@ -115,8 +115,8 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,e
       await allowPrepared(pool,{scope:scope.owner?null:scope.chat_id,admin:false,turnEvent:event.id,space:policy.id,revision:policy.revision,guard_epoch:guard.epoch},{text,transcripts:selectedTranscripts});
       const result=await call('run.start',{channel:'telegram',event_id:event.id,source_key:event.source_key,scope:event.scope,payload,
         text,transcripts:selectedTranscripts,attempt,control_reply:control,guard_mode:guard.mode,
-        ...(authority.owner==='inngest'?{asynchronous:true}:{}),
-        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision,guard_epoch:guard.epoch})},authority.owner==='inngest'?10000:260000);
+        asynchronous:true,
+        archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision,guard_epoch:guard.epoch})},10000);
       await dispatchReceipt(client,event.id,result);
     } catch {
       // Retain running + the same attempt ID. A retry reads the Hermes receipt;

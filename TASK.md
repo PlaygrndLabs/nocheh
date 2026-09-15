@@ -187,6 +187,17 @@ passes and do not establish full-chat latency or follow-up reliability.
 
 [Content-free timing evidence](compatibility/results/2026-09-15-telegram-latency-diagnosis.json).
 
+Profile admission now shares the native review/conversation lock. Foreground turns
+wait before child execution and recheck cancellation and current policy; a busy
+review returns to prerequisite waiting without consuming an attempt. Legacy
+Telegram ownership uses the asynchronous runtime receipt contract and reconciles
+running identities before any repeated start. All 74 service checks pass in the
+isolated Compose fixture with serial test-file execution; six focused admission
+checks pass. The initial parallel service run hit database timeouts. The broader
+Hermes run passed 151 checks with two existing skips, but three native startup
+checks timed out under host load and remain pending retest. This code increment
+is not yet installed and does not complete live Telegram acceptance.
+
 </telegram_live_latency>
 
 ## Outstanding acceptance and blockers

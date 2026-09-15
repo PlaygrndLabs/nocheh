@@ -93,6 +93,10 @@ export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCal
       const result=await call('memory.review',{id:digest(job.id+':'+job.generation),scope:config.assistant.owner_id,content:job.content,event_id:job.event_id,
         guard_mode:guard.mode,archive_credential:turnToken(config.token,null,Date.now()+600000,job.event_id,{...policy,purpose:'memory-review'})},240000);
       if((await guardState(pool)).epoch!==guard.epoch)throw new HttpError(409,'guard_context_changed');
+      if(result.state==='waiting'&&result.error_code==='profile_busy') {
+        await client.query("UPDATE memory_review_jobs SET state='pending',attempts=greatest(0,attempts-1),error_code='waiting_for_profile',next_attempt=now()+interval '5 seconds',updated_at=now() WHERE id=$1",[job.id]);
+        return;
+      }
       if(!['done','ambiguous'].includes(String(result.state)))throw new HttpError(503,'review_failed');
       await client.query('UPDATE memory_review_jobs SET state=$2,error_code=$3,updated_at=now() WHERE id=$1',[job.id,result.state,result.state==='ambiguous'?'review_interrupted':null]);
     }catch(error){await client.query("UPDATE memory_review_jobs SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second',updated_at=now() WHERE id=$1",[job.id,error instanceof HttpError?error.code:'review_unavailable']);}
