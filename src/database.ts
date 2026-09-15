@@ -26,7 +26,12 @@ export function connectDatabase(config: Settings): pg.Pool {
     password: config.databasePassword, max: 8, connectionTimeoutMillis: 5000,
     statement_timeout: 15000, idleTimeoutMillis: 30000,
   });
-  pool.on('error', () => console.error(JSON.stringify({event: 'database_connection_lost'})));
+  const connectionLost=()=>console.error(JSON.stringify({event:'database_connection_lost'}));
+  // A checked-out client can disconnect while a step awaits an external call.
+  // Pool error handling covers idle clients only; active borrowers still need
+  // a listener. Their next query rejects and existing receipt recovery applies.
+  pool.on('connect',client=>client.on('error',connectionLost));
+  pool.on('error',connectionLost);
   return pool;
 }
 

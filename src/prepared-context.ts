@@ -4,6 +4,7 @@ import {canonical,digest} from './archive.js';
 import {guardState,replaceValues,textValues} from './guarded.js';
 import {literalSpans,mask,patternSpans,DETECTOR_VERSION} from './guard.js';
 import {HttpError} from './http.js';
+import {releaseOperation} from './workflows/store.js';
 
 export const contextSchema=`CREATE TABLE IF NOT EXISTS guard_context_values (
  id text PRIMARY KEY,audience text NOT NULL,epoch bigint NOT NULL,content bytea NOT NULL);
@@ -120,5 +121,5 @@ export async function prepareContext(pool:pg.Pool,principal:Reader,value:unknown
     const prepared=replaceValues(value,replacements);
     await assertAudience(pool,principal);await allowPrepared(pool,principal,prepared);
     return prepared;
-  }finally{await client.query('ROLLBACK');await client.query('SELECT pg_advisory_unlock(hashtextextended($1,803309))',[scope]);client.release();}
+  }finally{await releaseOperation(client,async()=>{await client.query('ROLLBACK');await client.query('SELECT pg_advisory_unlock(hashtextextended($1,803309))',[scope]);});}
 }
