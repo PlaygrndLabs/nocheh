@@ -8,21 +8,26 @@ runs, not tests repeated by the documentation migration.
 <production_completion>
 
 The owner authorized the full production follow-up and local maintenance window.
-All nine family admissions were paused without changing ownership. The memory
-availability/startup repairs and automatic primary-context images are installed;
-all 11 dependencies passed health checks at 16:54 UTC. Admission restoration is
-pending explicit owner approval: after health and regression checks passed,
-automatic review still rejected reopening because live acceptance gates remain
-pending. One interrupted native review had no receipt and no active isolated turn;
-it is held as ambiguous with its original identity and 25 attempts.
+All nine family admissions were reopened after the owner's explicit approval,
+without changing ownership. The initial reopen attempt could not connect during
+a new PostgreSQL recovery; the guarded transaction succeeded after health
+recovered. The memory availability/startup repairs and automatic primary-context
+images are installed. One interrupted native review had no receipt and no active
+isolated turn; it remains ambiguous with its original identity and 25 attempts.
 
 Preflight found repeated PostgreSQL backend exits with code 2 and recovery cycles.
 The database container had no OOM kill, its volume was not shared, and the other
 project's database showed no corresponding failures. A graceful restart was
-followed by another backend exit at 16:25 UTC. No further code-2 exits appeared
-from 16:26 through 16:54 UTC. Its cause is unresolved; temporary connection-only
-diagnostics have been removed and logging is confirmed off. Healthy containers
-and this observation window do not resolve the production reliability gate.
+followed by further backend exits at 16:25, 19:20 and 19:22 UTC. Temporary
+connection-only diagnostics have been removed and logging is confirmed off.
+The cause remains unresolved. Docker also failed to stop several containers and
+reported a zombie process during the separately approved temporary coopr stop.
+All 17 original coopr containers were confirmed running again at 19:40 UTC.
+A graceful OrbStack restart has been requested; no force-stop is authorized.
+The read-only `orbctl list` attempt timed out waiting for the VM to start, and
+the final PostgreSQL connection check failed. Synthetic fixture services are
+stopped. [Reopening evidence](compatibility/results/2026-09-15-admission-reopening.json)
+records the actual successful transition separately from these later failures.
 
 [ADR-0044](docs/adr/0044-automatic-honcho-context.md) implements automatic primary
 Honcho context with a protected generation cache, a durable two-minute refresh,
@@ -30,9 +35,22 @@ and scoped deeper recall. Native notes stay small. The final isolated service
 run passed all 75 checks; 157 Hermes checks passed with two optional checks
 skipped. Installed image artifacts match the tested code and Graphify is refreshed.
 [Evidence](compatibility/results/2026-09-15-primary-honcho-context.json) records
-fixture corrections and limits. The scoped live context endpoint returned in
-715 ms, but its cache is empty while refresh admission is held; this is not a
-warm-cache latency or recall pass.
+fixture corrections and limits. After reopening admission, the regular Inngest
+refresh populated the protected context cache. A scoped live read returned in
+429 ms, reported memory available and contained the expected synthetic garden
+fact. The same permanent context workflow waits for its next two-minute refresh.
+
+Both new owner Telegram messages survived capture and spool draining. Voice
+transcription contains the expected synthetic phrase. Their one-attempt native
+receipts did not pass delivery acceptance: text is ambiguous (`dispatch_interrupted`)
+and voice is suppressed (`unsupported_message`). Neither receipt is reopened.
+An additional database recovery fix handles errors on checked-out clients and
+discards a guard connection even if rollback/unlock fails. Five focused checks
+pass; the wider regression encountered failures while the host was unstable.
+The candidate is not installed pending completion of that verification. The
+broader run was interrupted after three reported failures; it is not a pass.
+The Honcho deadline test now uses controlled time and passes independently.
+These source changes remain in the session worktree pending the wider gate.
 
 Fresh format-4 backup and inactive restore passed with 45 archive tables, 14
 Inngest tables and 676 protected files. The first restore exposed a Redis
@@ -42,8 +60,8 @@ restore projects are stopped; no restored login, worker, Telegram or Honcho
 activation occurred. The new cache table was empty, so this snapshot proves
 schema inclusion, not recovery of populated cache content.
 [Recovery evidence](compatibility/results/2026-09-15-primary-context-recovery.json)
-records the checks. Live cache warming, real owner Telegram acceptance and the
-final preparation/Telegram cutovers remain pending. Local integration succeeded;
+records the checks. Real owner Telegram delivery acceptance, stable operation and
+the final preparation/Telegram cutovers remain pending. Local integration succeeded;
 remote fetch/push require GitHub authentication.
 
 </production_completion>
