@@ -77,7 +77,7 @@ def run(body, emit=None):
     long_term='';memory={}
     if not review:
         from .archive_tools import request
-        try: memory=request('/v1/memory/honcho/recall',{'query':body['text'][:2000]})
+        try: memory=request('/v1/memory/honcho/recall',{'query':body.get('memory_query',body['text'])[:2000]})
         except Exception: memory={'limited_memory':True,'note':'Long-term memory is limited. Current context, native notes and archive search remain available.'}
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()

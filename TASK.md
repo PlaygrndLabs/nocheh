@@ -288,6 +288,8 @@ bounded context and fresh audience/guard checks is a recommendation, not an
 implemented or activated mode. The blanket reasoning call remains a latency
 limitation. [Native provider reference](https://github.com/NousResearch/hermes-agent/blob/main/plugins/memory/honcho/README.md).
 
+[Memory availability and startup evidence](compatibility/results/2026-09-15-memory-availability.json).
+
 </telegram_live_latency>
 
 ## Outstanding acceptance and blockers

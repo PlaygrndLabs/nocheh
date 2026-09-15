@@ -25,7 +25,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 return result,events
     async def test_stream_framing_and_failed_child(self):
-        result,events=await self.execute('import sys,json; body=json.load(sys.stdin); assert body["channel"]=="browser"; print(json.dumps({"event":"message.delta","text":"hello"})); print(json.dumps({"state":"done","text":"hello"}))')
+        result,events=await self.execute('import sys,json; body=json.load(sys.stdin); assert body["channel"]=="browser"; assert body["memory_query"]=="original"; assert "nocheh:event:event" in body["text"]; print(json.dumps({"event":"message.delta","text":"hello"})); print(json.dumps({"state":"done","text":"hello"}))')
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
