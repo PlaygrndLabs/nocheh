@@ -197,8 +197,8 @@ checks pass. The initial parallel service run hit database timeouts. The broader
 Hermes run passed 151 checks with two existing skips, but three native startup
 checks timed out under host load and remain pending retest. The final candidate passes all 155 non-optional Hermes checks across the full
 run and a solitary repeat of its one timing-sensitive TUI check; two existing
-optional checks are skipped. The code is not yet installed and does not complete
-live Telegram acceptance.
+optional checks are skipped. The code is installed locally; real Telegram acceptance still needs a new owner
+message and the remaining live gates.
 
 Guard context persistence now batches the cache reads, prepared-value inserts,
 and one atomic write per bounded detector batch. A 100-fragment regression proves
@@ -212,8 +212,19 @@ off the polling event loop while retaining their fsync-before-delivery ordering.
 Current host pressure was measured at about 92% CPU use, 15 GB RAM used and 6.6 GB
 compressed. This is current evidence, not proof of the original capture delay.
 The separate project was left running; the synthetic fixture is stopped again.
-Both candidate images are built and rollback-compatible with the existing schema.
-Graphify was refreshed with 253 files and no model calls.
+Both verified images are installed after pausing admission and observing no
+active reply, review, browser turn or action. Admission is restored with all owner
+and epoch values unchanged; rollback tags and compatible receipts are preserved.
+The eight replaced services passed health checks. Fresh shared-login text, guard,
+transcription and refresh-authority probes pass, and native polling is connected.
+The first text probe took 58.079 seconds, versus 4.285 seconds for its repeat;
+cold startup remains slow. These are synthetic runtime probes, not full Telegram
+latency measurements. No old ambiguous turn was replayed. Graphify was refreshed
+with 253 files and no model calls.
+
+[Installed response-fix evidence](compatibility/results/2026-09-15-telegram-response-fixes.json).
+The owner should send one fresh private follow-up so the new runtime receipt and
+phase timings can establish real delivery and remaining latency.
 
 </telegram_live_latency>
 
