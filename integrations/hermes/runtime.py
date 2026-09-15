@@ -85,7 +85,7 @@ def login_present():
     if reasoning_route() == 'native':return (PROFILE_HOME/'auth.json').is_file()
     try:
         opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(os.environ.get('SPEECH_URL','http://speech:8783')+'/health',timeout=3) as response:
+        with opener.open(os.environ.get('SPEECH_URL','http://chatgpt-speech:8783')+'/health',timeout=3) as response:
             return json.load(response).get('login_present') is True
     except Exception:return False
 

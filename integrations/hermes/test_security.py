@@ -51,7 +51,7 @@ class SecurityTests(unittest.TestCase):
         from .security_transport import install_isolated_route
         from .subscription import SubscriptionCredentials
         with patch.object(model_metadata,'get_model_context_length',return_value=12345),patch.object(context_compressor,'get_model_context_length'),patch.object(aux,'_CODEX_AUX_BASE_URL',aux._CODEX_AUX_BASE_URL):
-            credentials=SubscriptionCredentials('turn.scoped.capability','http://security:8786/codex','openai-codex','codex_responses')
+            credentials=SubscriptionCredentials('turn.scoped.capability','http://nocheh-security:8786/codex','openai-codex','codex_responses')
             install_isolated_route(credentials,'same-model',272000)
             self.assertEqual(model_metadata.get_model_context_length('same-model',base_url=credentials.base_url),272000)
             self.assertEqual(context_compressor.get_model_context_length('same-model'),272000)
@@ -66,7 +66,7 @@ class SecurityTests(unittest.TestCase):
             root=Path(folder);name='nocheh-'+'d'*24;profile=root/name;profile.mkdir();(profile/'config.yaml').write_text('{}');prepare(profile)
             try:
                 docker('POST','/networks/create',{'Name':network,'Internal':True});created=True
-                image=docker('GET','/images/nocheh-hermes:local/json')['Id']
+                image=docker('GET','/images/'+os.environ.get('NOCHEH_TEST_IMAGE','nocheh-hermes:local')+'/json')['Id']
                 spec=container_spec(name,str(root),image,network,os.getuid(),os.getgid())
                 code='''import os,socket,sys,json
 from pathlib import Path

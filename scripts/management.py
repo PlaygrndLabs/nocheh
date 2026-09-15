@@ -135,7 +135,7 @@ def dispatch(body):
                 except BlockingIOError:raise ValueError('import_batch_busy') from None
                 import urllib.error
                 from .archive import digest,canonical
-                from .tool_worker import atomic
+                from .tool_receipts import atomic
                 try:result=run(directory,mapping,body.get('after',0),API(job,import_owner='legacy'))
                 except urllib.error.HTTPError as error:
                     if error.code==409 and json.loads(error.read(4096)).get('error')=='import_owner_paused':return {'status':'import_paused'}

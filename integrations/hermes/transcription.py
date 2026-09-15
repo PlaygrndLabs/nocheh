@@ -100,7 +100,7 @@ class SubscriptionTranscriptionProvider(TranscriptionProvider):
                 if language:
                     headers["X-Nocheh-Language"] = language
                 request = urllib.request.Request(
-                    os.environ.get("SPEECH_URL", "http://speech:8783") + "/transcribe",
+                    os.environ.get("SPEECH_URL", "http://chatgpt-speech:8783") + "/transcribe",
                     data=path.read_bytes(), headers=headers,
                 )
                 with urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect()).open(request,timeout=110) as response:

@@ -13,7 +13,7 @@ from .capture import canonical
 
 
 def archive(route,body,token):
-    request=Request(os.environ.get('ARCHIVE_URL','http://archive:8780')+'/v1/scheduler/'+route,
+    request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/scheduler/'+route,
         data=canonical(body),headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
     with urlopen(request,timeout=15) as response:return json.load(response)
 

@@ -284,6 +284,6 @@ class AssistantGateway:
 def check_delivery_policy(credential):
     import urllib.request
     try:
-        request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://archive:8780')+'/v1/memory/check',headers={'Authorization':'Bearer '+credential})
+        request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/memory/check',headers={'Authorization':'Bearer '+credential})
         with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('valid') is True
     except Exception:return False

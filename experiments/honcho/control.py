@@ -58,6 +58,9 @@ def initialize():
     for level in ('minimal','low','medium','high','max'): env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
     (STATE/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
     for name in ('compose.env','honcho.env','meter.env'): (STATE/name).chmod(0o600)
+    if values.get('NOCHEH_HONCHO_ENABLED')=='true':
+        from scripts.honcho_runtime import normalize_endpoints
+        normalize_endpoints(STATE)
 
 
 def sources():

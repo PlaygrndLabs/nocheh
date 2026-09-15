@@ -11,15 +11,47 @@ runs, not tests repeated by the documentation migration.
 
 Owner approved [ADR-0046](docs/adr/0046-consolidated-inngest-installation.md).
 Implementation is in progress on `codex/system-diagram-01a0a683`.
-The initial increment adds application/capture and supervised Connect composition,
-explicit stored-preparation consumption, a local broker/guard boundary, and native
-dashboard presentation through managed Hermes administration. Isolated PostgreSQL
-tests pass 78/78; pinned Hermes native administration tests pass 12/12 (no network
-or production state). Node 24 build and AST graph refresh pass. The consolidated
-Dockerfile's complete build and merged runtime UI preview remain pending.
-Current installation and ownership are unchanged. Service naming, isolated full
-topology/fault acceptance, local migration, legacy removal, live Telegram and
-fresh inactive restore remain pending.
+Commit `6d37365` is integrated into local main; GitHub HTTPS authentication still
+blocks fetch/push. It adds supervised application/capture and Connect composition,
+stored-preparation consumption, the merged broker/guard, and native dashboard
+presentation through managed Hermes administration.
+
+The service layout now uses the [tool and purpose names](docs/services.md), two
+host processes and 15 continuously running containers with Honcho enabled.
+Isolated startup verified all 15 containers healthy and `inngest-db-init` completed.
+The complete pinned Hermes/dashboard and Node 24 application images build.
+Owner and native Hermes UI inspection passed; owner diagnostics completed with
+all application containers stopped. The host executor recovers receipts even when
+its Connect child is unavailable. Production credentials were not copied into
+these fixtures, and their provider calls were disabled.
+
+Fresh checks: 78/78 TypeScript/PostgreSQL tests; 169 passing native Hermes tests
+with two optional checks skipped in that container; 17 focused host tests,
+including the resolved Compose check; and the real agent-container isolation
+fixture passed separately. Full-stack Inngest outage, application restart during
+that outage, duplicate capture, durable outbox and reconnection passed. All nine
+family ownership switches passed in the synthetic installation. Real Connect
+pipeline validation passed preparation, Telegram, browser and scheduled receipts.
+The host import probe preserved three batch receipts after a lost acknowledgement;
+103 imported messages produced no replies or unapproved learning. The real-server
+privacy probe rejected protected outputs/errors and scanned 1,126 stored rows
+without finding the synthetic protected marker.
+
+The format-5 backup now includes Honcho PostgreSQL, protected configuration,
+spending ledger and separate native presentation preferences. A complete synthetic
+backup/inactive restore passed archive, Inngest and Honcho fingerprints; restored
+capture and workflows report inactive. The restore starts no execution authority
+or Honcho writers. Existing format-3/4 backups remain readable.
+
+The active installation still uses its old service names and seven Inngest-owned
+families; preparation and Telegram remain legacy-owned. Its initial format-4
+snapshot is retained at `data/backups/20260916-consolidation`. A fresh live synthetic
+subscription transcription check passed before cutover. Complete format-5 local
+backup, local service replacement, preparation/Telegram migration, removal of
+remaining legacy execution paths, and fresh live Telegram acceptance are pending.
+This evidence establishes the verified increment, not release completion.
+
+[Consolidation evidence](compatibility/results/2026-09-16-consolidated-services.json).
 
 </consolidation_implementation>
 

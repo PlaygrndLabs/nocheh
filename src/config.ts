@@ -11,7 +11,7 @@ export function secret(name: string): string {
 
 export type Service = 'archive' | 'worker' | 'guard' | 'nocheh-app';
 export function settings() {
-  const service = process.env.NOCHEH_SERVICE ?? 'archive';
+  const service = process.env.NOCHEH_SERVICE ?? 'nocheh-app';
   if (!['archive', 'worker', 'guard', 'nocheh-app'].includes(service)) throw new Error('Invalid service');
   const mode = process.env.GUARD_MODE === 'auto' ? 'on' : process.env.GUARD_MODE ?? 'on';
   if (!['off', 'on'].includes(mode)) throw new Error('Invalid guard mode');
@@ -21,8 +21,8 @@ export function settings() {
     service: service as Service, host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 8780),
     token: secret('SERVICE_TOKEN'), databasePassword: secret('PGPASSWORD'),
     dataDir: process.env.NOCHEH_DATA_DIR ?? '/data',
-    hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
-    honchoUrl:process.env.HONCHO_URL??'http://honcho:8000',
+    hermesUrl: process.env.HERMES_URL ?? 'http://hermes-runtime:8781',
+    honchoUrl:process.env.HONCHO_URL??'http://honcho-api:8000',
     memoryToken:process.env.NOCHEH_MEMORY_TOKEN??'',
     guardMode: mode as 'off' | 'on',
     guardTrusted:trusted as string[],detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_MODEL ?? 'gpt-5.6-sol'}`,

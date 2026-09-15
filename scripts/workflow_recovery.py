@@ -29,7 +29,7 @@ trap - EXIT
 
 
 def fingerprints(command,env,tables=None):
-    prefix=command+['exec','-T','postgres','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d',DATABASE]
+    prefix=command+['exec','-T','nocheh-postgres','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d',DATABASE]
     if tables is None:
         raw=subprocess.check_output(prefix+['-c',"SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY 1"],env=env,text=True)
         tables=raw.split()
@@ -55,8 +55,8 @@ def snapshot(command,env,stage,sha):
     # still up solely to export its quiesced dataset as a portable RDB.
     result={'version':1,'tables':fingerprints(command,env)}
     for filename,args in (
-        ('inngest.dump',['postgres','pg_dump','-U','nocheh','-d',DATABASE,'-Fc','--no-owner']),
-        ('workflow-redis.rdb',['workflow-redis','redis-cli','--rdb','-']),
+        ('inngest.dump',['nocheh-postgres','pg_dump','-U','nocheh','-d',DATABASE,'-Fc','--no-owner']),
+        ('workflow-redis.rdb',['inngest-redis','redis-cli','--rdb','-']),
     ):
         path=Path(stage)/filename
         with path.open('xb') as output:
@@ -79,9 +79,9 @@ def validate(directory,metadata,sha):
 
 def restore(command,env,snapshot_dir,state,metadata,sha):
     validate(snapshot_dir,metadata,sha)
-    subprocess.run(command+['run','--rm','--no-deps','workflow-database'],env=env,check=True,stdout=subprocess.DEVNULL)
+    subprocess.run(command+['run','--rm','--no-deps','inngest-db-init'],env=env,check=True,stdout=subprocess.DEVNULL)
     with (Path(snapshot_dir)/'inngest.dump').open('rb') as source:
-        subprocess.run(command+['exec','-T','postgres','pg_restore','-U','nocheh','-d',DATABASE,'--role=nocheh_inngest','--no-owner','--exit-on-error'],env=env,stdin=source,check=True,stdout=subprocess.DEVNULL)
+        subprocess.run(command+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d',DATABASE,'--role=nocheh_inngest','--no-owner','--exit-on-error'],env=env,stdin=source,check=True,stdout=subprocess.DEVNULL)
     if fingerprints(command,env,metadata['tables'])!=metadata['tables']:raise RuntimeError('workflow_restore_fingerprint_mismatch')
     directory=Path(state)/'workflows/redis';directory.mkdir(parents=True,mode=0o700)
     target=directory/'dump.rdb';shutil.copyfile(Path(snapshot_dir)/'workflow-redis.rdb',target);target.chmod(0o600)
@@ -89,5 +89,5 @@ def restore(command,env,snapshot_dir,state,metadata,sha):
     # AOF takes precedence over RDB. Load the verified RDB with AOF disabled,
     # create a fresh complete AOF, then shut down before any coordinator starts.
 
-    subprocess.run(command+['run','--rm','--no-deps','workflow-redis','sh','-c',REDIS_RESTORE_SCRIPT],env=env,check=True,timeout=90,stdout=subprocess.DEVNULL)
+    subprocess.run(command+['run','--rm','--no-deps','inngest-redis','sh','-c',REDIS_RESTORE_SCRIPT],env=env,check=True,timeout=90,stdout=subprocess.DEVNULL)
     return {'database_verified':True,'redis_verified':True,'active':False}

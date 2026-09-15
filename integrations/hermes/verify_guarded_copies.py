@@ -16,7 +16,7 @@ from .scopes import Scopes
 from .turn_process import run_process
 
 async def main():
-    secret=environment_secret('SERVICE_TOKEN');base=os.environ.get('ARCHIVE_URL','http://archive:8780')
+    secret=environment_secret('SERVICE_TOKEN');base=os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')
     def call(path,body=None,credential=secret):
         request=urllib.request.Request(base+path,data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),headers={'Authorization':'Bearer '+credential,'Content-Type':'application/json'})
         try:

@@ -45,7 +45,8 @@ class SnapshotTests(unittest.TestCase):
     def test_backup_preserves_import_approval_and_native_review_receipts(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);state=root/'state';state.mkdir();(state/'.env').write_text('TELEGRAM_ENABLED=false\n')
-            for name in ('files','spool','hermes','admin/jobs/fixture'):(state/name).mkdir(parents=True,exist_ok=True)
+            for name in ('files','spool','hermes','admin/jobs/fixture','admin/dashboard/home'):(state/name).mkdir(parents=True,exist_ok=True)
+            (state/'admin/dashboard/home/config.yaml').write_text('dashboard: {font: system-mono}\n')
             job=state/'admin/jobs/fixture/job.json';job.write_text('{"review_approved":true,"state":"cancelled"}')
             receipt=state/'hermes/review-receipt';receipt.write_text('ambiguous')
             cache=state/'hermes/profiles/fixture/.cache/uv';cache.mkdir(parents=True)
@@ -62,6 +63,7 @@ class SnapshotTests(unittest.TestCase):
                 stop_host.assert_called_once_with(state,wait=True);start_host.assert_called_once_with(state)
             manifest=validate_snapshot(root/'backup')
             self.assertEqual(manifest['version'],3)
+            self.assertIn('admin/dashboard/home/config.yaml',manifest['files'])
             self.assertEqual(manifest['files']['admin/jobs/fixture/job.json']['sha256'],sha(job))
             self.assertEqual(manifest['files']['hermes/review-receipt']['sha256'],sha(receipt))
             self.assertIn('memory_review_jobs',manifest['tables'])

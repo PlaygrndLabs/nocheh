@@ -7,22 +7,19 @@ events, files, and separately recorded transcripts stay in an owned, portable ar
 workflow. [TASK.md](TASK.md) records implementation, activation, and outstanding
 acceptance; [ADRs](docs/adr/README.md) preserve the decision history.
 
-**Status:** local Docker Compose implementation consolidated into `main` under
-[ADR-0039](docs/adr/0039-main-refactor-consolidation.md). Remaining live Telegram
-acceptance and provider cutover are pending; this is not a release declaration.
-Guarded copies and the owner editor are active locally. Primary Honcho integration
-is implemented but stays detached until shared reasoning, dedicated embeddings,
-and live memory acceptance pass. The shared CLIProxyAPI reasoning route and CPA
-Manager Plus monitor are implemented;
-the fresh provider login and live cutover are recorded in `TASK.md`.
-See [TASK.md](TASK.md) for current setup and validation status.
+The reviewed deployment combines application responsibilities and uses clear tool
+service names. See [the service map and workflow](docs/services.md).
+[TASK.md](TASK.md) records actual activation, migration progress and release gates;
+specifications and healthy containers do not establish release acceptance.
+
 Legacy code is preserved on `codex/legacy-nocheh`.
 
 ## Local development and automated startup
 
-Install Docker with Compose and Python 3, then run:
+Install Docker with Compose, Python 3 and Node 24.x, then run:
 
 ```bash
+npm ci                  # install the pinned host dashboard/build dependencies
 ./scripts/nocheh init     # create .env with generated internal credentials
 # Edit .env for Telegram, model and optional guarding settings.
 ./scripts/nocheh up       # build, start in the background, wait for health checks

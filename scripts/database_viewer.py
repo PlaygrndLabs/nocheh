@@ -14,7 +14,7 @@ def start(state, command, root):
     values['NOCHEH_VIEWER_PASSWORD'] = password
     write_env(env_path(state), values)
     env = compose_environment(state)
-    result = subprocess.call(command + ['up', '-d', '--wait', 'postgres'], cwd=root, env=env)
+    result = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-postgres'], cwd=root, env=env)
     if result:
         return result
     sql = """
@@ -30,14 +30,14 @@ ALTER ROLE nocheh_viewer SET default_transaction_read_only = on;
 ALTER ROLE nocheh_viewer SET statement_timeout = '15s';
 """ % password
     # Never put SQL containing the password in argv, logs, or error output.
-    result = subprocess.run(command + ['exec', '-T', 'postgres', 'psql', '-U', 'nocheh',
+    result = subprocess.run(command + ['exec', '-T', 'nocheh-postgres', 'psql', '-U', 'nocheh',
         '-d', 'nocheh', '-v', 'ON_ERROR_STOP=1'], input=sql, text=True,
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=root, env=env)
     if result.returncode:
         print('Database viewer role setup failed; PostgreSQL exit code:', result.returncode)
         return result.returncode
     result = subprocess.call(command + ['--profile', 'tools', 'up', '-d', '--wait',
-        '--no-deps', 'db-viewer'], cwd=root, env=env)
+        '--no-deps', 'pgweb-archive'], cwd=root, env=env)
     if result == 0:
         print('Read-only archive browser: http://127.0.0.1:8782')
     return result

@@ -11,7 +11,7 @@ def main(state,args):
     parser.add_argument('--uses',type=int,default=3);parser.add_argument('--minutes',type=int,default=60)
     options=parser.parse_args(args)
     if options.action in ('start','stop','status'):
-        from .tool_worker import start,stop,running
+        from .workflow_worker import start,stop,running
         result=start(state) if options.action=='start' else stop(state,wait=True) if options.action=='stop' else {'running':running(state),'inactive_restore':(state/'admin/tools/inactive').exists()}
     else:
         api=API()

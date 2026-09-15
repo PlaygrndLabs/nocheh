@@ -90,7 +90,7 @@ export async function boundedInspectionBody(response:Response){
   if(response.body)for await(const part of response.body){length+=part.length;if(length>12*1024*1024){await response.body.cancel().catch(()=>{});throw new HttpError(502,'inspection_response_too_large');}chunks.push(Buffer.from(part));}
   return Buffer.concat(chunks);
 }
-export async function proxyInngestInspection(req:IncomingMessage,res:ServerResponse,key:string,upstream='http://inngest:8288'){
+export async function proxyInngestInspection(req:IncomingMessage,res:ServerResponse,key:string,upstream='http://inngest-server:8288'){
   const selected=inspectionPath((req.url??'').slice('/v1/workflows/inspection'.length),req.method??'GET');
   if(req.headers.origin||req.headers.cookie)throw new HttpError(403,'inspection_backend_only');
   if(!/^[a-f0-9]{64}$/.test(key))throw new HttpError(503,'workflows_unavailable');

@@ -6,6 +6,9 @@ activation and pending acceptance. This guide describes operating procedures.
 Local Docker Compose is the current target. It is used for normal unattended
 operation, development and acceptance. No VPS is required.
 
+See [service names, responsibilities, dashboards and workflow](services.md).
+Host services require Node 24.x; set `NOCHEH_NODE` when selecting a non-default executable.
+
 ## Start and develop
 
 ```bash
@@ -87,7 +90,7 @@ monitor failure isolation and restart recovery.
 
 ```bash
 ./scripts/nocheh test
-./scripts/nocheh logs archive
+./scripts/nocheh logs nocheh-app
 ./scripts/nocheh status
 ./scripts/nocheh down
 ./scripts/nocheh up
@@ -113,10 +116,12 @@ its own `.env` in that state directory and its own login; do not duplicate a ref
 ```
 
 Backup stops Telegram ingress first, then archive and provider writers. It takes a PostgreSQL
-custom-format dump and copies the file store, durable spool, native Hermes state,
+custom-format dump and copies the file store, durable spool, native Hermes state and
+separate dashboard preferences,
 provider OAuth/monitor state, configuration and credentials while those writers are stopped. It records file
-checksums and deterministic fingerprints of all 18 current archive, policy,
-review, managed-run and action tables, then
+checksums and deterministic fingerprints of archive, policy, receipt and workflow
+tables. Version 5 also includes Honcho database fingerprints, a database dump,
+protected configuration and the embedding spending ledger. Honcho cache is rebuildable. It then
 restarts the previously running services. Backups are private local directories
 under ignored `data/backups/`; they contain original data and credentials. Keep
 their access permissions when copying them. Generated plugin symlinks are recorded
@@ -143,7 +148,7 @@ NOCHEH_STATE_DIR="$PWD/data/restored" COMPOSE_PROJECT_NAME=nocheh-restored ./scr
 ```
 
 Only after reconciliation and an approved cutover should the operator remove the
-three execution holds, obtain a fresh dedicated login, review `restored.env`, enable
+execution holds, including `workflows/inactive`,, obtain a fresh dedicated login, review `restored.env`, enable
 the intended policy and restart using those same variables. This is intentionally
 not automated. A backup cannot know about deliveries made after it was taken. Ordinary
 restarts use durable delivery receipts and never automatically resend ambiguous
@@ -207,11 +212,11 @@ Release evidence is tracked in [TASK.md](../TASK.md). The container tests cover
 database recovery, duplicate delivery, quota pauses, guard failure, scoped reads,
 replay suppression and approval boundaries. Actual Telegram DM/group/voice,
 intentional silence, approved delivery and reconnect checks remain required before
-cutover and merging. The Honcho live comparison is an optional separate experiment.
+release. Git integration has its own verification gates. The Honcho live comparison is an optional separate experiment.
 
 ## Later VPS deployment
 
-Use the same Compose files and scripts on a Linux host with Docker and Python 3.
+Use the same Compose files and scripts on a Linux host with Docker, Python 3 and Node 24.x.
 Transfer owned data using backup/restore, assign the proper host UID/GID, and run
 container acceptance there before enabling the bot. Keep the API on loopback unless
 an authenticated transport is intentionally configured. VPS provisioning and its

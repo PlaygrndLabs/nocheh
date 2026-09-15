@@ -14,7 +14,7 @@ DEFAULT_STATE = ROOT / 'data/local'
 DEFAULTS = {
     'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_PROVIDER_MONITOR_PORT': '18317', 'NOCHEH_MODEL': 'gpt-5.6-sol',
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'native', 'NOCHEH_SECURITY_RUNTIME': 'legacy', 'NOCHEH_MEMORY_CONTEXT': 'legacy',
-    'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]',
+    'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_WORKFLOWS_ENABLED': 'false', 'NOCHEH_WORKFLOW_UI_PORT': '8288',

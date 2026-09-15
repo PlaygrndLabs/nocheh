@@ -103,10 +103,10 @@ def status(state):
         monitor={'revision':MONITOR_LOCK['revision'],'running':False,'healthy':False})
     command,env=compose(state)
     try:
-        raw=subprocess.check_output(command+['ps','--format','json','cliproxy','provider-monitor'],cwd=ROOT,env=env,text=True,stderr=subprocess.DEVNULL,timeout=15)
+        raw=subprocess.check_output(command+['ps','--format','json','cliproxy-api','cliproxy-monitor'],cwd=ROOT,env=env,text=True,stderr=subprocess.DEVNULL,timeout=15)
         rows=[json.loads(line) for line in raw.splitlines() if line.strip()]
         for row in rows:
-            target=info if row.get('Service')=='cliproxy' else info['monitor']
+            target=info if row.get('Service')=='cliproxy-api' else info['monitor']
             target['running']=row.get('State')=='running';target['healthy']=row.get('Health')=='healthy'
     except (OSError,subprocess.SubprocessError,ValueError):pass
     return info
@@ -116,11 +116,11 @@ def verify(state):
     ensure_source();ensure_monitor_source();result=status(state)
     command,env=compose(state)
     try:
-        subprocess.run(command+['exec','-T','cliproxy','curl','--fail','--silent','--output','/dev/null','http://127.0.0.1:8317/healthz'],cwd=ROOT,env=env,check=True,timeout=20)
+        subprocess.run(command+['exec','-T','cliproxy-api','curl','--fail','--silent','--output','/dev/null','http://127.0.0.1:8317/healthz'],cwd=ROOT,env=env,check=True,timeout=20)
         result['health_check']='passed'
     except (OSError,subprocess.SubprocessError):result['health_check']='failed'
     try:
-        subprocess.run(command+['exec','-T','provider-monitor','wget','-q','-O','/dev/null','http://127.0.0.1:18317/health'],cwd=ROOT,env=env,check=True,timeout=20)
+        subprocess.run(command+['exec','-T','cliproxy-monitor','wget','-q','-O','/dev/null','http://127.0.0.1:18317/health'],cwd=ROOT,env=env,check=True,timeout=20)
         result['monitor_health_check']='passed'
     except (OSError,subprocess.SubprocessError):result['monitor_health_check']='failed'
     result['verified']=result['health_check']=='passed' and result['healthy'] and result['monitor_health_check']=='passed' and result['monitor']['healthy']
@@ -132,15 +132,15 @@ def login(state):
     current=login_state(state)
     if current['login_files']:
         raise SystemExit('A provider login already exists; refusing to create a second refresh owner.')
-    was_running='cliproxy' in subprocess.check_output(command+['ps','--services','--status','running'],cwd=ROOT,env=env,text=True).split()
-    if was_running:subprocess.run(command+['stop','cliproxy'],cwd=ROOT,env=env,check=True)
+    was_running='cliproxy-api' in subprocess.check_output(command+['ps','--services','--status','running'],cwd=ROOT,env=env,text=True).split()
+    if was_running:subprocess.run(command+['stop','cliproxy-api'],cwd=ROOT,env=env,check=True)
     try:
-        result=subprocess.call(command+['run','--rm','--no-deps','cliproxy','./CLIProxyAPI','-config','/state/config.yaml','-codex-device-login','-no-browser'],cwd=ROOT,env=env)
+        result=subprocess.call(command+['run','--rm','--no-deps','cliproxy-api','./CLIProxyAPI','-config','/state/config.yaml','-codex-device-login','-no-browser'],cwd=ROOT,env=env)
         if result==0 and not login_state(state)['login_present']:
             print('Device login returned without exactly one active Codex credential.',file=os.sys.stderr);return 1
         return result
     finally:
-        if was_running:subprocess.run(command+['up','-d','--no-build','--wait','cliproxy'],cwd=ROOT,env=env,check=True)
+        if was_running:subprocess.run(command+['up','-d','--no-build','--wait','cliproxy-api'],cwd=ROOT,env=env,check=True)
 
 
 def main(state,args):

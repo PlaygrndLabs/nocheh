@@ -1,5 +1,5 @@
 # Restore fixture only. PostgreSQL/Redis can be inspected; workers stay inactive.
 services:
-  workflow-redis:
+  inngest-redis:
     volumes: !override
       - ${NOCHEH_FAULT_STATE:?Explicit inactive restore state required}/workflows/redis:/data

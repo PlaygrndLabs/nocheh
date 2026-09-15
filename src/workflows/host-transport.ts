@@ -8,7 +8,7 @@ import {createHash,timingSafeEqual} from 'node:crypto';
 import type {Duplex} from 'node:stream';
 
 const paths=new Set(['/v0/connect/start','/v0/connect/flush','/v1/traces/userland']);
-export function hostTransport(key:string,upstream='http://inngest:8288',gateway='http://inngest:8289') {
+export function hostTransport(key:string,upstream='http://inngest-server:8288',gateway='http://inngest-server:8289') {
   if(!/^[a-f0-9]{64}$/.test(key))throw Error('workflow_keys_missing');
   const expected=Buffer.from('Bearer '+createHash('sha256').update(Buffer.from(key,'hex')).digest('hex'));
   const sockets=new Set<Duplex>();

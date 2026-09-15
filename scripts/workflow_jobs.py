@@ -9,7 +9,7 @@ from .import_job import run
 
 
 def tool_tick(state,body):
-    from .tool_worker import tick
+    from .tool_receipts import tick
     for key in ('action_id','workflow_id'):
         if not isinstance(body.get(key),str) or not re.fullmatch('[a-f0-9]{64}',body[key]):raise ValueError('invalid_workflow_identity')
     if not isinstance(body.get('workflow_token'),str) or not re.fullmatch(r'[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}',body['workflow_token']):raise ValueError('invalid_workflow_lease')

@@ -93,8 +93,8 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         seen=[]
         self.setup_boundary(lambda *_: (_ for _ in ()).throw(GuardUnavailable('guard_down')))
         with httpx.Client(transport=httpx.MockTransport(lambda req:seen.append(req) or httpx.Response(200,json={}))) as client:
-            with trusted_detector('http://cliproxy:8317/v1'):
-                client.post('http://cliproxy:8317/v1/chat/completions',json={'messages':[]})
+            with trusted_detector('http://cliproxy-api:8317/v1'):
+                client.post('http://cliproxy-api:8317/v1/chat/completions',json={'messages':[]})
                 with self.assertRaises(GuardUnavailable):
                     client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'secret'})
         self.assertEqual(len(seen),1)

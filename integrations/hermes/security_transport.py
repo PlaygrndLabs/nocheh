@@ -1,7 +1,7 @@
 """Trusted parent exports subscription material only to the external broker."""
 import os
 
-BROKER='http://security:8786'
+BROKER='http://nocheh-security:8786'
 
 def isolated_enabled():
     value=os.environ.get('NOCHEH_SECURITY_RUNTIME','legacy')

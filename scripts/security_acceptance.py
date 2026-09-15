@@ -39,7 +39,9 @@ from agent.model_metadata import get_model_context_length
 result['model_context_length']=get_model_context_length(result['model'],base_url=result['base_url'],api_key=result['api_key'],provider=result['provider'])
 sys.stdout.write(json.dumps(result))
 '''
-    result=subprocess.run(['docker','exec','-i','nocheh-hermes-1','python','-c',code],input=json.dumps(body).encode(),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=120)
+    from .provider import compose
+    command,env=compose(ROOT/'data/local')
+    result=subprocess.run(command+['exec','-T','hermes-runtime','python','-c',code],env=env,input=json.dumps(body).encode(),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=120)
     if result.returncode:raise RuntimeError('live_subscription_unavailable')
     return json.loads(result.stdout)
 
@@ -67,13 +69,13 @@ def main():
             images={name:docker('GET','/images/'+name+':security-candidate/json')['Id'] for name in ['nocheh-hermes','nocheh-services']}
             report['images']=images
             service={'Image':images['nocheh-services'],'User':f'{os.getuid()}:{os.getgid()}',
-              'NetworkingConfig':{'EndpointsConfig':{public:{'Aliases':['security']}}},
+              'NetworkingConfig':{'EndpointsConfig':{public:{'Aliases':['nocheh-security']}}},
               'Cmd':['node','dist/test/security-fixture-server.js'],
               'Env':['NOCHEH_SECURITY_FIXTURE=synthetic-only','PGHOST=fixture-postgres','PGUSER=nocheh','PGDATABASE=nocheh','PGPASSWORD=security-synthetic-database-password',
                      'SERVICE_TOKEN=synthetic-security-fixture-token'],
               'HostConfig':{'NetworkMode':public,'Binds':[str(root)+':/fixture:rw'],'ReadonlyRootfs':True,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],'LogConfig':{'Type':'none'}}}
             identifier=docker('POST','/containers/create',service)['Id'];identifiers.append(identifier)
-            docker('POST','/networks/'+internal+'/connect',{'Container':identifier,'EndpointConfig':{'Aliases':['security']}})
+            docker('POST','/networks/'+internal+'/connect',{'Container':identifier,'EndpointConfig':{'Aliases':['nocheh-security']}})
             docker('POST','/containers/'+identifier+'/start')
             deadline=time.monotonic()+20
             while not (root/'ready.json').exists():

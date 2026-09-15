@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 DETECTOR_CALL = contextvars.ContextVar('nocheh_trusted_detector', default=None)
-DEFAULT_TRUSTED = ['https://chatgpt.com/backend-api/codex', 'http://cliproxy:8317/v1']
+DEFAULT_TRUSTED = ['https://chatgpt.com/backend-api/codex', 'http://cliproxy-api:8317/v1']
 MAX_BODY = 1024*1024
 FAILURES = deque(maxlen=30)
 COUNTS = Counter()
@@ -86,7 +86,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def guard_rpc(destination,payload):
     from .archive_tools import _PROCESS_CREDENTIAL, ARCHIVE_CREDENTIAL
     token=_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get() or environment_secret('SERVICE_TOKEN')
-    req=urllib.request.Request(os.environ.get('GUARD_URL','http://guard:8780')+'/v1/guard',
+    req=urllib.request.Request(os.environ.get('GUARD_URL','http://nocheh-security:8786')+'/v1/guard',
         data=json.dumps({'destination':destination,'payload':payload},ensure_ascii=False).encode(),
         headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
     try:

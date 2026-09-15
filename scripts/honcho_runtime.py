@@ -2,10 +2,19 @@
 import hashlib
 import subprocess
 from pathlib import Path
-from .configuration import load,write_env,env_path
+from .configuration import load,write_env,read_env,env_path
 from .provider import compose
 
-SERVICES=('database','redis','meter','honcho','deriver')
+SERVICES=('honcho-postgres','honcho-redis','honcho-provider-gateway','honcho-api','honcho-deriver')
+
+
+def normalize_endpoints(directory):
+    """Preserve protected values while updating production-only service hosts."""
+    path=Path(directory)/'honcho.env';values=read_env(path);changed=False
+    for key,value in values.items():
+        updated=value.replace('@database:5432/','@honcho-postgres:5432/').replace('redis://redis:6379/','redis://honcho-redis:6379/').replace('http://meter:8790/','http://honcho-provider-gateway:8790/')
+        if updated!=value:values[key]=updated;changed=True
+    if changed:write_env(path,values)
 
 
 def enabled(state):
@@ -38,6 +47,7 @@ def enable(state,honcho_state):
             values[key]='nocheh_honcho_'+suffix+'_'+kind.lower()
             subprocess.run(['docker','volume','create',values[key]],check=True,stdout=subprocess.DEVNULL)
     values.update(NOCHEH_HONCHO_ENABLED='true',NOCHEH_HONCHO_STATE_DIR=str(honcho_state))
+    normalize_endpoints(honcho_state)
     write_env(env_path(state),values)
 
 
@@ -47,6 +57,7 @@ def operate(state,action):
     if action=='up':
         if (Path(state)/'spool/.restore-inactive').exists():raise ValueError('inactive_restore')
         ensure_inactive_experiment()
+        normalize_endpoints(env['NOCHEH_HONCHO_STATE_DIR'])
         arguments=['up','-d','--no-build','--wait','--wait-timeout','240',*SERVICES]
     elif action=='down':arguments=['stop',*reversed(SERVICES)]
     else:arguments=['ps',*SERVICES]

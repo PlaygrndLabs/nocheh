@@ -13,17 +13,17 @@ x-service: &service
   restart: unless-stopped
   stop_grace_period: 30s
   environment: &environment
-    PGHOST: postgres
+    PGHOST: nocheh-postgres
     PGUSER: nocheh
     PGDATABASE: nocheh
     PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
     SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
     NOCHEH_DATA_DIR: /data
-    HERMES_URL: http://hermes:8781
+    HERMES_URL: http://hermes-runtime:8781
     HONCHO_URL: http://honcho-memory:8000
     NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
-    GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]}
+    GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]}
     TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
     TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
     TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
@@ -49,7 +49,7 @@ x-honcho-runtime: &honcho-runtime
   stop_grace_period: 120s
 
 services:
-  database:
+  honcho-postgres:
     profiles: [honcho]
     restart: unless-stopped
     image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
@@ -64,7 +64,7 @@ services:
       test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U experiment -d honcho_experiment]
       interval: 3s
       retries: 30
-  redis:
+  honcho-redis:
     volumes: [honcho_redis:/data]
     profiles: [honcho]
     restart: unless-stopped
@@ -74,7 +74,7 @@ services:
       test: [CMD, redis-cli, ping]
       interval: 3s
       retries: 20
-  honcho:
+  honcho-api:
     <<: *honcho-runtime
     entrypoint: [sh, -c, '/app/.venv/bin/python scripts/provision_db.py && exec /app/.venv/bin/python /nocheh/run.py api']
     volumes: [./integrations/honcho:/nocheh:ro]
@@ -82,24 +82,31 @@ services:
       honcho-isolated: {}
       memory: {aliases: [honcho-memory]}
     depends_on:
-      database: {condition: service_healthy}
-      redis: {condition: service_healthy}
-      meter: {condition: service_healthy}
+      honcho-postgres: {condition: service_healthy}
+      honcho-redis: {condition: service_healthy}
+      honcho-provider-gateway: {condition: service_healthy}
     healthcheck:
       test: [CMD, /app/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',timeout=3)"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 20s
-  deriver:
+  honcho-deriver:
     <<: *honcho-runtime
+    environment: {METRICS_ENABLED: "true"}
+    healthcheck:
+      test: [CMD, /app/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/metrics',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     entrypoint: [/app/.venv/bin/python, /nocheh/run.py, deriver]
     volumes: [./integrations/honcho:/nocheh:ro]
     depends_on:
-      honcho: {condition: service_healthy}
-  meter:
+      honcho-api: {condition: service_healthy}
+  honcho-provider-gateway:
     init: true
-    environment: {NOCHEH_ARCHIVE_URL: "http://archive:8780"}
+    environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780"}
     profiles: [honcho]
     restart: unless-stopped
     image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
@@ -118,7 +125,7 @@ services:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8790/health',timeout=2)"]
       interval: 5s
       retries: 15
-  cli:
+  honcho-cli:
     image: nocheh-honcho-cli:0.1.4
     build: {context: ./experiments/honcho, dockerfile: cli.Dockerfile}
     profiles: [honcho-tools]
@@ -128,7 +135,7 @@ services:
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
     networks: [honcho-isolated]
 
-  security:
+  nocheh-security:
     <<: *service
     command: [node, dist/src/security/main.js]
     networks: [default, agent]
@@ -143,9 +150,9 @@ services:
       timeout: 5s
       retries: 12
     depends_on:
-      archive: {condition: service_healthy}
+      nocheh-app: {condition: service_healthy}
 
-  security-launcher:
+  hermes-agent-launcher:
     image: nocheh-hermes:local
     command: [python, -m, integrations.hermes.security_launcher]
     user: "0:0"
@@ -165,13 +172,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles:/profiles:ro
     depends_on:
-      security: {condition: service_healthy}
+      nocheh-security: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=3)"]
       interval: 5s
       timeout: 5s
       retries: 12
-  cliproxy:
+  cliproxy-api:
     image: nocheh-cliproxy:c76dfd4e
     build:
       context: ./data/compat/upstreams/CLIProxyAPI
@@ -199,7 +206,7 @@ services:
       retries: 12
       start_period: 10s
 
-  provider-monitor:
+  cliproxy-monitor:
     image: nocheh-cpamp:1ae656c
     build:
       context: ./data/compat/upstreams/cpa-manager-plus
@@ -219,7 +226,7 @@ services:
       HTTP_ADDR: 0.0.0.0:18317
       USAGE_DATA_DIR: /data
       USAGE_DB_PATH: /data/usage.sqlite
-      CPA_UPSTREAM_URL: http://cliproxy:8317
+      CPA_UPSTREAM_URL: http://cliproxy-api:8317
       CPA_MANAGEMENT_KEY_FILE: /run/secrets/cpa_management_key
       CPA_MANAGER_ADMIN_KEY_FILE: /run/secrets/cpamp_admin_key
       CPA_MANAGER_DATA_KEY_FILE: /run/secrets/cpamp_data_key
@@ -235,7 +242,7 @@ services:
       - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/monitor-data.key:/run/secrets/cpamp_data_key:ro
     ports: ["127.0.0.1:${NOCHEH_PROVIDER_MONITOR_PORT:-18317}:18317"]
     depends_on:
-      cliproxy: {condition: service_healthy}
+      cliproxy-api: {condition: service_healthy}
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:18317/health]
       interval: 5s
@@ -243,47 +250,23 @@ services:
       retries: 12
       start_period: 10s
 
-  dashboard:
-    image: nocheh-dashboard:local
-    build:
-      context: .
-      dockerfile: deploy/dashboard.Dockerfile
-    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
-    init: true
-    restart: unless-stopped
-    environment:
-      HERMES_HOME: /dashboard-state/home
-      NOCHEH_CAPTURE_ENABLED: '0'
-    volumes:
-      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard:/dashboard-state:rw
-    ports: ["127.0.0.1:8784:9119"]
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9119/nocheh',timeout=5)"]
-      interval: 5s
-      timeout: 6s
-      retries: 15
-
-  db-viewer:
+  pgweb-archive:
     image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
     profiles: [tools]
     restart: unless-stopped
     command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
     environment:
-      PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@postgres:5432/nocheh?sslmode=disable
+      PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@nocheh-postgres:5432/nocheh?sslmode=disable
     ports: ["127.0.0.1:8782:8081"]
     depends_on:
-      postgres: {condition: service_healthy}
+      nocheh-postgres: {condition: service_healthy}
     healthcheck:
       test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8081/]
       interval: 5s
       timeout: 3s
       retries: 12
 
-  postgres:
+  nocheh-postgres:
     image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
     restart: unless-stopped
     environment:
@@ -298,13 +281,13 @@ services:
       timeout: 3s
       retries: 20
 
-  workflow-database:
+  inngest-db-init:
     <<: *service
     profiles: [workflows]
     restart: "no"
     command: [node, dist/src/workflows/bootstrap.js]
     environment:
-      PGHOST: postgres
+      PGHOST: nocheh-postgres
       PGUSER: nocheh
       PGDATABASE: nocheh
       PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
@@ -313,9 +296,9 @@ services:
     volumes: []
     healthcheck: {disable: true}
     depends_on:
-      postgres: {condition: service_healthy}
+      nocheh-postgres: {condition: service_healthy}
 
-  workflow-redis:
+  inngest-redis:
     image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
     profiles: [workflows]
     restart: unless-stopped
@@ -329,7 +312,7 @@ services:
       timeout: 3s
       retries: 20
 
-  inngest:
+  inngest-server:
     image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
     profiles: [workflows]
     restart: unless-stopped
@@ -337,15 +320,15 @@ services:
     environment:
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
-      INNGEST_POSTGRES_URI: postgres://nocheh_inngest:${INNGEST_POSTGRES_PASSWORD:-}@postgres:5432/nocheh_inngest?sslmode=disable
-      INNGEST_REDIS_URI: redis://workflow-redis:6379
+      INNGEST_POSTGRES_URI: postgres://nocheh_inngest:${INNGEST_POSTGRES_PASSWORD:-}@nocheh-postgres:5432/nocheh_inngest?sslmode=disable
+      INNGEST_REDIS_URI: redis://inngest-redis:6379
       INNGEST_POSTGRES_MAX_OPEN_CONNS: "10"
       INNGEST_POSTGRES_MAX_IDLE_CONNS: "3"
       LOG_LEVEL: warn
     networks: [workflows]
     depends_on:
-      workflow-database: {condition: service_completed_successfully}
-      workflow-redis: {condition: service_healthy}
+      inngest-db-init: {condition: service_completed_successfully}
+      inngest-redis: {condition: service_healthy}
     healthcheck:
       test: [CMD, inngest, alpha, doctor, healthcheck]
       interval: 5s
@@ -353,56 +336,22 @@ services:
       retries: 20
       start_period: 20s
 
-  archive:
+  nocheh-app:
     <<: *service
-    networks: [default, memory, workflows]
-    environment:
-      <<: *environment
-      NOCHEH_SERVICE: archive
-      NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
-      NOCHEH_WORKFLOWS_ENABLED: ${NOCHEH_WORKFLOWS_ENABLED:-false}
-      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
-    ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
-    depends_on:
-      postgres: {condition: service_healthy}
-
-  worker:
-    <<: *service
-    networks: [default, memory, workflows]
-    environment:
-      <<: *environment
-      NOCHEH_SERVICE: worker
-      NOCHEH_WORKFLOWS_ENABLED: ${NOCHEH_WORKFLOWS_ENABLED:-false}
-      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
-      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
-    depends_on:
-      archive: {condition: service_healthy}
-
-  workflow-worker:
-    <<: *service
-    profiles: [workflows]
-    command: [node, dist/src/workflows/main.js]
     stop_grace_period: 300s
     networks: [default, memory, workflows]
     environment:
       <<: *environment
-      NOCHEH_SERVICE: worker
-      NOCHEH_WORKFLOWS_ENABLED: ${NOCHEH_WORKFLOWS_ENABLED:-false}
+      NOCHEH_SERVICE: nocheh-app
+      NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
+      NOCHEH_WORKFLOWS_ENABLED: ${NOCHEH_WORKFLOWS_ENABLED:-false}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
+    ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
     depends_on:
-      archive: {condition: service_healthy}
-      inngest: {condition: service_healthy}
+      nocheh-postgres: {condition: service_healthy}
 
-  guard:
-    <<: *service
-    environment:
-      <<: *environment
-      NOCHEH_SERVICE: guard
-    depends_on:
-      archive: {condition: service_healthy}
-
-  speech:
+  chatgpt-speech:
     image: nocheh-hermes:local
     command: [python, -m, integrations.hermes.speech_gateway]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -418,7 +367,7 @@ services:
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/provider/auth:/provider-auth:ro
     depends_on:
-      cliproxy: {condition: service_healthy}
+      cliproxy-api: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8783/health', timeout=4)"]
       interval: 5s
@@ -426,7 +375,7 @@ services:
       retries: 12
       start_period: 10s
 
-  hermes:
+  hermes-runtime:
     image: nocheh-hermes:local
     build:
       context: .
@@ -445,31 +394,33 @@ services:
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       NOCHEH_CAPTURE_ENABLED: '1'
+      NOCHEH_DASHBOARD_HOME: /dashboard-state/home
       NOCHEH_BROWSER_CHAT: '1'
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
       TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
-      GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy:8317/v1"]}
+      GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]}
       NOCHEH_REASONING_ROUTE: ${NOCHEH_REASONING_ROUTE:-native}
       NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-legacy}
       NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-legacy}
       CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
-      SPEECH_URL: http://speech:8783
+      SPEECH_URL: http://chatgpt-speech:8783
       NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
-      ARCHIVE_URL: http://archive:8780
-      GUARD_URL: http://guard:8780
+      ARCHIVE_URL: http://nocheh-app:8780
+      GUARD_URL: http://nocheh-security:8786
     volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard:/dashboard-state
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes:/workspace/data/local/hermes
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
       - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
       - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/hermes.key:/run/secrets/cliproxy_hermes_key:ro
     depends_on:
-      archive: {condition: service_healthy}
-      guard: {condition: service_healthy}
-      cliproxy: {condition: service_healthy}
-      speech: {condition: service_healthy}
+      nocheh-app: {condition: service_healthy}
+      nocheh-security: {condition: service_healthy}
+      cliproxy-api: {condition: service_healthy}
+      chatgpt-speech: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=4)"]
       interval: 5s

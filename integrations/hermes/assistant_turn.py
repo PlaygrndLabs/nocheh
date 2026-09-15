@@ -135,7 +135,7 @@ def run(body, emit=None):
                 if not re.fullmatch(r'[a-f0-9]{64}',image): raise ValueError('invalid_image_identity')
                 if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
                     from urllib.request import Request,urlopen
-                    req=Request('http://security:8786/v1/turn-files/'+image,headers={'Authorization':'Bearer '+body['archive_credential']})
+                    req=Request('http://nocheh-security:8786/v1/turn-files/'+image,headers={'Authorization':'Bearer '+body['archive_credential']})
                     with urlopen(req,timeout=30) as response:data=response.read(26*1024*1024)
                 else:data=(Path('/data/files')/image).read_bytes()
                 if hashlib.sha256(data).hexdigest()!=image: raise ValueError('image_hash_mismatch')
