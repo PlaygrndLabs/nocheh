@@ -244,7 +244,15 @@ for a 60-second quiet interval after foreground activity, without consuming an
 attempt or replacing a native receipt. All 75 service checks passed. All 157
 non-optional Hermes checks passed across the full run and an isolated repeat of
 three startup checks that timed out under shared-engine load; two optional checks
-were skipped. Installation and post-installation live checks are pending. [Follow-up evidence](compatibility/results/2026-09-15-telegram-followup-fixes.json).
+were skipped. Both tested images are installed locally; all eight replaced
+services are healthy, native Telegram polling is connected, and admission is
+restored with ownership unchanged. A new Inngest readiness observation completed
+without changing the four ingestion receipts or their single attempts. Fresh
+scoped owner recall returned the expected answer with limited_memory=false in
+34.544 seconds. Paid embedding reservations total $0.24 of the existing $5 pilot
+cap. This verifies recall, not the final Telegram response time: a new owner
+question and immediate follow-up were requested and remain pending. Local main
+contains code commit 9ea9fc2; GitHub HTTPS authentication still blocks remote push. [Follow-up evidence](compatibility/results/2026-09-15-telegram-followup-fixes.json).
 
 </telegram_live_latency>
 
