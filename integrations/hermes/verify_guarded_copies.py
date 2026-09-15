@@ -36,7 +36,7 @@ async def main():
         selected=call('/v1/guarded/prepare',{'event_id':source})['projections']
         projection=next(p for p in selected if p['kind']=='events')
         deadline=time.monotonic()+120
-        while projection['state']=='pending' and time.monotonic()<deadline:
+        while projection['state']!='ready' and time.monotonic()<deadline:
             await asyncio.sleep(2)
             projection=next(p for p in call('/v1/data/'+source+'/guarded')['projections'] if p['kind']=='events')
         record('import_prepared',projection['state']=='ready' and projection['content']['text']=='Database password: ***')
@@ -44,6 +44,10 @@ async def main():
         record('original_unchanged',call('/v1/events/'+source)['event']['text']==original)
         question='Use nocheh_archive_read to read nocheh:event:'+source+'. Reply with the exact sentence in its text, without commentary.'
         event=capture('question',question);call('/v1/guarded/prepare',{'event_id':event})
+        deadline=time.monotonic()+120
+        while any(p['state']!='ready' for p in call('/v1/data/'+event+'/guarded')['projections']):
+            if time.monotonic()>deadline:raise ValueError('question_preparation_pending')
+            await asyncio.sleep(1)
         status=call('/v1/memory/honcho');epoch=status['guard']['epoch'];revision=status['policy']
         claims={'scope':None,'event_id':event,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant','guard_epoch':epoch,'space':scope_id,'revision':revision}
         payload=base64.urlsafe_b64encode(json.dumps(claims,separators=(',',':')).encode()).decode().rstrip('=')

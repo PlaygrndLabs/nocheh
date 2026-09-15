@@ -20,7 +20,8 @@ import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import { guardPayload,inspectRequest } from './guard.js';
 import {prepareContext,allowPrepared} from './prepared-context.js';
-import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState,prepareGuarded} from './guarded.js';
+import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState} from './guarded.js';
+import {requestPreparation} from './workflows/preparation-request.js';
 import { requestAction,telegramActions,decideTelegram } from './actions.js';
 import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,startControlled,finishControlled} from './controlled-actions.js';
 import { reader, admin,assertAudience,turnToken } from './access.js';
@@ -121,8 +122,7 @@ const server = createServer((req, res) => { void (async () => {
     await assertAudience(pool,principal);return json(res,200,result);
   };
   const claim=async(body:unknown,channel:'browser'|'scheduler')=>{
-    if(object(body).owner_epoch===undefined&&(await guardState(pool)).mode==='on')await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,String(object(body).event_id));
-    const authority=object(body).owner_epoch===undefined?undefined:channel==='browser'?await browserAuthority(pool,config,body):await scheduledAuthority(pool,config,body);
+    const authority=channel==='browser'?await browserAuthority(pool,config,body):await scheduledAuthority(pool,config,body);
     return claimRun(pool,config,body,channel,authority);
   };
   if(config.service==='guard' && !principal.admin && req.method==='POST' && path==='/v1/guard') {
@@ -145,9 +145,8 @@ const server = createServer((req, res) => { void (async () => {
   if(servesArchive&&path==='/v1/guarded/prepare'&&req.method==='POST') {
     admin(principal);const body=object(await readJson(req));
     if(typeof body.event_id!=='string'||!/^[a-f0-9]{64}$/.test(body.event_id))throw new HttpError(400,'invalid_source');
-    await pool.query("UPDATE guard_sources SET next_attempt=now() WHERE event_id=$1 AND active_revision IS NULL",[body.event_id]);
-    await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,100,body.event_id);
-    return json(res,200,await inspectGuarded(pool,principal,body.event_id));
+    const workflow_id=await requestPreparation(pool,body.event_id);
+    return json(res,200,{...await inspectGuarded(pool,principal,body.event_id),workflow_id});
   }
   if(servesArchive&&path==='/v1/memory/honcho/context'&&req.method==='POST') {
     if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');
@@ -183,7 +182,7 @@ const server = createServer((req, res) => { void (async () => {
     return call(operation,{...input,archive_credential:turnToken(config.token,null,Date.now()+600000,principal.turnEvent,{...policy,purpose:'filter'})},timeout);
   }));
   const shared=path.match(/^\/v1\/memory\/(shared|filtered)\/([a-f0-9]{64})$/);
-  if(servesArchive && shared && req.method==='GET')return agentResult(await readShared(pool,principal,shared[1]!,shared[2]!,call));
+  if(servesArchive && shared && req.method==='GET')return agentResult(await readShared(pool,principal,shared[1]!,shared[2]!));
   if(servesArchive && path==='/v1/memory/recall') {
     if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
     if(req.method==='POST')return agentResult(await call('memory.recall',{...object(await readJson(req)),...(principal.admin?{}:{guard_epoch:(await guardState(pool)).epoch})}));
