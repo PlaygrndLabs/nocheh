@@ -8,6 +8,25 @@ from pathlib import Path
 
 DATABASE='nocheh_inngest'
 
+# Daemonization returns before Redis has necessarily loaded the RDB or opened
+# its listener. Wait for readiness before enabling the replacement AOF.
+REDIS_RESTORE_SCRIPT='''set -eu
+redis-server --bind 127.0.0.1 --port 6380 --dir /data --appendonly no --save '' --daemonize yes --pidfile /tmp/nocheh-restore.pid --logfile /tmp/nocheh-restore.log
+trap 'redis-cli -p 6380 shutdown nosave >/dev/null 2>&1 || true' EXIT
+i=0
+while [ "$(redis-cli -p 6380 ping 2>/dev/null || true)" != PONG ]; do
+  i=$((i+1)); test "$i" -lt 300; sleep 0.1
+done
+[ "$(redis-cli -p 6380 config set appendonly yes)" = OK ]
+i=0
+while ! redis-cli -p 6380 info persistence | tr -d '\\r' | grep -q '^aof_rewrite_in_progress:0$'; do
+  i=$((i+1)); test "$i" -lt 300; sleep 0.1
+done
+redis-cli -p 6380 info persistence | tr -d '\\r' | grep -q '^aof_last_bgrewrite_status:ok$'
+redis-cli -p 6380 shutdown nosave >/dev/null
+trap - EXIT
+'''
+
 
 def fingerprints(command,env,tables=None):
     prefix=command+['exec','-T','postgres','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d',DATABASE]
@@ -69,17 +88,6 @@ def restore(command,env,snapshot_dir,state,metadata,sha):
     if sha(target)!=metadata['workflow-redis.rdb']['sha256']:raise RuntimeError('workflow_restore_redis_mismatch')
     # AOF takes precedence over RDB. Load the verified RDB with AOF disabled,
     # create a fresh complete AOF, then shut down before any coordinator starts.
-    convert='''set -eu
-redis-server --bind 127.0.0.1 --port 6380 --dir /data --appendonly no --save '' --daemonize yes --pidfile /tmp/nocheh-restore.pid --logfile /tmp/nocheh-restore.log
-trap 'redis-cli -p 6380 shutdown nosave >/dev/null 2>&1 || true' EXIT
-redis-cli -p 6380 config set appendonly yes >/dev/null
-i=0
-while ! redis-cli -p 6380 info persistence | tr -d '\\r' | grep -q '^aof_rewrite_in_progress:0$'; do
-  i=$((i+1)); test "$i" -lt 300; sleep 0.1
-done
-redis-cli -p 6380 info persistence | tr -d '\\r' | grep -q '^aof_last_bgrewrite_status:ok$'
-redis-cli -p 6380 shutdown nosave >/dev/null
-trap - EXIT
-'''
-    subprocess.run(command+['run','--rm','--no-deps','workflow-redis','sh','-c',convert],env=env,check=True,timeout=60,stdout=subprocess.DEVNULL)
+
+    subprocess.run(command+['run','--rm','--no-deps','workflow-redis','sh','-c',REDIS_RESTORE_SCRIPT],env=env,check=True,timeout=90,stdout=subprocess.DEVNULL)
     return {'database_verified':True,'redis_verified':True,'active':False}

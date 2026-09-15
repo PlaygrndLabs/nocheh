@@ -8,28 +8,43 @@ runs, not tests repeated by the documentation migration.
 <production_completion>
 
 The owner authorized the full production follow-up and local maintenance window.
-All nine family admissions were paused without changing ownership. The earlier
-memory-availability/startup repair images are installed and their services have
-subsequently passed health checks. Admission restoration is pending: automatic
-review rejected reopening while worker health and regression evidence were still
-incomplete. One interrupted native review had no receipt and no active isolated
-turn; it is held as ambiguous with its original identity and 25 attempts.
+All nine family admissions were paused without changing ownership. The memory
+availability/startup repairs and automatic primary-context images are installed;
+all 11 dependencies passed health checks at 16:54 UTC. Admission restoration is
+pending explicit owner approval: after health and regression checks passed,
+automatic review still rejected reopening because live acceptance gates remain
+pending. One interrupted native review had no receipt and no active isolated turn;
+it is held as ambiguous with its original identity and 25 attempts.
 
 Preflight found repeated PostgreSQL backend exits with code 2 and recovery cycles.
 The database container had no OOM kill, its volume was not shared, and the other
 project's database showed no corresponding failures. A graceful restart was
-followed by another backend exit at 16:25 UTC. Its cause is unresolved; temporary
-connection-only diagnostics are enabled. Healthy containers do not resolve this
-production reliability gate.
+followed by another backend exit at 16:25 UTC. No further code-2 exits appeared
+from 16:26 through 16:54 UTC. Its cause is unresolved; temporary connection-only
+diagnostics have been removed and logging is confirmed off. Healthy containers
+and this observation window do not resolve the production reliability gate.
 
 [ADR-0044](docs/adr/0044-automatic-honcho-context.md) implements automatic primary
 Honcho context with a protected generation cache, a durable two-minute refresh,
 and scoped deeper recall. Native notes stay small. The final isolated service
 run passed all 75 checks; 157 Hermes checks passed with two optional checks
-skipped. Candidate image artifacts match the tested code and Graphify is refreshed.
+skipped. Installed image artifacts match the tested code and Graphify is refreshed.
 [Evidence](compatibility/results/2026-09-15-primary-honcho-context.json) records
-fixture corrections and limits. Candidate installation, real Telegram acceptance,
-backup/inactive restore and the final preparation/Telegram cutovers remain pending.
+fixture corrections and limits. The scoped live context endpoint returned in
+715 ms, but its cache is empty while refresh admission is held; this is not a
+warm-cache latency or recall pass.
+
+Fresh format-4 backup and inactive restore passed with 45 archive tables, 14
+Inngest tables and 676 protected files. The first restore exposed a Redis
+daemon-readiness race; bounded readiness and explicit AOF-configuration checks
+fixed it. Eleven focused host tests and a fresh isolated restore passed. Both
+restore projects are stopped; no restored login, worker, Telegram or Honcho
+activation occurred. The new cache table was empty, so this snapshot proves
+schema inclusion, not recovery of populated cache content.
+[Recovery evidence](compatibility/results/2026-09-15-primary-context-recovery.json)
+records the checks. Live cache warming, real owner Telegram acceptance and the
+final preparation/Telegram cutovers remain pending. Local integration succeeded;
+remote fetch/push require GitHub authentication.
 
 </production_completion>
 
