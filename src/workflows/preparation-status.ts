@@ -2,6 +2,13 @@ import type pg from 'pg';
 import {guardState} from '../guarded.js';
 import {observation,type Observation} from './pipeline.js';
 
+/** A prerequisite's recovery lease is not its expected completion time. */
+export function waitForPreparation(prepared:Observation,attempts=0):Observation {
+  // Only Inngest schedules this observation. Preparation retains its own
+  // provider backoff/lease, so polling readiness cannot repeat provider work.
+  return observation('waiting',prepared.stage,attempts,Date.now()+2000,'prerequisite');
+}
+
 export async function preparationStatus(pool:pg.Pool,eventId:string):Promise<Observation> {
   const files=(await pool.query(`SELECT count(*)::int AS count,coalesce(max(attempts),0)::int AS attempts,
     min(next_attempt) AS next,bool_or(state='failed' AND error_code IS DISTINCT FROM 'import_bytes_pending') AS failed,
@@ -18,4 +25,3 @@ export async function preparationStatus(pool:pg.Pool,eventId:string):Promise<Obs
   }
   return observation('completed','preparation');
 }
-

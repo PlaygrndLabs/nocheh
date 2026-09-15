@@ -50,6 +50,14 @@ identities. Browser/scheduler claims require the current Inngest epoch. Eight
 focused PostgreSQL tests pass, including mode changes, stale authority, duplicate
 requests and withholding shared text until its saved projection is ready.
 
+The fault rehearsal exposed a dependency delay: a turn could sleep through the
+five-minute transcription recovery lease even after preparation completed.
+Dependent workflows now recheck readiness through Inngest every two seconds;
+preparation retains its provider backoff. Four focused tests pass. The repeated
+rehearsal passed capture during PostgreSQL/Redis/Inngest outages, store restart,
+crash after effect before acknowledgement, worker kill and duplicate-event
+receipt reconciliation, with exactly three effects for three source identities.
+
 The active installation still uses its old service names and seven Inngest-owned
 families; preparation and Telegram remain legacy-owned. Its initial format-4
 snapshot is retained at `data/backups/20260916-consolidation`. A fresh live synthetic

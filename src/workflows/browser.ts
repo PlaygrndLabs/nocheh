@@ -3,7 +3,7 @@ import type pg from 'pg';
 import type {Settings} from '../config.js';
 import type {RuntimeCall} from '../runtime.js';
 import {HttpError,object,string} from '../http.js';
-import {preparationStatus} from './preparation-status.js';
+import {preparationStatus,waitForPreparation} from './preparation-status.js';
 import {guardState} from '../guarded.js';
 import {policyRevision} from '../spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority,type WorkflowState} from './store.js';
@@ -90,7 +90,7 @@ export function managedRunOperation(pool:pg.Pool,config:Settings,call:RuntimeCal
     let row=await load();if(!row?.admitted)return observation('skipped','admission');
     if(row.state==='captured'&&!row.cancel_requested) {
       const prepared=await preparationStatus(pool,event);
-      if(prepared.state!=='completed')return observation('waiting',prepared.stage,0,prepared.next_attempt,'prerequisite');
+      if(prepared.state!=='completed')return waitForPreparation(prepared);
     }
     if(['captured','running'].includes(row.state)) {
       const body={channel,event_id:event,attempt:1,owner_epoch:authority.epoch,asynchronous:true};

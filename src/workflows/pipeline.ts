@@ -5,7 +5,7 @@ import {HttpError,string} from '../http.js';
 import {fetchAttachments} from '../storage.js';
 import {prepareArchiveFiles} from '../preparation.js';
 import {guardState,prepareGuarded} from '../guarded.js';
-import {preparationStatus} from './preparation-status.js';
+import {preparationStatus,waitForPreparation} from './preparation-status.js';
 import {dispatchCommitted} from '../assistant.js';
 import type {ExecutionAuthority,WorkflowFamily,WorkflowState} from './store.js';
 
@@ -31,7 +31,7 @@ export function pipelineOperations(pool:pg.Pool,config:Settings,call:RuntimeCall
       let row=await load();if(!row)return observation('failed','admission');
       if(['pending','failed'].includes(row.state)) {
         const prepared=await preparationStatus(pool,eventId);
-        if(prepared.state!=='completed')return observation('waiting',prepared.stage,row.attempts,prepared.next_attempt,'prerequisite');
+        if(prepared.state!=='completed')return waitForPreparation(prepared,row.attempts);
       }
       if(['pending','running','failed'].includes(row.state)&&row.next_attempt<=new Date()) {
         await dispatchCommitted(pool,config,call,eventId,authority);row=await load();
