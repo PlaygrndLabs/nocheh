@@ -251,15 +251,49 @@ without changing the four ingestion receipts or their single attempts. Fresh
 scoped owner recall returned the expected answer with limited_memory=false in
 34.544 seconds. Paid embedding reservations total $0.24 of the existing $5 pilot
 cap. This verifies recall, not the final Telegram response time: a new owner
-question and immediate follow-up were requested and remain pending. Local main
+question and immediate follow-up were requested; their later results follow below. Local main
 contains code commit 9ea9fc2; GitHub HTTPS authentication still blocks remote push. [Follow-up evidence](compatibility/results/2026-09-15-telegram-followup-fixes.json).
+
+The owner's next question and immediate follow-up both completed on attempt one.
+Capture lag was 0.731 and 1.461 seconds; capture-to-receipt was 89.028 and 82.829
+seconds. Native agent initialization fell to 2.332 and 1.589 seconds, while
+Honcho recall still took 27.340 and 47.481 seconds. The second reply incorrectly
+reported limited memory during an incremental synchronization that completed six
+seconds after recall returned. Six source receipts were done; prior usable memory
+had not been retired. The adapter now records whether the current authorized
+generation has ever reached readiness and reports synchronization separately.
+Initial builds, retired generations and failed recall still disclose limited
+memory. All 75 service checks and ten focused checks passed; the final three Honcho
+and workflow-memory checks passed after adding explicit retired-state coverage.
+All 157 non-optional Hermes checks passed across the full run and a repeat of
+one TUI startup check that missed its deadline; two optional checks were skipped.
+Candidate installation remains pending.
+
+The memory query omits the per-execution archive footer while the full native
+agent prompt retains its source reference. A candidate image also precompiles
+the pinned Python modules. Its startup benchmark was stopped during severe host
+load (load average 104.50), without a valid timing result. A later bounded
+offline comparison measured 44.621 seconds for the previous image and 17.656
+seconds for the candidate; changing shared host load limits attribution. These
+are synthetic startup timings, not Telegram delivery acceptance. The isolated service
+test stack was stopped; unrelated services were left running. Three active
+Nocheh services had restarted, with Docker reporting no OOM kill at inspection.
+
+The owner asked how relevance should be detected and for Hermes/Honcho setup
+best practice. Native Hermes supports hybrid cached context, asynchronous writes,
+background retrieval and agent-selected recall tools. Nocheh currently uses a
+guarded blocking recall adapter and manages memory.provider itself; editing a
+native Honcho setting alone does not change that adapter. Hybrid retrieval with
+bounded context and fresh audience/guard checks is a recommendation, not an
+implemented or activated mode. The blanket reasoning call remains a latency
+limitation. [Native provider reference](https://github.com/NousResearch/hermes-agent/blob/main/plugins/memory/honcho/README.md).
 
 </telegram_live_latency>
 
 ## Outstanding acceptance and blockers
 
 - **Subscription transcription:** shared-login Ogg/Opus transcription and full provider restart acceptance passed on 2026-09-14. Actual owner Telegram voice persistence remains pending; preparation and Telegram ownership remain legacy.
-- **Telegram / release:** real owner text completed slowly and its follow-up failed as recorded above. Intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
+- **Telegram / release:** later real owner questions and follow-ups completed once, but latency and the latest fixes still need acceptance. The original ambiguous failed turn remains closed. Intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
 - **Shared provider:** the owner explicitly approved the switch after the earlier testing-only rejection. S5 passed and the shared route is active; the old native login is privately retired. No provider cutover blocker remains. The refresh check verifies authority delegation, not a newly forced token-expiration event.
 - **Honcho:** attached and verified; scoped production ingestion/recall, native-tool access, isolation, outage and restart acceptance pass. The opted-in history pilot and monthly budget cutover remain pending. Preserve the durable pilot ledger and explicit learning consent. See the production acceptance evidence above.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).

@@ -71,6 +71,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Attachment and detachment are explicit owner operations. Attachment requires accepted live reasoning, embeddings, ingestion, retrieval, restart, and failure checks. Detachment preserves source data, owner edits, and receipts.
 - Reattachment rebuilds previously learned sources in the selected representation. Optional catch-up includes consented sources received while detached; optional history includes older consented sources. Neither option grants learning consent.
 - Outages and rebuilds expose limited-memory status while preserving available current context, native notes, and archive search. Honcho memory can be rebuilt from owned sources and receipts.
+- Incremental synchronization reports its progress separately from memory availability. Previously ready memory in the current authorized generation stays available while new sources are processed; initial builds, replacement generations, and actual recall failures report limited memory.
 
 </area>
 </area>
