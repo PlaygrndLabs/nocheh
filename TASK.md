@@ -32,6 +32,22 @@ exceeded the health window; the healthy database was retained and preview
 startup retried. Registry-backed `npm ci` in Docker stalled and was cancelled;
 compiled assets run on the locally cached pinned runtime image. A clean container
 build remains pending. [Evidence](compatibility/results/2026-09-17-dashboard-foundation.json).
+Foundation commit `699edf9` is integrated into local main. GitHub fetch/push
+failed with `could not read Username; terminal prompts disabled`.
+
+The metrics increment adds bounded PostgreSQL registry aggregates and query
+indexes, authenticated owner/legacy proxy routes, lazy Recharts activity/outcome/
+duration/current-workload charts, chart data tables, and paginated workflow
+history with an accessible receipt drawer. Two database tests and two owner
+management tests pass, including aggregate boundaries, both ranges, filters,
+deduplication, retry-inclusive duration, invalid samples, domain-vs-registry
+completion, terminal failures, empty data, metadata privacy, authentication,
+aliases, and import consent/resume regressions. The Node 24 production build passes.
+Browser checks confirm independent chart filters, table pagination, drawer focus
+restoration, in-place retry receipts, and retained stale status/charts after an
+injected outage. The graph refresh reports 1,701 nodes and 6,017 edges with zero
+model calls. Full remaining-page acceptance is still in progress.
+[Metrics evidence](compatibility/results/2026-09-17-dashboard-metrics.json).
 Active-installation deployment is separate and has not been performed.
 
 </dashboard_refactor>

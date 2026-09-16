@@ -1,6 +1,8 @@
+<dashboard>
+
 # Owner dashboard and CLI
 
-Start the archive with `./scripts/nocheh up`. With Node 22+ and Python 3 available
+Start the archive with `./scripts/nocheh up`. With pinned Node 24 and Python 3 available
 locally, install the repository's locked development dependencies using `npm ci`,
 then run:
 
@@ -47,7 +49,7 @@ their integration acceptance passes; see TASK.md for actual phase status.
 
 Original chats are preserved evidence. Native notes are generated working memory
 and may change. Imported messages become archive sources, not native sessions or
-automatically generated memory. At import confirmation, an unchecked option grants
+automatically generated memory. At import confirmation, checking the optional learning control grants
 learning consent. That permits native note review and Honcho ingestion when attached;
 preparing guarded copies alone grants no learning consent. Honcho stays detached
 until its real provider acceptance passes.
@@ -418,3 +420,49 @@ The three API keys shown in the provider panel are generated local access keys
 for Hermes, Honcho and guarded-text preparation. The management key protects the
 local administration API. Neither kind is an OpenAI billing key or a substitute
 for the subscription OAuth login.
+
+<design_and_metrics>
+
+## Appearance and workflow trends
+
+The owner dashboard uses locally owned Radix-based components, Tailwind, Lucide,
+and Recharts. Appearance follows the system by default; Light, Dark, or System
+is persisted locally. The desktop sidebar collapses, and below 1024px navigation
+opens in a keyboard-accessible drawer. Refresh updates data without remounting
+the page. Hermes and CPA keep their native interfaces and integration links.
+
+Monitoring retains global running, waiting, failed, last confirmed success and
+unpublished backlog totals, independent of table pagination and chart filters.
+Workflow history is paginated; its details drawer holds receipts, publication,
+revision-aware retry/cancel, and source links. Status combines words, icons and
+color. Stale worker observations are uncertainty, not proof of a failed service.
+
+Owner-authenticated `GET /api/nocheh/workflows/metrics?range=24h|7d&family=…`
+(and the legacy `/api/plugins/nocheh` alias) proxies `/v1/workflows/metrics`.
+The default 24-hour range uses hourly UTC buckets; seven days uses six-hour
+UTC buckets. The response includes `from`, `to`, `observed_at`, `bucket_seconds`,
+`range`, `family`, and bounded `buckets`. Each bucket includes `start`, `end`,
+`admitted`, `completed`, `terminal_failed`, `completion_samples`,
+`completion_ms_p50`, and `completion_ms_p95`. A rolling window can have a partial
+first and last bucket (at most 25 or 29); start is inclusive and end exclusive.
+The browser explicitly labels its display timezone.
+
+Admissions use registry creation time. Confirmed completed/failed registry
+outcomes use confirmation update time; domain completion alone is excluded.
+Registry identity prevents repeated requests or retries from double counting.
+Completion duration is admission to confirmed completion, including waits and
+retries. It can exceed the selected chart window. Invalid negative durations
+have no sample; empty duration buckets are null, not zero. Reconciled outcomes
+can move between buckets because the registry is not a historical transition log.
+
+Current status refreshes every ten seconds, aggregates every sixty seconds, and
+manual Refresh updates both. Failed refreshes retain successful observations
+with a stale warning. Unavailable counts are not shown as zero. Chart legends,
+keyboard tooltips and View chart data provide alternative inspection paths.
+Current workload-by-family uses health counts, never historical queue depth.
+No sampling service, uptime claim, or provider analytics collection is added.
+Detailed provider analytics remain in CPA.
+
+</design_and_metrics>
+
+</dashboard>

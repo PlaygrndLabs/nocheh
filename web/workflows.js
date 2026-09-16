@@ -1,5 +1,8 @@
 import * as React from 'react';
-const {createElement:h,useEffect,useState,useRef}=React;
+import {useResource,refreshResources} from './lib/resource';
+import {StatusBadge} from './components/status';
+import {Button,Sheet,Table,EmptyState,Progress} from './components/ui/primitives';
+const {createElement:h,useState,useRef}=React;
 const time=value=>value?new Date(value).toLocaleString():'—';
 const families={preparation:'Source preparation',telegram:'Telegram',imports:'Imports',memory_review:'Memory review',honcho:'Honcho',browser:'Browser turns',schedules:'Schedules',actions:'Approved messages',tools:'Controlled tools'};
 const states={queued:'Queued',waiting:'Waiting',running:'Running',retryable_failed:'Failed · retry scheduled',completed:'Completed',failed:'Terminal failure',skipped:'Intentionally skipped',cancelled:'Cancelled',ambiguous:'Effect uncertain',denied:'Denied'};
@@ -37,54 +40,42 @@ export function WorkflowSummary({health,stale=false}){
 }
 
 export function Workflows({call,health,onSource}){
-  const [family,setFamily]=useState(''),[state,setState]=useState(''),[pages,setPages]=useState([null]),[page,setPage]=useState(null);
-  const [selected,setSelected]=useState(null),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,setRefresh]=useState(0);
-  const [controlError,setControlError]=useState(''),inspector=useRef(null);
-  useEffect(()=>{if(selected){inspector.current?.scrollIntoView({block:'start'});inspector.current?.focus();}},[selected]);
-  const after=pages.at(-1);
-  useEffect(()=>{
-    let alive=true,timer;
-    const update=async()=>{
-      try {
-        const query=new URLSearchParams({family,state,limit:'25',...(after?{after}:{})});
-        const [list,item]=await Promise.all([call('/workflows?'+query),selected?call('/workflows/'+selected):null]);
-        if(alive){setPage(list);setDetail(item);setError('');}
-      }catch{if(alive)setError('Workflow observations are unavailable. The last snapshot may be out of date.');}
-      finally{if(alive)timer=setTimeout(update,10000);}
-    };
-    update();return()=>{alive=false;clearTimeout(timer);};
-  },[call,family,state,after,selected,refresh]);
-  const filter=(setter,value)=>{setter(value);setPages([null]);setPage(null);};
+  const [family,setFamily]=useState(''),[state,setState]=useState(''),[pages,setPages]=useState([null]);
+  const [selected,setSelected]=useState(null),[busy,setBusy]=useState(false),[controlError,setControlError]=useState(''),trigger=useRef(null);
+  const after=pages.at(-1),query=new URLSearchParams({family,state,limit:'25',...(after?{after}:{})});
+  const {data:page,error}=useResource('/workflows?'+query,10000);
+  const {data:detail,error:detailError}=useResource(selected?'/workflows/'+selected:null,10000);
+  const filter=(setter,value)=>{setter(value);setPages([null]);};
   const control=async action=>{
     setBusy(true);setControlError('');
-    try{setDetail(await call('/workflows/'+detail.id+'/'+action,{revision:detail.revision}));setRefresh(n=>n+1);}
-    catch{setControlError('The workflow changed or cannot accept this action. Check its current receipt before trying again.');setRefresh(n=>n+1);}
-    finally{setBusy(false);}
+    try{await call('/workflows/'+detail.id+'/'+action,{revision:detail.revision});}
+    catch{setControlError('The workflow changed or cannot accept this action. Check its current receipt before trying again.');}
+    finally{refreshResources();setBusy(false);}
   };
-  const row=item=>h('article',{className:'n-workflow',key:item.id},
-    h('div',{className:'n-result-heading'},h('h3',null,families[item.family]),h('span',{className:'n-badge '+(bad(item.state)?'n-monitor-bad':'')},states[item.state]||item.state)),
-    h('p',null,'Stage: '+readable(item.stage)),item.waiting_reason&&h('p',null,readable(item.waiting_reason)),
-    h('small',null,`${item.attempts} attempt${item.attempts===1?'':'s'} · Created ${time(item.created_at)} · Updated ${time(item.updated_at)}`),
-    !['completed','failed','skipped','cancelled','ambiguous','denied'].includes(item.state)&&item.next_attempt&&h('small',null,'Next check: '+time(item.next_attempt)),
-    item.total!=null&&h('small',null,`${item.completed}/${item.total} records · ${item.duplicates} duplicates · ${item.learning_after} reviewed`),
-    h('div',{className:'n-actions'},h('button',{type:'button',onClick:()=>{setSelected(item.id);setDetail(null);}},'Execution details'),item.source_event_id&&h('button',{type:'button',onClick:()=>onSource(item.source_event_id)},'Inspect original')));
+  const row=item=>h('tr',{key:item.id},
+    h('td',null,h('strong',null,families[item.family]),item.waiting_reason&&h('small',null,readable(item.waiting_reason))),
+    h('td',null,h(StatusBadge,{state:item.state,label:states[item.state]})),
+    h('td',null,readable(item.stage),item.total!=null&&h(Progress,{value:item.total?100*item.completed/item.total:0,label:`${item.completed}/${item.total} records · ${item.duplicates} duplicates`})),
+    h('td',null,item.attempts),h('td',null,h('time',{dateTime:item.updated_at},time(item.updated_at)),h('small',null,'Admitted '+time(item.created_at))),
+    h('td',null,h(Button,{size:'sm',onClick:event=>{trigger.current=event.currentTarget;setSelected(item.id);setControlError('');},'aria-label':'Execution details for '+families[item.family]+' '+item.id.slice(0,8)},'Details')));
   return h(React.Fragment,null,
     h('section',{className:'n-panel'},h('h2',null,'Workflow history'),
-      h('p',{className:'n-muted'},'Source data and receipts stay in Nocheh. Detailed Inngest history is available for inspection; execution controls stay here.'),
+      h('p',{className:'n-muted'},'Inspect receipts and authorized controls. Filters apply to this table only.'),
       h('div',{className:'n-form'},h('label',null,'Workflow family',h('select',{value:family,onChange:e=>filter(setFamily,e.target.value)},h('option',{value:''},'All families'),...Object.entries(families).map(([value,label])=>h('option',{key:value,value},label)))),
         h('label',null,'Status',h('select',{value:state,onChange:e=>filter(setState,e.target.value)},h('option',{value:''},'All statuses'),...Object.entries(states).map(([value,label])=>h('option',{key:value,value},label))))),
-      error&&h('p',{role:'alert'},error),!page&&h('p',{role:'status'},error?'No current observation.':'Loading workflows…'),
-      page&&!page.workflows.length&&h('p',{className:'n-empty'},'No workflows match these filters.'),...((page?.workflows||[]).map(row)),
-      h('div',{className:'n-actions'},h('button',{type:'button',disabled:pages.length===1,onClick:()=>{setPages(p=>p.slice(0,-1));setPage(null);}},'Previous'),h('button',{type:'button',disabled:!page?.next,onClick:()=>{setPages(p=>[...p,page.next]);setPage(null);}},'Next'),h('small',null,'Observed '+time(page?.observed_at)+' · refreshes every 10 seconds'))),
-    selected&&h('section',{className:'n-panel','aria-label':'Workflow execution details',tabIndex:-1,ref:inspector},h('div',{className:'n-result-heading'},h('h2',null,'Execution details'),h('button',{type:'button',onClick:()=>{setSelected(null);setDetail(null);setControlError('');}},'Close details')),
+      error&&h('p',{role:'alert'},page?'Showing the last successful workflow observation. It may be stale.':'Workflow observations are unavailable.'),!page&&!error&&h('p',{role:'status'},'Loading workflows…'),
+      page&&!page.workflows.length&&h(EmptyState,{title:'No workflows match these filters'}),page?.workflows.length>0&&h(Table,{'aria-label':'Workflow history'},h('thead',null,h('tr',null,...['Family','Status','Stage','Attempts','Timing','Details'].map(label=>h('th',{key:label,scope:'col'},label)))),h('tbody',null,...page.workflows.map(row))),
+      h('div',{className:'n-actions'},h('button',{type:'button',disabled:pages.length===1,onClick:()=>{setPages(p=>p.slice(0,-1));}},'Previous'),h('button',{type:'button',disabled:!page?.next,onClick:()=>{setPages(p=>[...p,page.next]);}},'Next'),h('small',null,'Observed '+time(page?.observed_at)+' · refreshes every 10 seconds'))),
+    h(Sheet,{open:!!selected,onOpenChange:open=>{if(!open){setSelected(null);setControlError('');}},title:'Workflow execution details',description:'Inspect confirmed receipts before retrying or cancelling.',returnFocus:trigger.current},
+      detailError&&h('p',{role:'alert'},detail?'Receipt may be stale. Refresh before taking action.':'The execution receipt is unavailable.'),
       controlError&&h('p',{role:'alert'},controlError),
-      !detail?h('p',{role:'status'},'Loading execution receipt…'):h(React.Fragment,null,
-        h('p',null,(families[detail.family]||detail.family)+' · '+states[detail.state]),h('small',{className:'n-workflow-id'},'Workflow '+detail.id),h('small',{className:'n-workflow-id'},'Job '+detail.job_id),
+      !detail?h('p',{role:'status'},detailError?'No current receipt.':'Loading execution receipt…'):h(React.Fragment,null,
+        h('h3',null,families[detail.family]||detail.family),h(StatusBadge,{state:detail.state,label:states[detail.state]}),detail.source_event_id&&h(Button,{onClick:()=>{onSource(detail.source_event_id);setSelected(null);}},'Inspect original'),h('small',{className:'n-workflow-id'},'Workflow '+detail.id),h('small',{className:'n-workflow-id'},'Job '+detail.job_id),
         h('p',null,`Version ${detail.version} · generation ${detail.generation} · revision ${detail.revision}`),
         detail.control_reason&&h('p',{className:'n-muted'},readable(detail.control_reason)),
-        h('div',{className:'n-actions'},h('button',{type:'button',disabled:busy||!detail.can_retry,onClick:()=>control('retry')},'Retry now'),h('button',{type:'button',disabled:busy||!detail.can_cancel,onClick:()=>control('cancel')},'Cancel workflow')),
+        h('div',{className:'n-actions'},h('button',{type:'button',disabled:busy||!!detailError||!detail.can_retry,onClick:()=>control('retry')},'Retry now'),h('button',{type:'button',disabled:busy||!!detailError||!detail.can_cancel,onClick:()=>control('cancel')},'Cancel workflow')),
         h('h3',{className:'n-afterword'},'Execution receipts'),!detail.receipts.length&&h('p',{className:'n-muted'},'No external effect receipt has been recorded.'),
-        ...detail.receipts.map(r=>h('div',{className:'n-row',key:r.step+':'+r.attempt},h('b',null,readable(r.step)+' · attempt '+r.attempt),h('span',null,readable(r.state)+' · '+time(r.updated_at)))),
+        ...detail.receipts.map(r=>h('div',{className:'n-row',key:r.step+':'+r.attempt},h('b',null,readable(r.step)+' · attempt '+r.attempt),h('div',null,h(StatusBadge,{state:r.state,label:readable(r.state)}),h('small',null,time(r.updated_at))))),
         h('h3',{className:'n-afterword'},'Inngest runs'),!detail.runs.length&&h('p',{className:'n-muted'},'No Inngest run has been observed.'),
         ...detail.runs.map(r=>h('div',{className:'n-row',key:r.run_id},h('a',{href:'/inngest/run?runID='+encodeURIComponent(r.run_id)},'Inspect run '+r.run_id),h('span',null,'Dispatch '+r.dispatch+' · '+time(r.seen_at)))),
         h('h3',{className:'n-afterword'},'Publication and controls'),...detail.outbox.map(r=>h('div',{className:'n-row',key:r.dispatch},h('b',null,'Dispatch '+r.dispatch),h('span',null,r.published_at?'Published '+time(r.published_at):r.dispatch!==detail.dispatch?'Superseded':['completed','failed','skipped','cancelled','ambiguous','denied'].includes(detail.state)?'Closed without publication':'Awaiting publication · next '+time(r.next_attempt)))),
@@ -92,8 +83,8 @@ export function Workflows({call,health,onSource}){
     h('section',{className:'n-panel'},h('h2',null,'Workflow delivery and workers'),
       !health||health.unavailable?h('p',{role:'alert'},'Workflow health is unavailable. Worker observations may be stale.'):h(React.Fragment,null,
         h('p',null,`${health.outbox.pending} unpublished requests · ${health.outbox.admitted} eligible for delivery`),h('small',null,'Oldest unpublished: '+time(health.outbox.oldest)),h('small',null,'Oldest waiting work: '+time(health.oldest_waiting)),
-        ...health.workers.map(worker=>h('div',{className:'n-row',key:worker.family},h('b',null,families[worker.family]),h('span',null,worker.owner==='legacy'?'Existing runner':worker.connected?'Inngest worker connected':'Inngest worker not observed · stale or disconnected'),h('small',null,(worker.admission?'Admission open':'Admission paused')+' · last seen '+time(worker.seen_at)))),
-        ...health.services.map(service=>h('div',{className:'n-row',key:service.service},h('b',null,service.service),h('span',null,service.fresh?'Heartbeat current':'Heartbeat stale'),h('small',null,time(service.seen_at)))),
+        ...health.workers.map(worker=>h('div',{className:'n-row',key:worker.family},h('b',null,families[worker.family]),h(StatusBadge,{state:worker.owner==='legacy'?'unknown':worker.connected?'ready':'stale',label:worker.owner==='legacy'?'Existing runner':worker.connected?'Connected':'Stale or disconnected'}),h('small',null,(worker.admission?'Admission open':'Admission paused')+' · last seen '+time(worker.seen_at)))),
+        ...health.services.map(service=>h('div',{className:'n-row',key:service.service},h('b',null,service.service),h(StatusBadge,{state:service.fresh?'ready':'stale',label:service.fresh?'Current heartbeat':'Stale heartbeat'}),h('small',null,time(service.seen_at)))),
         h('small',null,'Observed '+time(health.observed_at)))),
     h('p',{className:'n-muted'},'Backup, restore and shutdown progress remain in ',h('a',{href:'#operations'},'Maintenance'),'.'));
 }

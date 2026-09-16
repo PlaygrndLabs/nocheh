@@ -26,6 +26,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const body=JSON.parse(raw || '{}');
     if(slow) await new Promise(r=>setTimeout(r,300));
     let result:unknown={};
+    if(req.url?.startsWith('/v1/workflows/metrics?'))result={range:'7d',family:'browser',buckets:[],observed_at:'2026-09-16T12:00:00Z'};
     if(req.url?.startsWith('/v1/workflows?'))result={workflows:[{id:'a'.repeat(64),state:'waiting'}],next:null};
     if(req.url==='/v1/workflows/'+'a'.repeat(64)+'/retry')result={id:'a'.repeat(64),revision:body.revision+1};
     if(req.url==='/v1/workflows/imports/confirm'){
@@ -69,6 +70,10 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     assert.equal((await fetch(base+'/settings',{headers:{Cookie:'nocheh_download='+token}})).status,401,'download cookies cannot administer settings');
     const settings=await request('/settings');assert.ok(!JSON.stringify(settings).includes('test-owner-token'));
     assert.equal((await fetch(base+'/workflows')).status,401);
+    assert.equal((await fetch(base+'/workflows/metrics?range=7d&family=browser')).status,401);
+    assert.equal((await fetch(base+'/workflows/metrics?range=7d',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);
+    const metrics=await request('/workflows/metrics?range=7d&family=browser');assert.equal(metrics.family,'browser');assert.equal(metrics.range,'7d');
+    const aliasMetrics=await fetch(base.replace('/api/plugins/nocheh','/api/nocheh')+'/workflows/metrics?range=7d&family=browser',{headers});assert.deepEqual(await aliasMetrics.json(),metrics);
     assert.equal((await fetch(base+'/workflows',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);
     assert.equal((await request('/workflows?limit=1')).workflows[0].state,'waiting');
     const root=await fetch(base.replace('/api/plugins/nocheh','/'));

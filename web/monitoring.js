@@ -1,17 +1,13 @@
 import * as React from 'react';
 import {Workflows,WorkflowSummary} from './workflows.js';
+import {useResource} from './lib/resource';
+import {Analytics} from './components/analytics';
+import {StatusBadge} from './components/status';
 const {createElement:h,useState,useEffect}=React;
 const time=value=>value?new Date(value).toLocaleString():'Not observed';
 const names={pending:'Queued',running:'Running',failed:'Failed · will retry',done:'Completed',ambiguous:'Delivery uncertain',suppressed:'Skipped',ready:'Ready',connected:'Receiving',recovering:'Recovering',disabled:'Disabled',starting:'Starting',credentials_missing:'Login missing',connection_failed:'Connection failed',runtime_failed:'Runtime failed'};
 const reason=value=>({telegram_network_error:'Telegram polling stopped after network recovery failed.',telegram_polling_conflict:'Another process may be using this bot token.',telegram_adapter_failed:'The Telegram adapter stopped.',telegram_poll_or_capture_failed:'The last Telegram poll or durable capture failed.',telegram_unauthorized:'Telegram rejected the bot token.',telegram_rate_limited:'Telegram requested a pause.',conversation_not_selected:'This chat is outside the selected Telegram conversations.',unsupported_message:'This update did not contain a supported message.',waiting_for_attachments:'Waiting for original files to download.',waiting_for_transcription:'Waiting for voice transcription.',guard_preparation_pending:'Waiting for a guarded copy before calling the model.',awaiting_dispatch_receipt:'Checking the existing run receipt before retrying.',model_unavailable:'The model did not return a successful result.',quota_paused:'Subscription quota is paused.',subscription_unavailable:'The subscription is unavailable. Check its login and quota.',runtime_restart_during_dispatch:'The runtime restarted before the outcome was confirmed. Review before sending again.',delivery_unconfirmed:'Telegram delivery was not confirmed. It will not be resent automatically.'})[value]||String(value||'').replaceAll('_',' ');
-function useMonitor(call){
-  const [data,setData]=useState(null),[error,setError]=useState('');
-  useEffect(()=>{let alive=true,timer;
-    const update=async()=>{try{const value=await call('/monitoring');if(alive){setData(value);setError('');}}catch{if(alive)setError('Monitoring is unavailable. The last snapshot may be out of date.');}finally{if(alive)timer=setTimeout(update,10000);}};
-    update();return()=>{alive=false;clearTimeout(timer);};
-  },[call]);
-  return [data,error];
-}
+function useMonitor(){const {data,error}=useResource('/monitoring',10000);return [data,error?'Monitoring is unavailable. The last successful observation may be stale.':''];}
 function Disclosure({title,note,children}){
   const [open,setOpen]=useState(false);
   return h('details',{className:'n-panel n-monitor-details',onToggle:event=>setOpen(event.currentTarget.open)},
@@ -40,10 +36,10 @@ export function Monitoring({call,compact=false,renderSource}){
   return h('div',{className:'n-monitor'},error&&h('p',{role:'alert'},error),
     h(WorkflowSummary,{health:data.workflows,stale:!!error}),
     banner,
-    h('p',{className:'n-monitor-availability'},!application||application.unavailable?'API and capture status unavailable.':
-      'API: '+(application.ok?'ready':'unavailable')+' · Capture: '+(application.capture?.capture||'unavailable')+' · Inngest: '+(application.workflows||'unavailable')),
+    h('div',{className:'health-strip'},h(StatusBadge,{state:application?.ok?'ready':'unknown',label:'API · '+(application?.ok?'ready':'unavailable')}),h(StatusBadge,{state:application?.capture?.capture||'unknown',label:'Capture · '+(application?.capture?.capture||'unavailable')}),h(StatusBadge,{state:application?.workflows||'unknown',label:'Inngest · '+(application?.workflows||'unavailable')})),
     Array.isArray(data.services)&&data.services.some(service=>service.state==='unhealthy')&&h('p',{className:'n-monitor-attention',role:'status'},data.services.filter(service=>service.state==='unhealthy').length+' services need attention. Expand Services for details.'),
     archive.spool_failures?.length>0&&h('p',{role:'alert'},archive.spool_failures.length+' archive spool failures require attention.'),
+    h(Analytics,{counts:data.workflows?.unavailable?null:data.workflows?.counts}),
     h(Disclosure,{title:'Workflow details',note:'Filter history, inspect receipts, retry or cancel; check delivery and workers.'},
       h(Workflows,{call,health:data.workflows,onSource:open})),
     sourceError&&h('p',{role:'alert'},sourceError),record&&h('section',null,h('button',{type:'button',onClick:()=>setRecord(null)},'Close original'),renderSource?.(record)),
@@ -59,7 +55,7 @@ export function Monitoring({call,compact=false,renderSource}){
       h('label',null,'Show',h('select',{value:filter,onChange:e=>setFilter(e.target.value)},...Object.entries({all:'All updates',attention:'Needs attention',done:'Completed',suppressed:'Skipped'}).map(([value,label])=>h('option',{key:value,value},label)))),
       !visible.length&&h('p',{className:'n-empty'},!workflowAvailable?'Workflow history is unavailable.':rows.length?'No updates match this filter.':'No Telegram updates have been captured yet.'),
       ...visible.map(row=>h('article',{className:'n-workflow',key:row.event_id},
-        h('div',{className:'n-result-heading'},h('h3',null,time(row.received_at)),h('span',{className:'n-badge '+(['failed','ambiguous'].includes(row.state)?'n-monitor-bad':'')},names[row.state]||row.state)),
+        h('div',{className:'n-result-heading'},h('h3',null,time(row.received_at)),h(StatusBadge,{state:row.state==='failed'?'retryable_failed':row.state,label:names[row.state]||row.state})),
         h('p',null,reason(row.error_code)||({done:'Processing completed.',suppressed:'No assistant turn was needed.',pending:'Waiting to start.',running:'A turn is in progress.'})[row.state]),
         h('ol',{className:'n-workflow-stages','aria-label':'Workflow stages'},h('li',null,'Captured'),h('li',null,row.files?`${row.files-row.files_waiting}/${row.files} files ready`:'No files'),h('li',null,data.archive?.guard_mode==='off'?'Guard off':row.guard_waiting?row.guard_waiting+' guarded copies waiting':'Guarded copies ready'),h('li',null,names[row.state]||row.state)),
         (row.guard_error||row.transcription_error)&&h('p',{role:'status'},reason(row.guard_error||row.transcription_error)),
@@ -78,5 +74,5 @@ export function Monitoring({call,compact=false,renderSource}){
     h(Disclosure,{title:'Background work',note:'Guarded copies, files, transcriptions and approved actions.'},...['preparation','artifacts','transcriptions','actions'].map(kind=>h('div',{className:'n-row',key:kind},h('b',null,({preparation:'Guarded copies',artifacts:'Files',transcriptions:'Transcriptions',actions:'Approved actions'})[kind]),h('span',null,archive[kind]?.map(row=>row.count+' '+(names[row.state]||row.state)).join(' · ')||'None recorded'))),
       h('a',{href:'#activity'},'Open browser runs and approvals →')),
     h(Disclosure,{title:'Services',note:Array.isArray(data.services)?data.services.length+' services · availability, purpose and expected state.':'Service status unavailable.'},h('p',{className:'n-muted'},'Container health reports availability. Telegram polling and workflow outcomes above show whether useful work is progressing.'),
-      Array.isArray(data.services)?data.services.map(row=>h('div',{className:'n-row',key:row.service},h('div',null,h('b',null,row.service),h('p',{className:'n-muted'},row.tool+' · '+row.location+' · '+row.purpose)),h('span',null,row.state+' · expected '+row.expected_state))):h('p',{role:'alert'},'Service status is unavailable.')));
+      Array.isArray(data.services)?data.services.map(row=>h('div',{className:'n-row',key:row.service},h('div',null,h('b',null,row.service),h('p',{className:'n-muted'},row.tool+' · '+row.location+' · '+row.purpose)),h('div',null,h(StatusBadge,{state:row.state,label:row.state.replaceAll('_',' ')}),h('small',null,'Expected '+row.expected_state)))):h('p',{role:'alert'},'Service status is unavailable.')));
 }

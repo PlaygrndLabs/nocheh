@@ -1,3 +1,4 @@
+import {workflowMetrics} from './workflows/metrics.js';
 import {captureInput,claimRun,finishRun,renewRun,prepareRun,cancelScheduled,recoverScheduled,scheduleDefinition,scheduledRuns,scheduledDelivery} from './managed-runs.js';
 import {admitBrowser,browserObservation,activeBrowser,cancelBrowser,browserWorkflowContext,browserAuthority} from './workflows/browser.js';
 import {scheduleOwnership,scheduledContext,scheduledAuthority,scheduledObservation} from './workflows/schedules.js';
@@ -74,6 +75,7 @@ const server = createServer((req, res) => { void (async () => {
     if(req.method==='GET'){
       if(/^\/v1\/workflows\/migrations\/[a-f0-9]{64}$/.test(path))return json(res,200,await migrationStatus(pool,path.split('/').at(-1)!));
       if(path==='/v1/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
+      if(path==='/v1/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
       if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(pool));
       if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(pool,path.split('/').at(-1)!));
     }

@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS workflow_registry (
   UNIQUE(family,job_id,version,generation)
 );
 CREATE INDEX IF NOT EXISTS workflow_registry_status ON workflow_registry(family,state,created_at,id);
+CREATE INDEX IF NOT EXISTS workflow_registry_metrics_created ON workflow_registry(created_at,family);
+CREATE INDEX IF NOT EXISTS workflow_registry_metrics_outcomes ON workflow_registry(updated_at,family) WHERE state IN ('completed','failed');
 CREATE TABLE IF NOT EXISTS workflow_outbox (
   id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'), workflow_id text NOT NULL REFERENCES workflow_registry(id),
   dispatch integer NOT NULL, attempts integer NOT NULL DEFAULT 0,

@@ -4,6 +4,7 @@ import pg from 'pg';
 import {settings} from '../src/config.js';
 import {initialize,heartbeat} from '../src/database.js';
 import {requestWorkflow,registerWorker,publishOutbox,enterFamily,leaveFamily,claimWorkflow} from '../src/workflows/store.js';
+import {workflowMetrics} from '../src/workflows/metrics.js';
 import {listWorkflows,workflowDetail,workflowHealth,controlWorkflow} from '../src/workflows/owner.js';
 import {captureInput,claimRun,finishRun} from '../src/managed-runs.js';
 import {admitBrowser} from '../src/workflows/browser.js';
@@ -30,6 +31,7 @@ test('owner workflow metadata preserves cursor precision, domain truth and stale
     const claim={scope:'42',profile:'owner',event_id:captured.event_id,actor:'legacy'};
     await claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1});await finishRun(pool,{...claim,state:'done',session:'native-session',text:'Owner metadata result canary'});
     const browser=(await listWorkflows(pool,{family:'browser',state:'completed'})).workflows[0]!;
+    assert.equal((await workflowMetrics(pool,{family:'browser'})).buckets.reduce((n,b)=>n+b.completed,0),0,'domain success is not confirmed orchestration completion');
     assert.equal(browser.registry_state,'queued');assert.equal(browser.state,'completed');assert.equal(browser.can_retry,false);
     const detail=await workflowDetail(pool,browser.id);assert.equal(detail.source_event_id,captured.event_id);assert.equal(detail.outbox.length,1);
     assert.ok(!JSON.stringify(detail).includes('canary'));assert.ok(!JSON.stringify(detail).includes('lease_token'));

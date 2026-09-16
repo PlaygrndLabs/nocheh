@@ -26,7 +26,7 @@ def dispatch(body):
         import re
         path=body['path']
         read_path=path.split('?',1)[0]
-        public=re.fullmatch(r'/v1/workflows(?:/(?:health|[a-f0-9]{64}))?',read_path) and 'body' not in body
+        public=re.fullmatch(r'/v1/workflows(?:/(?:health|metrics|[a-f0-9]{64}))?',read_path) and 'body' not in body
         internal=re.fullmatch(r'/v1/workflows/(?:[a-f0-9]{64}/(?:retry|cancel)|imports/(?:confirm|cancel|[a-f0-9-]{36})|host/(?:claim|renew|finish|continue|heartbeat))',path)
         if not public and not internal:raise ValueError('workflow_route_denied')
         return API().call(path,body.get('body'))
