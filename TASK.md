@@ -24,8 +24,56 @@ unavailable/stale observations, authenticated Inngest navigation and 375px layou
 The AST graph was refreshed without model calls. [Evidence](compatibility/results/2026-09-16-compact-monitoring.json)
 retains fixture setup failures and their successful retries. The isolated preview
 runs on port 18837; deployment to the active installation was not performed.
+Feature commit `25982bc` is verified. GitHub HTTPS authentication blocks fetch
+(`could not read Username; terminal prompts disabled`); remote synchronization
+remains pending.
 
 </compact_monitoring>
+
+<import_extensibility_review>
+
+## Long-term platform import design — 2026-09-16
+
+The owner clarified that the goal is long-term database design for future
+platforms, with Slack and Discord as examples. The requirement is recorded under
+Imports and portability in [SPECS.md](SPECS.md). This review records a proposed
+design direction; no schema migration or platform connector is implemented here.
+
+Source inspection confirms reusable original-event, revision, artifact, derived
+provenance, and import-progress storage in [archive.ts](src/archive.ts) and
+[import workflows](src/workflows/imports.ts). The envelope allowlist, Desktop
+parser, graph authors/replies, and topic inheritance remain platform-specific in
+[archive.ts](src/archive.ts), [import_job.py](scripts/import_job.py),
+[graph.ts](src/graph.ts), and [spaces.ts](src/spaces.ts).
+
+Proposed design work, pending implementation decisions:
+
+- Retain PostgreSQL and immutable source evidence. Add relational identities and
+  relationships for common queries, with versioned platform metadata for fields
+  outside the common model. Preserve supplied bytes separately from queryable
+  JSON; normalization cannot substitute for original evidence.
+- Separate source platform/namespace and external object identity from connector
+  installation, import job, and Nocheh audience. Use opaque string external IDs
+  and database uniqueness/foreign-key constraints. Link observations from exports
+  and live capture only when their identity mapping is established.
+- Model source objects and revisions independently of message-only assumptions.
+  Represent containers, authors, replies, threads, attachments, observed deletion
+  and reaction events through typed relationships/projections. Keep unknown fields
+  and distinguish an unavailable value from an observed empty or deleted value.
+- Keep local audience policy separate from platform membership and source
+  hierarchy. An imported parent or thread relation cannot grant access by itself.
+- Version adapters and normalized projections, retain import provenance and
+  resumable checkpoints, and evolve through explicit migrations preserving old
+  source references, exports, guarded revisions, and learning consent.
+
+Before claiming readiness, verify isolated PostgreSQL migrations and round trips
+with Telegram, Slack-shaped, Discord-shaped, and non-message fixtures. Cover
+colliding IDs across namespaces, repeated imports/live observations, edits,
+out-of-order and partial events, unresolved relations, missing files, interrupted
+imports, and audience isolation. These acceptance checks remain unrun. No design
+can guarantee every unknown future platform requires zero schema migrations.
+
+</import_extensibility_review>
 
 <application_database_bootstrap>
 
