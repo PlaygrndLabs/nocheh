@@ -1,5 +1,5 @@
 import * as React from 'react';
-import {Workflows} from './workflows.js';
+import {Workflows,WorkflowSummary} from './workflows.js';
 const {createElement:h,useState,useEffect}=React;
 const time=value=>value?new Date(value).toLocaleString():'Not observed';
 const names={pending:'Queued',running:'Running',failed:'Failed · will retry',done:'Completed',ambiguous:'Delivery uncertain',suppressed:'Skipped',ready:'Ready',connected:'Receiving',recovering:'Recovering',disabled:'Disabled',starting:'Starting',credentials_missing:'Login missing',connection_failed:'Connection failed',runtime_failed:'Runtime failed'};
@@ -12,6 +12,12 @@ function useMonitor(call){
   },[call]);
   return [data,error];
 }
+function Disclosure({title,note,children}){
+  const [open,setOpen]=useState(false);
+  return h('details',{className:'n-panel n-monitor-details',onToggle:event=>setOpen(event.currentTarget.open)},
+    h('summary',null,h('span',null,title),h('small',null,note)),
+    open&&h('div',{className:'n-monitor-detail-body'},children));
+}
 export function Monitoring({call,compact=false,renderSource}){
   const [data,error]=useMonitor(call),[filter,setFilter]=useState('all'),[record,setRecord]=useState(null),[sourceError,setSourceError]=useState('');
   const status=data?.runtime?.status||{},archive=data?.archive?.archive||{},provider=data?.provider||{};
@@ -19,7 +25,8 @@ export function Monitoring({call,compact=false,renderSource}){
   const needsAttention=!!data&&data.telegram_enabled&&telegram!=='connected';
   const rows=archive.workflows||[];
   const open=async id=>{setRecord(null);setSourceError('');try{setRecord(await call('/events/'+id));}catch{setSourceError('The original source could not be loaded.');}};
-  if(!data)return h('section',{className:'n-panel'},h('h2',null,'System monitoring'),h('p',{role:error?'alert':'status'},error||'Checking Telegram, the runtime and queued work…'));
+  if(!data)return h('section',{className:'n-panel'},h('h2',null,'System monitoring'),h('p',{role:error?'alert':'status'},error||'Checking Telegram, the runtime and queued work…'),
+    !compact&&h('a',{href:'/inngest/runs',className:'n-primary n-inngest-link'},'Open Inngest ↗'));
   const banner=h('section',{className:'n-panel n-monitor-banner'+(needsAttention||error?' n-monitor-warning':''),role:needsAttention||error?'alert':undefined},
     h('div',null,h('h2',null,needsAttention?'Telegram needs attention':data.telegram_enabled?'Telegram · '+(names[telegram]||telegram):'Telegram is disabled'),
       h('p',null,reason(status.telegram_details?.error_code)||(needsAttention?'The receive path is not confirmed. Check the incident and services below.':'Last successful poll: '+time(status.telegram_details?.last_poll_at))),
@@ -29,8 +36,18 @@ export function Monitoring({call,compact=false,renderSource}){
   const workflowAvailable=Array.isArray(archive.telegram)&&Array.isArray(archive.workflows);
   const counts=(archive.telegram||[]).reduce((all,row)=>({...all,[row.state]:row.count}),{});
   const visible=rows.filter(row=>filter==='all'||filter==='attention'&&['pending','running','failed','ambiguous'].includes(row.state)||row.state===filter);
-  return h('div',{className:'n-monitor'},banner,error&&h('p',{role:'alert'},error),
-    h(Workflows,{call,health:data.workflows,onSource:open}),
+  const application=data.application;
+  return h('div',{className:'n-monitor'},error&&h('p',{role:'alert'},error),
+    h(WorkflowSummary,{health:data.workflows,stale:!!error}),
+    banner,
+    h('p',{className:'n-monitor-availability'},!application||application.unavailable?'API and capture status unavailable.':
+      'API: '+(application.ok?'ready':'unavailable')+' · Capture: '+(application.capture?.capture||'unavailable')+' · Inngest: '+(application.workflows||'unavailable')),
+    Array.isArray(data.services)&&data.services.some(service=>service.state==='unhealthy')&&h('p',{className:'n-monitor-attention',role:'status'},data.services.filter(service=>service.state==='unhealthy').length+' services need attention. Expand Services for details.'),
+    archive.spool_failures?.length>0&&h('p',{role:'alert'},archive.spool_failures.length+' archive spool failures require attention.'),
+    h(Disclosure,{title:'Workflow details',note:'Filter history, inspect receipts, retry or cancel; check delivery and workers.'},
+      h(Workflows,{call,health:data.workflows,onSource:open})),
+    sourceError&&h('p',{role:'alert'},sourceError),record&&h('section',null,h('button',{type:'button',onClick:()=>setRecord(null)},'Close original'),renderSource?.(record)),
+    h(Disclosure,{title:'Telegram details',note:'Captured updates, processing stages and the last polling incident.'},
     h('div',{className:'n-metrics'},...[
       ['Completed',counts.done||0,'Completed Telegram turns; some may intentionally be silent.'],
       ['Waiting or running',(counts.pending||0)+(counts.running||0),'Captured work waiting for its next stage.'],
@@ -48,9 +65,8 @@ export function Monitoring({call,compact=false,renderSource}){
         (row.guard_error||row.transcription_error)&&h('p',{role:'status'},reason(row.guard_error||row.transcription_error)),
         h('small',null,row.attempts+' attempt'+(row.attempts===1?'':'s')+' · Updated '+time(row.updated_at)),
         ['pending','running','failed'].includes(row.state)&&h('small',null,'Next check: '+time(row.next_attempt)),
-        h('button',{type:'button',onClick:()=>open(row.event_id)},'Inspect original')))),
-    sourceError&&h('p',{role:'alert'},sourceError),record&&h('section',null,h('button',{type:'button',onClick:()=>setRecord(null)},'Close original'),renderSource?.(record)),
-    h('section',{className:'n-panel'},h('h2',null,'Provider connection'),
+        h('button',{type:'button',onClick:()=>open(row.event_id)},'Inspect original'))))),
+    h(Disclosure,{title:'Provider connection',note:provider.unavailable?'Provider observations unavailable.':!provider.login_present?'Shared subscription login is missing.':status.reasoning_route==='shared'?'Shared subscription proxy · login present.':'Native Hermes subscription route.'},
       h('p',null,'Active reasoning route: '+(status.reasoning_route==='shared'?'Shared subscription proxy':status.reasoning_route==='native'?'Native Hermes subscription':'Unavailable')),
       h('p',null,provider.unavailable?'Shared provider status unavailable.':provider.login_present?'Shared subscription login is present.':'Shared subscription login is missing. Complete OAuth before switching the active route.'),
       h('a',{href:'/providers/management.html#/oauth',className:'n-text-link'},'Open subscription OAuth →'),
@@ -59,10 +75,8 @@ export function Monitoring({call,compact=false,renderSource}){
       h('p',null,'Nocheh generates three local access credentials: Hermes for chat, Honcho for memory reasoning, and Preparation for guarded text. They authenticate these services to your local proxy. They are not OpenAI billing keys and do not sign you into ChatGPT.'),
       h('p',{className:'n-muted'},'The management key protects the local proxy’s administration API. Nocheh manages these credentials automatically.'),
       h('a',{href:'/providers/management.html',className:'n-text-link'},'Open provider requests and usage →')),
-    h('section',{className:'n-panel'},h('h2',null,'Background work'),...['preparation','artifacts','transcriptions','actions'].map(kind=>h('div',{className:'n-row',key:kind},h('b',null,({preparation:'Guarded copies',artifacts:'Files',transcriptions:'Transcriptions',actions:'Approved actions'})[kind]),h('span',null,archive[kind]?.map(row=>row.count+' '+(names[row.state]||row.state)).join(' · ')||'None recorded'))),
-      archive.spool_failures?.length>0&&h('p',{role:'alert'},archive.spool_failures.length+' archive spool failures require attention.'),
+    h(Disclosure,{title:'Background work',note:'Guarded copies, files, transcriptions and approved actions.'},...['preparation','artifacts','transcriptions','actions'].map(kind=>h('div',{className:'n-row',key:kind},h('b',null,({preparation:'Guarded copies',artifacts:'Files',transcriptions:'Transcriptions',actions:'Approved actions'})[kind]),h('span',null,archive[kind]?.map(row=>row.count+' '+(names[row.state]||row.state)).join(' · ')||'None recorded'))),
       h('a',{href:'#activity'},'Open browser runs and approvals →')),
-    h('section',{className:'n-panel'},h('h2',null,'Services'),h('p',{className:'n-muted'},'Container health reports availability. Telegram polling and workflow outcomes above show whether useful work is progressing.'),
-      data.application&&!data.application.unavailable&&h('p',null,'API: '+(data.application.ok?'ready':'unavailable')+' · Capture: '+(data.application.capture?.capture||'unavailable')+' · Inngest: '+(data.application.workflows||'unavailable')),
+    h(Disclosure,{title:'Services',note:Array.isArray(data.services)?data.services.length+' services · availability, purpose and expected state.':'Service status unavailable.'},h('p',{className:'n-muted'},'Container health reports availability. Telegram polling and workflow outcomes above show whether useful work is progressing.'),
       Array.isArray(data.services)?data.services.map(row=>h('div',{className:'n-row',key:row.service},h('div',null,h('b',null,row.service),h('p',{className:'n-muted'},row.tool+' · '+row.location+' · '+row.purpose)),h('span',null,row.state+' · expected '+row.expected_state))):h('p',{role:'alert'},'Service status is unavailable.')));
 }

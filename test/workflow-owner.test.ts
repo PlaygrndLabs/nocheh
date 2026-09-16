@@ -43,6 +43,12 @@ test('owner workflow metadata preserves cursor precision, domain truth and stale
     assert.ok(health.counts.some(row=>row.family==='browser'&&row.state==='completed'&&row.count===1));
     assert.ok(health.outbox.admitted>0,'all fresh workflow families are admitted to Inngest');assert.ok(health.outbox.pending>0);
     assert.ok(!JSON.stringify(health).includes('canary'));
+    assert.equal(health.last_success_at,null,'domain completion alone has no confirmed workflow completion time');
+    await pool.query("UPDATE workflow_registry SET state='completed',updated_at='2026-09-15T12:00:00Z' WHERE id=$1",[ids[1]]);
+    await pool.query("UPDATE workflow_registry SET state='skipped',updated_at='2026-09-16T12:00:00Z' WHERE id=$1",[ids[2]]);
+    health=await workflowHealth(pool);
+    assert.equal(health.last_success_at.toISOString(),'2026-09-15T12:00:00.000Z','newer skipped work does not replace the last success');
+    assert.ok(health.counts.some(row=>row.family==='tools'&&row.state==='completed'&&row.count===1));
 
     // A retry changes publication, never the effect identity or attempt count.
     await pool.query("UPDATE workflow_owners SET owner='inngest' WHERE family='tools'");

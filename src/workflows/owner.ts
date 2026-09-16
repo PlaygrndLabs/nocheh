@@ -153,6 +153,9 @@ export async function workflowHealth(pool:pg.Pool){
       FROM workflow_outbox o JOIN workflow_registry w ON w.id=o.workflow_id JOIN workflow_owners f USING(family)
       WHERE o.published_at IS NULL AND o.dispatch=w.dispatch AND w.state IN ('queued','waiting','running','retryable_failed')`),
     pool.query("SELECT min(created_at) AS oldest FROM workflow_observations WHERE state IN ('queued','waiting','retryable_failed')"),
-    pool.query("SELECT service,seen_at,(seen_at>now()-interval '30 seconds') AS fresh FROM service_heartbeats WHERE service IN ('nocheh-app','workflow-pipeline','workflow-host') ORDER BY service")]);
-  return {counts:results[0].rows,workers:results[1].rows,outbox:results[2].rows[0],oldest_waiting:results[3].rows[0].oldest,services:results[4].rows,observed_at:new Date().toISOString()};
+    pool.query("SELECT service,seen_at,(seen_at>now()-interval '30 seconds') AS fresh FROM service_heartbeats WHERE service IN ('nocheh-app','workflow-pipeline','workflow-host') ORDER BY service"),
+    // A domain may finish before orchestration records completion. Report the
+    // last confirmed workflow completion, never its admission/update timestamp.
+    pool.query("SELECT max(updated_at) AS at FROM workflow_registry WHERE state='completed'")]);
+  return {counts:results[0].rows,workers:results[1].rows,outbox:results[2].rows[0],oldest_waiting:results[3].rows[0].oldest,services:results[4].rows,last_success_at:results[5].rows[0].at,observed_at:new Date().toISOString()};
 }
