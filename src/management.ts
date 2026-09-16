@@ -201,7 +201,7 @@ export async function startManagement() {
       if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
       if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
-      if(req.method==='GET'&&/^\/workflows(?:\/(?:health|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
+      if(req.method==='GET'&&/^\/workflows(?:\/(?:health|metrics|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
       if(req.method==='POST'&&/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route,body:await readJson(req)}));
       if(route==='/tools/actions' && req.method==='GET')return json(res,200,await python({operation:'tools.manage'}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));

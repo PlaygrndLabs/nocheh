@@ -1,3 +1,4 @@
+import {workflowMetrics} from '../src/workflows/metrics.js';
 /** Explicit synthetic fixture. No runtime, publisher, scheduler or tool executor. */
 import {createServer} from 'node:http';
 import pg from 'pg';
@@ -29,6 +30,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(path.startsWith('/v1/workflows/inspection/'))return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
   if(req.method==='GET'){
     if(path==='/v1/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
+    if(path==='/v1/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
     if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(pool));
     if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(pool,path.split('/').at(-1)!));
     if(path==='/v1/status')return json(res,200,{archive:await archiveStatus(pool),guard_mode:'on',services:[]});

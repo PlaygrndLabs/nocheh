@@ -1,3 +1,4 @@
+import {workflowMetrics} from '../src/workflows/metrics.js';
 /** Isolated UI acceptance fixture. No poller, scheduler, provider, or effect executor. */
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
@@ -44,6 +45,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/health')return json(res,200,{ok:true});
   if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,runtime:{status:{telegram:'disabled',reasoning_route:'shared'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},provider:{login_present:true},application:{ok:true,capture:{capture:'ready'},workflows:'connected'},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
   if(route==='/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
+  if(route==='/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/health')return json(res,200,await workflowHealth(pool));
   if(/^\/workflows\/[a-f0-9]{64}$/.test(route))return json(res,200,await workflowDetail(pool,route.split('/')[2]!));
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[]},guard_mode:'on',services:[]});
