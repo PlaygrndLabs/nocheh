@@ -14,18 +14,29 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
-  inngest-db-init:
+  nocheh-app:
     image: ${NOCHEH_FIXTURE_IMAGE:?Unique fixture image required}
     build: {context: .., target: development}
-    command: [node, dist/src/workflows/bootstrap.js]
+    # Keep ordinary capture/workers inactive while probes use their own schemas.
+    command: [sh, -c, 'mkdir -p /tmp/nocheh-fixture/spool && touch /tmp/nocheh-fixture/spool/.restore-inactive && exec node dist/src/main.js']
     environment: &database
       PGHOST: nocheh-postgres
       PGUSER: nocheh
       PGDATABASE: nocheh
       PGPASSWORD: ${POSTGRES_PASSWORD}
       INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD}
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      NOCHEH_DATA_DIR: /tmp/nocheh-fixture
+      TELEGRAM_ENABLED: "false"
     depends_on:
       nocheh-postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8780/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
   inngest-redis:
     image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
     restart: unless-stopped
@@ -47,7 +58,7 @@ services:
       INNGEST_REDIS_URI: redis://inngest-redis:6379
       LOG_LEVEL: error
     depends_on:
-      inngest-db-init: {condition: service_completed_successfully}
+      nocheh-app: {condition: service_healthy}
       inngest-redis: {condition: service_healthy}
     healthcheck:
       test: [CMD, inngest, alpha, doctor, healthcheck]

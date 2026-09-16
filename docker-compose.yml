@@ -281,22 +281,6 @@ services:
       timeout: 3s
       retries: 20
 
-  inngest-db-init:
-    <<: *service
-    restart: "no"
-    command: [node, dist/src/workflows/bootstrap.js]
-    environment:
-      PGHOST: nocheh-postgres
-      PGUSER: nocheh
-      PGDATABASE: nocheh
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
-      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:-}
-    networks: [workflows]
-    volumes: []
-    healthcheck: {disable: true}
-    depends_on:
-      nocheh-postgres: {condition: service_healthy}
-
   inngest-redis:
     image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
     restart: unless-stopped
@@ -324,7 +308,7 @@ services:
       LOG_LEVEL: warn
     networks: [workflows]
     depends_on:
-      inngest-db-init: {condition: service_completed_successfully}
+      nocheh-app: {condition: service_healthy}
       inngest-redis: {condition: service_healthy}
     healthcheck:
       test: [CMD, inngest, alpha, doctor, healthcheck]
@@ -341,6 +325,7 @@ services:
       <<: *environment
       NOCHEH_SERVICE: nocheh-app
       NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:-}
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]

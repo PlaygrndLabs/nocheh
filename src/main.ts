@@ -16,6 +16,7 @@ import {honchoClient,memoryStatus,setMemoryConnection,memoryContext,recallMemory
 import { archiveStatus, envelope, ingest } from './archive.js';
 import { startCapture } from './worker.js';
 import {startWorkflowService} from './workflows/service.js';
+import {initializeWorkflowDatabase} from './workflows/bootstrap.js';
 import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import {prepareContext,allowPrepared} from './prepared-context.js';
@@ -40,6 +41,7 @@ const honcho=honchoClient(config.honchoUrl);
 // Each service owns its connection pool; an outage must be visible in health.
 const pool = connectDatabase(config);
 await initialize(pool);
+await initializeWorkflowDatabase(pool,process.env.INNGEST_POSTGRES_PASSWORD??'');
 if(servesArchive)await setGuardMode(pool,config.guardMode);
 await heartbeat(pool, config.service);
 const timer = setInterval(() => { void heartbeat(pool, config.service).catch(() => {}); }, 5000);

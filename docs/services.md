@@ -8,7 +8,7 @@
 <layout>
 
 One Compose project contains 15 continuously running containers when Honcho is
-enabled, or 16 with pgweb. The database initialization job exits successfully.
+enabled, or 16 with pgweb. Database initialization runs inside `nocheh-app` startup.
 Temporary isolated agent containers are additional.
 
 | Service | Tool and purpose | Location / expected state |
@@ -25,7 +25,6 @@ Temporary isolated agent containers are additional.
 | `cliproxy-monitor` | CPA Manager Plus full request history and analytics | Docker / running |
 | `inngest-server` | Workflow scheduling, retries, waits and inspection UI | Docker / running |
 | `inngest-redis` | Durable workflow queue and run state | Docker / running |
-| `inngest-db-init` | Create the dedicated Inngest database, then exit | Docker / completed |
 | `honcho-api` | Memory API | Docker / running when enabled |
 | `honcho-deriver` | Honcho's internal background processing | Docker / running when enabled |
 | `honcho-postgres` | Memory, vectors and derivation jobs | Docker / running when enabled |
@@ -55,6 +54,7 @@ flowchart TB
     App <--> Engine[inngest-server]
     Host[Host: nocheh-host-executor\nimports · tools · receipt recovery] <-->|authenticated Connect transport via app| App
     Engine --> EngineDB[nocheh-postgres\nInngest database and role]
+    App -.->|initializes on startup| EngineDB
     Engine --> Queue[inngest-redis]
     App --> Hermes
     Hermes --> Launcher[hermes-agent-launcher]
@@ -80,6 +80,11 @@ Ordinary functions share one application and concurrency four. Host functions us
 concurrency two. The application gives API/capture and workflow handlers separate
 PostgreSQL pools, each capped at eight. SDK reconnection does not gate API startup.
 Inngest Redis uses AOF, `appendfsync always` and `noeviction`.
+
+Startup: PostgreSQL → application schema and Inngest database initialization →
+application healthy → Inngest (also waits for Redis). Initialization preserves
+existing data. Inngest retains its restricted database role and cannot connect to
+the archive. See [ADR-0049](adr/0049-application-database-bootstrap.md).
 
 </relationships>
 

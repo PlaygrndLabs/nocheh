@@ -1,6 +1,15 @@
 import pg from 'pg';
 import {pathToFileURL} from 'node:url';
 
+/** Finish before the API listens; never start workflow execution during restore. */
+export async function initializeWorkflowDatabase(pool:pg.Pool,password:string):Promise<void> {
+  const client=await pool.connect();
+  try {await bootstrapWorkflowDatabase(client,password);}
+  catch {throw Error('workflow_database_setup_failed');}
+  // This session owns an advisory lock. Destroy it even if unlocking failed.
+  finally {client.release(true);}
+}
+
 /** Separate metadata owner. Never grant the orchestration role archive access. */
 export async function bootstrapWorkflowDatabase(client:pg.Client,password:string):Promise<void> {
   if(!/^[a-f0-9]{64}$/.test(password))throw Error('invalid_workflow_database_password');
