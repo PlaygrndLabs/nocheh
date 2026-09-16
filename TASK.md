@@ -69,12 +69,17 @@ images retain their existing pins. Commit `283ab38` is integrated into local `ma
 Fetch/push remain blocked by GitHub HTTPS authentication (`could not read Username;
 terminal prompts disabled`). The installed 15 containers are healthy.
 
-Automatic approval review rejected the live cutover because its service interruption
-and production-state impact require explicit approval beyond socket access. The
-prepared procedure drains the original host processes, validates a format-5 snapshot,
-recreates 17 services while preserving volumes, and verifies live subscription speech.
-That approval is requested; cutover, live subscription verification and scoped obsolete
-image cleanup remain pending. No live migration command executed.
+The owner explicitly approved the live local cutover. The host executor and dashboard
+are drained, a validated format-5 backup preserves 45 archive tables, 14 Inngest
+tables, 12 Honcho tables and 919 files, and both management containers are running.
+Final subscription checks and cleanup are in progress.
+
+The live check exposed a Mac/Linux boundary: the host CLI cannot observe a lock held
+inside Docker's VM. Executor lifecycle detection now queries Compose instead; Docker
+errors fail closed rather than declaring the worker stopped. The supervisor retains
+its in-VM exclusion lock. All 28 focused tests and a live read-only host CLI check pass.
+The first post-start database check encountered temporary PostgreSQL recovery; the
+database is accepting connections again, and final acceptance must recheck it.
 
 </container_management_migration>
 

@@ -23,11 +23,13 @@ def recover_receipts(state):
 
 
 def running(state):
-    path=Path(state)/'admin/workflows/worker.lock'
-    if not path.exists():return False
-    with path.open('a') as lock:
-        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);return False
-        except BlockingIOError:return True
+    # macOS and Docker's Linux VM do not share advisory file-lock visibility.
+    # Lifecycle callers must observe Compose; serve() still fences supervisors
+    # with a lock inside the container's kernel. Docker errors fail closed.
+    service='nocheh-host-executor'
+    result=subprocess.check_output(compose_command(state)+['ps','--status','running','--services',service],
+        env=compose_environment(state),text=True,stderr=subprocess.DEVNULL,timeout=15)
+    return service in result.split()
 
 
 def start(state):
