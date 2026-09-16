@@ -21,10 +21,15 @@ credential rejection pass. Snapshot/inactive restore preserves 15 workflow table
 Redis state and synthetic archive data; restart preserves the restored contents.
 Only PostgreSQL and Redis run in the restored fixture. Test resources were removed.
 [Acceptance evidence](compatibility/results/2026-09-16-application-database-bootstrap.json).
-Documentation checks and the AST-only graph refresh pass. The candidate uses the
-cached pinned Nocheh runtime and locked build dependencies; a registry-backed build
-stalled and was cancelled. Local installation activation and Git integration are
-pending; this increment is independent of the pending management migration.
+Documentation checks and the AST-only graph refresh pass. The installed image uses
+the cached pinned Nocheh runtime and locked build dependencies; a registry-backed
+build stalled and was cancelled. Code commit `9bb3d14` is integrated into local
+main and installed. The app is healthy with capture/outbox ready and workflows
+connected; all 15 running containers are healthy. Both database identities are
+preserved, and the completed initialization container is removed without deleting
+volumes. GitHub HTTPS authentication blocks fetch/push (`could not read Username;
+terminal prompts disabled`), so remote synchronization is pending. This increment
+is independent of the pending management migration.
 
 </application_database_bootstrap>
 
