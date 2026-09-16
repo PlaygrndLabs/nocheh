@@ -5,6 +5,29 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<application_database_bootstrap>
+
+## Inngest database setup inside the app — 2026-09-16
+
+Owner requested removing `inngest-db-init` and merging it into another service.
+[ADR-0049](docs/adr/0049-application-database-bootstrap.md) puts provisioning in
+`nocheh-app` before API readiness; Inngest waits for application and Redis health.
+The dedicated database and restricted role are preserved. Restore overrides the
+application command to run provisioning alone, without execution authorities.
+
+Fresh isolated Compose startup, four Node 24 tests, six Python tests, concurrent
+initialization, data preservation, startup during an Inngest outage, and invalid
+credential rejection pass. Snapshot/inactive restore preserves 15 workflow tables,
+Redis state and synthetic archive data; restart preserves the restored contents.
+Only PostgreSQL and Redis run in the restored fixture. Test resources were removed.
+[Acceptance evidence](compatibility/results/2026-09-16-application-database-bootstrap.json).
+Documentation checks and the AST-only graph refresh pass. The candidate uses the
+cached pinned Nocheh runtime and locked build dependencies; a registry-backed build
+stalled and was cancelled. Local installation activation and Git integration are
+pending; this increment is independent of the pending management migration.
+
+</application_database_bootstrap>
+
 <consolidation_implementation>
 
 ## Reviewed deployment and Inngest completion — 2026-09-16

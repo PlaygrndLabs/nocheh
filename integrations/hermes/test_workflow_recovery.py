@@ -55,6 +55,7 @@ class WorkflowRecoveryTests(unittest.TestCase):
             with patch('scripts.workflow_recovery.fingerprints',return_value=metadata['tables']),patch('scripts.workflow_recovery.subprocess.run',side_effect=lambda command,**kwargs:commands.append(command)):
                 result=restore(['fixture'],{},backup,state,metadata,sha)
             self.assertFalse(result['active'])
+            self.assertEqual(commands[0],['fixture','run','--rm','--no-deps','nocheh-app','node','dist/src/workflows/bootstrap.js'])
             self.assertEqual(sha(state/'workflows/redis/dump.rdb'),metadata['workflow-redis.rdb']['sha256'])
             self.assertFalse(any('inngest' in c or 'workflow-worker' in c for c in commands))
             self.assertIn('--role=nocheh_inngest',commands[1])

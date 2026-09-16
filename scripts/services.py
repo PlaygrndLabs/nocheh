@@ -18,7 +18,6 @@ CATALOG=(
  ('cliproxy-monitor','CPA Manager Plus','Persistent provider history, usage and analytics','docker','running'),
  ('inngest-server','Inngest','Workflow scheduling, retries, waits and inspection UI','docker','running'),
  ('inngest-redis','Redis','Durable workflow queue and run state','docker','running'),
- ('inngest-db-init','Inngest / PostgreSQL','Create the dedicated Inngest database and exit','docker','completed'),
  ('honcho-api','Honcho','Memory API','docker','honcho'),
  ('honcho-deriver','Honcho','Internal memory derivation; metrics probe checks process availability','docker','honcho'),
  ('honcho-postgres','PostgreSQL + pgvector','Memory, vectors and derivation jobs','docker','honcho'),
