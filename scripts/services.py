@@ -6,8 +6,8 @@ from pathlib import Path
 
 # name, tool, purpose, location, lifecycle/profile
 CATALOG=(
- ('nocheh-dashboard','Nocheh','Owner dashboard, configuration, backup and recovery','host','running'),
- ('nocheh-host-executor','Nocheh + Inngest','Host workflows and durable receipt recovery','host','running'),
+ ('nocheh-dashboard','Nocheh','Owner dashboard, configuration, backup and recovery','docker','running'),
+ ('nocheh-host-executor','Nocheh + Inngest','Imports, approved tools and durable receipt recovery','docker','running'),
  ('nocheh-app','Nocheh + Inngest SDK','API, capture, event publication and ordinary workflows','docker','running'),
  ('nocheh-postgres','PostgreSQL','Separate Nocheh and Inngest databases and roles','docker','running'),
  ('nocheh-security','Nocheh','Security broker, guard and exact authorization checks','docker','running'),
@@ -51,15 +51,5 @@ def describe(rows,config,host=None):
 
 
 def host_status(state):
-    from .dashboard import request
-    from .workflow_worker import running
-    result={}
-    try:
-        if request(state,'/health').get('ok'):result['nocheh-dashboard']={'state':'running','health':'healthy'}
-    except Exception:pass
-    if running(state):
-        healthy=False
-        try:healthy=time.time()-json.loads((Path(state)/'admin/workflows/status.json').read_text())['seen_at']<30
-        except (OSError,ValueError,KeyError):pass
-        result['nocheh-host-executor']={'state':'running','health':'healthy' if healthy else 'unhealthy'}
-    return result
+    # Management is observed through Compose, including from the host CLI.
+    return {}

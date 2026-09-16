@@ -48,7 +48,54 @@ x-honcho-runtime: &honcho-runtime
   restart: unless-stopped
   stop_grace_period: 120s
 
+x-management: &management
+  image: nocheh-management:local
+  build: {context: ., target: management}
+  user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+  group_add: ["${NOCHEH_DOCKER_GID:-0}"]
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 480s
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  environment:
+    NOCHEH_CONTAINER: "1"
+    NOCHEH_INSTALLATION_ROOT: ${NOCHEH_INSTALLATION_ROOT:-${PWD}}
+    NOCHEH_STATE_DIR: ${NOCHEH_STATE_DIR:-${PWD}/data/local}
+    NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
+    COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-nocheh}
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ${NOCHEH_INSTALLATION_ROOT:-${PWD}}:${NOCHEH_INSTALLATION_ROOT:-${PWD}}
+    - ${NOCHEH_STATE_DIR:-${PWD}/data/local}:${NOCHEH_STATE_DIR:-${PWD}/data/local}
+    - ${NOCHEH_HONCHO_STATE_DIR:-${PWD}/data/honcho-experiment}:${NOCHEH_HONCHO_STATE_DIR:-${PWD}/data/honcho-experiment}
+  networks: [default]
+
 services:
+  nocheh-dashboard:
+    <<: *management
+    command: [dashboard]
+    ports:
+      - "127.0.0.1:${NOCHEH_DASHBOARD_PORT:-8783}:${NOCHEH_DASHBOARD_PORT:-8783}"
+      - "127.0.0.1:${NOCHEH_OAUTH_PORT:-1455}:1455"
+    healthcheck:
+      test: [CMD, python3, -m, scripts.container_service, dashboard-health]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+  nocheh-host-executor:
+    <<: *management
+    command: [executor]
+    healthcheck:
+      test: [CMD, python3, -m, scripts.container_service, executor-health]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
   honcho-postgres:
     profiles: [honcho]
     restart: unless-stopped

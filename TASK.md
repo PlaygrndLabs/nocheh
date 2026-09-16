@@ -33,6 +33,44 @@ is independent of the pending management migration.
 
 </application_database_bootstrap>
 
+<container_management_migration>
+
+## Dashboard and executor in Docker — 2026-09-16
+
+Owner requested moving the dashboard and executor into Docker, rebuilding services,
+and cleaning up obsolete Nocheh resources. The prepared candidate was copied from
+`codex/system-diagram-20260916` into `codex/system-map-20260916`, preserving the
+original worktree. The owner then requested “fix all” and explicitly approved
+Docker-socket access for both trusted management containers.
+
+[ADR-0048](docs/adr/0048-containerized-management.md) records the administration
+boundary. The candidate now includes the authorized socket and group, internal
+service addresses, installation paths, container lifecycle and executor recovery.
+Fresh isolated Compose acceptance passes startup, owner-authorized socket access,
+real isolated tool execution, executor restart/reconnection, Inngest outage recovery,
+container backup and inactive restore, diagnostics/restart, and dashboard availability
+with the app stopped. The backup verifies 45 archive tables, 14 workflow tables and
+15 synthetic state files. Owner and native Hermes pages render through the container.
+No production credentials were copied into the fixture.
+
+The serialized TypeScript/PostgreSQL suite passes 83 tests; its separately enabled
+container-routing test also passes. The 175-test native suite had timing failures
+under concurrent fixture load; both affected tests pass in isolated reruns. Its three
+container-skipped checks pass separately on the host, including a real agent sandbox
+that cannot reach credentials, sibling files, the Docker socket or the internet.
+The 25 focused management Python checks pass. Initial timeout and diagnostic failures
+are retained in the [fresh evidence](compatibility/results/2026-09-16-container-management.json).
+Documentation checks and AST-only graph refresh pass.
+
+Management, application and development images build from pinned inputs. The changed
+Hermes integration is rebuilt over the verified pinned runtime layer; full upstream
+Rust/Go downloads were cancelled after stalling. Unchanged provider, tool and store
+images retain their existing pins. Git integration, the live format-5 snapshot,
+host-process drain, container cutover, subscription verification and scoped cleanup
+remain pending; this evidence does not yet claim installed activation.
+
+</container_management_migration>
+
 <consolidation_implementation>
 
 ## Reviewed deployment and Inngest completion — 2026-09-16

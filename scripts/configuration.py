@@ -10,7 +10,8 @@ except ImportError:
     from embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_STATE = ROOT / 'data/local'
+INSTALLATION_ROOT = Path(os.environ.get('NOCHEH_INSTALLATION_ROOT', ROOT)).resolve()
+DEFAULT_STATE = INSTALLATION_ROOT / 'data/local'
 DEFAULTS = {
     'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_PROVIDER_MONITOR_PORT': '18317', 'NOCHEH_MODEL': 'gpt-5.6-sol',
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'shared', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
@@ -26,7 +27,21 @@ DEFAULTS = {
 
 def env_path(state):
     state = Path(state).resolve()
-    return ROOT / '.env' if state == DEFAULT_STATE else state / '.env'
+    return INSTALLATION_ROOT / '.env' if state == DEFAULT_STATE else state / '.env'
+
+
+def compose_command(state, project=None):
+    command=['docker','compose','--env-file',str(env_path(state)),'-f',str(INSTALLATION_ROOT/'docker-compose.yml')]
+    if project:command+=['-p',project]
+    return command
+
+
+def archive_url(state):
+    return 'http://nocheh-app:8780' if os.environ.get('NOCHEH_CONTAINER')=='1' else 'http://127.0.0.1:'+load(state)['NOCHEH_PORT']
+
+
+def native_endpoint(state):
+    return ('hermes-runtime',8785) if os.environ.get('NOCHEH_CONTAINER')=='1' else ('127.0.0.1',int(os.environ.get('NOCHEH_NATIVE_ADMIN_PORT') or native_admin_port(state)))
 
 
 def read_env(path):
@@ -160,6 +175,8 @@ def compose_environment(state):
     result = dict(os.environ); result.update(load(state))
     result['NOCHEH_NATIVE_ADMIN_PORT'] = str(native_admin_port(state))
     result['NOCHEH_STATE_DIR'] = str(Path(state).resolve())
+    result['NOCHEH_INSTALLATION_ROOT'] = str(INSTALLATION_ROOT)
+    result['NOCHEH_DASHBOARD_PORT'] = load(state).get('NOCHEH_DASHBOARD_PORT') or str(int(result['NOCHEH_PORT'])+3 if int(result['NOCHEH_PORT'])<=65532 else int(result['NOCHEH_PORT'])-3)
     # Profiles are explicit per installation; a stale shell cannot activate workflows.
     profiles=[v for v in result.get('COMPOSE_PROFILES','').split(',') if v and v not in ('workflows','honcho','honcho-tools')]
     if result.get('NOCHEH_HONCHO_ENABLED')=='true' and not (Path(state)/'spool/.restore-inactive').exists():profiles.append('honcho')

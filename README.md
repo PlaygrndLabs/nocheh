@@ -19,7 +19,7 @@ Legacy code is preserved on `codex/legacy-nocheh`.
 Install Docker with Compose, Python 3 and Node 24.x, then run:
 
 ```bash
-npm ci                  # install the pinned host dashboard/build dependencies
+npm ci                  # development/build dependencies; runtime tools are in Docker
 ./scripts/nocheh init     # create .env with generated internal credentials
 # Edit .env for Telegram, model and optional guarding settings.
 ./scripts/nocheh up       # build, start in the background, wait for health checks

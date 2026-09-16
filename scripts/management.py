@@ -11,7 +11,10 @@ def dispatch(body):
     operation = body['operation']
     if operation=='archive.connection':
         config=load(state)
-        return {'port':int(config['NOCHEH_PORT']),'token':config['SERVICE_TOKEN']}
+        from .configuration import archive_url
+        from urllib.parse import urlsplit
+        endpoint=urlsplit(archive_url(state))
+        return {'host':endpoint.hostname,'port':endpoint.port,'token':config['SERVICE_TOKEN']}
     if operation=='workflow.import.batch':
         from .workflow_jobs import import_batch
         return import_batch(state,body)
@@ -49,8 +52,9 @@ def dispatch(body):
         path = ('/api/nocheh/preferences' if request.get('profile') and not request.get('job') else '/api/nocheh/policy') + '?' + query
         return call(state, path, request if body.get('write') else None, 'PUT' if body.get('write') else 'GET')
     if operation == 'native.connection':
-        from .configuration import native_admin_port
-        return {'port': int(os.environ.get('NOCHEH_NATIVE_ADMIN_PORT') or native_admin_port(state)), 'token': load(state)['SERVICE_TOKEN']}
+        from .configuration import native_endpoint
+        host,port=native_endpoint(state)
+        return {'host':host,'port':port,'token':load(state)['SERVICE_TOKEN']}
     if operation == 'memory.api':
         from .archive import API
         from urllib.parse import urlsplit

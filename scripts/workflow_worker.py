@@ -1,4 +1,4 @@
-"""Host supervision and shutdown remain independent of Inngest availability."""
+"""Executor supervision and shutdown remain independent of Inngest availability."""
 import fcntl
 import json
 import os
@@ -8,7 +8,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from .configuration import ROOT,compose_environment
+from .configuration import ROOT,compose_environment,compose_command
 from .tool_receipts import atomic,flush_receipts
 from .archive import API
 from .node_runtime import executable
@@ -35,32 +35,29 @@ def start(state):
     if (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return {'state':'inactive_restore'}
     directory=state/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     if running(state):return {'state':'running'}
-    executable(env)
     (directory/'stop').unlink(missing_ok=True)
-    subprocess.Popen([sys.executable,'-m','scripts.workflow_worker'],cwd=ROOT,env={**os.environ,'NOCHEH_STATE_DIR':str(state)},
-                     stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-    return {'state':'starting'}
+    subprocess.run(compose_command(state)+['up','-d','--no-build','--no-deps','--wait','nocheh-host-executor'],env=env,check=True)
+    return {'state':'running'}
 
 
 def stop(state,wait=False):
-    directory=Path(state)/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700);(directory/'stop').touch()
-    if wait:
-        deadline=time.monotonic()+420
-        while running(state):
-            if time.monotonic()>deadline:raise RuntimeError('workflow_host_still_draining')
-            time.sleep(.2)
-    return {'state':'stopping'}
+    # Compose suppresses restart while SIGTERM drains the foreground supervisor.
+    # A stop-file alone races restart: unless-stopped and can relaunch the worker.
+    subprocess.run(compose_command(state)+['stop','nocheh-host-executor'],env=compose_environment(state),check=True)
+    return {'state':'stopped'}
 
 
 def serve(state):
     directory=Path(state)/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     env=compose_environment(state);port=env['NOCHEH_PORT']
-    if (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return 0
-    env.update(INNGEST_BASE_URL='http://127.0.0.1:'+port,INNGEST_CONNECT_GATEWAY_URL='ws://127.0.0.1:'+port+'/v0/connect',NOCHEH_PYTHON=sys.executable)
+    base='http://nocheh-app:8780' if os.environ.get('NOCHEH_CONTAINER')=='1' else 'http://127.0.0.1:'+port
+    env.update(INNGEST_BASE_URL=base,INNGEST_CONNECT_GATEWAY_URL=base.replace('http://','ws://')+'/v0/connect',NOCHEH_PYTHON=sys.executable)
+    if os.environ.get('NOCHEH_CONTAINER')=='1':env['NOCHEH_NODE']='node'
     node=executable(env)
     with (directory/'worker.lock').open('a') as lock,ThreadPoolExecutor(max_workers=1) as recovery:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return 0
+        (directory/'stop').unlink(missing_ok=True)
         stopping=False;child=None;pending=None;next_recovery=0;next_start=0;receipt_state='starting';next_status=0
         def terminate(*_):
             nonlocal stopping
@@ -68,6 +65,10 @@ def serve(state):
         signal.signal(signal.SIGTERM,terminate);signal.signal(signal.SIGINT,terminate)
         while not stopping and not (directory/'stop').exists():
             now=time.monotonic()
+            if (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():
+                if child is not None and child.poll() is None:child.terminate();child.wait();child=None
+                atomic(directory/'status.json',{'pid':os.getpid(),'seen_at':time.time(),'state':'inactive'})
+                time.sleep(1);continue
             if pending is not None and pending.done():
                 try:pending.result();receipt_state='ready'
                 except Exception:receipt_state='waiting_for_archive'

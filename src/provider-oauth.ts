@@ -7,14 +7,14 @@ export class ProviderOAuth {
   private server:Server|undefined;
   private state:string|undefined;
   private timer?:ReturnType<typeof setTimeout>;
-  constructor(private monitor:number,private key:string,private ownerPort:number,private callbackPort=1455) {}
+  constructor(private monitor:number,private key:string,private ownerPort:number,private callbackPort=1455,private monitorHost='127.0.0.1',private bindHost='127.0.0.1') {}
   close() {
     this.state=undefined;
     if(this.timer)clearTimeout(this.timer);
     this.server?.close();this.server=undefined;
   }
   private async call(path:string,body?:unknown) {
-    const response=await fetch(`http://127.0.0.1:${this.monitor}/v0/management/${path}`,{
+    const response=await fetch(`http://${this.monitorHost}:${this.monitor}/v0/management/${path}`,{
       method:body===undefined?'GET':'POST',headers:{authorization:`Bearer ${this.key}`,'content-type':'application/json'},
       ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(15000),redirect:'error'});
     if(!response.ok)throw new HttpError(503,'provider_oauth_unavailable');
@@ -42,7 +42,7 @@ export class ProviderOAuth {
     })().catch(()=>{res.writeHead(500);res.end();});});
     this.server=server;
     try {
-      await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(this.callbackPort,'127.0.0.1',()=>resolve());});
+      await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(this.callbackPort,this.bindHost,()=>resolve());});
     } catch {this.close();throw new HttpError(409,'oauth_callback_port_busy');}
     this.timer=setTimeout(()=>this.close(),300000);this.timer.unref();
     try {

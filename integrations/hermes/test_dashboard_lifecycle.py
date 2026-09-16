@@ -22,7 +22,7 @@ class DashboardLifecycleTests(unittest.TestCase):
              patch('scripts.dashboard.subprocess.call', return_value=0) as call:
             result = start(Path(folder), ['--stop'])
         self.assertEqual(result, 0)
-        call.assert_not_called()
+        self.assertEqual(call.call_args.args[0][-2:],['stop','nocheh-dashboard'])
 
 
 if __name__ == '__main__':

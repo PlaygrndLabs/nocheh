@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from datetime import datetime,timezone
 from pathlib import Path
-from .configuration import ROOT
+from .configuration import INSTALLATION_ROOT as ROOT
 
 
 def lock():return json.loads((ROOT/'compatibility/upstreams.lock.json').read_text())

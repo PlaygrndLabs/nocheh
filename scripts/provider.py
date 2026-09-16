@@ -6,7 +6,8 @@ import secrets
 import subprocess
 from pathlib import Path
 
-ROOT=Path(__file__).resolve().parents[1]
+try: from .configuration import INSTALLATION_ROOT as ROOT
+except ImportError: from configuration import INSTALLATION_ROOT as ROOT
 LOCKS=json.loads((ROOT/'compatibility/upstreams.lock.json').read_text())
 LOCK=LOCKS['cliproxy']
 MONITOR_LOCK=LOCKS['cpamp']
@@ -94,7 +95,8 @@ def ensure_monitor_source(run=subprocess.run):
 
 def compose(state):
     from scripts.configuration import compose_environment,env_path
-    return (['docker','compose','--env-file',str(env_path(state)),'-f',str(ROOT/'docker-compose.yml')],
+    from .configuration import compose_command
+    return (compose_command(state),
             compose_environment(state))
 
 
