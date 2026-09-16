@@ -12,6 +12,14 @@ integration. It archives delivered updates; general history retrieval is a
 No user-account history connector is implemented. Export/import is the supported
 backfill path; it makes old messages searchable without sending old replies.
 
+<platform_sources>
+The database also accepts platform-independent source objects through the
+[versioned source descriptor](source-model.md). Platform adapters supply opaque
+identities, observations, and typed relationships; portable exports retain them.
+Slack and Discord export parsers are not implemented. The Telegram Desktop
+parser and generic portable archive import remain the available file importers.
+</platform_sources>
+
 Start Compose with `./scripts/nocheh up`. The CLI reads the ignored service token
 and generated local port configuration; credentials never appear in arguments.
 

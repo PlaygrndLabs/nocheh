@@ -58,9 +58,9 @@ export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref
     fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);if(!fenced)return;
     locked=(await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(803301) AS locked')).rows[0]?.locked ?? false;
     if (!locked) return;
-    const rows=await client.query<{id:string;source_ref:string}> (`SELECT id,source_ref FROM artifacts WHERE state<>'ready'
-      AND source_ref NOT LIKE 'desktop:%' AND error_code IS DISTINCT FROM 'import_bytes_pending'
-      AND next_attempt<=now() AND ($1::text IS NULL OR event_id=$1) ORDER BY next_attempt LIMIT 10`,[eventId]);
+    const rows=await client.query<{id:string;source_ref:string}> (`SELECT a.id,a.source_ref FROM artifacts a JOIN events e ON e.id=a.event_id
+      WHERE e.channel='telegram' AND a.state<>'ready' AND a.source_ref NOT LIKE 'desktop:%' AND a.error_code IS DISTINCT FROM 'import_bytes_pending'
+      AND a.next_attempt<=now() AND ($1::text IS NULL OR a.event_id=$1) ORDER BY a.next_attempt LIMIT 10`,[eventId]);
     for (const artifact of rows.rows) {
       try {
         const bytes=await fetchFile(artifact.source_ref);

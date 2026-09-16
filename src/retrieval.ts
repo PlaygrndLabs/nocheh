@@ -14,10 +14,11 @@ export function limit(value:unknown,fallback=20,max=50):number {
   if (!Number.isInteger(n) || n<1 || n>max) throw new HttpError(400,'invalid_limit');
   return n;
 }
-type EventRow={id:string;source_key:string;scope:string;channel:'telegram'|'browser'|'scheduler';bot_id:string;source_id:string;revision:string;origin:Envelope['origin'];kind:string;occurred_at:string|null;
-  received_at:Date;payload:Buffer;original_text:Buffer|null;wire:Buffer|null};
+type EventRow={id:string;source_key:string;scope:string;channel:string;bot_id:string;source_id:string;revision:string;origin:Envelope['origin'];kind:string;occurred_at:string|null;
+  received_at:Date;payload:Buffer;original_text:Buffer|null;wire:Buffer|null;source_descriptor:Buffer|null};
 const toEnvelope=(row:EventRow):Envelope=>({version:1,key:row.source_key,bot_id:row.bot_id,scope:row.scope,source_id:row.source_id,revision:row.revision,
   ...(row.channel === 'telegram' ? {} : {channel:row.channel}),
+  ...(row.source_descriptor ? {source:JSON.parse(row.source_descriptor.toString())} : {}),
   origin:row.origin,kind:row.kind,occurred_at:row.occurred_at,payload:JSON.parse(row.payload.toString()),text:row.original_text?.toString() ?? null,
   ...(row.wire ? {wire_base64:row.wire.toString('base64')} : {})});
 export async function search(pool:pg.Pool,principal:Reader,query:string,count=20) {
@@ -63,7 +64,7 @@ export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
     "SELECT id,event_id,artifact_id,kind,content,provenance,created_at FROM derived_artifacts WHERE event_id=$1 AND ($2::text IS NULL OR kind<>'runtime_context' OR provenance->>'audience'=$2) ORDER BY id",[id,principal.scope===null?null:contextAudience(principal)]);
   if(!principal.admin && (await guardState(pool)).mode==='on') {
     if(row.origin==='generated')throw new HttpError(409,'generated_context_unavailable');
-    const selected=await guardedValue(pool,'events:'+id),{wire_base64:_wire,...event}=toEnvelope(row);
+    const selected=await guardedValue(pool,'events:'+id),{wire_base64:_wire,source:_source,...event}=toEnvelope(row);
     await allowPrepared(pool,principal,selected.value);
     const guardedArtifacts:Record<string,unknown>[]=[],guardedDerived=[];
     for(const artifact of artifacts.rows) {
@@ -81,8 +82,10 @@ export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
       event:{...event,key:'nocheh:event:'+id,source_id:id,revision:String(selected.revision),bot_id:'',kind:'message',text:selected.value.text,payload:selected.value.payload},
       artifacts:guardedArtifacts,derived:guardedDerived};
   }
+  const model=principal.admin?await pool.query('SELECT s.descriptor,s.revision_id,r.object_id FROM source_observations s JOIN source_revisions r ON r.id=s.revision_id WHERE s.event_id=$1',[id]):null;
   await assertAudience(pool,principal);
   return {id:row.id,source:`nocheh:event:${id}`,received_at:row.received_at.toISOString(),event:toEnvelope(row),artifacts:artifacts.rows,
+    ...(model?.rows[0]?{source_model:{object_id:model.rows[0].object_id,revision_id:model.rows[0].revision_id,descriptor:JSON.parse(model.rows[0].descriptor.toString())}}:{}),
     derived:derived.rows.map(d=>({...d,created_at:d.created_at.toISOString(),content_base64:d.content.toString('base64'),content:undefined}))};
 }
 export async function readArtifact(pool:pg.Pool,principal:Reader,root:string,id:string):Promise<Buffer> {
