@@ -107,6 +107,13 @@ is independent of the pending management migration.
 
 ## Dashboard and executor in Docker — 2026-09-16
 
+The owner requested renaming the executor service to `nocheh-executor`. Compose,
+lifecycle commands, the monitoring catalog and the system diagram use that name.
+Inngest application identities and durable receipts retain their existing identities.
+All 28 focused checks pass on the host and in the rebuilt management image.
+Synthetic Compose validation and the AST-only graph refresh pass. The live service
+rename is pending.
+
 Owner requested moving the dashboard and executor into Docker, rebuilding services,
 and cleaning up obsolete Nocheh resources. The prepared candidate was copied from
 `codex/system-diagram-20260916` into `codex/system-map-20260916`, preserving the
