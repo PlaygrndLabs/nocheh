@@ -31,9 +31,9 @@ class HostWorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder,\
              patch('scripts.workflow_worker.compose_command',return_value=['docker','compose']),\
              patch('scripts.workflow_worker.compose_environment',return_value={}),\
-             patch('scripts.workflow_worker.subprocess.check_output',return_value='nocheh-host-executor\n') as query:
+             patch('scripts.workflow_worker.subprocess.check_output',return_value='nocheh-executor\n') as query:
             self.assertTrue(running(Path(folder)))
-            self.assertEqual(query.call_args.args[0][-5:],['ps','--status','running','--services','nocheh-host-executor'])
+            self.assertEqual(query.call_args.args[0][-5:],['ps','--status','running','--services','nocheh-executor'])
             with patch('scripts.workflow_worker.subprocess.run') as launch:
                 self.assertEqual(start(Path(folder))['state'],'running');launch.assert_not_called()
 

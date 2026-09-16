@@ -26,7 +26,7 @@ def running(state):
     # macOS and Docker's Linux VM do not share advisory file-lock visibility.
     # Lifecycle callers must observe Compose; serve() still fences supervisors
     # with a lock inside the container's kernel. Docker errors fail closed.
-    service='nocheh-host-executor'
+    service='nocheh-executor'
     result=subprocess.check_output(compose_command(state)+['ps','--status','running','--services',service],
         env=compose_environment(state),text=True,stderr=subprocess.DEVNULL,timeout=15)
     return service in result.split()
@@ -38,14 +38,14 @@ def start(state):
     directory=state/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     if running(state):return {'state':'running'}
     (directory/'stop').unlink(missing_ok=True)
-    subprocess.run(compose_command(state)+['up','-d','--no-build','--no-deps','--wait','nocheh-host-executor'],env=env,check=True)
+    subprocess.run(compose_command(state)+['up','-d','--no-build','--no-deps','--wait','nocheh-executor'],env=env,check=True)
     return {'state':'running'}
 
 
 def stop(state,wait=False):
     # Compose suppresses restart while SIGTERM drains the foreground supervisor.
     # A stop-file alone races restart: unless-stopped and can relaunch the worker.
-    subprocess.run(compose_command(state)+['stop','nocheh-host-executor'],env=compose_environment(state),check=True)
+    subprocess.run(compose_command(state)+['stop','nocheh-executor'],env=compose_environment(state),check=True)
     return {'state':'stopped'}
 
 
