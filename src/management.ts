@@ -18,7 +18,9 @@ const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
 const JOBS = join(STATE, 'admin/jobs');
 const PORT = Number(process.env.NOCHEH_DASHBOARD_PORT ?? 8783);
-const MONITOR = Number(process.env.NOCHEH_PROVIDER_MONITOR_PORT ?? 18317);
+const CONTAINER=process.env.NOCHEH_CONTAINER==='1';
+const MONITOR=CONTAINER?18317:Number(process.env.NOCHEH_PROVIDER_MONITOR_PORT??18317);
+const MONITOR_HOST=CONTAINER?'cliproxy-monitor':'127.0.0.1';
 const PREFIX = '/api/plugins/nocheh';
 const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
@@ -168,7 +170,7 @@ export async function startManagement() {
   if(monitorKey.length<32)throw new Error('provider_monitor_key_missing');
   const sessions=new DashboardSessions();
   const archiveConnection=object(await python({operation:'archive.connection'}));
-  const providerOAuth=new ProviderOAuth(MONITOR,monitorKey,PORT);
+  const providerOAuth=new ProviderOAuth(MONITOR,monitorKey,PORT,1455,MONITOR_HOST,CONTAINER?'0.0.0.0':'127.0.0.1');
   const sockets=new Set<Duplex>();
   for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
@@ -338,11 +340,11 @@ export async function startManagement() {
         if(credentials.some(name=>name.endsWith('.json')))throw new HttpError(409,'provider_login_already_exists');
         return json(res,200,await providerOAuth.start());
       }
-      proxyProviderMonitor(req,res,MONITOR,monitorKey,session.csrf);return;
+      proxyProviderMonitor(req,res,MONITOR,monitorKey,session.csrf,MONITOR_HOST);return;
     }
     if(path.startsWith('/inngest/')){
       const session=sessions.authorize(req,req.method!=='GET');
-      await proxyOwnerInspection(req,res,Number(archiveConnection.port),string(archiveConnection.token),session.csrf);return;
+      await proxyOwnerInspection(req,res,Number(archiveConnection.port),string(archiveConnection.token),session.csrf,String(archiveConnection.host??'127.0.0.1'));return;
     }
     if(path.startsWith('/hermes/')) {
       if(req.method==='POST'&&path==='/hermes/api/auth/ws-ticket') {
@@ -354,7 +356,7 @@ export async function startManagement() {
       const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
       if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
       const connection=object(await python({operation:'native.connection'}));
-      proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf);return;
+      proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf,String(connection.host??'127.0.0.1'));return;
     }
     throw new HttpError(404,'not_found');
   })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,
@@ -368,10 +370,10 @@ export async function startManagement() {
       sessions.consume(req,url.searchParams.get('ticket')??'');
       sockets.add(socket);socket.on('close',()=>sockets.delete(socket));
       const connection=object(await python({operation:'native.connection'}));
-      if(!socket.destroyed)proxyNativeSocket(req,socket,head,Number(connection.port),string(connection.token));
+      if(!socket.destroyed)proxyNativeSocket(req,socket,head,Number(connection.port),string(connection.token),String(connection.host??'127.0.0.1'));
     }catch{socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');}
   })(); });
-  server.listen(PORT, '127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`));
+  server.listen(PORT, CONTAINER?'0.0.0.0':'127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`));
   let stopping=false;
   const stop = () => {
     if(stopping)return;stopping=true;

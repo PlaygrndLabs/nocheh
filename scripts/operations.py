@@ -14,10 +14,9 @@ import urllib.request
 from datetime import datetime,timezone
 from pathlib import Path,PurePosixPath
 
-try: from .configuration import compose_environment, env_path, initialize, load, write_env
-except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env
-
-ROOT=Path(__file__).resolve().parents[1]
+try: from .configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
+except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
+ROOT=INSTALLATION_ROOT
 SERVICES=['hermes-runtime','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-launcher','nocheh-security','chatgpt-speech','cliproxy-monitor','cliproxy-api']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
@@ -38,9 +37,7 @@ TABLES.update(workflow_migrations='id')
 
 
 def compose(state,project=None):
-    result=['docker','compose','--env-file',str(env_path(state)),'-f',str(ROOT/'docker-compose.yml')]
-    if project: result+=['-p',project]
-    return result
+    return compose_command(state,project)
 
 
 def environment(state): return compose_environment(state)
@@ -213,7 +210,8 @@ def restore(snapshot,state,project,port):
                   NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
                   NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
                   NOCHEH_PROVIDER_MONITOR_PORT=str(port+10 if port<=65525 else port-10),
-                  NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
+                  NOCHEH_DASHBOARD_PORT=str(port+3 if port<=65532 else port-3),NOCHEH_OAUTH_PORT=str(port+4 if port<=65531 else port-4),
+                  COMPOSE_PROJECT_NAME=project,NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
     (state/'hermes/scheduler-inactive').touch()
@@ -237,7 +235,7 @@ def restore(snapshot,state,project,port):
     if 'honcho_connection' in manifest['tables']:
         subprocess.run(command+['exec','-T','nocheh-postgres','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
             "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
-    subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180'],env=env,check=True)
+    subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes-runtime','hermes-agent-launcher','chatgpt-speech','cliproxy-api','cliproxy-monitor','inngest-server'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
             'telegram_enabled':False,'subscription_login_activated':False}
@@ -262,7 +260,7 @@ def main(command,state,rest):
         }
         config=load(state)
         port=int(config.get('NOCHEH_PORT','8780'))
-        request=urllib.request.Request(f'http://127.0.0.1:{port}/v1/status',headers={'Authorization':'Bearer '+config['SERVICE_TOKEN']})
+        request=urllib.request.Request(archive_url(state)+'/v1/status',headers={'Authorization':'Bearer '+config['SERVICE_TOKEN']})
         try:
             with urllib.request.urlopen(request,timeout=10) as response: result['archive']=json.load(response)
         except Exception as error: result['archive']={'error':type(error).__name__}

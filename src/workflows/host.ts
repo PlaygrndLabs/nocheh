@@ -9,7 +9,7 @@ import type {Observation} from './pipeline.js';
 
 const root=resolve(fileURLToPath(new URL('../../..',import.meta.url))),state=process.env.NOCHEH_STATE_DIR;
 if(!state||existsSync(join(state,'workflows/inactive'))||existsSync(join(state,'spool/.restore-inactive')))process.exit(0);
-const base='http://127.0.0.1:'+Number(process.env.NOCHEH_PORT??8780),token=process.env.SERVICE_TOKEN??'';
+const base=process.env.NOCHEH_CONTAINER==='1'?'http://nocheh-app:8780':'http://127.0.0.1:'+Number(process.env.NOCHEH_PORT??8780),token=process.env.SERVICE_TOKEN??'';
 if(token.length<24)throw Error('workflow_host_configuration_missing');
 export type ArchiveRPC=(path:string,body:unknown)=>Promise<any>;
 const rpc:ArchiveRPC=async(path,body)=>{

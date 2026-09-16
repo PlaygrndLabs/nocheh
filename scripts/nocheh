@@ -9,10 +9,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from configuration import initialize, load, write_env, env_path, compose_environment
+from configuration import initialize, load, write_env, env_path, compose_environment, compose_command, DEFAULT_STATE, INSTALLATION_ROOT
 
 ROOT = Path(__file__).resolve().parents[1]
-STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(ROOT / "data/local"))).resolve()
+STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
 
 
 def bootstrap():
@@ -146,9 +146,9 @@ def main():
         ensure_source();ensure_monitor_source()
         from compatibility.setup import checkout,LOCK
         checkout('hermes-agent',LOCK['hermes'])
-    command = ["docker", "compose", "--env-file", str(env_path(STATE)), "-f", str(ROOT / "docker-compose.yml")]
+    command = compose_command(STATE)
     if args.command in ("dev", "test"):
-        command += ["-f", str(ROOT / "docker-compose.dev.yml")]
+        command += ["-f", str(INSTALLATION_ROOT / "docker-compose.dev.yml")]
     if args.command == 'db':
         from database_viewer import start
         return start(STATE, command, ROOT)
@@ -181,13 +181,8 @@ def main():
             return ready
     result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
     if args.command=='up' and result==0:
-        result=subprocess.call(['docker','build','-f',str(ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(ROOT)],cwd=ROOT,env=env)
-        if result==0:
-            sys.path.insert(0,str(ROOT))
-            from scripts.node_runtime import build
-            build(env)
-            from scripts.workflow_worker import start as start_workflows
-            print(json.dumps(start_workflows(STATE)))
+        result=subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
+
     if args.command == 'test' and result == 0:
         return subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
             '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes-runtime', 'python', '-m', 'unittest',

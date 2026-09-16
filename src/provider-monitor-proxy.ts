@@ -9,13 +9,13 @@ export function providerMonitorPath(raw:string):string {
   return url.pathname+url.search;
 }
 
-export function proxyProviderMonitor(req:IncomingMessage,res:ServerResponse,port:number,adminKey:string,csrf:string) {
+export function proxyProviderMonitor(req:IncomingMessage,res:ServerResponse,port:number,adminKey:string,csrf:string,host='127.0.0.1') {
   const path=providerMonitorPath(req.url??'/providers/management.html');
   const headers:IncomingHttpHeaders={...req.headers,host:`127.0.0.1:${port}`,authorization:`Bearer ${adminKey}`};
   headers['accept-encoding']='identity';
   delete headers.cookie;delete headers['x-nocheh-csrf'];delete headers['x-hermes-session-token'];
   if(headers.origin)headers.origin=`http://127.0.0.1:${port}`;
-  const proxy=request({hostname:'127.0.0.1',port,path,method:req.method,headers},response=>{
+  const proxy=request({hostname:host,port,path,method:req.method,headers},response=>{
     const outgoing={...response.headers,...securityHeaders};delete outgoing['set-cookie'];
     if(outgoing.location?.startsWith('/'))outgoing.location='/providers'+outgoing.location;
     if(String(response.headers['content-type']).includes('text/html')) {

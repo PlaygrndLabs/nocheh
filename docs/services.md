@@ -2,24 +2,25 @@
 
 # Nocheh services
 
-[ADR-0046](adr/0046-consolidated-inngest-installation.md) defines this deployment.
-[TASK.md](../TASK.md) records its implementation and activation evidence.
+[ADR-0048](adr/0048-containerized-management.md) defines the container migration.
+Docker administration access is explicitly owner-authorized.
+[TASK.md](../TASK.md) records implementation and activation evidence.
 
 <layout>
 
-One Compose project contains 15 continuously running containers when Honcho is
-enabled, or 16 with pgweb. Database initialization runs inside `nocheh-app` startup.
+One Compose project contains 17 continuously running containers when Honcho is
+enabled, or 18 with pgweb. Database initialization runs inside `nocheh-app` startup.
 Temporary isolated agent containers are additional.
 
 | Service | Tool and purpose | Location / expected state |
 | --- | --- | --- |
-| `nocheh-dashboard` | Owner dashboard, configuration, monitoring and recovery | Host / running |
-| `nocheh-host-executor` | Inngest host workflows and independent receipt recovery | Host / running |
+| `nocheh-dashboard` | Owner dashboard, configuration, monitoring and recovery | Docker / candidate |
+| `nocheh-host-executor` | Inngest host workflows and independent receipt recovery | Docker / candidate |
 | `nocheh-app` | API, source capture, durable event publisher and ordinary Inngest handlers | Docker / running |
 | `nocheh-postgres` | Separate Nocheh and Inngest databases and roles | Docker / running |
 | `nocheh-security` | Security broker, guard and exact authorization checks | Docker / running |
 | `hermes-runtime` | Managed Hermes runtime and native dashboard | Docker / running |
-| `hermes-agent-launcher` | Launch isolated agents; only container mounting the Docker socket | Docker / running |
+| `hermes-agent-launcher` | Launch isolated agents; only agent infrastructure container mounting the Docker socket | Docker / running |
 | `chatgpt-speech` | Subscription transcription; read-only shared login | Docker / running |
 | `cliproxy-api` | Shared model provider; sole OAuth refresh authority | Docker / running |
 | `cliproxy-monitor` | CPA Manager Plus full request history and analytics | Docker / running |
@@ -44,7 +45,7 @@ API, capture and Inngest connectivity are separate observations.
 
 ```mermaid
 flowchart TB
-    Owner[Owner] --> Dashboard[Host: nocheh-dashboard :8783]
+    Owner[Owner] --> Dashboard[nocheh-dashboard :8783]
     Dashboard --> App[nocheh-app\nAPI · capture · publisher · workflow handlers]
     Dashboard --> Hermes[hermes-runtime\nmanaged runtime and native dashboard]
     Dashboard --> Monitor[cliproxy-monitor\nprovider history]
@@ -52,7 +53,7 @@ flowchart TB
     Hermes --> App
     App --> PG[nocheh-postgres\nNocheh database]
     App <--> Engine[inngest-server]
-    Host[Host: nocheh-host-executor\nimports · tools · receipt recovery] <-->|authenticated Connect transport via app| App
+    Host[nocheh-host-executor\nimports · tools · receipt recovery] <-->|authenticated Connect transport via app| App
     Engine --> EngineDB[nocheh-postgres\nInngest database and role]
     App -.->|initializes on startup| EngineDB
     Engine --> Queue[inngest-redis]
@@ -104,7 +105,7 @@ PostgreSQL derivation queue stay with their respective tools.
 <dashboards>
 
 - Owner dashboard: <http://localhost:8783/>. Start with `./scripts/nocheh dashboard`.
-  It remains available during container maintenance.
+  It is independent of application and Inngest availability; it requires Docker.
 - Hermes: <http://localhost:8783/hermes/nocheh>, through the owner session and the
   existing managed administration server. No separate frontend container or stock
   gateway/scheduler startup runs. Presentation preferences live in
@@ -114,8 +115,9 @@ PostgreSQL derivation queue stay with their respective tools.
 - Optional pgweb: <http://localhost:8782/>, after `./scripts/nocheh db`.
 
 React, React DOM, Three.js, GraphQL, pg, TypeScript and esbuild are libraries or
-build tools, not additional production services. Host services require Node 24.x;
-`NOCHEH_NODE` can select its executable when the shell's default Node differs.
+build tools, not additional production services. The management image contains Node 24.x, Python, and pinned Docker CLI tools.
+It mounts installation paths at the same absolute locations for maintenance and
+approved tool bind mounts. Docker-socket access for these two trusted services is explicitly owner-authorized.
 
 </dashboards>
 </deployment>

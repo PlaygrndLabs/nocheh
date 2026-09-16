@@ -13,6 +13,6 @@ class ServiceCatalogTests(unittest.TestCase):
         self.assertEqual(services['pgweb-archive']['state'],'optional-stopped')
         self.assertEqual(services['honcho-deriver']['state'],'unhealthy')
         self.assertEqual(services['nocheh-app']['state'],'running')
-        self.assertEqual(services['nocheh-dashboard']['location'],'host')
+        self.assertEqual(services['nocheh-dashboard']['location'],'docker')
         self.assertEqual(services['inngest-server']['state'],'unhealthy')
         for row in services.values():self.assertTrue(row['tool'] and row['purpose'])

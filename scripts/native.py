@@ -4,16 +4,16 @@ import json
 import urllib.request
 import urllib.error
 from urllib.parse import urlencode
-from .configuration import load, native_admin_port
+from .configuration import load, native_endpoint
 
 
 def call(state, path, body=None, method=None, revision=None):
     import os
     token = load(state)['SERVICE_TOKEN']
-    port = int(os.environ.get('NOCHEH_NATIVE_ADMIN_PORT') or native_admin_port(state))
+    host,port = native_endpoint(state)
     headers = {'X-Hermes-Session-Token': token, 'Content-Type': 'application/json'}
     if revision: headers['If-Match'] = '"' + revision + '"'
-    request = urllib.request.Request(f'http://127.0.0.1:{port}' + path, headers=headers,
+    request = urllib.request.Request(f'http://{host}:{port}' + path, headers=headers,
         data=None if body is None else json.dumps(body).encode(), method=method)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:

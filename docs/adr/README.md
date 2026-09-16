@@ -62,4 +62,5 @@ and governs subsequent agent work without changing those product decisions.
 | [0045](0045-honcho-in-installation-compose.md) | Production Honcho in the installation project, preserved external volumes and inactive restores | Implementation and local transition tracked in TASK.md |
 | [0046](0046-consolidated-inngest-installation.md) | Consolidated Nocheh applications, clear tool service names and Inngest-only execution | Accepted; implementation and activation tracked in TASK.md |
 | [0047](0047-receipted-event-handoff.md) | Retry the same event identity until a fenced workflow records receipt | Durability implementation of the approved Inngest migration |
+| [0048](0048-containerized-management.md) | Dashboard and executor as separate Compose services | Owner-requested; Docker administration access awaits explicit authorization |
 | [0049](0049-application-database-bootstrap.md) | Inngest database initialization in application startup | Owner-requested; acceptance tracked in TASK.md |

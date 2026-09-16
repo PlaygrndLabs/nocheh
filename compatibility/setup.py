@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get('NOCHEH_INSTALLATION_ROOT', Path(__file__).resolve().parents[1])).resolve()
 LOCK = json.loads((ROOT / "compatibility/upstreams.lock.json").read_text())
 WORK = ROOT / "data/compat"
 
