@@ -94,7 +94,11 @@ keeps retrying the same event identity every 30 seconds until a fenced workflow
 records receipt. All three focused outbox tests pass. Restarting the fixture
 publisher recovered the observed lost preparation event; the full store outage,
 crash-after-effect, worker-kill and duplicate-capture rehearsal then passed with
-three effects for three sources. The fix's final image/deployment is pending.
+three effects for three sources. The fix is installed from local main `57fbab6`. API, capture and Inngest
+connectivity are healthy; all 15 containers are healthy. The pending exact-text
+action stayed unapproved across an application/engine restart, all nine family
+registrations reconnected, and the proposal-turn receipt stayed unchanged.
+Completed-delivery restart acceptance awaits the owner's exact approval command.
 Across the retirement and handoff increments, 80 distinct service checks passed;
 168 native checks passed, including a terminal-timeout rerun under lower load.
 Three environment-dependent native checks passed separately in the 11-check
