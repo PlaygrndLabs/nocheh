@@ -393,10 +393,20 @@ archive recall. See TASK.md G7 for evidence and remaining Honcho/release checks.
 
 ## System monitoring and subscription login
 
-Open **Monitoring** in Nocheh for observed Telegram polling, captured workflows,
-failed/uncertain outcomes, retries, guarded-copy preparation and provider state.
-It refreshes every ten seconds. A healthy container does not certify model access
-or Telegram reception. **Inspect original** opens the archived evidence.
+Open **Monitoring** (`/#monitoring`) for running, waiting and failed workflow
+totals, the last confirmed workflow completion, and unpublished backlog across
+all workflow families. The summary refreshes every ten seconds independently of
+history filters and pagination. Unavailable data is shown explicitly; failed
+refreshes retain the last snapshot with a stale-data warning.
+
+Use **Open Inngest** for native execution history at `/inngest/runs`, behind the
+same owner session. That view is read-only. Expand **Workflow details** to filter
+history, inspect stages, source evidence and receipts, use authorized retry/cancel
+controls, or check delivery and worker freshness. Telegram, provider, background
+work and service diagnostics have their own expandable sections. Failures,
+uncertain effects, disconnected workers and unhealthy services remain visible
+without expanding details. A healthy container does not certify model access or
+Telegram reception. **Inspect original** opens the archived evidence.
 
 The provider panel's **OAuth Login → Codex** uses a temporary callback listener on
 the host at port 1455. Start a fresh login after an expired attempt. If that port

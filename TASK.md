@@ -5,6 +5,28 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<compact_monitoring>
+
+## Compact Monitoring dashboard — 2026-09-16
+
+Owner accepted a compact operational summary in Nocheh with expandable details
+and an obvious **Open Inngest** link. Monitoring shows all-family running,
+waiting and failed totals, last confirmed workflow completion, and unpublished
+backlog. Detail sections retain workflow filters, receipts and authorized controls,
+Telegram history, provider observations, background work and service diagnostics.
+Uncertain outcomes, stale workers and unhealthy services remain visible.
+
+Verification: pinned Node 24 fixture image and TypeScript/dashboard build pass;
+five focused workflow/owner-session/native-inspection tests and nine existing
+dashboard tests pass. Shared-browser checks cover collapsed defaults, filtering,
+keyboard disclosure, inspector focus, retry/cancel, ten-second refresh,
+unavailable/stale observations, authenticated Inngest navigation and 375px layout.
+The AST graph was refreshed without model calls. [Evidence](compatibility/results/2026-09-16-compact-monitoring.json)
+retains fixture setup failures and their successful retries. The isolated preview
+runs on port 18837; deployment to the active installation was not performed.
+
+</compact_monitoring>
+
 <application_database_bootstrap>
 
 ## Inngest database setup inside the app — 2026-09-16
