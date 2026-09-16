@@ -4,7 +4,7 @@
 
 <contract>
 The source model extends the [archive](archive.md) and [portable import](import-export.md)
-contracts. [ADR-0050](adr/0050-platform-independent-sources.md) records the design.
+contracts. [ADR-0051](adr/0051-platform-independent-sources.md) records the design.
 
 New platforms submit a version-1 event envelope through the owner-only
 `/v1/import` endpoint with `channel` set to the platform and `source` set to a

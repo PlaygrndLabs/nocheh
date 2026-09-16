@@ -82,7 +82,7 @@ test('a full bounded page including 400 artifacts retains every node with finite
 // small hook driver keeps these tests independent of the native React bundle.
 const {readFile} = await import('node:fs/promises');
 const {runInNewContext} = await import('node:vm');
-const pluginSource = (await readFile(new URL('../web/app.js',import.meta.url),'utf8')).replace(/^import .*;$/gm,'');
+const pluginSource = (await readFile(new URL('../web/legacy-pages.js',import.meta.url),'utf8')).replace(/^import .*;$/gm,'').replace('export function createPages()', 'function createPages()')+'\ncreatePages();';
 const deferred = () => {let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 function componentDriver(fetchJSON) {
   let cursor=0, dirty=true, tree;
@@ -95,7 +95,8 @@ function componentDriver(fetchJSON) {
     useEffect(fn,deps){const i=cursor++;if(!slots[i]||deps.some((v,j)=>!Object.is(v,slots[i].deps[j]))){const old=slots[i];slots[i]={deps};effects.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}},
   };
   const window={__HERMES_PLUGIN_SDK__:{React,fetchJSON},__HERMES_PLUGINS__:{register(){}}};
-  runInNewContext(pluginSource,{window,React,fetchJSON,authedFetch:fetchJSON,createRoot:()=>({render(){}}),document:{getElementById:()=>({})}});
+  const useLoad=(path)=>{const [data,setData]=React.useState(null),[error,setError]=React.useState('');React.useEffect(()=>{let alive=true;fetchJSON('/api/nocheh'+path).then(v=>{if(alive)setData(v);}).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;};},[path]);return [data,error];};
+  runInNewContext(pluginSource,{window,React,useLoad,Monitoring:()=>null,fetchJSON,authedFetch:fetchJSON,createRoot:()=>({render(){}}),document:{getElementById:()=>({})}});
   const Graph=window.__NOCHEH_PAGES__.graph.component;
   return {
     async flush(){for(let i=0;i<15;i++){await Promise.resolve();if(dirty){dirty=false;cursor=0;tree=Graph({notify(){}});while(effects.length)effects.shift()();}}return tree;},

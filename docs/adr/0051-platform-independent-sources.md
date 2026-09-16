@@ -1,6 +1,6 @@
 <adr>
 
-# ADR-0050: Platform-independent source identities and observations
+# ADR-0051: Platform-independent source identities and observations
 
 <status>
 Accepted for implementation by the owner's “start building” instruction following

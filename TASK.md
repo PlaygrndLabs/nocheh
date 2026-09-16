@@ -5,6 +5,37 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<dashboard_refactor>
+
+## Dashboard UI/UX refactor — 2026-09-17
+
+The accepted whole-dashboard design and metrics requirements are in SPECS.md and
+[ADR-0050](docs/adr/0050-dashboard-components-and-workflow-metrics.md).
+The component foundation adds pinned Radix/shadcn-style primitives, Tailwind,
+Lucide, browser TypeScript, persisted adaptive themes, grouped responsive
+navigation, bounded lazy asset serving, and shared cancellable data subscriptions.
+Refresh retains the mounted page and unsaved edits.
+
+Foundation verification: Node 24 production build, two dashboard authentication
+and asset/native-boundary tests, and nine graph tests pass. AST-only Graphify
+refresh: 276 files, 1,701 nodes, 6,002 edges, zero model calls. Shared-browser
+checks on the synthetic Compose fixture confirm dark/system and light themes,
+375px navigation drawer, Escape and focus restoration, no main-content horizontal
+overflow, and a settings edit surviving manual refresh. Full route acceptance
+and historical metrics verification remain in progress.
+
+The fixture uses project `nocheh-dashboard-ui-20260916`, its own database/volume,
+a private database network, a separate localhost HTTP bridge, and port 18848.
+The persistent preview terminal is `49234`. No provider credentials, poller,
+scheduler, or external-effect executor is attached. Initial database startup
+exceeded the health window; the healthy database was retained and preview
+startup retried. Registry-backed `npm ci` in Docker stalled and was cancelled;
+compiled assets run on the locally cached pinned runtime image. A clean container
+build remains pending. [Evidence](compatibility/results/2026-09-17-dashboard-foundation.json).
+Active-installation deployment is separate and has not been performed.
+
+</dashboard_refactor>
+
 <compact_monitoring>
 
 ## Compact Monitoring dashboard — 2026-09-16
@@ -35,7 +66,7 @@ remains pending.
 ## Platform-independent import database — 2026-09-16–17
 
 The owner authorized implementation after requesting a long-term database design
-for future platforms, including Slack and Discord. [ADR-0050](docs/adr/0050-platform-independent-sources.md)
+for future platforms, including Slack and Discord. [ADR-0051](docs/adr/0051-platform-independent-sources.md)
 records the accepted design; the [source-model guide](docs/source-model.md)
 defines the adapter contract and isolated acceptance procedure.
 
@@ -69,6 +100,11 @@ for 11 checked tables, including all five source-model tables.
 [Content-free acceptance evidence](compatibility/results/2026-09-17-source-model.json)
 records coverage, fixture failures, successful retries, and build limitations.
 The synthetic fixture container, network, and database volume were removed.
+Integration with the concurrent dashboard foundation passes a full Node 24.13.0
+build and 11 dashboard/auth/graph checks; 17 executor/operations Python checks
+also pass. Backend dependency pins are unchanged. The AST graph was refreshed
+without model calls. The new source decision is ADR-0051 to preserve the
+concurrently accepted dashboard ADR-0050.
 
 No Slack/Discord export parser, live connector, active-installation migration,
 provider call, or deployment is included. Dedicated adapters can build on this

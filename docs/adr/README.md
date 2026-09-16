@@ -64,4 +64,6 @@ and governs subsequent agent work without changing those product decisions.
 | [0047](0047-receipted-event-handoff.md) | Retry the same event identity until a fenced workflow records receipt | Durability implementation of the approved Inngest migration |
 | [0048](0048-containerized-management.md) | Dashboard and executor as separate Compose services | Owner-requested; Docker administration access awaits explicit authorization |
 | [0049](0049-application-database-bootstrap.md) | Inngest database initialization in application startup | Owner-requested; acceptance tracked in TASK.md |
-| [0050](0050-platform-independent-sources.md) | Platform-independent source identities, observations, and relationships | Owner-authorized implementation; acceptance tracked in TASK.md |
+
+| [0050](0050-dashboard-components-and-workflow-metrics.md) | Shared dashboard components, adaptive themes and persisted workflow aggregates | Owner-accepted; implementation and acceptance tracked in TASK.md |
+| [0051](0051-platform-independent-sources.md) | Platform-independent source identities, observations, and relationships | Owner-authorized implementation; acceptance tracked in TASK.md |

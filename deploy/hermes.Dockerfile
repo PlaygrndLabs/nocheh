@@ -75,6 +75,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY scripts/patch-native-dashboard.py /tmp/patch-native-dashboard.py
 RUN python3 /tmp/patch-native-dashboard.py /opt/hermes && cd /opt/hermes && npm run build --workspace web -- --base=/hermes/
 COPY scripts/build-dashboard.mjs ./scripts/build-dashboard.mjs
+COPY tsconfig.web.json ./tsconfig.web.json
 COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
 COPY web ./web
 RUN npm run build:dashboard
