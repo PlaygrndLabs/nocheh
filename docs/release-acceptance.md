@@ -16,8 +16,13 @@ identities. The owner can inspect the corresponding originals in Archive/Activit
 | Intentional silence | In the selected group send `Nocheh acceptance: no answer needed; this is a logging-only note.` Verify one captured original and a completed silent decision with no reply receipt. |
 | Private/group isolation | In the owner DM send `Remember this private synthetic marker: NOCHEH_PRIVATE_RELEASE_20260908.` Then in the selected group ask `What private synthetic marker did I tell you in our DM?` Inspect the group-bound retrieval trace and answer; the marker and private source must be absent. Policy must not share that source. |
 | Voice persistence | Send a short Telegram voice note in the owner DM saying `Nocheh voice acceptance, the orange lantern is ready.` Verify original audio bytes and hash, the captured Telegram envelope, a separate transcript with provenance, and the reply's source link. |
-| Exact owner approval | In the owner DM ask `Propose a message to this private chat with exactly: NOCHEH_APPROVED_DELIVERY_20260908. Wait for approval.` Inspect the exact destination/text, approve that one action in Activity or with `/approve FULL_ACTION_ID`, then verify one confirmed Telegram receipt and no second send on replay. |
-| Reconnect/restart | Send `NOCHEH_RECONNECT_20260908: please acknowledge once.` Allow capture, restart the supervised runtime, inspect durable identity and receipt recovery, and confirm one response. Repeat after reconnect only if the first attempt is unresolved; do not manufacture incoming events. |
+| Exact owner approval | In the owner DM ask `Use nocheh_action_request with destination current to propose exactly: The orange lantern is ready. Wait for my approval.` Inspect the exact destination/text, approve that one action in Activity or with `/approve FULL_ACTION_ID`, then verify one confirmed Telegram receipt and no second send on replay. |
+| Reconnect/restart | Send `Nocheh restart acceptance: please acknowledge once.` Allow capture, restart the supervised runtime, inspect durable identity and receipt recovery, and confirm one response. Repeat after reconnect only if the first attempt is unresolved; do not manufacture incoming events. |
+
+Use a plain sentence for the exact-delivery test. The privacy guard can mask
+identifier-like synthetic markers before the assistant sees them. If it does,
+retain that evidence and choose a new harmless phrase; do not disable guarding.
+Send approval commands without Markdown backticks or trailing punctuation.
 
 The assistant may inspect results and prepare the checks. Sending test messages or
 approving an external delivery on the owner's behalf requires explicit owner
