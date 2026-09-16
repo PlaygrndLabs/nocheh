@@ -1,0 +1,44 @@
+# Isolated synthetic UI preview. Never combine with the installation Compose file.
+name: ${NOCHEH_FIXTURE_PROJECT:?Unique fixture project required}
+services:
+  database:
+    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    environment:
+      POSTGRES_USER: nocheh
+      POSTGRES_DB: nocheh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Synthetic password required}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U nocheh -d nocheh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  preview:
+    image: ${NOCHEH_FIXTURE_IMAGE:?Unique fixture image required}
+    build: {context: .., target: development}
+    command: [node, dist/test/dashboard-preview.js]
+    environment: &fixture
+      PGHOST: database
+      PGUSER: nocheh
+      PGDATABASE: nocheh
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Synthetic token required}
+      NOCHEH_WORKFLOW_FIXTURE: "1"
+      NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:?Unique preview port required}
+      TELEGRAM_ENABLED: "false"
+    ports: ["127.0.0.1:${NOCHEH_DASHBOARD_PORT}:${NOCHEH_DASHBOARD_PORT}"]
+    networks: [default, preview_http]
+    depends_on:
+      database: {condition: service_healthy}
+  checks:
+    image: ${NOCHEH_FIXTURE_IMAGE}
+    profiles: [checks]
+    command: [npm, test]
+    environment: *fixture
+    depends_on:
+      database: {condition: service_healthy}
+networks:
+  default: {internal: true}
+  preview_http: {}
+volumes:
+  postgres_data:
