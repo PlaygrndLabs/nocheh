@@ -18,6 +18,7 @@ import {workflowRequestSchema} from './workflows/requests.js';
 import {importWorkflowSchema} from './workflows/imports.js';
 import {approvalWorkflowSchema} from './workflows/approvals.js';
 import {toolWorkflowSchema} from './workflows/host-tools.js';
+import {migrateSourceModel} from './source-model.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   const pool = new pg.Pool({
@@ -44,6 +45,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
       service text PRIMARY KEY, seen_at timestamptz NOT NULL DEFAULT now()
     )`);
     await client.query(schema);
+    await migrateSourceModel(client);
     await client.query(managedRunSchema);
     await client.query(spaceSchema);
     await backfillSpaces(client);

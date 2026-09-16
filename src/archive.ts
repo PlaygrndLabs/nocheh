@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { HttpError, object, string } from './http.js';
 import { eventSpace } from './spaces.js';
 import {requestWorkflow} from './workflows/store.js';
+import {projectSource, sourceDescriptor, sourceLabel, type SourceDescriptor} from './source-model.js';
 
 export const digest = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 export function canonical(value: unknown): string {
@@ -71,15 +72,21 @@ CREATE TABLE IF NOT EXISTS action_requests (
 
 export interface Envelope {
   readonly version: 1; readonly key: string; readonly origin: 'live'|'import'|'generated';
-  readonly channel?: 'telegram'|'browser'|'scheduler';
+  readonly channel?: string;
+  readonly source?: SourceDescriptor;
   readonly bot_id: string; readonly kind: string; readonly scope: string;
   readonly source_id: string; readonly revision: string; readonly occurred_at: string|null;
   readonly payload: Record<string, unknown>; readonly text: string|null; readonly wire_base64?: string;
 }
+function validateEnvelopeSource(value:{channel?:unknown;source?:unknown;source_id?:unknown}):void {
+  const channel=value.channel===undefined?'telegram':sourceLabel(value.channel);
+  if(!['telegram','browser','scheduler'].includes(channel)&&value.source===undefined)throw new HttpError(400,'source_descriptor_required');
+  if(value.source!==undefined)sourceDescriptor(value.source,channel,String(value.source_id));
+}
 export function envelope(value: unknown): Envelope {
   const v = object(value);
-  if (Object.keys(v).some(k=>!['version','channel','key','origin','bot_id','kind','scope','source_id','revision','occurred_at','payload','text','wire_base64'].includes(k))) throw new HttpError(400,'unknown_envelope_field');
-  if (v.channel !== undefined && !['telegram','browser','scheduler'].includes(String(v.channel))) throw new HttpError(400,'invalid_channel');
+  if (Object.keys(v).some(k=>!['version','channel','key','origin','bot_id','kind','scope','source_id','revision','occurred_at','payload','text','wire_base64','source'].includes(k))) throw new HttpError(400,'unknown_envelope_field');
+  validateEnvelopeSource(v);
   if (v.version !== 1 || !['live','import','generated'].includes(String(v.origin))) throw new HttpError(400, 'invalid_envelope');
   for (const key of ['key','kind','scope','source_id','revision']) if (!string(v[key],1024)) throw new HttpError(400,'empty_identity');
   if (!string(v.bot_id,1024) && (v.channel === undefined || v.channel === 'telegram')) throw new HttpError(400,'empty_identity');
@@ -102,6 +109,9 @@ export function attachmentRefs(payload: Record<string, unknown>): {kind:string; 
 }
 
 export async function ingest(pool: pg.Pool, value: Envelope, dispatch=true): Promise<{id:string; duplicate:boolean}> {
+  // Internal legacy producers retain their original envelopes and stable hashes.
+  // Enforce the new source contract here as well as at the external boundary.
+  validateEnvelopeSource(value);
   const id = digest(value.key), payload = Buffer.from(canonical(value.payload));
   // Identity metadata is included: reuse of a key cannot silently move a source to another scope.
   const {channel, ...identity} = value;
@@ -118,6 +128,8 @@ export async function ingest(pool: pg.Pool, value: Envelope, dispatch=true): Pro
       const previous = await client.query<{payload_hash:string}>('SELECT payload_hash FROM events WHERE id=$1',[id]);
       if (previous.rows[0]?.payload_hash !== contentHash) throw new HttpError(409,'source_identity_conflict');
     } else {
+      if(value.source)await client.query('UPDATE events SET source_descriptor=$2 WHERE id=$1',[id,Buffer.from(canonical(value.source))]);
+      await projectSource(client,id,value);
       await client.query('INSERT INTO event_spaces(event_id,space_id) VALUES($1,$2)',[id,eventSpace(value.scope,value.payload,value.channel)]);
       for (const ref of value.channel === undefined || value.channel === 'telegram' ? attachmentRefs(value.payload) : []) {
         await client.query('INSERT INTO artifacts(id,event_id,kind,source_ref,metadata) VALUES($1,$2,$3,$4,$5)',
