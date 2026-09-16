@@ -14,8 +14,8 @@ Temporary isolated agent containers are additional.
 
 | Service | Tool and purpose | Location / expected state |
 | --- | --- | --- |
-| `nocheh-dashboard` | Owner dashboard, configuration, monitoring and recovery | Docker / candidate |
-| `nocheh-host-executor` | Inngest host workflows and independent receipt recovery | Docker / candidate |
+| `nocheh-dashboard` | Owner dashboard, configuration, monitoring and recovery | Docker / running |
+| `nocheh-host-executor` | Inngest host workflows and independent receipt recovery | Docker / running |
 | `nocheh-app` | API, source capture, durable event publisher and ordinary Inngest handlers | Docker / running |
 | `nocheh-postgres` | Separate Nocheh and Inngest databases and roles | Docker / running |
 | `nocheh-security` | Security broker, guard and exact authorization checks | Docker / running |
@@ -45,39 +45,61 @@ API, capture and Inngest connectivity are separate observations.
 
 ```mermaid
 flowchart TB
-    Owner[Owner] --> Dashboard[nocheh-dashboard :8783]
-    Dashboard --> App[nocheh-app\nAPI · capture · publisher · workflow handlers]
-    Dashboard --> Hermes[hermes-runtime\nmanaged runtime and native dashboard]
-    Dashboard --> Monitor[cliproxy-monitor\nprovider history]
+    Owner[Owner] --> Dashboard
     Telegram[Telegram] --> Hermes
-    Hermes --> App
-    App --> PG[nocheh-postgres\nNocheh database]
-    App <--> Engine[inngest-server]
-    Host[nocheh-host-executor\nimports · tools · receipt recovery] <-->|authenticated Connect transport via app| App
-    Engine --> EngineDB[nocheh-postgres\nInngest database and role]
-    App -.->|initializes on startup| EngineDB
-    Engine --> Queue[inngest-redis]
-    App --> Hermes
-    Hermes --> Launcher[hermes-agent-launcher]
-    Launcher --> Agents[Temporary isolated agents]
-    Agents --> Security[nocheh-security\nbroker and guard]
+    subgraph Docker["Local Docker Compose · 17 services"]
+        Dashboard["nocheh-dashboard :8783"]
+        Executor["nocheh-host-executor<br/>imports · approved tools · receipt recovery"]
+        App["nocheh-app<br/>API · capture · publisher · workflow handlers"]
+        PG["nocheh-postgres<br/>separate Nocheh and Inngest databases"]
+        Engine[inngest-server]
+        Queue[inngest-redis]
+        Hermes["hermes-runtime<br/>managed runtime and native dashboard"]
+        Launcher[hermes-agent-launcher]
+        Security["nocheh-security<br/>broker and guard"]
+        Speech[chatgpt-speech]
+        Provider["cliproxy-api<br/>shared provider and sole login refresh"]
+        Monitor[cliproxy-monitor]
+        Memory[honcho-api]
+        Deriver[honcho-deriver]
+        MemoryDB[honcho-postgres]
+        Cache[honcho-redis]
+        Gateway["honcho-provider-gateway<br/>controlled model access and spending ledger"]
+    end
+    Dashboard --> App
+    Dashboard --> Hermes
+    Dashboard --> Monitor
+    Dashboard -.->|maintenance| DockerAPI[Local Docker engine]
+    Executor -.->|approved tool sandboxes| DockerAPI
+    Executor <-->|authenticated Connect via app| App
+    Hermes -->|capture| App
+    App --> PG
+    App <--> Engine
+    Engine --> PG
+    Engine --> Queue
+    App -->|prepared work| Hermes
+    Hermes --> Launcher
+    Launcher --> Agents[Temporary isolated Docker agents]
+    Agents --> Security
     Security --> App
-    Security --> Provider[cliproxy-api\nshared provider and login refresh]
-    Hermes --> Speech[chatgpt-speech]
-    Speech --> Login[Read-only shared login]
-    Provider --> Login
-    App --> Memory[honcho-api]
-    Memory --> MemoryDB[honcho-postgres]
-    Deriver[honcho-deriver] --> MemoryDB
-    Memory --> Cache[honcho-redis]
-    Deriver --> Gateway[honcho-provider-gateway]
+    Security --> Provider
+    Hermes --> Speech
+    Speech -->|read only| Login[Shared OAuth file]
+    Provider -->|sole writer| Login
+    Provider --> Subscription[ChatGPT subscription]
+    Speech --> Subscription
+    App --> Memory
+    Memory --> MemoryDB
+    Deriver --> MemoryDB
+    Memory --> Cache
+    Deriver --> Gateway
     Memory --> Gateway
     Gateway --> Provider
-    Gateway --> Embeddings[Dedicated embeddings provider\nspending ledger and cap]
+    Gateway --> Embeddings[Dedicated capped embeddings provider]
     Monitor --> Provider
 ```
 
-Ordinary functions share one application and concurrency four. Host functions use
+Ordinary functions share one application and concurrency four. Executor functions use
 concurrency two. The application gives API/capture and workflow handlers separate
 PostgreSQL pools, each capped at eight. SDK reconnection does not gate API startup.
 Inngest Redis uses AOF, `appendfsync always` and `noeviction`.
@@ -93,7 +115,7 @@ the archive. See [ADR-0049](adr/0049-application-database-bootstrap.md).
 
 Telegram → capture and save → durable event publication → Inngest → prepare files,
 transcripts and guarded copies → Hermes reasoning → security and exact approvals →
-deliver and save receipt → update Honcho memory.
+deliver and save receipt → sync authorized Honcho memory.
 
 Preparation is a prerequisite. Workflow events carry opaque references and approved
 metadata; originals, transcripts, arguments and credentials remain protected.

@@ -24,8 +24,8 @@ Only PostgreSQL and Redis run in the restored fixture. Test resources were remov
 Documentation checks and the AST-only graph refresh pass. The installed image uses
 the cached pinned Nocheh runtime and locked build dependencies; a registry-backed
 build stalled and was cancelled. Code commit `9bb3d14` is integrated into local
-main and installed. The app is healthy with capture/outbox ready and workflows
-connected; all 15 running containers are healthy. Both database identities are
+main and installed. At that installation step, the app was healthy with
+capture/outbox ready and workflows connected; all 15 running containers were healthy. Both database identities are
 preserved, and the completed initialization container is removed without deleting
 volumes. GitHub HTTPS authentication blocks fetch/push (`could not read Username;
 terminal prompts disabled`), so remote synchronization is pending. This increment
@@ -70,16 +70,27 @@ Fetch/push remain blocked by GitHub HTTPS authentication (`could not read Userna
 terminal prompts disabled`). The installed 15 containers are healthy.
 
 The owner explicitly approved the live local cutover. The host executor and dashboard
-are drained, a validated format-5 backup preserves 45 archive tables, 14 Inngest
-tables, 12 Honcho tables and 919 files, and both management containers are running.
-Final subscription checks and cleanup are in progress.
+are stopped; all **17 Docker services are healthy**, including `nocheh-dashboard`
+and `nocheh-host-executor`. All nine workflow families have fresh worker observations.
+The format-5 backup preserves 45 archive tables, 14 Inngest tables, 12 Honcho tables
+and 919 files. Database identities and archive record counts are preserved; no data
+volume was deleted. The 18 containers in other projects retain their original IDs.
+The obsolete standalone `nocheh-dashboard:local` image and synthetic test resources
+are removed; rollback images and the full snapshot are retained.
+
+Live synthetic refresh ownership, chat, literal detection and required subscription
+transcription all pass. The owner dashboard and monitoring run at
+<http://localhost:8783/>. [Live evidence](compatibility/results/2026-09-16-container-management-live.json).
 
 The live check exposed a Mac/Linux boundary: the host CLI cannot observe a lock held
-inside Docker's VM. Executor lifecycle detection now queries Compose instead; Docker
-errors fail closed rather than declaring the worker stopped. The supervisor retains
-its in-VM exclusion lock. All 28 focused tests and a live read-only host CLI check pass.
-The first post-start database check encountered temporary PostgreSQL recovery; the
-database is accepting connections again, and final acceptance must recheck it.
+inside Docker's VM. Executor lifecycle detection now queries Compose; Docker errors
+fail closed rather than declaring the worker stopped. The supervisor retains its
+in-VM exclusion lock. All 28 focused tests pass on the host and in the management
+image; real host CLI observation, drain and restart also pass. The fix is integrated
+and installed as `26febe1`. The first post-start check encountered temporary PostgreSQL
+recovery; final identity, record-count, worker and service-health checks pass after
+recovery. AST-only graph and documentation checks pass. GitHub HTTPS authentication
+still blocks remote push; the verified implementation and evidence are on local main.
 
 </container_management_migration>
 
@@ -96,7 +107,7 @@ composition,
 stored-preparation consumption, the merged broker/guard, and native dashboard
 presentation through managed Hermes administration.
 
-The service layout now uses the [tool and purpose names](docs/services.md), two
+That deployment used the [tool and purpose names](docs/services.md), two
 host processes and 15 continuously running containers with Honcho enabled.
 Isolated startup verified all 15 containers healthy and `inngest-db-init` completed.
 The complete pinned Hermes/dashboard and Node 24 application images build.
