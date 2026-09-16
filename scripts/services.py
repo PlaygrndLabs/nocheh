@@ -7,7 +7,7 @@ from pathlib import Path
 # name, tool, purpose, location, lifecycle/profile
 CATALOG=(
  ('nocheh-dashboard','Nocheh','Owner dashboard, configuration, backup and recovery','docker','running'),
- ('nocheh-host-executor','Nocheh + Inngest','Imports, approved tools and durable receipt recovery','docker','running'),
+ ('nocheh-executor','Nocheh + Inngest','Imports, approved tools and durable receipt recovery','docker','running'),
  ('nocheh-app','Nocheh + Inngest SDK','API, capture, event publication and ordinary workflows','docker','running'),
  ('nocheh-postgres','PostgreSQL','Separate Nocheh and Inngest databases and roles','docker','running'),
  ('nocheh-security','Nocheh','Security broker, guard and exact authorization checks','docker','running'),
