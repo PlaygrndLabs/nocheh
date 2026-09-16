@@ -61,3 +61,4 @@ and governs subsequent agent work without changing those product decisions.
 | [0044](0044-automatic-honcho-context.md) | Automatic primary Honcho context, protected generation cache and background refresh | Implementation and activation tracked in TASK.md |
 | [0045](0045-honcho-in-installation-compose.md) | Production Honcho in the installation project, preserved external volumes and inactive restores | Implementation and local transition tracked in TASK.md |
 | [0046](0046-consolidated-inngest-installation.md) | Consolidated Nocheh applications, clear tool service names and Inngest-only execution | Accepted; implementation and activation tracked in TASK.md |
+| [0047](0047-receipted-event-handoff.md) | Retry the same event identity until a fenced workflow records receipt | Durability implementation of the approved Inngest migration |

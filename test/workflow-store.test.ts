@@ -92,3 +92,24 @@ test('transactional outbox, permanent identity, lost acknowledgments, publisher 
     }
   }finally{client.release();await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });
+
+
+test('acknowledged events retry unchanged until the workflow records receipt', {skip:!process.env.PGHOST}, async()=>{
+  const admin=new pg.Pool(),schema='handoff_'+Date.now();await admin.query(`CREATE SCHEMA ${schema}`);
+  const pool=new pg.Pool({options:`-c search_path=${schema}`});
+  try{
+    await initialize(pool);await registerWorker(pool,'pipeline',['telegram']);
+    const client=await pool.connect();let id:string;
+    try{id=await requestWorkflow(client,'telegram',hash('unreceived-source'));}finally{client.release();}
+    const sent:WorkflowEvent[]=[];
+    assert.equal(await publishOutbox(pool,async event=>{sent.push(event);}),1);
+    assert.equal(await publishOutbox(pool,async event=>{sent.push(event);}),0,'do not immediately flood an accepted event');
+    await pool.query("UPDATE workflow_outbox SET published_at=now()-interval '31 seconds'");
+    assert.equal(await publishOutbox(pool,async event=>{sent.push(event);}),1,'recover an accepted event missing from the engine');
+    assert.deepEqual(sent[0],sent[1],'permanent identity and engine deduplication survive delivery retries');
+    const receiver=await pool.connect();try{assert.ok(await claimWorkflow(receiver,id,1,'received-run',1));}finally{receiver.release();}
+    await pool.query("UPDATE workflow_outbox SET published_at=now()-interval '31 seconds'");
+    assert.equal(await publishOutbox(pool,async event=>{sent.push(event);}),0,'Inngest owns timing after receipt');
+    assert.equal(sent.length,2);
+  }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
+});

@@ -136,6 +136,9 @@ export async function registerWorker(pool:pg.Pool,app:'pipeline'|'host',register
   for(const family of registered)await pool.query(`INSERT INTO workflow_worker_registrations(family,version,app) VALUES($1,$2,$3)
     ON CONFLICT(family) DO UPDATE SET version=excluded.version,app=excluded.app,seen_at=now()`,[family,version,app]);
 }
+// An HTTP acceptance can precede the self-hosted engine's event consumer.
+// Keep retrying the same event ID until the fenced workflow records receipt.
+// Once received, Inngest alone owns execution retries and waits.
 export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Promise<unknown>,limit=25):Promise<number> {
   let published=0;
   for(let i=0;i<limit;i++) {
@@ -143,7 +146,9 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
     const result=await pool.query(`UPDATE workflow_outbox o SET lease_token=$1,lease_until=now()+interval '30 seconds',attempts=o.attempts+1
       WHERE o.id=(SELECT candidate.id FROM workflow_outbox candidate
         JOIN workflow_registry w ON w.id=candidate.workflow_id JOIN workflow_owners f ON f.family=w.family
-        WHERE candidate.published_at IS NULL AND candidate.dispatch=w.dispatch AND candidate.next_attempt<=now()
+        WHERE (candidate.published_at IS NULL OR (candidate.published_at<now()-interval '30 seconds'
+          AND NOT EXISTS(SELECT 1 FROM workflow_runs received WHERE received.workflow_id=w.id AND received.dispatch=w.dispatch)))
+        AND candidate.dispatch=w.dispatch AND candidate.next_attempt<=now()
         AND (candidate.lease_until IS NULL OR candidate.lease_until<now()) AND f.owner='inngest' AND f.admission
         AND EXISTS(SELECT 1 FROM workflow_worker_registrations r WHERE r.family=w.family AND r.version=w.version AND r.seen_at>now()-interval '30 seconds')
         AND w.state IN ('queued','waiting','retryable_failed','running')

@@ -11,7 +11,7 @@ runs, not tests repeated by the documentation migration.
 
 Owner approved [ADR-0046](docs/adr/0046-consolidated-inngest-installation.md).
 Implementation is in progress on `codex/system-diagram-01a0a683`.
-Commit `6d37365` is integrated into local main; GitHub HTTPS authentication still
+Commits through `8b4688a` are integrated into local main; GitHub HTTPS authentication still
 blocks fetch/push. It adds supervised application/capture and Connect composition,
 stored-preparation consumption, the merged broker/guard, and native dashboard
 presentation through managed Hermes administration.
@@ -72,23 +72,42 @@ intentionally suppressed. The original 18,346-byte voice file matches its SHA-25
 and the transcript links to that same input hash. The selected group's reply did
 not reveal the private synthetic marker; its scoped credential read the group
 source (200) and was denied the private source (404). Post-cutover subscription
-refresh, chat, detection and Ogg/Opus transcription passed. Exact approval remains
-pending: Hermes asked for a numeric chat ID instead of creating the proposal.
-A tested server-resolved `current` destination fixes this without trusting a
-model-supplied source identity. Final restart acceptance is still pending.
+refresh, chat, detection and Ogg/Opus transcription passed. Exact approval and final restart remain pending.
+The server-resolved `current` destination created a correctly scoped proposal,
+but the privacy guard masked the synthetic identifier before Hermes saw it.
+The owner has been asked to deny that proposal and use a plain sentence; no
+approval or delivery is inferred from the assistant's response.
 
-The final retirement increment removes legacy scanners, standalone workers,
-engine-disable flags and rollback execution. Fresh owners default to Inngest;
-retained import receipts only reconcile while paused. Fresh installations select
-isolated execution, shared providers and evidence memory. Historical records and
-inactive restore holds are preserved. Its final candidate and regression checks
-are in progress; the local installation still runs the preceding verified image.
+The retirement increment is installed locally: legacy scanners, standalone
+workers, engine-disable flags and rollback execution are removed. Fresh owners
+default to Inngest; retained import receipts only reconcile while paused. Fresh
+installations select isolated execution, shared providers and evidence memory.
+Historical records and inactive restore holds are preserved. A final-image live
+subscription check passed refresh, chat, detection and transcription. The last
+pre-install format-5 snapshot contains 800 protected files and 45 archive tables.
+The new fresh-install/inactive-restore rehearsal verified 45 archive tables,
+14 Inngest tables, 23 synthetic files, Honcho state and all execution holds.
+
+A final outage rehearsal exposed HTTP acknowledgement before Inngest's default
+in-memory event consumer subscribed. [ADR-0047](docs/adr/0047-receipted-event-handoff.md)
+keeps retrying the same event identity every 30 seconds until a fenced workflow
+records receipt. All three focused outbox tests pass. Restarting the fixture
+publisher recovered the observed lost preparation event; the full store outage,
+crash-after-effect, worker-kill and duplicate-capture rehearsal then passed with
+three effects for three sources. The fix's final image/deployment is pending.
+Across the retirement and handoff increments, 80 distinct service checks passed;
+168 native checks passed, including a terminal-timeout rerun under lower load.
+Three environment-dependent native checks passed separately in the 11-check
+host run; another 28 host recovery/configuration checks passed.
 
 [Consolidation evidence](compatibility/results/2026-09-16-consolidated-services.json).
 
 </consolidation_implementation>
 
 <production_completion>
+
+Historical snapshot before the consolidation above; its topology and pending
+gates describe that earlier maintenance checkpoint.
 
 The owner-approved graceful OrbStack restart succeeded without a force-stop or
 reset. All 38 previously running containers were restored, including the separate
@@ -145,7 +164,7 @@ remote fetch/push remain blocked by GitHub HTTPS authentication.
 
 </production_completion>
 
-## Current recorded state — 2026-09-15
+## Current recorded state — 2026-09-16
 
 | Area | Actual implementation and activation | Evidence / execution plan |
 | --- | --- | --- |
@@ -158,15 +177,17 @@ remote fetch/push remain blocked by GitHub HTTPS authentication.
 | Honcho | Attached and verified locally without history backfill. Scoped recall, the native Hermes tool, group isolation, outage fallback and persistence pass with one ingestion receipt and one attempt. Embeddings retain the $5 pilot cap. | [Production acceptance](compatibility/results/2026-09-15-honcho-production-acceptance.json), [recall regression](compatibility/results/2026-09-15-honcho-recall-regression.json), [prior live acceptance](compatibility/results/2026-09-14-honcho-live-acceptance.json) |
 | Space memory | M1–M5 implemented/fixture-tested within the recorded scope; filtered archive text supported. Filtering extensions and live checks below remain pending. | [Space-memory plan](docs/space-memory-plan.md), [fixture evidence](compatibility/results/2026-09-08-space-memory.json) |
 | Specification workflow | AGENTS.md, SPECS.md, and plan/status consolidation implemented. XML structure, document links, requirement coverage, and supersession checks pass; runtime files and accepted ADRs are unchanged. | [ADR-0040](docs/adr/0040-specifications-and-agent-workflow.md) |
-| Inngest workflows | I1–I6 implemented and verified; I7 local cutover is **7 of 9 families**. Imports, controlled tools, approved messages, native memory review, Honcho synchronization, browser turns and schedules use Inngest at epoch 2. Live import, sandbox approval/receipt, denial, consent, native browser streaming/replay/cancel, native memory review and one scheduled occurrence pass. Preparation and Telegram retain legacy ownership. Shared-provider cutover and transcription/restart checks pass; real owner Telegram acceptance remains pending. | [Execution plan](docs/workflow-monitoring-plan.md), [fresh fault/recovery evidence](compatibility/results/2026-09-14-inngest-fault-recovery.json), [local cutover evidence](compatibility/results/2026-09-14-inngest-local-cutover.json) |
+| Inngest workflows | All nine families are active on Inngest at epoch 2; legacy execution is retired. Text, voice, group silence, scoped isolation, fresh install/restore and fault recovery pass. Exact owner approval and final live restart remain pending. | [Consolidation evidence](compatibility/results/2026-09-16-consolidated-services.json), [execution plan](docs/workflow-monitoring-plan.md) |
 
-Latest fresh-image workflow regression: 73 service tests and 152 Hermes tests passed;
+Earlier fresh-image workflow regression (historical): 73 service tests and 152 Hermes tests passed;
 one optional Docker security fixture was skipped. Real local Connect outages,
 crash-after-effect recovery, legacy rollback, privacy and inactive restore passed. These synthetic
 checks do not replace the live acceptance below. No legacy persisted-data migration is required;
 VPS work remains deferred.
 
 <local_inngest_cutover>
+
+Historical seven-family checkpoint; the consolidation above completes all nine.
 
 The active local installation has both Connect apps and nine connected family
 registrations. Seven ownership switches used separate validated format-4 snapshots
@@ -451,8 +472,8 @@ from its normal pinned recipe. Both candidate image digests are recorded.
 
 ## Outstanding acceptance and blockers
 
-- **Subscription transcription:** shared-login Ogg/Opus transcription and full provider restart acceptance passed on 2026-09-14. Actual owner Telegram voice persistence remains pending; preparation and Telegram ownership remain legacy.
-- **Telegram / release:** later real owner questions and follow-ups completed once, but latency and the latest fixes still need acceptance. The original ambiguous failed turn remains closed. Intentional group silence, private/group isolation, voice-byte/transcript persistence, exact owner-approved delivery, and reconnect/restart without duplicate effects remain unrun. Follow [release acceptance](docs/release-acceptance.md); container health and synthetic inputs do not substitute for these checks.
+- **Subscription transcription:** final-image shared-login Ogg/Opus transcription passes. Real owner voice bytes, input hash, expected transcript and one completed reply are verified.
+- **Telegram / release:** real text, voice, intentional group silence and scoped private-source denial pass. Exact owner-approved delivery and the final live restart remain pending; the synthetic marker was masked, so the owner was asked for a plain-language proposal. Follow [release acceptance](docs/release-acceptance.md).
 - **Shared provider:** the owner explicitly approved the switch after the earlier testing-only rejection. S5 passed and the shared route is active; the old native login is privately retired. No provider cutover blocker remains. The refresh check verifies authority delegation, not a newly forced token-expiration event.
 - **Honcho:** attached and verified; scoped production ingestion/recall, native-tool access, isolation, outage and restart acceptance pass. The opted-in history pilot and monthly budget cutover remain pending. Preserve the durable pilot ledger and explicit learning consent. See the production acceptance evidence above.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
@@ -463,7 +484,7 @@ from its normal pinned recipe. Both candidate image digests are recorded.
 
 - **Per-session previews — not implemented:** add explicit isolation of Compose projects, networks, image tags, ports, state, and credentials before concurrent worktree previews. No duplicate Telegram poller, scheduler, or OAuth refresh owner may use the active installation.
 - **Makefile — not implemented:** `dev` is declared phony but has no recipe. Existing `./scripts/nocheh dev` runs the installation's Compose Watch workflow; it is not an isolated-session setup command. Wiring `make dev`, fresh-worktree setup, and visible persistent preview startup are follow-up tooling work.
-- **Inngest — accepted implementation:** [workflow execution plan](docs/workflow-monitoring-plan.md), I1–I7. Local orchestration infrastructure and seven families are active; preparation and Telegram cutover remain pending. Independent host recovery and existing provider/Honcho/release gates apply.
+- **Inngest — accepted implementation:** [workflow execution plan](docs/workflow-monitoring-plan.md), I1–I7. All nine families are active and legacy execution is retired; exact live approval and final restart remain pending. Independent host recovery and existing provider/Honcho/release gates apply.
 
 ## Historical implementation records
 
