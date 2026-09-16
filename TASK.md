@@ -65,9 +65,16 @@ Documentation checks and AST-only graph refresh pass.
 Management, application and development images build from pinned inputs. The changed
 Hermes integration is rebuilt over the verified pinned runtime layer; full upstream
 Rust/Go downloads were cancelled after stalling. Unchanged provider, tool and store
-images retain their existing pins. Git integration, the live format-5 snapshot,
-host-process drain, container cutover, subscription verification and scoped cleanup
-remain pending; this evidence does not yet claim installed activation.
+images retain their existing pins. Commit `283ab38` is integrated into local `main`.
+Fetch/push remain blocked by GitHub HTTPS authentication (`could not read Username;
+terminal prompts disabled`). The installed 15 containers are healthy.
+
+Automatic approval review rejected the live cutover because its service interruption
+and production-state impact require explicit approval beyond socket access. The
+prepared procedure drains the original host processes, validates a format-5 snapshot,
+recreates 17 services while preserving volumes, and verifies live subscription speech.
+That approval is requested; cutover, live subscription verification and scoped obsolete
+image cleanup remain pending. No live migration command executed.
 
 </container_management_migration>
 
