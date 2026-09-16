@@ -17,14 +17,41 @@ class HostWorkerTests(unittest.TestCase):
                 path.unlink()
 
     def test_live_os_lock_excludes_a_second_supervisor(self):
+        from scripts.workflow_worker import serve
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);directory=state/'admin/workflows';directory.mkdir(parents=True)
             with (directory/'worker.lock').open('a') as lock:
                 fcntl.flock(lock,fcntl.LOCK_EX)
-                self.assertTrue(running(state))
-                with patch('scripts.workflow_worker.compose_environment',return_value={}),patch('scripts.workflow_worker.subprocess.Popen') as launch:
-                    self.assertEqual(start(state)['state'],'running');launch.assert_not_called()
+                with patch('scripts.workflow_worker.compose_environment',return_value={'NOCHEH_PORT':'18780'}),\
+                     patch('scripts.workflow_worker.executable',return_value='/node24'),\
+                     patch('scripts.workflow_worker.subprocess.Popen') as launch:
+                    self.assertEqual(serve(state),0);launch.assert_not_called()
+
+    def test_container_presence_is_visible_without_a_host_file_lock(self):
+        with tempfile.TemporaryDirectory() as folder,\
+             patch('scripts.workflow_worker.compose_command',return_value=['docker','compose']),\
+             patch('scripts.workflow_worker.compose_environment',return_value={}),\
+             patch('scripts.workflow_worker.subprocess.check_output',return_value='nocheh-host-executor\n') as query:
+            self.assertTrue(running(Path(folder)))
+            self.assertEqual(query.call_args.args[0][-5:],['ps','--status','running','--services','nocheh-host-executor'])
+            with patch('scripts.workflow_worker.subprocess.run') as launch:
+                self.assertEqual(start(Path(folder))['state'],'running');launch.assert_not_called()
+
+    def test_stale_lock_file_does_not_report_a_stopped_container_as_running(self):
+        with tempfile.TemporaryDirectory() as folder,\
+             patch('scripts.workflow_worker.compose_command',return_value=['docker','compose']),\
+             patch('scripts.workflow_worker.compose_environment',return_value={}),\
+             patch('scripts.workflow_worker.subprocess.check_output',return_value=''):
+            state=Path(folder);directory=state/'admin/workflows';directory.mkdir(parents=True)
+            (directory/'worker.lock').touch()
             self.assertFalse(running(state))
+
+    def test_unavailable_docker_cannot_be_mistaken_for_a_stopped_executor(self):
+        import subprocess
+        with patch('scripts.workflow_worker.compose_command',return_value=['docker','compose']),\
+             patch('scripts.workflow_worker.compose_environment',return_value={}),\
+             patch('scripts.workflow_worker.subprocess.check_output',side_effect=subprocess.CalledProcessError(1,['docker','compose'])):
+            with self.assertRaises(subprocess.CalledProcessError):running(Path('/unavailable'))
 
     def test_receipt_recovery_continues_when_connect_process_cannot_start(self):
         import json
