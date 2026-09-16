@@ -1,7 +1,9 @@
-# Remaining local release acceptance
+# Local release acceptance
 
 [SPECS.md](../SPECS.md) defines release requirements; [TASK.md](../TASK.md) records
-actual implementation and acceptance. This file supplies the remaining live procedure.
+actual implementation and acceptance. This file supplies the repeatable live procedure.
+The consolidated installation passed these gates on 2026-09-16; see the
+[recorded acceptance](../compatibility/results/2026-09-16-consolidated-services.json).
 These checks need actual incoming Telegram traffic; synthetic archive events and
 healthy containers cannot substitute for it. Credentials are already configured.
 No VPS or Honcho key is required.
