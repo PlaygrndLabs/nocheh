@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createServer,request as httpRequest,type Server} from 'node:http';
@@ -45,6 +45,11 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
     const csrf=JSON.parse(html.match(/window\.__NOCHEH_CSRF__=("[^"]+")/)![1]!);
     assert.match(html,/Nocheh/);assert.ok(!html.includes(secret));assert.ok(!html.includes('__HERMES_PLUGIN_SDK__'));
     assert.equal((await fetch(base+'/assets/app.js')).status,200);
+    const chunks=await readdir(resolve('web/dist/chunks'));
+    assert.ok(chunks.some(name=>name.endsWith('.js')));
+    for(const name of chunks.filter(name=>name.endsWith('.js')))assert.equal((await fetch(base+'/assets/chunks/'+name)).status,200);
+    assert.equal((await fetch(base+'/assets/chunks/package.json')).status,404);
+    assert.equal((await fetch(base+'/assets/chunks/%252e%252e/management.js')).status,404);
     const alias=await fetch(base+'/nocheh',{redirect:'manual'});assert.equal(alias.status,308);assert.equal(alias.headers.get('location'),'/');
     assert.equal((await fetch(base+'/api/nocheh/jobs',{method:'POST',headers:{cookie},body:'{}'})).status,403);
     assert.equal((await fetch(base+'/api/nocheh/health',{headers:{cookie}})).status,200);

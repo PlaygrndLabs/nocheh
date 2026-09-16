@@ -1,10 +1,10 @@
 import * as React from 'react';
-import {createRoot} from 'react-dom/client';
+import {useLoad} from './lib/resource';
 import {fetchJSON,authedFetch} from './client.js';
 import {GuardedEditor} from './guarded-editor.js';
 import {Monitoring} from './monitoring.js';
 
-(() => {
+export function createPages() {
   const sdk = {React,fetchJSON,authedFetch};
   const {createElement: h, useState, useEffect, useRef, useMemo} = sdk.React;
   const base = '/api/nocheh';
@@ -25,12 +25,6 @@ import {Monitoring} from './monitoring.js';
   function Details({value,label='Technical details'}) { return h('details',null,h('summary',null,label),h(Data,{value})); }
   function RouteLink({page,children}) { return h('a',{href:'#'+page,className:'n-text-link'},children); }
   function Steps({items}) { return h('ol',{className:'n-steps'},...items.map((item,i)=>h('li',{key:item},h('span',{'aria-hidden':true},i+1),item))); }
-  function useLoad(path, refresh = 0) {
-    const [data,setData] = useState(null), [error,setError] = useState('');
-    useEffect(() => { let alive=true; setError(''); if(!path)return()=>{alive=false;}; call(path).then(v => {if(alive)setData(v);}).catch(e => {if(alive)setError(errorText(e));}); return()=>{alive=false;}; }, [path,refresh]);
-    return [data,error];
-  }
-
   function Status({refresh}) {
     const [data,error] = useLoad('/status',refresh);
     return h('div',null,h(Monitoring,{call,compact:true}),
@@ -396,26 +390,5 @@ import {Monitoring} from './monitoring.js';
       h(Panel,{title:'Provider monitoring',note:'Request history, usage, latency, failures and subscription account observations from CPA Manager Plus.'},
         h('a',{className:'n-text-link',href:'/providers/management.html'},'Open provider monitoring →')));
   }
-  function App() {
-    const [page,setPage]=useState(location.hash.slice(1)||'overview'),[notice,setNotice]=useState(null),[tick,setTick]=useState(0);
-    const heading=useRef(null);
-    useEffect(()=>{const change=()=>{setPage(location.hash.slice(1)||'overview');setNotice(null);};addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
-    useEffect(()=>{heading.current?.focus({preventScroll:true});},[page]);
-    const notify=(text,error=false)=>setNotice({text,error});
-    const pages={monitoring:'Monitoring',spaces:'Memory access',overview:'Overview',archive:'Archive',memory:'Memory',graph:'Graph',activity:'Activity',imports:'Imports',integrations:'Integrations',settings:'Settings',operations:'Maintenance',honcho:'Honcho memory'};
-    const descriptions={monitoring:'See what succeeded, what failed, and where work is waiting.',spaces:'Connect your private knowledge and control what each group or topic can use.',overview:'Your conversations, memory, and assistant in one place.',archive:'Find preserved messages and files, and inspect the evidence behind generated text.',memory:'Read the notes Hermes keeps for each chat.',graph:'Explore recorded relationships and follow links back to original sources.',imports:'Add Telegram history to your archive.',integrations:'Manage the tools that power Nocheh.',settings:'Control Telegram access, agent preferences, and privacy.',operations:'Check health, download data, back up and maintain your installation.',honcho:'Inspect primary memory, preparation and connection status.'};
-    descriptions.activity='Review proposed actions, manage permissions and inspect conversation results.';
-    const groups=[['Explore',['overview','monitoring','archive','memory','honcho','graph','activity']],['Manage',['imports','spaces','integrations','settings','operations']]];
-    const Current=extensions[page]?.component;
-    return h('div',{className:'nocheh-app'+(page==='graph'?' n-graph-active':'')},
-      h('aside',{className:'n-sidebar'},h('a',{href:'#overview',className:'n-brand'},h('span',{className:'n-mark','aria-hidden':true},'ن'),h('span',null,'Nocheh',h('small',null,'Your conversations & memory'))),
-        h('nav',{'aria-label':'Main navigation'},...groups.map(([label,keys])=>h('div',{className:'n-nav-group',key:label},h('span',{className:'n-nav-label'},label),...keys.map(key=>h('a',{href:'#'+key,key,'aria-current':page===key?'page':undefined},pages[key]))))),
-        h('label',{className:'n-mobile-navigation'},'Navigate',h('select',{value:pages[page]?page:'overview',onChange:e=>{location.hash=e.target.value;}},...Object.entries(pages).map(([key,label])=>h('option',{key,value:key},label)))),
-        h('div',{className:'n-sidebar-foot'},h('a',{href:'/hermes/nocheh',className:'n-text-link'},'Open Hermes ↗'),h('a',{href:'/providers/management.html',className:'n-text-link'},'Provider monitor ↗'),h('small',null,'Local owner dashboard'))),
-      h('main',{className:'n-main'},h('header',{className:'n-header'},h('div',null,h('h1',{ref:heading,tabIndex:-1},pages[page]||'Overview'),h('p',{className:'n-page-description'},descriptions[page]||descriptions.overview)),button('Refresh',()=>setTick(v=>v+1))),
-        notice&&h('div',{className:'n-notice '+(notice.error?'n-error':''),role:notice.error?'alert':'status'},notice.text,button('Dismiss',()=>setNotice(null))),
-        h('div',{key:page+tick},page==='monitoring'?h(Monitoring,{call,renderSource:record=>h(Source,{record,notify})}):page==='activity'?h(Activity,{notify}):page==='integrations'?h(Integrations):page==='settings'?h(Settings,{notify}):page==='imports'?h(Jobs,{notify}):page==='archive'?h(Archive,{notify}):Current?h(Current,{notify,call,h,sdk}):h(Status,{refresh:tick})),
-        h('footer',null,'Owned archive · Native Hermes memory · Local administration')));
-  }
-  createRoot(document.getElementById('root')).render(h(App));
-})();
+  return {overview:Status,monitoring:Monitoring,archive:Archive,activity:Activity,imports:Jobs,settings:Settings,integrations:Integrations,spaces:SpaceControls,graph:Graph,operations:Operations,memory:Memory,honcho:Honcho,Source,call};
+}
