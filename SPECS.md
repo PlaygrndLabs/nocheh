@@ -33,6 +33,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 <area name="Imports and portability">
 
+- The database design supports long-term data import across platforms, including future Slack and Discord adapters. Adding a platform preserves existing source data, identities, provenance, and audience boundaries.
 - Manual import accepts Telegram Desktop single-chat and multi-chat JSON exports with supplied media, including ZIP input. Preview shows scopes, message counts, dates, and missing files; missing media does not make supplied text unusable.
 - Imported history defaults to owner-private scope. Mapping it to an existing group requires explicit owner selection; Desktop identities are not guessed to be Bot API identities.
 - Import jobs persist progress, duplicates, revisions, errors, cancellation, and resumable identities. Uploads and extraction are bounded and reject escaping paths and symlinks. The supplied export bytes retain import provenance.
