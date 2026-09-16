@@ -86,7 +86,7 @@ services:
       timeout: 10s
       retries: 12
       start_period: 15s
-  nocheh-host-executor:
+  nocheh-executor:
     <<: *management
     command: [executor]
     healthcheck:

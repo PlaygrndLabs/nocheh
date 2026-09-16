@@ -109,6 +109,23 @@ is independent of the pending management migration.
 
 ## Dashboard and executor in Docker — 2026-09-16
 
+The owner requested renaming the executor service to `nocheh-executor`. Compose,
+lifecycle commands, the monitoring catalog and the system diagram use that name.
+Inngest application identities and durable receipts retain their existing identities.
+All 28 focused checks pass on the host and in the rebuilt management image.
+Synthetic Compose validation and the AST-only graph refresh pass. Code `e9004a9`
+is integrated into local main and installed. The old executor drained normally and
+was removed; `nocheh-executor` is healthy, all 17 services are healthy, all nine
+workflow registrations refreshed, and Monitoring displays the new name. Host and
+container lifecycle detection pass. Other container IDs and all volumes are preserved.
+[Rename evidence](compatibility/results/2026-09-16-executor-rename.json).
+The old dashboard's graceful shutdown stalled without active maintenance; its
+process was terminated and the replacement started healthy. Bounded dashboard
+shutdown and intermittent unavailable workflow/archive summaries need follow-up;
+the service catalog, API/capture readiness and Inngest connectivity were available.
+The concurrent compact-monitoring change is retained in Git but is not deployed by
+this management-image-only rename. GitHub authentication still blocks remote push.
+
 Owner requested moving the dashboard and executor into Docker, rebuilding services,
 and cleaning up obsolete Nocheh resources. The prepared candidate was copied from
 `codex/system-diagram-20260916` into `codex/system-map-20260916`, preserving the
@@ -141,9 +158,9 @@ images retain their existing pins. Commit `283ab38` is integrated into local `ma
 Fetch/push remain blocked by GitHub HTTPS authentication (`could not read Username;
 terminal prompts disabled`). The installed 15 containers are healthy.
 
-The owner explicitly approved the live local cutover. The host executor and dashboard
-are stopped; all **17 Docker services are healthy**, including `nocheh-dashboard`
-and `nocheh-host-executor`. All nine workflow families have fresh worker observations.
+The owner explicitly approved the live local cutover. At that cutover, the host
+executor and dashboard stopped and all **17 Docker services were healthy**, including
+`nocheh-dashboard` and the then-named `nocheh-host-executor`. All nine workflow families have fresh worker observations.
 The format-5 backup preserves 45 archive tables, 14 Inngest tables, 12 Honcho tables
 and 919 files. Database identities and archive record counts are preserved; no data
 volume was deleted. The 18 containers in other projects retain their original IDs.

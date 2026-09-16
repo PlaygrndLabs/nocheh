@@ -37,4 +37,4 @@ class ContainerServiceTests(unittest.TestCase):
         from scripts.workflow_worker import stop
         with patch('scripts.workflow_worker.compose_command',return_value=['docker','compose']),patch('scripts.workflow_worker.compose_environment',return_value={}),patch('scripts.workflow_worker.subprocess.run') as call:
             self.assertEqual(stop(Path('/unused'),wait=True),{'state':'stopped'})
-            self.assertEqual(call.call_args.args[0],['docker','compose','stop','nocheh-host-executor'])
+            self.assertEqual(call.call_args.args[0],['docker','compose','stop','nocheh-executor'])

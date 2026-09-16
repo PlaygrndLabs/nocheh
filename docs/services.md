@@ -15,7 +15,7 @@ Temporary isolated agent containers are additional.
 | Service | Tool and purpose | Location / expected state |
 | --- | --- | --- |
 | `nocheh-dashboard` | Owner dashboard, configuration, monitoring and recovery | Docker / running |
-| `nocheh-host-executor` | Inngest host workflows and independent receipt recovery | Docker / running |
+| `nocheh-executor` | Inngest executor workflows and independent receipt recovery | Docker / running |
 | `nocheh-app` | API, source capture, durable event publisher and ordinary Inngest handlers | Docker / running |
 | `nocheh-postgres` | Separate Nocheh and Inngest databases and roles | Docker / running |
 | `nocheh-security` | Security broker, guard and exact authorization checks | Docker / running |
@@ -49,7 +49,7 @@ flowchart TB
     Telegram[Telegram] --> Hermes
     subgraph Docker["Local Docker Compose · 17 services"]
         Dashboard["nocheh-dashboard :8783"]
-        Executor["nocheh-host-executor<br/>imports · approved tools · receipt recovery"]
+        Executor["nocheh-executor<br/>imports · approved tools · receipt recovery"]
         App["nocheh-app<br/>API · capture · publisher · workflow handlers"]
         PG["nocheh-postgres<br/>separate Nocheh and Inngest databases"]
         Engine[inngest-server]
