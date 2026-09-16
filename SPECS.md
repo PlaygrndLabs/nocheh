@@ -42,6 +42,15 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Portable export also includes registered native profiles' notes, scope markers, and SQLite session snapshots including committed WAL state. Runtime-generated material is labeled separately. Per-file hashes and a completion manifest support verification; operational credentials and configuration are excluded.
 - Portable export does not activate an installation or imply one common recovery snapshot. A quiesced backup supplies a common recovery point.
 
+<area name="Platform-independent source model">
+
+- Source identity separates platform, source namespace, object kind, and opaque external string ID from connector installations, import jobs, and local audiences. Separate observations may refer to the same source object and revision without losing their distinct originals or provenance. Unproven identity mappings remain separate.
+- Common source relationships include authors, containers, threads, replies, and attachments. Source objects also represent non-message data. Unknown platform fields are preserved; partial, complete, unknown, and observed-deletion states remain distinguishable without inferring missing history or revision order.
+- Relational identities and relationships support common queries; versioned metadata retains platform-specific extensions. Supplied original bytes remain separate from normalized projections. Projection metadata does not bypass guarding or audience access.
+- Adapters and source projections carry explicit versions. Database migrations preserve existing source references, original evidence, guarded revisions, learning consent, and export/reimport behavior. Source hierarchy and relationship targets do not grant audience access.
+
+</area>
+
 </area>
 </area>
 

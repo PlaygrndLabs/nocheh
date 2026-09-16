@@ -46,7 +46,9 @@ aliases, and import consent/resume regressions. The Node 24 production build pas
 Browser checks confirm independent chart filters, table pagination, drawer focus
 restoration, in-place retry receipts, and retained stale status/charts after an
 injected outage. The graph refresh reports 1,701 nodes and 6,017 edges with zero
-model calls. Full remaining-page acceptance is still in progress.
+model calls. Monitoring commit `0e1e81c` was reconciled with concurrent source-model main
+`b1a4a3d`: production build, eight affected PostgreSQL tests and eleven dashboard
+tests pass. Full remaining-page acceptance is still in progress.
 [Metrics evidence](compatibility/results/2026-09-17-dashboard-metrics.json).
 Active-installation deployment is separate and has not been performed.
 
@@ -79,46 +81,53 @@ remains pending.
 
 <import_extensibility_review>
 
-## Long-term platform import design — 2026-09-16
+## Platform-independent import database — 2026-09-16–17
 
-The owner clarified that the goal is long-term database design for future
-platforms, with Slack and Discord as examples. The requirement is recorded under
-Imports and portability in [SPECS.md](SPECS.md). This review records a proposed
-design direction; no schema migration or platform connector is implemented here.
+The owner authorized implementation after requesting a long-term database design
+for future platforms, including Slack and Discord. [ADR-0051](docs/adr/0051-platform-independent-sources.md)
+records the accepted design; the [source-model guide](docs/source-model.md)
+defines the adapter contract and isolated acceptance procedure.
 
-Source inspection confirms reusable original-event, revision, artifact, derived
-provenance, and import-progress storage in [archive.ts](src/archive.ts) and
-[import workflows](src/workflows/imports.ts). The envelope allowlist, Desktop
-parser, graph authors/replies, and topic inheritance remain platform-specific in
-[archive.ts](src/archive.ts), [import_job.py](scripts/import_job.py),
-[graph.ts](src/graph.ts), and [spaces.ts](src/spaces.ts).
+Implemented an additive PostgreSQL model for source objects, revisions, immutable
+observations, typed relationships, and migration receipts. Identities distinguish
+platform, namespace, object kind, and opaque external ID. They are independent of
+connector installation and local audience. New platforms use versioned source
+descriptors with adapter provenance, completeness, operation, and metadata.
+Unknown original fields and exact source/file bytes retain their preservation paths.
 
-Proposed design work, pending implementation decisions:
+Serialized migration backfills existing events in batches without changing event
+IDs, hashes, original bytes, owner edits, dispatch receipts, or learning consent.
+Telegram Bot API and Desktop identities retain separate namespaces. Graph queries
+use the common relationships, resolving only authorized observations. Portable
+exports retain explicit descriptors; guarded reads omit unprepared metadata.
+New channels cannot trigger Telegram dispatch or attachment downloads. Snapshot
+fingerprints include all five new source-model tables.
 
-- Retain PostgreSQL and immutable source evidence. Add relational identities and
-  relationships for common queries, with versioned platform metadata for fields
-  outside the common model. Preserve supplied bytes separately from queryable
-  JSON; normalization cannot substitute for original evidence.
-- Separate source platform/namespace and external object identity from connector
-  installation, import job, and Nocheh audience. Use opaque string external IDs
-  and database uniqueness/foreign-key constraints. Link observations from exports
-  and live capture only when their identity mapping is established.
-- Model source objects and revisions independently of message-only assumptions.
-  Represent containers, authors, replies, threads, attachments, observed deletion
-  and reaction events through typed relationships/projections. Keep unknown fields
-  and distinguish an unavailable value from an observed empty or deleted value.
-- Keep local audience policy separate from platform membership and source
-  hierarchy. An imported parent or thread relation cannot grant access by itself.
-- Version adapters and normalized projections, retain import provenance and
-  resumable checkpoints, and evolve through explicit migrations preserving old
-  source references, exports, guarded revisions, and learning consent.
+Validation: the pinned TypeScript compiler/dashboard build passes locally. The
+Node 24/PostgreSQL regression run initially recorded 82 passes, four failures,
+and three fixture-dependent skips. A scheduler compatibility regression was fixed;
+approval and dashboard failures passed on retry; the database-disconnection test
+requires its explicit isolated-fixture flag. All 14 affected regression checks
+passed on their targeted rerun. All six final source-model/disconnection tests
+passed, including a backfill spanning more than 200 records. Across the suite
+and targeted follow-ups, 86 distinct checks passed; the three external-fixture
+checks remain skipped. The 14 Python archive/import-job/operations tests passed.
+The extra Docker compiler check was stopped after prolonged execution; it is
+not a pass. Fixture-only dump/restore and restart preserve identical fingerprints
+for 11 checked tables, including all five source-model tables.
+[Content-free acceptance evidence](compatibility/results/2026-09-17-source-model.json)
+records coverage, fixture failures, successful retries, and build limitations.
+The synthetic fixture container, network, and database volume were removed.
+Integration with the concurrent dashboard foundation passes a full Node 24.13.0
+build and 11 dashboard/auth/graph checks; 17 executor/operations Python checks
+also pass. Backend dependency pins are unchanged. The AST graph was refreshed
+without model calls. The new source decision is ADR-0051 to preserve the
+concurrently accepted dashboard ADR-0050.
 
-Before claiming readiness, verify isolated PostgreSQL migrations and round trips
-with Telegram, Slack-shaped, Discord-shaped, and non-message fixtures. Cover
-colliding IDs across namespaces, repeated imports/live observations, edits,
-out-of-order and partial events, unresolved relations, missing files, interrupted
-imports, and audience isolation. These acceptance checks remain unrun. No design
-can guarantee every unknown future platform requires zero schema migrations.
+No Slack/Discord export parser, live connector, active-installation migration,
+provider call, or deployment is included. Dedicated adapters can build on this
+contract and the existing resumable import workflow. Real Inngest/bootstrap,
+Docker-routing, and native UI acceptance remain separate fixture requirements.
 
 </import_extensibility_review>
 

@@ -17,6 +17,14 @@ events. Search text is a derived index; it is never the source of an export.
 Observed edits are separate revisions. Telegram updates the bot never receives
 (including unavailable deletion notifications) cannot be reconstructed.
 
+<source_identity>
+A [versioned source model](source-model.md) groups immutable observations by
+platform, namespace, object kind, and opaque external ID. Object revisions and
+typed relationships support other platforms without replacing the original event
+archive. The additive migration preserves legacy event keys, hashes, and bytes;
+local audience policy remains independent of source identity and relationships.
+</source_identity>
+
 Attachments keep source IDs and metadata. Downloads are retried with capped
 backoff, saved by SHA-256 under `files/`, and fsynced before their database state
 becomes `ready`. Unretrievable files remain `failed` with attempt counts and a

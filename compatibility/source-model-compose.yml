@@ -1,0 +1,37 @@
+# Independent synthetic PostgreSQL acceptance; do not combine with installation Compose.
+name: ${NOCHEH_SOURCE_FIXTURE_PROJECT:?Explicit fixture project required}
+services:
+  nocheh-postgres:
+    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    mem_limit: 512m
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=64]
+    environment:
+      POSTGRES_USER: nocheh
+      POSTGRES_DB: nocheh
+      POSTGRES_PASSWORD: ${NOCHEH_SOURCE_FIXTURE_PASSWORD:?Synthetic password required}
+    volumes: [source_fixture_database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  checks:
+    image: ${NOCHEH_SOURCE_FIXTURE_IMAGE:?Explicit fixture image required}
+    mem_limit: 768m
+    build: {context: .., target: development}
+    profiles: [checks]
+    command: [node, --test, --test-concurrency=1, dist/test/source-model.test.js]
+    environment:
+      PGHOST: nocheh-postgres
+      PGUSER: nocheh
+      PGDATABASE: nocheh
+      PGPASSWORD: ${NOCHEH_SOURCE_FIXTURE_PASSWORD}
+      SERVICE_TOKEN: source-model-fixture-token-not-a-real-credential
+      NOCHEH_DATA_DIR: /tmp/source-model-fixture
+      TELEGRAM_ENABLED: "false"
+    depends_on:
+      nocheh-postgres: {condition: service_healthy}
+networks:
+  default: {internal: true}
+volumes:
+  source_fixture_database:
