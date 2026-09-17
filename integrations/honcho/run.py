@@ -8,6 +8,8 @@ import httpx
 install_transport(httpx)
 if sys.argv[1]=='api':
     from src.main import app
+    from provenance import install
+    install(app)
     app.add_middleware(WorkspaceMiddleware)
     import uvicorn
     uvicorn.run(app,host='0.0.0.0',port=8000,log_level='warning',access_log=False)
