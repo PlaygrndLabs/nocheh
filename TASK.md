@@ -21,7 +21,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
-| Derivative versioning, reprocessing, portability, backup | Pending |
+| Derivative versioning, reprocessing, portability, backup | Reprocessing and guarded selection repositories verified; owner routes/UI, portability, and backup pending |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
@@ -82,6 +82,28 @@ set that marker. Its optional Inngest/Redis services are stopped after acceptanc
 [Guard evidence](compatibility/results/2026-09-18-guard-store-recovery.json).
 Production callers still use their existing guarded path; this is not activation
 or evidence that the full data-store migration is complete.
+
+The reprocessing repository adds idempotent owner requests to the existing
+preparation outbox, validates original file references and bytes, and persists
+output before guarded preparation or completion. Its execution step holds the
+existing preparation authority fence and a per-job lock. The subscription engine
+uses the pinned native `perception.transcribe` contract; deterministic fixture
+engines verify two versions without adding a provider integration.
+
+Selections preserve immutable revision and activation history, require prepared
+guards, allow automatic selection only for the first result, and use the same
+revocation-before-publication protocol as guard edits. Old contexts fail closed
+after activation and Honcho/native review refreshes are requested. Reprocessing
+does not silently activate its output or copy an old owner's edit to new text.
+
+Node 24 compilation and four affected real-PostgreSQL tests pass without skips,
+including guard-failure retry without another transcription, two engine versions
+over exact original bytes, explicit switching/backtracking with retained owner
+edits, unprepared activation denial, and interrupted selection reconciliation.
+AST-only Graphify: 314 files, 1,918 nodes, 6,932 edges, zero model calls.
+[Reprocessing evidence](compatibility/results/2026-09-18-derivative-reprocessing.json).
+These interfaces are still candidate repositories; production/API/CLI/dashboard
+callers and the remaining migration have not been switched.
 
 </original_only_archive>
 

@@ -6,6 +6,7 @@ import {requestWorkflow} from '../workflows/store.js';
 import {ArchiveRepository,type SourceReference,type FileReference} from './archive.js';
 import type {DerivativeReference} from './derived.js';
 import type {StorePools} from './connections.js';
+import {revokeBeforePublication} from './publications.js';
 
 export type GuardReference=SourceReference|FileReference|DerivativeReference;
 export interface GuardBinding {generation:string;epoch:number;mode:'on'|'off'}
@@ -108,31 +109,14 @@ export class GuardRepository {
     const saved=(await this.stores.derived.query('SELECT source_id,revision,expected_revision FROM guard_revisions WHERE operation_id=$1',[revision.operation_id])).rows[0];
     if(!saved||saved.source_id!==revision.source_id||saved.revision!==revision.revision||saved.expected_revision!==revision.expected_revision)
       throw new HttpError(409,'guard_operation_conflict');
-    const client=await this.stores.control.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('SELECT epoch FROM guard_state WHERE singleton FOR UPDATE');
-      const previous=(await client.query('SELECT * FROM guard_publications WHERE id=$1',[revision.operation_id])).rows[0];
-      if(previous) {
-        if(previous.source_id!==revision.source_id||previous.revision!==revision.revision||previous.expected_revision!==revision.expected_revision)
-          throw new HttpError(409,'guard_operation_conflict');
-      } else {
-        const epoch=Number((await client.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);
-        await client.query(`INSERT INTO guard_publications(id,source_id,revision,expected_revision,epoch) VALUES($1,$2,$3,$4,$5)`,
-          [revision.operation_id,revision.source_id,revision.revision,revision.expected_revision,epoch]);
-        await client.query('INSERT INTO guard_invalidations(source_id,epoch) VALUES($1,$2)',[revision.source_id,epoch]);
-        await requestWorkflow(client,'honcho','refresh',epoch);
-        await requestWorkflow(client,'memory_review','refresh',epoch);
-      }
-      await client.query('COMMIT');
-    } catch(error) {await client.query('ROLLBACK');throw error;}
-    finally {client.release();}
+    await revokeBeforePublication(this.stores.control,{...revision,kind:'guard'});
   }
 
   /** Safe to retry after either database commit, including an uncertain response. */
   async finishPublication(operationId:string):Promise<void> {
     const operation=(await this.stores.control.query('SELECT * FROM guard_publications WHERE id=$1',[operationId])).rows[0];
     if(!operation)throw new HttpError(404,'guard_publication_missing');
+    if(operation.operation_kind!=='guard')throw new HttpError(409,'guard_operation_conflict');
     if(operation.state==='done')return;
     if(operation.state==='conflict')throw new HttpError(409,'guard_revision_conflict');
     const client=await this.stores.derived.connect();let conflict=false;
@@ -159,7 +143,7 @@ export class GuardRepository {
 
   async reconcile(limit=100):Promise<number> {
     if(!Number.isInteger(limit)||limit<1||limit>200)throw new HttpError(400,'invalid_reconciliation_limit');
-    const rows=(await this.stores.control.query("SELECT id FROM guard_publications WHERE state='pending' ORDER BY created_at,id LIMIT $1",[limit])).rows;
+    const rows=(await this.stores.control.query("SELECT id FROM guard_publications WHERE state='pending' AND operation_kind='guard' ORDER BY created_at,id LIMIT $1",[limit])).rows;
     for(const row of rows)try {await this.finishPublication(row.id);}
     catch(error) {if(!(error instanceof HttpError)||error.code!=='guard_revision_conflict')throw error;}
     return rows.length;

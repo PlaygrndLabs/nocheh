@@ -60,7 +60,10 @@ export async function initializeStoreDatabases(connection:pg.PoolConfig,password
         await client.query(`GRANT SELECT,INSERT ON ALL TABLES IN SCHEMA public TO ${db}`);
         await client.query(`GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO ${db}`);
         if(name==='archive')await client.query(`GRANT UPDATE(file_hash,byte_size) ON artifacts TO ${db}`);
-        else if(name==='derived')await client.query(`GRANT UPDATE(active_revision,state) ON guard_sources TO ${db}`);
+        else if(name==='derived') {
+          await client.query(`GRANT UPDATE(active_revision,state) ON guard_sources TO ${db}`);
+          await client.query(`GRANT UPDATE(active_revision) ON derivative_selections TO ${db}`);
+        }
         else if(name==='control')await client.query(`GRANT UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO ${db}`);
         await client.query('COMMIT');
       } catch(error) {await client.query('ROLLBACK');throw error;}
