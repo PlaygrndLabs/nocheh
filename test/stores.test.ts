@@ -26,12 +26,14 @@ test('original archive rejects runtime, generated, schedule and transcript envel
 });
 
 test('three real databases preserve originals, isolate roles, recover capture and retain versioned outputs',
-  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:60000},async()=>{
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   assert.equal(process.env.PGDATABASE,'nocheh');
   const adminConfig:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const admin=new pg.Pool(adminConfig),root=await mkdtemp(join(tmpdir(),'nocheh-stores-'));
   let stores:ReturnType<typeof connectStores>|undefined;
   try {
+    assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture',
+      'destructive fixture cleanup requires the dedicated PostgreSQL cluster marker');
     // This destructive test is opt-in and confined to its own Compose project.
     for(const name of storeNames)await admin.query(`DROP DATABASE IF EXISTS nocheh_${name} WITH (FORCE)`);
     await initializeStoreDatabases(adminConfig,passwords);

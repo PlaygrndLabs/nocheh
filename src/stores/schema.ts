@@ -1,5 +1,6 @@
 import {sourceModelSchema} from '../source-model.js';
 import {workflowSchema} from '../workflows/store.js';
+import {derivedGuardSchema,controlGuardSchema} from './guard-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS derived_artifacts (
 CREATE INDEX IF NOT EXISTS derived_event ON derived_artifacts(event_id,created_at,id);
 CREATE INDEX IF NOT EXISTS derived_artifact ON derived_artifacts(artifact_id,kind,created_at,id);
 CREATE INDEX IF NOT EXISTS derived_lexical ON derived_artifacts USING gin(to_tsvector('simple',search_text));
+${derivedGuardSchema}
 `;
 
 export const initialControlSchema=`
@@ -59,6 +61,7 @@ CREATE TABLE IF NOT EXISTS capture_handoffs (
  requested_at timestamptz NOT NULL DEFAULT now()
 );
 ${workflowSchema}
+${controlGuardSchema}
 CREATE TABLE IF NOT EXISTS attachment_retrievals (
  artifact_id text PRIMARY KEY,event_id text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
