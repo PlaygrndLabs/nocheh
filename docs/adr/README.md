@@ -67,3 +67,4 @@ and governs subsequent agent work without changing those product decisions.
 
 | [0050](0050-dashboard-components-and-workflow-metrics.md) | Shared dashboard components, adaptive themes and persisted workflow aggregates | Owner-accepted; implementation and acceptance tracked in TASK.md |
 | [0051](0051-platform-independent-sources.md) | Platform-independent source identities, observations, and relationships | Owner-authorized implementation; acceptance tracked in TASK.md |
+| [0052](0052-pure-source-archive.md) | Archive limited to pure source data and guarded versions; memory/runtime/workflow state stored separately | Owner-defined boundary; classification and migration pending |
