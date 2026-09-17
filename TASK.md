@@ -87,8 +87,20 @@ resolved by testing the clean immutable image. Host suspension stopped the
 fixture; ownership was checked before restarting it. The final preview uses terminal `5513` and image
 `nocheh-dashboard-ui-final:20260917`; the optional native check services are stopped.
 [Final acceptance](compatibility/results/2026-09-17-dashboard-acceptance.json)
-records build, browser, test, isolation, and setup-retry details. Active-installation
-deployment remains separate and has not been performed.
+records build, browser, test, isolation, and setup-retry details.
+
+After the owner's explicit request to build Docker and show the changes at
+`http://localhost:8783/#monitoring`, the local installation's `nocheh-app` and
+`nocheh-dashboard` images were built from `e0d8666` and recreated with Compose
+`--no-deps --no-build --wait`. Both are healthy. Every other installation
+container retains its identity; the existing runtime, executor, provider, and
+storage services were not recreated. The browser shows the new monitoring UI,
+status badges, four charts, period/family controls, and chart-data disclosure.
+Owner-session requests for both historical ranges and the legacy alias return
+bounded aggregates; unauthenticated metrics return 401. This is a local dashboard
+activation, not a broader release or provider cutover. The persistent dashboard
+log terminal is `58831`.
+[Local activation evidence](compatibility/results/2026-09-17-dashboard-local-activation.json).
 
 </dashboard_refactor>
 
