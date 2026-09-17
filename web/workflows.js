@@ -1,4 +1,5 @@
 import * as React from 'react';
+import {Activity,Clock3,CircleX,CircleCheck,Inbox} from 'lucide-react';
 import {useResource,refreshResources} from './lib/resource';
 import {StatusBadge} from './components/status';
 import {Button,Sheet,Table,EmptyState,Progress} from './components/ui/primitives';
@@ -19,19 +20,19 @@ export function WorkflowSummary({health,stale=false}){
   const workers=health?.workers||[],disconnected=workers.filter(worker=>!worker.connected).length;
   const staleServices=(health?.services||[]).filter(service=>!service.fresh).length;
   const metrics=[
-    ['Running',counts.running||0,'Executing now'],
-    ['Waiting',(counts.queued||0)+(counts.waiting||0),'Queued or awaiting a prerequisite'],
-    ['Failed',failed,`${counts.retryable_failed||0} retry scheduled · ${counts.failed||0} terminal`],
-    ['Last success',health?.last_success_at?time(health.last_success_at):'None recorded','Last confirmed workflow completion'],
-    ['Backlog',health?.outbox?.pending??'—','Requests awaiting publication']
+    ['Running',counts.running||0,'Executing now','active',Activity],
+    ['Waiting',(counts.queued||0)+(counts.waiting||0),'Queued or awaiting a prerequisite','warning',Clock3],
+    ['Failed',failed,`${counts.retryable_failed||0} retry scheduled · ${counts.failed||0} terminal`,'danger',CircleX],
+    ['Last success',health?.last_success_at?time(health.last_success_at):'None recorded','Last confirmed workflow completion',health?.last_success_at?'success':'neutral',CircleCheck],
+    ['Backlog',health?.outbox?.pending??'—','Requests awaiting publication',health?.outbox?.pending!=null?'warning':'neutral',Inbox]
   ];
   return h('section',{className:'n-panel n-workflow-summary','aria-label':'Workflow summary'},
     h('div',{className:'n-summary-line'},h('div',null,h('h2',null,'Workflows'),h('p',{className:'n-muted'},'All workflow families · refreshes every 10 seconds')),
       h('a',{href:'/inngest/runs',className:'n-primary n-inngest-link'},'Open Inngest ↗')),
     !available&&h('p',{role:'alert'},'Workflow status is unavailable. Counts and the last success cannot be checked.'),
     stale&&h('p',{role:'alert'},'These are the last known workflow observations and may be out of date.'),
-    h('dl',{className:'n-workflow-metrics'},...metrics.map(([label,value,note])=>h('div',{key:label},
-      h('dt',null,label),h('dd',{className:label==='Last success'?'n-workflow-time':undefined},available?value:'—'),h('small',null,available?note:'Unavailable')))),
+    h('dl',{className:'n-workflow-metrics'},...metrics.map(([label,value,note,tone,Icon])=>h('div',{key:label,'data-tone':available?tone:'neutral'},
+      h('dt',null,h(Icon,{size:14,'aria-hidden':true}),label),h('dd',{className:label==='Last success'?'n-workflow-time':undefined},available?value:'—'),h('small',null,available?note:'Unavailable')))),
     available&&(failed>0||uncertain>0||denied>0)&&h('p',{className:'n-monitor-attention',role:'status'},
       [failed>0?`${failed} failed (${counts.retryable_failed||0} retry scheduled)`:null,uncertain>0?`${uncertain} uncertain — review before another effect`:null,denied>0?`${denied} denied`:null].filter(Boolean).join(' · ')),
     available&&h('p',{className:disconnected||staleServices?'n-monitor-attention':'n-muted',role:disconnected||staleServices?'status':undefined},
