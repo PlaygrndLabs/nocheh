@@ -46,7 +46,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 <area name="Platform-independent source model">
 
 - Source identity separates platform, source namespace, object kind, and opaque external string ID from connector installations, import jobs, and local audiences. Separate observations may refer to the same source object and revision without losing their distinct originals or provenance. Unproven identity mappings remain separate.
-- Common source relationships include authors, containers, threads, replies, and attachments. Source objects also represent non-message data. Unknown platform fields are preserved; partial, complete, unknown, and observed-deletion states remain distinguishable without inferring missing history or revision order.
+- Common source relationships include authors, containers, threads, replies, reactions, and attachments. Reaction observations preserve the target message, reaction, actor when supplied, source timing, and observed changes, including activity on old messages. Source objects also represent non-message data. Unknown platform fields are preserved; partial, complete, unknown, and observed-deletion states remain distinguishable without inferring missing history or revision order.
 - Relational identities and relationships support common queries; versioned metadata retains platform-specific extensions. Supplied original bytes remain separate from normalized projections. Projection metadata does not bypass guarding or audience access.
 - Adapters and source projections carry explicit versions. Database migrations preserve existing source references, original evidence, guarded revisions, learning consent, and export/reimport behavior. Source hierarchy and relationship targets do not grant audience access.
 
@@ -74,7 +74,17 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Audience access is enforced in storage, tools, source reads, file access, notes, sessions, graphs, and delivery. Policy changes invalidate stale capabilities and contexts; audience authorization is rechecked before delivery.
 - Approved shares expose exact owner-approved content revisions. They do not grant access to private originals or private provenance. Filtered sharing exposes only derived material reviewed for the target audience from explicitly selected sources; failures withhold wider knowledge. Semantic privacy filtering is fallible and separate from provider guarding.
 - Live conversations can drive native memory review. Imported-content learning needs explicit approval during import; preparation or attachment does not grant that approval. Background review has no external-action tools and keeps source facts separate from inferences.
-- Memories and retrieved content are evidence, never policy or approval. The security boundary preserves complete authorized native memory, source references, history, model choice, reasoning settings, and configured context limits without introducing lossy summaries or extra context-work approvals.
+- Memories and retrieved content are evidence, never security policy or action approval. Conversation conventions guide interpretation within those boundaries. The security boundary preserves complete authorized native memory, source references, history, model choice, reasoning settings, and configured context limits without introducing lossy summaries or extra context-work approvals.
+
+<area name="Conversation state and conventions">
+
+- The agent traces the state of tasks, commitments, and other subjects from message relationships, reactions, and other conversation activity. New activity on an old message can update the agent's understanding of that subject's state.
+- A "check" emoji reaction on an old message can mean it is done; this is a contextual interpretation, not a fixed meaning for that emoji. The agent learns how people use reactions and relationships from the conversation and its conventions, preserving uncertainty when the meaning is unclear.
+- Explicit interpretation rules can be supplied in the infrastructure system prompt, in each group or project's contribution rules, or stated in the group. Learned conventions and explicit rules retain their source and applicable group or project scope; a convention from one group or project is not silently applied to another.
+- Inferred state retains links to the source activity and applicable conventions, remains distinguishable from observed facts, and can be revised by later activity, corrections, or rule changes. Inferred state and learned conventions are memory outside the source archive database; the original observations and their guarded versions remain preserved in the archive.
+- Interpreting a reaction or group convention does not grant action approval or change administrative, provider, privacy, or guard policy. State inference follows the same audience and learning-consent boundaries as other memory.
+
+</area>
 
 <area name="Honcho and native memory">
 
