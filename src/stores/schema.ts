@@ -3,6 +3,7 @@ import {workflowSchema} from '../workflows/store.js';
 import {derivedGuardSchema,controlGuardSchema} from './guard-schema.js';
 import {derivativeSelectionSchema} from './selection-schema.js';
 import {controlPolicySchema} from './policy-schema.js';
+import {controlMemorySchema} from './memory-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS capture_handoffs (
 ${workflowSchema}
 ${controlGuardSchema}
 ${controlPolicySchema}
+${controlMemorySchema}
 CREATE TABLE IF NOT EXISTS attachment_retrievals (
  artifact_id text PRIMARY KEY,event_id text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),

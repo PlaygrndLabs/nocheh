@@ -22,7 +22,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing and guarded selection repositories verified; owner routes/UI, portability, and backup pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships and project/sharing policies verified; learning, provenance and interfaces pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, project/sharing policies and provenance readers verified; learning and interfaces pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
@@ -138,6 +138,21 @@ AST-only Graphify: 321 files, 1,969 nodes, 7,114 edges, zero model calls.
 [Project policy evidence](compatibility/results/2026-09-18-project-sharing-policy.json).
 Sharing content preparation/approval, production routing and owner interfaces
 remain pending; this is not a claim that project UI or sharing delivery is done.
+
+The bounded Honcho provenance reader follows conclusion ancestry to native
+message IDs and maps those IDs through confirmed Nocheh ingestion receipts.
+Every native query is workspace-scoped; Nocheh checks the current installation,
+guard epoch, audience, and attached/verified state before and after the read.
+Missing conclusions, truncated ancestry, absent message metadata, and unverified
+ingestion links are explicit limitations. Ancestry is not labeled an exact quote
+citation. The adapter reads no conclusion text or embeddings and calls no model.
+
+Two affected real-PostgreSQL checks and three Python ancestry checks pass. The
+new route registers successfully against the pinned Honcho image in a disposable
+container with networking disabled and no credential/state mounts. AST-only
+Graphify reports 326 files, 1,986 nodes and 7,168 edges. Native database traversal,
+full inference integration and fresh live acceptance remain pending.
+[Provenance evidence](compatibility/results/2026-09-18-honcho-provenance.json).
 
 </original_only_archive>
 
