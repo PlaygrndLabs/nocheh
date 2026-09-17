@@ -1,0 +1,50 @@
+# Optional native inspection checks for the synthetic dashboard fixture only.
+# Combine with dashboard-preview-compose.yml; no listener is published.
+services:
+  workflow-bootstrap:
+    image: ${NOCHEH_FIXTURE_IMAGE}
+    profiles: [native-checks]
+    command: [node, dist/src/workflows/bootstrap.js]
+    environment:
+      PGHOST: database
+      PGUSER: nocheh
+      PGDATABASE: nocheh
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:?Synthetic workflow password required}
+    depends_on:
+      database: {condition: service_healthy}
+  inngest-redis:
+    image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
+    profiles: [native-checks]
+    command: [redis-server, --save, "", --appendonly, "no"]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  inngest-server:
+    image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
+    profiles: [native-checks]
+    command: [inngest, start]
+    environment:
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:?Synthetic event key required}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:?Synthetic signing key required}
+      INNGEST_POSTGRES_URI: postgres://nocheh_inngest:${INNGEST_POSTGRES_PASSWORD}@database:5432/nocheh_inngest?sslmode=disable
+      INNGEST_REDIS_URI: redis://inngest-redis:6379
+      LOG_LEVEL: error
+    depends_on:
+      workflow-bootstrap: {condition: service_completed_successfully}
+      inngest-redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, inngest, alpha, doctor, healthcheck]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+  checks:
+    environment:
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD}
+      INNGEST_BASE_URL: http://inngest-server:8288
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+    depends_on:
+      inngest-server: {condition: service_healthy}

@@ -21,7 +21,8 @@ provider credentials server-side.
 
 The launcher starts Nocheh before building the optional native page. If Hermes is
 unavailable, the Nocheh archive/import/maintenance screens remain accessible.
-The owner API runs locally and does not expose a Docker socket to containers.
+The owner API runs locally. Docker administration access is confined to trusted
+management services; agents and tool sandboxes receive no Docker socket.
 All containers, including the native dashboard, belong to the `nocheh` Compose
 project. Native assets use the pinned upstream lockfile. Stop and start to rebuild
 updates; `dashboard --stop` stops only the dashboard service and owner server.
@@ -30,11 +31,13 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 
 | Page | Use it for |
 | --- | --- |
-| Overview | Start common tasks and understand the archive, Hermes memory and Honcho. |
+| Overview | Read system health, archive/workflow metrics, attention items and 24-hour activity; start common tasks. |
+| Monitoring | Read five global workflow totals, history charts, service diagnostics, and paginated receipts; open Inngest. |
+| Memory access | Review audience policy, shared knowledge, recall previews, and learning jobs in separate tabs. |
 | Archive | Browse originals, guarded copies and transcripts; edit guarded wording and inspect history or original files. |
 | Memory | Read general notes, user profile notes and native conversation history for one chat. |
 | Graph | Follow recorded relationships back to their source evidence. |
-| Activity | Follow browser inputs, completed results and interruptions; open their original sources. |
+| Activity | Review exact approvals, bounded permissions, and run history in separate tabs; inspect original evidence. |
 | Imports | Choose a Telegram export, review access and files, then start or resume an import. |
 | Settings → Nocheh settings | Manage Telegram access, model routing and guarding across the installation. Review, save, then apply to running services. |
 | Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
@@ -463,6 +466,58 @@ Current workload-by-family uses health counts, never historical queue depth.
 No sampling service, uptime claim, or provider analytics collection is added.
 Detailed provider analytics remain in CPA.
 
+Page implementations live under `web/pages/`; shared controls live in
+`web/components/ui/`, while data subscriptions and revision-bound drafts live in
+`web/lib/`. Browser code is checked with `tsconfig.web.json`. The build removes
+obsolete chunks and emits independent chart, access-control, and Three.js bundles.
+`npm run test:dashboard` covers graph behavior and request handoff/cancellation.
+
+Archive and conversation history use list/detail views that stack on mobile.
+Original sources remain read-only; guarded copies are explicitly editable, and
+notes carry generated-content labels. Settings and guarded drafts keep the
+revision where editing started, so Refresh cannot silently bypass a conflict.
+Import consent belongs to the selected job and stays fixed when it resumes.
+Maintenance reviews use focus-restoring dialogs before backup, restart or restore.
+
 </design_and_metrics>
+
+<synthetic_preview>
+
+## Isolated UI acceptance preview
+
+`compatibility/dashboard-preview-compose.yml` is a separate synthetic fixture,
+not an overlay for the installation Compose file. Assign a unique project/image,
+an unused localhost port, and new random credentials in a private environment file:
+`NOCHEH_FIXTURE_PROJECT`, `NOCHEH_FIXTURE_IMAGE`, `NOCHEH_DASHBOARD_PORT`,
+`POSTGRES_PASSWORD`, and `SERVICE_TOKEN`. Never copy installation credentials.
+The fixture owns its database volume and internal database network; only its
+HTTP preview bridge publishes the chosen loopback port. It has no poller,
+scheduler, provider login, or external-effect executor.
+
+From the session worktree, with `FIXTURE_ENV` pointing to that private file:
+
+```sh
+docker compose --env-file "$FIXTURE_ENV" -f compatibility/dashboard-preview-compose.yml build preview
+docker compose --env-file "$FIXTURE_ENV" -f compatibility/dashboard-preview-compose.yml up --no-build preview
+```
+
+Keep the second command in the persistent preview terminal. The fixture uses real
+PostgreSQL workflow aggregates and synthetic page data. Its action/settings/import
+controls change only synthetic state; integration links show a fixture boundary.
+For injected browser failures, `/tmp/nocheh-ui-scenario` inside that preview
+container accepts `offline`, `unavailable`, `conflict`, or `no-graphics`; `normal`
+restores normal behavior. Never apply these probes to installation containers.
+
+For the existing native inspection and database bootstrap tests, combine the
+preview file with `compatibility/dashboard-native-checks-compose.yml`, enable the
+`native-checks` profile, and assign fresh 64-character hexadecimal
+`INNGEST_POSTGRES_PASSWORD`, `INNGEST_EVENT_KEY`, and `INNGEST_SIGNING_KEY` values.
+It starts pinned Inngest and Redis only on the private fixture network, without
+registered runtime workers or published ports. The `checks` service runs against
+that same fixture. The container-dashboard boundary test additionally requires a
+separate network-isolated container with `nocheh-app`, `hermes-runtime`, and
+`cliproxy-monitor` mapped to loopback and `NOCHEH_CONTAINER_TEST=1`.
+
+</synthetic_preview>
 
 </dashboard>

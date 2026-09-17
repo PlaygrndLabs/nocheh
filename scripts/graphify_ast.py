@@ -10,7 +10,7 @@ from graphify.export import to_json
 def main():
     root = Path(__file__).resolve().parents[1]
     files = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard'], cwd=root, text=True).splitlines()
-    paths = [root / name for name in files if Path(name).suffix in ('.py', '.ts', '.js', '.mjs') and (root / name).is_file()]
+    paths = [root / name for name in files if Path(name).suffix in ('.py', '.ts', '.tsx', '.js', '.jsx', '.mjs') and (root / name).is_file()]
     output = root / 'graphify-out'
     output.mkdir(exist_ok=True)
     extraction = extract(paths, cache_root=root)

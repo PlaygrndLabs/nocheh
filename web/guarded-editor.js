@@ -1,3 +1,5 @@
+import {useResource,refreshResources} from './lib/resource';
+import {StatusBadge} from './components/status';
 import * as React from 'react';
 const {createElement:h,useEffect,useState}=React;
 
@@ -9,7 +11,8 @@ export function replaceRepeated(value,previous,next) {
   return value;
 }
 
-function Projection({source,original,eventId,call,refresh,notify}) {
+function Projection({source:latest,original,eventId,call,refresh,notify}) {
+  const [source]=useState(latest);
   const initial=source.content??original;
   const [text,setText]=useState(initial?.text??''),[metadata,setMetadata]=useState(JSON.stringify(Object.fromEntries(Object.entries(initial??{}).filter(([key])=>key!=='text')),null,2));
   const [busy,setBusy]=useState(false),[history,setHistory]=useState(null),[preview,setPreview]=useState(null),[problem,setProblem]=useState('');
@@ -19,7 +22,7 @@ function Projection({source,original,eventId,call,refresh,notify}) {
     try {
       const content=restore?undefined:replaceRepeated({...JSON.parse(metadata),...(hasText?{text}:{})},initial?.text??null,text);
       await call('/data/'+eventId+'/guarded',{source_id:source.id,expected_revision:source.active_revision,...(restore?{restore_revision:restore}:{content})});
-      notify('Guarded version saved. Your original is unchanged.');refresh();
+      notify('Guarded version saved. Your original is unchanged.');await refresh();
     }catch(error){setProblem(error.message==='guard_revision_conflict'?'This copy changed elsewhere. Refresh and compare before saving again.':error instanceof SyntaxError?'Check the other fields: they must be valid JSON.':error.message);}
     finally{setBusy(false);}
   }
@@ -31,7 +34,9 @@ function Projection({source,original,eventId,call,refresh,notify}) {
     try{setPreview(await call('/data/'+eventId+'/guarded/history?source_id='+encodeURIComponent(source.id)+'&revision='+revision));}catch(error){setProblem(error.message);}
   }
   return h('article',{className:'n-projection'},
-    h('div',{className:'n-row'},h('h3',null,source.kind==='events'?'Message':source.kind==='artifacts'?'File information':original?.kind?.replaceAll('_',' ')||'Generated text'),h('span',{className:'n-badge'},source.active_revision?'Revision '+source.active_revision+' · '+(source.author==='owner'?'Owner edited':'Automatic'):source.state==='failed'?'Preparation failed':'Waiting for preparation')),
+    h('div',{className:'n-row'},h('h3',null,source.kind==='events'?'Message':source.kind==='artifacts'?'File information':original?.kind?.replaceAll('_',' ')||'Generated text'),h(StatusBadge,{state:source.active_revision?'ready':source.state||'pending',label:source.active_revision?'Revision '+source.active_revision+' · '+(source.author==='owner'?'Owner edited':'Automatic'):source.state==='failed'?'Preparation failed':'Waiting for preparation'})),
+    latest.active_revision!==source.active_revision&&h('p',{role:'alert'},'A newer revision is available. Your edits and original revision are retained. Review the latest copy before saving.'),
+    latest.active_revision!==source.active_revision&&h('button',{type:'button',onClick:refresh,disabled:busy},'Discard edits and load latest copy'),
     source.error_code&&h('p',{role:'status'},source.error_code.replaceAll('_',' ')),
     h('div',{className:'n-guard-comparison'},
       h('section',null,h('h4',null,'Original · read only'),h('pre',{className:'n-data',dir:'auto'},hasText?original?.text:JSON.stringify(original,null,2)),hasText&&h('details',null,h('summary',null,'Original fields'),h('pre',{className:'n-data'},JSON.stringify(original,null,2)))),
@@ -47,8 +52,8 @@ function Projection({source,original,eventId,call,refresh,notify}) {
 }
 
 export function GuardedEditor({record,call,notify}) {
-  const [data,setData]=useState(null),[error,setError]=useState(''),[tick,setTick]=useState(0);
-  useEffect(()=>{let alive=true;setData(null);setError('');call('/data/'+record.id+'/guarded').then(value=>{if(alive)setData(value);}).catch(error=>{if(alive)setError(error.message);});return()=>{alive=false;};},[record.id,tick]);
+  const {data,error}=useResource('/data/'+record.id+'/guarded'),[reset,setReset]=useState(0);
+  const reload=async()=>{await refreshResources();setReset(v=>v+1);};
   function original(source) {
     if(source.kind==='events')return {text:record.event.text,payload:record.event.payload};
     if(source.kind==='artifacts'){const a=record.artifacts.find(a=>a.id===source.source_id);return {kind:a?.kind,metadata:a?.metadata};}
@@ -58,5 +63,5 @@ export function GuardedEditor({record,call,notify}) {
   return h('section',{className:'n-panel'},h('h2',null,'Original and guarded versions'),
     h('p',{className:'n-muted'},'The original archive is read only. Guarded copies are separate, editable versions for your agents when guarding is on.'),
     error&&h('p',{role:'alert'},error),!data&&!error&&h('p',{role:'status'},'Loading guarded versions…'),
-    ...(data?.projections??[]).map(source=>h(Projection,{key:source.id+':'+source.active_revision,source,original:original(source),eventId:record.id,call,notify,refresh:()=>setTick(v=>v+1)})));
+    ...(data?.projections??[]).map(source=>h(Projection,{key:source.id+':'+reset,source,original:original(source),eventId:record.id,call,notify,refresh:reload})));
 }

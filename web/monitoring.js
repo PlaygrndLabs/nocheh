@@ -15,12 +15,13 @@ function Disclosure({title,note,children}){
     open&&h('div',{className:'n-monitor-detail-body'},children));
 }
 export function Monitoring({call,compact=false,renderSource}){
-  const [data,error]=useMonitor(call),[filter,setFilter]=useState('all'),[record,setRecord]=useState(null),[sourceError,setSourceError]=useState('');
+  const [data,error]=useMonitor(call),[filter,setFilter]=useState('all'),[sourceId,setSourceId]=useState(null);
+  const {data:record,error:sourceError}=useResource(sourceId?'/events/'+sourceId:null);
   const status=data?.runtime?.status||{},archive=data?.archive?.archive||{},provider=data?.provider||{};
   const telegram=status.telegram||'unavailable';
   const needsAttention=!!data&&data.telegram_enabled&&telegram!=='connected';
   const rows=archive.workflows||[];
-  const open=async id=>{setRecord(null);setSourceError('');try{setRecord(await call('/events/'+id));}catch{setSourceError('The original source could not be loaded.');}};
+  const open=id=>setSourceId(id);
   if(!data)return h('section',{className:'n-panel'},h('h2',null,'System monitoring'),h('p',{role:error?'alert':'status'},error||'Checking Telegram, the runtime and queued work…'),
     !compact&&h('a',{href:'/inngest/runs',className:'n-primary n-inngest-link'},'Open Inngest ↗'));
   const banner=h('section',{className:'n-panel n-monitor-banner'+(needsAttention||error?' n-monitor-warning':''),role:needsAttention||error?'alert':undefined},
@@ -42,7 +43,7 @@ export function Monitoring({call,compact=false,renderSource}){
     h(Analytics,{counts:data.workflows?.unavailable?null:data.workflows?.counts}),
     h(Disclosure,{title:'Workflow details',note:'Filter history, inspect receipts, retry or cancel; check delivery and workers.'},
       h(Workflows,{call,health:data.workflows,onSource:open})),
-    sourceError&&h('p',{role:'alert'},sourceError),record&&h('section',null,h('button',{type:'button',onClick:()=>setRecord(null)},'Close original'),renderSource?.(record)),
+    sourceError&&h('p',{role:'alert'},sourceError),record&&h('section',null,h('button',{type:'button',onClick:()=>setSourceId(null)},'Close original'),renderSource?.(record)),
     h(Disclosure,{title:'Telegram details',note:'Captured updates, processing stages and the last polling incident.'},
     h('div',{className:'n-metrics'},...[
       ['Completed',counts.done||0,'Completed Telegram turns; some may intentionally be silent.'],
