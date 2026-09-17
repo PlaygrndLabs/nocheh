@@ -5,6 +5,42 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<conversation_state_inference>
+
+## Conversation state and conventions — 2026-09-17
+
+The owner's requirement is recorded under "Conversation state and conventions"
+in [SPECS.md](SPECS.md). Implementation and live acceptance are pending.
+
+Source inspection confirms that `src/source-model.ts` projects authorship,
+containment, replies, and threads. `integrations/hermes/capture.py` preserves
+delivered reaction and reaction-count updates, but the legacy source projection
+does not normalize their message/actor relationships. `src/graph.ts` renders
+recorded relationships; that does not establish interpretation of task state.
+The generic source contract can represent additional relations and operations,
+but this is not evidence of an implemented reaction-driven state-inference flow.
+
+Implementation planning needs normalized reaction/change capture, retrieval of
+the affected older source context, and a durable path to refresh derived state.
+Define how group/project rules are supplied, attributed, scoped, updated, and
+combined with learned conventions. Rule precedence and maintenance controls need
+a concrete design; no new database layout or prompt-management mechanism is
+selected by this documentation increment. Coordinate derived-state placement
+with the pending [archive separation](docs/adr/0052-pure-source-archive.md).
+
+Pending acceptance covers a check reaction on an old task under an explicit
+completion convention; a different meaning in another group/project; learned
+and ambiguous meanings; reaction removal/replacement and later corrections;
+duplicate, delayed, and out-of-order observations; missing actor/context; and
+audience/consent enforcement without treating reactions as action approvals.
+Verify source preservation and the state-to-evidence trail across restart.
+
+This increment changes specifications and status only. Documentation structure,
+links, consistency, and requirement coverage are checked. No runtime changes,
+reaction subscription checks, inference tests, or live acceptance are claimed.
+
+</conversation_state_inference>
+
 <archive_storage_boundary>
 
 ## Pure source archive boundary — 2026-09-17
