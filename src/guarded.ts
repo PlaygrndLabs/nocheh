@@ -90,7 +90,7 @@ async function sourceInput(client:pg.PoolClient,source:{kind:string;source_id:st
 
 // Persist each successful bounded fragment before continuing. A failed later
 // fragment or a worker restart does not repeat the completed detector work.
-async function prepareValue(client:pg.PoolClient,id:string,input:unknown,version:string,detect:(text:string)=>Promise<unknown>) {
+export async function prepareValue(client:pg.PoolClient,id:string,input:unknown,version:string,detect:(text:string)=>Promise<unknown>) {
   const pieces=new Map<string,string[]>(),prepared=new Map<string,string>();
   const pending=new Set<string>();
   for(const value of new Set(textValues(input))) {

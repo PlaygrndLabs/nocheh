@@ -20,7 +20,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | --- | --- |
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
-| Guard/control separation and recovery | Pending |
+| Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Pending |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Pending |
 | Complete isolated Compose and UI acceptance | Pending |
@@ -59,6 +59,29 @@ scheduler, OAuth authority, or live data. Production still uses the legacy
 single-database path: this increment is a tested foundation, not a completed
 storage cutover. Reset, guard migration, reprocessing activation, learning/UI,
 portability, and fresh live acceptance remain pending.
+
+The guard repository now stores immutable inputs, fragments, automatic/owner
+revision history, and activation evidence in derived storage. Control owns mode,
+epoch, invalidations, and publication receipts. Publication first revokes prior
+contexts, then changes the derived active pointer, then confirms completion;
+pending publications fail closed. Durable activation evidence reconciles a lost
+completion response even after a newer owner edit has superseded that revision.
+Owner edits survive delayed automatic detection, explicit restores create new
+revisions, and repeat initialization/new connections preserve history.
+
+Guard/storage verification: Node 24 compilation and all three affected real-DB
+tests pass (no skips), with AST refresh at 309 files, 1,895 nodes, and 6,824 edges.
+A preceding storage rerun exceeded its 60-second test timeout while PostgreSQL
+was waiting on WALWrite; it is recorded as cancelled, not passed. The repeated
+run used a five-minute integration bound and retained durability settings.
+Automatic approval review rejected an unguarded test-reset patch before it ran.
+The guard test reuses its synthetic database; destructive fixture cleanup now
+requires the dedicated `nocheh-stores-fixture` PostgreSQL cluster marker as well
+as the explicit fixture opt-in. The task-owned fixture alone was restarted to
+set that marker. Its optional Inngest/Redis services are stopped after acceptance.
+[Guard evidence](compatibility/results/2026-09-18-guard-store-recovery.json).
+Production callers still use their existing guarded path; this is not activation
+or evidence that the full data-store migration is complete.
 
 </original_only_archive>
 
