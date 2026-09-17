@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS guard_publications (
 );
 ALTER TABLE guard_publications ADD COLUMN IF NOT EXISTS operation_kind text NOT NULL DEFAULT 'guard'
  CHECK(operation_kind IN ('guard','selection'));
+ALTER TABLE guard_publications DROP CONSTRAINT IF EXISTS guard_publications_operation_kind_check;
+ALTER TABLE guard_publications ADD CONSTRAINT guard_publications_operation_kind_check CHECK(operation_kind IN ('guard','selection','memory'));
 CREATE TABLE IF NOT EXISTS guard_invalidations (
  id bigserial PRIMARY KEY,source_id text NOT NULL,epoch bigint NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','done')),

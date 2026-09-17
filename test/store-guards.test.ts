@@ -30,7 +30,7 @@ test('guard publications revoke before visibility and recover owner history acro
     assert.ok(prepared);assert.ok(calls>0);
     const automatic=(await guards.read(id,await guards.state())).value as any;
     assert.ok(!JSON.stringify(automatic).includes('yellow-lantern'));
-    await assert.rejects(guards.read(id,initial),{code:'guard_context_changed'});
+    assert.deepEqual((await guards.read(id,initial)).value,automatic,'initial preparation cannot invalidate unrelated authorized context');
 
     const beforeOwner=await guards.state(),owner={text:'Owner version',payload:{message:{text:'Owner version'}}};
     const ownerRevision=await guards.edit(id,prepared.revision,owner,digest(key+':owner'));

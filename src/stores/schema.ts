@@ -4,6 +4,7 @@ import {derivedGuardSchema,controlGuardSchema} from './guard-schema.js';
 import {derivativeSelectionSchema} from './selection-schema.js';
 import {controlPolicySchema} from './policy-schema.js';
 import {controlMemorySchema} from './memory-schema.js';
+import {derivedLearnedSchema} from './learned-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -53,6 +54,7 @@ CREATE INDEX IF NOT EXISTS derived_artifact ON derived_artifacts(artifact_id,kin
 CREATE INDEX IF NOT EXISTS derived_lexical ON derived_artifacts USING gin(to_tsvector('simple',search_text));
 ${derivedGuardSchema}
 ${derivativeSelectionSchema}
+${derivedLearnedSchema}
 `;
 
 export const initialControlSchema=`

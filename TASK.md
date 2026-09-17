@@ -22,7 +22,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing and guarded selection repositories verified; owner routes/UI, portability, and backup pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, project/sharing policies and provenance readers verified; learning and interfaces pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, project/sharing policies, provenance and learned versions verified; automatic learning and interfaces pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
@@ -153,6 +153,32 @@ container with networking disabled and no credential/state mounts. AST-only
 Graphify reports 326 files, 1,986 nodes and 7,168 edges. Native database traversal,
 full inference integration and fresh live acceptance remain pending.
 [Provenance evidence](compatibility/results/2026-09-18-honcho-provenance.json).
+
+Learned-memory projections now retain immutable derivative versions, provenance,
+guarded outputs, evidence dependencies, owner corrections, and retirement history.
+Publication uses the same recoverable control-revocation/derived-activation protocol.
+Owner corrections cannot be replaced by automatic proposals; changed guarded input
+or selected derivative revisions block reuse of dependent inferred projections.
+Model-facing reads require scope and evidence authorization in addition to guards.
+Owner inspection/history are separate administrative operations.
+
+Interpretations support meanings, subject states, and quoted participant conventions.
+Project-wide conventions require a quoted unambiguous project reference. Explicit
+rules outrank inferred meanings, owner corrections outrank affected interpretations,
+and conflicting explicit rules remain visible without arrival-order resolution.
+The result schema cannot set administrative, guard, provider or privacy policy.
+
+First guarded preparations/new projections now preserve the current epoch because
+no earlier authorized representation exists. Pending publication still blocks reads;
+changing existing content or selecting an engine revokes the epoch before publication.
+This prevents initial preparation from causing endless unrelated memory rebuilds.
+
+Node 24 compilation and all four learned/guard/reprocessing checks pass. A preceding
+run found an ambiguous history join; that run failed and the fixed query passed the
+rerun. AST-only Graphify: 330 files, 2,012 nodes and 7,297 edges, zero model calls.
+[Learned version evidence](compatibility/results/2026-09-18-learned-memory-versions.json).
+Automatic Honcho learning execution, native memory refresh integration, production
+routing, owner interfaces and live acceptance remain pending.
 
 </original_only_archive>
 
