@@ -19,7 +19,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Increment | Status |
 | --- | --- |
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
-| Three stores, repositories, capture handoff, role isolation | Pending |
+| Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Pending |
 | Derivative versioning, reprocessing, portability, backup | Pending |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Pending |
@@ -32,6 +32,33 @@ authorized reset; erase installation-owned content, history, backups, and export
 No live services or data have changed in this documentation increment. Earlier
 storage/classification and convention-design questions below are resolved by the
 accepted plan; those entries are historical observations, not remaining decisions.
+
+The storage foundation adds separate database/owner/runtime roles, append-only
+source and derivative repositories, immutable original file manifests, typed
+provenance, and recoverable handoff into the existing Inngest registry/outbox.
+The spool commits its bounded archive batch before attempting control writes;
+reconciliation cycles through all capture sequences to handle commit reordering.
+Concurrent reconciliation uses one control transaction without borrowing a
+second connection while holding the cursor lock. No cross-database joins,
+foreign tables, or mixed-store query router are introduced.
+
+Node 24 compilation and the initial clean development image build pass. Both
+storage tests pass against three actual databases, including wrong-role access,
+original/derivative rewrite denial, control outage, duplicate capture, interrupted
+handoff, concurrent reconciliation, version provenance, and repeat bootstrap.
+The existing suite initially reports 92 passes, two missing-native-dependency
+failures, and one container-only skip. After starting synthetic Inngest/Redis and
+configuring loopback aliases, all eight affected/storage/container checks pass;
+this covers all 95 distinct checks without treating the initial failures as passes.
+The unsupported host-only run is not acceptance evidence. Graphify was refreshed
+with ASTs only: 306 files, 1,873 nodes, 6,743 edges, zero model calls.
+
+The fixture project is `nocheh-stores-20260918`, with its own internal network,
+database volume, synthetic credentials, and no published ports, live poller,
+scheduler, OAuth authority, or live data. Production still uses the legacy
+single-database path: this increment is a tested foundation, not a completed
+storage cutover. Reset, guard migration, reprocessing activation, learning/UI,
+portability, and fresh live acceptance remain pending.
 
 </original_only_archive>
 
