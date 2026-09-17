@@ -38,8 +38,20 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(files),2)
         events = [json.loads(p.read_bytes()) for p in files]
         self.assertEqual(next(e for e in events if e['kind']=='telegram_update')['text'],update['message']['text'])
+        self.assertEqual(next(e for e in events if e['kind']=='telegram_wire')['origin'],'live')
         await request.do_request(url='https://api.telegram.org/botredacted/getUpdates')
         self.assertEqual(len(list((self.root/'pending').glob('*.json'))),2)
+
+    async def test_reaction_timestamps_and_unknown_fields_are_captured_without_message_context(self):
+        changes=[{'update_id':2,'message_reaction':{'chat':{'id':-20},'message_id':5,'date':1700000001,
+                  'user':{'id':7},'old_reaction':[],'new_reaction':[{'type':'emoji','emoji':'✅'}],'future_field':'exact'}},
+                 {'update_id':3,'message_reaction_count':{'chat':{'id':-20},'message_id':5,'date':1700000002,'reactions':[]}}]
+        self.capture.updates((200,json.dumps({'ok':True,'result':changes}).encode()))
+        events=[json.loads(p.read_bytes()) for p in (self.root/'pending').glob('*.json')]
+        updates=sorted((e for e in events if e['kind']=='telegram_update'),key=lambda e:e['revision'])
+        self.assertEqual([e['occurred_at'] for e in updates],['1700000001','1700000002'])
+        self.assertEqual([e['payload'] for e in updates],changes)
+        self.assertTrue(all(e['text'] is None for e in updates))
 
     async def test_disk_failure_never_returns_an_acknowledgeable_update(self):
         request=instrument_request(Request((200,b'{"ok":true,"result":[{"update_id":1}]}')),self.capture,polling=True)

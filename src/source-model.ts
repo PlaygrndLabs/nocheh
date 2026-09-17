@@ -151,8 +151,8 @@ export function legacySource(value:Envelope):SourceDescriptor {
   return fallback;
 }
 
-export async function projectSource(client:pg.PoolClient,eventId:string,value:Envelope):Promise<void> {
-  const descriptor=value.source??legacySource(value),source=descriptor.object;
+export async function projectSource(client:pg.PoolClient,eventId:string,value:Envelope,projection?:SourceDescriptor):Promise<void> {
+  const descriptor=value.source??projection??legacySource(value),source=descriptor.object;
   const identities=new Map([source,...descriptor.relations.map(r=>r.target)].map(v=>[sourceObjectId(v),v]));
   // Stable ordering avoids inverse-relation deadlocks between simultaneous imports.
   const objects=[...identities].sort(([a],[b])=>a.localeCompare(b)).map(([id,v])=>({id,...v}));

@@ -95,6 +95,7 @@ class Capture:
             batch = self.event(f'telegram:{self.bot_id}:wire:{digest(raw)}', 'telegram_wire',
                                {'update_ids': [u['update_id'] for u in decoded['result']]})
             batch['wire_base64'] = base64.b64encode(raw).decode()
+            batch['origin'] = 'live'
             self.enqueue(batch)
         for update in decoded.get('result', []):
             key = f"telegram:{self.bot_id}:update:{update['update_id']}"
@@ -103,7 +104,8 @@ class Capture:
             source = message or other
             value = self.event(key, 'telegram_update', update, source.get('chat', {}).get('id', 'system'),
                                message.get('text', message.get('caption')), str(source.get('message_id', update['update_id'])), update['update_id'])
-            value.update(origin='live', occurred_at=str(message.get('edit_date', message.get('date'))) if message.get('date') else None)
+            source_date = source.get('edit_date', source.get('date'))
+            value.update(origin='live', occurred_at=str(source_date) if source_date is not None else None)
             self.enqueue(value)
 
     def outbound(self, method, parameters, dispatch_key):

@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import {attachmentRefs,canonical,digest,envelope,type Envelope} from '../archive.js';
 import {projectSource} from '../source-model.js';
+import {observedSource} from '../observed-source.js';
 import {HttpError} from '../http.js';
 
 export interface SourceReference {
@@ -48,7 +49,7 @@ export class ArchiveRepository {
         const wire=value.wire_base64===undefined?null:Buffer.from(value.wire_base64,'base64');
         if((previous.wire===null)!==(wire===null)||(wire&&!wire.equals(previous.wire)))throw new HttpError(409,'source_wire_conflict');
       } else {
-        await projectSource(client,id,value);
+        await projectSource(client,id,value,observedSource(value));
         for(const ref of channel===undefined||channel==='telegram'?attachmentRefs(value.payload):[])
           await client.query(`INSERT INTO artifacts(id,event_id,kind,source_ref,metadata) VALUES($1,$2,$3,$4,$5)`,
             [digest(`${id}:${ref.ref}`),id,ref.kind,ref.ref,JSON.stringify(ref.metadata)]);

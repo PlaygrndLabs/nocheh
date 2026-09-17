@@ -22,7 +22,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing and guarded selection repositories verified; owner routes/UI, portability, and backup pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationship capture/resolution verified; learning, provenance, projects and interfaces pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
@@ -104,6 +104,24 @@ AST-only Graphify: 314 files, 1,918 nodes, 6,932 edges, zero model calls.
 [Reprocessing evidence](compatibility/results/2026-09-18-derivative-reprocessing.json).
 These interfaces are still candidate repositories; production/API/CLI/dashboard
 callers and the remaining migration have not been switched.
+
+The new source projection normalizes reply targets and individual/anonymous
+reaction observations, including source timing, actors when supplied, exact
+reaction types, additions/removals, and anonymous counts. Unknown future fields
+stay in original payloads. The frozen legacy projection is unchanged. Incoming
+wire batches are classified as observed originals, and capture records reaction
+timestamps even when no message body is available.
+
+The archive relationship repository resolves old targets independently of graph
+pagination. Scoped readers cannot use unknown or contradictory topic membership,
+and external reply targets require their own matching audience. The owner can
+inspect unresolved references. This is scope filtering, not a control-policy grant;
+production retrieval must also apply consent and action authorization.
+
+Node 24 compilation, nine affected TypeScript/PostgreSQL checks, and six Python
+capture checks pass. No fresh human reactions, subscription checks, or live gates
+are claimed. [Relationship evidence](compatibility/results/2026-09-18-source-relationships.json).
+Learning and production store routing remain pending.
 
 </original_only_archive>
 
