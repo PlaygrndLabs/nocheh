@@ -102,6 +102,22 @@ activation, not a broader release or provider cutover. The persistent dashboard
 log terminal is `58831`.
 [Local activation evidence](compatibility/results/2026-09-17-dashboard-local-activation.json).
 
+The owner reported that the summary data values were still uncolored. Workflow
+summary values now use their semantic status colors directly, with matching
+Lucide label icons. Missing values remain neutral, while observed zero counts
+retain their labeled category. Both light/dark themes pass browser checks at
+375 and 1440 pixels with no horizontal overflow; unavailable values are neutral
+in both themes. Value contrast on panel surfaces is at least 5.5:1. The pinned
+Docker production build and all 12 dashboard checks pass. The AST-only graph
+refresh reports 300 files, 1,946 nodes, 6,800 edges, and zero model calls.
+
+The verified management image is installed in the local dashboard at port 8783;
+only that container was recreated. All five live metric values and label icons
+are visibly colored, and the open Monitoring tabs were refreshed. The initial
+live workflow observation was unavailable and recovered on subsequent polling.
+The synthetic preview remains on port 18848 in persistent terminal `86398`.
+[Value-color evidence](compatibility/results/2026-09-17-dashboard-value-colors.json).
+
 </dashboard_refactor>
 
 <compact_monitoring>

@@ -463,6 +463,10 @@ manual Refresh updates both. Failed refreshes retain successful observations
 with a stale warning. Unavailable counts are not shown as zero. Chart legends,
 keyboard tooltips and View chart data provide alternative inspection paths.
 Current workload-by-family uses health counts, never historical queue depth.
+Workflow summary values and label icons use blue for running, amber for waiting
+and backlog, red for failures, and green for a recorded confirmed completion.
+Missing or unavailable values are neutral in both themes. Zero is an observed
+count in the labeled category, rather than an unavailable observation.
 No sampling service, uptime claim, or provider analytics collection is added.
 Detailed provider analytics remain in CPA.
 
