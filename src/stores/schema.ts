@@ -1,6 +1,7 @@
 import {sourceModelSchema} from '../source-model.js';
 import {workflowSchema} from '../workflows/store.js';
 import {derivedGuardSchema,controlGuardSchema} from './guard-schema.js';
+import {derivativeSelectionSchema} from './selection-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -49,6 +50,7 @@ CREATE INDEX IF NOT EXISTS derived_event ON derived_artifacts(event_id,created_a
 CREATE INDEX IF NOT EXISTS derived_artifact ON derived_artifacts(artifact_id,kind,created_at,id);
 CREATE INDEX IF NOT EXISTS derived_lexical ON derived_artifacts USING gin(to_tsvector('simple',search_text));
 ${derivedGuardSchema}
+${derivativeSelectionSchema}
 `;
 
 export const initialControlSchema=`
@@ -66,6 +68,13 @@ CREATE TABLE IF NOT EXISTS attachment_retrievals (
  artifact_id text PRIMARY KEY,event_id text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
  attempts integer NOT NULL DEFAULT 0,next_attempt timestamptz NOT NULL DEFAULT now(),error_code text
+);
+CREATE TABLE IF NOT EXISTS reprocess_jobs (
+ id text PRIMARY KEY,request_hash text NOT NULL,file_reference jsonb NOT NULL,
+ producer text NOT NULL,producer_version text NOT NULL,configuration jsonb NOT NULL,
+ state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
+ derived_id text,attempts integer NOT NULL DEFAULT 0,error_code text,
+ created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS capture_reconciliation (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),

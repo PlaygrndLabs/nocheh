@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS guard_publications (
  epoch bigint NOT NULL,state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','done','conflict')),
  created_at timestamptz NOT NULL DEFAULT now(),completed_at timestamptz
 );
+ALTER TABLE guard_publications ADD COLUMN IF NOT EXISTS operation_kind text NOT NULL DEFAULT 'guard'
+ CHECK(operation_kind IN ('guard','selection'));
 CREATE TABLE IF NOT EXISTS guard_invalidations (
  id bigserial PRIMARY KEY,source_id text NOT NULL,epoch bigint NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','done')),
