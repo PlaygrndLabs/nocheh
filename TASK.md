@@ -22,7 +22,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing and guarded selection repositories verified; owner routes/UI, portability, and backup pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationship capture/resolution verified; learning, provenance, projects and interfaces pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships and project/sharing policies verified; learning, provenance and interfaces pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
@@ -122,6 +122,22 @@ Node 24 compilation, nine affected TypeScript/PostgreSQL checks, and six Python
 capture checks pass. No fresh human reactions, subscription checks, or live gates
 are claimed. [Relationship evidence](compatibility/results/2026-09-18-source-relationships.json).
 Learning and production store routing remain pending.
+
+Owner project and sharing policy repositories now live in control storage. They
+provide revision-checked, idempotent create/edit/archive, chat/topic assignments,
+explicit exclusions, inherited topic membership, and selected sharing rules.
+Every mutation checks owner authority, advances the guard/access epoch in the
+same transaction, and requests memory refresh. Project membership does not
+create a sharing rule or authorize reading another conversation. Sharing rules
+only select inputs for a separately prepared release; raw access is not granted.
+
+Node 24 compilation and all four affected real-PostgreSQL checks pass, including
+owner-only changes, idempotence, inheritance/exclusion, stale revisions, archived
+project handling, exact sharing destinations, and revocation of old contexts.
+AST-only Graphify: 321 files, 1,969 nodes, 7,114 edges, zero model calls.
+[Project policy evidence](compatibility/results/2026-09-18-project-sharing-policy.json).
+Sharing content preparation/approval, production routing and owner interfaces
+remain pending; this is not a claim that project UI or sharing delivery is done.
 
 </original_only_archive>
 
