@@ -5,6 +5,36 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<original_only_archive>
+
+## Original-only archive and clean restart — 2026-09-18
+
+The owner authorized implementation of the [complete execution plan](docs/original-only-archive-plan.md).
+[ADR-0053](docs/adr/0053-original-only-archive.md) supersedes guarded placement in
+ADR-0052. Requirements now classify original audio/video/files as sources, all
+guarded versions and generated output as derivatives, and policy/workflows as
+control. Three databases, automatic inspectable contextual learning, corrections,
+projects, and explicitly managed sharing are accepted requirements.
+
+| Increment | Status |
+| --- | --- |
+| Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
+| Three stores, repositories, capture handoff, role isolation | Pending |
+| Guard/control separation and recovery | Pending |
+| Derivative versioning, reprocessing, portability, backup | Pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Pending |
+| Complete isolated Compose and UI acceptance | Pending |
+| Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
+| Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
+
+Preserve configuration, external logins, and spending accounting during the
+authorized reset; erase installation-owned content, history, backups, and exports.
+No live services or data have changed in this documentation increment. Earlier
+storage/classification and convention-design questions below are resolved by the
+accepted plan; those entries are historical observations, not remaining decisions.
+
+</original_only_archive>
+
 <conversation_state_inference>
 
 ## Conversation state and conventions — 2026-09-17

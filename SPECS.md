@@ -18,19 +18,28 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Local Docker Compose is the supported development, unattended operation, and acceptance environment. Each installation has one Compose project containing all services, including the owner dashboard and executor.
 - Deployment service names identify their tool and purpose. `nocheh-app` combines the API, source capture, outbox publication, and ordinary Inngest handlers; `nocheh-security` combines the broker and guard outside agent execution. Hermes serves its built native dashboard through its managed web server. The owner dashboard and executor run as separate Docker services, independently of the application and Inngest. The executor service is named `nocheh-executor`. Stores, credential-bearing gateways, and isolated agent launch authority retain separate boundaries.
 - The supported Node runtime is 24.x. Ordinary workflow execution has concurrency four, executor workflows two, and separate API/capture and workflow PostgreSQL pools capped at eight connections each. Inngest outages cannot prevent capture, API startup, or management operations while Docker is available.
-- Nocheh owns a PostgreSQL archive and a file store. Guarded source projections, owner revisions, and source provenance are durable archive records. Audience policies, approvals, memory state, and operational receipts are durable records outside the archive database. Hermes owns its native runtime state. Provider monitoring may retain its own operational SQLite state.
+- Nocheh uses three databases on its PostgreSQL service, with separate credentials and explicit repository interfaces: `nocheh_archive` for original evidence, `nocheh_derived` for guarded versions and generated data, and `nocheh_control` for configuration, audience policy, projects, sharing permissions, approvals, jobs, retries, authorization epochs, and execution receipts. Hermes, Honcho, and Inngest retain their separate native stores. Provider monitoring may retain its own operational SQLite state.
 - Product source data is portable across runtime and memory implementations. A replacement runtime satisfies the same capability, capture, audience, and enforcement contracts.
 
 </area>
 
 <area name="Archive and provenance">
 
-- The archive database is storage for pure source data and its guarded versions, including source identities, provenance, and guarded revision history. Generated memory, runtime context, Hermes runtime state, and workflow execution state are stored separately from the archive database.
-- Original messages, observed events, edits and revisions, source identities, timestamps, and retrievable file bytes are preserved in the owned archive. Transcripts and other generated artifacts are separate records with source and generation provenance. A model output never replaces an original.
+- The archive database contains only original observations, messages and edits, source identities, observed relationships, original file manifests, hashes, and capture provenance. Original file bytes live in the owned immutable file store. All guarded versions, transcripts, extractions, generated artifacts, runtime context, and learned interpretations live outside the archive in `nocheh_derived`.
+- Original audio, video, and files are the source; transcripts and extractions are replaceable, versioned derivatives. Every derivative retains stable typed source references, source revision, input hash, producer/version, and configuration fingerprint. A model output never replaces an original.
+- Observed incoming messages and successfully delivered assistant messages are source evidence of what was said. Drafts, prompts, internal contexts, generated shares, schedule definitions/fires, and execution attempts are not source observations and remain outside the archive.
 - Incoming Telegram events enter a durable spool before acknowledgment and commit idempotently before downstream assistant processing. Duplicate updates, database outages, restarts, partial downloads, and retries preserve observations and recoverable progress.
 - Capture, attachment retrieval, assistant work, and approved actions have independent progress; slow inference does not block source capture. Unsupported or malformed input is retained with a visible processing outcome.
-- Browser text and attachments are captured before command interpretation or inference. Scheduled definitions and fires have source identities and captured originals. Outbound results, execution attempts, and delivery receipts remain separate evidence.
-- Search, source reads, artifact downloads, graphs, export, and replay preserve identities and enforce audience access. Queries are bounded and paginated. Derived conclusions and inferred relations are distinguishable from source facts.
+- Browser text and attachments are captured before command interpretation or inference. Scheduled definitions and fires retain stable operational identities in control storage. Outbound results, execution attempts, and delivery receipts remain separate evidence; confirmed delivered messages can reference that evidence.
+- Search, source reads, artifact downloads, graphs, export, and replay preserve identities and enforce audience access. Queries are bounded and paginated. Archive search and the default archive graph show original evidence; source details link to derivatives. Knowledge retrieval can combine authorized sources and memory with clear labels.
+
+<area name="Versioned derivatives and reprocessing">
+
+- The owner can list derivative versions, inspect provenance, reprocess selected sources from original bytes, and activate a prepared version through the dashboard, API, and CLI. Jobs are idempotent and edits use revision checks.
+- Reprocessing preserves immutable output versions, original bytes, and owner-edited guarded versions. Guard preparation succeeds before activation. An old owner edit is never silently applied to different generated text.
+- Changing the active derivative invalidates dependent contexts and refreshes affected learning. Completed derivative results are durable before workflow completion receipts.
+
+</area>
 
 <area name="Imports and portability">
 
@@ -39,7 +48,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Imported history defaults to owner-private scope. Mapping it to an existing group requires explicit owner selection; Desktop identities are not guessed to be Bot API identities.
 - Import jobs persist progress, duplicates, revisions, errors, cancellation, and resumable identities. Uploads and extraction are bounded and reject escaping paths and symlinks. The supplied export bytes retain import provenance.
 - Historical import and replay send no old conversation replies. Importing makes sources searchable; learning requires explicit opt-in at import confirmation, retained across retries.
-- Archive export and reimport preserve originals, files, generated records, guarded history, identities, and provenance. Accepting saved guarded copies requires an explicit trusted restore; ordinary imports prepare their own projections and divergent histories are conflicts.
+- Source-only exports preserve original observations, files, identities, and capture provenance. Complete portable exports also preserve generated records and guarded history in separately labeled domains. Reimport routes records to their proper stores. Accepting saved guarded copies requires an explicit trusted restore; ordinary imports prepare their own projections and divergent histories are conflicts.
 - Portable export also includes registered native profiles' notes, scope markers, and SQLite session snapshots including committed WAL state. Runtime-generated material is labeled separately. Per-file hashes and a completion manifest support verification; operational credentials and configuration are excluded.
 - Portable export does not activate an installation or imply one common recovery snapshot. A quiesced backup supplies a common recovery point.
 
@@ -57,14 +66,14 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 <area name="Guarded projections">
 
-- Guarding has two modes: `on` and `off`, with `on` the default. Durable guarded projections are prepared at ingestion for source revisions, including imported and derived text, and reused without repeated detection of the same prepared content.
+- Guarding has two modes: `on` and `off`, with `on` the default. Durable guarded projections are prepared at ingestion for source revisions, including imported and derived text, and reused without repeated detection of the same prepared content. Guard inputs, outputs, revision history, and owner edits live in `nocheh_derived`; guard policy and authorization epochs live in `nocheh_control`. Owner edits are durable data, never disposable caches.
 - A trusted model detects literal secret substrings; local code validates literal membership and spans, merges overlaps, and masks them. All other text remains exactly unchanged. Detection quality is measured; it is not a guarantee that every possible secret is found.
 - The owner can inspect originals, file bytes, preparation status, guarded copies, and revision history. Only guarded projections are editable. Saves use revision checks; restoration creates a new revision. Saved owner edits are authoritative and cannot be re-masked or overwritten by background preparation.
 - `on` selects only current guarded data for agents, tools, memory, and embeddings, including trusted reasoning routes. `off` selects originals with the same audience and effect checks. Guarding is neither archive encryption nor a switch that disables authorization.
 - Preparation persists completed work and retries incomplete work. Unknown, unavailable, stale, or unbound guarded context fails closed without an original-data fallback.
 - Every physical model attempt validates current content revisions, audience, and destination, including complete history, native memory, retrieved sources, tool results, auxiliary calls, redirects, retries, and provider changes. Unsupported transports, opaque server-side history, and provider-hosted tools that bypass this boundary are rejected.
 - Trusted detection and media preparation receive the original inputs necessary for their task. Raw media reaches only explicitly trusted perception or transcription destinations; resulting text is stored and prepared under the same policy as typed text. Model names alone confer no trust.
-- Owner edits and representation changes retire affected contexts, credentials, caches, and memory generations before reuse. Rebuilding uses current authorized sources; original and guarded memory generations do not mix. Retiring local data cannot retract data already delivered externally.
+- Owner edits and representation changes retire affected contexts, credentials, caches, and memory generations before reuse. Revocation precedes availability of changed guards or access policies; interrupted changes stay unavailable until reconciliation completes. Rebuilding uses current authorized sources; original and guarded memory generations do not mix. Retiring local data cannot retract data already delivered externally.
 
 </area>
 
@@ -78,11 +87,21 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 <area name="Conversation state and conventions">
 
-- The agent traces the state of tasks, commitments, and other subjects from message relationships, reactions, and other conversation activity. New activity on an old message can update the agent's understanding of that subject's state.
+- The agent automatically learns contextual meanings and traces the state of tasks, commitments, and other subjects from permitted message relationships, reactions, edits, and stated conventions in background learning, even when it does not reply. New activity on an old message can update the agent's understanding. Learning itself sends no acknowledgment or external action.
 - A "check" emoji reaction on an old message can mean it is done; this is a contextual interpretation, not a fixed meaning for that emoji. The agent learns how people use reactions and relationships from the conversation and its conventions, preserving uncertainty when the meaning is unclear.
-- Explicit interpretation rules can be supplied in the infrastructure system prompt, in each group or project's contribution rules, or stated in the group. Learned conventions and explicit rules retain their source and applicable group or project scope; a convention from one group or project is not silently applied to another.
-- Inferred state retains links to the source activity and applicable conventions, remains distinguishable from observed facts, and can be revised by later activity, corrections, or rule changes. Inferred state and learned conventions are memory outside the source archive database; the original observations and their guarded versions remain preserved in the archive.
+- Explicit interpretation rules can be supplied in the infrastructure system prompt, in each group or project's contribution rules, or stated by any participant in the group. Local rules apply locally; project-wide rules require an unambiguous project reference. Explicit applicable conventions take precedence over inferred defaults. Conflicting explicit conventions stay visible until evidence or an owner correction resolves them.
+- Inferred state and conventions live in `nocheh_derived`, retain source activity, applicable scope/rules, uncertainty, producer details, conflicts, and revision history, and remain distinguishable from observed facts. Later activity, corrections, or rule changes can revise them. Original observations remain in the archive and their guarded representations remain in derived storage.
+- The owner can inspect what Nocheh learned, filter by scope, follow evidence, inspect history and conflicts, and correct or retire interpretations in the dashboard, API, and CLI. Owner corrections override the affected interpretation and invalidate or rebuild dependent memory contexts before reuse.
+- Contextual interpretation uses guarded Honcho reasoning with authorized evidence and applicable conventions. A bounded provenance reader follows conclusion ancestry to ingested source references and explicitly reports unavailable exact citations.
+- Reply/reaction context resolves independently of graph pagination. Duplicate, delayed, removed, anonymous aggregate, and unresolved observations remain distinguishable; missing context is not invented and unknown topic membership does not broaden access.
 - Interpreting a reaction or group convention does not grant action approval or change administrative, provider, privacy, or guard policy. State inference follows the same audience and learning-consent boundaries as other memory.
+
+</area>
+
+<area name="Projects and explicit sharing">
+
+- The owner can create, edit, archive, and manage projects spanning multiple chats/topics through the dashboard, API, and CLI. Each chat/topic has one effective project; a topic inherits its group's assignment unless explicitly assigned.
+- Project membership grants no cross-chat access. The owner chooses sharing sources, destinations, enabled state, and approved or filtered mode, with preview and revocation. Learned conventions retain their applicable scope and do not silently transfer between projects.
 
 </area>
 
@@ -216,7 +235,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 <area name="Operations and acceptance">
 
-- Backups quiesce ingress before writers and preserve PostgreSQL records, originals, files, durable journals/receipts, native state, configuration, and a conservative spending-ledger snapshot. Checksums and table fingerprints verify recovery; rebuildable dependency caches are explicitly excluded.
+- Backups quiesce ingress before writers and establish one recovery point across archive, derived, and control databases, original files, durable journals/receipts, guarded owner edits, native stores, configuration, and a conservative spending-ledger snapshot. Checksums and table fingerprints verify recovery; rebuildable dependency caches are explicitly excluded.
 - Backups include Inngest PostgreSQL history and Redis queue/run state at the same quiesced recovery point as Nocheh evidence. Restored workers, schedules, and event publication remain inactive. Backup, restore, and service shutdown execute through containerized management independently of Inngest, with maintenance progress visible in Nocheh.
 - Restore uses a separate project and state directory with Telegram disabled, OAuth held inactive, and archive workers, tool execution, scheduling, and Honcho attachment held. Restore does not activate services or reset a newer spending ledger.
 - Recovery cutover reconciles snapshot-era pending work with source evidence and shuts down source authorities before activation. Rollback uses the matching code/images and a verified inactive snapshot, never an older runtime against a newer live database.
