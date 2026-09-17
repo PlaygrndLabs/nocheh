@@ -21,8 +21,8 @@ and asset/native-boundary tests, and nine graph tests pass. AST-only Graphify
 refresh: 276 files, 1,701 nodes, 6,002 edges, zero model calls. Shared-browser
 checks on the synthetic Compose fixture confirm dark/system and light themes,
 375px navigation drawer, Escape and focus restoration, no main-content horizontal
-overflow, and a settings edit surviving manual refresh. Full route acceptance
-and historical metrics verification remain in progress.
+overflow, and a settings edit surviving manual refresh. The following increments record full route acceptance
+and historical metrics verification.
 
 The fixture uses project `nocheh-dashboard-ui-20260916`, its own database/volume,
 a private database network, a separate localhost HTTP bridge, and port 18848.
@@ -48,9 +48,47 @@ restoration, in-place retry receipts, and retained stale status/charts after an
 injected outage. The graph refresh reports 1,701 nodes and 6,017 edges with zero
 model calls. Monitoring commit `0e1e81c` was reconciled with concurrent source-model main
 `b1a4a3d`: production build, eight affected PostgreSQL tests and eleven dashboard
-tests pass. Full remaining-page acceptance is still in progress.
+tests pass. Final remaining-page acceptance is recorded below.
 [Metrics evidence](compatibility/results/2026-09-17-dashboard-metrics.json).
-Active-installation deployment is separate and has not been performed.
+The final page refactor replaces the legacy monolith with page components,
+shared controls, subscriptions and revision-bound drafts. Overview, archive,
+memory, Honcho, integrations, imports, activity, memory access, settings,
+maintenance and graph now use the shared presentation. A route-handoff race in
+shared subscriptions has a focused regression test. Refresh retains selection,
+unsaved edits and the original compare-and-swap revision; stale saves reject.
+Import consent and group mappings remain bound to the selected job and resume.
+
+Final checks: 92 tests pass in the clean image; its one container-boundary test
+runs separately with synthetic loopback service aliases and passes. That covers
+all 93 tests, including the three new subscription regressions, existing graph,
+owner-session, privacy, workflow, native Inngest inspection, database startup,
+source preservation and import consent/resume checks. Host Node 24 and the clean
+locked-dependency Docker development build pass; npm reports zero vulnerabilities.
+The initial network build blocker is resolved. The production runtime image also builds successfully; its digest
+is recorded in the final acceptance file.
+
+Browser acceptance covers all twelve routes in light/dark at 375, 768, 1024 and
+1440 pixels, with no page-level horizontal overflow. Additional checks cover
+chart filters/data/keyboard tooltips, zero/unavailable/stale observations,
+pagination, receipt drawers, exact approvals and bounded permission revocation,
+guarded editing and stale-save rejection, settings conflicts, import consent and
+resume, audience previews, memory history, and backup/restart/restore reviews.
+Escape restores focus. Graph sources remain inspectable under injected graphics
+failure. Loaded reduced-motion CSS disables transitions/animation; chart
+animations are disabled. Checked text/status token pairs exceed 4.5:1 in both
+themes. Recharts and Three.js are absent from the main entry bundle and load
+through separate dynamic imports. The final AST graph includes TSX/JSX:
+300 files, 1,832 nodes, 6,634 edges, zero model calls.
+
+The final fixture adds optional pinned Inngest/Redis acceptance dependencies on
+its private network with no registered runtime workers or published ports.
+Cached-image Python allowlist and invalidated host-build-mount failures were
+resolved by testing the clean immutable image. Host suspension stopped the
+fixture; ownership was checked before restarting it. The final preview uses terminal `5513` and image
+`nocheh-dashboard-ui-final:20260917`; the optional native check services are stopped.
+[Final acceptance](compatibility/results/2026-09-17-dashboard-acceptance.json)
+records build, browser, test, isolation, and setup-retry details. Active-installation
+deployment remains separate and has not been performed.
 
 </dashboard_refactor>
 
