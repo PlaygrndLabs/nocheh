@@ -5,6 +5,39 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<archive_storage_boundary>
+
+## Pure source archive boundary — 2026-09-17
+
+The owner clarified the archive's storage boundary after inspecting the database
+schema. The durable requirement is in [SPECS.md](SPECS.md), with the boundary
+decision and supersession in [ADR-0052](docs/adr/0052-pure-source-archive.md).
+
+Source inspection confirms that `src/database.ts` initializes archive, guarded,
+memory, execution, security, and workflow tables through one PostgreSQL client.
+Native Hermes notes remain profile files and its sessions remain native SQLite;
+Honcho has a separate PostgreSQL store. However, the Nocheh database stores memory
+review content, filtered memory, Honcho receipts/context caches, and operational
+state. `integrations/hermes/prepared_context.py` also submits native memory text
+and tool results for preparation; `src/prepared-context.ts` persists new fragments
+as `derived_artifacts.kind = 'runtime_context'`, alongside guarded revisions.
+The archive therefore does not yet satisfy the clarified boundary.
+
+Implementation and migration are pending. Define the table/content split and
+durable handoff before moving data; preserve original bytes, source IDs,
+provenance, owner revisions, consent, audience enforcement, and effect receipts.
+Backup/restore and failure-path acceptance must cover the separated stores.
+Clarification pending: whether transcripts and extracted file text belong in
+the source archive or a separate derived-data store. Their existing preservation
+and guarding requirements remain in force. The target database/role layout and
+cross-store consistency mechanism have not been selected.
+
+This increment changes documentation only. Structure, local links, diff hygiene,
+and related-spec consistency are checked; no data migration, runtime activation,
+or live database inspection is claimed.
+
+</archive_storage_boundary>
+
 <dashboard_refactor>
 
 ## Dashboard UI/UX refactor — 2026-09-17
