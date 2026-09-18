@@ -40,6 +40,7 @@ class ResetPreservationTests(unittest.TestCase):
         self.database = {name: [] for name in reset_preservation.reset_configuration.catalog('original-only-v1')}
         policy = {'enabled': False, 'owner_id': '42', 'group_ids': ['-10']}
         self.database.update(security_policy=[{'document': {'version': 1, 'rules': []}}],
+                             installation_generation=[{'generation': '11111111-1111-4111-8111-111111111111'}],
                              guard_mode=[{'mode': 'on'}],
                              runtime_configuration=[{'name': 'assistant', 'document': policy}])
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()),

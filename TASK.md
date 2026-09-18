@@ -7,6 +7,21 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+Fresh-store setup admission now binds the pre-reset installation generation into
+preservation evidence and rejects reusing it. The trusted reset repository assigns
+the journal's new generation, restores only current security/guard/allowlist,
+project, assignment and sharing configuration, then admits active custom profile
+identities through the existing control repository with deterministic operations.
+Exact replay is idempotent; altered setup, commands, target rows, or generations
+fail closed. Historical configuration, sources, derivatives, learned state,
+approvals, schedules, effects and workflow history are not copied. The ordinary
+bootstrap still rejects inactive installations; a reset-only bootstrap path
+requires the exact reset fence and explicit reset profile. A fresh internal-network
+PostgreSQL rehearsal passes, along with 24 affected Python checks and the complete
+candidate build. Docker lifecycle coordination, native preference restoration and
+empty-baseline proof remain pending. No live state changed.
+[Setup admission evidence](compatibility/results/2026-09-18-reset-setup-admission.json).
+
 The scoped erasure phase is now a resumable coordinator primitive bound to the
 completed preservation receipt, exact container and volume identities, and the
 anchored file manifest. Fsynced intents precede file deletion, database shutdown,

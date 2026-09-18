@@ -597,6 +597,23 @@ bind-mounted workflow Redis data in their reviewed locations. The primitive
 advances only `erased`; fresh store initialization and empty-baseline proof are
 separate phases.
 
+Fresh initialization must use the reset-only `nocheh-reset-setup` profile while
+the exact reset inactive fence remains present. Ordinary store bootstrap continues
+to reject every inactive installation. The reset setup service accepts only the
+private `/reset/setup.json` request, verifies its reset identifier against the
+fence, initializes fresh schemas, rejects the pre-reset generation, and assigns
+the journal generation before runtime activation. `restoreResetSetup` restores
+only the current security policy, guard mode, assistant allowlist, projects,
+assignments, sharing rules, and active custom profile identities. Active custom
+profiles use deterministic `restore-preferences:PROFILE_ID` operations through the
+runtime-profile repository; exact retries reuse the resulting control receipts.
+Do not copy old configuration revisions, owner commands, sources, derivatives,
+learned state, approvals, schedules, effects, or workflow history. The new setup
+operations and refresh requests belong to the new generation and remain
+distinguishable from erased history. Verify this repository boundary with
+`python3 compatibility/reset-setup-rehearsal.py --directory NEW_DIRECTORY
+--image CANDIDATE` on a fresh internal-only PostgreSQL fixture.
+
 Run `python3 compatibility/reset-erasure-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` for a fresh internal-network fixture that uses real
 PostgreSQL stores, original/spool files, provider accounting, saved credentials,

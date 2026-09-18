@@ -14,7 +14,9 @@ class ResetConfigurationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
         self.state = Path(self.temporary.name).resolve()
         self.values = {name: [] for name in configuration.catalog('original-only-v1')}
-        self.values.update(security_policy=[{'document': {'version': 1, 'rules': []}}], guard_mode=[{'mode': 'on'}])
+        self.values.update(security_policy=[{'document': {'version': 1, 'rules': []}}],
+                           installation_generation=[{'generation': '11111111-1111-4111-8111-111111111111'}],
+                           guard_mode=[{'mode': 'on'}])
         self.values['projects'] = [{'id': 'a' * 64, 'name': 'Saved project', 'description': 'Private configuration', 'state': 'active'}]
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False, 'content_copied': False,
             'blockers': [], 'containers': [], 'volumes': [], 'installation': {'root': str(self.state.parent), 'state': str(self.state),
@@ -43,11 +45,12 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertNotIn('memory_shares', query.call_args.args[1])
 
     def test_unknown_fields_and_missing_critical_configuration_fail_closed(self):
-        for change in ('content', 'columns', 'security', 'guard', 'runtime'):
+        for change in ('content', 'columns', 'security', 'generation', 'guard', 'runtime'):
             values = copy.deepcopy(self.values)
             if change == 'content': values['events'] = []
             if change == 'columns': values['projects'][0]['body'] = 'source content'
             if change == 'security': values['security_policy'] = []
+            if change == 'generation': values['installation_generation'] = [{'generation': 'old'}]
             if change == 'guard': values['guard_mode'] = []
             if change == 'runtime': values['runtime_configuration'] = [{'name': 'unknown', 'document': {}}]
             with self.subTest(change=change), self.assertRaises(ValueError):
