@@ -51,6 +51,7 @@ test('generated journals recover outside archive and preserve delivered original
   const incoming:Envelope={...sent,key:key+':incoming',origin:'live',kind:'telegram_update',text:'Received',payload:{message:{...message,text:'Received'}}};
   const inputs=[intent,sent,ambiguous,schedule,incoming];
   try {
+    await guards.reconcile();await guards.setMode('on');
     for(const item of inputs)await immutableFile(spool,digest(item.key)+'.json',Buffer.from(canonical(item)));
     const dead=new pg.Pool(config);await dead.end();
     await drainSourceSpool(new CaptureCoordinator(archive,dead),root);

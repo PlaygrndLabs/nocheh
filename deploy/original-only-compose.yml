@@ -1,5 +1,5 @@
 # Opt-in installation wiring. Selected from the saved layout, never a shell flag.
-# Application entrypoint migration and the full rehearsal gate remain separate.
+# The full installation rehearsal and activation gates remain separate.
 services:
   nocheh-store-bootstrap:
     image: nocheh-services:local
@@ -43,6 +43,8 @@ services:
     depends_on:
       nocheh-store-bootstrap: {condition: service_completed_successfully}
   nocheh-security:
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
     environment:
       PGUSER: ""
       PGDATABASE: ""

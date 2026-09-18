@@ -309,6 +309,29 @@ pending; the opt-in layout is not yet a runnable release candidate and the live
 installation remains on its prior layout.
 [Storage setup evidence](compatibility/results/2026-09-18-store-configuration.json).
 
+The application and security entrypoints now select explicit three-store services
+for the original-only layout, with legacy startup isolated behind the legacy
+selection. Owner/source/guard/memory HTTP routes use the separated repositories;
+HTTP capture acknowledges only an fsynced spool record and continues through
+archive/control outages. Independent capture, control handoff reconciliation,
+guard reconciliation, outbox publication, and heartbeat stages respect inactive
+restore state. Security sees that marker through a read-only mount. Configured
+guard mode must be established before scoped requests proceed, and native recall
+receives the current installation generation and epoch.
+
+Seven affected real PostgreSQL/HTTP/entrypoint checks pass, including actual app
+and broker subprocess startup without administrator credentials, inactive-restore
+refusal, outage recovery, exact-once source capture, stale capability denial,
+owner operations, and generated-record placement. A prior failed run exposed a
+generated-capture test's reliance on the previous fixture guard mode; the test
+now sets its own guard-on prerequisite and the complete affected run passes.
+TypeScript, synthetic Compose rendering, and AST-only Graphify pass. Workflow
+execution, action/managed-runtime endpoints (including action security preview),
+complete portable coordination, full Compose rehearsal, reset, and fresh live
+acceptance remain pending. No live installation configuration was changed.
+[Service entrypoint evidence](compatibility/results/2026-09-18-store-entrypoints.json).
+
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior
