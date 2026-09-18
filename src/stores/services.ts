@@ -35,6 +35,7 @@ import {ControlledExecutionRepository} from './controlled-execution.js';
 import {ActionCommandRepository} from './action-commands.js';
 import {BrowserCaptureRepository} from './browser-capture.js';
 import {BrowserRunRepository} from './browser-runs.js';
+import {RuntimeProfileRepository} from './runtime-profiles.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -67,6 +68,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
+    runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime),
     controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,options.runtime,options.serviceToken??'',detect),

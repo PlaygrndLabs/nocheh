@@ -55,6 +55,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // must observe the complete current authorization generation on every call.
     if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
     if(await owner.handle(principal,req,res,url))return;
+    if(path==='/v1/runtime/profiles'||path==='/v1/runtime/profiles/resolve') {
+      admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
+      if(req.method==='GET'&&path==='/v1/runtime/profiles')return json(res,200,await s.runtimeProfiles.list(principal));
+      if(req.method==='POST')return json(res,200,await (path.endsWith('/resolve')?s.runtimeProfiles.resolve(principal,await readJson(req)):s.runtimeProfiles.save(principal,await readJson(req))));
+    }
     if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/browser/'.length);
       if(operation==='finish')return json(res,200,await s.browser.finish(body));
