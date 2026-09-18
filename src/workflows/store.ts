@@ -38,10 +38,12 @@ CREATE INDEX IF NOT EXISTS workflow_registry_metrics_outcomes ON workflow_regist
 CREATE TABLE IF NOT EXISTS workflow_outbox (
   id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'), workflow_id text NOT NULL REFERENCES workflow_registry(id),
   dispatch integer NOT NULL, attempts integer NOT NULL DEFAULT 0,
+  failures integer NOT NULL DEFAULT 0 CHECK(failures>=0),
   next_attempt timestamptz NOT NULL DEFAULT now(), lease_token uuid, lease_until timestamptz,
   published_at timestamptz, error_code text CHECK(error_code IS NULL OR error_code='publication_unavailable'),
   created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(workflow_id,dispatch)
 );
+ALTER TABLE workflow_outbox ADD COLUMN IF NOT EXISTS failures integer NOT NULL DEFAULT 0 CHECK(failures>=0);
 CREATE INDEX IF NOT EXISTS workflow_outbox_due ON workflow_outbox(next_attempt) WHERE published_at IS NULL;
 CREATE TABLE IF NOT EXISTS workflow_runs (
   workflow_id text NOT NULL REFERENCES workflow_registry(id), run_id text NOT NULL,
@@ -154,18 +156,20 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
         AND (candidate.lease_until IS NULL OR candidate.lease_until<now()) AND f.owner='inngest' AND f.admission
         AND EXISTS(SELECT 1 FROM workflow_worker_registrations r WHERE r.family=w.family AND r.version=w.version AND r.seen_at>now()-interval '30 seconds')
         AND w.state IN ('queued','waiting','retryable_failed','running')
-        ORDER BY candidate.created_at,candidate.id FOR UPDATE OF candidate SKIP LOCKED LIMIT 1)
+        ORDER BY candidate.published_at NULLS FIRST,candidate.next_attempt,candidate.created_at,candidate.id FOR UPDATE OF candidate SKIP LOCKED LIMIT 1)
       RETURNING o.id,o.workflow_id,o.dispatch,(SELECT family FROM workflow_registry WHERE id=o.workflow_id) AS family`,[token]);
     const row=result.rows[0];if(!row)break;
     try {
       await send({name:'nocheh/workflow.requested',id:row.id,data:{workflow_id:row.workflow_id,dispatch:row.dispatch,family:row.family}});
-      await pool.query(`UPDATE workflow_outbox SET published_at=now(),lease_token=NULL,lease_until=NULL,error_code=NULL WHERE id=$1 AND lease_token=$2`,[row.id,token]);
+      await pool.query(`UPDATE workflow_outbox SET published_at=now(),lease_token=NULL,lease_until=NULL,error_code=NULL,failures=0,next_attempt=now() WHERE id=$1 AND lease_token=$2`,[row.id,token]);
       published++;
     }catch {
       // A lost acknowledgment republishes exactly this ID. Permanent execution
       // exclusion is the registry's responsibility, including after 24 hours.
-      await pool.query(`UPDATE workflow_outbox SET lease_token=NULL,lease_until=NULL,error_code='publication_unavailable',
-        next_attempt=now()+least(3600,power(2,least(attempts,11)))*interval '1 second' WHERE id=$1 AND lease_token=$2`,[row.id,token]);
+      // Successful receipt probes are attempts, not transport failures: they
+      // must not inflate the delay when a later outage interrupts delivery.
+      await pool.query(`UPDATE workflow_outbox SET lease_token=NULL,lease_until=NULL,error_code='publication_unavailable',failures=least(failures+1,11),
+        next_attempt=now()+power(2,least(failures+1,11))*interval '1 second' WHERE id=$1 AND lease_token=$2`,[row.id,token]);
       break;
     }
   }

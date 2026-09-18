@@ -113,3 +113,34 @@ test('acknowledged events retry unchanged until the workflow records receipt', {
     assert.equal(sent.length,2);
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });
+
+test('publication backoff counts consecutive failures and new requests are not starved by accepted retries', {skip:!process.env.PGHOST},async()=>{
+  const admin=new pg.Pool(),schema='publication_'+Date.now();await admin.query(`CREATE SCHEMA ${schema}`);
+  const pool=new pg.Pool({options:`-c search_path=${schema}`});
+  try{
+    await initialize(pool);await registerWorker(pool,'pipeline',['telegram']);
+    const client=await pool.connect();let older:string;
+    try{older=await requestWorkflow(client,'telegram',hash('older-publication'));}finally{client.release();}
+    const sent:WorkflowEvent[]=[];
+    for(let i=0;i<10;i++){
+      await pool.query("UPDATE workflow_outbox SET published_at=now()-interval '31 seconds',next_attempt=now()");
+      assert.equal(await publishOutbox(pool,async event=>{sent.push(event);},1),1);
+    }
+    assert.ok(sent.every(event=>event.id===sent[0]!.id),'successful receipt probes keep the same transport identity');
+    const due=()=>pool.query("UPDATE workflow_outbox SET published_at=now()-interval '31 seconds',next_attempt=now()");
+    const fail=()=>publishOutbox(pool,async()=>{throw Error('synthetic transport outage');},1);
+    const delay=async()=>Number((await pool.query('SELECT extract(epoch FROM next_attempt-now()) AS seconds FROM workflow_outbox')).rows[0].seconds);
+    await due();assert.equal(await fail(),0);const first=await delay();
+    assert.ok(first>0&&first<=2,'ten successful probes must not turn the first outage into a half-hour delay');
+    await due();await fail();const second=await delay();assert.ok(second>2&&second<=4);
+    await due();assert.equal(await publishOutbox(pool,async()=>{},1),1);
+    await due();await fail();const reset=await delay();assert.ok(reset>0&&reset<=2,'successful delivery resets failure backoff');
+    await due();
+    const next=await pool.connect();let newer:string;
+    try{newer=await requestWorkflow(next,'telegram',hash('newer-publication'));}finally{next.release();}
+    const chosen:WorkflowEvent[]=[];
+    assert.equal(await publishOutbox(pool,async event=>{chosen.push(event);},1),1);
+    assert.equal(chosen[0]!.data.workflow_id,newer!,'new intake precedes another already-accepted delivery probe');
+    assert.notEqual(chosen[0]!.data.workflow_id,older!);
+  }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
+});

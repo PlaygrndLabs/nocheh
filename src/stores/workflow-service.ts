@@ -22,7 +22,7 @@ export function startStorageWorkflows(s:StorageServices,config:Settings,call:Run
   };
   const service=superviseConnection(async()=>{
     const client=workflowClient('pipeline');
-    return connectWorkflows('pipeline',client,workflowFunctions(client,s.stores.control,operations),undefined,2);
+    return connectWorkflows('pipeline',client,workflowFunctions(client,s.stores.control,operations));
   },async()=>{
     await registerWorker(s.stores.control,'pipeline',Object.keys(operations) as WorkflowFamily[]);await storageHeartbeat(s.stores,'workflow-pipeline');
   });

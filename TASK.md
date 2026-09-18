@@ -7,15 +7,28 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The complete synthetic installation rehearsal now passes across the three stores,
+Hermes, Honcho, Inngest, guard preparation, convention/reaction learning without
+acknowledgments, browser execution, delivered-message capture, duplicates, and a
+combined database/workflow outage. Capture/control recovered first; native memory
+recovered in 249.077 seconds within the 300-second bound. Fixture canaries reached
+only the detector; no external provider calls or live state changes occurred.
+API/capture and workflow pools are separate, ordinary Connect concurrency is four,
+and publication backoff counts consecutive transport failures rather than prior
+successful receipt probes. Thirteen focused checks pass without skips; the prior
+image fails the retry-delay regression. The complete candidate image builds.
+[Installation recovery evidence](compatibility/results/2026-09-18-installation-recovery.json).
+This is deterministic fixture evidence, not live recall/model-quality acceptance.
+Full reset orchestration, fresh live gates, and remote synchronization remain pending.
+
 First guarded-copy publication no longer blocks unrelated authorized contexts.
 Its own source still fails closed until its prepared pointer is ready; replacement
 guards, engine selections, and learned publications retain their authorization
 barriers. An injected-interruption regression fails on the previous candidate;
 18 affected storage/action/runtime checks pass with the fix and no skips. The
-complete candidate management image builds successfully. The combined synthetic
-installation's post-outage memory gate timed out after capture/control recovery;
-engine history shows worker-capacity retries. That rehearsal remains failed while
-capacity recovery is investigated. No live state or owners were changed.
+complete candidate management image builds successfully. Its initial combined
+rehearsal timed out after capture/control recovery; the subsequent capacity and
+retry fixes below have a fresh passing rehearsal. No live state or owners changed.
 [Guard publication evidence](compatibility/results/2026-09-18-guard-publication-isolation.json).
 
 Reset shutdown coordination now preserves each reviewed container's prior running
