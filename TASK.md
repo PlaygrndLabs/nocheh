@@ -7,6 +7,18 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The reset file-erasure primitive freezes metadata-only, installation-local targets
+and removes entries through anchored descriptors without following symlinks.
+All remaining targets are checked before deletion; changed/new files, replaced
+ancestors, hardlinks, special files, and overlaps with preserved setup stop it.
+Inactive markers/protected subtrees remain; interrupted deletion resumes from the
+same manifest. Nine host checks and nine checks in the final network-disabled,
+read-only Compose image pass. The complete management build passes. This is an
+internal primitive: the coordinator must bind the manifest into preservation
+proof and recheck all barriers. No live files or owners changed. Container/volume
+erasure, effect settlement and the full reset remain pending.
+[File erasure evidence](compatibility/results/2026-09-18-reset-files.json).
+
 The original-only owner dashboard preview passes learned-memory correction/retirement
 with history, project management/topic inheritance, sharing preview/approval/revocation,
 and reprocessing/activation preserving prior owner edits and exact source bytes.

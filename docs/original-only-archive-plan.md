@@ -447,6 +447,19 @@ and a separate sentinel. It verifies interruption/retry, preserved restart setti
 durable inactivity, database access for reconciliation, and unrelated-owner isolation.
 Its synthetic lifecycle evidence does not satisfy full native/provider acceptance.
 
+The internal `scripts.reset_files` primitive freezes the reviewed post-quiescence
+installation-local paths into a metadata-only manifest. Bind its exact hash into
+the coordinator's durable preservation evidence before calling `erase`. Its barrier
+callback must recheck phase/journal ownership, writer exclusion, preservation and
+inactive fences before mutations. Descriptor-relative traversal never follows
+symlinks. New/replaced entries and overlapping preservation paths block deletion;
+missing already-erased entries permit interruption recovery. Pass all four reset
+markers as protected paths. This does not remove containers or database volumes,
+resolve external backup ownership, or establish that earlier phases passed.
+Detailed private manifests can contain filenames: retire them with the reset's
+content-bearing administration data before the empty-baseline gate, retaining only
+non-content hashes/counts needed for the generation and one-attempt boundary.
+
 Only after verifying the empty baseline, inactive fence, current generation, and
 stopped pollers may the coordinator issue one HTTPS `deleteWebhook` request with
 `drop_pending_updates=true`. This is the [Telegram backlog operation](https://core.telegram.org/bots/api#deletewebhook),
