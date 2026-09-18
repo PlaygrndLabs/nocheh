@@ -103,6 +103,18 @@ passes after adding final source-access rechecks and repeatable fixture identiti
 AST-only Graphify: 343 files, 2,083 nodes, 7,773 edges, zero model calls.
 [Source retrieval evidence](compatibility/results/2026-09-18-source-only-retrieval.json).
 
+The shared storage-service composition now exposes a tested owner HTTP controller
+and CLI commands for source versions, exact provenance, idempotent reprocessing,
+guarded activation/history/restore, learned correction/retirement/history, project
+management and membership, sharing-rule management, and bounded Honcho provenance.
+The existing dashboard owner proxy recognizes these routes, preserves its session
+and cross-site checks, and reports revision conflicts. Source/learned mutations
+reject scoped tokens before reading their bodies. Six affected HTTP/PostgreSQL
+and management checks plus five Python CLI checks pass. Production API mounting,
+sharing content previews/releases, and visible UI remain pending.
+[Owner operation contracts](docs/storage-owner-api.md) and
+[owner API evidence](compatibility/results/2026-09-18-storage-owner-api.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior
