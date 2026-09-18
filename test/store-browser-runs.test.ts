@@ -21,7 +21,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-browser-runs-')),base=Date.now(),token=digest('browser'+base),group='-'+base;
-  const owner={admin:true,scope:null},policy={enabled:true,owner_id:'123',group_ids:[group]};let serial=0,mode='done',failCompletion=false;
+  const owner={admin:true,scope:null},policy={enabled:true,owner_id:'123',group_ids:[group]};let serial=0,mode='done',failCompletion=false,research='',planning='';
   const control=new Proxy(stores.control,{get(target,key){if(key==='connect')return async()=>{
     const db=await target.connect();return new Proxy(db,{get(client,name){if(name==='query')return (sql:any,...args:any[])=>{
       if(failCompletion&&String(sql).startsWith('UPDATE managed_runs SET state=$2,result_reference')){failCompletion=false;return Promise.reject(Error('lost control completion'));}
@@ -50,17 +50,21 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Prepared audio fixture-secret';}},
     honcho:async()=>{throw Error('no providers');}});
   const authority=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
-  const capture=async(options:Record<string,unknown>={})=>{const binding=await s.guards.state(),body={scope:'123',profile:'research',conversation:'fixture-'+base+'-'+(++serial),
+  const capture=async(options:Record<string,unknown>={})=>{const binding=await s.guards.state(),body={scope:'123',profile:options.scope&&options.scope!=='123'?'nocheh-'+digest(String(options.space??options.scope)).slice(0,24):research,conversation:'fixture-'+base+'-'+(++serial),
     id:'input',text:'Original fixture-secret',revision:binding.epoch,...options};const source=await s.browserCapture.capture(owner,body);await drainSourceSpool(s.capture,root,source.event_id);return {...body,...source};};
   const prepare=async(id:string)=>s.preparation.run(id,async()=>{throw Error('no download');},'fixture',s.detect,await authority('preparation'));
   const run=async(id:string)=>{const result=await storageWorkflowOperations(s,runtime).browser!(id,await authority('browser'));safeMetadata(result);return result;};
   const saved=async(id:string)=>(await stores.control.query('SELECT * FROM managed_runs WHERE event_id=$1',[id])).rows[0];
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
+    research=(await s.runtimeProfiles.save(owner,{name:'research-'+base,state:'active',expected_revision:0,operation_id:'browser-research-'+base})).id;
+    planning=(await s.runtimeProfiles.save(owner,{name:'planning-'+base,state:'active',expected_revision:0,operation_id:'browser-planning-'+base})).id;
+    const unknown=await capture({profile:'unregistered'});await assert.rejects(s.browser.admit(owner,unknown),{code:'profile_scope_denied'});
+    const wrongAudience=await capture({scope:group,profile:research});await assert.rejects(s.browser.admit(owner,wrongAudience),{code:'profile_scope_denied'});
     const first=await capture();await assert.rejects(s.browser.admit({admin:false,scope:'123'},first),{status:403});
     await s.browser.admit(owner,first);assert.equal((await run(first.event_id)).state,'waiting');assert.equal(calls.length,0);
     const second=await capture({conversation:first.conversation,id:'second'});await assert.rejects(s.browser.admit(owner,second),{code:'session_busy'});
-    const other=await capture({conversation:first.conversation,profile:'planning'});await s.browser.admit(owner,other);await s.browser.cancel(other);
+    const other=await capture({conversation:first.conversation,profile:planning});await s.browser.admit(owner,other);await s.browser.cancel(other);
     await prepare(first.event_id);mode='ack_lost';
     const firstWorkflow=(await stores.control.query("SELECT id FROM workflow_registry WHERE family='browser' AND job_id=$1",[first.event_id])).rows[0].id;
     await advanceWorkflow(stores.control,firstWorkflow,1,'browser','fixture-first',storageWorkflowOperations(s,runtime).browser!);
@@ -76,7 +80,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     assert.equal((await stores.archive.query('SELECT original_text FROM events WHERE id=$1',[first.event_id])).rows[0].original_text.toString(),first.text);
     const result={event_id:first.event_id,actor:contexts.get(first.event_id).actor,state:'done',text:'Generated answer',session:first.conversation,error_code:null};
     assert.equal((await s.browser.finish(result)).duplicate,true);await assert.rejects(s.browser.finish({...result,text:'Changed receipt'}),{code:'derivative_identity_conflict'});
-    await assert.rejects(s.browser.observe({...first,profile:'planning'}),{code:'run_profile_mismatch'});
+    await assert.rejects(s.browser.observe({...first,profile:planning}),{code:'run_profile_mismatch'});
     const lost=await capture();await s.browser.admit(owner,lost);await prepare(lost.event_id);failCompletion=true;await run(lost.event_id);
     assert.equal((await saved(lost.event_id)).state,'running');const count=calls.length;assert.equal((await run(lost.event_id)).state,'completed');assert.equal(calls.length,count,'durable result repairs control without runtime');
     const absent=await capture();await s.browser.admit(owner,absent);await prepare(absent.event_id);mode='request_lost';await run(absent.event_id);await run(absent.event_id);
@@ -123,6 +127,11 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     await s.derivativePortability.restore(owner,[portable]);const beforeHistory=calls.length;
     await assert.rejects(run(historical.event_id),{code:'imported_result_not_execution_receipt'});assert.equal(calls.length,beforeHistory);
     assert.equal((await saved(historical.event_id)).result_reference,null);assert.equal((await s.browser.observe(historical)).text,'');
+    const retiring=await capture({profile:planning});await s.browser.admit(owner,retiring);await prepare(retiring.event_id);
+    const retirement=await s.runtimeProfiles.save(owner,{id:planning,name:'planning-'+base,state:'retired',expected_revision:1,operation_id:'browser-retire-'+base});
+    assert.equal(retirement.state,'retired');const beforeRetirement=calls.length;
+    assert.equal((await run(retiring.event_id)).state,'cancelled');assert.equal(calls.length,beforeRetirement,'retired queued profile never reaches native execution');
+    await assert.rejects(s.browser.admit(owner,retiring),{code:'profile_scope_denied'});
     const columns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='managed_runs'")).rows.map(r=>r.column_name);
     assert.ok(!columns.some(c=>['payload','content','text','transcripts'].includes(c)));
     assert.equal((await stores.archive.query("SELECT count(*)::int AS n FROM events WHERE kind IN ('browser_result','runtime_context')")).rows[0].n,0);

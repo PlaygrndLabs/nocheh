@@ -29,7 +29,7 @@ def audience_revision(token,space):
 
 
 class Administration:
-    def __init__(self, app, root, model, policy, token, browser_enabled=False, revision_reader=None):
+    def __init__(self, app, root, model, policy, token, browser_enabled=False, revision_reader=None, profile_catalog=None):
         from .isolated_profile import install_database_paths
         install_database_paths()
         self.app, self.root, self.model = app, Path(root).resolve(), model
@@ -37,8 +37,14 @@ class Administration:
         self.lock = asyncio.Lock()
         self.browser_enabled = browser_enabled
         self.revision_reader = revision_reader
+        self.profile_catalog = profile_catalog
+        if self.profile_catalog is None and os.environ.get('NOCHEH_STORAGE_LAYOUT') == 'original-only-v1':
+            from .runtime_profiles import ProfileCatalog
+            self.profile_catalog = ProfileCatalog(self.root, policy, token)
 
     def binding(self,name):
+        if self.profile_catalog:
+            return self.profile_catalog.validate(self.profile_catalog.resolve(name))
         if not self.policy.owner:raise ValueError('owner_profile_unavailable')
         if not name or name in ('default','current'):name=Scopes.profile(self.policy.owner)
         path=self.root/'profiles'/name
@@ -59,6 +65,8 @@ class Administration:
         raise ValueError('profile_scope_denied')
 
     def preference_home(self,name,home):
+        if self.profile_catalog:
+            return self.profile_catalog.path(self.profile_catalog.resolve(name)['preference_profile'])
         bound=self.binding(name)
         return self.root/'profiles'/Scopes.profile(bound.space) if bound.revision else home
 
@@ -75,6 +83,15 @@ class Administration:
         return name, path
 
     def profiles(self):
+        if self.profile_catalog:
+            result = []
+            for entry in self.profile_catalog.list():
+                path = self.profile_catalog.path(entry['native_profile'])
+                result.append({**entry, 'path': str(path), 'model': self.model, 'provider': 'openai-codex',
+                    'has_env': False, 'skill_count': 0, 'gateway_running': False, 'has_alias': False,
+                    'description': 'Owner private' if entry['owner'] else 'Managed Telegram group',
+                    'scope': 'owner' if entry['owner'] else 'group', 'exists': path.exists()})
+            return {'profiles': result}
         names = [Scopes.profile(chat) for chat in [self.policy.owner, *self.policy.groups] if chat]
         parent = self.root / 'profiles'
         if parent.exists():
@@ -221,7 +238,8 @@ class Administration:
                     result=await upload_chat_image(ChatImageUpload(**body),name)
                 elif path == '/api/profiles' and method == 'GET': result = self.profiles()
                 elif path == '/api/profiles/active' and method == 'GET':
-                    result = {'active': self.profile('')[0], 'current': self.profile('')[0]}
+                    active = self.profile_catalog.resolve()['name'] if self.profile_catalog else self.profile('')[0]
+                    result = {'active': active, 'current': active}
                 elif path == '/api/profiles' and method == 'POST':
                     new = body.get('name', '')
                     if not isinstance(new, str) or not NAME.fullmatch(new) or new.startswith('nocheh-') or new in ('default', 'current'):
@@ -230,29 +248,43 @@ class Administration:
                         raise ValueError('profile_import_requires_managed_bootstrap')
                     if body.get('provider') not in (None, '', 'openai-codex') or body.get('model') not in (None, '', self.model):
                         raise ValueError('subscription_model_managed_by_nocheh')
-                    (self.root / 'profiles').mkdir(exist_ok=True, mode=0o700)
-                    dest = self.root / 'profiles' / new
-                    dest.mkdir(mode=0o700, parents=False, exist_ok=False)
-                    atomic_yaml(dest / 'config.yaml', {})
-                    (dest / 'nocheh-owner-profile.json').write_text('{"scope":"owner"}')
-                    (dest / 'workspace').mkdir(mode=0o700)
+                    if self.profile_catalog:
+                        self.profile_catalog.save({'name': new, 'state': 'active', 'expected_revision': 0,
+                            'operation_id': body.get('operation_id') or 'native-profile-' + uuid.uuid4().hex})
+                    else:
+                        (self.root / 'profiles').mkdir(exist_ok=True, mode=0o700)
+                        dest = self.root / 'profiles' / new
+                        dest.mkdir(mode=0o700, parents=False, exist_ok=False)
+                        atomic_yaml(dest / 'config.yaml', {})
+                        (dest / 'nocheh-owner-profile.json').write_text('{"scope":"owner"}')
+                        (dest / 'workspace').mkdir(mode=0o700)
                     result = {'status': 'created', 'name': new, 'profile': next(p for p in self.profiles()['profiles'] if p['name'] == new)}
                 elif re.fullmatch(r'/api/profiles/[^/]+', path) and method in ('PATCH','DELETE'):
-                    import time
-                    selected, source = self.profile(path.rsplit('/',1)[1])
-                    if selected.startswith('nocheh-'): raise ValueError('managed_profile_binding_immutable')
-                    if method == 'DELETE':
-                        retired = self.root / 'retired-profiles'; retired.mkdir(exist_ok=True, mode=0o700)
-                        source.rename(retired / (selected + '-' + str(time.time_ns())))
-                        result = {'ok':True, 'retained':'retired-profiles'}
+                    if self.profile_catalog:
+                        entry = self.profile_catalog.resolve(path.rsplit('/', 1)[1])
+                        if entry['managed']: raise ValueError('managed_profile_binding_immutable')
+                        saved = self.profile_catalog.save({'id': entry['logical_profile'],
+                            'name': body.get('new_name', '') if method == 'PATCH' else entry['name'],
+                            'state': 'active' if method == 'PATCH' else 'retired',
+                            'expected_revision': body.get('expected_revision', entry['revision']),
+                            'operation_id': body.get('operation_id') or 'native-profile-' + uuid.uuid4().hex})
+                        result = {'ok': True, **saved, 'retained': 'native history and saved preferences'}
                     else:
-                        new = body.get('new_name', '')
-                        if not isinstance(new,str) or not NAME.fullmatch(new) or new.startswith('nocheh-') or new in ('default','current'):
-                            raise ValueError('invalid_profile_name')
-                        target = self.root / 'profiles' / new
-                        if target.exists(): raise FileExistsError()
-                        source.rename(target)
-                        result = {'ok':True, 'name':new, 'path':str(target)}
+                        import time
+                        selected, source = self.profile(path.rsplit('/',1)[1])
+                        if selected.startswith('nocheh-'): raise ValueError('managed_profile_binding_immutable')
+                        if method == 'DELETE':
+                            retired = self.root / 'retired-profiles'; retired.mkdir(exist_ok=True, mode=0o700)
+                            source.rename(retired / (selected + '-' + str(time.time_ns())))
+                            result = {'ok':True, 'retained':'retired-profiles'}
+                        else:
+                            new = body.get('new_name', '')
+                            if not isinstance(new,str) or not NAME.fullmatch(new) or new.startswith('nocheh-') or new in ('default','current'):
+                                raise ValueError('invalid_profile_name')
+                            target = self.root / 'profiles' / new
+                            if target.exists(): raise FileExistsError()
+                            source.rename(target)
+                            result = {'ok':True, 'name':new, 'path':str(target)}
                 elif re.fullmatch(r'/api/profiles/[^/]+/soul', path) and method == 'GET':
                     _, selected = self.profile(path.split('/')[-2])
                     soul = selected / 'SOUL.md'
@@ -361,18 +393,18 @@ class Administration:
                 await JSONResponse({'error': 'profile_exists'}, 409)(scope, receive, send)
             except ValueError as error:
                 code = str(error) if re.fullmatch(r'[a-z_]+', str(error)) else 'invalid_request'
-                await JSONResponse({'error': code, 'detail': code}, 409 if code == 'configuration_conflict' else 400)(scope, receive, send)
+                await JSONResponse({'error': code, 'detail': code}, 409 if code.endswith('_conflict') or code == 'profile_retired' else 400)(scope, receive, send)
             except Exception:
                 await JSONResponse({'error': 'native_administration_unavailable'}, 503)(scope, receive, send)
 
 
-def create_app(root, model, policy, token, browser_enabled=False, revision_reader=None, presentation_home=None):
+def create_app(root, model, policy, token, browser_enabled=False, revision_reader=None, presentation_home=None, profile_catalog=None):
     from hermes_cli import web_server as native
     from hermes_cli import web_server_sessions as sessions
     from hermes_cli.web_routers import sessions as router
     from hermes_state import SessionDB
     from hermes_cli import web_server_profiles, web_server_cron
-    app = Administration(native.app, root, model, policy, token, browser_enabled, revision_reader)
+    app = Administration(native.app, root, model, policy, token, browser_enabled, revision_reader, profile_catalog)
     from .presentation import install
     install(presentation_home or Path(root)/'dashboard-presentation')
     web_server_profiles._resolve_profile_dir = lambda name: app.profile(name)[1]

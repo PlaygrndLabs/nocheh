@@ -96,8 +96,8 @@ Managed capabilities include the admitted logical profile. Named profiles have
 separate native identities and prepared-text caches within each audience and
 guard generation; default profiles share their identity across transports.
 Only preferences carry into a new native generation automatically, never old
-unprepared notes. Native administration and managed-run routing remain separate
-integration steps.
+unprepared notes. Native profile administration and browser admission resolve
+the control catalog; scheduler routing remains a separate integration step.
 Browser submission capture is filesystem-only until replay: original file bytes
 are durable before the source spool entry, and archive commits all manifests with
 the source. API acknowledgment reports `spooled`; execution requires separate
@@ -112,8 +112,8 @@ An unstarted browser submission binds its execution guard revision after initial
 file preparation/selection. The first native request intent is durable before the
 call; after that boundary a changed guard cannot silently rebind the run. Default
 logical profile IDs stay stable while native state remains generation isolated.
-Native profile administration and confirmed browser-delivery capture still need
-their end-to-end integration. Scheduler migration, host import coordination, and the full installation rehearsal still
+Confirmed browser-delivery capture still needs its end-to-end integration.
+Scheduler migration, host import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.
@@ -122,8 +122,13 @@ The candidate native-profile catalog lives in control storage. Its owner-only
 `/v1/runtime/profiles` and `/v1/runtime/profiles/resolve` operations distinguish
 display names, stable logical/preference identities, and current native directory
 identities. Rename/retire revokes contexts in the same control transaction.
-Native administration and managed admission must consume this catalog before the
-candidate can be activated; saved native preferences require explicit migration.
+Native administration and browser admission consume this catalog, rejecting
+retired identities, stale native directory aliases, and wrong audiences. Native
+filesystem markers supply topic lookup hints only. Stable preference directories
+survive rename and feed the next native turn without copying notes or sessions.
+Saved native preferences still require explicit migration before activation, and
+the combined UI/runtime rehearsal must verify generation changes during media
+preparation and browser reconnect.
 
 Run `NOCHEH_STORES_FIXTURE=1 python3 -m scripts.store_wiring_check` to render the
 combined Compose configuration with temporary synthetic credentials, inspect

@@ -26,13 +26,15 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
             finally: db.close()
     env = {key:os.environ[key] for key in ('LANG','LC_ALL','LD_LIBRARY_PATH','SERVICE_TOKEN',
         'ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS',
-        'NOCHEH_SECURITY_RUNTIME','NOCHEH_MEMORY_CONTEXT','NOCHEH_REASONING_ROUTE') if key in os.environ}
+        'NOCHEH_SECURITY_RUNTIME','NOCHEH_MEMORY_CONTEXT','NOCHEH_REASONING_ROUTE','NOCHEH_STORAGE_LAYOUT') if key in os.environ}
     env.update(PATH='/opt/venv/bin:/usr/local/bin:/usr/bin:/bin',HOME=str(home),HERMES_HOME=str(home),
         PYTHONPATH='/workspace:/opt/hermes',HERMES_PYTHON='/opt/venv/bin/python',
         HERMES_PYTHON_SRC_ROOT='/opt/hermes',HERMES_CWD=str(workspace),
         NOCHEH_RUNTIME_HOME=str(admin.root),NOCHEH_MODEL=admin.model,
         NOCHEH_BROWSER_PROFILE=name,NOCHEH_BROWSER_SCOPE=chat,NOCHEH_BROWSER_OWNER='1' if owner else '0',
         NOCHEH_BROWSER_SPACE=bound.space,NOCHEH_BROWSER_REVISION=str(bound.revision),
+        NOCHEH_BROWSER_LOGICAL_PROFILE=bound.logical_profile,NOCHEH_BROWSER_GENERATION=bound.generation,
+        NOCHEH_BROWSER_GUARD_EPOCH=str(bound.guard_epoch),
         NOCHEH_BROWSER_OWNER_ID=admin.policy.owner,NOCHEH_CAPTURE_ENABLED='0',
         NODE_ENV='production',HERMES_TUI_DISABLE_MOUSE='1',HERMES_TUI_INLINE='1',HERMES_TUI_DASHBOARD='1',
         COLORTERM='truecolor',TERM='xterm-256color')

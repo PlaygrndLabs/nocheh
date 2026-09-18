@@ -51,6 +51,15 @@ class BrowserGatewayTests(unittest.TestCase):
         result=self.invoke('prompt.submit',text=' exact\r\n ',nocheh_event_id='event-one')
         if thread:=self.server._sessions['sid'].get('_nocheh_thread'): thread.join(10);self.assertFalse(thread.is_alive())
         return result
+    def test_control_requests_use_stable_logical_profile(self):
+        from dataclasses import replace
+        self.gateway.scope=replace(self.gateway.scope,logical_profile='profile-'+'a'*48,
+            generation='11111111-1111-4111-8111-111111111111',guard_epoch=2)
+        self.assertIn('result',self.capture());self.assertIn('result',self.submit())
+        for route,body in self.calls:
+            if route.endswith(('/input','/admit')) or route=='/internal/browser/events':
+                self.assertEqual(body['profile'],self.gateway.scope.logical_profile)
+        self.assertEqual(self.gateway.home,self.root/'profiles/group-one')
     def test_capture_required_scope_and_forbidden_operations(self):
         self.assertIn('error',self.submit());self.assertEqual(self.run_count,0)
         self.assertIn('error',self.invoke('shell.exec',command='echo secret'))
