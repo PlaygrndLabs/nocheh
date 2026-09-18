@@ -7,6 +7,17 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The reset preflight now enumerates exact installation paths, container identities,
+and configured PostgreSQL/Honcho/Redis volumes without stopping services or copying
+content. It checks both running and stopped containers for shared volume/state
+ownership, verifies Compose origin/mount bindings, and flags unknown paths and
+symlinked preservation targets. `./scripts/nocheh reset plan --output FILE` writes a
+private, explicitly non-executable inventory; frozen preservation and execution
+gates remain separate. Seven focused checks pass. The read-only installation audit
+identified 17 containers, three volumes, and 63 path dispositions with no ownership
+conflicts. Existing restores and external backup/export directories still require
+per-item ownership review. [Inventory evidence](compatibility/results/2026-09-18-reset-inventory.json).
+
 The reset's provider-accounting cleanup is a verified candidate. The installation
 audit found that the monitor mixes accounting with raw failure bodies, response
 metadata, inspection logs, and search text. The pinned-schema cleanup preserves

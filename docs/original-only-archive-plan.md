@@ -402,6 +402,18 @@ The full running application/native/UI rehearsal remains separate.
 
 <reset>
 
+Run `./scripts/nocheh reset plan --output NEW_FILE` with the saved installation
+root/state to create a private read-only preflight. It inventories exact container
+IDs and Compose origins, current database/cache mount identities, and explicit
+path dispositions. Both running and stopped foreign containers can block shared
+state or volume ownership. External volume drivers, unknown paths, and symlinked
+preservation targets require review. Existing restorations and external archives
+need per-item ownership evidence before entering an executable reset manifest.
+The preflight contains no configuration values or source content and cannot
+execute deletion. Revalidate and freeze it under maintenance exclusion after the
+complete isolated acceptance gates; the executor must not treat this preflight
+or its configuration fingerprint as an execution authorization.
+
 `integrations.hermes.preference_transfer` captures only the eight preferences
 accepted by the managed native interface. Preserve global defaults and explicit
 profile overrides separately, including the absence of topic overrides. Legacy
