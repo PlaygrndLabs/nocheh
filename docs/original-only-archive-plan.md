@@ -35,6 +35,37 @@ session worktree and integrate verified increments under the shared Git lock.
 
 </increments>
 
+<owner_interface_rehearsal>
+
+Use `compatibility/stores-compose.yml` with
+`compatibility/stores-dashboard-compose.yml` and profile `owner-preview` for the
+candidate owner-interface fixture. Build the dashboard and TypeScript first. Set
+an explicit fixture image, a dedicated Compose project, and a free localhost port
+in a session-owned environment file (`NOCHEH_STORES_FIXTURE_IMAGE`,
+`NOCHEH_STORES_FIXTURE_PROJECT`, `NOCHEH_STORES_UI_PORT`). Verify the actual
+PostgreSQL cluster marker before seeding. Keep the foreground Compose terminal
+visible alongside the preview. Restart the preview container after each rebuild,
+because the build replaces the mounted output directories. Reload the browser
+and inspect the new bundle before recording UI evidence. Never reuse an
+installation database or credentials.
+
+The fixture exercises real archive/derived/control repositories and owner
+session/CSRF boundaries with synthetic messages, exact original file bytes,
+versioned fixture transcription, deterministic privacy filtering, and inspectable
+learning projections. It does not run Telegram, live Honcho, subscription providers,
+background execution, or credential refresh. Those remain separate full-rehearsal
+and live gates. Seeding is idempotent and retains owner edits and active selections
+across fixture restarts.
+
+Verify learned-memory corrections/history/retirement, project inheritance and
+exclusions, approved and filtered sharing previews/revocation, original-source
+inspection, two file-reading versions, guarded edits, reprocessing and activation.
+Check retained drafts after revision conflicts, keyboard focus return and visibility
+in long panels, desktop and 375px layouts, and light/dark appearances. File readings
+are the default source-version view; all internal derivatives remain inspectable.
+
+</owner_interface_rehearsal>
+
 <reset>
 
 Stop ingress, scheduling, execution, learning, and provider refresh ownership;

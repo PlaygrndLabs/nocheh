@@ -21,8 +21,8 @@ projects, and explicitly managed sharing are accepted requirements.
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
-| Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI verified as candidates; dashboard, portability, and backup pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, workers, explicit sharing, and owner API/CLI verified as candidates; production wiring and dashboard pending |
+| Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; portability, backup, and production routing pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, workers, explicit sharing, and owner API/CLI/dashboard verified as candidates; production wiring pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
@@ -203,6 +203,32 @@ diff hygiene, and AST-only Graphify pass (361 files, 2,219 nodes, 8,563 edges,
 zero model calls). No live credentials, provider calls, or installation state were
 used. Dashboard and production routing remain pending.
 [Sharing evidence](compatibility/results/2026-09-18-store-sharing.json).
+
+The candidate dashboard now provides learned-memory inspection, evidence links,
+conflicts, corrections, retirement/restoration, and immutable history; project
+creation/editing/archive and topic inheritance/exclusion; and sharing rule,
+preview, exact approval, provenance, and revocation controls. Source details keep
+immutable originals first and show file readings by default, with an explicit
+internal-derivative view. Reprocessing, prepared activation, guarded owner edits,
+and revision history use the separated owner API. Revision conflicts retain drafts;
+uncertain retries retain their operation IDs while the form is open.
+
+The separate `nocheh-stores-ui-20260918` Compose project exposes only
+`127.0.0.1:18859`, uses its own database volume and synthetic credentials, and runs
+no provider, poller, scheduler, native learning, or credential refresh. Browser
+checks cover corrections/retirement/restoration, project/topic operations,
+approved/filtered previews and revocation, rejected out-of-scope sources, two
+transcript versions and retained owner edits, desktop/mobile light/dark layouts,
+keyboard dismissal/focus return and long-panel focus visibility. No horizontal
+page overflow was observed at 375px. The browser console is free of warnings/errors.
+
+Three affected PostgreSQL tests and fourteen existing dashboard checks pass
+across the recorded runs. The host socket-boundary test initially failed with
+`EPERM`; its isolated-container rerun passes. Initial preview port publication
+and keyboard-focus defects were fixed and checked again. TypeScript, production
+build, diff hygiene, and AST-only Graphify pass. This verifies candidate owner
+interfaces, not complete production Compose acceptance or fresh live gates.
+[Owner dashboard evidence](compatibility/results/2026-09-18-store-dashboard.json).
 
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,

@@ -1,12 +1,15 @@
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity as ActivityIcon,Archive as ArchiveIcon,ArrowUpRight,BrainCircuit,Database,FolderInput,GitFork,Home,Menu,PanelLeftClose,PanelLeftOpen,Plug,RefreshCw,Settings as SettingsIcon,ShieldCheck,Wrench,X} from 'lucide-react';
+import {Activity as ActivityIcon,Archive as ArchiveIcon,ArrowUpRight,BrainCircuit,Database,FolderInput,FolderKanban,Share2,GitFork,Home,Menu,PanelLeftClose,PanelLeftOpen,Plug,RefreshCw,Settings as SettingsIcon,ShieldCheck,Wrench,X} from 'lucide-react';
 import {Status} from './pages/overview';
 import {Settings} from './pages/settings.js';
 import {Jobs} from './pages/imports.js';
 import {Archive} from './pages/archive';
 import {Activity} from './pages/activity';
 import {Memory} from './pages/memory';
+import {LearnedMemory} from './pages/learned';
+import {Projects} from './pages/projects';
+import {Sharing} from './pages/sharing';
 import {Honcho} from './pages/honcho.js';
 import {Source} from './pages/source.js';
 import {Graph} from './pages/graph.js';
@@ -19,13 +22,13 @@ import {Button,Sheet,Tooltip} from './components/ui/primitives';
 import {ThemeSelect} from './lib/theme';
 import {StatusBadge} from './components/status';
 import {useResource,refreshResources} from './lib/resource';
-const pages={overview:Status,monitoring:Monitoring,archive:Archive,activity:Activity,imports:Jobs,settings:Settings,integrations:Integrations,spaces:SpaceControls,graph:Graph,operations:Operations,memory:Memory,honcho:Honcho,Source,call};
+const pages={overview:Status,monitoring:Monitoring,archive:Archive,activity:Activity,imports:Jobs,settings:Settings,integrations:Integrations,spaces:SpaceControls,graph:Graph,operations:Operations,memory:Memory,learned:LearnedMemory,projects:Projects,sharing:Sharing,honcho:Honcho,Source,call};
 const routes=[
- ['overview','Overview',Home,'Your conversations, memory, and assistant at a glance.'],['archive','Archive',ArchiveIcon,'Find originals and inspect the evidence behind generated text.'],['memory','Memory',BrainCircuit,'Working notes and conversations, separated by profile.'],['honcho','Honcho memory',Database,'Primary memory availability and synchronization.'],['graph','Graph',GitFork,'Explore recorded relationships and their sources.'],
+ ['overview','Overview',Home,'Your conversations, memory, and assistant at a glance.'],['archive','Archive',ArchiveIcon,'Find originals and inspect the evidence behind generated text.'],['learned','Learned memory',BrainCircuit,'Inspect meanings, evidence, conflicts, and owner corrections.'],['memory','Memory',BrainCircuit,'Working notes and conversations, separated by profile.'],['honcho','Honcho memory',Database,'Primary memory availability and synchronization.'],['graph','Graph',GitFork,'Explore recorded relationships and their sources.'],
  ['monitoring','Monitoring',ActivityIcon,'System health, workflow progress, and historical trends.'],['activity','Activity',ShieldCheck,'Review approvals, permissions, and conversation results.'],
- ['imports','Imports',FolderInput,'Bring Telegram history into your owned archive.'],['spaces','Memory access',ShieldCheck,'Control what each group and topic can use.'],['integrations','Integrations',Plug,'The connected tools behind your personal brain.'],['settings','Settings',SettingsIcon,'Telegram access, agent preferences, and privacy.'],['operations','Maintenance',Wrench,'Diagnostics, exports, backups, and recovery.']
+ ['projects','Projects',FolderKanban,'Organize conversations and their interpretation conventions.'],['sharing','Sharing',Share2,'Choose sources, destinations, and the exact knowledge they can use.'],['imports','Imports',FolderInput,'Bring Telegram history into your owned archive.'],['spaces','Memory access',ShieldCheck,'Control what each group and topic can use.'],['integrations','Integrations',Plug,'The connected tools behind your personal brain.'],['settings','Settings',SettingsIcon,'Telegram access, agent preferences, and privacy.'],['operations','Maintenance',Wrench,'Diagnostics, exports, backups, and recovery.']
 ] as const;
-const groups=[['Knowledge',['overview','archive','memory','honcho','graph']],['Operations',['monitoring','activity']],['Manage',['imports','spaces','integrations','settings','operations']]] as const;
+const groups=[['Knowledge',['overview','archive','learned','memory','honcho','graph']],['Operations',['monitoring','activity']],['Manage',['projects','sharing','imports','spaces','integrations','settings','operations']]] as const;
 function currentRoute(){const key=location.hash.slice(1).split('?')[0];return routes.some(r=>r[0]===key)?key:'overview';}
 function PersistentStatus(){const {data,error}=useResource<any>('/monitoring',10000);return <a className="persistent-status" href="#monitoring" aria-label="Inspect system status"><StatusBadge state={error?'stale':data?.application?.ok?'ready':data?.application?.ok===false?'failed':'unknown'} label={error?'Status stale':data?.application?.ok?'API ready':data?.application?.ok===false?'API unavailable':'Status unobserved'}/></a>;}
 function App(){

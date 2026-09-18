@@ -48,13 +48,14 @@ export class ProjectRepository {
       return result;
     });
   }
-  async effective(space:string):Promise<{space:string;assignment:Assignment|null;project:Project|null;inherited:boolean}> {
+  async effective(space:string):Promise<{space:string;own_assignment:Assignment|null;assignment:Assignment|null;project:Project|null;inherited:boolean}> {
     validateSpace(space);const parent=parentSpace(space);
     const {rows}=await this.control.query(`SELECT a.*,row_to_json(p) AS project FROM project_assignments a
       LEFT JOIN projects p ON p.id=a.project_id WHERE a.space_id=$1 OR a.space_id=$2`,[space,parent]);
     const own=rows.find(r=>r.space_id===space),inherited=!own||own.mode==='inherit';
     const chosen=inherited?rows.find(r=>r.space_id===parent):own;
-    return {space,assignment:chosen?{space_id:chosen.space_id,project_id:chosen.project_id,mode:chosen.mode,revision:chosen.revision}:null,
+    return {space,own_assignment:own?{space_id:own.space_id,project_id:own.project_id,mode:own.mode,revision:own.revision}:null,
+      assignment:chosen?{space_id:chosen.space_id,project_id:chosen.project_id,mode:chosen.mode,revision:chosen.revision}:null,
       project:chosen?.project??null,inherited:!!chosen&&inherited};
   }
   async list(principal:Reader,after='') {
