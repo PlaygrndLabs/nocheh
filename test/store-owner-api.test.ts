@@ -44,6 +44,19 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'88',revision:'1',occurred_at:null,text:'A convention',
       payload:{message:{message_id:88,chat:{id:123,type:'private'},voice:{file_id:key}}}};
     const captured=(await services.capture.capture(event)).source,file=await services.attachments.commit(captured.artifact_ids[0]!,Buffer.from('Original voice bytes'));
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const consentPath='/v1/sources/'+file.event.id+'/learning-consent';
+    assert.equal((await request(consentPath)).revision,0);
+    const beforeConsent=await services.guards.state(),deny={enabled:false,expected_revision:0,operation_id:key+':learning-denied'};
+    assert.equal((await request(consentPath,deny)).revision,1);assert.equal((await request(consentPath)).effective,false);
+    const afterConsent=await services.guards.state();assert.ok(afterConsent.epoch>beforeConsent.epoch);
+    await assert.rejects(services.guards.assertCurrent(beforeConsent),{code:'guard_context_changed'});
+    await request(consentPath,deny);assert.deepEqual(await services.guards.state(),afterConsent,'duplicate consent cannot advance authority twice');
+    await request(consentPath,{...deny,enabled:true,operation_id:key+':stale-consent'},409);
+    await request(consentPath,{enabled:true,expected_revision:1,operation_id:key+':learning-allowed'});
+    assert.equal((await request(consentPath)).effective,true);
+    const scopedConsent=await fetch(base+consentPath,{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}});
+    assert.equal(scopedConsent.status,403,'conversation content cannot grant learning consent');
     const body={artifact_id:file.id,input_hash:file.input_hash,producer:'fixture',producer_version:'1',configuration:{},operation_id:key+':reprocess'};
     const first=await request('/v1/sources/'+file.event.id+'/reprocess',body);
     assert.equal((await request('/v1/sources/'+file.event.id+'/reprocess',body)).id,first.id);

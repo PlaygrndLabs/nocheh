@@ -4,7 +4,7 @@
 
 <status>
 These routes use the three-store repository composition and have isolated HTTP
-acceptance. Production API mounting and the complete dashboard are tracked in
+acceptance. The original-only application mounts these routes. Installation and full dashboard acceptance are tracked in
 [TASK.md](../TASK.md); this document does not claim runtime activation.
 </status>
 
@@ -25,6 +25,7 @@ source identifiers and links do not change when a derivative is activated.
 | GET `/v1/sources/:id/derivatives` | Version metadata, provenance, guarded readiness and active selection |
 | POST `/v1/sources/:id/reprocess` | Queue work from a verified original file hash |
 | POST `/v1/sources/:id/prepare` | Request deterministic preparation in the current authorization epoch |
+| GET/POST `/v1/sources/:id/learning-consent` | Inspect effective learning permission or save an explicit owner decision |
 | GET `/v1/reprocessing/:id` | Execution state and durable result reference |
 | GET `/v1/derivatives/:id` | Exact saved output, producer/configuration/input provenance and guard link |
 | POST `/v1/derivatives/:id/activate` | Activate a prepared version; `expected_revision: null` for the first selection |
@@ -45,6 +46,12 @@ List cursors use `after`; histories use `before`. Learned filters use both
 `scope_kind=conversation|project` and `scope_id`. Sharing rules configure preparation;
 they never grant direct reads of another conversation. Native ancestry explicitly
 reports missing provenance and is not labeled an exact quote citation.
+
+Learning consent uses `enabled`, `expected_revision` (zero for the first explicit
+decision), and `operation_id`. A successful change revokes previous contexts and
+queues memory refresh in the same control transaction. Imported sources do not
+gain learning permission merely by being imported. This permission cannot cause
+old Telegram messages to be answered or authorize an external action.
 </routes>
 
 <cli>
@@ -54,6 +61,9 @@ local API configuration without running setup or activating services.
 
 - `sources versions EVENT_ID`, `sources derivative DERIVATIVE_ID`, and
   `sources job JOB_ID` inspect records.
+- `sources learning-consent EVENT_ID` inspects permission. `sources set-learning
+  EVENT_ID --enabled true|false --revision N --operation-id REQUEST_ID` grants or
+  revokes learning for that source.
 - `sources reprocess EVENT_ID --artifact FILE_ID --input-hash SHA256 --engine NAME
   --version VERSION --operation-id REQUEST_ID` queues a version; optional
   `--configuration FILE` supplies engine configuration.

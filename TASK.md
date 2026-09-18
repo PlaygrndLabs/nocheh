@@ -407,6 +407,16 @@ broader tools, managed execution, portability coordination, reset, and live gate
 remain pending.
 [Telegram dispatch evidence](compatibility/results/2026-09-18-store-telegram-dispatch.json).
 
+Source learning consent is now exposed through owner-only GET/POST API and
+`sources learning-consent` / `sources set-learning` CLI operations. The effective
+permission distinguishes capture policy from explicit owner decisions. Grants
+and revocations use revision checks and idempotent operations; they revoke prior
+contexts and queue memory refresh atomically. Scoped callers cannot submit a
+consent body. Two affected real-database owner/source-portability checks and five
+Python CLI checks pass, with TypeScript and AST-only Graphify. This exposes the
+existing consent boundary without enabling imported-source replies or effects.
+[Learning consent evidence](compatibility/results/2026-09-18-source-learning-consent.json).
+
 
 
 
