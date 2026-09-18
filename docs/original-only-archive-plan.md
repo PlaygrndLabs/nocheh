@@ -210,8 +210,8 @@ without dispatching old replies, fetching historical Telegram attachments, or
 automatically authorizing imported sources for learning. Explicit owner learning
 consent remains separate. A duplicate import cannot change an existing live
 capture admission. Source-only imports reject bundles containing derivative or
-guarded records, rather than silently losing them; complete and legacy bundle
-routing is a separate implementation gate.
+guarded records, rather than silently losing them. The complete v2 coordinator
+routes these domains separately; legacy bundle conversion remains pending.
 
 Verify source identity/wire/timestamps, exact binary and empty files, read-only
 export during control unavailability, import control-outage behavior, interrupted
@@ -246,9 +246,8 @@ guard restoration, prepared selection activation, or learned correction uses the
 normal revision and revocation paths. Duplicate imports preserve subsequent
 destination edits and selections; immutable conflicts fail without replacing data.
 
-The bundle coordinator below composes these repositories. Native Honcho database
-rehydration, legacy bundle conversion, and complete installation recovery remain
-separate gates. A full export validates source/derivative reference completeness
+The bundle coordinator below composes these repositories. Legacy bundle conversion and complete installation recovery remain separate
+gates; native Honcho row restoration has an explicit inactive coordinator below. A full export validates source/derivative reference completeness
 before publishing its complete manifest. A concurrent append or head change that
 leaves a missing parent/revision fails the candidate export explicitly.
 
@@ -281,8 +280,18 @@ manifest, and records a durable import receipt. Retry uses the same package and
 refuses to overwrite changed native files. Imported guards, selections, learned
 projections, caches, and native state cannot authorize execution or attachment.
 An owner must adopt representations through the normal guarded/revisioned paths.
-Honcho rehydration into a fresh inactive native database still requires its own
-rehearsal; staging JSON is not that database-restore acceptance gate.
+Restore staged Honcho rows with
+`./scripts/nocheh import --honcho-memory DIRECTORY/honcho --inactive-state STATE`.
+The target must have a restored-inactive marker and an empty, initialized native
+database whose column types match the pinned package. The coordinator rejects
+running writers and orphan writable state mounts. It starts no service and changes
+no attachment, provider, or spending configuration. Data enters temporary tables
+before a single transaction materializes all eight memory tables. Exact completed
+replay is accepted; a populated conflicting target, nonempty native queue/webhook
+state, schema mismatch, or malformed row fails without replacing memory. Native
+identity sequences advance past imported IDs. The standalone synthetic rehearsal
+checks those boundaries; full acceptance against the pinned native service and
+coordinated installation restore remains a separate gate.
 
 Verify `store-portable-bundle.test.ts` using the fixture's read-only `scripts` and
 `integrations` mounts in addition to `dist`. It exports from one empty three-store

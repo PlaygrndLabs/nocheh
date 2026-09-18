@@ -37,7 +37,7 @@ class NativeMemoryExport:
 
     def query(self,snapshot,sql,output=None):
         if not SNAPSHOT.fullmatch(snapshot):raise ValueError('native_memory_snapshot_invalid')
-        command="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION SNAPSHOT '"+snapshot+"'; SET LOCAL statement_timeout='120s'; "+sql+'; COMMIT;'
+        command="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION SNAPSHOT '"+snapshot+"'; SET LOCAL statement_timeout='120s'; SET LOCAL TIME ZONE 'UTC'; "+sql+'; COMMIT;'
         return subprocess.run(self.prefix+['-c',command],env=self.environment,stdout=output if output else subprocess.PIPE,
             stderr=subprocess.DEVNULL,text=output is None,check=True).stdout
 
@@ -69,6 +69,76 @@ class NativeMemoryExport:
                 result['tables'][table]={'columns':columns,'rows':count,'sha256':file_digest(path),'size':path.stat().st_size}
         result['complete']=True;metadata.write_text(json.dumps(result,indent=2)+'\n')
         return result
+
+
+    def restore_inactive(self,directory):
+        """Restore rows only into empty, initialized native tables in one transaction.
+
+        The installation coordinator must first enforce inactive ownership. This
+        primitive never initializes schema, starts a native service, or accepts SQL
+        from the package; column types must match the installed pinned schema.
+        """
+        directory=Path(directory);manifest=validate_honcho(directory)
+        pin=json.loads((Path(__file__).resolve().parents[1]/'experiments/honcho/upstreams.lock.json').read_text())['honcho']['revision']
+        if manifest['producer_revision']!=pin:raise ValueError('native_memory_schema_version_mismatch')
+        schema=manifest['schema'];relations={table:'"'+schema+'"."'+table+'"' for table in TABLES}
+        process=subprocess.Popen(self.prefix,env=self.environment,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+        try:
+            def write(sql):process.stdin.write(sql+';\n')
+            write("BEGIN; SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='120s'; SET LOCAL TIME ZONE 'UTC'")
+            write('LOCK TABLE '+','.join(relations.values())+' IN EXCLUSIVE MODE')
+            # Schema checks precede materialization and share its transaction.
+            for table,relation in relations.items():
+                expected=json.dumps(manifest['tables'][table]['columns'],separators=(',',':')).encode().hex()
+                write("DO $check$ BEGIN IF (SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',format_type(a.atttypid,a.atttypmod)) ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid='"+relation+"'::regclass AND a.attnum>0 AND NOT a.attisdropped) IS DISTINCT FROM convert_from(decode('"+expected+"','hex'),'UTF8')::jsonb THEN RAISE EXCEPTION 'native_memory_columns_mismatch'; END IF; END $check$")
+            for table in ('queue','active_queue_sessions','webhook_endpoints'):
+                relation='"'+schema+'"."'+table+'"'
+                # Operational tables are not portable. Existing work/attachments
+                # make the destination unsuitable even when memory tables are empty.
+                write("DO $check$ BEGIN IF to_regclass('"+relation+"') IS NOT NULL THEN EXECUTE 'LOCK TABLE "+relation+" IN EXCLUSIVE MODE'; IF EXISTS(SELECT 1 FROM "+relation+") THEN RAISE EXCEPTION 'native_memory_target_has_work'; END IF; END IF; END $check$")
+            for table,relation in relations.items():
+                write('CREATE TEMP TABLE nocheh_import_'+table+' ON COMMIT DROP AS SELECT * FROM '+relation+' WITH NO DATA')
+                with (directory/(table+'.ndjson')).open('rb') as source:
+                    for line in source:
+                        encoded=line.strip().hex()
+                        write('INSERT INTO pg_temp.nocheh_import_'+table+' SELECT * FROM json_populate_record(NULL::'+relation+",convert_from(decode('"+encoded+"','hex'),'UTF8')::json)")
+            populated=' OR '.join('EXISTS(SELECT 1 FROM '+relation+')' for relation in relations.values())
+            same=[]
+            for table,relation in relations.items():
+                left='SELECT row_to_json(t)::jsonb FROM '+relation+' t';right='SELECT row_to_json(t)::jsonb FROM pg_temp.nocheh_import_'+table+' t'
+                same.append('NOT EXISTS(('+left+' EXCEPT ALL '+right+') UNION ALL ('+right+' EXCEPT ALL '+left+'))')
+            write("DO $replay$ BEGIN IF ("+populated+") AND NOT ("+' AND '.join(same)+") THEN RAISE EXCEPTION 'native_memory_target_conflict'; END IF; END $replay$")
+            for table,relation in relations.items():
+                write('INSERT INTO '+relation+' OVERRIDING SYSTEM VALUE SELECT * FROM pg_temp.nocheh_import_'+table+' WHERE NOT EXISTS(SELECT 1 FROM '+relation+')')
+                # Advance existing native identity sequences using the installed
+                # schema, without trusting sequence names supplied by an export.
+                for column in manifest['tables'][table]['columns']:
+                    name=column['name']
+                    if not IDENTIFIER.fullmatch(name):raise ValueError('native_memory_column_invalid')
+                    write("DO $sequence$ DECLARE seq text; value bigint; populated boolean; BEGIN seq:=pg_get_serial_sequence('"+relation+"','"+name+"'); IF seq IS NOT NULL THEN SELECT max(\""+name+"\"),count(*)>0 INTO value,populated FROM "+relation+"; PERFORM setval(seq,coalesce(value,1),populated); END IF; END $sequence$")
+            write("COMMIT; SELECT 'nocheh-native-imported'")
+            process.stdin.close();result=process.stdout.read();code=process.wait()
+            if code or result.strip()!='nocheh-native-imported':raise RuntimeError('native_memory_restore_failed')
+        except (BrokenPipeError,OSError):raise RuntimeError('native_memory_restore_failed') from None
+        finally:
+            if process.poll() is None:process.kill();process.wait()
+            if process.stdin and not process.stdin.closed:
+                try:process.stdin.close()
+                except OSError:pass
+            if process.stdout:process.stdout.close()
+        return {'restored_tables':len(TABLES),'automatic_activation':False,'provider_calls':0}
+
+
+def restore_honcho(state,directory):
+    from .configuration import compose_command,compose_environment
+    from .store_recovery import assert_no_state_writers
+    state=Path(state).resolve();marker=state/'spool/.restore-inactive'
+    if marker.is_symlink() or not marker.is_file():raise ValueError('native_memory_restore_requires_inactive_installation')
+    command=compose_command(state);environment=compose_environment(state)
+    running=subprocess.check_output(command+['ps','--services','--status','running'],env=environment,text=True).split()
+    if set(running)-{'nocheh-postgres','honcho-postgres','inngest-redis'}:raise ValueError('native_memory_restore_writers_active')
+    assert_no_state_writers(state,environment,command)
+    return NativeMemoryExport(command,environment).restore_inactive(directory)
 
 
 def export_honcho(state,directory):
