@@ -402,6 +402,33 @@ The full running application/native/UI rehearsal remains separate.
 
 <reset>
 
+`scripts.reset_protocol` records ordered evidence from isolated acceptance through
+quiescence, effect settlement, preservation, erasure, initialization, empty baseline,
+the Telegram boundary, fresh acceptance, and resumption. Bind it to the reviewed
+preflight and a new installation generation. The caller must verify each phase;
+recording a hash does not execute or establish acceptance. Hold the database
+maintenance lock as well as the local journal lock while the old database exists.
+macOS and Docker do not share advisory-lock visibility. Keep the reset journal and
+its exclusive attempt reservation outside all content-erasure paths.
+
+Only after verifying the empty baseline, inactive fence, current generation, and
+stopped pollers may the coordinator issue one HTTPS `deleteWebhook` request with
+`drop_pending_updates=true`. This is the [Telegram backlog operation](https://core.telegram.org/bots/api#deletewebhook),
+not deletion of remote message history. Persist the attempted operation and its
+exclusive file reservation before sending. Preserve a confirmed response before
+completing the phase; reuse that confirmation after restart. A timeout, lost response,
+or interruption between reservation and send remains uncertain and must not be
+retried automatically. Telegram provides no idempotency key for this method;
+an empty current queue alone cannot prove the earlier operation's outcome.
+Normal polling retains `drop_pending_updates=false` and never invokes this reset
+primitive. No public CLI discard operation is exposed by this library.
+
+Run `python3 compatibility/reset-protocol-rehearsal.py --directory NEW_DIRECTORY
+--management-image CANDIDATE --native-image PINNED_CANDIDATE` to exercise journal
+failure paths and the pinned adapter's normal restart behavior in network-disabled
+Compose containers. This bounded rehearsal has no installation mounts, providers,
+or live Telegram requests; full reset and live acceptance remain separate gates.
+
 Run `./scripts/nocheh reset plan --output NEW_FILE` with the saved installation
 root/state to create a private read-only preflight. It inventories exact container
 IDs and Compose origins, current database/cache mount identities, and explicit

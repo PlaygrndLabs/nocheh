@@ -7,6 +7,27 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+Reset progress and the one-attempt Telegram backlog boundary are implemented as
+internal coordinator primitives. Ordered evidence, installation identity, and a
+new generation bind the durable journal. The backlog call requires the empty
+baseline and inactive fence; an exclusive durable reservation prevents duplicate
+requests even across macOS/Docker lock domains. Confirmed outcomes replay locally;
+lost responses, interrupted intent writes, and unconfirmed outcomes stay pending
+without retrying the discard. Normal native restart continues preserving updates.
+The final management image build and isolated network-disabled Compose run pass:
+28 reset/accounting/inventory checks and seven pinned native capture/restart checks,
+with no skips. The initial fixture attempt stopped before tests because its tmpfs
+options needed YAML quoting; the corrected fresh run passes. AST-only Graphify
+contains 459 files, 2,916 nodes, and 11,536 edges with zero model calls.
+[Reset protocol evidence](compatibility/results/2026-09-18-reset-protocol.json).
+The read-only live audit found two historical ambiguous dispatches and one
+ambiguous sandboxed shell action (also represented by one workflow receipt).
+Neither dispatch has a matching retained outbound intent; the shell retains an
+ambiguous outcome. These are observations for reconciliation after quiescence,
+not successful execution evidence or permission to erase their receipts.
+The complete reset executor, combined installation rehearsal, and fresh live
+acceptance remain pending. No live Telegram request or reset has occurred.
+
 The reset preflight now enumerates exact installation paths, container identities,
 and configured PostgreSQL/Honcho/Redis volumes without stopping services or copying
 content. It checks both running and stopped containers for shared volume/state
