@@ -53,6 +53,10 @@ the role credentials and do not expose them as ordinary editable values.
 
 `src/stores/runtime-pools.ts` opens explicit domain pools and rejects bootstrap
 credentials. Legacy database initialization rejects the original-only layout.
+The trusted application startup writer admits saved assistant setup into versioned
+control records. Policy and guard-mode changes revoke the prior epoch and enqueue
+refresh work in the same transaction; security and execution paths reject an
+outdated service configuration. Equivalent setup reuses its revision.
 Application and security entrypoints select the separated repository composition
 for this layout. Neither entrypoint initializes schemas or falls back to the legacy
 pool. HTTP admission fsyncs observations before acknowledging them; independent

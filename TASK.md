@@ -352,6 +352,22 @@ workflow controls still require migration. No provider calls or installation res
 were performed.
 [Workflow integration evidence](compatibility/results/2026-09-18-store-workflows.json).
 
+Saved assistant setup is now admitted as a versioned control record before scoped
+runtime use. The application startup writer publishes an allowlist or guard-mode
+change, revokes prior capabilities, and queues refreshes atomically. Repeated or
+reordered equivalent setup does not change authority; returning to an older
+policy creates a new revision and epoch. Security, scoped HTTP, native memory
+preparation, and workflow execution reject stale service configurations. This
+keeps a previous service process from using the former allowlist after a change.
+
+Six affected synthetic PostgreSQL/service/workflow checks pass, including lost
+refresh-write rollback and concurrent equivalent setup. The focused configuration
+check was repeated after the final clean TypeScript build. AST-only Graphify and
+documentation checks pass. This adds no conversational configuration authority,
+does not activate the candidate installation, and leaves fresh live gates pending.
+[Runtime configuration evidence](compatibility/results/2026-09-18-runtime-configuration.json).
+
+
 
 
 The guard repository now stores immutable inputs, fragments, automatic/owner

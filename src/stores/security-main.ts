@@ -13,7 +13,7 @@ const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:co
   policy:()=>config.assistant,runtime:call,honcho:honchoClient(config.honchoUrl)});
 const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,model:process.env.NOCHEH_MODEL??'gpt-5.6-sol',
   archive:process.env.ARCHIVE_URL??'http://nocheh-app:8780',hermes:config.hermesUrl,prepare:storageGuardService(services),
-  assertActive:()=>assertStorageActive(config.dataDir),assertReady:()=>assertGuardConfiguration(services.guards,config.guardMode),health:()=>storageHealth(stores)});
+  assertActive:()=>assertStorageActive(config.dataDir),assertReady:async()=>{await assertGuardConfiguration(services.guards,config.guardMode);await services.configuration.assert(config.assistant);},health:()=>storageHealth(stores)});
 const timer=setInterval(()=>{if(!restoredInactive(config.dataDir))void storageHeartbeat(stores,'nocheh-security').catch(()=>{});},5000);timer.unref();
 server.listen(8786,'0.0.0.0');
 let stopping=false;

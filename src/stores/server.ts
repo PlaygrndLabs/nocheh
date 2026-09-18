@@ -24,6 +24,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/internal/honcho/prepare') {
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
       await assertGuardConfiguration(s.guards,config.guardMode);
+      await s.configuration.assert(config.assistant);
       return json(res,200,await s.memory.prepareRequest(await readJson(req,1024*1024)));
     }
     const principal=reader(req,config.token);
@@ -36,7 +37,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     // Owners can inspect and repair incomplete guard changes; scoped callers
     // must observe the complete current authorization generation on every call.
-    if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);}
+    if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
     if(await owner.handle(principal,req,res,url))return;
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true}))return;
     const result=async(value:unknown,prepared=false)=>{
