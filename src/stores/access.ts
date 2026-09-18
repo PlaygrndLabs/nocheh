@@ -26,8 +26,11 @@ export class SourceAccessRepository {
   }
   async canLearn(reference:SourceReference,binding:GuardBinding):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
+    const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[reference.id])).rows[0];
+    if(intake?.state==='pending')return false;
     const consent=(await this.stores.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];
     if(consent){await this.guards.assertCurrent(binding);return consent.enabled===true;}
+    if(intake?.transport==='import')return false;
     if(source.origin!=='live'||source.kind==='telegram_wire')return false;
     const policy=this.policy();if(!policy.enabled||!policy.owner_id)return false;
     if(source.channel==='browser')return source.scope===policy.owner_id;

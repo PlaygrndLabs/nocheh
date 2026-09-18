@@ -20,6 +20,10 @@ def canonical(value):
     return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
 
 
+def file_digest(path):
+    with path.open('rb') as source:return hashlib.file_digest(source,'sha256').hexdigest()
+
+
 class API:
     def __init__(self, import_job=None, import_lease=None, import_owner='inngest'):
         state=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local'))
@@ -95,35 +99,48 @@ def desktop_records(document,root,scope=None,scope_map=None):
             yield {'event':event,'artifacts':artifacts,'derived':[]},uploads
 
 
-def upload(api,artifact_id,path,expected=None):
+def upload(api,artifact_id,path,expected=None,source_only=False):
     if path.stat().st_size>50*1024*1024: raise ValueError('attachment_exceeds_50_mib')
     data=path.read_bytes(); checksum=digest(data)
     if expected and checksum!=expected: raise ValueError('artifact_integrity_failed')
-    api.call(f'/v1/artifacts/{artifact_id}/bytes',{'bytes_base64':base64.b64encode(data).decode(),'sha256':checksum})
+    route='original-files' if source_only else 'artifacts'
+    api.call(f'/v1/{route}/{artifact_id}/bytes',{'bytes_base64':base64.b64encode(data).decode(),'sha256':checksum})
 
 
-def export_archive(api,directory):
-    directory.mkdir(parents=True,exist_ok=False)
-    (directory/'files').mkdir()
-    manifest={'format':'nocheh-archive-v1','complete':False,'events':0,'files':0}
+def export_archive(api,directory,source_only=False):
+    directory.mkdir(parents=True,exist_ok=False,mode=0o700)
+    (directory/'files').mkdir(mode=0o700)
+    manifest={'format':'nocheh-sources-v1' if source_only else 'nocheh-archive-v1','complete':False,'events':0,'files':0}
+    if source_only:manifest.update(derivatives_included=False,credentials_included=False,
+        consistency='Paginated immutable observations; use coordinated backup for a single recovery point.')
     (directory/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (directory/'manifest.json').chmod(0o600)
     after=''
     with (directory/'events.ndjson').open('w') as output:
+        (directory/'events.ndjson').chmod(0o600)
         while True:
-            page=api.call('/v1/export?'+urllib.parse.urlencode({'after':after,'limit':20}))
+            page=api.call(('/v1/exports/sources?' if source_only else '/v1/export?')+urllib.parse.urlencode({'after':after,'limit':20}))
+            if source_only and page.get('format')!='nocheh-sources-v1':raise ValueError('unexpected_source_export_format')
             for record in page['records']:
+                if source_only and ('derived' in record or 'guarded' in record or record['event']['origin']=='generated'):
+                    raise ValueError('original_source_required')
                 for artifact in record['artifacts']:
                     if artifact['state']!='ready': continue
                     checksum=artifact['file_hash']
                     if len(checksum)!=64 or any(c not in '0123456789abcdef' for c in checksum): raise ValueError('invalid_file_hash')
                     target=directory/'files'/checksum
                     if not target.exists():
-                        data=api.call(f"/v1/artifacts/{artifact['id']}/bytes",binary=True)
+                        route='original-files' if source_only else 'artifacts'
+                        data=api.call(f"/v1/{route}/{artifact['id']}/bytes",binary=True)
                         if digest(data)!=checksum: raise ValueError('artifact_integrity_failed')
-                        target.write_bytes(data); manifest['files']+=1
+                        if source_only and len(data)!=artifact['byte_size']:raise ValueError('artifact_size_conflict')
+                        target.write_bytes(data); target.chmod(0o600); manifest['files']+=1
                 output.write(json.dumps(record,ensure_ascii=False,separators=(',',':'))+'\n'); manifest['events']+=1
             if not page['next']: break
+            if source_only and (page['next']==after or len(page['next'])!=64 or any(c not in '0123456789abcdef' for c in page['next'])):
+                raise ValueError('invalid_export_cursor')
             after=page['next']
+    if source_only:manifest['records_sha256']=file_digest(directory/'events.ndjson')
     manifest['complete']=True
     (directory/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     return manifest
@@ -131,16 +148,36 @@ def export_archive(api,directory):
 
 def import_archive(api,directory,restore_guarded=False):
     manifest=json.loads((directory/'manifest.json').read_text())
-    if manifest.get('format')!='nocheh-archive-v1' or manifest.get('complete') is not True: raise ValueError('incomplete_export')
+    if manifest.get('format') not in ('nocheh-archive-v1','nocheh-sources-v1') or manifest.get('complete') is not True: raise ValueError('incomplete_export')
+    source_only=manifest['format']=='nocheh-sources-v1'
+    if source_only and restore_guarded:raise ValueError('source_export_has_no_guarded_versions')
+    if source_only:
+        # Validate the full package before sending any record to an installation.
+        if file_digest(directory/'events.ndjson')!=manifest.get('records_sha256'):raise ValueError('source_records_integrity_failed')
+        checked=0
+        with (directory/'events.ndjson').open() as source:
+            for line in source:
+                record=json.loads(line);checked+=1
+                if 'derived' in record or 'guarded' in record or record['event']['origin']=='generated':raise ValueError('original_source_required')
+                for artifact in record['artifacts']:
+                    if artifact['state']!='ready':continue
+                    checksum=artifact['file_hash']
+                    if len(checksum)!=64 or any(c not in '0123456789abcdef' for c in checksum):raise ValueError('invalid_file_hash')
+                    file=media_path(directory/'files',checksum)
+                    if not file.is_file() or file.stat().st_size>50*1024*1024:raise ValueError('original_file_unavailable')
+                    data=file.read_bytes()
+                    if digest(data)!=checksum or len(data)!=artifact['byte_size']:raise ValueError('artifact_integrity_failed')
+        if checked!=manifest.get('events'):raise ValueError('source_record_count_mismatch')
     count=0
     with (directory/'events.ndjson').open() as source:
         for line in source:
-            record=json.loads(line); api.call('/v1/import'+('?restore_guarded=true' if restore_guarded else ''),record)
+            record=json.loads(line)
+            api.call('/v1/imports/sources' if source_only else '/v1/import'+('?restore_guarded=true' if restore_guarded else ''),record)
             for artifact in record['artifacts']:
                 if artifact['state']=='ready':
                     checksum=artifact['file_hash']
                     if len(checksum)!=64 or any(c not in '0123456789abcdef' for c in checksum): raise ValueError('invalid_file_hash')
-                    upload(api,artifact['id'],media_path(directory/'files',checksum),checksum)
+                    upload(api,artifact['id'],media_path(directory/'files',checksum),checksum,source_only)
             count+=1
     return {'imported':count,'telegram_replies':0}
 
@@ -152,10 +189,11 @@ def main():
     tg.add_argument('--approve-memory-review',action='store_true',help='Explicitly approve a private Hermes memory review after successful import.')
     for name in ('export','import'):
         command=sub.add_parser(name);command.add_argument('directory',type=Path)
+        if name=='export':command.add_argument('--sources-only',action='store_true')
         if name=='import':command.add_argument('--restore-guarded',action='store_true',help='Trust and restore guarded revision history from your own export; no re-detection.')
     sub.add_parser('replay').add_argument('event_ids',nargs='+')
     args=parser.parse_args();api=API()
-    if args.command=='export': result=export_archive(api,args.directory)
+    if args.command=='export': result=export_archive(api,args.directory,args.sources_only)
     elif args.command=='import': result=import_archive(api,args.directory,args.restore_guarded)
     elif args.command=='replay': result=api.call('/v1/replay',{'event_ids':args.event_ids})
     else:

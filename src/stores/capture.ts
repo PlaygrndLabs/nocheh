@@ -13,13 +13,21 @@ export class CaptureCoordinator {
   constructor(readonly archive:ArchiveRepository,readonly control:pg.Pool,readonly generated?:GeneratedCaptureRepository){}
 
   private async request(client:pg.PoolClient,source:CapturedSource):Promise<void> {
+    await client.query(`INSERT INTO source_intakes(event_id,source_revision,input_hash,transport,state) VALUES($1,$2,$3,$4,'ready') ON CONFLICT DO NOTHING`,
+      [source.reference.id,source.reference.revision,source.reference.input_hash,source.origin==='import'?'import':'capture']);
+    const intake=(await client.query('SELECT * FROM source_intakes WHERE event_id=$1',[source.reference.id])).rows[0];
+    if(intake.source_revision!==source.reference.revision||intake.input_hash!==source.reference.input_hash)throw new HttpError(409,'source_intake_conflict');
+    // A committed original is sufficient to repair an interrupted source import:
+    // manifests commit with it in the same archive transaction. Import transport
+    // stays recorded, so recovery cannot dispatch an old Telegram update.
+    if(intake.state!=='ready')await client.query("UPDATE source_intakes SET state='ready' WHERE event_id=$1",[source.reference.id]);
     await client.query(`INSERT INTO capture_handoffs(event_id,source_revision,payload_hash) VALUES($1,$2,$3)
       ON CONFLICT DO NOTHING`,[source.reference.id,source.reference.revision,source.reference.input_hash]);
     const previous=(await client.query('SELECT source_revision,payload_hash FROM capture_handoffs WHERE event_id=$1',[source.reference.id])).rows[0];
     if(previous.source_revision!==source.reference.revision||previous.payload_hash!==source.reference.input_hash)
       throw new HttpError(409,'capture_handoff_conflict');
     await requestWorkflow(client,'preparation',source.reference.id);
-    if(source.origin==='live'&&source.kind!=='telegram_wire') {
+    if(intake.transport==='capture'&&source.origin==='live'&&source.kind!=='telegram_wire') {
       await requestWorkflow(client,'memory_review','source:'+source.reference.id);
       if(source.channel==='telegram'&&source.kind==='telegram_update')await requestWorkflow(client,'telegram',source.reference.id);
     }
