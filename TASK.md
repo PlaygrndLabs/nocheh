@@ -7,6 +7,27 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The post-reset live gate and controlled resumption are now implemented as separate
+internal coordinator transitions. The reset-only validator accepts one closed
+`nocheh-fresh-acceptance-v1` request bound to the current reset ID, installation
+generation, and exact confirmed Telegram-boundary timestamp. It rejects fixture
+labels and verifies current post-boundary rows across all three stores: live owner
+and allowlisted-group sources, reply/reaction targets and a non-owner human actor,
+selected subscription transcript provenance, active learned memory and its exact
+Honcho projection receipt, owner correction, inspected isolation, intentional
+silence, one exact approved delivery, one-attempt restart recovery, and the fresh
+Honcho verification/ingestion/ready-context receipts. Historical rows cannot pass.
+The journal advances only through `fresh_acceptance`; all restart policies remain
+`no`. A separately journaled resumption then restores the exact pre-reset policies
+only for services that were previously running. Interrupted partial policy changes
+resume idempotently and dependency-only jobs remain non-restarting. Four focused
+Python checks, all 94 reset checks, two mock store checks, a three-check real
+three-database PostgreSQL run, the final candidate build, Compose configuration,
+and the full internal-only reset lifecycle pass. No live acceptance request was
+fabricated or accepted. The live reset/boundary, dedicated group, human input, and
+fresh checks remain required before this code can resume the installation.
+[Fresh-gate evidence](compatibility/results/2026-09-18-reset-fresh-acceptance-gate.json).
+
 Fresh acceptance now has a separate, restart-safe activation mode. The coordinator
 derives the exact enabled service set and original restart policies from the
 immutable quiescence receipt, expands only current Compose dependencies, records
@@ -298,7 +319,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
 | Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows, Overview and Memory access compatibility verified in isolated previews |
 | Installation-scoped reset and empty baseline | Preservation, scoped erasure, fresh resource initialization, setup restoration, native preference restoration, and complete empty-baseline proof pass a combined synthetic lifecycle; live ownership review and the authorized reset remain pending |
-| Fresh live acceptance and saved-setup resumption | Current-state validation is bound to the one-attempt boundary; restart-safe acceptance activation passes with fixture transport and restart ownership disabled. The live boundary, dedicated test group, human participation, fresh evidence, and controlled resumption remain pending |
+| Fresh live acceptance and saved-setup resumption | Current-state validation, live-only evidence verification, and exact saved-policy resumption are implemented and pass isolated failure/recovery tests. The live boundary, dedicated test group, human participation, fresh evidence, and actual resumption remain pending |
 
 Preserve configuration, external logins, and spending accounting during the
 authorized reset; erase installation-owned content, history, backups, and exports.

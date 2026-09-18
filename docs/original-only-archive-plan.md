@@ -518,6 +518,41 @@ rehearsal must release the fixture fences while leaving all four fresh container
 on restart policy `no`; it makes one in-process boundary call and no provider or
 live Telegram request.
 
+Collect the required live results in one private
+`nocheh-fresh-acceptance-v1` request. Bind it to the reset ID, new installation
+generation, and the journal's exact Telegram `confirmed_at` value. Store only
+content-free event, artifact, derivative, learned-version, action, dispatch and
+Honcho receipt IDs; hash the dedicated group and participating human identities.
+Mark owner-inspected assertions for reply quality, learned recall, correction,
+private/group isolation, exact delivery and restart recovery. The request has a
+closed schema and must say `mode: live`; fixture, synthetic or historical labels
+are rejected.
+
+Call `scripts.reset_acceptance.verify_fresh` while every acceptance container still
+has restart policy `no`. Its reset-only service reads the current three databases
+and requires every referenced Telegram event to have `origin=live` and a receive
+time no earlier than the confirmed backlog boundary. It verifies owner/group
+audiences against saved configuration; reply/reaction links and the non-owner
+reaction actor; exact original file plus active subscription transcript; active
+learned revision, its completed Honcho projection receipt, and active owner
+correction; completed dispatches for inspected recall/isolation; intentional
+silence with no result; one approved action with security/result receipts; and a
+single-attempt completed restart dispatch. Honcho must be freshly verified and
+attached with all six required checks, a ready current-generation workspace, a
+post-boundary context snapshot, and completed ingestion. The validator returns
+only hashes, counts and pass labels. It cannot accept healthy services, historical
+reports, fixtures, or unanchored checklist claims as live evidence.
+
+Only after that validator advances `fresh_acceptance` may
+`scripts.reset_acceptance.resume` restore service ownership. It recomputes the
+current Compose plan, checks every recorded fresh container identity and running
+dependency, requires all reset fences to remain absent, and restores the exact
+pre-reset restart policy only for services recorded as running in the quiescence
+receipt. Dependency-only completed jobs keep restart policy `no`. A durable
+resumption intent makes partial policy restoration retryable; unexpected policies,
+replaced containers, changed plans or changed acceptance evidence fail closed.
+`resumed` is the final journal step.
+
 Run `python3 compatibility/reset-protocol-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE --native-image PINNED_CANDIDATE` to exercise journal
 failure paths and the pinned adapter's normal restart behavior in network-disabled

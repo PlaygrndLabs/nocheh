@@ -14,6 +14,7 @@ class FakeDocker:
         self.root = str(root); self.project = project
         self.files = str(root / 'compose.yml')
         self.fail_start_once = False; self.start_calls = []
+        self.fail_restart_once = False; self.acceptance_calls = 0
         self.rendered = {'name': project, 'services': {
             'nocheh-postgres': {}, 'inngest-redis': {},
             'nocheh-store-bootstrap': {'depends_on': {
@@ -60,8 +61,14 @@ class FakeDocker:
                     self.add(service, marker * 64, 'created')
             return ''
         if arguments[:2] == ['docker', 'update']:
+            policy = arguments[2].split('=', 1)[1]
+            name, _, maximum = policy.partition(':')
             for identifier in arguments[3:]:
-                self.containers[identifier]['restart_policy'] = {'Name': 'no', 'MaximumRetryCount': 0}
+                if self.fail_restart_once and self.containers[identifier]['service'] == 'nocheh-app' and name != 'no':
+                    self.fail_restart_once = False
+                    raise RuntimeError('synthetic_restart_policy_interruption')
+                self.containers[identifier]['restart_policy'] = {
+                    'Name': name, 'MaximumRetryCount': int(maximum or 0)}
             return ''
         if arguments[:2] == ['docker', 'start']:
             identifier = arguments[2]; row = self.containers[identifier]
@@ -71,6 +78,20 @@ class FakeDocker:
                 raise RuntimeError('synthetic_acceptance_start_interruption')
             row['state'] = 'exited' if row['service'] == 'nocheh-store-bootstrap' else 'running'
             return ''
+        if 'run' in arguments and arguments[-1] == 'nocheh-reset-acceptance':
+            self.acceptance_calls += 1
+            request = json.loads((Path(self.root) / 'state/admin/reset/fresh-acceptance-request.json').read_text())
+            names = ('owner_dm', 'dedicated_group', 'reply', 'human_reaction',
+                     'subscription_transcription', 'learned_recall', 'owner_correction',
+                     'isolation', 'intentional_silence', 'exact_approval',
+                     'restart_recovery', 'honcho')
+            return json.dumps({'event': 'reset_fresh_acceptance_verified',
+                'reset_id': request['reset_id'], 'generation': request['generation'],
+                'mode': 'live', 'boundary_confirmed_at': request['boundary_confirmed_at'],
+                'checks': {name: 'passed' for name in names}, 'source_events': 11,
+                'live_only': True, 'historical_evidence': False, 'fixtures_accepted': False,
+                'dedicated_group_sha256': request['dedicated_group_sha256'],
+                'human_participant_sha256': request['human_participant_sha256']}) + '\n'
         raise AssertionError(arguments)
 
 
@@ -159,6 +180,57 @@ class ResetAcceptanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'plan_changed'):
                 reset_acceptance.activate(journal, self.preflight, runner=fake,
                     environment=self.environment, command=self.command, timeout=0)
+
+    def test_fresh_gate_and_interrupted_restart_policy_restore_are_separate(self):
+        fake = FakeDocker(self.root, self.project)
+        with reset_protocol.locked(self.state) as journal:
+            initialization = self.ready(journal)
+            with patch.object(reset_acceptance.reset_baseline, 'verify', return_value={'phase': 'empty_baseline'}), \
+                 patch.object(reset_acceptance.reset_initialization, 'assert_initialized', return_value=initialization):
+                reset_acceptance.activate(journal, self.preflight, runner=fake,
+                    environment=self.environment, command=self.command, timeout=0)
+            evidence = {'format': 'nocheh-fresh-acceptance-v1',
+                'reset_id': journal.value['reset_id'], 'generation': journal.value['generation'],
+                'mode': 'live', 'boundary_confirmed_at': journal.value['telegram']['confirmed_at'],
+                'dedicated_group_sha256': 'a' * 64, 'human_participant_sha256': 'b' * 64,
+                'checks': {'owner_dm': {}}}
+            result = reset_acceptance.verify_fresh(journal, self.preflight, evidence,
+                runner=fake, environment=self.environment, command=self.command, timeout=0)
+            self.assertEqual(result['phase'], 'fresh_acceptance'); self.assertEqual(result['checks'], 12)
+            self.assertFalse(result['restart_ownership']); self.assertEqual(len(journal.value['steps']), 9)
+            self.assertTrue(all(row['restart_policy']['Name'] == 'no' for row in fake.containers.values()))
+            fake.fail_restart_once = True
+            with self.assertRaisesRegex(RuntimeError, 'synthetic_restart_policy_interruption'):
+                reset_acceptance.resume(journal, self.preflight, runner=fake,
+                    environment=self.environment, command=self.command, timeout=0)
+            self.assertEqual(reset_protocol.read(journal.directory / 'resumption.json')['stage'], 'prepared')
+            self.assertEqual(len(journal.value['steps']), 9)
+            resumed = reset_acceptance.resume(journal, self.preflight, runner=fake,
+                environment=self.environment, command=self.command, timeout=0)
+            self.assertTrue(resumed['resumed']); self.assertTrue(resumed['restart_ownership'])
+            self.assertEqual(journal.value['steps'][-1]['step'], 'resumed')
+            self.assertEqual(fake.containers['d' * 64]['restart_policy']['Name'], 'no')
+            for marker in ('b', 'c', 'e', 'f'):
+                self.assertEqual(fake.containers[marker * 64]['restart_policy']['Name'], 'unless-stopped')
+            self.assertEqual(reset_acceptance.resume(journal, self.preflight, runner=fake,
+                environment=self.environment, command=self.command, timeout=0), resumed)
+
+    def test_fresh_gate_rejects_fixture_label_before_store_verification(self):
+        fake = FakeDocker(self.root, self.project)
+        with reset_protocol.locked(self.state) as journal:
+            initialization = self.ready(journal)
+            with patch.object(reset_acceptance.reset_baseline, 'verify', return_value={'phase': 'empty_baseline'}), \
+                 patch.object(reset_acceptance.reset_initialization, 'assert_initialized', return_value=initialization):
+                reset_acceptance.activate(journal, self.preflight, runner=fake,
+                    environment=self.environment, command=self.command, timeout=0)
+            evidence = {'format': 'nocheh-fresh-acceptance-v1', 'mode': 'live',
+                'reset_id': journal.value['reset_id'], 'generation': journal.value['generation'],
+                'boundary_confirmed_at': journal.value['telegram']['confirmed_at'],
+                'fixture': True}
+            with self.assertRaisesRegex(ValueError, 'request_invalid'):
+                reset_acceptance.verify_fresh(journal, self.preflight, evidence,
+                    runner=fake, environment=self.environment, command=self.command, timeout=0)
+            self.assertEqual(fake.acceptance_calls, 0); self.assertEqual(len(journal.value['steps']), 8)
 
 
 if __name__ == '__main__':
