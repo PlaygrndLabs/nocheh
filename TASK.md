@@ -386,6 +386,27 @@ broader controlled tools, managed runtimes, full rehearsal, reset, and fresh liv
 acceptance remain pending. No live sends occurred.
 [Telegram action evidence](compatibility/results/2026-09-18-store-telegram-actions.json).
 
+Telegram dispatch now runs through the separated workflow composition. It admits
+only captured live incoming messages, waits for current preparation, and stores
+immutable runtime inputs/results in derived storage with control references and
+receipts. Original routing IDs remain authoritative even when the owner edits
+guarded content. Media enters the committed native handler as prepared text and
+selected file readings, avoiding a second native download or transcription.
+
+Lost start acknowledgments observe the same native identity; explicit absence or
+a never-started queued request can reuse that identity only after authorization
+checks. Revoked queued contexts are cancelled. Completed derivative receipts
+repair interrupted control completion, and terminal silence/failure/ambiguity
+cannot automatically start another turn. Owner-DM action commands are wired to
+this dispatch path; edits/reactions continue learning without dispatching old
+replies. Seven affected synthetic PostgreSQL/HTTP/engine checks and eleven pinned
+offline native gateway/receipt/scope checks pass. TypeScript and AST-only Graphify
+pass. An initial fixture run rejected a malformed workflow run ID; after correcting
+that fixture, the focused and combined runs pass. Full Inngest/native rehearsal,
+broader tools, managed execution, portability coordination, reset, and live gates
+remain pending.
+[Telegram dispatch evidence](compatibility/results/2026-09-18-store-telegram-dispatch.json).
+
 
 
 

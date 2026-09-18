@@ -29,6 +29,7 @@ import {SourcePortabilityRepository} from './source-portability.js';
 import {DerivativePortabilityRepository} from './derivative-portability.js';
 import {RuntimeConfigurationRepository} from './runtime-configuration.js';
 import {TelegramActionRepository} from './telegram-actions.js';
+import {TelegramDispatchRepository} from './telegram-dispatch.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -55,9 +56,10 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const detect=async(text:string)=>(await options.runtime('guard.detect',{text})).literals;
   const turns=new RuntimeTurnRepository(access,prepared);
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
+  const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
-    telegramActions:new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect),
+    telegramActions,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,telegramActions,options.runtime,options.serviceToken??'',detect),
     capture,sourcePortability:new SourcePortabilityRepository(capture,attachments),derivativePortability:new DerivativePortabilityRepository(stores,archive),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
