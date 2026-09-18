@@ -37,6 +37,16 @@ session worktree and integrate verified increments under the shared Git lock.
 
 <storage_setup>
 
+API/capture and workflow services use independent domain pools so native/Honcho
+callbacks retain capacity while workers await external work. Ordinary Connect
+execution has four slots. Publication retries preserve the same event identity,
+prioritize requests not yet accepted, and back off only for consecutive transport
+failures; successful receipt probes do not enlarge a later outage's delay.
+The combined fixture runner is `compatibility/installation-rehearsal.py`. It uses
+explicit immutable images, new synthetic state, internal networks, no live login,
+and deterministic provider transports. Its successful report records each gate;
+missing live gates remain pending even after this rehearsal passes.
+
 The saved `NOCHEH_STORAGE_LAYOUT` selects the installation layout; existing
 configurations default to `legacy` until the controlled cutover. Ordinary settings
 Apply cannot change this internal setting. `original-only-v1` selects
