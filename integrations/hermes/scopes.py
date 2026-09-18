@@ -6,6 +6,7 @@ import base64
 import time
 import json
 import re
+import os
 from pathlib import Path
 
 
@@ -19,6 +20,11 @@ def verify_capability(credential,secret,scope,event_id):
         if claims.get('space') is not None:
             if claims['space'] != scope.space or type(claims.get('revision')) is not int or claims['revision'] < 1:raise ValueError()
         elif scope.space != scope.chat_id:raise ValueError()
+        generation=claims.get('generation')
+        if generation is not None and not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}',str(generation)):raise ValueError()
+        if generation is not None and (type(claims.get('guard_epoch')) is not int or claims['guard_epoch']<1):raise ValueError()
+        if os.environ.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1' and generation is None:raise ValueError()
+        if claims.get('purpose','assistant') not in ('assistant','memory-review','filter'):raise ValueError()
         return claims
     except Exception:raise ValueError('archive_capability_scope_mismatch') from None
 
@@ -32,6 +38,8 @@ class Scope:
     space: str = ''
     revision: int = 0
     guard_epoch: int = 0
+    generation: str = ''
+    purpose: str = 'assistant'
 
 
 class Scopes:
@@ -62,6 +70,16 @@ class Scopes:
         if epoch is not None:
             if type(epoch) is not int or epoch<1:raise ValueError('invalid_guard_generation')
             scope=replace(scope,profile=Scopes.profile((scope.space or scope.chat_id)+':policy:'+str(scope.revision)+':guard:'+str(epoch)),guard_epoch=epoch)
+        generation=claims.get('generation')
+        if generation is not None:
+            if not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}',str(generation)) or type(epoch) is not int or epoch<1:
+                raise ValueError('invalid_installation_generation')
+            purpose=claims.get('purpose','assistant')
+            if purpose not in ('assistant','memory-review','filter'):raise ValueError('invalid_turn_purpose')
+            # Reviews share native notes and the foreground lock; filtering has
+            # a separate context. Prepared-text caches remain purpose-specific.
+            identity=[generation,scope.space or scope.chat_id,'owner' if scope.owner else 'scoped',epoch,'filter' if purpose=='filter' else 'assistant']
+            scope=replace(scope,profile=Scopes.profile(json.dumps(identity,separators=(',',':'),ensure_ascii=False)),generation=generation,purpose=purpose)
         return scope
 
     def resolve(self,update,expected_scope):

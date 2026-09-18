@@ -44,10 +44,12 @@ def recall(root, body):
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError('invalid_recall_limit')
     profiles = registered_profiles(root)
-    if body.get('guard_epoch') is not None:
+    if body.get('guard_epoch') is not None or body.get('generation') is not None:
         def current(profile):
             metadata=profile/'space.json'
-            return metadata.is_file() and not metadata.is_symlink() and json.loads(metadata.read_text()).get('guard_epoch')==body['guard_epoch']
+            if not metadata.is_file() or metadata.is_symlink():return False
+            value=json.loads(metadata.read_text())
+            return (body.get('guard_epoch') is None or value.get('guard_epoch')==body['guard_epoch']) and (body.get('generation') is None or value.get('generation')==body['generation'])
         profiles=[p for p in profiles if current(p)]
     selected = body.get('profile')
     if selected:

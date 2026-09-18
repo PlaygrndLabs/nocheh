@@ -4,6 +4,11 @@ import sys
 import tempfile
 import threading
 import unittest
+import base64
+import json
+import hashlib
+import hmac
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
@@ -11,6 +16,18 @@ from .turn_process import _run_process,run_process
 from .scopes import Scope
 
 class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.secret='synthetic-review-secret-not-a-real-credential'
+        environment=patch.dict(os.environ,{'SERVICE_TOKEN':self.secret})
+        environment.start();self.addCleanup(environment.stop)
+
+    def review_body(self,purpose='memory-review'):
+        claims={'scope':None,'space':'42','revision':1,'guard_epoch':1,'generation':'11111111-1111-1111-1111-111111111111',
+                'purpose':purpose,'event_id':'b'*64,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant'}
+        encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+        signature=base64.urlsafe_b64encode(hmac.new(self.secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
+
     async def execute(self,source,cancel=None):
         with tempfile.TemporaryDirectory() as folder:
             self.env=None;original=asyncio.create_subprocess_exec
@@ -72,8 +89,15 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             profile=Path(folder)
             with (profile/'.turn.lock').open('a') as lock,patch('integrations.hermes.review_worker.prepare_profile',return_value=profile),patch('integrations.hermes.review_worker._review') as child:
                 fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                result=review(profile,SimpleNamespace(owner='42'),'model',None,{'scope':'42','id':'a'*64,'content':'synthetic','archive_credential':'turn.e30.signature'})
+                result=review(profile,SimpleNamespace(owner='42'),'model',None,self.review_body())
                 self.assertEqual(result,{'state':'waiting','error_code':'profile_busy'});child.assert_not_called()
+
+    async def test_review_requires_verified_review_capability_before_opening_profile(self):
+        from .review_worker import review
+        ordinary=self.review_body('assistant');forged=self.review_body();forged['archive_credential']+='invalid'
+        with patch('integrations.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):
+            for body in (ordinary,forged):
+                with self.assertRaises(ValueError):review(Path('/unused'),SimpleNamespace(owner='42'),'model',None,body)
 
     async def test_already_cancelled_never_starts_a_child(self):
         cancel=threading.Event();cancel.set()
@@ -85,7 +109,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         from .review_worker import review
         with tempfile.TemporaryDirectory() as folder:
             profile=Path(folder);activity=profile/'.foreground';activity.touch()
-            body={'scope':'42','id':'a'*64,'content':'synthetic','archive_credential':'turn.e30.signature'}
+            body=self.review_body()
             with patch('integrations.hermes.review_worker.prepare_profile',return_value=profile),patch('integrations.hermes.review_worker._review',return_value={'state':'done'}) as child:
                 now=activity.stat().st_mtime
                 with patch('integrations.hermes.review_worker.time.time',return_value=now+30):

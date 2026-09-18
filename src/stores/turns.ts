@@ -32,7 +32,7 @@ export class RuntimeTurnRepository implements BrokerStorage {
   }
   profile(principal:Reader,binding:GuardBinding):string {
     return 'nocheh-'+digest(canonical([binding.generation,principal.space,principal.scope===null?'owner':'scoped',
-      binding.epoch,principal.purpose??'assistant'])).slice(0,24);
+      binding.epoch,principal.purpose==='filter'?'filter':'assistant'])).slice(0,24);
   }
   /** Trusted admission only. The referenced operation/source must already be durable. */
   async register(principal:Reader,input:{logical_profile:string;job?:string}):Promise<void> {
@@ -62,6 +62,13 @@ export class RuntimeTurnRepository implements BrokerStorage {
       return parentSpace(row.scope)??row.scope;
     }
     const source=await this.access.archive.verify(reference),space=await this.access.space(reference);
+    if(principal.scope===null&&principal.purpose==='memory-review'&&principal.space===this.access.policy().owner_id) {
+      const binding=await this.assertAudience(principal);
+      if(!await this.access.canLearn(reference,binding))throw new HttpError(403,'learning_consent_required');
+      // An owner-only native review learns permitted evidence into the owner's
+      // native notes. It cannot grant group access or become an ordinary reply.
+      return principal.space!;
+    }
     if(!space||space!==principal.space)throw new HttpError(403,'turn_source_denied');
     return source.scope;
   }

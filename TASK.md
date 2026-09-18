@@ -160,6 +160,26 @@ provider request or live acceptance was performed. Production workflows, Hermes
 review/profile integration, and the full service cutover remain pending.
 [Native memory evidence](compatibility/results/2026-09-18-store-native-memory.json).
 
+Hermes native review now has a separate control job repository and durable derived
+inputs/results. Profile-busy responses preserve identity and consume no attempt;
+uncertain work only observes the same native receipt. Completed results repair a
+lost control write without another native call. Owner pause/resume uses revisions
+and cannot turn uncertainty into a new execution. Review capabilities are verified
+before opening a native profile; an owner-only review may use permitted source
+evidence in the private owner profile, while an ordinary turn cannot use that
+exception. Reviews and foreground owner turns share their native notes/quiet-period
+lock; filtering has a separate context, and prepared caches retain purpose isolation.
+
+Native profile names and recall filtering now include installation generation.
+The original-only layout rejects legacy unbound credentials. Three affected real
+PostgreSQL checks pass, followed by two final purpose-boundary checks. Twenty-one
+offline tests pass in pinned Hermes `7166071f`, with no network or installation
+state. A temporary-filesystem fixture syntax error prevented the first container
+from starting and was corrected. AST-only Graphify: 357 files, 2,178 nodes, 8,347
+edges, zero model calls. Native management/managed turns, workflow routing, and
+production entry points still await their remaining migrations.
+[Native review evidence](compatibility/results/2026-09-18-store-native-review.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior
