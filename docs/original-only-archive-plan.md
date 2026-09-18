@@ -358,6 +358,20 @@ The complete rehearsal must additionally exercise the coordinated original-file,
 Hermes, Honcho, Inngest, Redis, and accounting snapshots through the final service
 composition. Database-only fixture evidence does not satisfy that complete gate.
 
+`compatibility/coordinated-recovery-rehearsal.py --directory NEW_DIRECTORY
+--services-image CANDIDATE --honcho-image PINNED_CANDIDATE` exercises production
+CLI format-6 backup/restore through the real Compose definitions with a synthetic
+internal-network overlay. It creates fresh source/target installations, real
+Honcho migrations and embeddings, both derivative versions and owner edits, native
+notes/sessions, Inngest/Redis state, and a spending ledger. It starts no provider,
+refresh authority, Telegram poller, or native execution. Runtime roles and logins
+stay inactive on restore; fixture containers and volumes are removed afterward.
+This rehearsal passes; dashboard-started coordination must additionally avoid
+stopping its own container and exclude concurrent management writers while
+keeping maintenance progress visible. The full running application/native/UI
+rehearsal remains separate.
+
+
 </recovery_rehearsal>
 
 <reset>

@@ -60,6 +60,20 @@ class WorkflowRecoveryTests(unittest.TestCase):
             self.assertFalse(any('inngest' in c or 'workflow-worker' in c for c in commands))
             self.assertIn('--role=nocheh_inngest',commands[1])
 
+    def test_separated_restore_uses_only_setup_authority_without_reactivating_domain_roles(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);backup=root/'snapshot';backup.mkdir();state=root/'state';state.mkdir()
+            def dump(command,**kwargs):kwargs['stdout'].write(b'fixture')
+            with patch('scripts.workflow_recovery.fingerprints',return_value={'public.events':'hash'}),patch('scripts.workflow_recovery.subprocess.run',side_effect=dump):
+                metadata=snapshot(['fixture'],{},backup,sha)
+            commands=[]
+            with patch('scripts.workflow_recovery.fingerprints',return_value=metadata['tables']),patch('scripts.workflow_recovery.subprocess.run',side_effect=lambda command,**kwargs:commands.append(command)):
+                restore(['fixture'],{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'},backup,state,metadata,sha)
+            self.assertIn('nocheh-store-bootstrap',commands[0])
+            self.assertIn('PGUSER=nocheh',commands[0]);self.assertIn('PGDATABASE=nocheh',commands[0])
+            self.assertEqual(commands[0][-2:],['node','dist/src/workflows/bootstrap.js'])
+            self.assertFalse(any('nocheh-app' in c or 'dist/src/stores/bootstrap.js' in c for c in commands))
+
 
 class RedisRestoreStartupTests(unittest.TestCase):
     def run_restore(self, reject_config=False):
