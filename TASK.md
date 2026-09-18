@@ -7,6 +7,21 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+Reset shutdown coordination now preserves each reviewed container's prior running
+state and restart policy before suppressing restart ownership. It installs durable
+inactive fences, stops capture/native scheduling before host executors and other
+writers/refresh owners, and leaves database/cache servers available for effect
+settlement. Interrupted shutdown resumes from the same receipt; changed ownership,
+foreign writers, lost maintenance, and replaced fences block progress without
+automatic resumption. Thirty-one focused shutdown/journal/inventory checks pass.
+A fresh Compose rehearsal with nine owned containers and real PostgreSQL maintenance
+exclusion passes, including injected interruption, a late foreign writer, eight
+stopped heartbeat writers, retained settings, and an untouched separate sentinel.
+These are synthetic lifecycle checks, not full native/provider acceptance. No live
+owner was stopped. Effect settlement, preservation/erasure orchestration, combined
+installation rehearsal, and fresh live gates remain pending.
+[Shutdown evidence](compatibility/results/2026-09-18-reset-quiescence.json).
+
 Reset progress and the one-attempt Telegram backlog boundary are implemented as
 internal coordinator primitives. Ordered evidence, installation identity, and a
 new generation bind the durable journal. The backlog call requires the empty

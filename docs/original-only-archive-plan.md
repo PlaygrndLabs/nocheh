@@ -411,6 +411,26 @@ maintenance lock as well as the local journal lock while the old database exists
 macOS and Docker do not share advisory-lock visibility. Keep the reset journal and
 its exclusive attempt reservation outside all content-erasure paths.
 
+After complete isolated acceptance, call `scripts.reset_quiescence.quiesce` while
+holding the journal and the PostgreSQL maintenance lock. Supply the exact reviewed
+preflight, including container restart policies. The coordinator records prior
+running states and policies before changes, establishes all four inactive fences,
+suppresses Docker restart, then stops native ingress/scheduling, host executors and
+launchers, and other writers and refresh owners. Database/cache servers remain
+available for effect settlement; they are stopped before later volume erasure.
+An interrupted shutdown retains its original settings and does not resume services.
+Every retry revalidates configuration, container/mount identities, foreign references,
+maintenance ownership, and fence ownership. A recorded initially absent fence can
+recover an interrupted write of this reset's own prefix. Existing inactive restores
+and another reset's markers require separate review.
+
+Verify with `python3 compatibility/reset-quiescence-rehearsal.py --directory
+NEW_DIRECTORY --management-image CANDIDATE`. It uses real Compose lifecycle and
+PostgreSQL advisory exclusion, synthetic heartbeat writers, a late foreign writer,
+and a separate sentinel. It verifies interruption/retry, preserved restart settings,
+durable inactivity, database access for reconciliation, and unrelated-owner isolation.
+Its synthetic lifecycle evidence does not satisfy full native/provider acceptance.
+
 Only after verifying the empty baseline, inactive fence, current generation, and
 stopped pollers may the coordinator issue one HTTPS `deleteWebhook` request with
 `drop_pending_updates=true`. This is the [Telegram backlog operation](https://core.telegram.org/bots/api#deletewebhook),

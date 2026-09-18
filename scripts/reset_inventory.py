@@ -17,6 +17,7 @@ from pathlib import Path
 from .configuration import INSTALLATION_ROOT, compose_command, compose_environment, env_path, load
 
 CONTAINER_FORMAT = ('{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},'
+                    '"restart_policy":{{json .HostConfig.RestartPolicy}},'
                     '"state":{{json .State.Status}},"project":{{json (index .Config.Labels "com.docker.compose.project")}},'
                     '"service":{{json (index .Config.Labels "com.docker.compose.service")}},'
                     '"working_dir":{{json (index .Config.Labels "com.docker.compose.project.working_dir")}},'
