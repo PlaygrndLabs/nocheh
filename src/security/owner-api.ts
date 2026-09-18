@@ -6,7 +6,7 @@ import {manifest,decide,validatePolicy} from './contract.js';
 import {configuration,savePolicy,effectLog,policySnapshot} from './store.js';
 import {controlledAction} from '../controlled-actions.js';
 
-export async function ownerSecurityRoute(pool:pg.Pool,principal:Reader,req:IncomingMessage,res:ServerResponse,url:URL) {
+export async function ownerSecurityRoute(pool:pg.Pool,principal:Reader,req:IncomingMessage,res:ServerResponse,url:URL,options:{separated?:boolean}={}) {
   if(!url.pathname.startsWith('/v1/security/'))return false;
   admin(principal);
   if(url.pathname==='/v1/security/plugin'&&req.method==='GET'){json(res,200,manifest);return true;}
@@ -18,6 +18,7 @@ export async function ownerSecurityRoute(pool:pg.Pool,principal:Reader,req:Incom
     json(res,200,await effectLog(pool,principal,url.searchParams.get('after')??'0',url.searchParams.get('effect')??undefined));return true;
   }
   if(url.pathname==='/v1/security/preview'&&req.method==='POST') {
+    if(options.separated)throw new HttpError(503,'action_preview_unavailable');
     const body=object(await readJson(req)),row=await controlledAction(pool,principal,body.action_id);
     const snapshot=await policySnapshot(pool),policy=body.policy===undefined?snapshot.policy:validatePolicy(body.policy);
     const effect={id:row.id,kind:row.kind as 'shell'|'browser'|'mcp',scope:row.scope,profile:row.profile,fingerprint:row.fingerprint,...(row.job_id?{job:row.job_id}:{})};

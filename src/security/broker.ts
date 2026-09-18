@@ -21,7 +21,7 @@ export interface BrokerStorage {
   assertAudience(principal:Reader):Promise<unknown>;
   turnFile(principal:Reader,hash:string):Promise<string>;
 }
-export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;}
+export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|tools\/actions\/[a-f0-9]{64})$/],
   ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|action-requests)$/],
@@ -60,10 +60,12 @@ export function brokerServer(options:BrokerOptions) {
   });});
   async function handle(req:IncomingMessage,res:ServerResponse) {
     const url=new URL(req.url??'/','http://security'),path=url.pathname;
-    if(req.method==='GET'&&path==='/health'){await options.pool.query('SELECT 1');return json(res,200,{ok:true,service:'security',plugin:manifest.id,api_version:1});}
+    if(req.method==='GET'&&path==='/health'){if(options.health)await options.health();else await options.pool.query('SELECT 1');return json(res,200,{ok:true,service:'security',plugin:manifest.id,api_version:1});}
+    options.assertActive?.();
     const principal=reader(req,options.token);
+    await options.assertReady?.();
     if(principal.admin&&path==='/v1/guard'&&req.method==='POST')return json(res,200,await options.prepare(principal,await readJson(req,1024*1024)));
-    if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url))return;
+    if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url,{separated:!!options.storage}))return;
     const binding=await (options.storage?options.storage.binding(principal):turnBinding(options.pool,principal));
     const credential=req.headers.authorization!;
     // A cold Honcho recall includes multiple guarded provider calls. Keep other

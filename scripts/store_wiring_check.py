@@ -26,6 +26,8 @@ def check():
             for store in ('ARCHIVE','DERIVED','CONTROL'):
                 key='NOCHEH_'+store+'_PASSWORD';assert env[key]==values[key] and env[key]!=values['POSTGRES_PASSWORD']
         assert services['nocheh-app']['depends_on']['nocheh-store-bootstrap']['condition']=='service_completed_successfully'
+        marker_mount=[v for v in services['nocheh-security']['volumes'] if v['target']=='/data/spool']
+        assert len(marker_mount)==1 and marker_mount[0]['read_only'] is True
         assert services['hermes-runtime']['environment']['NOCHEH_STORAGE_LAYOUT']=='original-only-v1'
         assert all('NOCHEH_ARCHIVE_PASSWORD' not in services[name].get('environment',{}) for name in ('hermes-runtime','hermes-agent-launcher'))
         return {'status':'pass','layout':'original-only-v1','services_started':0,'credentials':'synthetic','runtime_administrator_credentials':False}

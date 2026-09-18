@@ -1,5 +1,5 @@
 import { mkdir, open, link, unlink, readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname,join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { digest, envelope, ingest } from './archive.js';
@@ -10,7 +10,7 @@ export async function syncDirectory(path:string):Promise<void> {
   const dir=await open(path,'r'); try { await dir.sync(); } finally { await dir.close(); }
 }
 export async function immutableFile(directory:string, name:string, bytes:Buffer):Promise<void> {
-  await mkdir(directory,{recursive:true,mode:0o700});
+  const created=await mkdir(directory,{recursive:true,mode:0o700});
   const path=join(directory,name), temporary=join(directory,`.${randomUUID()}.tmp`);
   const file=await open(temporary,'wx',0o600);
   try { await file.writeFile(bytes); await file.sync(); } finally { await file.close(); }
@@ -20,6 +20,10 @@ export async function immutableFile(directory:string, name:string, bytes:Buffer)
     if (!(await readFile(path)).equals(bytes)) throw new HttpError(409,'immutable_file_conflict');
   } finally { await unlink(temporary); }
   await syncDirectory(directory);
+  // On a fresh installation, persist the newly created directory entries too.
+  if(created)for(let parent=dirname(directory);;parent=dirname(parent)) {
+    await syncDirectory(parent);if(parent===dirname(created))break;
+  }
 }
 export async function storeBytes(root:string,bytes:Buffer):Promise<string> {
   const hash=digest(bytes); await immutableFile(join(root,'files'),hash,bytes); return hash;

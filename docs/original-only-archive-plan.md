@@ -53,9 +53,18 @@ the role credentials and do not expose them as ordinary editable values.
 
 `src/stores/runtime-pools.ts` opens explicit domain pools and rejects bootstrap
 credentials. Legacy database initialization rejects the original-only layout.
-At this setup increment the production main/security/worker entrypoint migration
-is still pending, so the opt-in layout is not yet a runnable release candidate.
-Do not switch the installation or infer activation from a successful config render.
+Application and security entrypoints select the separated repository composition
+for this layout. Neither entrypoint initializes schemas or falls back to the legacy
+pool. HTTP admission fsyncs observations before acknowledging them; independent
+capture/reconciliation stages retire the spool only after downstream control
+requests are durable. Scoped requests wait for the configured guard mode and all
+three stores contribute to health. Restored installations refuse content access,
+including in the security service through a read-only spool marker mount.
+
+Workflow execution, actions, and managed-runtime migration still require their
+separate increments and the full installation rehearsal. The opt-in layout is not
+yet a complete release candidate. Do not switch the live installation or infer
+activation from a successful config render or repository-level HTTP check.
 
 Run `NOCHEH_STORES_FIXTURE=1 python3 -m scripts.store_wiring_check` to render the
 combined Compose configuration with temporary synthetic credentials, inspect
