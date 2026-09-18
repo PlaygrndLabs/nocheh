@@ -11,6 +11,7 @@ import {runtimeTurnSchema} from './turns.js';
 import {securityCoreSchema} from '../security/store.js';
 import {nativeReviewSchema} from './native-review.js';
 import {sharingContentSchema} from './sharing-schema.js';
+import {portableHistorySchema} from './portable-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -74,6 +75,7 @@ ${derivedGuardSchema}
 ${runtimeContextSchema}
 ${derivativeSelectionSchema}
 ${derivedLearnedSchema}
+${portableHistorySchema}
 `;
 
 export const initialControlSchema=`

@@ -38,6 +38,8 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const unauthorized=await fetch(base+'/v1/projects',{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}});
     assert.equal(unauthorized.status,403,'owner authority is checked before body parsing');
     assert.equal((await fetch(base+'/v1/projects')).status,401);
+    const transferTypes=await request('/v1/exports/derivatives/types');assert.ok(transferTypes.types.includes('guard_revisions'));
+    await request('/v1/exports/derivatives?type=workflow_registry',undefined,400);
     assert.equal((await request('/v1/derivation-engines')).engines.length,2);
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'88',revision:'1',occurred_at:null,text:'A convention',
       payload:{message:{message_id:88,chat:{id:123,type:'private'},voice:{file_id:key}}}};
@@ -98,5 +100,9 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.ok((await request('/v1/learned?scope_kind=conversation&scope_id=123')).entries.some((e:any)=>e.id===entry&&e.retired));
     await request('/v1/learned?scope_kind=invalid&scope_id=123',undefined,400);
     assert.equal(engines,1,'owner inspection/corrections never rerun the source engine');
+    const exported=await request('/v1/exports/derivatives?type=derived_artifacts&limit=1');assert.equal(exported.format,'nocheh-derivatives-v1');
+    assert.equal((await request('/v1/imports/derivatives',{records:exported.records})).activated,false);
+    assert.equal((await request('/v1/imports/derivatives/verify',{records:exported.records})).verified,1);
+    assert.equal((await request('/v1/exports/derivative-history?limit=1')).records.length,1);
   } finally {await new Promise<void>(resolve=>server.close(()=>resolve()));await stores.close();await rm(root,{recursive:true,force:true});}
 });

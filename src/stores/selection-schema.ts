@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS derivative_selection_revisions (
  author text NOT NULL CHECK(author IN ('automatic','owner')),created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(selection_id,revision)
 );
+ALTER TABLE derivative_selections ADD COLUMN IF NOT EXISTS imported boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS derivative_activations (
  operation_id text PRIMARY KEY REFERENCES derivative_selection_revisions(operation_id),
  activated_at timestamptz NOT NULL DEFAULT now()

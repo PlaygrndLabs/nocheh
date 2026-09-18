@@ -96,6 +96,40 @@ learning consent. No provider credentials or live messages are required.
 
 </source_portability_rehearsal>
 
+<derivative_portability_rehearsal>
+
+The candidate derivative transfer API enumerates its fixed record types at
+`GET /v1/exports/derivatives/types`, exports pages at
+`GET /v1/exports/derivatives?type=TYPE`, and retains prior import history at
+`GET /v1/exports/derivative-history`. Owner-only
+`POST /v1/imports/derivatives` accepts record batches;
+`POST /v1/imports/derivatives/verify` checks completed references and heads.
+The Python `scripts.derivative_transfer` library checks the package before
+transfer, indexes record offsets on disk, imports parents before children,
+detects missing/cyclic ancestry, and verifies every declaration afterward.
+
+Restore immutable outputs, guard inputs/revisions, selection history, and learned
+projections into derived storage. Restore operation identities only as historical
+control references that cannot authorize effects. Retain exact imported records
+in immutable derivative history, including prepared caches and guard fragments;
+never insert imported cache entries into active preparation tables. Even equal
+installation generations and authorization epochs must not revive a cache.
+
+Imported guard heads stay pending and protect owner edits from automatic
+replacement. Imported selections and learned projections remain inspectable but
+unavailable to runtime readers, including while guarding is off. Explicit owner
+guard restoration, prepared selection activation, or learned correction uses the
+normal revision and revocation paths. Duplicate imports preserve subsequent
+destination edits and selections; immutable conflicts fail without replacing data.
+
+This is the derivative transfer component, not a complete portable-package pass.
+The top-level source/derivative/native bundle coordinator, native Honcho transfer,
+legacy bundle conversion, and complete inactive native round-trip remain separate
+gates. A full export must establish a consistent source/derivative boundary so
+concurrent capture or generation cannot create missing references in its package.
+
+</derivative_portability_rehearsal>
+
 <recovery_rehearsal>
 
 For the original-only layout, backup format 6 contains separate archive, derived,
