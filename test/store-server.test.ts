@@ -100,7 +100,15 @@ test('separated application captures through control outages, exposes owner repo
     assert.deepEqual((await request('/v1/browser/prepare',browserContext)).files,[]);
     assert.equal((await request('/v1/browser/heartbeat',browserContext)).cancel_requested,false);
     await request('/v1/browser/finish',{event_id:browserSource.event_id,actor:browserContext.actor,state:'done',session:browserInput.conversation,text:'Synthetic browser result'});
-    assert.equal((await request('/v1/browser/observe',{...browserInput,event_id:browserSource.event_id})).text,'Synthetic browser result');
+    const delivered=await request('/v1/browser/observe',{...browserInput,event_id:browserSource.event_id});
+    assert.equal(delivered.text,'Synthetic browser result');assert.ok(delivered.delivery);
+    await request('/v1/browser/delivered',delivered.delivery,403,credential);
+    controlDown=true;archiveDown=true;
+    const deliveredSource=await request('/v1/browser/delivered',delivered.delivery,202);
+    assert.equal(JSON.parse(await readFile(join(root,'spool/pending',deliveredSource.event_id+'.json'),'utf8')).text,'Synthetic browser result');
+    await request('/v1/browser/delivered',{...delivered.delivery,sha256:digest('forged')},409);
+    controlDown=false;archiveDown=false;
+    await until(async()=>!!(await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[deliveredSource.event_id])).rowCount);
     await request('/v1/memory/check',undefined,409,browserClaim.archive_credential);
     await request('/v1/scheduler/ownership',{},403,credential);
     const scheduleOwner=await request('/v1/scheduler/ownership',{}),scheduleJob='http-job-'+Date.now();

@@ -73,6 +73,7 @@ WORKDIR /opt/nocheh
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY scripts/patch-native-dashboard.py /tmp/patch-native-dashboard.py
+COPY scripts/native-browser-delivery.ts /tmp/native-browser-delivery.ts
 RUN python3 /tmp/patch-native-dashboard.py /opt/hermes && cd /opt/hermes && npm run build --workspace web -- --base=/hermes/
 COPY scripts/build-dashboard.mjs ./scripts/build-dashboard.mjs
 COPY tsconfig.web.json ./tsconfig.web.json

@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])
+(root / 'web/src/lib/nocheh-browser-delivery.ts').write_text(Path(__file__).with_name('native-browser-delivery.ts').read_text())
 path = root / 'web/src/lib/api.ts'
 source = path.read_text()
 def replace(old, new):
@@ -34,6 +35,11 @@ replace('''          const next = new URLSearchParams(prev);
 path.write_text(source)
 path = root / 'web/src/components/ChatSidebar.tsx'
 source = path.read_text()
+source = 'import {receiveBrowserDelivery, resumeBrowserDeliveries} from "@/lib/nocheh-browser-delivery";\n' + source
+replace('''  const [state, setState] = useState<ConnectionState>("idle");''', '''  useEffect(() => resumeBrowserDeliveries(api.acknowledgeBrowserDelivery), []);
+  const [state, setState] = useState<ConnectionState>("idle");''')
+replace('''        const { type, payload } = frame.params;''', '''        const { type, payload } = frame.params;
+        if (type === "message.complete") void receiveBrowserDelivery(payload, api.acknowledgeBrowserDelivery).catch(() => {});''')
 replace('const url = await buildWsUrl("/api/events", { channel });', 'const url = await buildWsUrl("/api/events", { channel, profile: profile || "" });')
 path.write_text(source)
 path = root / 'web/src/pages/ChatPage.tsx'
@@ -58,6 +64,9 @@ replace('      <PluginSlot name="chat:top" />', '''      <PluginSlot name="chat:
 path.write_text(source)
 path = root / 'web/src/lib/api.ts'
 source = path.read_text()
+replace('''export const api = {''', '''export const api = {
+  acknowledgeBrowserDelivery: (receipt: {receipt: string; sha256: string}) =>
+    fetchJSON("/api/nocheh/browser-delivered", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(receipt)}),''')
 replace('''  createCronJob: (job: CronJobMutation, profile = "default") =>
     fetchJSON<CronJob>(`/api/cron/jobs?profile=${encodeURIComponent(profile)}`, {
       method: "POST",

@@ -69,7 +69,17 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     const firstWorkflow=(await stores.control.query("SELECT id FROM workflow_registry WHERE family='browser' AND job_id=$1",[first.event_id])).rows[0].id;
     await advanceWorkflow(stores.control,firstWorkflow,1,'browser','fixture-first',storageWorkflowOperations(s,runtime).browser!);
     assert.equal((await advanceWorkflow(stores.control,firstWorkflow,1,'browser','fixture-recovery',storageWorkflowOperations(s,runtime).browser!)).state,'completed');
-    assert.equal((await s.browser.observe(first)).text,'Generated answer');assert.equal((await s.browser.active(first)).active,false);
+    const delivered=await s.browser.observe(first);
+    assert.equal(delivered.text,'Generated answer');assert.ok(delivered.delivery);assert.equal((await s.browser.active(first)).active,false);
+    assert.equal((await stores.archive.query("SELECT 1 FROM events WHERE channel='browser' AND source_id=$1",[(await saved(first.event_id)).result_reference.id])).rowCount,0,'offering generated text is not delivery');
+    const receipt=await s.browserDelivery.acknowledge(owner,delivered.delivery);
+    await drainSourceSpool(s.capture,root,receipt.event_id);
+    const witnessed=(await s.archive.captured(receipt.event_id)).reference;
+    assert.equal((await stores.archive.query('SELECT original_text,kind FROM events WHERE id=$1',[receipt.event_id])).rows[0].original_text.toString(),'Generated answer');
+    assert.equal(await s.access.canLearn(witnessed,await s.guards.state()),true);
+    assert.equal((await stores.archive.query("SELECT 1 FROM source_relations r JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id WHERE r.event_id=$1 AND r.kind='reply_to' AND o.event_id=$2",[receipt.event_id,first.event_id])).rowCount,1,'delivered browser message resolves its original reply target');
+    await s.browserDelivery.acknowledge(owner,delivered.delivery);await drainSourceSpool(s.capture,root,receipt.event_id);
+    assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events WHERE id=$1',[receipt.event_id])).rows[0].count,1);
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(first.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
     assert.ok((await s.reviews.queue((await s.archive.captured(first.event_id)).reference)).length>0,'completed browser originals remain available to permitted background learning');
     const reviewBinding=await s.guards.state();
@@ -115,7 +125,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     const expired=await capture({text:'Lease expiration'});await s.browser.admit(owner,expired);await prepare(expired.event_id);mode='running';await run(expired.event_id);
     await stores.control.query("UPDATE managed_runs SET lease_until=now()-interval '1 second' WHERE event_id=$1",[expired.event_id]);
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(expired.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
-    assert.equal((await s.browser.observe(expired)).visible,false);assert.equal((await run(expired.event_id)).state,'ambiguous');
+    assert.equal((await s.browser.observe(expired)).visible,false);assert.equal((await s.browser.observe(expired)).delivery,null);assert.equal((await run(expired.event_id)).state,'ambiguous');
     const historical=await capture({text:'Imported receipt is historical'});await s.browser.admit(owner,historical);await prepare(historical.event_id);await run(historical.event_id);
     const historyRun=await saved(historical.event_id),operation='browser-result:'+historical.event_id,artifactId=digest('derivative:'+operation),configuration={binding:historyRun.binding};
     const historyText=Buffer.from(canonical({state:'done',text:'Imported claim of completion',session:historical.conversation,error_code:null}));

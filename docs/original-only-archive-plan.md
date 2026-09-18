@@ -120,7 +120,15 @@ An unstarted browser submission binds its execution guard revision after initial
 file preparation/selection. The first native request intent is durable before the
 call; after that boundary a changed guard cannot silently rebind the run. Default
 logical profile IDs stay stable while native state remains generation isolated.
-Confirmed browser-delivery capture still needs its end-to-end integration.
+Completed browser output creates an immutable offer in the owned spool, outside
+archive. The native dashboard acknowledges only an exact received completion
+frame. The owner-only `POST /v1/browser/delivered` endpoint verifies its opaque
+receipt and text hash, then fsyncs the exact message into source capture. No
+PostgreSQL or Inngest dependency can discard that accepted observation. The
+browser keeps receipt IDs/hashes for retry across reconnect without storing
+message text. Completion emission alone is not delivery evidence. Offers must
+be erased with the spool during reset; stale browser receipts cannot recreate
+missing offers. Combined native browser/reconnect acceptance remains pending.
 Host import coordination is verified independently; the full installation rehearsal
 still requires its separate gate. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer

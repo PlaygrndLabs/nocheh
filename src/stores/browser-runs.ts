@@ -9,6 +9,7 @@ import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {PreparationRepository} from './preparation.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {GuardBinding} from './guards.js';
+import type {BrowserDeliveryRepository} from './browser-delivery.js';
 import {ManagedExecutionRepository,managedIdentity as identity,managedEventId as eventId,type ManagedInput as Input} from './managed-execution.js';
 export {managedStorageSchema} from './managed-execution.js';
 
@@ -18,7 +19,16 @@ export class BrowserRunRepository extends ManagedExecutionRepository {
   protected readonly family='browser' as const;
   protected override readonly rebindBeforeLaunch=true;
   constructor(access:SourceAccessRepository,readonly sources:SourceRepository,derived:DerivedRepository,
-    readonly preparation:PreparationRepository,turns:RuntimeTurnRepository,token:string,call:RuntimeCall){super(access,derived,turns,token,call);}
+    readonly preparation:PreparationRepository,turns:RuntimeTurnRepository,token:string,call:RuntimeCall,
+    readonly delivery:BrowserDeliveryRepository){super(access,derived,turns,token,call);}
+  override async observe(input:unknown){
+    const status=await super.observe(input);
+    if(status.state!=='done'||!status.visible||!status.text)return {...status,delivery:null};
+    const row=await this.scoped(input);await this.current(row);
+    const original=(await this.access.stores.archive.query('SELECT source_id FROM events WHERE id=$1',[row.event_id])).rows[0];
+    const delivery=await this.delivery.offer(row,status.text,original.source_id);
+    await this.current(row);return {...status,delivery};
+  }
   protected readiness(row:any){return this.preparation.status(row.event_id);}
   protected async sourceAllowed(row:any,binding:GuardBinding){
     if(!await this.access.canRead(this.principal(row),row.source_reference,binding)||await this.access.space(row.source_reference)!==row.space_id)

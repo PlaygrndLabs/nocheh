@@ -80,6 +80,19 @@ class NativeAdminTests(unittest.TestCase):
                              ('POST','/api/mcp/test')]:
             self.assertEqual(self.client.request(method, path, headers=self.headers).status_code, 409)
 
+    def test_browser_receipt_needs_owner_auth_and_survives_profile_generation_change(self):
+        from fastapi.testclient import TestClient
+        from .native_admin import Administration
+        app=Administration(self.app,self.root,'model',self.policy,self.token,browser_enabled=True)
+        client=TestClient(app,base_url='http://127.0.0.1');body={'receipt':'a'*64,'sha256':'b'*64}
+        with patch('integrations.hermes.native_admin.acknowledge_browser_delivery',return_value={'state':'spooled'}) as capture:
+            self.assertEqual(client.post('/api/nocheh/browser-delivered',json=body).status_code,401);capture.assert_not_called()
+            with patch.object(app,'profile',side_effect=ValueError('profile_policy_changed')):
+                result=client.post('/api/nocheh/browser-delivered',headers=self.headers,json=body)
+            self.assertEqual(result.status_code,200,result.text);capture.assert_called_once_with(self.token,body)
+            capture.side_effect=RuntimeError('database outage')
+            self.assertEqual(client.post('/api/nocheh/browser-delivered',headers=self.headers,json=body).status_code,503)
+
     def test_dashboard_preferences_do_not_write_runtime_profiles(self):
         before=(self.owner/'config.yaml').read_bytes()
         self.assertEqual(self.client.get('/api/dashboard/font').status_code,401)
