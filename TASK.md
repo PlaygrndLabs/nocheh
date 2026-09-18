@@ -21,7 +21,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
-| Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; portability, backup, and production routing pending |
+| Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; three-store backup/inactive restore candidates verified; portability, full coordinated rehearsal, and production routing pending |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, workers, explicit sharing, and owner API/CLI/dashboard verified as candidates; production wiring pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
@@ -229,6 +229,26 @@ and keyboard-focus defects were fixed and checked again. TypeScript, production
 build, diff hygiene, and AST-only Graphify pass. This verifies candidate owner
 interfaces, not complete production Compose acceptance or fresh live gates.
 [Owner dashboard evidence](compatibility/results/2026-09-18-store-dashboard.json).
+
+Version-6 recovery tooling now snapshots all three databases while holding their
+write barriers through file and native-store capture. A PostgreSQL maintenance
+lock serializes coordinators before service changes; lost coordination leaves
+writers stopped. It stops the installation’s
+Compose writers and rejects orphan containers with writable state mounts. Snapshot
+checksums, per-table fingerprints, and sequence positions are validated; partial
+barrier failures release earlier locks. Restore requires absent databases/roles,
+verifies exact data before advancing the guard epoch, disconnects native memory,
+and leaves runtime roles NOLOGIN. The three-store restore path starts no application,
+provider, scheduler, or executor. Saved logins remain in inactive restore locations.
+
+Twenty-three focused/existing Python recovery checks pass. Real PostgreSQL fixture
+recovery verifies 7 archive, 13 derivative, and 34 control tables; 88 synthetic
+owner-edited guarded revisions survive restore and restart. No live data or provider
+was used. Coordinator ordering/file checks are tested with fixtures; the complete
+native/Compose recovery rehearsal remains pending production composition, as do
+source-only/complete portable exports and imports. This is a verified recovery
+increment, not completion of portability or release acceptance.
+[Three-store recovery evidence](compatibility/results/2026-09-18-store-recovery.json).
 
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
