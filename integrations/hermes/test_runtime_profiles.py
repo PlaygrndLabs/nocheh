@@ -149,3 +149,27 @@ class RuntimeProfileTests(unittest.TestCase):
         self.assertEqual(env['NOCHEH_BROWSER_GUARD_EPOCH'], str(self.control.epoch))
         self.assertFalse((Path(env['HERMES_HOME']) / 'auth.json').exists())
         self.assertNotIn('POSTGRES_PASSWORD', env)
+
+    def test_scheduler_uses_stable_profile_for_definitions_and_fires(self):
+        from .native_cron import manage, inspect, workflow_cursor
+        from .scheduler import Scheduler
+        entry = self.create(); calls = []
+        def call(route, body):
+            calls.append((route, body))
+            if route == 'ownership': return {'owner': 'inngest', 'epoch': 7, 'admission': True}
+            if route == 'input': return {'event_id': 'a' * 64}
+            return {}
+        job = manage(self.app, '/api/cron/jobs', 'POST', {'profile': ['research']},
+            {'name': 'Fixture', 'prompt': 'Retain exact\r\n prompt', 'schedule': 'every 1h'}, {}, call)
+        home = Path(job['hermes_home']); self.assertEqual(home.name, entry['logical_profile'])
+        manage(self.app, '/api/cron/jobs/' + job['id'] + '/trigger', 'POST', {'profile': ['research']},
+            {'request_id': 'manual-fixture'}, {}, call)
+        scheduler = Scheduler(self.app, None, call)
+        result = scheduler.advance({'logical_profile': home.name, 'job_id': job['id'],
+            'cursor': workflow_cursor(inspect(home)[0], home.name), 'owner_epoch': 7})
+        self.assertEqual(result['state'], 'completed')
+        for route, body in calls:
+            if route in ('definition', 'input'):
+                self.assertEqual(body['profile'], entry['logical_profile'])
+                self.assertEqual(body['definition']['profile'], entry['logical_profile'])
+        self.assertEqual(next(body for route, body in calls if route == 'input')['text'], 'Retain exact\r\n prompt')
