@@ -12,6 +12,7 @@ import tempfile
 import time
 import urllib.request
 from datetime import datetime,timezone
+from contextlib import ExitStack
 from pathlib import Path,PurePosixPath
 
 try: from .configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
@@ -75,13 +76,27 @@ def fingerprints(command,env,tables=None):
 
 
 def backup(state,output,leave_stopped=False):
-    from scripts.workflow_worker import running as workflows_running,stop as stop_workflows,start as start_workflows
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
+    if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
+        copied_roots=[Path(state)/name for name in ('files','spool','hermes','provider','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
+        if any(output.resolve().is_relative_to(root.resolve()) for root in copied_roots):
+            raise ValueError('Backup destination would be included in its own snapshot')
+        from scripts.store_recovery import StoreRecovery
+        recovery=StoreRecovery(command,env)
+        with recovery.maintenance():return _backup(state,output,leave_stopped,command,env,recovery)
+    return _backup(state,output,leave_stopped,command,env)
+
+
+def _backup(state,output,leave_stopped,command,env,recovery=None):
+    from scripts.workflow_worker import running as workflows_running,stop as stop_workflows,start as start_workflows
     output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     stage=Path(tempfile.mkdtemp(prefix='.backup-',dir=output.parent));stage.chmod(0o700)
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
-    stopped=[name for name in SERVICES if name in running]
+    three_stores=env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1'
+    stopped=([name for name in running if name not in ('nocheh-postgres','honcho-postgres','inngest-redis','nocheh-executor')]
+        if three_stores else [name for name in SERVICES if name in running])
+    barrier=ExitStack()
     workflow_was_running=workflows_running(state)
     try:
         if 'hermes-runtime' in stopped:subprocess.run(command+['stop','hermes-runtime'],env=env,check=True)
@@ -92,11 +107,18 @@ def backup(state,output,leave_stopped=False):
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                   'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
-        manifest['tables']=fingerprints(command,env)
-        dump=stage/'archive.dump'
-        with dump.open('xb') as file:
-            subprocess.run(command+['exec','-T','nocheh-postgres','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
-        dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
+        if three_stores:
+            from scripts.store_recovery import assert_no_state_writers
+            assert_no_state_writers(state,env,command)
+            barrier.enter_context(recovery.barrier())
+            manifest['stores']=recovery.snapshot(stage,sha)
+            manifest['tables']={store:record['tables'] for store,record in manifest['stores']['databases'].items()}
+        else:
+            manifest['tables']=fingerprints(command,env)
+            dump=stage/'archive.dump'
+            with dump.open('xb') as file:
+                subprocess.run(command+['exec','-T','nocheh-postgres','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
+            dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
         from scripts.workflow_recovery import enabled_or_present,snapshot as workflow_snapshot
         if enabled_or_present(state,env):
             manifest.update(version=4,workflows=workflow_snapshot(command,env,stage,sha))
@@ -146,13 +168,18 @@ def backup(state,output,leave_stopped=False):
                 tar.add(copy,arcname='state/'+relative,recursive=False)
                 copy.unlink()
         archive.chmod(0o600);sync(archive);manifest['state_sha256']=sha(archive)
+        if three_stores:
+            recovery.assert_barrier();manifest.update(version=6,storage_layout='original-only-v1')
         metadata=stage/'manifest.json';metadata.write_text(json.dumps(manifest,indent=2)+'\n');metadata.chmod(0o600);sync(metadata)
+        if three_stores:validate_snapshot(stage)
         stage.rename(output)
         descriptor=os.open(output.parent,os.O_RDONLY)
         try: os.fsync(descriptor)
         finally: os.close(descriptor)
-        return {'status':'backed_up','path':str(output),'files':len(manifest['files']),'tables':len(manifest['tables'])}
+        return {'status':'backed_up','path':str(output),'files':len(manifest['files']),'tables':sum(len(v) for v in manifest['tables'].values()) if three_stores else len(manifest['tables'])}
     finally:
+        barrier.close()
+        if three_stores:recovery.assert_maintenance()
         # Resume precisely the services that were running before the snapshot.
         if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180']+stopped,env=env,check=True)
         if workflow_was_running and not leave_stopped:start_workflows(state)
@@ -160,12 +187,19 @@ def backup(state,output,leave_stopped=False):
 
 def validate_snapshot(snapshot):
     manifest=json.loads((snapshot/'manifest.json').read_text())
-    if manifest.get('version') not in (1,2,3,4,5) or sha(snapshot/'archive.dump')!=manifest['dump_sha256'] or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
+    if manifest.get('version') not in (1,2,3,4,5,6) or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
         raise ValueError('Backup checksum mismatch')
+    if manifest['version']==6:
+        from scripts.store_recovery import validate
+        if manifest.get('storage_layout')!='original-only-v1':raise ValueError('Backup storage layout mismatch')
+        validate(snapshot,manifest.get('stores'),sha)
+        if manifest.get('tables')!={store:record['tables'] for store,record in manifest['stores']['databases'].items()}:
+            raise ValueError('Backup table manifest mismatch')
+    elif sha(snapshot/'archive.dump')!=manifest['dump_sha256']:raise ValueError('Backup checksum mismatch')
     if manifest['version']==4 or manifest.get('workflows'):
         from scripts.workflow_recovery import validate
         validate(snapshot,manifest.get('workflows'),sha)
-    if manifest['version']==5:
+    if manifest['version']==5 or manifest.get('honcho'):
         from scripts.honcho_recovery import validate as validate_honcho
         validate_honcho(snapshot,manifest.get('honcho'),sha)
     seen=set()
@@ -220,14 +254,20 @@ def restore(snapshot,state,project,port):
     (state/'spool/.restore-inactive').touch()
     (state/'workflows').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'workflows/inactive').touch()
+    if manifest['version']==6:config['NOCHEH_STORAGE_LAYOUT']='original-only-v1'
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
     subprocess.run(command+['up','-d','--wait','nocheh-postgres'],env=env,check=True)
-    with (snapshot/'archive.dump').open('rb') as file:
-        subprocess.run(command+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
-    # Old snapshots predate the policy tables; verify exactly their recorded set.
-    actual=fingerprints(command,env,manifest['tables'])
-    if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
+    if manifest['version']==6:
+        from scripts.store_recovery import StoreRecovery
+        StoreRecovery(command,env).restore_inactive(snapshot,manifest['stores'],sha)
+        actual=manifest['tables']
+    else:
+        with (snapshot/'archive.dump').open('rb') as file:
+            subprocess.run(command+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
+        # Old snapshots predate the policy tables; verify exactly their recorded set.
+        actual=fingerprints(command,env,manifest['tables'])
+        if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
     if manifest.get('workflows'):
         from scripts.workflow_recovery import restore as restore_workflows
         restore_workflows(command,env,snapshot,state,manifest['workflows'],sha)
@@ -237,7 +277,8 @@ def restore(snapshot,state,project,port):
     if 'honcho_connection' in manifest['tables']:
         subprocess.run(command+['exec','-T','nocheh-postgres','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
             "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
-    subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes-runtime','hermes-agent-launcher','chatgpt-speech','cliproxy-api','cliproxy-monitor','inngest-server'],env=env,check=True)
+    if manifest['version']!=6:
+        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes-runtime','hermes-agent-launcher','chatgpt-speech','cliproxy-api','cliproxy-monitor','inngest-server'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
             'telegram_enabled':False,'subscription_login_activated':False}

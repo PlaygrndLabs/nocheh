@@ -66,6 +66,29 @@ are the default source-version view; all internal derivatives remain inspectable
 
 </owner_interface_rehearsal>
 
+<recovery_rehearsal>
+
+For the original-only layout, backup format 6 contains separate archive, derived,
+and control dumps. The maintenance coordinator first obtains the installation
+maintenance lock, then stops installation writers,
+checks for orphan containers with writable state mounts, and holds a database
+write barrier until database, original-file, Hermes, Honcho, and Inngest snapshots
+and the manifest are complete. Verify checksums, row fingerprints, sequence
+positions, guarded owner edits, and original file hashes. Restore into a fresh
+installation only, with runtime database roles NOLOGIN, a revoked guard epoch,
+provider logins held inactive, and execution/scheduling disabled.
+
+Run `python3 -m scripts.store_fixture_recovery <fixture-env> <new-output-directory>`
+against a dedicated `compatibility/stores-compose.yml` installation to verify the
+three-database portion without live data. The script checks the real cluster
+marker, refuses existing restore resources, tests blocked writes and interrupted
+barrier setup, restores exact data, and restarts only the restored database.
+The complete rehearsal must additionally exercise the coordinated original-file,
+Hermes, Honcho, Inngest, Redis, and accounting snapshots through the final service
+composition. Database-only fixture evidence does not satisfy that complete gate.
+
+</recovery_rehearsal>
+
 <reset>
 
 Stop ingress, scheduling, execution, learning, and provider refresh ownership;
