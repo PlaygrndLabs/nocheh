@@ -614,6 +614,38 @@ distinguishable from erased history. Verify this repository boundary with
 `python3 compatibility/reset-setup-rehearsal.py --directory NEW_DIRECTORY
 --image CANDIDATE` on a fresh internal-only PostgreSQL fixture.
 
+After scoped erasure, call `scripts.reset_initialization.initialize` with the same
+reviewed preflight while the reset journal and inactive fences remain current. It
+records resource-creation intent before mutation, proves every reviewed pre-reset
+container and volume identity is absent, creates fresh installation directories and
+external Honcho volumes, and uses Compose to create only Nocheh PostgreSQL, workflow
+Redis, and the enabled Honcho PostgreSQL/Redis services. The coordinator disables
+their restart policies before starting them, verifies exact Compose origins, mounts,
+volume labels, and health, then runs the reset-only setup repository. Only after the
+repository reports the journal's new generation and admitted profile count may it
+restore the frozen native presentation preferences. Capture, scheduling, execution,
+learning, provider refresh, and agent services remain stopped throughout. Every
+interruption resumes from the recorded identities; replacement resources, old
+identities, changed configuration, or missing fences fail closed.
+
+Next call `scripts.reset_baseline.verify`. Its reset-only repository service derives
+the complete table inventory from the three store schemas, requires archive and
+derivative row counts to be zero, and permits only the exact current setup plus the
+deterministic new-generation profile refresh requests in control. Independent host
+checks require empty Inngest PostgreSQL, workflow Redis, Honcho PostgreSQL, Honcho
+Redis, original-file storage, and spool content; exact restored native preference
+files; no erased native memory reports; no unexpected installation service; and no
+foreign writable mount. After these checks pass, a durable retirement intent binds
+the hashes and sizes of the detailed private preservation, ownership, settlement,
+file, configuration, preference, accounting, and setup artifacts before removing
+them. The retained baseline report contains counts and hashes rather than source or
+configuration content. Run
+`python3 compatibility/reset-fresh-baseline-rehearsal.py --directory NEW_DIRECTORY
+--services-image CANDIDATE` to exercise erasure through empty baseline with seeded
+original, derivative, file, spool, workflow, Redis, Honcho, credential, login, and
+spending fixtures on an internal-only network. It must leave runtime activation
+false and make no provider calls.
+
 Run `python3 compatibility/reset-erasure-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` for a fresh internal-network fixture that uses real
 PostgreSQL stores, original/spool files, provider accounting, saved credentials,

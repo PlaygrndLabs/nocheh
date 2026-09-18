@@ -7,19 +7,24 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
-Fresh-store setup admission now binds the pre-reset installation generation into
-preservation evidence and rejects reusing it. The trusted reset repository assigns
-the journal's new generation, restores only current security/guard/allowlist,
-project, assignment and sharing configuration, then admits active custom profile
-identities through the existing control repository with deterministic operations.
-Exact replay is idempotent; altered setup, commands, target rows, or generations
-fail closed. Historical configuration, sources, derivatives, learned state,
-approvals, schedules, effects and workflow history are not copied. The ordinary
-bootstrap still rejects inactive installations; a reset-only bootstrap path
-requires the exact reset fence and explicit reset profile. A fresh internal-network
-PostgreSQL rehearsal passes, along with 24 affected Python checks and the complete
-candidate build. Docker lifecycle coordination, native preference restoration and
-empty-baseline proof remain pending. No live state changed.
+Fresh reset initialization and the empty-baseline gate now pass a complete synthetic
+lifecycle. The coordinator records creation intent before making new resources,
+rejects every pre-reset container and volume identity, and starts only the selected
+PostgreSQL and Redis services with restart ownership disabled. It assigns the
+journal's new installation generation, restores only current setup, admits active
+custom profiles through deterministic repository operations, and restores bounded
+native presentation preferences while every runtime owner remains fenced. The
+baseline independently proves zero archive/derivative rows, exact setup-only control
+history, empty Inngest and Honcho PostgreSQL/Redis stores, empty original files and
+spool, and no foreign writer. It then retires detailed private reset artifacts under
+a durable intent. Interrupted startup resumes against the exact recorded resources;
+old identities, altered setup/history, dirty caches, or unexpected journal content
+fail closed. Three focused checks, all 89 reset checks, a two-check real PostgreSQL
+rehearsal, the candidate build, and a full Honcho-enabled internal-network lifecycle
+pass. Synthetic provider login, credentials, spending, and inactive fences remain;
+runtime activation and live state changes remain absent. The live reset, one-attempt
+Telegram boundary, fresh acceptance, and controlled resumption are still pending.
+[Fresh baseline evidence](compatibility/results/2026-09-18-reset-fresh-baseline.json).
 [Setup admission evidence](compatibility/results/2026-09-18-reset-setup-admission.json).
 
 The scoped erasure phase is now a resumable coordinator primitive bound to the
@@ -260,7 +265,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Derivative versioning, reprocessing, portability, backup | Versioning/owner interfaces, source and derivative portability, native transfer, and coordinated backup/inactive restore have recorded candidate evidence; live cutover and fresh live gates remain separate |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
 | Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows, Overview and Memory access compatibility verified in isolated previews |
-| Installation-scoped reset and empty baseline | Preservation and scoped erasure candidates pass fresh rehearsals; live ownership review, initialization, empty-baseline proof, and the authorized reset remain pending |
+| Installation-scoped reset and empty baseline | Preservation, scoped erasure, fresh resource initialization, setup restoration, native preference restoration, and complete empty-baseline proof pass a combined synthetic lifecycle; live ownership review and the authorized reset remain pending |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
 
 Preserve configuration, external logins, and spending accounting during the
