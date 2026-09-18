@@ -16,15 +16,19 @@ import {listWorkflows,workflowDetail,workflowHealth} from '../workflows/owner.js
 import {workflowMetrics} from '../workflows/metrics.js';
 import {proxyInngestInspection} from '../workflows/inspection.js';
 import {controlStorageWorkflow} from './workflow-owner.js';
+import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
+import {registerWorker} from '../workflows/store.js';
+import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
-export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({})) {
+export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>) {
   const owner=new OwnerStorageApi(s);
   const server=createServer((req,res)=>{void(async()=>{
     const url=new URL(req.url??'/','http://local'),path=url.pathname;
     if(req.method==='GET'&&path==='/health')return json(res,200,{ok:true,service:config.service,storage_layout:'original-only-v1',
       databases:await storageHealth(s.stores),inactive:restoredInactive(config.dataDir),workers:status()});
     assertStorageActive(config.dataDir);
+    if(transport?.handle(req,res))return;
     if(req.method==='POST'&&path==='/internal/actions/authorize') {
       authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
@@ -50,6 +54,22 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
     if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {
       admin(principal);
+      if(req.method==='POST'&&path.startsWith('/v1/workflows/host/')) {
+        const body=await readJson(req);
+        if(path==='/v1/workflows/host/claim') {
+          if(object(body).family!=='tools')throw new HttpError(503,'host_import_migration_pending');
+          await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
+          return json(res,200,await claimHostWorkflow(s.stores.control,body));
+        }
+        if(path==='/v1/workflows/host/renew')return json(res,200,await renewHostWorkflow(s.stores.control,body));
+        if(path==='/v1/workflows/host/finish')return json(res,200,await finishHostWorkflow(s.stores.control,body));
+        if(path==='/v1/workflows/host/continue')return json(res,200,await continueHostWorkflow(s.stores.control,body));
+        if(path==='/v1/workflows/host/heartbeat') {
+          await registerWorker(s.stores.control,'host',['tools']);
+          await s.stores.control.query("INSERT INTO service_heartbeats(service) VALUES('workflow-host') ON CONFLICT(service) DO UPDATE SET seen_at=now()");
+          return json(res,200,{ok:true});
+        }
+      }
       if(path.startsWith('/v1/workflows/inspection/'))return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
       if(req.method==='GET') {
         if(path==='/v1/workflows')return json(res,200,await listWorkflows(s.stores.control,Object.fromEntries(url.searchParams)));
@@ -67,6 +87,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     };
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.telegramActions.request(principal,await readJson(req)));
     if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.controlledActions.propose(principal,await readJson(req)));
+    if(req.method==='POST'&&['/v1/tools/claim','/v1/tools/start','/v1/tools/finish'].includes(path)) {
+      admin(principal);const body=await readJson(req,2*1024*1024);
+      if(path==='/v1/tools/finish')return json(res,200,await s.controlledExecution.finish(body));
+      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
+      return json(res,200,await (path.endsWith('/claim')?s.controlledExecution.claim(body):s.controlledExecution.start(body)));
+    }
     if(req.method==='POST'&&['/v1/tools/decide','/v1/tools/grant','/v1/tools/revoke'].includes(path)) {
       admin(principal);const body=await readJson(req);
       return json(res,200,await (path.endsWith('/decide')?s.controlledActions.decide(principal,body):path.endsWith('/grant')?s.controlledActions.grant(principal,body):s.controlledActions.revoke(principal,body)));

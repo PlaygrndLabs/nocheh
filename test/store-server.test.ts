@@ -85,6 +85,17 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/security/preview',{action_id:tool.id})).decision.outcome,'ask');
     await request('/v1/tools/decide',{id:tool.id,fingerprint:tool.fingerprint,decision:'approve'},403,credential);
     assert.equal((await request('/v1/tools/decide',{id:tool.id,fingerprint:tool.fingerprint,decision:'approve'})).state,'approved');
+    const toolWorkflow=(await connected.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[tool.id])).rows[0];
+    await request('/v1/workflows/host/heartbeat',{});
+    await request('/v1/workflows/host/claim',{workflow_id:toolWorkflow.id,dispatch:1,family:'tools',run_id:'fixture'},403,credential);
+    const toolLease=await request('/v1/workflows/host/claim',{workflow_id:toolWorkflow.id,dispatch:1,family:'tools',run_id:'fixture'});
+    const toolIdentity={id:tool.id,actor:'wf-'+toolWorkflow.id,workflow_id:toolWorkflow.id,workflow_token:toolLease.token};
+    await request('/v1/tools/claim',toolIdentity,403,credential);
+    assert.equal((await request('/v1/tools/claim',toolIdentity)).arguments.command,'pwd');
+    assert.equal((await request('/v1/tools/start',toolIdentity)).started,true);
+    assert.equal((await request('/v1/tools/start',toolIdentity)).started,false);
+    await request('/v1/tools/finish',{id:tool.id,actor:toolIdentity.actor,state:'done',result:{stdout:'synthetic HTTP result'}});
+    assert.equal((await request('/v1/workflows/host/finish',{workflow_id:toolWorkflow.id,token:toolLease.token,result:{observed:true}})).state,'completed');
     assert.equal(proposal.state,'proposed');assert.equal((await request('/v1/tools/actions/'+proposal.id,undefined,200,credential)).arguments.text,'Synthetic approval preview');
     await request('/v1/tools/telegram-decision',{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'},403,credential);
     assert.equal((await request('/v1/tools/telegram-decision',{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'})).state,'approved');
