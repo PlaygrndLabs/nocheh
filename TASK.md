@@ -631,6 +631,34 @@ full backup coordination/rehearsal, browser delivery evidence, reset, and fresh
 live gates remain pending. No installation data was deleted or reconfigured.
 [Host import evidence](compatibility/results/2026-09-18-store-imports.json).
 
+Original-only exports now compose source records/files, derivative/guarded history,
+Hermes notes/SQLite sessions, and configured Honcho memory rows/embeddings into a
+checksummed `nocheh-portable-v2` package. Archive-only dashboard downloads use the
+source-only API. Honcho snapshots use one repeatable-read PostgreSQL snapshot and
+exclude queues/webhooks. Every source, parent, and active revision needed by
+materialized derivative records must be present before the complete manifest is
+atomically published. Configured native-store outages leave incomplete exports.
+
+Portable import validates inventory/checksums/reference closure before remote
+writes, routes sources and derivatives through their owner repositories, and
+stages native history with an inactive marker and durable receipt. Interrupted
+imports can replay the same package; changed destination notes are preserved by
+rejecting overwrite. Three PostgreSQL/source/derivative checks pass, with the full
+bundle check repeated after closure validation. A separate PostgreSQL snapshot
+probe verifies eight native memory tables under a concurrent update. Twenty-five
+offline pinned-native checks pass. The initial API fixture lacked the native
+module mount and was corrected. A host-only regression invocation could not bind
+its restore test port; the complete final suite passes in the isolated container.
+TypeScript, Python compilation, documentation links, diff hygiene, and AST-only
+Graphify pass (432 files, 2,684 nodes, 10,901 edges; zero model calls).
+
+Native Honcho database rehydration, legacy bundle conversion, coordinated full
+backup/restore, complete Compose/native/UI rehearsal, confirmed browser delivery,
+reset, and fresh live gates remain pending. Native staging is not native database
+restore or activation evidence; no live data or provider was used.
+[Portable bundle evidence](compatibility/results/2026-09-18-store-portable-bundle.json).
+
+
 
 
 

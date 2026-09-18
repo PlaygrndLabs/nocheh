@@ -111,3 +111,61 @@ def import_derivatives(api,directory):
                         api.call('/v1/imports/derivatives/verify',{'records':[record]});verified+=1
             return {'imported':verified,'automatic_activation':False}
         finally:index.close()
+
+
+def validate_references(directory,archive):
+    """A complete bundle must contain every declared parent and active revision.
+
+    Paginated exports are not a recovery snapshot. Concurrent append/head changes
+    may produce a missing parent; reject that candidate before publishing it as
+    complete instead of emitting a package which cannot be restored.
+    """
+    with tempfile.TemporaryDirectory(prefix='nocheh-portable-refs-') as temporary:
+        index=sqlite3.connect(Path(temporary)/'references.sqlite')
+        try:
+            index.execute('CREATE TABLE refs(kind text,key text,PRIMARY KEY(kind,key))')
+            index.execute('CREATE TABLE revisions(kind text,key text,revision integer,PRIMARY KEY(kind,key,revision))')
+            def add(kind,key):
+                if not isinstance(key,str) or not key:raise ValueError('portable_reference_invalid')
+                index.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(kind,key))
+            with (Path(archive)/'events.ndjson').open() as source:
+                for line in source:
+                    record=json.loads(line);add('events',record['id'])
+                    for artifact in record['artifacts']:add('artifacts',artifact['id'])
+            with (Path(directory)/'records.ndjson').open() as source:
+                for line in source:
+                    record=json.loads(line);kind=record['type'];value=record['value'];add(kind,record['key'])
+                    parent={'guard_revisions':'source_id','derivative_selection_revisions':'selection_id','learned_versions':'entry_id'}.get(kind)
+                    if parent:
+                        index.execute('INSERT OR IGNORE INTO revisions VALUES(?,?,?)',(kind,value.get(parent),value.get('revision')))
+                    if kind=='guard_revisions':add('guard_revision_operations',value['operation_id'])
+            index.commit()
+            def require(kind,key):
+                if not isinstance(key,str) or not index.execute('SELECT 1 FROM refs WHERE kind=? AND key=?',(kind,key)).fetchone():raise ValueError('portable_reference_incomplete')
+            with (Path(directory)/'records.ndjson').open() as source:
+                for line in source:
+                    record=json.loads(line);kind=record['type'];value=record['value']
+                    if kind=='derived_artifacts':
+                        if value.get('event_id') is not None:require('events',value['event_id'])
+                        else:require('content_operations',(value.get('operation_reference') or {}).get('id'))
+                        if value.get('artifact_id') is not None:require('artifacts',value['artifact_id'])
+                        for parent in value.get('provenance',{}).get('parents',[]):require('derived_artifacts',parent.get('id'))
+                    elif kind=='guard_sources':
+                        require(value.get('kind'),value.get('source_id'))
+                        if value.get('event_id') is not None:require('events',value['event_id'])
+                    elif kind=='guard_revisions':require('guard_sources',value.get('source_id'))
+                    elif kind=='guard_activations':require('guard_revision_operations',value.get('operation_id'))
+                    elif kind=='derivative_selections':
+                        require('events',value.get('event_id'))
+                        if value.get('artifact_id') is not None:require('artifacts',value['artifact_id'])
+                    elif kind=='derivative_selection_revisions':
+                        require('derivative_selections',value.get('selection_id'));require('derived_artifacts',value.get('derived_id'))
+                    elif kind=='derivative_activations':require('derivative_selection_revisions',value.get('operation_id'))
+                    elif kind=='learned_versions':
+                        require('learned_entries',value.get('entry_id'));require('derived_artifacts',value.get('derived_id'))
+                        for evidence in value.get('evidence',[]):require('events',evidence.get('id'))
+                    elif kind=='learned_activations':require('learned_versions',value.get('operation_id'))
+                    revision_kind={'guard_sources':'guard_revisions','derivative_selections':'derivative_selection_revisions','learned_entries':'learned_versions'}.get(kind)
+                    if revision_kind and value.get('active_revision') is not None:
+                        if not index.execute('SELECT 1 FROM revisions WHERE kind=? AND key=? AND revision=?',(revision_kind,record['key'],value['active_revision'])).fetchone():raise ValueError('portable_history_incomplete')
+        finally:index.close()
