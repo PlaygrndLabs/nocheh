@@ -48,6 +48,9 @@ test('separated application captures through control outages, exposes owner repo
   const until=async(check:()=>Promise<boolean>)=>{for(let i=0;i<400;i++){if(await check())return;await new Promise(r=>setTimeout(r,25));}assert.fail('fixture progress timeout');};
   try {
     assert.deepEqual((await request('/health')).databases,{archive:'ready',derived:'ready',control:'ready'});
+    const initialStatus=await request('/v1/status');
+    assert.equal(initialStatus.guard_mode,'on');assert.equal(initialStatus.storage_layout,'original-only-v1');
+    assert.equal(typeof initialStatus.archive.events,'number');assert.ok(Array.isArray(initialStatus.archive.artifacts));
     assert.equal((await request('/v1/security/policy')).source,'owner security policy');
     await request('/v1/security/preview',{action_id:digest(key)},404);
     const project=await request('/v1/projects',{name:key,description:'HTTP rehearsal',state:'active',expected_revision:0,operation_id:key+':project'});
@@ -56,6 +59,7 @@ test('separated application captures through control outages, exposes owner repo
       payload:{message:{message_id:Date.now(),chat:{id:123,type:'private'},from:{id:123},text:'Original HTTP observation'}}};
     controlDown=true;archiveDown=true;
     await request('/health',undefined,503);
+    await request('/v1/status',undefined,503);
     await request('/v1/ingest',event,403,scopeToken(token,'123',Date.now()+60000));
     const accepted=await request('/v1/ingest',event,202);assert.equal(accepted.state,'spooled');
     const browserInput={scope:'123',profile:'nocheh-'+digest('123').slice(0,24),conversation:'http-'+Date.now(),id:'submission',text:'Original browser observation',files:[]};
@@ -72,6 +76,8 @@ test('separated application captures through control outages, exposes owner repo
     await until(async()=>!(await readdir(join(root,'spool/pending'))).includes(digest(key)+'.json'));
     assert.equal((await connected.archive.query('SELECT count(*)::int AS count FROM events WHERE id=$1',[digest(key)])).rows[0].count,1);
     assert.equal((await connected.control.query('SELECT state FROM source_intakes WHERE event_id=$1',[digest(key)])).rows[0].state,'ready');
+    await until(async()=>!!(await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[browserSource.event_id])).rowCount);
+    assert.equal((await request('/v1/status')).archive.events,initialStatus.archive.events+2,'overview counts original observations from archive storage');
     const captured=(await services.archive.captured(digest(key))).reference;
     const legacyRuntime={event:{...event,key:key+':legacy-runtime',origin:'generated',kind:'runtime_context'},received_at:'2026-09-01T00:00:00.000Z',artifacts:[],derived:[]};
     const legacyImported=await request('/v1/import',legacyRuntime);assert.equal(legacyImported.store,'derived');
@@ -85,6 +91,7 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await services.selections.current(captured.id,null,'extracted_text',await services.guards.state())).id,output.id,'worker repairs interrupted selection publication');
     await services.guards.prepare((await services.archive.captured(digest(key))).reference,'fixture',services.detect);
     const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
+    await request('/v1/status',undefined,403,credential);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
     await request('/v1/runtime/profiles',undefined,403,credential);
     const profiles=await request('/v1/runtime/profiles');assert.ok(profiles.profiles.some((p:any)=>p.is_default));

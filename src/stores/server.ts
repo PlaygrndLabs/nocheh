@@ -231,8 +231,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const rows=(await s.stores.archive.query('SELECT id,channel,scope,source_id,revision,kind,origin,occurred_at,received_at,original_text FROM events WHERE id>$1 ORDER BY id LIMIT 51',[after])).rows;
         return json(res,200,{records:rows.slice(0,50).map(row=>({...row,original_text:undefined,text:row.original_text?.toString()??null})),next:rows.length>50?rows[49].id:null});
       }
-      if(path==='/v1/status')return json(res,200,{service:config.service,storage_layout:'original-only-v1',guard:await s.guards.state(),
-        services:(await s.stores.control.query('SELECT service,seen_at FROM service_heartbeats ORDER BY service')).rows,workers:status()});
+      if(path==='/v1/status') {
+        const [guard,archive,services]=await Promise.all([s.guards.state(),s.sources.status(principal),
+          s.stores.control.query('SELECT service,seen_at FROM service_heartbeats ORDER BY service')]);
+        return json(res,200,{service:config.service,storage_layout:'original-only-v1',guard,guard_mode:guard.mode,archive,
+          services:services.rows,workers:status()});
+      }
     }
     throw new HttpError(404,'not_found');
   })().catch(error=>{

@@ -79,6 +79,11 @@ const server=createServer((req,res)=>{void(async()=>{
  }
  if(req.method==='GET'){
   if(route==='/health')return json(res,200,{ok:true});
+  if(route==='/status'){
+   const guard=await services.guards.state();
+   return json(res,200,{service:'synthetic-owner-preview',storage_layout:'original-only-v1',guard,guard_mode:guard.mode,
+    archive:await services.sources.status(owner),services:[],workers:{}});
+  }
   if(route==='/monitoring')return json(res,200,{application:{ok:true},fixture:true,checked_at:new Date().toISOString()});
   if(route==='/scopes')return json(res,200,{scopes:[{scope:'123',events:1},{scope:'-10042',events:2},{scope:'-10043',events:1}],next:null});
   if(route==='/data'){
