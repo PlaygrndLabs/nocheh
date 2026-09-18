@@ -21,6 +21,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/health')return json(res,200,{ok:true,service:config.service,storage_layout:'original-only-v1',
       databases:await storageHealth(s.stores),inactive:restoredInactive(config.dataDir),workers:status()});
     assertStorageActive(config.dataDir);
+    if(req.method==='POST'&&path==='/internal/actions/authorize') {
+      authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
+      return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
+    }
     if(req.method==='POST'&&path==='/internal/honcho/prepare') {
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
       await assertGuardConfiguration(s.guards,config.guardMode);
@@ -44,6 +48,13 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
       return json(res,200,value);
     };
+    if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.telegramActions.request(principal,await readJson(req)));
+    if(path==='/v1/tools/actions'&&req.method==='GET') {
+      admin(principal);return json(res,200,{actions:[],permissions:[],telegram:await s.telegramActions.list(principal)});
+    }
+    if(path==='/v1/tools/telegram-decision'&&req.method==='POST'){admin(principal);return json(res,200,await s.telegramActions.decide(principal,await readJson(req)));}
+    const action=path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
+    if(action&&req.method==='GET')return result(await s.telegramActions.inspect(principal,action[1]!),true);
     if(path==='/v1/context/prepare'&&req.method==='POST') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
       return result(await readJson(req,1024*1024));

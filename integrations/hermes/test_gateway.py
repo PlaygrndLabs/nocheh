@@ -93,6 +93,16 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     async with gateway.lock:
                         action=await asyncio.wait_for(gateway.send_action({'id':'a'*64,'destination':'777','text':'Approved fixture'}),1)
                     self.assertEqual(action,{'state':'done'},'approved sends cannot wait behind a conversation lock')
+                    with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}), patch('integrations.hermes.assistant_gateway.check_action_policy',return_value=False):
+                        count=len(request.sent)
+                        self.assertEqual(await gateway.send_action({'id':'b'*64,'destination':'777','text':'Revoked approval'}),{'state':'denied'})
+                        self.assertEqual(len(request.sent),count)
+                    with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}), patch('integrations.hermes.assistant_gateway.check_action_policy',return_value=True):
+                        self.assertEqual(await gateway.send_action({'id':'b'*64,'destination':'777','text':'Revoked approval'}),{'state':'denied'},'denied receipt cannot later send')
+                        (gateway.receipts/('action-'+'c'*64+'.intent')).write_bytes(canonical({'action_id':'c'*64}))
+                        self.assertEqual(await gateway.send_action({'id':'c'*64,'destination':'777','text':'Uncertain old attempt'}),{'state':'ambiguous'})
+                        self.assertEqual(gateway.action({'id':'c'*64,'observe_only':True}),{'state':'ambiguous'})
+                        self.assertEqual(len(request.sent),count,'preexisting intent cannot send again')
                     before=len(request.sent)
                     with patch('integrations.hermes.assistant_gateway.check_delivery_policy',return_value=False):
                         blocked=await gateway.dispatch(envelope(20,'Policy changed during generation'))
