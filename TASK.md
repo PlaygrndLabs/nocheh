@@ -34,6 +34,18 @@ live installation is currently stopped and remains unchanged; its setup aggregat
 cannot be checked until PostgreSQL is running under the pre-reset fences.
 [Legacy transition evidence](compatibility/results/2026-09-18-reset-legacy-transition.json).
 
+Integrated commit `9fa7f51` now has a fresh installation-scoped, non-executable
+preflight bound to the current legacy configuration and exact Docker identities:
+17 containers, three volumes, 65 classified paths and zero inventory blockers.
+The private ownership review covers all 15 immediate restore/archive items: 12
+installation-owned backup, export, restore and recovery entries are selected for
+erasure, while three worktree archive/backup entries are preserved as unrelated.
+The preflight and reviewed-path artifacts are mode `0600`, copied no content and
+remain private under `data/local/admin/reset/`. Current services are stopped, so no
+legacy database setup aggregate was read. Reset execution, the one-attempt Telegram
+boundary, the dedicated test-group/human evidence and fresh acceptance remain
+pending. [Live preflight evidence](compatibility/results/2026-09-18-reset-live-preflight.json).
+
 The post-reset live gate and controlled resumption are now implemented as separate
 internal coordinator transitions. The reset-only validator accepts one closed
 `nocheh-fresh-acceptance-v1` request bound to the current reset ID, installation
@@ -153,8 +165,9 @@ forged paths fail closed. The anchored file manifest accepts reviewed erasure on
 for direct children of those exact roots and preserves unrelated siblings. Thirteen
 focused host checks and the 70-check reset suite pass. The candidate management
 image passes 41 reset checks beside six pinned native checks in read-only,
-network-disabled Compose with no state mounts. No live files were reviewed or
-deleted; the real installation's archive ownership review remains pending.
+network-disabled Compose with no state mounts. That increment did not review or
+delete live files; the later installation-scoped preflight above records the current
+private ownership decisions without deleting them.
 [Ownership review evidence](compatibility/results/2026-09-18-reset-ownership.json).
 
 The reset now has a bounded setup-only database snapshot for current security
@@ -345,7 +358,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Derivative versioning, reprocessing, portability, backup | Versioning/owner interfaces, source and derivative portability, native transfer, and coordinated backup/inactive restore have recorded candidate evidence; live cutover and fresh live gates remain separate |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
 | Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows, Overview and Memory access compatibility verified in isolated previews |
-| Installation-scoped reset and empty baseline | Preservation, scoped erasure, fresh resource initialization, setup restoration, native preference restoration, and complete empty-baseline proof pass a combined synthetic lifecycle; live ownership review and the authorized reset remain pending |
+| Installation-scoped reset and empty baseline | Preservation, scoped erasure, legacy-to-three-store conversion, setup/native preference restoration, and complete empty-baseline proof pass a combined synthetic lifecycle. A current private preflight and exact ownership review have zero inventory blockers; reset execution remains pending |
 | Fresh live acceptance and saved-setup resumption | Current-state validation, live-only evidence verification, and exact saved-policy resumption are implemented and pass isolated failure/recovery tests. The live boundary, dedicated test group, human participation, fresh evidence, and actual resumption remain pending |
 
 Preserve configuration, external logins, and spending accounting during the
