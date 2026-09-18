@@ -9,6 +9,7 @@ import {controlOperationSchema} from './operations.js';
 import {runtimeContextSchema} from './prepared-context.js';
 import {runtimeTurnSchema} from './turns.js';
 import {managedStorageSchema} from './browser-runs.js';
+import {scheduleStorageSchema} from './schedules.js';
 import {runtimeProfileSchema} from './runtime-profiles.js';
 import {securityCoreSchema} from '../security/store.js';
 import {nativeReviewSchema} from './native-review.js';
@@ -119,6 +120,7 @@ ${controlOperationSchema}
 ${runtimeTurnSchema}
 ${runtimeProfileSchema}
 ${managedStorageSchema}
+${scheduleStorageSchema}
 ${securityCoreSchema}
 ${nativeReviewSchema}
 ${sharingContentSchema}

@@ -60,6 +60,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(req.method==='GET'&&path==='/v1/runtime/profiles')return json(res,200,await s.runtimeProfiles.list(principal));
       if(req.method==='POST')return json(res,200,await (path.endsWith('/resolve')?s.runtimeProfiles.resolve(principal,await readJson(req)):s.runtimeProfiles.save(principal,await readJson(req))));
     }
+    if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
+      admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
+      const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
+      if(operation==='ownership')return json(res,200,await s.schedules.ownership());
+      if(operation==='definition')return json(res,200,await s.schedules.definition(principal,body));
+      if(operation==='input')return json(res,200,await s.schedules.capture(principal,body));
+      throw new HttpError(503,'scheduler_execution_migration_pending');
+    }
     if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/browser/'.length);
       if(operation==='finish')return json(res,200,await s.browser.finish(body));

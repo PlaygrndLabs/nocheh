@@ -130,6 +130,16 @@ Saved native preferences still require explicit migration before activation, and
 the combined UI/runtime rehearsal must verify generation changes during media
 preparation and browser reconnect.
 
+Schedule definition/capture APIs use control operation references and immutable
+versioned derivatives. Control stores configuration, active version pointers,
+monotonic cursors, and occurrence identities; prompt/definition/trigger content
+stays in derived storage. Changed execution versions revoke before publication;
+clock-only cursor updates do not revoke their admitted run. Replays repair failed
+handoffs without a new fire identity. Scheduler execution/receipt/delivery routes
+and Inngest schedule operations remain gated until their separate migration and
+verification. The native schedule file remains the candidate clock adapter; the
+combined rehearsal must verify its recovery against committed control versions.
+
 Run `NOCHEH_STORES_FIXTURE=1 python3 -m scripts.store_wiring_check` to render the
 combined Compose configuration with temporary synthetic credentials, inspect
 credential separation/dependencies, and start no services. The real database

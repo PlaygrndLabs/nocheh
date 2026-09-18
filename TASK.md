@@ -575,6 +575,26 @@ zero model calls). Saved preference migration, confirmed browser delivery, compl
 UI/runtime rehearsal, and scheduler integration remain pending.
 [Native profile evidence](compatibility/results/2026-09-18-store-profile-administration.json).
 
+Schedule definitions and occurrences now have an explicit control repository.
+Immutable definition documents, exact prompts, guarded prompt representations,
+and trigger documents live in derived storage. Control retains typed references,
+configuration, monotonic native cursor revisions, and execution identities.
+Neither definitions nor fires create archive records. Derivative/control outages
+and lost commit acknowledgments replay the same operation; duplicate and delayed
+updates cannot replace newer definitions. Changed execution versions revoke
+contexts and cancel affected pending work, while clock-only completion checkpoints
+preserve their already-admitted occurrence. Overlap and missed occurrences are
+recorded without authorizing execution. Explicit guard-off admission works without
+a detector. Native scheduling sends stable catalog profile identities.
+Three PostgreSQL/HTTP checks and 14 offline pinned-native checks pass. Definition
+return typing and a missing test import were corrected before successful final
+compilation and the repeated affected database batch. AST-only Graphify: 423 files,
+2,607 nodes, 10,530 edges; zero model calls. Scheduler claims, results, delivery
+approval, native execution/recovery, and Inngest operation registration remain
+pending; those HTTP operations fail closed until their migration is complete.
+[Schedule storage evidence](compatibility/results/2026-09-18-store-schedule-storage.json).
+
+
 
 
 

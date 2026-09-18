@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawn} from 'node:child_process';
 import pg from 'pg';
-import {digest,type Envelope} from '../src/archive.js';
+import {canonical,digest,type Envelope} from '../src/archive.js';
 import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
@@ -98,6 +98,19 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/browser/finish',{event_id:browserSource.event_id,actor:browserContext.actor,state:'done',session:browserInput.conversation,text:'Synthetic browser result'});
     assert.equal((await request('/v1/browser/observe',{...browserInput,event_id:browserSource.event_id})).text,'Synthetic browser result');
     await request('/v1/memory/check',undefined,409,browserClaim.archive_credential);
+    await request('/v1/scheduler/ownership',{},403,credential);
+    const scheduleOwner=await request('/v1/scheduler/ownership',{}),scheduleJob='http-job-'+Date.now();
+    const scheduleDefinition={profile:browserInput.profile,name:'HTTP fixture',prompt:'Synthetic scheduled prompt',schedule:{kind:'interval',minutes:60},
+      deliver:'local',repeat:null,enabled:true,removed:false,preferences:{},execution_version:'v1'};
+    await request('/v1/scheduler/definition',{scope:'123',profile:browserInput.profile,job_id:scheduleJob,definition:scheduleDefinition,
+      workflow_cursor:digest(scheduleJob),workflow_sequence:1});
+    const scheduled=await request('/v1/scheduler/input',{scope:'123',space:'123',profile:browserInput.profile,job_id:scheduleJob,id:'first',
+      text:scheduleDefinition.prompt,files:[],definition:scheduleDefinition,job_revision:digest(canonical(scheduleDefinition)),
+      scheduled_for:'2026-09-18T12:00:00Z',fire_reason:'manual',owner_epoch:scheduleOwner.epoch});
+    assert.equal(scheduled.state,'captured');
+    assert.equal((await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[scheduled.event_id])).rowCount,0);
+    await request('/v1/scheduler/claim',{event_id:scheduled.event_id},503);
+
     await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
     const proposal=await request('/v1/action-requests',{destination:'current',text:'Synthetic approval preview'},200,credential);
     const tool=await request('/v1/tools/propose',{kind:'shell',arguments:{command:'pwd'}},200,credential);

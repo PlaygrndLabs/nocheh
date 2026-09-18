@@ -79,7 +79,7 @@ class Scheduler:
                     request_id=pending['id'] if pending else due
                     fire=digest(canonical({'profile':home.name,'job':job['id'],'request':request_id,'type':'manual' if pending else 'scheduled'}))
                     snapshot=definition(job,home.name)
-                    captured=self.call('input',{'id':fire,'conversation':job['id'],'scope':bound.chat_id,'profile':bound.profile,
+                    captured=self.call('input',{'id':fire,'conversation':job['id'],'scope':bound.chat_id,'profile':bound.logical_profile or bound.profile,
                         'space':bound.space,'revision':bound.revision,'text':job['prompt'],'files':[],
                         'job_id':job['id'],'job_revision':revision(job,home.name),'scheduled_for':scheduled_for,
                         'fire_reason':reason,'definition':snapshot,'owner_epoch':epoch})
