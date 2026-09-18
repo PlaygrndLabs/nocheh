@@ -102,7 +102,14 @@ Browser submission capture is filesystem-only until replay: original file bytes
 are durable before the source spool entry, and archive commits all manifests with
 the source. API acknowledgment reports `spooled`; execution requires separate
 admission. Database or Inngest outages cannot discard an accepted submission.
-Managed runtimes, host import coordination, and the full installation rehearsal still
+Browser execution now has control-only admission, claims, leases, cancellation,
+and receipts. Inputs/results remain immutable derivatives. Native continuation
+observes the same receipt first; missing evidence after claim is uncertain and
+cannot start a replacement execution. Imported derivative records are marked at
+insertion and cannot satisfy current execution/checkpoint recovery. Explicit owner
+adoption of imported content and guarded edits remains a separate operation.
+Native profile administration and confirmed browser-delivery capture still need
+their end-to-end integration. Scheduler migration, host import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.

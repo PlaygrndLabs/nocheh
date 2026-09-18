@@ -102,6 +102,10 @@ test('complete derivative transfer retains edits and lineage while imported auth
     assert.deepEqual(await restored.attachments.bytes(await restored.attachments.file(file.id)),bytes);
     assert.equal((await target.archive.query('SELECT count(*) FROM events')).rows[0].count,'1');
     assert.equal((await target.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[generated.id])).rows[0].content.toString(),'Runtime content');
+    assert.equal((await target.derived.query('SELECT imported FROM derived_artifacts WHERE id=$1',[child.id])).rows[0].imported,true);
+    await assert.rejects(restored.derived.checkpoint(key+':child'),{code:'imported_result_not_execution_receipt'});
+    await assert.rejects(restored.derived.record({operation_id:key+':child',source:original.reference,parents:[outputs[0]!],kind:'runtime_context',content:Buffer.from('Interpreted context'),producer:'fixture',producer_version:'1',configuration:{}}),{code:'imported_result_not_execution_receipt'});
+    assert.equal((await source.derived.checkpoint(key+':child')).id,child.id,'a local checkpoint still repairs lost workflow completion');
     assert.equal((await target.derived.query('SELECT count(*) FROM runtime_prepared_values')).rows[0].count,'0');
     assert.equal((await target.derived.query('SELECT count(*) FROM runtime_prepared_inputs')).rows[0].count,'0');
     await assert.rejects(restored.operations.verify(operation),{code:'operation_reference_conflict'});

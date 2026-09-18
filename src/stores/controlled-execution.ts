@@ -35,7 +35,7 @@ export class ControlledExecutionRepository {
   }
   /** Recover only an exact immutable receipt; no external operation occurs here. */
   async recover(db:pg.PoolClient,row:any) {
-    const saved=(await this.actions.derived.pool.query('SELECT * FROM derived_artifacts WHERE operation_id=$1',[operation(row.id)])).rows[0];
+    const saved=await this.actions.derived.checkpoint(operation(row.id));
     if(!saved)return null;
     const content=JSON.parse(saved.content.toString());
     if(digest(saved.content)!==saved.content_hash||saved.kind!=='controlled_action_result'||saved.producer_version!==protocol||

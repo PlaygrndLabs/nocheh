@@ -157,7 +157,7 @@ export class TelegramActionRepository {
         }catch(error){await db.query('ROLLBACK');throw error;}
         return observation(state==='done'?'completed':state==='denied'?'denied':'waiting',state==='ambiguous'?'reconcile':'action',1,Date.now()+60000,state==='ambiguous'?'receipt_pending':null);
       };
-      const durable=(await this.stores.derived.query('SELECT id,content,content_hash FROM derived_artifacts WHERE operation_id=ANY($1)',[['telegram-action-result:'+id+':done','telegram-action-result:'+id+':denied']])).rows[0];
+      const durable=await this.derived.checkpoint('telegram-action-result:'+id+':done')??await this.derived.checkpoint('telegram-action-result:'+id+':denied');
       if(durable) {
         const state=JSON.parse(durable.content.toString()).state;
         if(digest(durable.content)!==durable.content_hash||!['done','denied'].includes(state)||durable.content.toString()!==canonical({state}))throw new HttpError(409,'action_result_conflict');

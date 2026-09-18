@@ -139,7 +139,7 @@ export class TelegramDispatchRepository {
       await db.query('INSERT INTO dispatches(event_id,source_reference) VALUES($1,$2) ON CONFLICT DO NOTHING',[id,captured.reference]);
       let row=await this.row(id);if(closed.has(row.state))return this.observation(row);
       if(row.attempts) {
-        const saved=(await this.derived.pool.query('SELECT id,content,content_hash FROM derived_artifacts WHERE operation_id=$1',[`telegram-dispatch-result:${id}:${row.attempts}`])).rows[0];
+        const saved=await this.derived.checkpoint(`telegram-dispatch-result:${id}:${row.attempts}`);
         if(saved) {
           const value=JSON.parse(saved.content.toString());if(digest(saved.content)!==saved.content_hash||!closed.has(value.state))throw new HttpError(409,'dispatch_result_conflict');
           return await this.finish(row,value,{store:'derived',kind:'artifact',id:saved.id,input_hash:saved.content_hash});

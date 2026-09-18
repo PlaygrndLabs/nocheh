@@ -219,7 +219,7 @@ export class NativeMemoryRepository {
   async refreshContext(id:string,requestId=String(Math.floor(Date.now()/120000))):Promise<boolean> {
     const current=await this.current(id);if(!current.row.last_ready_at&&current.row.state!=='ready')return false;
     string(requestId,200);const key='native-context:'+id+':'+requestId;
-    let raw=(await this.derived.pool.query('SELECT id,content,content_hash FROM derived_artifacts WHERE operation_id=$1',[key])).rows[0];
+    let raw=await this.derived.checkpoint(key);
     if(!raw) {
       const result=await this.call('/v3/workspaces/'+id+'/peers/source/representation',{include_most_frequent:true,max_conclusions:50});
       const text=string(result.representation,2*1024*1024);

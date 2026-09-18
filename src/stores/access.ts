@@ -18,7 +18,7 @@ export class SourceAccessRepository {
   async canRead(principal:Reader,reference:SourceReference,binding:GuardBinding):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
-    if(source.channel!=='telegram'||source.scope!==principal.scope)return false;
+    if(!['telegram','browser'].includes(source.channel)||source.scope!==principal.scope)return false;
     const observed=(await this.relationships.describe(reference)).audience,space=principal.space??principal.scope;
     const allowed=!!observed&&observed.chat_id===principal.scope&&(observed.topic_state==='known'?space===observed.chat_id+'/topic/'+observed.topic_id:
       observed.topic_state==='none'&&space===observed.chat_id);
@@ -33,7 +33,10 @@ export class SourceAccessRepository {
     if(intake?.transport==='import')return false;
     if(source.origin!=='live'||source.kind==='telegram_wire')return false;
     const policy=this.policy();if(!policy.enabled||!policy.owner_id)return false;
-    if(source.channel==='browser')return source.scope===policy.owner_id;
+    if(source.channel==='browser') {
+      if(source.kind!=='browser_input'||source.scope!==policy.owner_id&&!policy.group_ids.includes(source.scope))return false;
+      const space=await this.space(reference);await this.guards.assertCurrent(binding);return space!==null;
+    }
     if(source.channel!=='telegram'||!['telegram_update','telegram_delivered_message'].includes(source.kind))return false;
     if(!policy.group_ids.includes(source.scope)&&source.scope!==policy.owner_id)return false;
     const observed=(await this.relationships.describe(reference)).audience;
@@ -43,8 +46,10 @@ export class SourceAccessRepository {
   }
   async space(reference:SourceReference):Promise<string|null> {
     const source=await this.archive.verify(reference);
-    if(source.channel==='browser'&&source.scope===this.policy().owner_id)return source.scope;
     const observed=(await this.relationships.describe(reference)).audience;
+    // Legacy owner originals can lack topic metadata; that exception cannot
+    // promote a group/topic submission into a broader audience.
+    if(!observed&&source.channel==='browser'&&source.scope===this.policy().owner_id)return source.scope;
     return !observed||observed.topic_state==='unknown'?null:observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id;
   }
   async setConsent(principal:Reader,reference:SourceReference,input:unknown) {

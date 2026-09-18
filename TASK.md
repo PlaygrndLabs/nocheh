@@ -20,7 +20,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | --- | --- |
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation and app/security/capture wiring verified in isolated Compose; remaining repository migrations pending |
-| Guard/control separation and recovery | Guard repositories, service callers, and publication recovery verified; remaining action/managed control-state migrations pending |
+| Guard/control separation and recovery | Guard, action, browser execution, service callers, and publication recovery verified as candidates; native administration and scheduler migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; three-store backup/inactive restore candidates verified; portability, full coordinated rehearsal, and production routing pending |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, explicit sharing, owner interfaces, and preparation/memory workflow wiring verified as candidates; full installation rehearsal pending |
 | Complete isolated Compose and UI acceptance | Pending |
@@ -501,6 +501,34 @@ Five initial affected checks and four final checks (including three repeats) pas
 in isolated Compose, with TypeScript and AST-only Graphify passing. Managed
 execution admission remains the next integration step; capture starts no run.
 [Browser capture evidence](compatibility/results/2026-09-18-store-browser-capture.json).
+
+Browser admission, claims, leases, cancellation, workflow inspection, and receipts
+now use control storage; prepared inputs and terminal results use derived storage.
+The admitted source, conversation, logical profile, installation generation,
+guard revision, and workflow owner remain bound throughout the run. Claim is
+exclusive; observation precedes any same-identity native continuation. A missing
+receipt after claim cannot authorize another execution. Completed derivatives
+repair interrupted completion without a native call. Cancelled/expired contexts
+cannot reuse capabilities or stream protected output, while separately authorized
+background review/filter work can still process the original evidence.
+
+The trusted native handoff verifies the signed logical profile before entering
+the common runner. Browser topics use exact observed membership for retrieval and
+learning. Imported derivative history now carries an immutable inactive-origin
+flag; browser, action, learning, guard, and reprocessing recovery cannot mistake
+an imported artifact for a locally completed operation. Owner adoption of imported
+guard edits and selected transcripts remains available.
+
+The final serial batch passes ten affected PostgreSQL/HTTP checks; seven additional
+checkpoint/portability checks passed in the preceding batch. Eighteen offline
+native checks pass. An initial fixture reused the same submission ID when testing
+session contention and was corrected. A later overlapping pair of fixture batches
+caused a `guard_transition_pending` failure; the affected checks were repeated
+serially and pass. TypeScript, diff hygiene, and AST-only Graphify pass (417 files,
+2,551 nodes, 10,264 edges; zero model calls). Native profile administration,
+confirmed browser delivery capture, scheduler migration, and full installation
+acceptance remain pending. No live service or content was changed.
+[Browser execution evidence](compatibility/results/2026-09-18-store-browser-runs.json).
 
 
 
