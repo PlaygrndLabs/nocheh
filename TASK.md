@@ -290,6 +290,25 @@ Top-level coordinated portable bundles, native Honcho transfer, legacy import
 conversion, production wiring, and full inactive native round-trip remain pending.
 [Derivative transfer evidence](compatibility/results/2026-09-18-derivative-portability.json).
 
+Three-store installation configuration and setup are now implemented as an opt-in
+Compose overlay selected by saved configuration. Setup-only bootstrap provisions
+the three domain stores plus Inngest, holds the installation maintenance lock,
+preserves existing generations/history on repeat setup, and refuses inactive
+restores. Domain, administrator, and workflow credentials are distinct and private.
+Runtime app/security configuration removes administrator and Inngest database
+passwords; Hermes receives no domain credentials. The runtime pool factory uses
+explicit role/database pairs and rejects bootstrap credentials. Legacy database
+initialization fails closed when the new layout is selected.
+
+The Compose render check starts no services and uses temporary synthetic setup.
+Two configuration checks, the real-database bootstrap check, and an affected owner
+API check pass across the recorded runs. Twenty-four Python configuration,
+settings, container/lifecycle, and recovery checks pass; TypeScript and AST-only
+Graphify pass. Production main/security/worker entrypoint migration is still
+pending; the opt-in layout is not yet a runnable release candidate and the live
+installation remains on its prior layout.
+[Storage setup evidence](compatibility/results/2026-09-18-store-configuration.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior

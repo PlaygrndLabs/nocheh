@@ -21,6 +21,7 @@ import {toolWorkflowSchema} from './workflows/host-tools.js';
 import {migrateSourceModel} from './source-model.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
+  if(config.storageLayout==='original-only-v1')throw Error('separated_storage_repositories_required');
   const pool = new pg.Pool({
     host: process.env.PGHOST ?? 'nocheh-postgres', port: Number(process.env.PGPORT ?? 5432),
     user: process.env.PGUSER ?? 'nocheh', database: process.env.PGDATABASE ?? 'nocheh',
