@@ -11,6 +11,7 @@ import type {DerivedRepository} from './derived.js';
 import type {GuardRepository,GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
+import type {SourceReference} from './archive.js';
 
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
@@ -99,17 +100,18 @@ export class ControlledActionRepository {
     return (await db.query(`SELECT id,remaining,expires_at,revision FROM action_permissions WHERE fingerprint=$1 AND binding=$2
       AND (job_id IS NULL OR job_id=$3) AND remaining>0 AND revoked_at IS NULL AND expires_at>now() ORDER BY expires_at,id`,[row.fingerprint,row.binding,row.job_id])).rows;
   }
-  private async command<T>(principal:Reader,body:Record<string,unknown>,request:unknown,change:(db:pg.PoolClient)=>Promise<T>) {
-    admin(principal);const hash=digest(canonical(request)),id=body.operation_id===undefined?'action-owner:'+hash:string(body.operation_id,200),db=await this.control.connect();
+  private async command<T>(principal:Reader,body:Record<string,unknown>,request:unknown,change:(db:pg.PoolClient)=>Promise<T>,source?:SourceReference) {
+    admin(principal);if(source)await this.access.archive.verify(source);
+    const hash=digest(canonical(source?{request,source}:request)),id=body.operation_id===undefined?'action-owner:'+hash:string(body.operation_id,200),db=await this.control.connect();
     try {
       await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,803365))',[id]);
       const prior=(await db.query('SELECT * FROM action_owner_commands WHERE id=$1',[id])).rows[0];
       if(prior){if(prior.request_hash!==hash)throw new HttpError(409,'owner_command_conflict');await db.query('COMMIT');return prior.result as T;}
-      const result=await change(db);await db.query('INSERT INTO action_owner_commands(id,request_hash,result) VALUES($1,$2,$3)',[id,hash,result]);
+      const result=await change(db);await db.query('INSERT INTO action_owner_commands(id,request_hash,result,source_reference) VALUES($1,$2,$3,$4)',[id,hash,result,source??null]);
       await db.query('COMMIT');return result;
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
-  async decide(principal:Reader,value:unknown) {
+  async decide(principal:Reader,value:unknown,source?:SourceReference) {
     admin(principal);const body=exact(value,['id','fingerprint','decision','expected_revision','operation_id']),id=identity(body.id);
     if(!['approve','deny'].includes(String(body.decision)))throw new HttpError(400,'invalid_decision');
     return this.command(principal,body,{...body,operation_id:undefined},async db=>{
@@ -119,9 +121,9 @@ export class ControlledActionRepository {
       if(!['proposed','approved'].includes(row.state))throw new HttpError(409,'action_already_started_or_closed');
       if(body.decision==='approve'){await this.fence(db,row.binding);await this.arguments(row);}
       const state=body.decision==='approve'?'approved':'rejected';
-      await db.query('UPDATE controlled_actions SET state=$2,permission_id=NULL,revision=revision+1,updated_at=now() WHERE id=$1',[id,state]);
+      await db.query('UPDATE controlled_actions SET state=$2,permission_id=NULL,decision_reference=$3,revision=revision+1,updated_at=now() WHERE id=$1',[id,state,source??null]);
       await requestWorkflow(db,'tools',id);return {id,state,revision:row.revision+1};
-    });
+    },source);
   }
   async grant(principal:Reader,value:unknown) {
     admin(principal);const body=exact(value,['action_id','fingerprint','uses','minutes','expected_revision','operation_id']),id=identity(body.action_id);
@@ -139,7 +141,7 @@ export class ControlledActionRepository {
       return {id:permission,revision:1};
     });
   }
-  async revoke(principal:Reader,value:unknown) {
+  async revoke(principal:Reader,value:unknown,source?:SourceReference) {
     admin(principal);const body=exact(value,['id','expected_revision','operation_id']),id=identity(body.id);
     return this.command(principal,body,{kind:'revoke',...body,operation_id:undefined},async db=>{
       const row=(await db.query('SELECT revision,revoked_at FROM action_permissions WHERE id=$1 FOR UPDATE',[id])).rows[0];
@@ -147,7 +149,7 @@ export class ControlledActionRepository {
       if(body.expected_revision!==undefined&&body.expected_revision!==row.revision)throw new HttpError(409,'permission_changed');
       if(!row.revoked_at)await db.query('UPDATE action_permissions SET revoked_at=now(),revision=revision+1 WHERE id=$1',[id]);
       return {id,revoked:true,revision:row.revision+(row.revoked_at?0:1)};
-    });
+    },source);
   }
   async list(principal:Reader) {
     admin(principal);const rows=(await this.control.query('SELECT id FROM controlled_actions ORDER BY created_at DESC,id DESC LIMIT 100')).rows;

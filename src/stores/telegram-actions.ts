@@ -1,7 +1,6 @@
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import {evaluate,recordEffect} from '../security/store.js';
@@ -191,27 +190,5 @@ export class TelegramActionRepository {
         producer:'hermes',producer_version:protocol,configuration:{id},provenance:{binding:row.binding,native_receipt:id}});
       return await finish(state,result);
     }finally{await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(hashtextextended($1,803363))',[id]);if(held)await leaveFamily(db,'actions');});}
-  }
-  /** Commands are accepted only from independently captured owner DM evidence. */
-  async controlReply(source:SourceReference):Promise<string|null> {
-    const original=await this.access.archive.verify(source);
-    if(original.kind!=='telegram_update'||original.origin!=='live')return null;
-    const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
-    if(intake?.transport==='import'||intake?.state==='pending')return null;
-    const row=(await this.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0],payload=JSON.parse(row.payload.toString()),text=payload.message?.text;
-    const command=typeof text==='string'?text.trim().match(/^\/(actions|action|approve|deny)(?:\s+([a-f0-9]{64}))?$/):null;if(!command)return null;
-    if(!conversationScope(this.access.policy(),payload,original.scope)?.owner)return 'Only the owner can review or approve actions in their private DM.';
-    const owner={admin:true,scope:null};
-    if(command[1]==='actions') {
-      const rows=(await this.list(owner)).filter(row=>['proposed','approved','running','ambiguous'].includes(row.state)).slice(0,10);
-      return rows.length?rows.map(row=>`${row.id}\nTelegram destination: ${row.arguments.destination}\nStatus: ${row.state}\nReview: /action ${row.id}`).join('\n\n').slice(0,3500):'No pending actions.';
-    }
-    if(!command[2])return 'Include the full action ID.';
-    try {
-      const action=await this.inspect(owner,command[2]);
-      if(command[1]==='action')return `Telegram destination: ${action.arguments.destination}\nStatus: ${action.state}\nExact message:\n${action.arguments.text}\n\nApprove: /approve ${action.id}\nReject: /deny ${action.id}`;
-      const result=await this.decide(owner,{id:action.id,fingerprint:action.fingerprint,decision:command[1],operation_id:'telegram-command:'+source.id},source);
-      return `Action ${result.id} ${result.state}.`;
-    }catch(error){if(error instanceof HttpError&&[400,404,409].includes(error.status))return error.code==='action_not_found'?'Action not found.':'This action cannot be approved or changed in its current state. Review it in Nocheh Activity.';throw error;}
   }
 }

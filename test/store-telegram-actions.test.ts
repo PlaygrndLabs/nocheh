@@ -82,9 +82,9 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
     const previous=calls.length;assert.equal((await actions.run(denied.id,authority)).state,'denied');assert.equal(calls.length,previous);
     const commandAction=await actions.request(principal,{destination:'123',text:'Approved by owner DM'});
     const groupCommand=await capture('group-command','/approve '+commandAction.id,group,123);
-    assert.match((await actions.controlReply(groupCommand))!,/Only the owner/);assert.equal((await actions.inspect(owner,commandAction.id)).state,'proposed');
+    assert.match((await services.actionCommands.controlReply(groupCommand))!,/Only the owner/);assert.equal((await actions.inspect(owner,commandAction.id)).state,'proposed');
     const ownerCommand=await capture('owner-command','/approve '+commandAction.id,'123',123);
-    assert.match((await actions.controlReply(ownerCommand))!,/approved/);assert.match((await actions.controlReply(ownerCommand))!,/approved/);
+    assert.match((await services.actionCommands.controlReply(ownerCommand))!,/approved/);assert.match((await services.actionCommands.controlReply(ownerCommand))!,/approved/);
     assert.equal((await actions.inspect(owner,commandAction.id)).state,'approved');
     const stale=await actions.request(principal,{destination:'123',text:'Approval cannot survive revocation'});await approve(stale.id);
     await services.guards.setMode('off');const sentBefore=calls.length;

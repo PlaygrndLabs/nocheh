@@ -14,7 +14,7 @@ import type {GuardRepository,GuardBinding} from './guards.js';
 import type {PreparationRepository} from './preparation.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
-import type {TelegramActionRepository} from './telegram-actions.js';
+import type {ActionCommandRepository} from './action-commands.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -48,7 +48,7 @@ export function dispatchPayload(original:any,representation:any,text:string|null
 export class TelegramDispatchRepository {
   constructor(readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,readonly sources:SourceRepository,
     readonly derived:DerivedRepository,readonly guards:GuardRepository,readonly preparation:PreparationRepository,
-    readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:TelegramActionRepository,
+    readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:ActionCommandRepository,
     readonly call:RuntimeCall,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
   private get control(){return this.access.stores.control;}
   private observation(row:any):Observation {

@@ -89,6 +89,9 @@ completion. Retained receipts repair lost completion and settle uncertainty;
 expired claims never authorize a repeat execution. The original-only listener
 supports host Connect with inactive-installation checks. Host imports remain
 unregistered and admission fails closed until their repository migration is ready.
+Telegram review/approval/revocation commands use independently captured original
+owner DMs and store decision references in control. Imported messages, edits,
+guarded content, and group messages cannot grant administrative authority.
 Managed runtimes, host import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer

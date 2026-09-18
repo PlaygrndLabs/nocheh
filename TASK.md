@@ -467,6 +467,16 @@ approval cannot revive it. This is synthetic receipt verification, not a live
 tool-effect or full Connect installation acceptance pass.
 [Controlled execution evidence](compatibility/results/2026-09-18-store-controlled-execution.json).
 
+Telegram action review now combines message and controlled tool proposals. Owner
+DM commands can inspect exact arguments, approve or deny a bounded proposal, list
+permissions, and revoke a permission. Their authority is the independently
+captured original owner DM; group commands, imported commands, edited messages,
+and editable guarded text cannot authorize them. Decision receipts link to that
+original source in control storage. Replays remain idempotent and large tool
+arguments require complete review in Activity. Generated replies remain derived
+until confirmed delivery is captured. Five affected synthetic checks pass.
+[Owner command evidence](compatibility/results/2026-09-18-store-action-commands.json).
+
 
 
 
