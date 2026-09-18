@@ -90,6 +90,11 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'})).valid,true);
     await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'different message'},403);
     assert.equal((await request('/v1/exports/sources?limit=1')).format,'nocheh-sources-v1');
+    assert.ok(Array.isArray((await request('/v1/workflows?limit=1')).workflows));
+    assert.ok(Array.isArray((await request('/v1/workflows/health')).workers));
+    assert.ok(Array.isArray((await request('/v1/workflows/metrics?range=24h')).buckets));
+    await request('/v1/workflows',undefined,403,credential);
+    await request('/v1/workflows/migrations',{},409);
     await request('/v1/export',undefined,404);
     await services.guards.setMode('off');
     await request('/v1/memory/check',undefined,409,credential);assert.notEqual((await services.guards.state()).epoch,binding.epoch);

@@ -12,6 +12,10 @@ import {captureEvidence} from './generated-capture.js';
 import {OwnerStorageApi} from './owner-api.js';
 import type {StorageServices} from './services.js';
 import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHealth} from './lifecycle.js';
+import {listWorkflows,workflowDetail,workflowHealth} from '../workflows/owner.js';
+import {workflowMetrics} from '../workflows/metrics.js';
+import {proxyInngestInspection} from '../workflows/inspection.js';
+import {controlStorageWorkflow} from './workflow-owner.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
 export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({})) {
@@ -44,6 +48,19 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
     if(await owner.handle(principal,req,res,url))return;
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true}))return;
+    if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {
+      admin(principal);
+      if(path.startsWith('/v1/workflows/inspection/'))return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
+      if(req.method==='GET') {
+        if(path==='/v1/workflows')return json(res,200,await listWorkflows(s.stores.control,Object.fromEntries(url.searchParams)));
+        if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(s.stores.control));
+        if(path==='/v1/workflows/metrics')return json(res,200,await workflowMetrics(s.stores.control,Object.fromEntries(url.searchParams)));
+        if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(s.stores.control,path.split('/').at(-1)!));
+      }
+      const control=path.match(/^\/v1\/workflows\/([a-f0-9]{64})\/(retry|cancel)$/);
+      if(control&&req.method==='POST')return json(res,200,await controlStorageWorkflow(s.stores.control,principal,control[1]!,control[2]!,await readJson(req)));
+      if(path==='/v1/workflows/migrations'||path.startsWith('/v1/workflows/migrations/'))throw new HttpError(409,'legacy_migration_not_applicable');
+    }
     const result=async(value:unknown,prepared=false)=>{
       if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
       return json(res,200,value);
