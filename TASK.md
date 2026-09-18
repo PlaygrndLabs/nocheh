@@ -126,6 +126,20 @@ affected PostgreSQL and prepared-context checks pass after correcting one test's
 expected detector rejection code. Runtime broker wiring remains pending.
 [Context evidence](compatibility/results/2026-09-18-store-prepared-context.json).
 
+The broker accepts explicit turn/audience/file repositories and writes policy
+decisions to control storage with typed original/operation references. Native
+profile identity includes installation generation, audience, purpose, and guard
+epoch. Scheduled turns need durable admission and become unusable after closure;
+source turns require exact known conversation membership. Provider attempts and
+streamed output recheck authorization. Administrative guard requests now keep
+their generated context in derived storage under control operation roots. Six
+affected broker, action, and security-policy checks pass; the prior four context
+and broker checks also pass. An initial fixture omitted attachment preparation
+and correctly failed closed; it was corrected. AST-only Graphify: 353 files,
+2,133 nodes, 8,096 edges, zero model calls. Production entry points still await
+the full service cutover.
+[Broker evidence](compatibility/results/2026-09-18-store-security-broker.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior
