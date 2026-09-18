@@ -121,14 +121,29 @@ file preparation/selection. The first native request intent is durable before th
 call; after that boundary a changed guard cannot silently rebind the run. Default
 logical profile IDs stay stable while native state remains generation isolated.
 Completed browser output creates an immutable offer in the owned spool, outside
-archive. The native dashboard acknowledges only an exact received completion
-frame. The owner-only `POST /v1/browser/delivered` endpoint verifies its opaque
+archive. The native dashboard acknowledges an exact received completion frame
+or an exact missed response after rendering it. The owner-only `POST /v1/browser/delivered` endpoint verifies its opaque
 receipt and text hash, then fsyncs the exact message into source capture. No
 PostgreSQL or Inngest dependency can discard that accepted observation. The
 browser keeps receipt IDs/hashes for retry across reconnect without storing
 message text. Completion emission alone is not delivery evidence. Offers must
 be erased with the spool during reset; stale browser receipts cannot recreate
-missing offers. Combined native browser/reconnect acceptance remains pending.
+missing offers. `POST /v1/browser/undelivered` resolves the current profile and
+returns at most four authorized, unacknowledged results per cursor page. The
+native dashboard renders recovery results before acknowledging them; merely
+listing a stored result cannot create an original observation. Archive delivery
+IDs retire offers from recovery without cross-store joins or a second receipt
+source of truth. Native sidebar publication is initialized, while recovery does
+not depend on that best-effort WebSocket connection.
+
+A visible completed run supplies its current binding to the native browser.
+The gateway validates audience, logical profile, installation generation, guard
+revision, and native identity before switching its session database. It clears
+old cached history and uses the new native state without copying old notes or
+sessions. Native preparation creates the isolated database directory before UI
+history reads. Transport channels use logical profiles across guard revisions;
+logical profiles still have separate channels. Capture itself adds no database
+dependency. Combined browser/Compose acceptance remains pending.
 Host import coordination is verified independently; the full installation rehearsal
 still requires its separate gate. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer

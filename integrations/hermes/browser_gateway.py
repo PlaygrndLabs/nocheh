@@ -24,7 +24,43 @@ class BrowserGateway:
         self.actor = uuid.uuid4().hex
         self.call = call or self.http
         self.lock = threading.Lock(); self.running = {}; self.inputs = {}
+        self.context_lock = threading.RLock(); self.native_db = None
         self.original = dict(server._methods)
+
+    def database(self):
+        if self.native_db is None:
+            from hermes_state import SessionDB
+            from .isolated_profile import database_path
+            self.native_db = SessionDB(database_path(self.home))
+        return self.native_db
+
+    def adopt_context(self, status):
+        """Use only the currently authorized run binding, never directory hints.
+        The same conversation ID can continue in fresh native state; old context
+        is left in its old generation and is not copied into this one."""
+        value=status.get('context')
+        if not value:return
+        from .scopes import Scopes
+        from dataclasses import replace
+        expected={'scope':self.scope.chat_id,'space':self.scope.space or self.scope.chat_id,
+                  'logical_profile':self.scope.logical_profile,'owner':self.scope.owner,'generation':self.scope.generation}
+        if not status.get('visible') or any(value.get(key)!=item for key,item in expected.items()):raise ValueError('profile_scope_denied')
+        if type(value.get('revision')) is not int or value['revision']!=value.get('guard_epoch') or value['revision']<self.scope.revision:
+            raise ValueError('profile_scope_denied')
+        bound=Scopes.apply_revision(replace(self.scope,revision=value['revision']),value)
+        if bound.profile!=value.get('native_profile'):raise ValueError('profile_scope_denied')
+        if bound.profile==self.scope.profile:return
+        home=self.root/'profiles'/bound.profile
+        if home.is_symlink() or (self.root/'profiles').is_symlink():raise ValueError('profile_path_denied')
+        from .assistant_gateway import prepare_profile
+        prepare_profile(self.root,bound,self.model)
+        from .isolated_profile import prepare
+        prepare(home)
+        (home/'workspace').mkdir(exist_ok=True,mode=0o700)
+        if self.native_db is not None:self.native_db.close();self.native_db=None
+        self.scope,self.home=bound,home
+        for session in self.server._sessions.values():
+            session.update(history=[],edit_snapshots={},profile_home=None,cwd=str(home/'workspace'))
 
     def http(self, route, body):
         base = os.environ.get('ARCHIVE_URL','http://nocheh-app:8780') if route.startswith('/v1/') else 'http://127.0.0.1:8781'
@@ -127,13 +163,16 @@ class BrowserGateway:
                     if status['state'] not in ('captured','running'):
                         # Drain the bounded journal page before delivering completion.
                         if len(status.get('events',[]))==100:continue
-                        with contextlib.suppress(Exception):
-                            from hermes_state import SessionDB
-                            from .isolated_profile import database_path
-                            db=SessionDB(database_path(self.home),read_only=True)
-                            try:session['history']=db.get_messages_as_conversation(session['session_key'])
-                            finally:db.close()
                         done=status['state']=='done' and status.get('visible')
+                        if done:
+                            with self.context_lock:
+                                self.adopt_context(status)
+                                with contextlib.suppress(Exception):
+                                    from hermes_state import SessionDB
+                                    from .isolated_profile import database_path
+                                    db=SessionDB(database_path(self.home),read_only=True)
+                                    try:session['history']=db.get_messages_as_conversation(session['session_key'])
+                                    finally:db.close()
                         self.server._emit('message.complete',sid,{'text':status['text'] if done else 'The managed turn ended. Its original input and execution evidence are preserved.',
                             **({'nocheh_delivery':status['delivery']} if done and status.get('delivery') else {}),
                             'usage':{},'status':'complete' if done else 'interrupted' if status['state']=='cancelled' else 'error'})
@@ -169,6 +208,11 @@ class BrowserGateway:
         return self.server._ok(rid,{'status':'interrupted'})
 
     def invoke(self, name, rid, params):
+        # Close joins the observer; it must not hold the observer's context lock.
+        if name=='session.close':return self._invoke(name,rid,params)
+        with self.context_lock:return self._invoke(name,rid,params)
+
+    def _invoke(self, name, rid, params):
         try:
             if params.get('profile') not in (None,'',self.scope.profile,self.scope.logical_profile): raise ValueError('profile_scope_denied')
             params = {**params};params.pop('profile',None)
@@ -229,6 +273,9 @@ class BrowserGateway:
                 self.server._methods[name] = lambda rid,params,name=name:self.server._err(rid,4032,'managed_operation_unavailable: '+name)
         self.server._schedule_agent_build = lambda *_:None
         self.server._start_agent_build = lambda *_:None
+        self.server._schedule_session_cap_enforcement = lambda:None
+        self.server._get_db = self.database
+        self.server._current_profile_name = lambda:self.scope.profile
         self.server._make_agent = lambda *_args,**_kwargs: (_ for _ in ()).throw(RuntimeError('managed_bootstrap_required'))
         # Native resume must never discover/adopt a sibling profile's session.
         self.server._profile_home = lambda name: None if name in (None,'',self.scope.profile,self.scope.logical_profile) else (_ for _ in ()).throw(ValueError('profile_scope_denied'))
@@ -252,6 +299,8 @@ def main():
             'revision':scope.revision,'logical_profile':scope.logical_profile})
         if expected.profile!=profile: raise SystemExit('managed_profile_mismatch')
     from tui_gateway import server
+    from tui_gateway.entry import _install_sidecar_publisher
+    _install_sidecar_publisher()
     gateway=BrowserGateway(server,root,scope,os.environ['NOCHEH_MODEL']);gateway.install();gateway.flush_receipts()
     from .request_boundary import install
     from .compatibility_patch import install as native_gate
@@ -270,6 +319,7 @@ def main():
         for cancel in list(gateway.running.values()): cancel.set()
         for session in list(server._sessions.values()):
             if thread:=session.get('_nocheh_thread'): thread.join(timeout=5)
+        if gateway.native_db is not None:gateway.native_db.close()
 
 
 if __name__=='__main__': main()

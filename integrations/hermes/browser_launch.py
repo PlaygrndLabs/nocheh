@@ -10,6 +10,9 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
     if not chat: raise ValueError('owner_required')
     from .assistant_gateway import prepare_profile
     prepare_profile(admin.root,bound,admin.model)
+    if bound.generation:
+        from .isolated_profile import prepare
+        prepare(home)
     workspace = home / 'workspace'
     if workspace.is_symlink(): raise ValueError('workspace_path_denied')
     workspace.mkdir(exist_ok=True,mode=0o700)
@@ -43,7 +46,7 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
         from urllib.parse import urlsplit,parse_qs,urlencode
         parsed=urlsplit(sidecar_url)
         if parsed.scheme!='ws' or parsed.hostname!='127.0.0.1' or parsed.port!=8785 or parsed.path!='/api/pub': raise ValueError('invalid_metadata_destination')
-        query=parse_qs(parsed.query);query['profile']=[name]
+        query=parse_qs(parsed.query);query['profile']=[bound.logical_profile or name]
         env['HERMES_TUI_SIDECAR_URL']=parsed._replace(query=urlencode(query,doseq=True)).geturl()
     if active_session_file: env['HERMES_TUI_ACTIVE_SESSION_FILE']=active_session_file
     return ['/usr/local/bin/node','/opt/hermes/ui-tui/dist/entry.js'],str(workspace),env

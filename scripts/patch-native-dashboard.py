@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 root = Path(sys.argv[1])
 (root / 'web/src/lib/nocheh-browser-delivery.ts').write_text(Path(__file__).with_name('native-browser-delivery.ts').read_text())
+(root / 'web/src/components/NochehBrowserRecovery.tsx').write_text(Path(__file__).with_name('native-browser-recovery.tsx').read_text())
 path = root / 'web/src/lib/api.ts'
 source = path.read_text()
 def replace(old, new):
@@ -36,6 +37,9 @@ path.write_text(source)
 path = root / 'web/src/components/ChatSidebar.tsx'
 source = path.read_text()
 source = 'import {receiveBrowserDelivery, resumeBrowserDeliveries} from "@/lib/nocheh-browser-delivery";\n' + source
+source = 'import {BrowserRecovery} from "@/components/NochehBrowserRecovery";\n' + source
+replace('''      <Card className="flex items-center justify-between gap-2 px-3 py-2">''', '''      <BrowserRecovery key={profile || ""} profile={profile || ""} />
+      <Card className="flex items-center justify-between gap-2 px-3 py-2">''')
 replace('''  const [state, setState] = useState<ConnectionState>("idle");''', '''  useEffect(() => resumeBrowserDeliveries(api.acknowledgeBrowserDelivery), []);
   const [state, setState] = useState<ConnectionState>("idle");''')
 replace('''        const { type, payload } = frame.params;''', '''        const { type, payload } = frame.params;
@@ -65,6 +69,9 @@ path.write_text(source)
 path = root / 'web/src/lib/api.ts'
 source = path.read_text()
 replace('''export const api = {''', '''export const api = {
+  undeliveredBrowserResponses: (profile: string, after: string | null) =>
+    fetchJSON<{items: Array<{event_id: string; conversation: string; text: string; status: "complete"; nocheh_delivery: {receipt: string; sha256: string}}>; next: string | null}>(
+      `/api/nocheh/browser-undelivered?profile=${encodeURIComponent(profile)}${after ? "&after=" + encodeURIComponent(after) : ""}`),
   acknowledgeBrowserDelivery: (receipt: {receipt: string; sha256: string}) =>
     fetchJSON("/api/nocheh/browser-delivered", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(receipt)}),''')
 replace('''  createCronJob: (job: CronJobMutation, profile = "default") =>
