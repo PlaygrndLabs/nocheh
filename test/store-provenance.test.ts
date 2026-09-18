@@ -24,15 +24,16 @@ test('Honcho ancestry maps only verified ingestion receipts and current authoriz
   };
   const provenance=new HonchoProvenanceRepository(stores,archive,guards,call);
   try {
-    const source=(await archive.capture(event)).source.reference,binding=await guards.state();
+    const source=(await archive.capture(event)).source.reference,related=(await archive.capture({...event,key:key+':related',source_id:'2'})).source.reference,binding=await guards.state();
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[workspace,binding.generation,binding.epoch,'owner']);
     await stores.control.query(`INSERT INTO memory_ingestion_receipts(id,generation,source_reference,guard_source_id,prepared_id,content_hash,state,remote_id)
       VALUES($1,$2,$3,$4,$5,$6,'done',$7)`,[receipt,workspace,JSON.stringify(source),'events:'+source.id,digest(key+':prepared'),digest('fixture'),message]);
+    await stores.control.query('UPDATE memory_ingestion_receipts SET source_references=$2 WHERE id=$1',[receipt,JSON.stringify([source,related])]);
     await assert.rejects(provenance.read(workspace,'owner',[conclusion],binding),{code:'memory_context_retired'});
     assert.equal(calls,0,'detached memory does not invoke native readers');
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true');
     const result=await provenance.read(workspace,'owner',[conclusion],binding);
-    assert.deepEqual(result.evidence,[source]);assert.equal(result.exact_citations,false,'ancestry never claims exact citation precision');
+    assert.deepEqual(result.evidence,[source,related]);assert.equal(result.exact_citations,false,'ancestry never claims exact citation precision');
     assert.ok(result.limitations.includes('ingestion_reference_unavailable'));
     await assert.rejects(provenance.read(workspace,'-42',[conclusion],binding),{code:'memory_context_retired'});
     mutate=true;

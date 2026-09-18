@@ -140,6 +140,26 @@ and correctly failed closed; it was corrected. AST-only Graphify: 353 files,
 the full service cutover.
 [Broker evidence](compatibility/results/2026-09-18-store-security-broker.json).
 
+The candidate Honcho repository now queues permitted source/relationship packets
+and learned projections with content in derived storage and receipts in control.
+Each receipt records all source references, guard/selection dependencies, audience,
+generation, and immutable input hash. Writes become uncertain before the native
+mutation; recovery reconciles exact native messages and never treats absence as
+permission to resend. Retired receipts can be settled without reactivating their
+workspace. Native representations and recall results persist before completion,
+carry explicit citation limitations, and are guarded through the current prepared
+context boundary so owner-approved passages remain exact. Corrections invalidate
+old generations and rebuilt inputs include the current owner interpretation.
+
+Eight affected synthetic memory/guard checks pass, followed by two targeted
+checks after adding multi-source ancestry coverage. Earlier fixture failures were
+unknown forum membership, a null-prototype assertion, and generation isolation;
+they were corrected without relaxing runtime checks. TypeScript and AST-only
+Graphify pass (355 files, 2,162 nodes, 8,253 edges, zero model calls). No native
+provider request or live acceptance was performed. Production workflows, Hermes
+review/profile integration, and the full service cutover remain pending.
+[Native memory evidence](compatibility/results/2026-09-18-store-native-memory.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior

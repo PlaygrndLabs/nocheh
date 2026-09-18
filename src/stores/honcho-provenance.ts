@@ -29,10 +29,16 @@ export class HonchoProvenanceRepository {
     const evidence=new Map<string,SourceReference>();
     for(const message of result.messages) {
       if(!nativeId(message.message_id)||typeof message.receipt_id!=='string'||!/^[a-f0-9]{64}$/.test(message.receipt_id))throw new HttpError(502,'invalid_honcho_provenance');
-      const row=(await this.stores.control.query(`SELECT source_reference FROM memory_ingestion_receipts
+      const row=(await this.stores.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
         WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done'`,[message.receipt_id,workspace,message.message_id])).rows[0];
       if(!row){limitations.add('ingestion_reference_unavailable');continue;}
-      const reference=(await this.archive.verify(row.source_reference)).reference;evidence.set(reference.id,reference);
+      const references=row.source_references?.length?row.source_references:[row.source_reference];
+      if(references.length>30)throw new HttpError(502,'invalid_ingestion_provenance');
+      for(const item of references) {
+        if(evidence.has(item.id))continue;
+        if(evidence.size>=256){limitations.add('source_reference_limit');continue;}
+        const reference=(await this.archive.verify(item)).reference;evidence.set(reference.id,reference);
+      }
     }
     await this.current(workspace,audience,binding);
     return {conclusions:result.nodes.map((n:any)=>({id:n.id,parents:n.parents,deleted:n.deleted===true})),evidence:[...evidence.values()],
