@@ -96,12 +96,23 @@ def files(state, memory, config_path, blockers):
             actions.append(entry(path, action, 'provider_login' if action == 'preserve' else 'native_runtime_state'))
     area(state / 'provider', {**{name: ('preserve', 'provider_setup_and_credentials') for name in ('auth', 'keys', 'config.yaml', 'retired')},
                               'monitor': ('delegate', '')})
-    area(state / 'provider/monitor', {'usage.sqlite': ('sanitize_accounting', 'preserve_accounting_erase_content'),
-                                    'usage.sqlite-wal': ('sqlite_checkpoint', 'managed_by_accounting_cleanup'),
-                                    'usage.sqlite-shm': ('sqlite_checkpoint', 'managed_by_accounting_cleanup'),
-                                    'usage.sqlite-journal': ('sqlite_checkpoint', 'managed_by_accounting_cleanup'),
-                                    'usage.sqlite.manager.lock': ('preserve', 'native_writer_lock'),
-                                    'usage-imports': ('erase', 'old_usage_import_payloads')})
+    monitor = state / 'provider/monitor'
+    monitor_decisions = {'usage.sqlite': ('sanitize_accounting', 'preserve_accounting_erase_content'),
+                         'usage.sqlite-wal': ('sqlite_checkpoint', 'managed_by_accounting_cleanup'),
+                         'usage.sqlite-shm': ('sqlite_checkpoint', 'managed_by_accounting_cleanup'),
+                         'usage.sqlite-journal': ('sqlite_checkpoint', 'managed_by_accounting_cleanup'),
+                         'usage.sqlite.manager.lock': ('preserve', 'native_writer_lock'),
+                         'usage-imports': ('erase', 'old_usage_import_payloads')}
+    area(monitor, monitor_decisions)
+    # Bind absent SQLite companions too: sanitization can create the native lock
+    # and remove WAL/checkpoint files after the preflight was taken.
+    known = {item['path'] for item in actions}
+    if monitor.is_dir() and not monitor.is_symlink():
+        for name in ('usage.sqlite', 'usage.sqlite-wal', 'usage.sqlite-shm', 'usage.sqlite-journal',
+                     'usage.sqlite.manager.lock'):
+            path = monitor / name
+            if str(path) not in known:
+                actions.append(entry(path, *monitor_decisions[name]))
     area(memory, {**{name: ('preserve', 'memory_setup_credentials_or_spending') for name in (
         'honcho.env', 'meter.env', 'internal_token', 'database_password', 'temporary_embedding_key', 'honcho.Dockerfile',
         'ledger', 'bridge-auth', 'bridge.Dockerfile', 'bridge.yaml', 'compose.env')},

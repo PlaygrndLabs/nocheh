@@ -7,6 +7,25 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The complete pre-erasure preservation gate now binds the setup-only database
+snapshot, saved environment policy, native preference snapshot, exact archive
+ownership decisions, sanitized provider accounting, byte fingerprints of retained
+credentials/provider login/Honcho setup and spending, and the anchored file-erasure
+manifest into one immutable receipt before advancing `preservation_frozen`. Every
+input is independently rechecked under the journal, maintenance and inactive
+fences. Interrupted cleanup is retryable both before and after its accounting
+receipt; changed policy, credentials, preferences, accounting, ownership or erasure
+scope fail closed. Eight focused checks and the 78-check reset suite pass. The final
+management image passes 49 reset checks beside six pinned native checks in
+read-only, network-disabled Compose. A fresh internal-network rehearsal passes with
+real PostgreSQL configuration reads and the real SQLite sanitizer: four setup rows,
+ten retained roots and five erasure targets were bound; source/derivative canaries
+were excluded from all preservation artifacts while original files, credentials,
+provider login, Honcho setup and spending remained. The management image now
+contains the YAML runtime required by native preference transfer. No live state was
+stopped, reviewed, sanitized or deleted.
+[Preservation evidence](compatibility/results/2026-09-18-reset-preservation.json).
+
 The reset now requires a private, exact ownership review for every immediate item
 under existing restore and external archive roots. Each current device/inode is
 explicitly marked installation-owned for erasure or unrelated for preservation;
