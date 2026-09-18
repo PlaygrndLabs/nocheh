@@ -80,8 +80,11 @@ same-identity continuation; revoked queued contexts are cancelled. Original rout
 identifiers cannot be changed through guarded edits. Workflow inspection, health,
 metrics, and owner retry/cancel use control-only metadata and receipt/family fences.
 They remain available without the Inngest control plane. Legacy family migration
-does not apply to fresh original-only databases. Broader controlled tools, managed
-runtimes, host import coordination, and the full installation rehearsal still
+does not apply to fresh original-only databases. Controlled shell/browser/MCP
+proposals use immutable derived arguments and exact guarded fingerprints; owner
+decisions, bounded grants, revocations, and idempotency receipts live in control.
+Policy previews consume no grant. Host tool execution, managed runtimes, host
+import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.
