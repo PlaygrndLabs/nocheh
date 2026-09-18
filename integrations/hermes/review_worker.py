@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from .scopes import Scopes, Scope
+from .scopes import Scopes, Scope,verify_capability
 from .assistant_gateway import prepare_profile
 
 
@@ -37,9 +37,11 @@ def review(root, policy, model, credentials, body):
         raise ValueError('owner_review_required')
     if not re.fullmatch(r'[a-f0-9]{64}',body.get('id','')) or not isinstance(body.get('content'),str) or len(body['content'])>12000:
         raise ValueError('invalid_review_request')
-    scope=Scope(policy.owner,policy.owner,True,Scopes.profile(policy.owner))
-    import base64
-    scope=Scopes.apply_revision(scope,json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'===')))
+    scope=Scope(policy.owner,policy.owner,True,Scopes.profile(policy.owner),policy.owner)
+    from .environment import secret
+    claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
+    if claims.get('generation') and claims.get('purpose')!='memory-review':raise ValueError('review_capability_required')
+    scope=Scopes.apply_revision(scope,claims)
     profile=prepare_profile(root,scope,model)
     import fcntl
     with (profile/'.turn.lock').open('a') as lock:

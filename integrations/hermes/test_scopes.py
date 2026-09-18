@@ -35,6 +35,8 @@ class ScopeTests(unittest.TestCase):
         signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         token='turn.'+body+'.'+signature
         verify_capability(token,secret,a,event)
+        with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
+            with self.assertRaises(ValueError):verify_capability(token,secret,a,event)
         for scope,target in ((b,event),(owner,event),(a,'b'*64)):
             with self.assertRaises(ValueError):verify_capability(token,secret,scope,target)
 

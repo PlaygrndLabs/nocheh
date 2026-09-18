@@ -23,10 +23,11 @@ import {PreparedContextRepository} from './prepared-context.js';
 import {HttpError} from '../http.js';
 import {RuntimeTurnRepository} from './turns.js';
 import {NativeMemoryRepository} from './native-memory.js';
+import {NativeReviewRepository} from './native-review.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
-  runtime:RuntimeCall;honcho:HonchoCall;transcription?:DerivationEngine}) {
+  runtime:RuntimeCall;honcho:HonchoCall;transcription?:DerivationEngine;serviceToken?:string}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
   const transcription=options.transcription??subscriptionTranscription(options.runtime),extraction=utf8Extraction();
@@ -47,10 +48,12 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects),provenance=new HonchoProvenanceRepository(stores,archive,guards,options.honcho);
   const detect=async(text:string)=>(await options.runtime('guard.detect',{text})).literals;
-  return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns:new RuntimeTurnRepository(access,prepared),access,sources,projects,sharing,learned,contexts,provenance,
+  const turns=new RuntimeTurnRepository(access,prepared);
+  return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     capture:new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived)),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
+    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),
     detectorVersion:options.detectorVersion,detect};
 }
 export type StorageServices=ReturnType<typeof storageServices>;

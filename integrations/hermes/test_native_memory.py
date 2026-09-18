@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,6 +9,16 @@ from .scopes import Scopes
 
 
 class NativeMemoryTests(unittest.TestCase):
+    def test_recall_requires_matching_installation_and_guard_generation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for name,generation,epoch in [('current','new',4),('old-installation','old',4),('old-guard','new',3)]:
+                profile=root/'profiles'/Scopes.profile(name);(profile/'memories').mkdir(parents=True)
+                (profile/'memories/MEMORY.md').write_text('Juniper '+name)
+                (profile/'space.json').write_text(json.dumps({'generation':generation,'guard_epoch':epoch}))
+            result=recall(root,{'query':'Juniper','generation':'new','guard_epoch':4})
+            self.assertEqual([hit['text'] for hit in result['hits']],['Juniper current'])
+
     def test_owner_recalls_actual_native_notes_and_sessions_without_writes(self):
         from hermes_state import SessionDB
         with tempfile.TemporaryDirectory() as folder:

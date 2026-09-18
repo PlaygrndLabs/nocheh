@@ -17,7 +17,7 @@ export interface CapturedSource {
 
 const internalKinds=new Set(['runtime_context','transcript','extracted_text','shared_knowledge',
   'outbound_intent','outbound_result','schedule_definition','schedule_fire','guard_result','learning_result','learned_memory','extraction_status',
-  'memory_input','memory_result','memory_context']);
+  'memory_input','memory_result','memory_context','runtime_result']);
 export function originalEnvelope(input:unknown):Envelope {
   const value=envelope(input);
   if(value.origin==='generated'||value.channel==='scheduler'||internalKinds.has(value.kind))

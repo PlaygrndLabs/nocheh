@@ -1,0 +1,20 @@
+# Offline native tests only. No installation state, credentials, network or poller.
+services:
+  hermes-checks:
+    image: ${NOCHEH_HERMES_FIXTURE_IMAGE:?Pinned Hermes fixture image required}
+    profiles: [hermes-checks]
+    network_mode: none
+    read_only: true
+    mem_limit: 1g
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=512m,mode=1777"]
+    environment:
+      HOME: /tmp
+      HERMES_HOME: /tmp/nocheh-hermes-fixture
+      TELEGRAM_ENABLED: "false"
+      NOCHEH_CAPTURE_ENABLED: "0"
+      PYTHONDONTWRITEBYTECODE: "1"
+      SERVICE_TOKEN: stores-fixture-token-not-a-real-credential
+    volumes:
+      - ../integrations:/workspace/integrations:ro
+    entrypoint: [python, -m, unittest]
+    command: [integrations.hermes.test_prepared_context, integrations.hermes.test_native_memory, integrations.hermes.test_turn_process, integrations.hermes.test_scopes, integrations.hermes.test_workflow_observation]
