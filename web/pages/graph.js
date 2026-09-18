@@ -1,6 +1,6 @@
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 import {Source} from './source.js';
-  const graphKinds = {scope:'Scope',profile:'Profile',message:'Message',author:'Author',attachment:'File',memory:'Memory',derived:'Derived'};
+  const graphKinds = {scope:'Scope',profile:'Profile',event:'Observation',message:'Message',author:'Author',attachment:'File',memory:'Memory',derived:'Derived'};
 function GraphSpace({data, selectedId, matchingIds, choose}) {
     const host=useRef(null), scene=useRef(null), onChoose=useRef(choose);
     const [problem,setProblem]=useState(''),[ready,setReady]=useState(false),[retry,setRetry]=useState(0),[labels,setLabels]=useState(true),[expanded,setExpanded]=useState(false),[expandError,setExpandError]=useState('');
@@ -52,7 +52,7 @@ export function Graph({notify}) {
     const matchingIds=useMemo(()=>kind||query.trim()?new Set(filtered.map(node=>node.id)):null,[filtered,kind,query]);
     const connections=(data?.edges||[]).filter(edge=>edge.from===selected?.id||edge.to===selected?.id);
     return h('div',{className:'n-graph-page'},
-      h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Follow the evidence'),h('p',{className:'n-muted'},'Explore messages, people and memory in three dimensions. Select a node to follow its source.')),
+      h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Follow the evidence'),h('p',{className:'n-muted'},'Explore original observations, people and files in three dimensions. Select a node to follow its source.')),
         h('label',{className:'n-graph-scope'},'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},h('option',{value:'*'},'All private knowledge'),...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),
         scopes?.next&&button('Load more scopes',()=>setScopeAfter(scopes.next))),
       scopeError&&h('p',{role:'alert'},scopeError),!scopes&&!scopeError&&h('p',{role:'status'},'Loading archive scopes…'),
@@ -82,11 +82,10 @@ export function Graph({notify}) {
                   return h('button',{type:'button',key:i,className:'n-connection',onClick:()=>choose(target)},h('small',null,(edge.from===selected.id?'Outgoing · ':'Incoming · ')+edge.kind.replaceAll('_',' ')),h('span',{dir:'auto'},target.label));
                 }))) : h('div',null,h('h3',null,'Inspect a connection'),h('p',{className:'n-muted'},'Select a node in the space or the list. Its direct connections will light up here.'),h('p',{className:'n-muted'},'Positions help you navigate. Only the links represent recorded relationships.'))))),
         h('div',{className:'n-graph-legend','aria-label':'Node legend'},...Object.entries(graphKinds).filter(([key])=>data.nodes.some(n=>n.kind===key)).map(([key,label])=>h('span',{key},h('i',{className:'n-kind-dot n-kind-'+key,'aria-hidden':true}),label)),h('span',null,h('i',{className:'n-reference-line','aria-hidden':true}),'Dashed: citation / derived')),
-        h('div',{className:'n-graph-pagination'},h('p',{className:'n-muted'},'Page '+(history.length+1)+' · '+data.nodes.filter(n=>n.kind==='message').length+' messages · '+data.unresolved_replies+' reply references outside this page'),
-          h('div',{className:'n-space-actions'},button('Previous messages',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));},!history.length),button('Next messages',()=>{setHistory([...history,after]);setAfter(data.next);},!data.next),button('Export graph JSON',()=>exportJSON(data,'nocheh-graph.json')))),
+        h('div',{className:'n-graph-pagination'},h('p',{className:'n-muted'},'Page '+(history.length+1)+' · '+data.nodes.filter(n=>['message','event'].includes(n.kind)).length+' observations · '+data.unresolved_replies+' reply references outside this page'),
+          h('div',{className:'n-space-actions'},button('Previous observations',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));},!history.length),button('Next observations',()=>{setHistory([...history,after]);setAfter(data.next);},!data.next),button('Export graph JSON',()=>exportJSON(data,'nocheh-graph.json')))),
         data.bounds.truncated&&h('p',{role:'status'},'Attachment or derived-node limit reached. Open source records for the complete details.'),
-        !data.nodes.some(n=>n.kind==='message')&&h('p',{className:'n-muted'},'No messages on this page. Choose another scope or return to the previous page.'),
-        h('p',{className:'n-muted'},'Observed relationships and explicit memory citations. This view makes no model calls.'),
+        !data.nodes.some(n=>['message','event'].includes(n.kind))&&h('p',{className:'n-muted'},'No observations on this page. Choose another scope or return to the previous page.'),
+        h('p',{className:'n-muted'},'Recorded source relationships. This view makes no model calls.'),
         record&&h('div',{ref:source,id:'n-graph-source'},h(Source,{record,notify}))));
   }
-

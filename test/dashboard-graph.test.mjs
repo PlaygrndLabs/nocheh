@@ -143,3 +143,14 @@ test('graph request failure exposes a retry instead of an empty successful scene
   assert.ok(!view.elements().some(node=>node.props.data));
   view.unmount();
 });
+
+
+test('original observation nodes are counted and selectable by type',async()=>{
+  const original=page('a','Original');original.nodes[0].kind='event';
+  const view=componentDriver(path=>Promise.resolve(path.includes('/scopes?')?{scopes:[{scope:'a',events:1}]}:original));
+  await view.flush();
+  assert.ok(view.elements().some(node=>node.type==='option'&&node.props.value==='event'&&node.children.includes('Observation')));
+  assert.ok(view.elements().some(node=>node.children.includes('Page 1 · 1 observations · 0 reply references outside this page')));
+  assert.ok(!view.elements().some(node=>node.children.some(child=>typeof child==='string'&&child.startsWith('No observations'))));
+  view.unmount();
+});

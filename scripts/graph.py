@@ -1,10 +1,12 @@
-"""Combine an archive graph page with bounded, explicitly cited native notes."""
+"""Read original evidence; retain native-note enrichment for legacy stores only."""
 from urllib.parse import urlencode
 from .archive import API
 
 
 def read(scope,after='',focus=''):
     api=API();graph=api.call('/v1/graph?'+urlencode({'scope':scope,'after':after,'focus':focus}))
+    if api.storage_layout == 'original-only-v1':
+        return graph
     profiles=api.call('/v1/manage/hermes',{'action':'profiles'})
     choices=profiles.get('history_profiles',profiles['profiles'])
     choices=[p for p in choices if p.get('exists') and (scope=='*' or p['scope']==scope)]

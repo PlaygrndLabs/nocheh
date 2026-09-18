@@ -3,6 +3,7 @@ export const NODE_STYLES = {
   scope: {color: '#80d6c0', label: 'Scope', size: 7},
   profile: {color: '#80d6c0', label: 'Profile', size: 5},
   message: {color: '#83c9f4', label: 'Message', size: 3.7},
+  event: {color: '#83c9f4', label: 'Observation', size: 3.7},
   author: {color: '#edac90', label: 'Author', size: 5.5},
   attachment: {color: '#a6c2d7', label: 'File', size: 3.5},
   memory: {color: '#c1aff5', label: 'Memory', size: 5},
