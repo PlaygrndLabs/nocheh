@@ -7,7 +7,7 @@ import {OperationRepository,type OperationReference} from './operations.js';
 export interface DerivativeInput {
   operation_id:string;source:SourceReference|OperationReference;file?:FileReference;kind:string;content:Buffer;
   producer:string;producer_version:string;configuration:Record<string,unknown>;
-  provenance?:Record<string,unknown>;
+  provenance?:Record<string,unknown>;parents?:DerivativeReference[];
 }
 export interface DerivativeReference {store:'derived';kind:'artifact';id:string;input_hash:string}
 
@@ -15,6 +15,18 @@ export class DerivedRepository {
   constructor(readonly pool:pg.Pool,readonly archive:ArchiveRepository,readonly operations?:OperationRepository){}
 
   async record(input:DerivativeInput):Promise<DerivativeReference> {
+    return this.write(input,this.pool);
+  }
+  async recordMany(inputs:DerivativeInput[]):Promise<DerivativeReference[]> {
+    if(inputs.length>500)throw new HttpError(400,'derivative_batch_limit');
+    const client=await this.pool.connect();
+    try {
+      await client.query('BEGIN');const outputs=[];
+      for(const input of inputs)outputs.push(await this.write(input,client));
+      await client.query('COMMIT');return outputs;
+    } catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }
+  private async write(input:DerivativeInput,db:Pick<pg.Pool,'query'>):Promise<DerivativeReference> {
     if(!input.operation_id||input.operation_id.length>1024||!input.kind||!input.producer||!input.producer_version)
       throw new HttpError(400,'invalid_derivative');
     const original=input.source.store==='archive'?input.source:null;
@@ -31,15 +43,24 @@ export class DerivedRepository {
         throw new HttpError(409,'file_reference_conflict');
       inputHash=input.file.input_hash;
     }
+    if(input.parents) {
+      if(!input.parents.length||input.parents.length>100||input.file)throw new HttpError(400,'invalid_derivative_parents');
+      for(const parent of input.parents) {
+        if(parent.store!=='derived'||parent.kind!=='artifact')throw new HttpError(400,'invalid_derivative_reference');
+        const row=(await db.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[parent.id])).rows[0];
+        if(!row||row.content_hash!==parent.input_hash)throw new HttpError(409,'derivative_reference_conflict');
+      }
+      inputHash=input.parents.length===1?input.parents[0]!.input_hash:digest(canonical(input.parents));
+    }
     const id=digest(`derivative:${input.operation_id}`),contentHash=digest(input.content),configurationHash=digest(canonical(input.configuration));
-    const provenance={...input.provenance,source:input.source,...(input.file?{file:input.file}:{}),configuration:input.configuration};
-    await this.pool.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,content_hash,provenance,
+    const provenance={...input.provenance,source:input.source,...(input.file?{file:input.file}:{}),...(input.parents?{parents:input.parents}:{}),configuration:input.configuration};
+    await db.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,content_hash,provenance,
       source_revision,input_hash,producer,producer_version,configuration_hash,operation_id,search_text,operation_reference)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(operation_id) DO NOTHING`,
     [id,original?.id??null,input.file?.id??null,input.kind,input.content,contentHash,JSON.stringify(provenance),original?.revision??'0',
       inputHash,input.producer,input.producer_version,configurationHash,input.operation_id,input.content.toString('utf8').replaceAll('\0',''),
       original?null:JSON.stringify(input.source)]);
-    const stored=(await this.pool.query('SELECT * FROM derived_artifacts WHERE operation_id=$1',[input.operation_id])).rows[0];
+    const stored=(await db.query('SELECT * FROM derived_artifacts WHERE operation_id=$1',[input.operation_id])).rows[0];
     if(!stored||stored.content_hash!==contentHash||stored.input_hash!==inputHash||stored.event_id!==(original?.id??null)||
       canonical(stored.operation_reference)!==canonical(original?null:input.source)||
       stored.artifact_id!==(input.file?.id??null)||stored.kind!==input.kind||stored.source_revision!==(original?.revision??'0')||
