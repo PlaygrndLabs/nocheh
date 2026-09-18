@@ -25,6 +25,7 @@ import {RuntimeTurnRepository} from './turns.js';
 import {NativeMemoryRepository} from './native-memory.js';
 import {NativeReviewRepository} from './native-review.js';
 import {SharingContentRepository} from './sharing.js';
+import {ImportRepository} from './imports.js';
 import {SourcePortabilityRepository} from './source-portability.js';
 import {DerivativePortabilityRepository} from './derivative-portability.js';
 import {RuntimeConfigurationRepository} from './runtime-configuration.js';
@@ -68,6 +69,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions);
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
+  const sourcePortability=new SourcePortabilityRepository(capture,attachments);
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
@@ -76,7 +78,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime),
     controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,options.runtime,options.serviceToken??'',detect),
-    capture,sourcePortability:new SourcePortabilityRepository(capture,attachments),derivativePortability:new DerivativePortabilityRepository(stores,archive),
+    capture,sourcePortability,imports:new ImportRepository(sourcePortability,access),derivativePortability:new DerivativePortabilityRepository(stores,archive),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),

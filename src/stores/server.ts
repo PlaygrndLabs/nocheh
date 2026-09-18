@@ -17,6 +17,7 @@ import {workflowMetrics} from '../workflows/metrics.js';
 import {proxyInngestInspection} from '../workflows/inspection.js';
 import {controlStorageWorkflow} from './workflow-owner.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
+import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
 import type {hostTransport} from '../workflows/host-transport.js';
@@ -41,6 +42,20 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.memory.prepareRequest(await readJson(req,1024*1024)));
     }
     const principal=reader(req,config.token);
+    if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
+      admin(principal);
+      if(req.method!=='POST'||!(path==='/v1/import'||path==='/v1/memory/reviews'||/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)))throw new HttpError(403,'import_route_denied');
+      const held=await enterImportWrite(s.stores.control,req.headers['x-nocheh-import-job'],req.headers['x-nocheh-import-lease'],req.headers['x-nocheh-import-owner']);
+      try{
+        if(path==='/v1/import')return json(res,200,await s.imports.record(principal,await readJson(req,32*1024*1024),held.job));
+        if(path==='/v1/memory/reviews')return json(res,200,await s.imports.approveLearning(principal,await readJson(req),held.job));
+        return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024),held.job));
+      }finally{await held.release();}
+    }
+    if(req.method==='POST'&&path==='/v1/import'){admin(principal);return json(res,200,await s.imports.record(principal,await readJson(req,32*1024*1024)));}
+    if(req.method==='POST'&&path==='/v1/memory/reviews'){admin(principal);return json(res,200,await s.imports.approveLearning(principal,await readJson(req)));}
+    if(/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)&&req.method==='POST'){admin(principal);return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024)));}
+
     if(req.method==='POST'&&path==='/v1/browser/input') {
       admin(principal);return json(res,200,await s.browserCapture.capture(principal,await readJson(req,40*1024*1024)));
     }
@@ -97,10 +112,21 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
     if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {
       admin(principal);
+
+      if(req.method==='POST'&&path.startsWith('/v1/workflows/imports/')){
+        const body=await readJson(req);
+        if(path==='/v1/workflows/imports/confirm')return json(res,200,await confirmImport(s.stores.control,body));
+        if(path==='/v1/workflows/imports/reconcile-receipt')return json(res,200,await reconcileImportReceipt(s.stores.control,body));
+        if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(s.stores.control,object(body).id));
+      }
+      if(req.method==='GET'&&/^\/v1\/workflows\/imports\/[a-f0-9-]{36}$/.test(path)){
+        const job=(await s.stores.control.query('SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at FROM workflow_imports WHERE id=$1',[path.split('/').at(-1)])).rows[0];
+        const owner=(await s.stores.control.query("SELECT owner FROM workflow_owners WHERE family='imports'")).rows[0].owner;
+        return json(res,200,{owned:!!job,owner,job});
+      }
       if(req.method==='POST'&&path.startsWith('/v1/workflows/host/')) {
         const body=await readJson(req);
         if(path==='/v1/workflows/host/claim') {
-          if(object(body).family!=='tools')throw new HttpError(503,'host_import_migration_pending');
           await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
           return json(res,200,await claimHostWorkflow(s.stores.control,body));
         }
@@ -108,7 +134,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(path==='/v1/workflows/host/finish')return json(res,200,await finishHostWorkflow(s.stores.control,body));
         if(path==='/v1/workflows/host/continue')return json(res,200,await continueHostWorkflow(s.stores.control,body));
         if(path==='/v1/workflows/host/heartbeat') {
-          await registerWorker(s.stores.control,'host',['tools']);
+          await registerWorker(s.stores.control,'host',['imports','tools']);
           await s.stores.control.query("INSERT INTO service_heartbeats(service) VALUES('workflow-host') ON CONFLICT(service) DO UPDATE SET seen_at=now()");
           return json(res,200,{ok:true});
         }
