@@ -44,14 +44,16 @@ export class OwnerStorageApi {
       if(method==='GET'&&!memory[2]) {
         const result=await s.learned.history(principal,memory[1]!);
         if(!result.versions.length)throw new HttpError(404,'learned_memory_not_found');
-        const active=(await s.stores.derived.query('SELECT active_revision FROM learned_entries WHERE id=$1',[memory[1]])).rows[0]?.active_revision;
-        return {id:memory[1],active_revision:active,...result};
+        const entry=(await s.stores.derived.query(`SELECT e.*,v.author,v.retired,v.created_at AS revised_at,d.content,d.provenance
+          FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
+          JOIN derived_artifacts d ON d.id=v.derived_id WHERE e.id=$1`,[memory[1]])).rows[0];
+        return {id:memory[1],active_revision:entry?.active_revision,entry:entry?{...entry,text:entry.content.toString(),content:undefined}:null,...result};
       }
     }
     const source=path.match(/^\/v1\/sources\/([a-f0-9]{64})\/(derivatives|reprocess|prepare)$/);
     if(source) {
       const captured=await s.archive.captured(source[1]!);
-      if(method==='GET'&&source[2]==='derivatives')return s.selections.versions(source[1]!,q.get('after')??'',limit(q.get('limit'),50,100));
+      if(method==='GET'&&source[2]==='derivatives')return s.selections.versions(source[1]!,q.get('after')??'',limit(q.get('limit'),50,100),q.get('view')??'all');
       if(method==='POST'&&source[2]==='prepare') {
         exact(input,[]);const binding=await s.guards.state(),client=await s.stores.control.connect();
         try {await client.query('BEGIN');const id=await requestWorkflow(client,'preparation',captured.reference.id,binding.epoch);await client.query('COMMIT');return {workflow_id:id};}

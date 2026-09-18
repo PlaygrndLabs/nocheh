@@ -96,13 +96,15 @@ export class SelectionRepository {
     return {id:row.id,revision:row.revision,guard_revision:guarded.revision,value:guarded.value};
   }
 
-  async versions(eventId:string,after='',limit=50) {
-    if(!Number.isInteger(limit)||limit<1||limit>100||after.length>64)throw new HttpError(400,'invalid_derivative_page');
+  async versions(eventId:string,after='',limit=50,view='all') {
+    if(!Number.isInteger(limit)||limit<1||limit>100||after.length>64||!['all','readings'].includes(view))throw new HttpError(400,'invalid_derivative_page');
     const rows=(await this.stores.derived.query(`SELECT d.id,d.artifact_id,d.kind,d.created_at,d.source_revision,d.input_hash,
       d.content_hash,d.producer,d.producer_version,d.configuration_hash,d.provenance,g.active_revision AS guard_revision,
-      EXISTS(SELECT 1 FROM derivative_selections s JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision WHERE r.derived_id=d.id) AS active
+      EXISTS(SELECT 1 FROM derivative_selections s JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision WHERE r.derived_id=d.id) AS active,
+      (SELECT s.active_revision FROM derivative_selections s WHERE s.event_id=d.event_id AND s.artifact_id IS NOT DISTINCT FROM d.artifact_id AND s.kind=d.kind LIMIT 1) AS selection_revision
       FROM derived_artifacts d LEFT JOIN guard_sources g ON g.id='derived_artifacts:'||d.id
-      WHERE d.event_id=$1 AND d.id>$2 ORDER BY d.id LIMIT $3`,[eventId,after,limit+1])).rows;
+      WHERE d.event_id=$1 AND d.id>$2 AND ($4='all' OR d.kind IN ('transcript','extracted_text','extraction_status'))
+      ORDER BY d.id LIMIT $3`,[eventId,after,limit+1,view])).rows;
     return {versions:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null};
   }
 }

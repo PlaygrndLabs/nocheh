@@ -1,0 +1,24 @@
+# Combine only with stores-compose.yml in a dedicated synthetic UI project.
+services:
+  owner-preview:
+    image: ${NOCHEH_STORES_FIXTURE_IMAGE:?Explicit fixture image required}
+    profiles: [owner-preview]
+    mem_limit: 768m
+    command: [node, dist/test/stores-dashboard-preview.js]
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
+    environment:
+      PGHOST: database
+      PGPASSWORD: stores-fixture-admin-not-a-real-credential
+      NOCHEH_STORES_FIXTURE: "1"
+      NOCHEH_DASHBOARD_PORT: "18859"
+      TELEGRAM_ENABLED: "false"
+    volumes:
+      - ../dist:/app/dist:ro
+      - ../web/dist:/app/web/dist:ro
+    ports: ["127.0.0.1:${NOCHEH_STORES_UI_PORT:?Dedicated preview port required}:18859"]
+    networks: [default, preview_http]
+    depends_on:
+      database: {condition: service_healthy}
+networks:
+  preview_http: {}

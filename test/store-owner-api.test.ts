@@ -55,6 +55,8 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal((await request('/v1/derivatives/'+output.id+'/activate',activation)).revision,1);
     assert.equal((await request('/v1/derivatives/'+output.id+'/activate',activation)).revision,1);
     await request('/v1/derivatives/'+output.id+'/activate',{...activation,operation_id:key+':stale'},409);
+    const listed=await request('/v1/sources/'+file.event.id+'/derivatives?view=readings');assert.equal(listed.versions[0].selection_revision,1);
+    await request('/v1/sources/'+file.event.id+'/derivatives?view=invalid',undefined,400);
     const guardPath='/v1/guards/derived_artifacts/'+output.id,guard=await request(guardPath);
     const edit={expected_revision:guard.active_revision,operation_id:key+':guard',content:{text:'Owner guarded reading',kind:'transcript',provenance:{}}};
     await request(guardPath,edit);await request(guardPath,{...edit,operation_id:key+':staleguard'},409);
@@ -64,7 +66,9 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const project=await request('/v1/projects',{name:key,description:'Synthetic',state:'active',expected_revision:0,operation_id:key+':project'});
     const space='-'+Date.now(),assignment={space_id:space,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign'};
     await request('/v1/projects/assignments',assignment);
-    assert.equal((await request('/v1/projects/effective?space='+encodeURIComponent(space+'/topic/77'))).project.id,project.id);
+    const inherited=await request('/v1/projects/effective?space='+encodeURIComponent(space+'/topic/77'));
+    assert.equal(inherited.project.id,project.id);assert.equal(inherited.own_assignment,null);
+    assert.equal((await request('/v1/projects/effective?space='+encodeURIComponent(space))).own_assignment.revision,1);
     await request('/v1/projects/assignments',{...assignment,operation_id:key+':staleassignment'},409);
     const sharing=await request('/v1/sharing/rules',{name:key,sources:[space],destination:'123',enabled:true,mode:'approved',instructions:'Only the selected facts',expected_revision:0,operation_id:key+':share'});
     assert.equal(sharing.mode,'approved');assert.ok((await request('/v1/sharing/rules')).rules.some((r:any)=>r.id===sharing.id));
@@ -84,7 +88,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const binding=await services.guards.state(),guarded=await services.guards.read('events:'+file.event.id,binding),entry=digest(key+':learned');
     await services.learned.publishAutomatic(entry,{kind:'meaning',subject:'check mark',text:'A contextual meaning',scope:{kind:'conversation',id:'123'},
       uncertainty:'supported',evidence:[file.event],conflicts:[]},null,key+':learned',[{source_id:'events:'+file.event.id,revision:guarded.revision,value_hash:digest(canonical(guarded.value))}],binding,'fixture',services.detect);
-    assert.equal((await request('/v1/learned/'+entry)).active_revision,1);
+    const selectedEntry=await request('/v1/learned/'+entry);assert.equal(selectedEntry.active_revision,1);assert.equal(selectedEntry.entry.text,'A contextual meaning');
     const correction={expected_revision:1,operation_id:key+':correct',text:'Owner corrected meaning',retired:false};
     assert.equal((await request('/v1/learned/'+entry+'/correct',correction)).revision,2);
     assert.equal((await request('/v1/learned/'+entry+'/correct',correction)).revision,2);
