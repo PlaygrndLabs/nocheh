@@ -87,8 +87,15 @@ Policy previews consume no grant. Host tool execution uses a durable claim/start
 boundary, rechecks current authority, and saves derived results before control
 completion. Retained receipts repair lost completion and settle uncertainty;
 expired claims never authorize a repeat execution. The original-only listener
-supports host Connect with inactive-installation checks. Host imports remain
-unregistered and admission fails closed until their repository migration is ready.
+supports host Connect with inactive-installation checks. Host imports use the same
+control coordinator, with each source/file/review request fenced by its current
+job lease. Originals and file manifests use the archive repository; job membership,
+progress, cancellation, review approval, and retained completion receipts use
+control. Interrupted source commits replay idempotently without live replies or
+automatic learning. Batch review cannot enable sources from another job or undo a
+later owner revocation. Owner workflow inspection shows import progress and
+revision-checked retry/cancel operations. Legacy bundles containing derivatives
+still require the complete portable importer; they cannot be silently truncated.
 Telegram review/approval/revocation commands use independently captured original
 owner DMs and store decision references in control. Imported messages, edits,
 guarded content, and group messages cannot grant administrative authority.

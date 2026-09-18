@@ -616,6 +616,22 @@ fresh provider/live acceptance. Host imports, complete portable bundles and back
 coordination, browser delivery evidence, reset, and fresh gates remain pending.
 [Scheduled execution evidence](compatibility/results/2026-09-18-store-scheduled-execution.json).
 
+Host import admission and batch writes now use the separated repositories. Each
+write holds the current import lease through original capture, file storage, or
+explicit learning consent. Control retains typed job/source membership, progress,
+owner controls, and response-loss receipts. Cancellation and lease expiry fence
+later writes; history does not dispatch replies or learn without approval. Batch
+review cannot cross job membership, and replay cannot undo an owner revocation.
+Six PostgreSQL/HTTP checks and eleven offline native batching/workflow checks pass.
+Initial fixture run IDs and injected-outage status expectations were corrected;
+the final serial database batch passes all six checks with no skips. TypeScript,
+diff hygiene, and AST-only Graphify pass (428 files, 2,648 nodes, 10,766 edges;
+zero model calls). Complete/legacy portable bundle routing, native-store transfer,
+full backup coordination/rehearsal, browser delivery evidence, reset, and fresh
+live gates remain pending. No installation data was deleted or reconfigured.
+[Host import evidence](compatibility/results/2026-09-18-store-imports.json).
+
+
 
 
 
