@@ -74,7 +74,10 @@ being reconciled. Guard, selection, and learned-publication recovery runs alongs
 capture. Telegram action proposals and results are immutable derived records;
 approval and receipt metadata live in control. The native sender checks the exact
 current authorization and treats an unconfirmed prior intent as uncertain, with
-no resend. Telegram dispatch, broader controlled tools, managed runtimes, and owner workflow controls
+no resend. Telegram dispatch stores prepared inputs and terminal native results in
+derived storage and receipt metadata in control. Native observation precedes any
+same-identity continuation; revoked queued contexts are cancelled. Original routing
+identifiers cannot be changed through guarded edits. Broader controlled tools, managed runtimes, and owner workflow controls
 still require their separate increments and the full installation rehearsal. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.

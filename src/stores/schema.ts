@@ -15,6 +15,7 @@ import {portableHistorySchema} from './portable-schema.js';
 import {storageWorkflowSchema} from './workflow-schema.js';
 import {runtimeConfigurationSchema} from './runtime-configuration.js';
 import {telegramActionSchema} from './telegram-action-schema.js';
+import {telegramDispatchSchema} from './telegram-dispatch.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -102,6 +103,7 @@ ${workflowSchema}
 ${storageWorkflowSchema}
 ${runtimeConfigurationSchema}
 ${telegramActionSchema}
+${telegramDispatchSchema}
 ${controlGuardSchema}
 ${controlPolicySchema}
 ${controlMemorySchema}
