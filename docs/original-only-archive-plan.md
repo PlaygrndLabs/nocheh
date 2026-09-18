@@ -157,9 +157,9 @@ Native administration and browser admission consume this catalog, rejecting
 retired identities, stale native directory aliases, and wrong audiences. Native
 filesystem markers supply topic lookup hints only. Stable preference directories
 survive rename and feed the next native turn without copying notes or sessions.
-Saved native preferences still require explicit migration before activation, and
-the combined UI/runtime rehearsal must verify generation changes during media
-preparation and browser reconnect.
+Saved native preferences use the bounded transfer library described below; its
+reset-coordinator integration remains pending. The combined UI/runtime rehearsal
+must verify generation changes during media preparation and browser reconnect.
 
 Schedule definition/capture APIs use control operation references and immutable
 versioned derivatives. Control stores configuration, active version pointers,
@@ -401,6 +401,24 @@ The full running application/native/UI rehearsal remains separate.
 </recovery_rehearsal>
 
 <reset>
+
+`integrations.hermes.preference_transfer` captures only the eight preferences
+accepted by the managed native interface. Preserve global defaults and explicit
+profile overrides separately, including the absence of topic overrides. Legacy
+owner markers map to deterministic stable profile IDs; for an original-only
+source, supply active rows from the control profile repository instead. Unknown
+or ambiguous legacy names require an explicit mapping before reset. Do not infer
+administrative authority from restored filesystem markers.
+
+The coordinator must hold maintenance exclusion, snapshot the control catalog,
+retain the configuration-only manifest durably, and call `verify_source` before
+deletion. Recheck the catalog independently. Submit `profile_commands` through the
+explicit control repository with their deterministic operation IDs, then pass the
+confirmed admissions to `restore` on fresh native state. Exact partial writes are
+retryable; conflicting configuration and retained native history fail before any
+write. Job preferences disappear with schedules. This library neither quiesces
+services nor deletes data; those operations still require the complete scoped
+coordinator and isolated reset rehearsal.
 
 Stop ingress, scheduling, execution, learning, and provider refresh ownership;
 settle in-flight effects before erasing receipts. Resolve installation-owned
