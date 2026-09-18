@@ -503,6 +503,17 @@ execute deletion. Revalidate and freeze it under maintenance exclusion after the
 complete isolated acceptance gates; the executor must not treat this preflight
 or its configuration fingerprint as an execution authorization.
 
+Use `scripts.reset_ownership.prepare` to create the private review artifact for
+every immediate item under a restore or external archive review root. Assign each
+exact device/inode identity either `erase-installation-owned` or
+`preserve-unrelated`; an absent disposition, new item, replaced item, unknown file
+type, changed root, or incomplete root list stops validation. Only
+`scripts.reset_ownership.validate` may turn those decisions into scoped rows for
+`scripts.reset_files.freeze`. The file manifest accepts reviewed items only as
+direct children of the exact preflight review roots, retains unrelated siblings,
+and removes a reviewed symlink as a link without following its target. Neither
+preparation nor validation infers ownership or deletes data.
+
 `integrations.hermes.preference_transfer` captures only the eight preferences
 accepted by the managed native interface. Preserve global defaults and explicit
 profile overrides separately, including the absence of topic overrides. Legacy

@@ -5,10 +5,13 @@ the manifest into its durable preservation evidence and supply a barrier that
 rechecks journal, maintenance, owner exclusion, preservation and inactive fences.
 No source bytes are read or copied. Database/container erasure is separate.
 """
+import hashlib
 import os
 import stat
 from contextlib import contextmanager
 from pathlib import Path
+
+from . import reset_protocol
 
 FORMAT = 'nocheh-reset-file-manifest-v1'
 MAX_ENTRIES = 100000
@@ -64,7 +67,7 @@ def inspect_at(fd, name):
         return None
 
 
-def freeze(preflight, protected):
+def freeze(preflight, protected, reviewed=None):
     """Return only metadata for reviewed installation-local content targets.
 
     External backups/restores require separate per-item ownership review; this
@@ -79,7 +82,21 @@ def freeze(preflight, protected):
     selected = [row for row in preflight['paths']
                 if row['action'] in ('erase', 'snapshot_preferences_then_erase')]
     retained = [absolute(row['path']) for row in preflight['paths']
-                if row['action'] not in ('erase', 'snapshot_preferences_then_erase')]
+                if row['action'] not in ('erase', 'snapshot_preferences_then_erase', 'review_restore')]
+    reviewed_roots = []
+    if reviewed is not None:
+        expected_hash = hashlib.sha256(reset_protocol.canonical(preflight) + b'\n').hexdigest()
+        if (not isinstance(reviewed, dict) or reviewed.get('format') != 'nocheh-reset-reviewed-paths-v1' or
+                reviewed.get('preflight_sha256') != expected_hash or reviewed.get('content_copied') is not False or
+                any(not isinstance(reviewed.get(key), list) for key in ('roots', 'erase', 'preserve'))):
+            raise ValueError('reset_file_review_invalid')
+        explicit_roots = {row['path'] for row in preflight.get('paths', []) if row.get('action') == 'review_restore'}
+        explicit_roots.update(row['path'] for row in preflight.get('external_archives', []))
+        if set(reviewed['roots']) != explicit_roots:
+            raise ValueError('reset_file_review_invalid')
+        reviewed_roots = [absolute(value) for value in reviewed['roots']]
+        selected.extend(reviewed['erase'])
+        retained.extend(absolute(row['path']) for row in reviewed['preserve'])
     planned = []
     count = 0
 
@@ -102,9 +119,13 @@ def freeze(preflight, protected):
                 os.close(child)
         return record
 
+    ordinary = {id(row) for row in preflight['paths'] if row['action'] in ('erase', 'snapshot_preferences_then_erase')}
     for row in selected:
         path = absolute(row['path'])
-        if (not any(path.is_relative_to(root) and path != root for root in roots) or
+        in_installation = any(path.is_relative_to(root) and path != root for root in roots)
+        in_review = any(path.parent == root for root in reviewed_roots)
+        if ((id(row) in ordinary and not in_installation) or
+                (id(row) not in ordinary and not in_review) or
                 any(path == keep or path in keep.parents or keep in path.parents for keep in retained) or
                 any(path == absolute(item['path']) or path in absolute(item['path']).parents or
                     absolute(item['path']) in path.parents for item in planned)):
