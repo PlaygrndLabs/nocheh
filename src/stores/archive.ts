@@ -3,6 +3,7 @@ import {attachmentRefs,canonical,digest,envelope,type Envelope} from '../archive
 import {projectSource} from '../source-model.js';
 import {observedSource} from '../observed-source.js';
 import {HttpError} from '../http.js';
+import {browserManifests} from './browser-capture.js';
 
 export interface SourceReference {
   store:'archive';kind:'event';id:string;revision:string;input_hash:string;
@@ -22,7 +23,7 @@ export function sourceIdentity(input:unknown) {
 
 const internalKinds=new Set(['runtime_context','transcript','extracted_text','shared_knowledge',
   'outbound_intent','outbound_result','schedule_definition','schedule_fire','guard_result','learning_result','learned_memory','extraction_status',
-  'memory_input','memory_result','memory_context','runtime_result','action_request','action_result','action_decision','owner_action_decision','action_control_reply','controlled_action_request','controlled_action_result']);
+  'memory_input','memory_result','memory_context','runtime_result','browser_result','scheduled_result','scheduled_trigger','action_request','action_result','action_decision','owner_action_decision','action_control_reply','controlled_action_request','controlled_action_result']);
 export function originalEnvelope(input:unknown):Envelope {
   const value=envelope(input);
   if(value.origin==='generated'||value.channel==='scheduler'||internalKinds.has(value.kind))
@@ -37,12 +38,13 @@ export class ArchiveRepository {
   async capture(input:unknown,imported?:{received_at?:string;manifests:OriginalManifest[]}):Promise<{source:CapturedSource;duplicate:boolean}> {
     const {value,id,inputHash}=sourceIdentity(input),channel=value.channel;
     if(imported&&(imported.received_at!==undefined&&!Number.isFinite(Date.parse(imported.received_at))||imported.manifests.length>1000))throw new HttpError(400,'invalid_original_import');
-    const observed:OriginalManifest[]=channel===undefined||channel==='telegram'?attachmentRefs(value.payload).map(r=>({id:digest(`${id}:${r.ref}`),source_ref:r.ref,kind:r.kind,metadata:r.metadata})):[];
+    const observed:OriginalManifest[]=channel===undefined||channel==='telegram'?attachmentRefs(value.payload).map(r=>({id:digest(`${id}:${r.ref}`),source_ref:r.ref,kind:r.kind,metadata:r.metadata})):browserManifests(id,value);
     const refs:OriginalManifest[]=imported?[...imported.manifests]:observed;
     if(imported)for(const original of observed) {
       const supplied=refs.find(ref=>ref.id===original.id);
       if(!supplied)refs.push(original);
-      else if(supplied.kind!==original.kind||canonical(supplied.metadata)!==canonical(original.metadata))throw new HttpError(409,'artifact_metadata_conflict');
+      else if(supplied.kind!==original.kind||canonical(supplied.metadata)!==canonical(original.metadata)||
+        original.file_hash!=null&&(supplied.file_hash!==original.file_hash||supplied.byte_size!==original.byte_size))throw new HttpError(409,'artifact_metadata_conflict');
     }
     for(const ref of refs) {
       if(ref.id!==digest(`${id}:${ref.source_ref}`)||!ref.source_ref||ref.source_ref.length>4096||!ref.kind||ref.kind.length>100||!ref.metadata||typeof ref.metadata!=='object'||Array.isArray(ref.metadata))
