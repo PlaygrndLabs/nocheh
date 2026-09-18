@@ -1,3 +1,4 @@
+import {blockingPublications} from './publications.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -63,7 +64,7 @@ export class ScheduleRepository {
     const row=(await db.query(`SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton
       ${update?'FOR UPDATE OF g FOR SHARE OF i':'FOR SHARE OF i,g'}`)).rows[0];
     if(!row||canonical({generation:row.generation,epoch:Number(row.epoch),mode:row.mode})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
-    if((await db.query("SELECT 1 FROM guard_publications WHERE state='pending' LIMIT 1")).rowCount)throw new HttpError(409,'guard_transition_pending');
+    if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
   async ownership(){return (await this.control.query("SELECT owner,epoch,admission FROM workflow_owners WHERE family='schedules'")).rows[0];}
   async definition(principal:Reader,input:unknown){

@@ -1,3 +1,4 @@
+import {blockingPublications} from './publications.js';
 import {HttpError,string} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import {observation,type Observation,type WorkflowOperation} from '../workflows/pipeline.js';
@@ -37,7 +38,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       await db.query('BEGIN');
       const state=(await db.query('SELECT mode,epoch FROM guard_state WHERE singleton FOR SHARE')).rows[0];
       if(Number(state.epoch)!==binding.epoch||state.mode!==binding.mode)throw new HttpError(409,'guard_context_changed');
-      if((await db.query("SELECT 1 FROM guard_publications WHERE state='pending' LIMIT 1")).rowCount)throw new HttpError(409,'guard_transition_pending');
+      if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
       await db.query(`INSERT INTO learning_refresh_sweeps(installation_generation,guard_epoch,family) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[binding.generation,binding.epoch,family]);
       const row=(await db.query('SELECT * FROM learning_refresh_sweeps WHERE installation_generation=$1 AND guard_epoch=$2 AND family=$3 FOR UPDATE',
         [binding.generation,binding.epoch,family])).rows[0];

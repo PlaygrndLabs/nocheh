@@ -32,6 +32,18 @@ test('guard publications revoke before visibility and recover owner history acro
     assert.ok(!JSON.stringify(automatic).includes('yellow-lantern'));
     assert.deepEqual((await guards.read(id,initial)).value,automatic,'initial preparation cannot invalidate unrelated authorized context');
 
+    // A crash while publishing a new context must not interrupt other turns.
+    // The unfinished source itself remains inaccessible until reconciliation.
+    const other=(await archive.capture({...event,key:key+':other',source_id:key+':other'})).source.reference;
+    const otherId=await guards.register(other),firstInterrupted=new GuardRepository(stores,archive);
+    firstInterrupted.finishPublication=async()=>{throw Error('injected-first-publication');};
+    await assert.rejects(firstInterrupted.prepare(other,'fixture-detector',async()=>['yellow-lantern']),/injected-first-publication/);
+    assert.deepEqual(await guards.state(),initial);
+    assert.deepEqual((await guards.read(id,initial)).value,automatic);
+    await assert.rejects(guards.read(otherId,initial),{code:'guard_preparation_pending'});
+    await guards.reconcile();
+    assert.deepEqual((await guards.read(otherId,initial)).value,automatic);
+
     const beforeOwner=await guards.state(),owner={text:'Owner version',payload:{message:{text:'Owner version'}}};
     const ownerRevision=await guards.edit(id,prepared.revision,owner,digest(key+':owner'));
     await assert.rejects(guards.read(id,beforeOwner),{code:'guard_context_changed'});

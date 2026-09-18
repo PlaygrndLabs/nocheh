@@ -1,3 +1,4 @@
+import {blockingPublications} from './publications.js';
 import type pg from 'pg';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {canonical,digest} from '../archive.js';
@@ -38,7 +39,7 @@ export class RuntimeConfigurationRepository {
     try {
       await db.query('BEGIN');
       const guard=(await db.query('SELECT mode,epoch FROM guard_state WHERE singleton FOR UPDATE')).rows[0];
-      if(!guard||(await db.query("SELECT 1 FROM guard_publications WHERE state='pending' LIMIT 1")).rowCount)throw new HttpError(409,'guard_transition_pending');
+      if(!guard||(await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
       const current=(await db.query(`SELECT v.revision,v.fingerprint FROM runtime_configuration c
         JOIN runtime_configuration_versions v USING(name,revision) WHERE c.name='assistant'`)).rows[0];
       const changed=current?.fingerprint!==fingerprint;let revision=current?.revision??0,epoch=Number(guard.epoch);

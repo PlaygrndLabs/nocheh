@@ -1,3 +1,4 @@
+import {blockingPublications} from './publications.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -191,7 +192,7 @@ export class SharingContentRepository {
   private async fence(db:pg.PoolClient,input:Inputs,binding:GuardBinding) {
     const state=(await db.query('SELECT g.epoch,g.mode,i.generation FROM guard_state g CROSS JOIN installation i WHERE g.singleton AND i.singleton FOR UPDATE OF g')).rows[0];
     if(canonical({generation:state.generation,epoch:Number(state.epoch),mode:state.mode})!==canonical(binding)||
-      (await db.query("SELECT 1 FROM guard_publications WHERE state='pending' LIMIT 1")).rowCount)throw new HttpError(409,'sharing_context_changed');
+      (await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'sharing_context_changed');
     const rule=(await db.query('SELECT revision,enabled FROM sharing_rules WHERE id=$1',[input.rule.id])).rows[0];
     if(!rule?.enabled||rule.revision!==input.rule.revision)throw new HttpError(409,'sharing_policy_changed');
   }

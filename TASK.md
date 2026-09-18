@@ -7,6 +7,17 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+First guarded-copy publication no longer blocks unrelated authorized contexts.
+Its own source still fails closed until its prepared pointer is ready; replacement
+guards, engine selections, and learned publications retain their authorization
+barriers. An injected-interruption regression fails on the previous candidate;
+18 affected storage/action/runtime checks pass with the fix and no skips. The
+complete candidate management image builds successfully. The combined synthetic
+installation's post-outage memory gate timed out after capture/control recovery;
+engine history shows worker-capacity retries. That rehearsal remains failed while
+capacity recovery is investigated. No live state or owners were changed.
+[Guard publication evidence](compatibility/results/2026-09-18-guard-publication-isolation.json).
+
 Reset shutdown coordination now preserves each reviewed container's prior running
 state and restart policy before suppressing restart ownership. It installs durable
 inactive fences, stops capture/native scheduling before host executors and other
