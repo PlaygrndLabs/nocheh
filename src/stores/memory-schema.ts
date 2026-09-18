@@ -19,4 +19,12 @@ CREATE TABLE IF NOT EXISTS memory_ingestion_receipts (
  next_attempt timestamptz NOT NULL DEFAULT now(),created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS memory_receipts_remote ON memory_ingestion_receipts(generation,remote_id);
+CREATE TABLE IF NOT EXISTS interpretation_jobs (
+ id text PRIMARY KEY,source_reference jsonb NOT NULL,workspace text NOT NULL,audience text NOT NULL,
+ input_reference jsonb NOT NULL,binding jsonb NOT NULL,context_hash text NOT NULL,output_id text,
+ state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','publishing','done','failed')),
+ attempts integer NOT NULL DEFAULT 0,result_ids jsonb NOT NULL DEFAULT '[]',publication_ids jsonb NOT NULL DEFAULT '[]',error_code text,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS interpretation_inputs ON interpretation_jobs(context_hash,state);
 `;

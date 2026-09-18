@@ -22,7 +22,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing and guarded selection repositories verified; owner routes/UI, portability, and backup pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, project/sharing policies, provenance and learned versions verified; automatic learning and interfaces pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions and automatic worker verified as candidate repositories; production wiring and interfaces pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
@@ -179,6 +179,33 @@ rerun. AST-only Graphify: 330 files, 2,012 nodes and 7,297 edges, zero model cal
 [Learned version evidence](compatibility/results/2026-09-18-learned-memory-versions.json).
 Automatic Honcho learning execution, native memory refresh integration, production
 routing, owner interfaces and live acceptance remain pending.
+
+The candidate automatic-learning worker prepares permitted source and relationship
+evidence independently of reply dispatch. It uses the guarded Honcho reasoning
+endpoint, preserves completed results before preparation/publication, and records
+inspectable meaning/state/convention versions without any delivery or acknowledgment
+operation. Imports require explicit learning consent; live sources follow selected
+conversation access. Unknown reaction topic context waits for its target.
+
+Context includes bounded old-target observations and related activity. Embedded
+reply/external-reply text is removed from the model projection until the target is
+independently authorized. Only selected derivatives and applicable permitted rules
+enter the request. Exact source/guard/selection dependencies and existing corrections
+are checked on use. Identical authorized inputs reuse completed work across unrelated
+generation changes, preventing recursive learning from its own output.
+
+Prepared projection batches record all pending activations and workflow recovery in
+one control transaction before exposing changed versions. A crash after one derived
+activation leaves the batch unavailable; resumption reconciles the remainder using
+the saved reasoning result. Existing owner corrections are not overwritten.
+
+Node 24 compilation and five affected synthetic/PostgreSQL checks pass; a targeted
+rerun additionally proves update-batch revocation and partial-publication recovery.
+No external provider or Telegram calls ran: Honcho reasoning is a deterministic
+fixture. AST-only Graphify: 334 files, 2,035 nodes, 7,488 edges, zero model calls.
+[Automatic learning evidence](compatibility/results/2026-09-18-contextual-learning-worker.json).
+The production workflow handler, native ingestion/context integration, owner UI,
+portability, full rehearsal and fresh live gates remain pending.
 
 </original_only_archive>
 

@@ -8,9 +8,10 @@ import {DerivedRepository} from './derived.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
 import {ProjectRepository} from './projects.js';
 import {revokeBeforePublication} from './publications.js';
+import {requestWorkflow} from '../workflows/store.js';
 
 export interface PreparedDependency {source_id:string;revision:number|null;value_hash:string;selection?:{id:string;revision:number}}
-interface LearnedPublication {entry_id:string;revision:number;expected_revision:number|null;operation_id:string;input_binding:GuardBinding;request_hash:string}
+export interface LearnedPublication {entry_id:string;revision:number;expected_revision:number|null;operation_id:string;input_binding:GuardBinding;request_hash:string}
 export class LearnedMemoryRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository,readonly derived:DerivedRepository,readonly guards:GuardRepository){}
 
@@ -43,7 +44,7 @@ export class LearnedMemoryRepository {
     detect:(text:string)=>Promise<unknown>,nativeProvenance:Record<string,unknown>={}) {
     if(!/^[a-f0-9]{64}$/.test(id)||!operationId||operationId.length>200||!value.evidence.length||value.evidence.length>30||
       (expected!==null&&(!Number.isSafeInteger(expected)||expected<1)))throw new HttpError(400,'invalid_learned_version');
-    const previous=await this.prior(operationId,requestHash);if(previous)return this.resume(previous);
+    const previous=await this.prior(operationId,requestHash);if(previous)return previous;
     await this.guards.assertCurrent(binding);
     for(const source of value.evidence)await this.archive.verify(source);
     if(author!=='owner') {
@@ -80,14 +81,50 @@ export class LearnedMemoryRepository {
       await client.query('COMMIT');
     } catch(error) {await client.query('ROLLBACK');throw error;}
     finally {client.release();}
-    return this.resume(version!);
+    return version!;
   }
 
   async publishAutomatic(id:string,value:Interpretation,expected:number|null,operationId:string,dependencies:PreparedDependency[],binding:GuardBinding,
     producerVersion:string,detect:(text:string)=>Promise<unknown>,nativeProvenance:Record<string,unknown>={}) {
     const author=value.uncertainty==='explicit'||value.kind==='convention'?'participant':'honcho';
     const hash=digest(canonical({id,value,expected,operationId,dependencies,producerVersion,nativeProvenance}));
+    return this.resume(await this.publish(id,value,expected,operationId,author,false,dependencies,binding,producerVersion,hash,detect,nativeProvenance));
+  }
+
+  async stageAutomatic(id:string,value:Interpretation,expected:number|null,operationId:string,dependencies:PreparedDependency[],binding:GuardBinding,
+    producerVersion:string,detect:(text:string)=>Promise<unknown>,nativeProvenance:Record<string,unknown>={}) {
+    const author=value.uncertainty==='explicit'||value.kind==='convention'?'participant':'honcho';
+    const hash=digest(canonical({id,value,expected,operationId,dependencies,producerVersion,nativeProvenance}));
     return this.publish(id,value,expected,operationId,author,false,dependencies,binding,producerVersion,hash,detect,nativeProvenance);
+  }
+
+  /** One control commit revokes for the whole prepared batch and records recovery before any pointer changes. */
+  async activateBatch(versions:LearnedPublication[],binding:GuardBinding,jobId:string,resultId:string,resultIds:string[]):Promise<void> {
+    if(versions.length>12||new Set(versions.map(v=>v.entry_id)).size!==versions.length)throw new HttpError(400,'invalid_learning_batch');
+    for(const version of versions) {
+      const saved=await this.prior(version.operation_id,version.request_hash);
+      if(!saved||saved.entry_id!==version.entry_id||saved.revision!==version.revision||canonical(saved.input_binding)!==canonical(binding))throw new HttpError(409,'learning_batch_conflict');
+    }
+    const db=await this.stores.control.connect();
+    try {
+      await db.query('BEGIN');
+      const state=(await db.query('SELECT g.epoch,g.mode,i.generation FROM guard_state g CROSS JOIN installation i WHERE g.singleton AND i.singleton FOR UPDATE OF g')).rows[0];
+      const job=(await db.query('SELECT state,binding FROM interpretation_jobs WHERE id=$1 FOR UPDATE',[jobId])).rows[0];
+      if(!job||canonical(job.binding)!==canonical(binding))throw new HttpError(409,'learning_batch_conflict');
+      if(job.state==='publishing'||job.state==='done'){await db.query('COMMIT');return;}
+      if(canonical({epoch:Number(state.epoch),mode:state.mode,generation:state.generation})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
+      const changed=versions.some(v=>v.expected_revision!==null);
+      const epoch=changed?Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch):Number(state.epoch);
+      for(const version of versions) {
+        await db.query(`INSERT INTO guard_publications(id,operation_kind,source_id,revision,expected_revision,epoch) VALUES($1,'memory',$2,$3,$4,$5)`,
+          [version.operation_id,version.entry_id,version.revision,version.expected_revision,epoch]);
+        if(changed)await db.query('INSERT INTO guard_invalidations(source_id,epoch) VALUES($1,$2)',[version.entry_id,epoch]);
+        await requestWorkflow(db,'honcho','projection:'+version.entry_id,version.revision);
+      }
+      if(changed){await requestWorkflow(db,'honcho','refresh',epoch);await requestWorkflow(db,'memory_review','refresh',epoch);}
+      await db.query("UPDATE interpretation_jobs SET state='publishing',output_id=$2,result_ids=$3,publication_ids=$4 WHERE id=$1",[jobId,resultId,JSON.stringify(resultIds),JSON.stringify(versions.map(v=>v.operation_id))]);
+      await db.query('COMMIT');
+    } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
 
   async correct(principal:Reader,id:string,input:unknown,detect:(text:string)=>Promise<unknown>) {
@@ -102,7 +139,7 @@ export class LearnedMemoryRepository {
     const text=body.retired?current.content.toString():string(body.text,8000).trim();if(!text)throw new HttpError(400,'memory_correction_required');
     const {quote:_,...metadata}=current.provenance.learning;
     const value:Interpretation={...metadata,text,uncertainty:'explicit',conflicts:[],evidence:current.evidence};
-    return this.publish(id,value,expected,operationId,'owner',body.retired,current.dependencies,await this.guards.state(),'owner-correction-v1',hash,detect);
+    return this.resume(await this.publish(id,value,expected,operationId,'owner',body.retired,current.dependencies,await this.guards.state(),'owner-correction-v1',hash,detect));
   }
 
   async finish(operationId:string):Promise<void> {
