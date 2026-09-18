@@ -13,9 +13,12 @@ test('installation bootstrap provisions separate domains and workflow storage wi
   const admin=new pg.Pool({host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD});
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
   const saved={...process.env},root=await mkdtemp(join(tmpdir(),'nocheh-bootstrap-'));
+  // The shared synthetic Inngest service uses the configured fixture key too.
+  // Do not rotate its role while other serial acceptance checks reuse it.
+  const workflowPassword=process.env.INNGEST_POSTGRES_PASSWORD??digest('workflow-fixture');
   try {
     Object.assign(process.env,{NOCHEH_DATA_DIR:root,NOCHEH_STORAGE_LAYOUT:'original-only-v1',
-      NOCHEH_ARCHIVE_PASSWORD:digest('archive-fixture'),NOCHEH_DERIVED_PASSWORD:digest('derived-fixture'),NOCHEH_CONTROL_PASSWORD:digest('control-fixture'),INNGEST_POSTGRES_PASSWORD:digest('workflow-fixture')});
+      NOCHEH_ARCHIVE_PASSWORD:digest('archive-fixture'),NOCHEH_DERIVED_PASSWORD:digest('derived-fixture'),NOCHEH_CONTROL_PASSWORD:digest('control-fixture'),INNGEST_POSTGRES_PASSWORD:workflowPassword});
     await bootstrapStores();
     const env={...process.env};delete env.PGPASSWORD;delete env.PGPASSWORD_FILE;delete env.INNGEST_POSTGRES_PASSWORD;delete env.INNGEST_POSTGRES_PASSWORD_FILE;
     const stores=runtimeStores(env);
@@ -32,7 +35,7 @@ test('installation bootstrap provisions separate domains and workflow storage wi
         assert.equal(role,'nocheh_'+name);
         await assert.rejects(stores[name].query('CREATE DATABASE portable_bootstrap_forbidden'),{code:'42501'});
       }
-      const workflow=new pg.Pool({host:process.env.PGHOST,user:'nocheh_inngest',database:'nocheh_inngest',password:digest('workflow-fixture')});
+      const workflow=new pg.Pool({host:process.env.PGHOST,user:'nocheh_inngest',database:'nocheh_inngest',password:workflowPassword});
       try {assert.equal((await workflow.query('SELECT current_user AS name')).rows[0].name,'nocheh_inngest');}
       finally{await workflow.end();}
       await mkdir(join(root,'spool'));await writeFile(join(root,'spool/.restore-inactive'),'inactive');

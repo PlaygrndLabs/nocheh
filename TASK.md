@@ -758,6 +758,16 @@ rehearsal, saved preference migration, scoped reset, and fresh live gates also
 remain pending.
 [Coordinated recovery evidence](compatibility/results/2026-09-18-coordinated-store-recovery.json).
 
+The complete TypeScript/dashboard regression suite passes all 140 checks with
+zero skips in the synthetic PostgreSQL/Inngest Compose fixture. It includes
+container dashboard boundaries and real pinned Inngest inspection. The first
+run had 139 passes and one fixture authentication failure: store bootstrap had
+rotated the shared workflow password. The fixture now preserves its configured
+password; compilation and the full serial rerun pass. This is component and
+service regression evidence, not the full running native/UI or fresh live gates.
+[Full regression evidence](compatibility/results/2026-09-18-full-store-regression.json).
+
+
 
 
 
