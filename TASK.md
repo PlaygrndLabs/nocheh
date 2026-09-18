@@ -41,8 +41,14 @@ notes; that dependency is now retained only for legacy stores. Original observat
 are labeled, counted, filterable, and inspectable in the 3D view. Thirteen focused
 Python/graph checks and the full pinned candidate image build pass. The isolated
 preview was inspected at 375px/1440px in dark/light themes; keyboard focus restoration
-and mobile overflow checks pass. Its background workers are paused after fixture
-preparation. Fresh full-pipeline evidence is the separate G rehearsal below.
+and mobile overflow checks pass. A fresh compatibility follow-up makes Overview read
+its original-record and original-file counts from archive storage, exposes the guard
+mode, and routes Memory access to current explicit sharing controls instead of the
+legacy memory-space API. Three storage/API checks pass without skips, including
+database-outage and real entrypoint coverage. The follow-up preview passes at 375px
+and 1440px in dark/light themes with no console errors or horizontal overflow. Its
+background workers are paused after fixture preparation. Fresh full-pipeline evidence
+is the separate G rehearsal below.
 [Owner dashboard evidence](compatibility/results/2026-09-18-original-dashboard.json).
 
 The complete synthetic installation rehearsal now passes across the three stores,
@@ -175,7 +181,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Guard/control separation and recovery | Focused checks and fresh combined outage rehearsal pass; no live cutover |
 | Derivative versioning, reprocessing, portability, backup | Versioning/owner interfaces, source and derivative portability, native transfer, and coordinated backup/inactive restore have recorded candidate evidence; live cutover and fresh live gates remain separate |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
-| Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows verified; overview and Memory access compatibility follow-up pending |
+| Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows, Overview and Memory access compatibility verified in isolated previews |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
 

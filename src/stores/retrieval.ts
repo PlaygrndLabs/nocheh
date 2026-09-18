@@ -24,6 +24,15 @@ export class SourceRepository {
     this.audience=new AudienceRepository(access.guards);
   }
   private get stores(){return this.access.stores;}
+  async status(principal:Reader) {
+    admin(principal);
+    const [events,artifacts]=await Promise.all([
+      this.stores.archive.query('SELECT count(*) AS count FROM events'),
+      this.stores.archive.query(`SELECT CASE WHEN file_hash IS NULL THEN 'pending' ELSE 'ready' END AS state,
+        count(*)::integer AS count FROM artifacts GROUP BY 1 ORDER BY 1`),
+    ]);
+    return {events:Number(events.rows[0].count),artifacts:artifacts.rows};
+  }
   private async permitted(principal:Reader,id:string,binding:GuardBinding|null):Promise<SourceReference> {
     const reference=(await this.access.archive.captured(id)).reference;
     if(binding&&!await this.access.canRead(principal,reference,binding))throw new HttpError(404,'source_not_found');
