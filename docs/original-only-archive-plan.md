@@ -108,6 +108,10 @@ observes the same receipt first; missing evidence after claim is uncertain and
 cannot start a replacement execution. Imported derivative records are marked at
 insertion and cannot satisfy current execution/checkpoint recovery. Explicit owner
 adoption of imported content and guarded edits remains a separate operation.
+An unstarted browser submission binds its execution guard revision after initial
+file preparation/selection. The first native request intent is durable before the
+call; after that boundary a changed guard cannot silently rebind the run. Default
+logical profile IDs stay stable while native state remains generation isolated.
 Native profile administration and confirmed browser-delivery capture still need
 their end-to-end integration. Scheduler migration, host import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not

@@ -85,7 +85,7 @@ class Scopes:
             # Reviews share native notes and the foreground lock; filtering has
             # a separate context. Prepared-text caches remain purpose-specific.
             identity=[generation,scope.space or scope.chat_id,'owner' if scope.owner else 'scoped',epoch,'filter' if purpose=='filter' else 'assistant']
-            default=Scopes.profile((scope.space or scope.chat_id) if scope.owner else (scope.space or scope.chat_id)+':policy:'+str(claims.get('revision')))
+            default=Scopes.profile(scope.space or scope.chat_id)
             if logical and logical!=default:identity.append(logical)
             scope=replace(scope,profile=Scopes.profile(json.dumps(identity,separators=(',',':'),ensure_ascii=False)),generation=generation,purpose=purpose,logical_profile=logical or '')
         return scope

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS managed_runs (
 CREATE UNIQUE INDEX IF NOT EXISTS managed_conversation_busy ON managed_runs(scope,logical_profile,conversation_id)
  WHERE admitted AND state IN ('captured','running');
 CREATE INDEX IF NOT EXISTS managed_run_lease ON managed_runs(lease_until) WHERE state='running';
+ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS launch_requested_at timestamptz;
 `;
 const protocol='managed-browser-v2',closed=new Set(['done','failed','cancelled','interrupted']);
 const identity=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_run_identity');return id;};
@@ -79,9 +80,27 @@ export class BrowserRunRepository {
       await requestWorkflow(db,'browser',id);await db.query('COMMIT');return {owned:true,event_id:id,state:'captured'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{await releaseOperation(db,async()=>{if(held)await leaveFamily(db,'browser');});}
   }
-  async context(input:unknown){const body=object(input),row=await this.row(eventId(body.event_id));
+  /** Capture/admission is not a prepared execution context. Bind after initial
+   * extraction/selection, before the first native request can exist. */
+  private async bindPrepared(row:any,epoch:number){
+    if((await this.preparation.status(row.event_id)).state!=='completed')throw new HttpError(409,'run_preparation_pending');
+    const binding=await this.guards.state();this.scope(row.scope);
+    if(binding.generation!==row.binding.generation)throw new HttpError(409,'audience_context_changed');
+    if(await this.access.space(row.source_reference)!==row.space_id)throw new HttpError(403,'turn_source_denied');
+    const db=await this.control.connect();try{await db.query('BEGIN');await this.fence(db,binding);
+      const owner=(await db.query("SELECT * FROM workflow_owners WHERE family='browser' FOR SHARE")).rows[0];
+      if(owner.owner!=='inngest'||!owner.admission||owner.epoch!==epoch||row.owner_epoch!==epoch)throw new HttpError(409,'workflow_owner_changed');
+      await db.query(`UPDATE managed_runs SET binding=$2,launch_requested_at=now(),revision=revision+1,updated_at=now()
+        WHERE event_id=$1 AND state='captured' AND NOT cancel_requested AND launch_requested_at IS NULL`,[row.event_id,binding]);
+      const saved=(await db.query('SELECT * FROM managed_runs WHERE event_id=$1',[row.event_id])).rows[0];
+      if(saved.state!=='captured'||saved.cancel_requested)throw new HttpError(409,'run_lease_lost');
+      await db.query('COMMIT');await this.current(saved);return saved;
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  async context(input:unknown){const body=object(input);let row=await this.row(eventId(body.event_id));
     const owner=(await this.control.query("SELECT * FROM workflow_owners WHERE family='browser'")).rows[0];
     if(!row?.admitted||owner.owner!=='inngest'||!owner.admission||owner.epoch!==body.owner_epoch||row.owner_epoch!==owner.epoch)throw new HttpError(409,'workflow_owner_changed');
+    if(row.state==='captured'&&!row.launch_requested_at)row=await this.bindPrepared(row,owner.epoch);
     await this.current(row);return {event_id:row.event_id,scope:row.scope,space:row.space_id,profile:row.logical_profile,conversation:row.conversation_id,
       revision:row.binding.epoch,generation:row.binding.generation,actor:'run_'+row.event_id,owner_epoch:owner.epoch,storage_layout:'original-only-v1'};
   }
@@ -109,7 +128,7 @@ export class BrowserRunRepository {
   }
   async claim(input:unknown){
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
-    const body=object(input),row=await this.scoped(body);await this.context(body);
+    const body=object(input);await this.context(body);const row=await this.scoped(body);
     if(body.actor!=='run_'+row.event_id)throw new HttpError(403,'run_actor_mismatch');
     if(row.state!=='captured')return {claimed:false,event_id:row.event_id,state:row.state};
     const built=await this.build(row),db=await this.control.connect();let held=false;
@@ -206,6 +225,10 @@ export class BrowserRunRepository {
       let row=await this.row(id);if(!row)return observation('skipped','admission');
       if(row.input_reference&&!row.result_reference&&await this.recover(row))row=await this.row(id);
       if(closed.has(row.state))return this.status(row);
+      if(row.state==='captured'&&!row.launch_requested_at&&!row.cancel_requested&&row.owner_epoch===authority.epoch){
+        const ready=await this.preparation.status(id);if(ready.state!=='completed')return observation('waiting',ready.stage,0,ready.next_attempt,'prerequisite');
+        row=await this.bindPrepared(row,authority.epoch);
+      }
       let current=row.owner_epoch===authority.epoch;try{await this.current(row);}catch(error){if(!(error instanceof HttpError))throw error;current=false;}
       const body={channel:'browser',event_id:id,attempt:1,owner_epoch:row.owner_epoch??authority.epoch,asynchronous:true};
       if(!current||row.cancel_requested){

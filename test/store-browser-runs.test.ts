@@ -46,7 +46,9 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     await s.browser.finish(receipt);native.set(id,{state:'done'});
     if(mode==='ack_lost'){mode='done';throw Error('lost reply after completion');}return {state:'done'};
   };
-  const s=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no providers');}});
+  const s=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
+    transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Prepared audio fixture-secret';}},
+    honcho:async()=>{throw Error('no providers');}});
   const authority=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
   const capture=async(options:Record<string,unknown>={})=>{const binding=await s.guards.state(),body={scope:'123',profile:'research',conversation:'fixture-'+base+'-'+(++serial),
     id:'input',text:'Original fixture-secret',revision:binding.epoch,...options};const source=await s.browserCapture.capture(owner,body);await drainSourceSpool(s.capture,root,source.event_id);return {...body,...source};};
@@ -92,6 +94,8 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     assert.equal(await s.access.canRead(principal,reference,binding),true);assert.equal(await s.access.canRead({...principal,space:group},reference,binding),false);
     assert.equal(await s.access.canRead({...principal,space:group+'/topic/13'},reference,binding),false);assert.equal(await s.access.canLearn(reference,binding),true);
     await s.browser.admit(owner,scoped);await prepare(scoped.event_id);mode='done';assert.equal((await run(scoped.event_id)).state,'completed');
+    const media=await capture({text:'Read the attached audio',files:[{name:'original.ogg',kind:'audio',bytes_base64:Buffer.from([79,103,103,0,255]).toString('base64')}]});
+    await s.browser.admit(owner,media);await prepare(media.event_id);assert.equal((await run(media.event_id)).state,'completed','initial transcript preparation must not cancel an unstarted browser submission');
     const queued=await capture();await s.browser.admit(owner,queued);await prepare(queued.event_id);mode='queued';await run(queued.event_id);
     await s.guards.setMode('off');assert.equal((await s.browser.observe(queued)).visible,false);assert.equal((await run(queued.event_id)).state,'cancelled');
     assert.equal(calls.filter(c=>c.body.event_id===queued.event_id&&c.op==='run.start').length,1);
