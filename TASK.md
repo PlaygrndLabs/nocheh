@@ -21,8 +21,8 @@ projects, and explicitly managed sharing are accepted requirements.
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
 | Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
-| Derivative versioning, reprocessing, portability, backup | Reprocessing and guarded selection repositories verified; owner routes/UI, portability, and backup pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions and automatic worker verified as candidate repositories; production wiring and interfaces pending |
+| Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI verified as candidates; dashboard, portability, and backup pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, workers, explicit sharing, and owner API/CLI verified as candidates; production wiring and dashboard pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
@@ -179,6 +179,30 @@ from starting and was corrected. AST-only Graphify: 357 files, 2,178 nodes, 8,34
 edges, zero model calls. Native management/managed turns, workflow routing, and
 production entry points still await their remaining migrations.
 [Native review evidence](compatibility/results/2026-09-18-store-native-review.json).
+
+Explicit sharing now keeps preview inputs, filter results, published text, and
+private source provenance in derived storage; control stores policy and publication
+receipts. Owner API/CLI operations list previews/releases, inspect provenance,
+approve an exact text hash and guard revision, and revoke with revision checks.
+Scoped readers receive only the released representation, without private source
+identifiers. Rules select exact source/destination conversations; unknown topics
+cannot broaden access. Project membership never grants source access.
+
+Filtering uses the existing native subscription adapter, records its actual model
+and provider configuration, and checkpoints results before completion. It searches
+original messages and selected transcripts/extractions. Changed source guards,
+selected engine versions, output guards, or sharing rules withhold affected results;
+revocation invalidates existing contexts before policy becomes usable. Retried
+approvals cannot revive revoked releases. Filter candidates remain untrusted data,
+and malformed results cannot add administrative fields or private citations.
+
+Three affected PostgreSQL checks, four CLI checks, and two offline native filter
+checks pass. Recovery covers a lost completion receipt without another model call,
+plus revocation during filtering and engine activation after sharing. TypeScript,
+diff hygiene, and AST-only Graphify pass (361 files, 2,219 nodes, 8,563 edges,
+zero model calls). No live credentials, provider calls, or installation state were
+used. Dashboard and production routing remain pending.
+[Sharing evidence](compatibility/results/2026-09-18-store-sharing.json).
 
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,

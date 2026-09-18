@@ -24,6 +24,7 @@ import {HttpError} from '../http.js';
 import {RuntimeTurnRepository} from './turns.js';
 import {NativeMemoryRepository} from './native-memory.js';
 import {NativeReviewRepository} from './native-review.js';
+import {SharingContentRepository} from './sharing.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -54,6 +55,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),
+    shared:new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??''),
     detectorVersion:options.detectorVersion,detect};
 }
 export type StorageServices=ReturnType<typeof storageServices>;

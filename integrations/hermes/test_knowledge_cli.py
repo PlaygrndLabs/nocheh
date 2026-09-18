@@ -42,3 +42,19 @@ class KnowledgeCliTests(unittest.TestCase):
             self.assertTrue(allowed_path(path),path)
         for path in ['https://example.com/v1/projects','//example.com/v1/projects','/v1/projects/../tools/execute','/v1/tools/execute','/v1/projects#fragment']:
             self.assertFalse(allowed_path(path),path)
+
+    def test_sharing_approval_binds_preview_guard_and_text(self):
+        preview='a'*64
+        path,body=self.invoke('sharing',['approve',preview,'--revision','2','--guard-revision','3','--text-hash','b'*64,'--operation-id','approve-1'])
+        self.assertEqual(path,'/v1/sharing/previews/'+preview+'/approve')
+        self.assertEqual(body,{'expected_revision':2,'guard_revision':3,'text_hash':'b'*64,'operation_id':'approve-1'})
+        self.assertEqual(self.invoke('sharing',['show-preview',preview]),('/v1/sharing/previews/'+preview,None))
+        self.assertEqual(self.invoke('sharing',['revoke',preview,'--revision','1','--operation-id','revoke-1']),
+                         ('/v1/sharing/releases/'+preview+'/revoke',{'expected_revision':1,'operation_id':'revoke-1'}))
+        with tempfile.TemporaryDirectory() as folder:
+            file=Path(folder)/'preview.json';value={'rule_id':'c'*64,'source_ids':['d'*64],'content':'Exact text','operation_id':'preview-1'}
+            file.write_text(json.dumps(value))
+            self.assertEqual(self.invoke('sharing',['preview','--file',str(file)]),('/v1/sharing/preview',value))
+        for path in ['/v1/sharing/preview','/v1/sharing/previews/'+preview,'/v1/sharing/previews/'+preview+'/approve','/v1/sharing/releases/'+preview+'/revoke']:
+            self.assertTrue(allowed_path(path),path)
+        self.assertFalse(allowed_path('/v1/sharing/releases/'+preview+'/deliver'))
