@@ -19,7 +19,8 @@ export function scopedObservation(value:unknown):any {
 }
 export class SourceRepository {
   readonly audience:AudienceRepository;
-  constructor(readonly access:SourceAccessRepository,readonly attachments:AttachmentRepository,readonly selections:SelectionRepository) {
+  constructor(readonly access:SourceAccessRepository,readonly attachments:AttachmentRepository,readonly selections:SelectionRepository,
+    readonly allowPrepared:(principal:Reader,value:unknown)=>Promise<void>=async()=>{}) {
     this.audience=new AudienceRepository(access.guards);
   }
   private get stores(){return this.access.stores;}
@@ -62,8 +63,9 @@ export class SourceRepository {
     const relationships=await this.access.relationships.context(reference,binding&&principal.scope!==null?{
       kind:'conversation',chat_id:principal.scope,topic_id:principal.space?.includes('/topic/')?principal.space.split('/topic/')[1]!:null}:{kind:'owner'},20);
     if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
-    return {id,source:'nocheh:event:'+id,reference,received_at:row.received_at.toISOString(),representation:binding?.mode==='on'?'guarded':'original',
+    const result={id,source:'nocheh:event:'+id,reference,received_at:row.received_at.toISOString(),representation:binding?.mode==='on'?'guarded':'original',
       guarded_revision:guardedRevision,event,artifacts,derived,relationships,derivative_versions:'/v1/sources/'+id+'/derivatives'};
+    await this.allowPrepared(principal,result);return result;
   }
 
   /** Archive search deliberately excludes transcripts, contexts and learned results. */
@@ -90,7 +92,7 @@ export class SourceRepository {
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000});
       if(hits.length===count)break;
     }
-    if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}return hits;
+    if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}await this.allowPrepared(principal,hits);return hits;
   }
   async bytes(principal:Reader,id:string):Promise<Buffer> {
     const binding=principal.admin?null:await this.audience.assert(principal);

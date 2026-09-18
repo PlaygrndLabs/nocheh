@@ -6,6 +6,7 @@ import {controlPolicySchema} from './policy-schema.js';
 import {controlMemorySchema} from './memory-schema.js';
 import {derivedLearnedSchema} from './learned-schema.js';
 import {controlOperationSchema} from './operations.js';
+import {runtimeContextSchema} from './prepared-context.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -21,6 +22,9 @@ CREATE TABLE IF NOT EXISTS events (
  payload bytea NOT NULL, payload_hash text NOT NULL, original_text bytea,
  search_text text NOT NULL DEFAULT '', wire bytea
 );
+ALTER TABLE events DROP CONSTRAINT IF EXISTS events_kind_check;
+ALTER TABLE events ADD CONSTRAINT events_kind_check CHECK(kind NOT IN ('runtime_context','transcript','extracted_text',
+ 'shared_knowledge','outbound_intent','outbound_result','schedule_definition','schedule_fire','guard_result','learning_result','learned_memory','extraction_status'));
 CREATE INDEX IF NOT EXISTS events_scope_time ON events(scope,received_at,id);
 CREATE INDEX IF NOT EXISTS events_lexical ON events USING gin(to_tsvector('simple',search_text));
 CREATE TABLE IF NOT EXISTS artifacts (
@@ -62,6 +66,7 @@ ALTER TABLE derived_artifacts ADD CONSTRAINT derived_anchor CHECK(
 CREATE INDEX IF NOT EXISTS derived_artifact ON derived_artifacts(artifact_id,kind,created_at,id);
 CREATE INDEX IF NOT EXISTS derived_lexical ON derived_artifacts USING gin(to_tsvector('simple',search_text));
 ${derivedGuardSchema}
+${runtimeContextSchema}
 ${derivativeSelectionSchema}
 ${derivedLearnedSchema}
 `;

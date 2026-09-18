@@ -115,6 +115,17 @@ sharing content previews/releases, and visible UI remain pending.
 [Owner operation contracts](docs/storage-owner-api.md) and
 [owner API evidence](compatibility/results/2026-09-18-storage-owner-api.json).
 
+Runtime-context preparation now persists generated inputs and detector checkpoints
+in derived storage, with typed source or scheduled-operation roots. Authorized
+prepared passages survive formatting; caches are isolated by audience, purpose,
+installation generation, and guard epoch. Detector results survive a lost cache
+completion, and completed batches persist atomically before guard publication.
+Guard-off still checks the bound source and current audience. Internal guard
+results cannot become active source derivatives or archive records. All eight
+affected PostgreSQL and prepared-context checks pass after correcting one test's
+expected detector rejection code. Runtime broker wiring remains pending.
+[Context evidence](compatibility/results/2026-09-18-store-prepared-context.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior
