@@ -7,6 +7,20 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The offline settlement gate now checks durable native delivery/tool receipts and
+workflow/domain correspondence while reset quiescence and database maintenance
+remain held. It never resends an action or rewrites an ambiguous database receipt.
+Missing/ambiguous external outcomes and orphan uncertain effects block the gate;
+stopped local computations remain explicitly result-unknown. Stable, content-free
+evidence is durable before the journal advances and can resume after interruption.
+Twelve host checks pass; a fresh internal-network Compose rehearsal passes against
+both real storage schemas and native capture journals. The final management image
+build and 21 packaged settlement/file-erasure checks pass without network access.
+An initial synthetic duplicate-dispatch setup error was corrected before the passing
+rehearsal. No live settlement, owner shutdown or deletion occurred. Full preservation,
+container/volume erasure, initialization and fresh acceptance remain pending.
+[Settlement evidence](compatibility/results/2026-09-18-reset-effects.json).
+
 The reset file-erasure primitive freezes metadata-only, installation-local targets
 and removes entries through anchored descriptors without following symlinks.
 All remaining targets are checked before deletion; changed/new files, replaced
@@ -157,11 +171,11 @@ projects, and explicitly managed sharing are accepted requirements.
 | Increment | Status |
 | --- | --- |
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
-| Three stores, repositories, capture handoff, role isolation | Foundation and app/security/capture wiring verified in isolated Compose; remaining repository migrations pending |
-| Guard/control separation and recovery | Guard, action, browser/scheduler execution, profile administration, and publication recovery verified as candidates; complete installation rehearsal pending |
-| Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; three-store backup/inactive restore candidates verified; portability, full coordinated rehearsal, and production routing pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, explicit sharing, owner interfaces, and preparation/memory workflow wiring verified as candidates; full installation rehearsal pending |
-| Complete isolated Compose and UI acceptance | Pending |
+| Three stores, repositories, capture handoff, role isolation | Repository and production-composition candidates verified in isolated Compose; live installation remains on its saved layout |
+| Guard/control separation and recovery | Focused checks and fresh combined outage rehearsal pass; no live cutover |
+| Derivative versioning, reprocessing, portability, backup | Versioning/owner interfaces, source and derivative portability, native transfer, and coordinated backup/inactive restore have recorded candidate evidence; live cutover and fresh live gates remain separate |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
+| Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows verified; overview and Memory access compatibility follow-up pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
 
