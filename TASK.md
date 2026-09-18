@@ -90,6 +90,19 @@ and repeated preparation. Production workflow handlers still await the common
 service composition; no live transcription or full rehearsal is claimed.
 [Preparation evidence](compatibility/results/2026-09-18-store-preparation.json).
 
+The source retrieval repository now searches original evidence only, reads active
+authorized file derivatives separately, and links source details to version history.
+Its owner graph contains originals, attachments, actors, and observed relationships;
+old reply/reaction targets resolve independently of the page. Scoped reads strip
+embedded reply snapshots and check target access independently, including unknown
+topic denial. Capability claims carry installation generation as well as epoch;
+the new repository rejects legacy or stale claims even with guarding off. The old
+runtime routes are not switched by this increment.
+Six affected synthetic/retrieval/HTTP checks pass; the final targeted rerun also
+passes after adding final source-access rechecks and repeatable fixture identities.
+AST-only Graphify: 343 files, 2,083 nodes, 7,773 edges, zero model calls.
+[Source retrieval evidence](compatibility/results/2026-09-18-source-only-retrieval.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior
