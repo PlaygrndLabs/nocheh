@@ -1,10 +1,11 @@
 export const derivedGuardSchema=`
 CREATE TABLE IF NOT EXISTS guard_sources (
- id text PRIMARY KEY,event_id text NOT NULL,kind text NOT NULL,source_id text NOT NULL,
+ id text PRIMARY KEY,event_id text,kind text NOT NULL,source_id text NOT NULL,
  reference jsonb NOT NULL,input_hash text NOT NULL,input bytea NOT NULL,
  active_revision integer,state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','ready')),
  created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(kind,source_id)
 );
+ALTER TABLE guard_sources ALTER COLUMN event_id DROP NOT NULL;
 CREATE TABLE IF NOT EXISTS guard_revisions (
  id text PRIMARY KEY,source_id text NOT NULL REFERENCES guard_sources(id),revision integer NOT NULL,
  content bytea NOT NULL,search_text text NOT NULL,input_hash text NOT NULL,

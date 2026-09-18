@@ -5,6 +5,7 @@ import {derivativeSelectionSchema} from './selection-schema.js';
 import {controlPolicySchema} from './policy-schema.js';
 import {controlMemorySchema} from './memory-schema.js';
 import {derivedLearnedSchema} from './learned-schema.js';
+import {controlOperationSchema} from './operations.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -42,7 +43,7 @@ ${sourceModelSchema}
 
 export const initialDerivedSchema=`
 CREATE TABLE IF NOT EXISTS derived_artifacts (
- id text PRIMARY KEY,event_id text NOT NULL,artifact_id text,kind text NOT NULL,
+ id text PRIMARY KEY,event_id text,artifact_id text,kind text NOT NULL,
  content bytea NOT NULL,content_hash text NOT NULL,provenance jsonb NOT NULL,
  source_revision text NOT NULL,input_hash text NOT NULL,producer text NOT NULL,
  producer_version text NOT NULL,configuration_hash text NOT NULL,
@@ -50,6 +51,14 @@ CREATE TABLE IF NOT EXISTS derived_artifacts (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS derived_event ON derived_artifacts(event_id,created_at,id);
+ALTER TABLE derived_artifacts ALTER COLUMN event_id DROP NOT NULL;
+ALTER TABLE derived_artifacts ADD COLUMN IF NOT EXISTS operation_reference jsonb;
+ALTER TABLE derived_artifacts DROP CONSTRAINT IF EXISTS derived_anchor;
+ALTER TABLE derived_artifacts ADD CONSTRAINT derived_anchor CHECK(
+ (event_id IS NOT NULL AND operation_reference IS NULL) OR
+ (event_id IS NULL AND artifact_id IS NULL AND operation_reference IS NOT NULL AND
+  coalesce(operation_reference->>'store'='control' AND operation_reference->>'kind'='operation'
+    AND operation_reference ?& ARRAY['id','generation','input_hash'],false)));
 CREATE INDEX IF NOT EXISTS derived_artifact ON derived_artifacts(artifact_id,kind,created_at,id);
 CREATE INDEX IF NOT EXISTS derived_lexical ON derived_artifacts USING gin(to_tsvector('simple',search_text));
 ${derivedGuardSchema}
@@ -70,6 +79,7 @@ ${workflowSchema}
 ${controlGuardSchema}
 ${controlPolicySchema}
 ${controlMemorySchema}
+${controlOperationSchema}
 CREATE TABLE IF NOT EXISTS attachment_retrievals (
  artifact_id text PRIMARY KEY,event_id text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
