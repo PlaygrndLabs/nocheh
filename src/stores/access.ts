@@ -60,6 +60,14 @@ export class SourceAccessRepository {
       return {event_id:reference.id,enabled:body.enabled,revision};
     });
   }
+  async consent(principal:Reader,reference:SourceReference) {
+    admin(principal);const source=await this.archive.verify(reference),binding=await this.guards.state();
+    const saved=(await this.stores.control.query('SELECT enabled,revision,updated_at FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];
+    const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[reference.id])).rows[0];
+    const effective=await this.canLearn(reference,binding);await this.guards.assertCurrent(binding);
+    return {source:reference,enabled:saved?.enabled??null,revision:saved?.revision??0,effective,
+      authority:saved?'owner':'capture_policy',transport:intake?.transport??source.origin,intake_state:intake?.state??null,updated_at:saved?.updated_at??null};
+  }
   principal(space:string):Reader {
     return {admin:false,scope:space===this.policy().owner_id?null:parentSpace(space)??space,space};
   }

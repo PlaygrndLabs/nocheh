@@ -10,7 +10,7 @@ from .archive import API
 def allowed_path(path):
     parsed=urlsplit(path)
     if parsed.scheme or parsed.netloc or parsed.fragment:return False
-    return bool(re.fullmatch(r'/v1/(?:projects(?:/assignments|/effective)?|sharing/(?:rules|preview|previews(?:/[a-f0-9]{64}(?:/approve)?)?|releases(?:/[a-f0-9]{64}/revoke)?)|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
+    return bool(re.fullmatch(r'/v1/(?:projects(?:/assignments|/effective)?|sharing/(?:rules|preview|previews(?:/[a-f0-9]{64}(?:/approve)?)?|releases(?:/[a-f0-9]{64}/revoke)?)|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare|learning-consent)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
 
 
 def parse(command,arguments):
@@ -20,12 +20,13 @@ def parse(command,arguments):
         item=commands.add_parser(name);item.add_argument('id');item.add_argument('--revision',type=int,required=True);item.add_argument('--operation-id',required=True);return item
     if command=='sources':
         commands.add_parser('engines')
-        for name in ('versions','derivative','job','prepare'):
+        for name in ('versions','derivative','job','prepare','learning-consent'):
             item=commands.add_parser(name);item.add_argument('id')
             if name=='versions':item.add_argument('--after',default='')
         item=commands.add_parser('reprocess');item.add_argument('id');item.add_argument('--artifact',required=True);item.add_argument('--input-hash',required=True)
         item.add_argument('--engine',required=True);item.add_argument('--version',required=True);item.add_argument('--configuration',type=Path);item.add_argument('--operation-id',required=True)
         change('activate')
+        change('set-learning').add_argument('--enabled',choices=('true','false'),required=True)
         for name in ('guard','guard-history'):
             item=commands.add_parser(name);item.add_argument('kind',choices=('events','artifacts','derived_artifacts'));item.add_argument('id')
         for name in ('edit-guard','restore-guard'):
@@ -69,6 +70,8 @@ def operation(command,args):
         elif action=='derivative':path='/v1/derivatives/'+args.id
         elif action=='job':path='/v1/reprocessing/'+args.id
         elif action=='prepare':path='/v1/sources/'+args.id+'/prepare';body={}
+        elif action=='learning-consent':path='/v1/sources/'+args.id+'/learning-consent'
+        elif action=='set-learning':path='/v1/sources/'+args.id+'/learning-consent';body={**mutation(),'enabled':args.enabled=='true'}
         elif action=='reprocess':
             path='/v1/sources/'+args.id+'/reprocess';body={'artifact_id':args.artifact,'input_hash':args.input_hash,'producer':args.engine,
                 'producer_version':args.version,'configuration':json.loads(args.configuration.read_text()) if args.configuration else {},'operation_id':args.operation_id}

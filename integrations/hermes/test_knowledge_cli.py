@@ -25,6 +25,15 @@ class KnowledgeCliTests(unittest.TestCase):
             with self.assertRaises(SystemExit):main('sources',['activate',artifact,'--revision','0'])
             api.assert_not_called()
 
+    def test_source_learning_consent_is_explicit_and_revision_checked(self):
+        source='a'*64;path='/v1/sources/'+source+'/learning-consent'
+        self.assertEqual(self.invoke('sources',['learning-consent',source]),(path,None))
+        self.assertEqual(self.invoke('sources',['set-learning',source,'--revision','2','--operation-id','consent-3','--enabled','false']),
+                         (path,{'expected_revision':2,'operation_id':'consent-3','enabled':False}))
+        with patch('scripts.knowledge.API') as api,contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):main('sources',['set-learning',source,'--enabled','true'])
+            api.assert_not_called()
+
     def test_corrections_projects_and_sharing_use_exact_revisioned_payloads(self):
         with tempfile.TemporaryDirectory() as folder:
             text=Path(folder)/'correction.txt';text.write_text('Exact owner correction')
