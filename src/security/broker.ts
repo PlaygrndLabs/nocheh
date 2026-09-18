@@ -9,8 +9,19 @@ import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
 import {evaluate,recordEffect} from './store.js';
 import {ownerSecurityRoute} from './owner-api.js';
 import {providerPayload} from './provider-request.js';
+import type {SourceReference} from '../stores/archive.js';
+import type {OperationReference} from '../stores/operations.js';
 
-export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;}
+export interface TurnBinding {
+  event_id:string;scope:string;profile:string;logical_profile:string;owner:boolean;
+  guard_epoch:number;revision?:number|undefined;generation?:string;job?:string;reference?:SourceReference|OperationReference;
+}
+export interface BrokerStorage {
+  binding(principal:Reader):Promise<TurnBinding>;
+  assertAudience(principal:Reader):Promise<unknown>;
+  turnFile(principal:Reader,hash:string):Promise<string>;
+}
+export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;}
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|tools\/actions\/[a-f0-9]{64})$/],
   ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|action-requests)$/],
@@ -21,7 +32,7 @@ export function providerTarget(transport:Record<string,unknown>,path:string):str
   if(transport.base_url==='http://cliproxy-api:8317/v1'&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return transport.base_url+'/chat/completions';
   throw new HttpError(403,'provider_route_denied');
 }
-export async function turnBinding(pool:pg.Pool,principal:Reader) {
+export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBinding> {
   if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');
   await assertAudience(pool,principal);
   const event=(await pool.query<{scope:string;payload:Buffer;channel:string;managed:boolean}>('SELECT scope,payload,channel,EXISTS(SELECT 1 FROM managed_runs WHERE event_id=events.id) AS managed FROM events WHERE id=$1',[principal.turnEvent])).rows[0];
@@ -42,6 +53,7 @@ async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
 }
 export function brokerServer(options:BrokerOptions) {
   const call=options.fetch??fetch;
+  const assertCurrent=(principal:Reader)=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal);
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
     json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'security_service_unavailable'});
@@ -52,7 +64,7 @@ export function brokerServer(options:BrokerOptions) {
     const principal=reader(req,options.token);
     if(principal.admin&&path==='/v1/guard'&&req.method==='POST')return json(res,200,await options.prepare(principal,await readJson(req,1024*1024)));
     if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url))return;
-    const binding=await turnBinding(options.pool,principal);
+    const binding=await (options.storage?options.storage.binding(principal):turnBinding(options.pool,principal));
     const credential=req.headers.authorization!;
     // A cold Honcho recall includes multiple guarded provider calls. Keep other
     // broker operations on their shorter deadline; cancellation still aborts both.
@@ -64,8 +76,8 @@ export function brokerServer(options:BrokerOptions) {
       const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{})};
       const decision=await evaluate(options.pool,effect);
       trace={effect,decision,started:false,closed:false};
-      await recordEffect(options.pool,effect,'proposed',decision,binding.event_id);
-      await recordEffect(options.pool,effect,decision.outcome==='allow'?'allowed':'blocked',decision,binding.event_id);
+      await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);
+      await recordEffect(options.pool,effect,decision.outcome==='allow'?'allowed':'blocked',decision,binding.reference??binding.event_id);
       if(decision.outcome!=='allow'){trace.closed=true;throw new HttpError(403,'security_policy_denied');}
       return trace;
     };
@@ -84,9 +96,10 @@ export function brokerServer(options:BrokerOptions) {
       let relay=path;
       const file=path.match(/^\/v1\/turn-files\/([a-f0-9]{64})$/);
       if(file&&req.method==='GET') {
-        const artifact=(await options.pool.query<{id:string}>('SELECT id FROM artifacts WHERE event_id=$1 AND file_hash=$2 AND state=\'ready\' LIMIT 1',[principal.turnEvent,file[1]])).rows[0];
+        const artifact=options.storage?await options.storage.turnFile(principal,file[1]!):
+          (await options.pool.query<{id:string}>('SELECT id FROM artifacts WHERE event_id=$1 AND file_hash=$2 AND state=\'ready\' LIMIT 1',[principal.turnEvent,file[1]])).rows[0]?.id;
         if(!artifact)throw new HttpError(404,'turn_file_not_found');
-        relay='/v1/artifacts/'+artifact.id+'/bytes';
+        relay='/v1/artifacts/'+artifact+'/bytes';
       }
       if(scopedRoute(req.method??'',relay)) {
         const body=req.method==='POST'?JSON.stringify(await readJson(req,1024*1024)):undefined;
@@ -96,7 +109,7 @@ export function brokerServer(options:BrokerOptions) {
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok){await response.body?.cancel();throw new HttpError(response.status,'scoped_archive_unavailable');}
         await stream(response,principal,res,file?26*1024*1024:8*1024*1024);
-        if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.event_id);trace.closed=true;}return;
+        if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.reference??binding.event_id);trace.closed=true;}return;
       }
       if(req.method!=='POST'||!['/codex/responses','/v1/chat/completions'].includes(path)||url.search)throw new HttpError(403,'security_route_denied');
       const input=await readJson(req,1024*1024);let payload:Record<string,unknown>;
@@ -108,8 +121,8 @@ export function brokerServer(options:BrokerOptions) {
           const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{})};
           const current=await evaluate(options.pool,effect);
           const decision:Decision={outcome:'deny',origin:'mandatory',revision:current.revision,rule:error.code};
-          await recordEffect(options.pool,effect,'proposed',decision,binding.event_id);
-          await recordEffect(options.pool,effect,'blocked',decision,binding.event_id);
+          await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);
+          await recordEffect(options.pool,effect,'blocked',decision,binding.reference??binding.event_id);
         }
         throw error;
       }
@@ -119,26 +132,26 @@ export function brokerServer(options:BrokerOptions) {
       const prepared=object(await options.prepare(principal,{destination,payload}));
       if(prepared.guarded!==true||!prepared.payload)throw new HttpError(503,'required_guard_unavailable');
       // Every attempt, including SDK retries, repeats current audience enforcement.
-      await assertAudience(options.pool,principal);
+      await assertCurrent(principal);
       const current=await evaluate(options.pool,attempt.effect);
       if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
       const headers:Record<string,string>={'content-type':'application/json',authorization:'Bearer '+String(transport.api_key)};
       for(const [key,value] of Object.entries(object(transport.headers??{})))if(['user-agent','originator','chatgpt-account-id'].includes(key.toLowerCase())&&typeof value==='string')headers[key]=value;
-      await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.event_id);attempt.started=true;
+      await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.reference??binding.event_id);attempt.started=true;
       const response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});
-      if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.event_id);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
+      if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.reference??binding.event_id);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
       await stream(response,principal,res,8*1024*1024);
-      await recordEffect(options.pool,attempt.effect,'completed',attempt.decision,binding.event_id);attempt.closed=true;
-    }catch(error){if(trace&&!trace.closed)await recordEffect(options.pool,trace.effect,trace.started?'ambiguous':'failed',trace.decision,binding.event_id);throw error;}
+      await recordEffect(options.pool,attempt.effect,'completed',attempt.decision,binding.reference??binding.event_id);attempt.closed=true;
+    }catch(error){if(trace&&!trace.closed)await recordEffect(options.pool,trace.effect,trace.started?'ambiguous':'failed',trace.decision,binding.reference??binding.event_id);throw error;}
     finally{clearTimeout(timer);res.off('close',closed);controller.abort();}
   }
   async function stream(response:Response,principal:Reader,res:ServerResponse,max:number) {
-    await assertAudience(options.pool,principal);
+    await assertCurrent(principal);
     res.writeHead(200,{'content-type':response.headers.get('content-type')??'application/octet-stream','cache-control':'no-store'});
     let size=0;
     if(response.body)for await(const part of response.body) {
       size+=part.length;if(size>max)throw new HttpError(413,'security_response_limit');
-      await assertAudience(options.pool,principal);
+      await assertCurrent(principal);
       if(!res.write(part))await Promise.race([once(res,'drain'),once(res,'close').then(()=>{throw new Error('closed');})]);
     }
     res.end();

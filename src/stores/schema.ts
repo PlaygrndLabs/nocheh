@@ -7,6 +7,8 @@ import {controlMemorySchema} from './memory-schema.js';
 import {derivedLearnedSchema} from './learned-schema.js';
 import {controlOperationSchema} from './operations.js';
 import {runtimeContextSchema} from './prepared-context.js';
+import {runtimeTurnSchema} from './turns.js';
+import {securityCoreSchema} from '../security/store.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -85,6 +87,8 @@ ${controlGuardSchema}
 ${controlPolicySchema}
 ${controlMemorySchema}
 ${controlOperationSchema}
+${runtimeTurnSchema}
+${securityCoreSchema}
 CREATE TABLE IF NOT EXISTS attachment_retrievals (
  artifact_id text PRIMARY KEY,event_id text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
