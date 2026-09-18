@@ -7,6 +7,22 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+Fresh acceptance now has a separate, restart-safe activation mode. The coordinator
+derives the exact enabled service set and original restart policies from the
+immutable quiescence receipt, expands only current Compose dependencies, records
+the plan before creating containers, and rejects old/replaced identities or a
+changed plan. It creates every fresh dependency while all four reset fences remain,
+then forces every container to `restart=no` before releasing only the current
+reset's fences and starting services in dependency order. An interrupted start
+retries against the same identities; it cannot enable automatic restart, complete
+fresh acceptance, or resume production. Two focused interruption/tamper checks and
+all 92 reset checks pass. A full internal-only synthetic reset lifecycle reaches
+`acceptance_running` with four fresh infrastructure services, one fixture backlog
+call, zero provider/live Telegram calls, released fences, and restart ownership
+still disabled. The fresh live evidence gate and controlled restoration of saved
+restart policies remain pending.
+[Acceptance-mode evidence](compatibility/results/2026-09-18-reset-acceptance-mode.json).
+
 The one-attempt Telegram reset boundary is now bound to current empty-state proof
 instead of caller-supplied assertions alone. Reset-only store observation computes
 content-free fingerprints over every row and sequence in the exact archive,
@@ -282,7 +298,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
 | Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows, Overview and Memory access compatibility verified in isolated previews |
 | Installation-scoped reset and empty baseline | Preservation, scoped erasure, fresh resource initialization, setup restoration, native preference restoration, and complete empty-baseline proof pass a combined synthetic lifecycle; live ownership review and the authorized reset remain pending |
-| Fresh live acceptance and saved-setup resumption | Current-state validation is bound to the one-attempt boundary and passes with a fixture transport; the live boundary, dedicated test group, human participation, fresh evidence, and controlled resumption remain pending |
+| Fresh live acceptance and saved-setup resumption | Current-state validation is bound to the one-attempt boundary; restart-safe acceptance activation passes with fixture transport and restart ownership disabled. The live boundary, dedicated test group, human participation, fresh evidence, and controlled resumption remain pending |
 
 Preserve configuration, external logins, and spending accounting during the
 authorized reset; erase installation-owned content, history, backups, and exports.
