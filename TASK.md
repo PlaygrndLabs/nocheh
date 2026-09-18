@@ -7,6 +7,18 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The reset now requires a private, exact ownership review for every immediate item
+under existing restore and external archive roots. Each current device/inode is
+explicitly marked installation-owned for erasure or unrelated for preservation;
+missing decisions, additions, replacements, unknown file types, changed roots and
+forged paths fail closed. The anchored file manifest accepts reviewed erasure only
+for direct children of those exact roots and preserves unrelated siblings. Thirteen
+focused host checks and the 70-check reset suite pass. The candidate management
+image passes 41 reset checks beside six pinned native checks in read-only,
+network-disabled Compose with no state mounts. No live files were reviewed or
+deleted; the real installation's archive ownership review remains pending.
+[Ownership review evidence](compatibility/results/2026-09-18-reset-ownership.json).
+
 The reset now has a bounded setup-only database snapshot for current security
 policy, legacy conversation overrides or original-only guard/runtime configuration,
 projects, assignments, sharing rules, and active profile identities. It uses one
