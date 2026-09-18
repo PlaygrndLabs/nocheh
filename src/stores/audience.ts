@@ -11,10 +11,10 @@ export class AudienceRepository {
       throw new HttpError(409,'audience_context_changed');
     return binding;
   }
-  async turn(secret:string,principal:Pick<Reader,'scope'|'space'|'purpose'>,eventId:string,expires:number):Promise<string> {
+  async turn(secret:string,principal:Pick<Reader,'scope'|'space'|'purpose'|'logical_profile'>,eventId:string,expires:number):Promise<string> {
     if(!principal.space)throw new HttpError(400,'conversation_required');
     const binding=await this.guards.state();
     return turnToken(secret,principal.scope,expires,eventId,{space:principal.space,revision:binding.epoch,
-      guard_epoch:binding.epoch,generation:binding.generation,...(principal.purpose?{purpose:principal.purpose}:{})});
+      guard_epoch:binding.epoch,generation:binding.generation,...(principal.purpose?{purpose:principal.purpose}:{}),...(principal.logical_profile?{logical_profile:principal.logical_profile}:{})});
   }
 }

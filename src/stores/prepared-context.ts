@@ -9,6 +9,7 @@ import type {OperationReference} from './operations.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
 import {AudienceRepository} from './audience.js';
+import {namedProfile} from './runtime-profile.js';
 
 export const runtimeContextSchema=`
 CREATE TABLE IF NOT EXISTS runtime_prepared_values (
@@ -20,7 +21,7 @@ CREATE TABLE IF NOT EXISTS runtime_prepared_inputs (
  source_id text NOT NULL REFERENCES guard_sources(id)
 );
 `;
-export const preparedAudience=(principal:Reader)=>canonical([principal.scope===null?'owner':principal.space??principal.scope,principal.purpose??'assistant']);
+export const preparedAudience=(principal:Reader)=>canonical([principal.scope===null?'owner':principal.space??principal.scope,principal.purpose??'assistant',...(namedProfile(principal)?[namedProfile(principal)]:[])]);
 const leaves=(value:unknown):string[]=>typeof value==='string'?(value?[value]:[]):Array.isArray(value)?value.flatMap(leaves):
   value&&typeof value==='object'?Object.values(value).flatMap(leaves):[];
 
