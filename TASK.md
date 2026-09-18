@@ -490,6 +490,18 @@ compilation and the targeted regression run. Managed browser/scheduler routes an
 native administration still require migration before installation acceptance.
 [Managed profile evidence](compatibility/results/2026-09-18-store-managed-profiles.json).
 
+Browser submission capture now persists exact original file bytes before fsyncing
+the original observation, without depending on any database or Inngest. Replay
+commits the source and its attachment manifests together, then retires the spool
+only after deterministic control handoffs. Logical profiles form part of source
+identity, so identical conversation/submission IDs in different profiles cannot
+collide. Generated browser/scheduled results and triggers are rejected by archive
+validation and constraints. Source-only exports retain the original manifests.
+Five initial affected checks and four final checks (including three repeats) pass
+in isolated Compose, with TypeScript and AST-only Graphify passing. Managed
+execution admission remains the next integration step; capture starts no run.
+[Browser capture evidence](compatibility/results/2026-09-18-store-browser-capture.json).
+
 
 
 

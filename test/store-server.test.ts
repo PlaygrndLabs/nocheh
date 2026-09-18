@@ -58,6 +58,10 @@ test('separated application captures through control outages, exposes owner repo
     await request('/health',undefined,503);
     await request('/v1/ingest',event,403,scopeToken(token,'123',Date.now()+60000));
     const accepted=await request('/v1/ingest',event,202);assert.equal(accepted.state,'spooled');
+    const browserInput={scope:'123',profile:'research',conversation:'http-'+Date.now(),id:'submission',text:'Original browser observation',files:[]};
+    await request('/v1/browser/input',browserInput,403,scopeToken(token,'123',Date.now()+60000));
+    const browserSource=await request('/v1/browser/input',browserInput);assert.equal(browserSource.state,'spooled');
+    assert.equal(JSON.parse(await readFile(join(root,'spool/pending',browserSource.event_id+'.json'),'utf8')).text,browserInput.text);
     const path=join(root,'spool/pending',digest(key)+'.json');assert.equal(JSON.parse(await readFile(path,'utf8')).text,event.text);
     await request('/v1/ingest',event,202);
     await request('/v1/ingest',{...event,text:'Changed observation'},409);
@@ -120,6 +124,7 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,offCredential)).representation,'original');
     await writeFile(join(root,'spool/.restore-inactive'),'inactive restored installation');
     await request('/v1/projects',undefined,503);await request('/v1/ingest',{...event,key:key+':inactive'},503);
+    await request('/v1/browser/input',{...browserInput,id:'inactive'},503);
     await until(async()=>Object.values(worker.status()).every(value=>value==='inactive'));
     assert.equal((await request('/health')).inactive,true);
   }finally {

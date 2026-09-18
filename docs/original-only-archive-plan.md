@@ -98,6 +98,10 @@ guard generation; default profiles share their identity across transports.
 Only preferences carry into a new native generation automatically, never old
 unprepared notes. Native administration and managed-run routing remain separate
 integration steps.
+Browser submission capture is filesystem-only until replay: original file bytes
+are durable before the source spool entry, and archive commits all manifests with
+the source. API acknowledgment reports `spooled`; execution requires separate
+admission. Database or Inngest outages cannot discard an accepted submission.
 Managed runtimes, host import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer

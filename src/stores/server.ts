@@ -40,6 +40,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.memory.prepareRequest(await readJson(req,1024*1024)));
     }
     const principal=reader(req,config.token);
+    if(req.method==='POST'&&path==='/v1/browser/input') {
+      admin(principal);return json(res,200,await s.browserCapture.capture(principal,await readJson(req,40*1024*1024)));
+    }
     // Durable admission depends only on the owned filesystem. Database and
     // workflow outages leave an acknowledged observation available for replay.
     if(req.method==='POST'&&path==='/v1/ingest') {
