@@ -63,7 +63,7 @@ class ResetInventoryTests(unittest.TestCase):
         manifest = self.inspect()
         self.assertFalse(manifest['executable']); self.assertFalse(manifest['content_copied'])
         self.assertEqual(manifest['blockers'], [])
-        self.assertEqual(len(manifest['volumes']), 3)
+        self.assertEqual(len(manifest['volumes']), 4)
         text = json.dumps(manifest)
         for forbidden in ('SECRET_NEVER_SERIALIZED', 'DO_NOT_SERIALIZE', 'LOGIN_MUST', 'PRIVATE_ORIGINAL', 'ACCOUNTING_NOT_TOUCHED'):
             self.assertNotIn(forbidden, text)
@@ -125,7 +125,7 @@ class ResetInventoryTests(unittest.TestCase):
 
     def test_inactive_memory_stores_are_still_included_when_present_in_composition(self):
         self.values['NOCHEH_HONCHO_ENABLED'] = 'false'
-        self.assertEqual(len(self.inspect()['volumes']), 3)
+        self.assertEqual(len(self.inspect()['volumes']), 4)
 
 
 if __name__ == '__main__':

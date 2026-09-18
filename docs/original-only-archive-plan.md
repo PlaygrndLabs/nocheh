@@ -580,6 +580,32 @@ requiring the reviewed database identity. Run
 PostgreSQL configuration queries, the real SQLite sanitizer, and synthetic retained
 credentials, spending, original-file and source/derivative canaries.
 
+After `preservation_frozen`, call `scripts.reset_erasure.erase` with the same
+reviewed preflight and ownership artifact. Its immutable receipt binds the
+preservation digest, exact anchored file manifest, full reviewed container
+identities, and raw volume identities. It fsyncs a separate intent before file
+erasure, database shutdown, container removal, and volume removal. The last
+maintenance-dependent check occurs before the database-stop intent; retries after
+that intent must continue from the saved receipt without attempting to reacquire
+the intentionally removed PostgreSQL service. Every later boundary still verifies
+the reset journal, all frozen preservation artifacts, retained setup fingerprints,
+inactive fences, Docker identities, foreign volume references, and writable bind
+overlaps. A disappeared reviewed object is accepted only after its matching intent;
+a recreated same-name volume or replacement container fails closed. Include
+Nocheh, Honcho, and Inngest PostgreSQL volumes, Honcho Redis, and content-bearing
+bind-mounted workflow Redis data in their reviewed locations. The primitive
+advances only `erased`; fresh store initialization and empty-baseline proof are
+separate phases.
+
+Run `python3 compatibility/reset-erasure-rehearsal.py --directory NEW_DIRECTORY
+--management-image CANDIDATE` for a fresh internal-network fixture that uses real
+PostgreSQL stores, original/spool files, provider accounting, saved credentials,
+provider login, Honcho setup/spending, and an unrelated sentinel container and
+volume. It must remove only its fixture content, exact containers, exact volumes,
+and workflow Redis bind while retaining the saved setup, inactive fences, and
+sentinel. The packaged `reset-protocol-rehearsal.py` also includes the erasure
+failure-path suite in a read-only, network-disabled image.
+
 Stop ingress, scheduling, execution, learning, and provider refresh ownership;
 settle in-flight effects before erasing receipts. Resolve installation-owned
 paths and volumes explicitly; never use global pruning or touch unrelated state.

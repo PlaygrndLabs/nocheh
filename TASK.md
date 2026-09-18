@@ -7,6 +7,25 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The scoped erasure phase is now a resumable coordinator primitive bound to the
+completed preservation receipt, exact container and volume identities, and the
+anchored file manifest. Fsynced intents precede file deletion, database shutdown,
+container removal, and volume removal. After the reviewed PostgreSQL service is
+stopped, recovery continues without its maintenance connection while rechecking
+the journal, preservation artifacts, retained setup fingerprints, inactive fences,
+Docker identities, and foreign references. Inngest PostgreSQL and bind-mounted
+workflow Redis data are explicit targets. Interrupted file, database-stop, and
+volume removal paths resume; changed receipts, recreated same-name volumes,
+replacement containers, and foreign mounts fail closed. Eight focused and 86 full
+host reset checks pass. The final management image passes 57 reset checks beside
+six pinned native checks in read-only, network-disabled Compose. A fresh
+internal-network rehearsal removed three synthetic containers, two PostgreSQL
+volumes, original/spool data and workflow Redis data while retaining credentials,
+provider login, spending, inactive fences, and an unrelated container/volume.
+Only `erased` advances; initialization and empty-baseline proof remain separate.
+No live installation state was stopped or deleted.
+[Erasure evidence](compatibility/results/2026-09-18-reset-erasure.json).
+
 The complete pre-erasure preservation gate now binds the setup-only database
 snapshot, saved environment policy, native preference snapshot, exact archive
 ownership decisions, sanitized provider accounting, byte fingerprints of retained
@@ -226,7 +245,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Derivative versioning, reprocessing, portability, backup | Versioning/owner interfaces, source and derivative portability, native transfer, and coordinated backup/inactive restore have recorded candidate evidence; live cutover and fresh live gates remain separate |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
 | Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows, Overview and Memory access compatibility verified in isolated previews |
-| Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
+| Installation-scoped reset and empty baseline | Preservation and scoped erasure candidates pass fresh rehearsals; live ownership review, initialization, empty-baseline proof, and the authorized reset remain pending |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
 
 Preserve configuration, external logins, and spending accounting during the
