@@ -678,6 +678,26 @@ remaining installation/reset/live gates are still pending.
 [Native portable restore evidence](compatibility/results/2026-09-18-native-portable-restore.json).
 
 
+Legacy mixed archive records and complete v1 portable bundles now route through
+the separate repositories. Original identities and file bytes remain exact;
+generated contexts, outputs, and generated file bytes become immutable imported
+derivatives. Each entire incoming document is retained before conversion, including
+guarded owner edits that conflict with destination history. Optional guarded
+restoration preserves revision authors and content but leaves heads pending.
+Replay cannot replace later destination edits or revive execution checkpoints.
+Observed Telegram delivery messages alone become original evidence; old drafts
+and receipts cannot cause delivery. Historical bigint file sizes are normalized
+without changing the retained input document.
+
+Seven PostgreSQL/HTTP checks and 27 offline pinned native checks pass, with no
+skips or provider calls. TypeScript/Python compilation, documentation links,
+diff hygiene, and AST-only Graphify pass (434 files, 2,703 nodes, 11,011 edges;
+zero model calls). Combined Compose/native/UI and coordinated recovery rehearsal,
+confirmed browser delivery, installation reset, and fresh live acceptance remain
+pending. No installation content or configuration changed.
+[Legacy import evidence](compatibility/results/2026-09-18-store-legacy-import.json).
+
+
 
 
 

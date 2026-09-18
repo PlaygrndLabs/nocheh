@@ -100,11 +100,11 @@ def desktop_records(document,root,scope=None,scope_map=None):
             yield {'event':event,'artifacts':artifacts,'derived':[]},uploads
 
 
-def upload(api,artifact_id,path,expected=None,source_only=False):
+def upload(api,artifact_id,path,expected=None,source_only=False,derived=False):
     if path.stat().st_size>50*1024*1024: raise ValueError('attachment_exceeds_50_mib')
     data=path.read_bytes(); checksum=digest(data)
     if expected and checksum!=expected: raise ValueError('artifact_integrity_failed')
-    route='original-files' if source_only else 'artifacts'
+    route='imports/legacy/files' if derived else 'original-files' if source_only else 'artifacts'
     api.call(f'/v1/{route}/{artifact_id}/bytes',{'bytes_base64':base64.b64encode(data).decode(),'sha256':checksum})
 
 
@@ -157,20 +157,23 @@ def validate_archive(directory,restore_guarded=False):
     if source_only:
         # Validate the full package before sending any record to an installation.
         if file_digest(directory/'events.ndjson')!=manifest.get('records_sha256'):raise ValueError('source_records_integrity_failed')
-        checked=0
-        with (directory/'events.ndjson').open() as source:
-            for line in source:
-                record=json.loads(line);checked+=1
-                if 'derived' in record or 'guarded' in record or record['event']['origin']=='generated':raise ValueError('original_source_required')
-                for artifact in record['artifacts']:
-                    if artifact['state']!='ready':continue
-                    checksum=artifact['file_hash']
-                    if len(checksum)!=64 or any(c not in '0123456789abcdef' for c in checksum):raise ValueError('invalid_file_hash')
-                    file=media_path(directory/'files',checksum)
-                    if not file.is_file() or file.stat().st_size>50*1024*1024:raise ValueError('original_file_unavailable')
-                    data=file.read_bytes()
-                    if digest(data)!=checksum or len(data)!=artifact['byte_size']:raise ValueError('artifact_integrity_failed')
-        if checked!=manifest.get('events'):raise ValueError('source_record_count_mismatch')
+    checked=0
+    with (directory/'events.ndjson').open() as source:
+        for line in source:
+            record=json.loads(line);checked+=1
+            if source_only and ('derived' in record or 'guarded' in record or record['event']['origin']=='generated'):raise ValueError('original_source_required')
+            for artifact in record['artifacts']:
+                if artifact['state']!='ready':continue
+                checksum=artifact['file_hash']
+                if len(checksum)!=64 or any(c not in '0123456789abcdef' for c in checksum):raise ValueError('invalid_file_hash')
+                file=media_path(directory/'files',checksum)
+                if not file.is_file() or file.stat().st_size>50*1024*1024:raise ValueError('original_file_unavailable')
+                data=file.read_bytes()
+                size=artifact.get('byte_size')
+                if not source_only and isinstance(size,str) and size.isascii() and size.isdigit() and len(size)<=20:size=int(size)
+                if size is not None and (type(size) is not int or not 0<=size<2**53):raise ValueError('artifact_size_invalid')
+                if digest(data)!=checksum or size is not None and len(data)!=size:raise ValueError('artifact_integrity_failed')
+    if checked!=manifest.get('events'):raise ValueError('source_record_count_mismatch')
     return manifest
 
 
@@ -181,12 +184,15 @@ def import_archive(api,directory,restore_guarded=False):
     with (directory/'events.ndjson').open() as source:
         for line in source:
             record=json.loads(line)
-            api.call('/v1/imports/sources' if source_only else '/v1/import'+('?restore_guarded=true' if restore_guarded else ''),record)
+            separated=getattr(api,'storage_layout','legacy')=='original-only-v1'
+            route='/v1/imports/sources' if source_only else ('/v1/imports/legacy' if separated else '/v1/import')+('?restore_guarded=true' if restore_guarded else '')
+            result=api.call(route,record)
+            generated={item['id'] for item in result.get('files',[]) if item.get('store')=='derived'} if isinstance(result,dict) else set()
             for artifact in record['artifacts']:
                 if artifact['state']=='ready':
                     checksum=artifact['file_hash']
                     if len(checksum)!=64 or any(c not in '0123456789abcdef' for c in checksum): raise ValueError('invalid_file_hash')
-                    upload(api,artifact['id'],media_path(directory/'files',checksum),checksum,source_only)
+                    upload(api,artifact['id'],media_path(directory/'files',checksum),checksum,source_only,artifact['id'] in generated)
             count+=1
     return {'imported':count,'telegram_replies':0}
 
