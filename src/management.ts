@@ -13,6 +13,7 @@ import {proxyProviderMonitor} from './provider-monitor-proxy.js';
 import {ProviderOAuth} from './provider-oauth.js';
 import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
+import {ownerStoragePath} from './stores/owner-api.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -100,7 +101,7 @@ function python(body: unknown, progress?: (value: Record<string, unknown>) => vo
     child.on('error', () => { clearTimeout(timer); reject(new HttpError(503, 'operation_unavailable')); });
     child.on('close', code => {
       clearTimeout(timer);
-      if (code || failure || result === undefined) reject(new HttpError(['configuration_conflict','guard_revision_conflict'].includes(failure??'')?409:400, failure ?? 'operation_interrupted'));
+      if (code || failure || result === undefined) reject(new HttpError(/(?:_conflict|_changed)$/.test(failure??'')?409:400, failure ?? 'operation_interrupted'));
       else accept(result);
     });
     child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(body));
@@ -200,6 +201,8 @@ export async function startManagement() {
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
       if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
+      if(ownerStoragePath('/v1'+route)&&['GET','POST'].includes(req.method??''))return json(res,200,await python({operation:'knowledge.api',path:'/v1'+route+url.search,
+        ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
       if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
       if(req.method==='GET'&&/^\/workflows(?:\/(?:health|metrics|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
       if(req.method==='POST'&&/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route,body:await readJson(req)}));

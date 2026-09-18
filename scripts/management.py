@@ -9,6 +9,17 @@ from .configuration import ROOT, load
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
+    if operation=='knowledge.api':
+        from .knowledge import allowed_path
+        from .archive import API
+        from urllib.error import HTTPError
+        if not allowed_path(body['path']):raise ValueError('knowledge_route_denied')
+        try:return API().call(body['path'],body.get('body'))
+        except HTTPError as error:
+            try:code=json.load(error).get('error')
+            except Exception:code=None
+            import re
+            raise ValueError(code if isinstance(code,str) and re.fullmatch('[a-z_]{1,80}',code) else 'knowledge_operation_unavailable') from None
     if operation=='archive.connection':
         config=load(state)
         from .configuration import archive_url
