@@ -366,10 +366,21 @@ Honcho migrations and embeddings, both derivative versions and owner edits, nati
 notes/sessions, Inngest/Redis state, and a spending ledger. It starts no provider,
 refresh authority, Telegram poller, or native execution. Runtime roles and logins
 stay inactive on restore; fixture containers and volumes are removed afterward.
-This rehearsal passes; dashboard-started coordination must additionally avoid
-stopping its own container and exclude concurrent management writers while
-keeping maintenance progress visible. The full running application/native/UI
-rehearsal remains separate.
+This rehearsal passes. Add `--management-image CANDIDATE` to run the backup through
+the real containerized dashboard, verify that its coordinator survives, and
+verify automatic writer resumption before inactive restore. That variant also
+passes. It renders only the fresh synthetic installation's service definitions
+and uses read-only Git metadata for snapshot provenance; it borrows no live state
+or credentials and publishes no host ports.
+
+Dashboard maintenance fences new requests before draining admitted uploads,
+management work, websocket connections, and OAuth callbacks. Only authenticated
+progress and static dashboard reads remain available. Backup verifies the exact
+coordinator container and the active readiness token before writer exclusion,
+before publishing its snapshot, and before resuming writers. Changed readiness
+fails closed. Other writable state mounts still block the snapshot. Resume uses
+only the saved running-service list without implicitly starting dependencies.
+The full running application/native/UI rehearsal remains separate.
 
 
 </recovery_rehearsal>

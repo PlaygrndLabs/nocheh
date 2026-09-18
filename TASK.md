@@ -750,12 +750,10 @@ Eighteen recovery checks pass. The first rehearsal rejected an incorrectly shape
 synthetic detector response; correcting the fixture allowed the complete run to
 pass. No production data or provider credential was used.
 
-The dashboard-started backup path still needs a coordinator that survives stopping
-writers: the current original-only shutdown list includes its own dashboard
-container. It must enforce maintenance exclusion while keeping progress visible;
-CLI rehearsal evidence does not close that gate. Full native/application/UI
-rehearsal, saved preference migration, scoped reset, and fresh live gates also
-remain pending.
+The CLI rehearsal exposed a separate dashboard coordinator shutdown issue,
+addressed by the dashboard maintenance increment below. Full native/application/UI
+rehearsal, saved preference migration, scoped reset, and fresh live gates remain
+pending.
 [Coordinated recovery evidence](compatibility/results/2026-09-18-coordinated-store-recovery.json).
 
 The complete TypeScript/dashboard regression suite passes all 140 checks with
@@ -766,6 +764,28 @@ rotated the shared workflow password. The fixture now preserves its configured
 password; compilation and the full serial rerun pass. This is component and
 service regression evidence, not the full running native/UI or fresh live gates.
 [Full regression evidence](compatibility/results/2026-09-18-full-store-regression.json).
+
+Dashboard-started original-only backups now fence new management/native/provider
+requests, drain already-admitted requests and OAuth callbacks, and keep the active
+job's progress readable. The backup verifies the exact current dashboard container
+and a per-operation readiness token before exempting it from writer shutdown.
+Changed readiness or container identity fails closed; unrelated writable mounts
+still block the backup. Resume starts only the previously running services, without
+restarting setup dependencies while the maintenance lock is held.
+
+The real management candidate image passes a dashboard-triggered coordinated
+backup and separate inactive restore in fresh internal-only Compose installations.
+The coordinator survives, Inngest resumes, and all 74 domain tables, 12 Honcho
+tables, 14 Inngest tables, Redis state, 24 state files, exact originals, both
+engine versions, durable owner edits, native sessions/notes, and spending accounting
+survive. Restored domain roles cannot log in and provider logins remain inactive.
+Nine distinct dashboard/HTTP/OAuth checks and twenty Python recovery checks pass.
+An initial TypeScript field typing error was fixed; host socket restrictions were
+resolved by running the affected checks in isolated containers. AST-only Graphify:
+447 files, 2,770 nodes, 11,162 edges, zero model calls. This closes dashboard backup
+coordination, not the combined running native/UI or fresh live acceptance gates.
+[Dashboard recovery evidence](compatibility/results/2026-09-18-dashboard-store-recovery.json).
+
 
 
 

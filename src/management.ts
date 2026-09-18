@@ -14,6 +14,7 @@ import {ProviderOAuth} from './provider-oauth.js';
 import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
+import {ManagementMaintenance} from './management-maintenance.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -74,10 +75,10 @@ export function uploadName(name: string): string {
 }
 
 function python(body: unknown, progress?: (value: Record<string, unknown>) => void,
-                started?: (child: ChildProcess) => void): Promise<unknown> {
+                started?: (child: ChildProcess) => void, coordinator?:string): Promise<unknown> {
   return new Promise((accept, reject) => {
     const child = spawn(process.env.NOCHEH_PYTHON ?? 'python3', ['-m', 'scripts.management'],
-      {cwd: ROOT, env: {...process.env, NOCHEH_STATE_DIR: STATE}, stdio: ['pipe', 'pipe', 'ignore']});
+      {cwd: ROOT, env: {...process.env, NOCHEH_STATE_DIR: STATE,NOCHEH_MAINTENANCE_COORDINATOR:coordinator??''}, stdio: ['pipe', 'pipe', 'ignore']});
     started?.(child);
     let buffer = '', result: unknown, failure: string | undefined;
     // Lifecycle operations must finish their cleanup; do not kill a backup with writers paused.
@@ -115,19 +116,20 @@ async function exclusive<T>(id: string, run: () => Promise<T>): Promise<T> {
   locked.add(id); try { return await run(); } finally { locked.delete(id); }
 }
 const runningTasks = new Set<Promise<void>>();
-function launch(job: Job, body: Record<string, unknown>) {
+const maintenance=new ManagementMaintenance();
+function launch(job: Job, body: Record<string, unknown>, coordinator?:string) {
   let writes = Promise.resolve();
   const task = python(body, value => {
     if (typeof value.completed === 'number') job.completed = value.completed;
     if (typeof value.duplicates === 'number') job.duplicates = value.duplicates;
     const snapshot = {...job}; writes = writes.then(() => putJob(snapshot));
-  }, child => active.set(job.id, child)).then(async result => {
+  }, child => active.set(job.id, child),coordinator).then(async result => {
     await writes; job.result = result;
     if (job.state !== 'cancelled') job.state = object(result).status === 'import_paused'?'interrupted':object(result).status === 'apply_failed' ? 'failed' : 'complete';
   }).catch(async error => {
     await writes.catch(() => {});
     if (job.state !== 'cancelled') { job.state = 'failed'; job.error = error instanceof HttpError ? error.code : 'operation_failed'; }
-  }).finally(async () => { await putJob(job); active.delete(job.id); activeJobs.delete(job.id); if(job.kind.startsWith('operations.')||job.kind==='settings.apply') operationBusy=false; });
+  }).finally(async () => {try{await putJob(job);}finally{active.delete(job.id); activeJobs.delete(job.id); if(job.kind.startsWith('operations.')||job.kind==='settings.apply') operationBusy=false;if(coordinator)maintenance.end(coordinator);} });
   runningTasks.add(task); void task.finally(()=>runningTasks.delete(task)).catch(()=>{});
   activeJobs.set(job.id, job);
 }
@@ -190,10 +192,13 @@ export async function startManagement() {
     if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
     if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
-  const server = createServer((req, res) => { void (async () => {
+  const server = createServer((req, res) => {const tracked=maintenance.enter();
+    const responseDone=new Promise<void>(resolve=>{res.once('finish',resolve);res.once('close',resolve);});
+    void (async () => {
     const authority = `127.0.0.1:${PORT}`;
     checkOrigin(req);
     const url = new URL(req.url ?? '/', `http://${authority}`), path = url.pathname;
+    if(!maintenance.allows(req.method??'',path))throw new HttpError(503,'installation_maintenance');
     const prefix=path.startsWith(PRIMARY+'/')?PRIMARY:PREFIX;
     if (path.startsWith(prefix + '/')) {
       const route = path.slice(prefix.length);
@@ -201,6 +206,11 @@ export async function startManagement() {
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
       if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
+      if(req.method==='GET'&&route==='/maintenance')return json(res,200,maintenance.state??{ready:false});
+      if(maintenance.active&&req.method==='GET'&&(route==='/jobs'||route==='/jobs/'+maintenance.state?.job)){
+        const job=activeJobs.get(maintenance.state!.job);
+        return json(res,200,route==='/jobs'?(job?[job]:[]):job??{state:'running'});
+      }
       if(ownerStoragePath('/v1'+route)&&['GET','POST'].includes(req.method??''))return json(res,200,await python({operation:'knowledge.api',path:'/v1'+route+url.search,
         ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
       if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
@@ -238,9 +248,14 @@ export async function startManagement() {
         if(!['diagnose','backup','restore','restart','export','portable-export'].includes(action))throw new HttpError(400,'operation_denied');
         if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
         operationBusy=true;
+        let coordinator:string|undefined;
         try {const job=await newJob('operations.'+action);job.state='running';await putJob(job);
-          launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}});return json(res,202,job);
-        }catch(error){operationBusy=false;throw error;}
+          if(action==='backup'){
+            coordinator=await maintenance.begin(job.id,tracked.id);
+            for(const socket of sockets)socket.destroy();await providerOAuth.quiesce();maintenance.ready(coordinator);
+          }
+          launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}},coordinator);return json(res,202,job);
+        }catch(error){operationBusy=false;if(coordinator)maintenance.end(coordinator);throw error;}
       });
       if (route === '/policy' && ['GET','POST'].includes(req.method??'')) {
         const body=req.method==='POST'?object(await readJson(req)):{};
@@ -363,10 +378,11 @@ export async function startManagement() {
     }
     throw new HttpError(404,'not_found');
   })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,
-    {error: error instanceof HttpError ? error.code : 'management_unavailable'}); else res.end(); }); });
+    {error: error instanceof HttpError ? error.code : 'management_unavailable'}); else res.end(); }).finally(async()=>{await responseDone;tracked.finish();}); });
   server.requestTimeout = 120000;
   server.on('upgrade', (req, socket, head) => { void (async()=>{
     try {
+      if(maintenance.active)throw new HttpError(503,'installation_maintenance');
       checkOrigin(req);if(!req.headers.origin)throw new HttpError(403,'origin_required');
       const url=new URL(req.url??'','http://local');
       if(!['/hermes/api/pty','/hermes/api/ws','/hermes/api/events'].includes(url.pathname))throw new HttpError(403,'websocket_route_denied');

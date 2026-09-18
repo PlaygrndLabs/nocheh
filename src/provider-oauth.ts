@@ -13,6 +13,11 @@ export class ProviderOAuth {
     if(this.timer)clearTimeout(this.timer);
     this.server?.close();this.server=undefined;
   }
+  async quiesce(){
+    this.state=undefined;if(this.timer)clearTimeout(this.timer);
+    const server=this.server;this.server=undefined;
+    if(server)await new Promise<void>(resolve=>server.close(()=>resolve()));
+  }
   private async call(path:string,body?:unknown) {
     const response=await fetch(`http://${this.monitorHost}:${this.monitor}/v0/management/${path}`,{
       method:body===undefined?'GET':'POST',headers:{authorization:`Bearer ${this.key}`,'content-type':'application/json'},

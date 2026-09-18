@@ -17,7 +17,7 @@ IDENTIFIER=re.compile(r'[a-z_][a-z0-9_]{0,62}')
 HASH=re.compile(r'[a-f0-9]{64}')
 
 
-def assert_no_state_writers(state,environment,command):
+def assert_no_state_writers(state,environment,command,coordinator=None):
     """Catch orphan native/tool containers after their Compose launchers stop.
 
     Inspect mount metadata only. Never stop an unrelated container or expose its
@@ -26,6 +26,8 @@ def assert_no_state_writers(state,environment,command):
     """
     allowed=set(subprocess.check_output(command+['ps','-q','nocheh-postgres','honcho-postgres','inngest-redis'],
         env=environment,text=True).split())
+    if coordinator:
+        coordinator.assert_current();allowed.add(coordinator.identity['id'])
     identifiers=subprocess.check_output(['docker','ps','-q','--no-trunc'],env=environment,text=True).split()
     roots=[Path(state).resolve(),Path(environment.get('NOCHEH_HONCHO_STATE_DIR') or Path(state)/'honcho').resolve()]
     for identifier in identifiers:
