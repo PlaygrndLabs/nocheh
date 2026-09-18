@@ -8,6 +8,8 @@ import type {DerivativeReference} from './derived.js';
 import type {StorePools} from './connections.js';
 import {revokeBeforePublication} from './publications.js';
 import {OperationRepository} from './operations.js';
+import type {Reader} from '../access.js';
+import type {PreparedContextRepository} from './prepared-context.js';
 
 export type GuardReference=SourceReference|FileReference|DerivativeReference;
 export interface GuardBinding {generation:string;epoch:number;mode:'on'|'off'}
@@ -107,11 +109,11 @@ export class GuardRepository {
   }
 
   /** Begin revocation before changing any active derived pointer. */
-  async beginPublication(revision:GuardRevision):Promise<void> {
+  async beginPublication(revision:GuardRevision,binding?:GuardBinding):Promise<void> {
     const saved=(await this.stores.derived.query('SELECT source_id,revision,expected_revision FROM guard_revisions WHERE operation_id=$1',[revision.operation_id])).rows[0];
     if(!saved||saved.source_id!==revision.source_id||saved.revision!==revision.revision||saved.expected_revision!==revision.expected_revision)
       throw new HttpError(409,'guard_operation_conflict');
-    await revokeBeforePublication(this.stores.control,{...revision,kind:'guard'});
+    await revokeBeforePublication(this.stores.control,{...revision,kind:'guard',...(binding?{input_binding:binding}:{})});
   }
 
   /** Safe to retry after either database commit, including an uncertain response. */
@@ -167,6 +169,22 @@ export class GuardRepository {
   async edit(id:string,expected:number|null,content:unknown,operationId:string):Promise<GuardRevision> {
     const revision=await this.stage(id,expected,content,'owner','owner-edit-v1',operationId);
     await this.beginPublication(revision);await this.finishPublication(operationId);return revision;
+  }
+
+  /** Prepare generated results through the authorized context boundary so exact owner-approved passages survive. */
+  async prepareContext(reference:GuardReference,version:string,principal:Reader,contexts:PreparedContextRepository,
+    detect:(text:string)=>Promise<unknown>):Promise<GuardRevision|null> {
+    const binding=await contexts.audience.assert(principal);
+    // A version created while guarding is off must still be safe for later activation with guarding on.
+    if(binding.mode==='off')return this.prepare(reference,version,detect);
+    const id=await this.register(reference),source=(await this.stores.derived.query('SELECT input,input_hash,active_revision FROM guard_sources WHERE id=$1',[id])).rows[0];
+    if(source.active_revision!==null)return null;
+    const preparationVersion=version+':authorized-context-v1',content=await contexts.prepare(principal,JSON.parse(source.input.toString()),detect);
+    const operationId=digest(canonical(['guard',id,source.input_hash,preparationVersion]));
+    let revision:GuardRevision;
+    try{revision=await this.stage(id,null,content,'automatic',preparationVersion,operationId);}
+    catch(error){if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
+    await this.beginPublication(revision,binding);await this.finishPublication(operationId);return revision;
   }
 
   async restore(id:string,expected:number|null,oldRevision:number,operationId:string):Promise<GuardRevision> {

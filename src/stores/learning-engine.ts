@@ -72,7 +72,7 @@ export class ContextualLearningRepository {
           await this.provenance.current(job.workspace,job.audience,job.binding);
           const response=await this.call('/v3/workspaces/'+job.workspace+'/peers/source/chat',{query,reasoning_level:'low',stream:false});
           // Preserve the completed reasoning result before validation, publication or job completion.
-          const output=await this.derived.record({operation_id:operation,source:job.source_reference,kind:'learning_result',
+          const output=await this.derived.record({operation_id:operation,source:job.source_reference,parents:[job.input_reference],kind:'learning_result',
             content:Buffer.from(string(response.content,200000)),producer:'honcho',producer_version:protocol,configuration:{reasoning_level:'low'},
             provenance:{workspace:job.workspace,input:job.input_reference,limitations:['reasoning_response_has_no_exact_conclusion_citations']}});
           result={id:output.id,content:Buffer.from(response.content)};

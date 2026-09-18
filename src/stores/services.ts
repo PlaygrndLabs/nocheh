@@ -22,6 +22,7 @@ import {HonchoProvenanceRepository} from './honcho-provenance.js';
 import {PreparedContextRepository} from './prepared-context.js';
 import {HttpError} from '../http.js';
 import {RuntimeTurnRepository} from './turns.js';
+import {NativeMemoryRepository} from './native-memory.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -45,9 +46,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
   const projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects),provenance=new HonchoProvenanceRepository(stores,archive,guards,options.honcho);
+  const detect=async(text:string)=>(await options.runtime('guard.detect',{text})).literals;
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns:new RuntimeTurnRepository(access,prepared),access,sources,projects,sharing,learned,contexts,provenance,
     capture:new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived)),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
-    detectorVersion:options.detectorVersion,detect:async(text:string)=>(await options.runtime('guard.detect',{text})).literals};
+    memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
+    detectorVersion:options.detectorVersion,detect};
 }
 export type StorageServices=ReturnType<typeof storageServices>;
