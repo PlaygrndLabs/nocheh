@@ -6,6 +6,7 @@ import {digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} from '../src/stores/connections.js';
 import {storeSchemas} from '../src/stores/schema.js';
 import {resetSetupSnapshot,restoreResetSetup} from '../src/stores/reset-setup.js';
+import {verifyResetBaseline} from '../src/stores/reset-baseline.js';
 
 test('reset setup restores only current configuration under a new generation and replays exactly',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -50,6 +51,12 @@ test('reset setup restores only current configuration under a new generation and
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family IN ('honcho','memory_review')")).rows[0].count,2);
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM security_policy_versions')).rows[0].count,2);
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM runtime_configuration_versions')).rows[0].count,1);
+    const baseline=await verifyResetBaseline(stores,input);
+    assert.equal(baseline.generation,input.generation);assert.equal(baseline.archive_rows,0);assert.equal(baseline.derived_rows,0);
+    await stores.derived.query(`INSERT INTO derived_artifacts(id,kind,content,content_hash,provenance,source_revision,input_hash,
+      producer,producer_version,configuration_hash,operation_id,operation_reference) VALUES($1,'runtime_context','x',$2,'{}','1',$2,'fixture','1',$2,'fixture',$3)`,
+      ['e'.repeat(64),digest('x'),{store:'control',kind:'operation',id:'fixture',generation:input.generation,input_hash:digest('fixture')}]);
+    await assert.rejects(verifyResetBaseline(stores,input),/not_empty/);
     await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'foreign','active',1)",['d'.repeat(64)]);
     await assert.rejects(restoreResetSetup(stores,input),/target_changed/);
   } finally {
