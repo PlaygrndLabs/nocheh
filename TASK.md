@@ -367,6 +367,25 @@ documentation checks pass. This adds no conversational configuration authority,
 does not activate the candidate installation, and leaves fresh live gates pending.
 [Runtime configuration evidence](compatibility/results/2026-09-18-runtime-configuration.json).
 
+Telegram proposals and immutable delivery results now use derived storage; exact
+owner decisions, fingerprints, execution metadata, and security audits use control.
+Owner HTTP decisions and independently captured owner-DM commands share the same
+idempotent approval path. Group conventions and memory-review credentials cannot
+approve or request an external effect. These operations create no archive events.
+The actions workflow preserves a completed derivative before control completion,
+repairs an interrupted completion from that derivative, and observes uncertain
+native sends without resubmitting them. The native sender rechecks the current
+exact approval, guard binding, admitted configuration, and security policy before
+sending; an existing unconfirmed native intent cannot send again.
+
+Five affected synthetic PostgreSQL/service/workflow checks and six pinned offline
+Hermes checks pass, with TypeScript and AST-only Graphify. The first native run
+caught an action fence inserted into the dispatch block; it was corrected and the
+full affected native run repeated successfully. Telegram dispatch integration,
+broader controlled tools, managed runtimes, full rehearsal, reset, and fresh live
+acceptance remain pending. No live sends occurred.
+[Telegram action evidence](compatibility/results/2026-09-18-store-telegram-actions.json).
+
 
 
 

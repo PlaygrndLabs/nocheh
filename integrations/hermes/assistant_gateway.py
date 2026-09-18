@@ -256,6 +256,11 @@ class AssistantGateway:
         async with self.action_lock:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())
+            if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
+            if os.environ.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1' and not await asyncio.to_thread(check_action_policy,body):
+                result={'state':'denied'}
+                await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
+                return result
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
             token=DISPATCH_KEY.set('action:'+body['id'])
             try:
@@ -271,7 +276,7 @@ class AssistantGateway:
             import re
             if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_action')
             path=self.receipts/('action-'+body['id']+'.result')
-            return json.loads(path.read_bytes()) if path.exists() else {'state':'not_found'}
+            return json.loads(path.read_bytes()) if path.exists() else {'state':'ambiguous' if (self.receipts/('action-'+body['id']+'.intent')).exists() else 'not_found'}
         if self.loop is None:raise RuntimeError('telegram_not_ready')
         return asyncio.run_coroutine_threadsafe(self.send_action(body),self.loop).result(timeout=55)
 
@@ -286,5 +291,15 @@ def check_delivery_policy(credential):
     import urllib.request
     try:
         request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/memory/check',headers={'Authorization':'Bearer '+credential})
+        with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('valid') is True
+    except Exception:return False
+
+
+def check_action_policy(body):
+    import urllib.request
+    try:
+        request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/internal/actions/authorize',
+            data=canonical({key:body[key] for key in ('id','destination','text')}),
+            headers={'Authorization':'Bearer '+environment_secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
         with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('valid') is True
     except Exception:return False

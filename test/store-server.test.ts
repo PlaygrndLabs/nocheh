@@ -79,6 +79,16 @@ test('separated application captures through control outages, exposes owner repo
     const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
     await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
+    const proposal=await request('/v1/action-requests',{destination:'current',text:'Synthetic approval preview'},200,credential);
+    assert.equal(proposal.state,'proposed');assert.equal((await request('/v1/tools/actions/'+proposal.id,undefined,200,credential)).arguments.text,'Synthetic approval preview');
+    await request('/v1/tools/telegram-decision',{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'},403,credential);
+    assert.equal((await request('/v1/tools/telegram-decision',{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'})).state,'approved');
+    assert.ok((await request('/v1/tools/actions')).telegram.some((row:any)=>row.id===proposal.id));
+    await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'},401,credential);
+    await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'},403);
+    await connected.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[proposal.id]);
+    assert.equal((await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'})).valid,true);
+    await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'different message'},403);
     assert.equal((await request('/v1/exports/sources?limit=1')).format,'nocheh-sources-v1');
     await request('/v1/export',undefined,404);
     await services.guards.setMode('off');

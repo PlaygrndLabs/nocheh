@@ -71,7 +71,10 @@ database clients; refresh sweeps checkpoint source/projection cursors in control
 Native ingestion uses work revisions so later inputs can schedule observation
 after an earlier job completed. Uncertain effects retain their identity while
 being reconciled. Guard, selection, and learned-publication recovery runs alongside
-capture. Telegram dispatch, actions, managed runtimes, and owner workflow controls
+capture. Telegram action proposals and results are immutable derived records;
+approval and receipt metadata live in control. The native sender checks the exact
+current authorization and treats an unconfirmed prior intent as uncertain, with
+no resend. Telegram dispatch, broader controlled tools, managed runtimes, and owner workflow controls
 still require their separate increments and the full installation rehearsal. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.

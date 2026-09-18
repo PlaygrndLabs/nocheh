@@ -69,6 +69,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     return {source,binding};
   };
   const operations:Partial<Record<WorkflowFamily,WorkflowOperation>>={
+    actions:(id,authority)=>s.telegramActions.run(id,authority),
     preparation:async(job,authority)=>{
       const match=/^reprocess:([a-f0-9]{64})$/.exec(job);
       if(match) {

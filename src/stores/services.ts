@@ -28,6 +28,7 @@ import {SharingContentRepository} from './sharing.js';
 import {SourcePortabilityRepository} from './source-portability.js';
 import {DerivativePortabilityRepository} from './derivative-portability.js';
 import {RuntimeConfigurationRepository} from './runtime-configuration.js';
+import {TelegramActionRepository} from './telegram-actions.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -56,6 +57,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
+    telegramActions:new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect),
     capture,sourcePortability:new SourcePortabilityRepository(capture,attachments),derivativePortability:new DerivativePortabilityRepository(stores,archive),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
