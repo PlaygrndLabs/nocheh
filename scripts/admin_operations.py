@@ -33,7 +33,8 @@ def run(state,action,job,options=None):
         if action=='portable-export':
             from .portable import export_all
             manifest=export_all(state,root/'archive')
-        else:manifest=export_archive(API(),root/'archive')
+        else:
+            api=API();manifest=export_archive(api,root/'archive',source_only=api.storage_layout=='original-only-v1')
         temporary=root/'export.part'
         with zipfile.ZipFile(temporary,'x',compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted((root/'archive').rglob('*')):

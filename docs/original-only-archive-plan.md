@@ -246,13 +246,55 @@ guard restoration, prepared selection activation, or learned correction uses the
 normal revision and revocation paths. Duplicate imports preserve subsequent
 destination edits and selections; immutable conflicts fail without replacing data.
 
-This is the derivative transfer component, not a complete portable-package pass.
-The top-level source/derivative/native bundle coordinator, native Honcho transfer,
-legacy bundle conversion, and complete inactive native round-trip remain separate
-gates. A full export must establish a consistent source/derivative boundary so
-concurrent capture or generation cannot create missing references in its package.
+The bundle coordinator below composes these repositories. Native Honcho database
+rehydration, legacy bundle conversion, and complete installation recovery remain
+separate gates. A full export validates source/derivative reference completeness
+before publishing its complete manifest. A concurrent append or head change that
+leaves a missing parent/revision fails the candidate export explicitly.
 
 </derivative_portability_rehearsal>
+
+<complete_portable_rehearsal>
+
+For original-only installations, `./scripts/nocheh export --output DIRECTORY`
+creates `nocheh-portable-v2`: original observations/files, immutable derivatives
+and guarded history, Hermes native notes/SQLite sessions, and configured Honcho
+memory rows/embeddings. Dashboard archive-only downloads use the source-only API;
+complete downloads use the same bundle coordinator. Operational credentials,
+Honcho queue state, and webhooks are excluded. An unavailable configured native
+store leaves the bundle incomplete. The manifest states that independently read
+stores are not a coordinated recovery point; use backup for that requirement.
+
+Honcho uses one exported PostgreSQL repeatable-read snapshot across its eight
+pinned memory tables. The package stores data-only JSON, column/type metadata,
+and the producer source revision. A reader does not execute SQL supplied by the
+bundle. Verify exact native values and embeddings under a concurrent update with
+`python3 compatibility/honcho-portable-rehearsal.py --env-file FIXTURE_ENV`.
+This command requires the isolated PostgreSQL marker and creates/removes only a
+new randomly named synthetic database.
+
+`./scripts/nocheh import --portable DIRECTORY --native-output SEPARATE_DIRECTORY`
+validates the whole package before API mutations, then imports originals through
+the archive repository and derivative history through its dedicated repository.
+It stages native history in a separate inactive directory, preserves the package
+manifest, and records a durable import receipt. Retry uses the same package and
+refuses to overwrite changed native files. Imported guards, selections, learned
+projections, caches, and native state cannot authorize execution or attachment.
+An owner must adopt representations through the normal guarded/revisioned paths.
+Honcho rehydration into a fresh inactive native database still requires its own
+rehearsal; staging JSON is not that database-restore acceptance gate.
+
+Verify `store-portable-bundle.test.ts` using the fixture's read-only `scripts` and
+`integrations` mounts in addition to `dist`. It exports from one empty three-store
+namespace and imports into another through owner HTTP APIs, preserving exact
+original bytes, two engine versions, guarded owner edits, and inactive Hermes
+notes/sessions. Missing references/history, tampered files, symlinks, overlapping
+destinations, interrupted import, and changed destination notes have offline
+regression coverage. Legacy `nocheh-archive-v1`/`nocheh-portable-v1` conversion
+remains a separate migration increment.
+
+</complete_portable_rehearsal>
+
 
 <recovery_rehearsal>
 

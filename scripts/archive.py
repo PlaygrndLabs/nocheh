@@ -33,6 +33,7 @@ class API:
         port=config['NOCHEH_PORT']
         self.url=archive_url(state)
         self.token=config['SERVICE_TOKEN']
+        self.storage_layout=config.get('NOCHEH_STORAGE_LAYOUT','legacy')
         self.import_headers={} if import_job is None else {'X-Nocheh-Import-Job':import_job,'X-Nocheh-Import-Owner':import_owner}
         if import_lease is not None:self.import_headers['X-Nocheh-Import-Lease']=import_lease
 
@@ -146,7 +147,9 @@ def export_archive(api,directory,source_only=False):
     return manifest
 
 
-def import_archive(api,directory,restore_guarded=False):
+def validate_archive(directory,restore_guarded=False):
+    directory=Path(directory)
+    if directory.is_symlink() or (directory/'manifest.json').is_symlink() or (directory/'events.ndjson').is_symlink():raise ValueError('archive_path_denied')
     manifest=json.loads((directory/'manifest.json').read_text())
     if manifest.get('format') not in ('nocheh-archive-v1','nocheh-sources-v1') or manifest.get('complete') is not True: raise ValueError('incomplete_export')
     source_only=manifest['format']=='nocheh-sources-v1'
@@ -168,6 +171,12 @@ def import_archive(api,directory,restore_guarded=False):
                     data=file.read_bytes()
                     if digest(data)!=checksum or len(data)!=artifact['byte_size']:raise ValueError('artifact_integrity_failed')
         if checked!=manifest.get('events'):raise ValueError('source_record_count_mismatch')
+    return manifest
+
+
+def import_archive(api,directory,restore_guarded=False):
+    directory=Path(directory);manifest=validate_archive(directory,restore_guarded)
+    source_only=manifest['format']=='nocheh-sources-v1'
     count=0
     with (directory/'events.ndjson').open() as source:
         for line in source:

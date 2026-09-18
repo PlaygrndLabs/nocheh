@@ -38,6 +38,10 @@ def main():
         sys.path.insert(0,str(ROOT))
         from scripts.workflows import main as workflows
         return workflows(STATE,rest)
+    if args.command=='import' and '--portable' in rest:
+        sys.path.insert(0,str(ROOT))
+        from scripts.portable import import_main
+        return import_main(STATE,rest)
     if args.command=='export':
         sys.path.insert(0,str(ROOT))
         from scripts.portable import main as portable
