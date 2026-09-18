@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -7,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from integrations.hermes import preference_transfer
-from scripts import (reset_baseline, reset_boundary, reset_initialization, reset_inventory,
+from scripts import (configuration, reset_baseline, reset_boundary, reset_initialization, reset_inventory,
                      reset_protocol, reset_quiescence)
 
 
@@ -117,6 +118,14 @@ class ResetInitializationTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve(); self.state = self.root / 'state'; self.state.mkdir()
         (self.root / 'memory').mkdir()
         (self.state / 'hermes').mkdir(); (self.state / 'spool').mkdir()
+        self.values = dict(configuration.DEFAULTS)
+        self.values.update(NOCHEH_STORAGE_LAYOUT='original-only-v1', TELEGRAM_ENABLED='false',
+            TELEGRAM_OWNER_ID='42', POSTGRES_PASSWORD='1' * 64, SERVICE_TOKEN='2' * 64,
+            INNGEST_EVENT_KEY='3' * 64, INNGEST_SIGNING_KEY='4' * 64,
+            INNGEST_POSTGRES_PASSWORD='5' * 64, NOCHEH_ARCHIVE_PASSWORD='6' * 64,
+            NOCHEH_DERIVED_PASSWORD='7' * 64, NOCHEH_CONTROL_PASSWORD='8' * 64)
+        configuration.write_env(self.state / '.env', self.values)
+        loaded = configuration.load(self.state); configuration.validate(loaded)
         metadata = self.state.stat(); self.project = 'reset-initialization-fixture'
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()),
             'executable': False, 'content_copied': False, 'blockers': [],
@@ -124,7 +133,7 @@ class ResetInitializationTests(unittest.TestCase):
             'volumes': [{'name': self.project + '_postgres_data', 'created_at': 'old'}],
             'installation': {'root': str(self.root), 'state': str(self.state), 'memory_state': str(self.root / 'memory'),
                 'project': self.project, 'storage_layout': 'original-only-v1', 'config_path': str(self.state / '.env'),
-                'configuration_sha256': 'd' * 64,
+                'configuration_sha256': hashlib.sha256(reset_protocol.canonical(loaded)).hexdigest(),
                 'state_anchor': {'device': metadata.st_dev, 'inode': metadata.st_ino, 'kind': 'directory'}}}
         self.generation = str(uuid.uuid4()); self.reset_id = self.preflight['id']
         self.policy = {'enabled': False, 'owner_id': '42', 'group_ids': []}
@@ -140,6 +149,18 @@ class ResetInitializationTests(unittest.TestCase):
             'preferences': {'snapshot_sha256': reset_protocol.fingerprint(preferences), 'snapshot': preferences}}
         self.command = ['docker', 'compose', '-f', str(self.root / 'compose.yml'), '-p', self.project]
         self.environment = {'NOCHEH_HONCHO_ENABLED': 'false', 'NOCHEH_MODEL': 'fixture-model'}
+
+    def legacy(self):
+        self.values['NOCHEH_STORAGE_LAYOUT'] = 'legacy'; configuration.write_env(self.state / '.env', self.values)
+        loaded = configuration.load(self.state)
+        self.preflight['installation']['storage_layout'] = 'legacy'
+        self.preflight['installation']['configuration_sha256'] = hashlib.sha256(
+            reset_protocol.canonical(loaded)).hexdigest()
+        snapshot = {'format': 'nocheh-reset-configuration-v1', 'layout': 'legacy', 'configuration': {
+            'security_policy': [{'document': {'version': 1, 'rules': []}}],
+            'memory_spaces': [{'id': '-10', 'overrides': {'mode': 'filtered', 'sources': ['42']}}]}}
+        self.artifacts['configuration'] = {'snapshot_sha256': reset_protocol.fingerprint(snapshot),
+                                           'snapshot': snapshot}
 
     def ready(self, journal):
         journal.create(self.preflight, self.generation)
@@ -183,6 +204,35 @@ class ResetInitializationTests(unittest.TestCase):
                     reset_initialization.initialize(journal, self.preflight, runner=fake,
                         environment=self.environment, command=self.command)
         self.assertEqual(fake.volumes, {}); self.assertEqual(fake.setup_calls, 0)
+
+    def test_legacy_layout_transition_is_recorded_before_write_and_retryable(self):
+        self.legacy(); fake = FakeDocker(self.root, self.state, self.project, self.command[3],
+                                         self.state / 'admin/reset/setup.json')
+        writer = configuration.write_env; interrupted = False
+
+        def after_write(path, values):
+            nonlocal interrupted
+            writer(path, values)
+            if not interrupted:
+                interrupted = True; raise OSError('synthetic_layout_interruption')
+
+        with reset_protocol.locked(self.state) as journal:
+            self.ready(journal)
+            with patch.object(reset_initialization.reset_preservation, 'assert_frozen', return_value=self.artifacts), \
+                 patch.object(reset_initialization.configuration, 'write_env', side_effect=after_write):
+                with self.assertRaisesRegex(OSError, 'synthetic_layout_interruption'):
+                    reset_initialization.initialize(journal, self.preflight, runner=fake,
+                        environment=self.environment, command=self.command)
+            self.assertEqual(reset_protocol.read(journal.directory / 'layout.json')['stage'], 'prepared')
+            self.assertEqual(configuration.load(self.state)['NOCHEH_STORAGE_LAYOUT'], 'original-only-v1')
+            with patch.object(reset_initialization.reset_preservation, 'assert_frozen', return_value=self.artifacts):
+                result = reset_initialization.initialize(journal, self.preflight, runner=fake,
+                    environment=self.environment, command=self.command)
+            request = reset_protocol.read(journal.directory / 'setup.json')
+            self.assertEqual(result['phase'], 'initialized')
+            self.assertEqual(request['snapshot']['layout'], 'original-only-v1')
+            self.assertEqual(request['snapshot']['configuration']['sharing_rules'][0]['destination'], '-10')
+            self.assertTrue(request['snapshot']['configuration']['sharing_rules'][0]['enabled'])
 
     def test_empty_baseline_retires_private_artifacts_and_rejects_cache_content(self):
         fake = FakeDocker(self.root, self.state, self.project, self.command[3],

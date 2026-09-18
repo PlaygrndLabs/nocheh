@@ -4,12 +4,18 @@ This is a component of preservation, not its completion gate. The coordinator
 must also preserve environment/provider setup, spending and native preferences,
 validate their fresh-store admission, and retain maintenance exclusion.
 """
+import hashlib
 import json
+import re
+import uuid
 
 from . import reset_protocol, reset_quiescence
 
 FORMAT = 'nocheh-reset-configuration-v1'
 ROW_LIMIT = 10000
+LEGACY_PRIVACY = ('Do not disclose personal relationships, health, finances, identity details, credentials, '
+                  'private plans, or information about other people. Release only relevant non-personal '
+                  'knowledge. When uncertain, omit it.')
 # Explicit projections prevent new content columns from entering this snapshot.
 COMMON = {
     'security_policy': ('SELECT v.document FROM security_policy p '
@@ -89,6 +95,81 @@ def snapshot(query, layout):
     if len(raw.encode()) > reset_protocol.LIMIT:
         raise ValueError('reset_configuration_limit')
     return validate({'format': FORMAT, 'layout': layout, 'configuration': json.loads(raw)})
+
+
+def _space(value):
+    if (not isinstance(value, str) or not value.strip() or len(value.encode()) > 256 or
+            any(ord(character) < 32 for character in value) or
+            '/topic/' in value and not re.fullmatch(r'-?\d+/topic/[1-9]\d{0,15}', value)):
+        raise ValueError('reset_legacy_space_invalid')
+    return value
+
+
+def _legacy_rules(rows):
+    """Translate legacy destination policy without enabling wider access.
+
+    The legacy filtered mode selected source spaces automatically. Approved and
+    isolated modes did not authorize filtered recall, so their migrated rules are
+    disabled while retaining the owner's source selection and instructions.
+    """
+    result, destinations = [], set()
+    for item in rows:
+        destination = _space(item['id'])
+        if destination in destinations or not isinstance(item['overrides'], dict):
+            raise ValueError('reset_legacy_space_invalid')
+        destinations.add(destination); values = item['overrides']
+        if set(values) - {'mode', 'sources', 'privacy_instructions'}:
+            raise ValueError('reset_legacy_space_invalid')
+        mode = values.get('mode', 'approved')
+        if mode not in ('isolated', 'approved', 'filtered'):
+            raise ValueError('reset_legacy_space_invalid')
+        raw_sources = values.get('sources', [])
+        if not isinstance(raw_sources, list) or len(raw_sources) > 100:
+            raise ValueError('reset_legacy_space_invalid')
+        sources = sorted({_space(source) for source in raw_sources})
+        if destination in sources:
+            raise ValueError('reset_legacy_space_requires_review')
+        instructions = values.get('privacy_instructions', LEGACY_PRIVACY)
+        if not isinstance(instructions, str) or len(instructions.encode()) > 4000:
+            raise ValueError('reset_legacy_space_invalid')
+        identifier = hashlib.sha256(reset_protocol.canonical(
+            ['legacy-space-policy-v1', destination])).hexdigest()
+        result.append({'id': identifier, 'name': f'Migrated legacy {mode} policy {identifier[:12]}',
+                       'sources': sources, 'destination': destination,
+                       'enabled': mode == 'filtered' and bool(sources),
+                       'mode': 'filtered' if mode == 'filtered' else 'approved',
+                       'instructions': instructions})
+    return sorted(result, key=lambda row: row['id'])
+
+
+def original_only(snapshot_value, values, preferences, reset_id):
+    """Create the exact original-only setup request from either source layout."""
+    source = validate(snapshot_value)
+    if source['layout'] == 'original-only-v1':
+        return source
+    try:
+        uuid.UUID(reset_id)
+        owner = preferences['owner']; profiles = preferences['profiles']
+        groups = sorted(set(value.strip() for value in values['TELEGRAM_GROUP_IDS'].split(',') if value.strip()))
+        if (preferences['groups'] != groups or owner != values['TELEGRAM_OWNER_ID'] or
+                not isinstance(profiles, list)):
+            raise ValueError
+        runtime_profiles = [{'id': row['id'], 'name': row['name'], 'owner_id': owner}
+                            for row in profiles if row.get('name') is not None]
+        assistant = {'enabled': values['TELEGRAM_ENABLED'] == 'true',
+                     'owner_id': owner, 'group_ids': groups}
+    except (KeyError, TypeError, AttributeError, ValueError):
+        raise ValueError('reset_legacy_configuration_invalid') from None
+    converted = {'format': FORMAT, 'layout': 'original-only-v1', 'configuration': {
+        'security_policy': source['configuration']['security_policy'],
+        'installation_generation': [{'generation': str(uuid.uuid5(
+            uuid.NAMESPACE_URL, 'nocheh:legacy-installation:' + reset_id))}],
+        'guard_mode': [{'mode': values['NOCHEH_GUARD_MODE']}],
+        'runtime_configuration': [{'name': 'assistant', 'document': assistant}],
+        'projects': [], 'project_assignments': [],
+        'sharing_rules': _legacy_rules(source['configuration']['memory_spaces']),
+        'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id'])}}
+    return validate(converted)
 
 
 def freeze(journal, preflight, recovery, *, inspect):

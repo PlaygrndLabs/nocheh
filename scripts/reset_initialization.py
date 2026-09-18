@@ -7,6 +7,7 @@ repository service, and then restores bounded native preferences.  Capture,
 workflow execution, providers, pollers, and agents remain stopped.
 """
 import json
+import hashlib
 import os
 import stat
 import subprocess
@@ -15,10 +16,12 @@ from pathlib import Path
 
 from integrations.hermes import preference_transfer
 
-from . import (configuration, reset_erasure, reset_inventory, reset_preservation,
-               reset_protocol, reset_quiescence)
+from . import (configuration, reset_configuration, reset_erasure, reset_inventory,
+               reset_preservation, reset_protocol, reset_quiescence)
 
 FORMAT = 'nocheh-reset-initialization-v1'
+LAYOUT_FORMAT = 'nocheh-reset-layout-transition-v1'
+TARGET_LAYOUT = 'original-only-v1'
 STAGES = ('prepared', 'resource_create_intent', 'resources_created',
           'services_ready', 'setup_restored', 'preferences_restored')
 VOLUME_FORMAT = ('{"name":{{json .Name}},"created_at":{{json .CreatedAt}},'
@@ -182,7 +185,7 @@ def _resource_identity(value):
             'volumes': value['volumes']}
 
 
-def _base(journal, preflight, artifacts, request, plan):
+def _base(journal, preflight, artifacts, request, plan, layout):
     return {'format': FORMAT, 'reset_id': journal.value['reset_id'],
             'preflight_sha256': journal.value['preflight_sha256'],
             'erasure_sha256': journal.value['steps'][4]['evidence_sha256'],
@@ -190,12 +193,13 @@ def _base(journal, preflight, artifacts, request, plan):
             'configuration_sha256': artifacts['configuration']['snapshot_sha256'],
             'preferences_sha256': artifacts['preferences']['snapshot_sha256'],
             'setup_request_sha256': reset_protocol.fingerprint(request),
+            'layout': layout,
             'plan': plan, 'stage': 'prepared', 'resources': None,
             'setup': None, 'preferences': None}
 
 
-def _record(journal, preflight, artifacts, request, plan):
-    path = journal.directory / 'initialization.json'; base = _base(journal, preflight, artifacts, request, plan)
+def _record(journal, preflight, artifacts, request, plan, layout):
+    path = journal.directory / 'initialization.json'; base = _base(journal, preflight, artifacts, request, plan, layout)
     if path.exists() or path.is_symlink():
         value = reset_protocol.read(path)
         fixed = {key: value.get(key) for key in base if key not in ('stage', 'resources', 'setup', 'preferences')}
@@ -223,11 +227,75 @@ def _advance(journal, path, value, stage, **changes):
     return updated
 
 
-def _request(journal, artifacts):
-    snapshot = artifacts['configuration']['snapshot']
+def _request(journal, artifacts, values):
+    snapshot = reset_configuration.original_only(
+        artifacts['configuration']['snapshot'], values,
+        artifacts['preferences']['snapshot'], journal.value['reset_id'])
     return {'snapshot': snapshot, 'generation': journal.value['generation'],
             'reset_id': journal.value['reset_id'],
             'profile_commands': preference_transfer.profile_commands(artifacts['preferences']['snapshot'])}
+
+
+def _configuration_sha(values):
+    return hashlib.sha256(reset_protocol.canonical(values)).hexdigest()
+
+
+def _layout_base(journal, preflight, current):
+    source = dict(current); source['NOCHEH_STORAGE_LAYOUT'] = preflight['installation']['storage_layout']
+    target = {**source, 'NOCHEH_STORAGE_LAYOUT': TARGET_LAYOUT}
+    configuration.validate(source); configuration.validate(target)
+    if (_configuration_sha(source) != preflight['installation']['configuration_sha256'] or
+            preflight['installation']['storage_layout'] not in ('legacy', TARGET_LAYOUT) or
+            str(configuration.env_path(journal.state)) != preflight['installation']['config_path']):
+        raise ValueError('reset_initialization_configuration_changed')
+    return {'format': LAYOUT_FORMAT, 'reset_id': journal.value['reset_id'],
+            'preflight_sha256': journal.value['preflight_sha256'],
+            'path': preflight['installation']['config_path'],
+            'source_layout': preflight['installation']['storage_layout'],
+            'target_layout': TARGET_LAYOUT,
+            'source_sha256': _configuration_sha(source),
+            'target_sha256': _configuration_sha(target), 'stage': 'prepared'}, target
+
+
+def _transition_layout(journal, preflight):
+    """Record intent, then change only the saved layout selector."""
+    path = journal.directory / 'layout.json'; current = configuration.load(journal.state)
+    base, target = _layout_base(journal, preflight, current)
+    if path.exists() or path.is_symlink():
+        value = reset_protocol.read(path)
+        if value not in (base, {**base, 'stage': 'applied'}):
+            raise ValueError('reset_initialization_layout_receipt_changed')
+    else:
+        reset_protocol.atomic(path, base, create=True); value = base
+    current_sha = _configuration_sha(current)
+    if current_sha not in (base['source_sha256'], base['target_sha256']):
+        raise ValueError('reset_initialization_configuration_changed')
+    if current_sha == base['source_sha256'] and base['source_sha256'] != base['target_sha256']:
+        journal.assert_current(); reset_quiescence.assert_fences(journal.state, journal.value['reset_id'])
+        configuration.write_env(configuration.env_path(journal.state), target)
+    observed = configuration.load(journal.state)
+    if (_configuration_sha(observed) != base['target_sha256'] or
+            observed['NOCHEH_STORAGE_LAYOUT'] != TARGET_LAYOUT):
+        raise RuntimeError('reset_initialization_layout_transition_failed')
+    if value['stage'] == 'prepared':
+        value = {**base, 'stage': 'applied'}; reset_protocol.atomic(path, value)
+    return value, observed
+
+
+def _assert_layout(journal, preflight, value):
+    layout = value.get('layout')
+    if (not isinstance(layout, dict) or layout.get('format') != LAYOUT_FORMAT or
+            layout.get('stage') != 'applied' or layout.get('reset_id') != journal.value['reset_id'] or
+            layout.get('preflight_sha256') != journal.value['preflight_sha256'] or
+            layout.get('source_layout') != preflight['installation']['storage_layout'] or
+            layout.get('target_layout') != TARGET_LAYOUT or
+            layout.get('source_sha256') != preflight['installation']['configuration_sha256'] or
+            layout.get('path') != preflight['installation']['config_path']):
+        raise ValueError('reset_initialization_layout_receipt_changed')
+    current = configuration.load(journal.state)
+    if (_configuration_sha(current) != layout.get('target_sha256') or
+            current['NOCHEH_STORAGE_LAYOUT'] != TARGET_LAYOUT):
+        raise ValueError('reset_initialization_configuration_changed')
 
 
 def _setup_result(raw, request):
@@ -275,6 +343,7 @@ def assert_initialized(journal, preflight, *, runner=run, environment=None, comm
             value.get('reset_id') != journal.value['reset_id'] or
             reset_protocol.fingerprint(value) != journal.value['steps'][5]['evidence_sha256']):
         raise ValueError('reset_initialization_evidence_changed')
+    _assert_layout(journal, preflight, value)
     reset_quiescence.assert_fences(journal.state, journal.value['reset_id'])
     current = _inspect_resources(journal, preflight, value['plan'], runner, environment)
     if _resource_identity(current) != _resource_identity(value['resources']):
@@ -296,17 +365,16 @@ def initialize(journal, preflight, *, runner=run, environment=None, command=None
         return {'phase': 'initialized', 'services': len(value['resources']['containers']),
                 'volumes': len(value['resources']['volumes']), 'profiles': value['preferences']['profiles'],
                 'native_content_copied': False, 'runtime_activated': False}
-    if preflight['installation']['storage_layout'] != 'original-only-v1':
-        raise ValueError('reset_initialization_layout_unsupported')
-    environment = configuration.compose_environment(journal.state) if environment is None else environment
-    command = configuration.compose_command(journal.state) if command is None else command
     artifacts = reset_preservation.assert_frozen(journal, preflight)
     erasure = reset_protocol.read(journal.directory / 'erasure.json')
     if (erasure.get('stage') != reset_erasure.STAGES[-1] or
             reset_protocol.fingerprint(erasure) != journal.value['steps'][4]['evidence_sha256']):
         raise ValueError('reset_erasure_evidence_changed')
     reset_quiescence.assert_fences(journal.state, journal.value['reset_id'])
-    request = _request(journal, artifacts)
+    layout, values = _transition_layout(journal, preflight)
+    environment = configuration.compose_environment(journal.state) if environment is None else environment
+    command = configuration.compose_command(journal.state) if command is None else command
+    request = _request(journal, artifacts, values)
     setup_path = journal.directory / 'setup.json'
     if setup_path.exists() or setup_path.is_symlink():
         if reset_protocol.read(setup_path) != request:
@@ -316,7 +384,7 @@ def initialize(journal, preflight, *, runner=run, environment=None, command=None
     profiles = ['reset', *(['honcho'] if environment.get('NOCHEH_HONCHO_ENABLED') == 'true' else [])]
     rendered = _render(command, profiles, environment, runner)
     plan = _plan(preflight, rendered, 'honcho' in profiles, command)
-    path, value = _record(journal, preflight, artifacts, request, plan)
+    path, value = _record(journal, preflight, artifacts, request, plan, layout)
 
     if value['stage'] == 'prepared':
         _assert_old_absent(preflight, runner, environment)

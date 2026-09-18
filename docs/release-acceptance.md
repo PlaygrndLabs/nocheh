@@ -8,6 +8,15 @@ These checks need actual incoming Telegram traffic; synthetic archive events and
 healthy containers cannot substitute for it. Credentials are already configured.
 No VPS or Honcho key is required.
 
+When the reset preflight reports the legacy storage layout, the frozen setup must
+pass the legacy-to-original-only conversion before fresh services are created. The
+private transition receipt must show the exact saved legacy configuration hash,
+the target hash differing only by `NOCHEH_STORAGE_LAYOUT=original-only-v1`, and an
+applied state. Inspect the converted sharing rules and custom runtime profiles in
+the private setup request before the empty-baseline phase retires it. Any unknown
+legacy policy field, self-sharing source, or unrelated configuration change blocks
+the reset for review.
+
 For the deliberate reset acceptance, record these checks in the private reset
 journal as a `nocheh-fresh-acceptance-v1` request. Use the current post-boundary
 event and receipt IDs; do not reuse the historical evidence linked below. The

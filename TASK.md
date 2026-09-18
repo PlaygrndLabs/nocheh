@@ -7,6 +7,33 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The reset can now start from the installed legacy database and finish on the
+required three-store layout. After preservation and erasure, initialization writes
+a private layout-transition intent before changing only the saved
+`NOCHEH_STORAGE_LAYOUT` selector. Exact source and target configuration hashes make
+the write retryable; unrelated configuration changes fail closed. The frozen legacy
+security policy, owner/group allowlist, guard mode and custom runtime profiles are
+converted into the original-only setup request. Legacy filtered space policies
+become enabled filtered sharing rules; approved and isolated policies become
+disabled rules that retain their selected sources and privacy instructions without
+granting new access. Unrepresentable self-sharing and unknown policy fields require
+review. The detailed transition artifact is retired only after the empty-baseline
+proof.
+
+Fifteen focused configuration/initialization checks and all 97 reset checks pass on
+the host; the same 97 checks pass in the read-only, network-disabled management
+image. A complete internal-only Compose rehearsal starts with a real legacy schema,
+one original, one generated context, a filtered space policy and a legacy custom
+profile; it erases the synthetic content, writes the target layout, restores the
+policy/profile into fresh three-store databases, proves every content/cache store
+empty, confirms the fixture Telegram boundary, and reaches acceptance mode with
+restart ownership disabled. The first rehearsal attempt used the management image
+where a runtime image was required, failed before setup, and cleaned up; the repeated
+runtime-image attempt passed. No provider or live Telegram request was made. The
+live installation is currently stopped and remains unchanged; its setup aggregate
+cannot be checked until PostgreSQL is running under the pre-reset fences.
+[Legacy transition evidence](compatibility/results/2026-09-18-reset-legacy-transition.json).
+
 The post-reset live gate and controlled resumption are now implemented as separate
 internal coordinator transitions. The reset-only validator accepts one closed
 `nocheh-fresh-acceptance-v1` request bound to the current reset ID, installation

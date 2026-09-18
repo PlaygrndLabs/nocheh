@@ -684,7 +684,19 @@ distinguishable from erased history. Verify this repository boundary with
 
 After scoped erasure, call `scripts.reset_initialization.initialize` with the same
 reviewed preflight while the reset journal and inactive fences remain current. It
-records resource-creation intent before mutation, proves every reviewed pre-reset
+accepts a frozen source layout of either `legacy` or `original-only-v1`, but always
+creates `original-only-v1`. For a legacy source it converts only setup: current
+security policy, saved assistant allowlist, guard mode, custom runtime-profile
+identities and legacy per-space sharing preferences. Filtered preferences become
+enabled filtered rules; approved and isolated preferences become disabled rules so
+the conversion cannot widen access. Unknown fields, invalid spaces and self-sharing
+stop for review. Initialization fsyncs a private transition intent before atomically
+changing only the saved layout selector; retry accepts exactly the old or target
+configuration hash and rejects every other change. The transition receipt is bound
+into initialization evidence and retired with the other private setup artifacts
+after the empty-baseline proof.
+
+It records resource-creation intent before mutation, proves every reviewed pre-reset
 container and volume identity is absent, creates fresh installation directories and
 external Honcho volumes, and uses Compose to create only Nocheh PostgreSQL, workflow
 Redis, and the enabled Honcho PostgreSQL/Redis services. The coordinator disables
@@ -709,10 +721,12 @@ file, configuration, preference, accounting, and setup artifacts before removing
 them. The retained baseline report contains counts and hashes rather than source or
 configuration content. Run
 `python3 compatibility/reset-fresh-baseline-rehearsal.py --directory NEW_DIRECTORY
---services-image CANDIDATE` to exercise erasure through empty baseline with seeded
-original, derivative, file, spool, workflow, Redis, Honcho, credential, login, and
-spending fixtures on an internal-only network. It must leave runtime activation
-false and make no provider calls.
+--services-image CANDIDATE` to exercise erasure through empty baseline from a real
+legacy schema with seeded original, generated context, space-sharing configuration,
+custom native profile, file, spool, workflow, Redis, Honcho, credential, login, and
+spending fixtures on an internal-only network. It must finish on the three-store
+layout, retain only setup, leave runtime activation false, and make no provider
+calls.
 
 Run `python3 compatibility/reset-erasure-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` for a fresh internal-network fixture that uses real
