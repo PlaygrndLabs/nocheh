@@ -1,0 +1,44 @@
+# Pinned native schema acceptance only: synthetic credentials, no published ports,
+# provider, poller, deriver, refresh owner, or access to installation state.
+name: ${NOCHEH_NATIVE_FIXTURE_PROJECT:?Explicit native fixture project required}
+services:
+  honcho-postgres:
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    mem_limit: 512m
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=32, -c, cluster_name=nocheh-native-portable-fixture]
+    environment:
+      POSTGRES_DB: honcho_experiment
+      POSTGRES_USER: experiment
+      POSTGRES_PASSWORD: synthetic-native-portable-not-a-real-credential
+    volumes: [native_fixture_database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U experiment -d honcho_experiment]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  schema:
+    image: ${NOCHEH_NATIVE_HONCHO_IMAGE:?Explicit pinned Honcho fixture image required}
+    profiles: [checks]
+    mem_limit: 768m
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    entrypoint: [/app/.venv/bin/python]
+    command: [scripts/provision_db.py]
+    environment:
+      DB_CONNECTION_URI: postgresql+psycopg://experiment:synthetic-native-portable-not-a-real-credential@honcho-postgres:5432/honcho_experiment
+      PYTHON_DOTENV_DISABLED: "1"
+      HONCHO_CONFIG_TOML_DISABLED: "1"
+      EMBEDDING_VECTOR_DIMENSIONS: "1536"
+      LLM_OPENAI_API_KEY: synthetic-no-provider
+      CACHE_ENABLED: "false"
+      AUTH_USE_AUTH: "false"
+      LOG_LEVEL: WARNING
+    volumes: [./native-portability-seed.py:/fixture/seed.py:ro]
+    depends_on:
+      honcho-postgres: {condition: service_healthy}
+networks:
+  default: {internal: true}
+volumes:
+  native_fixture_database:

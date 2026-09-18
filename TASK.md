@@ -723,6 +723,18 @@ receipt, not that a human read it; no live installation was changed.
 [Browser delivery evidence](compatibility/results/2026-09-18-store-browser-delivery.json).
 
 
+Native portable recovery now passes against the pinned Honcho Alembic migrations
+and ORM models on real PostgreSQL/pgvector, including 1,536-dimensional embedding
+columns, source citation ancestry, soft-deleted interpretation history, and exact
+eight-table replay. Exported and restored row bytes and schema metadata match.
+The dedicated internal-only fixture uses synthetic credentials and no published
+ports, API/deriver/provider service, installation state, or provider requests.
+This closes the native-schema portability check; combined Honcho service behavior,
+coordinated backup/restore, installation reset, and fresh live evidence remain
+separate pending gates.
+[Pinned native portability evidence](compatibility/results/2026-09-18-pinned-native-portability.json).
+
+
 
 
 
