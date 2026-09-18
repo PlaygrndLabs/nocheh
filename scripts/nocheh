@@ -28,8 +28,12 @@ def bootstrap():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing"))
+    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "reset"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
+    if args.command=='reset':
+        sys.path.insert(0,str(ROOT))
+        from scripts.reset_inventory import main as reset_inventory
+        return reset_inventory(STATE,rest)
     if args.command in ('sources','projects','learned','sharing'):
         sys.path.insert(0,str(ROOT))
         from scripts.knowledge import main as knowledge
