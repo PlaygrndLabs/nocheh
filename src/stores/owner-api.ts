@@ -7,7 +7,7 @@ import type {StorageServices} from './services.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:projects(?:\/assignments|\/effective)?|sharing\/rules|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -22,6 +22,16 @@ export class OwnerStorageApi {
     if(path==='/v1/projects/assignments')return method==='GET'?s.projects.assignments(principal,q.get('after')??''):s.projects.assign(principal,input);
     if(path==='/v1/projects/effective'&&method==='GET')return s.projects.effective(q.get('space')??'');
     if(path==='/v1/sharing/rules')return method==='GET'?s.sharing.list(principal,q.get('after')??''):s.sharing.save(principal,input);
+    if(path==='/v1/sharing/preview'&&method==='POST')return s.shared.preview(principal,input);
+    if(path==='/v1/sharing/previews'&&method==='GET')return s.shared.previews(principal,q.get('after')??'');
+    if(path==='/v1/sharing/releases'&&method==='GET')return s.shared.list(principal,q.get('after')??'');
+    const preview=path.match(/^\/v1\/sharing\/previews\/([a-f0-9]{64})(?:\/(approve))?$/);
+    if(preview) {
+      if(method==='GET'&&!preview[2])return s.shared.inspect(principal,preview[1]!);
+      if(method==='POST'&&preview[2])return s.shared.approve(principal,preview[1]!,input);
+    }
+    const release=path.match(/^\/v1\/sharing\/releases\/([a-f0-9]{64})\/revoke$/);
+    if(release&&method==='POST')return s.shared.revoke(principal,release[1]!,input);
     if(path==='/v1/learned'&&method==='GET') {
       const kind=q.get('scope_kind'),id=q.get('scope_id');
       if(!!kind!==!!id||kind&&!['conversation','project'].includes(kind))throw new HttpError(400,'invalid_memory_scope');

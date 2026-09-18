@@ -72,6 +72,15 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal(archived.state,'archived');
 
     await services.guards.prepare(file.event,'fixture',services.detect);
+    const shareRule=await request('/v1/sharing/rules',{name:key+':source-share',sources:['123'],destination:space,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':source-share'});
+    const sharePreview=await request('/v1/sharing/preview',{rule_id:shareRule.id,expected_revision:1,source_ids:[file.event.id],content:'Approved voice summary',operation_id:key+':share-preview'});
+    assert.equal((await request('/v1/sharing/previews/'+sharePreview.id)).text,'Approved voice summary');
+    assert.ok((await request('/v1/sharing/previews')).previews.some((p:any)=>p.id===sharePreview.id));
+    const shareApproval={expected_revision:1,guard_revision:sharePreview.guard_revision,text_hash:sharePreview.text_hash,operation_id:key+':share-approval'};
+    const shareRelease=await request('/v1/sharing/previews/'+sharePreview.id+'/approve',shareApproval);
+    assert.equal((await request('/v1/sharing/previews/'+sharePreview.id+'/approve',shareApproval)).id,shareRelease.id);
+    await request('/v1/sharing/releases/'+shareRelease.id+'/revoke',{expected_revision:1,operation_id:key+':share-revoke'});
+    assert.ok((await request('/v1/sharing/releases')).releases.some((r:any)=>r.id===shareRelease.id&&r.state==='revoked'));
     const binding=await services.guards.state(),guarded=await services.guards.read('events:'+file.event.id,binding),entry=digest(key+':learned');
     await services.learned.publishAutomatic(entry,{kind:'meaning',subject:'check mark',text:'A contextual meaning',scope:{kind:'conversation',id:'123'},
       uncertainty:'supported',evidence:[file.event],conflicts:[]},null,key+':learned',[{source_id:'events:'+file.event.id,revision:guarded.revision,value_hash:digest(canonical(guarded.value))}],binding,'fixture',services.detect);

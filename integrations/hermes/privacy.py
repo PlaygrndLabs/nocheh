@@ -27,4 +27,7 @@ def filter_knowledge(credentials, model, body):
 
     result=json.loads(response.choices[0].message.content)
     if not isinstance(result,dict) or set(result)!={'items'}:raise ValueError('privacy_contract_rejected')
+    # This provenance comes from the adapter, never from the model's JSON.
+    result['producer']={'name':'hermes','version':'nocheh-privacy-v1','model':model,
+                        'provider':credentials.provider,'api_mode':credentials.api_mode}
     return result

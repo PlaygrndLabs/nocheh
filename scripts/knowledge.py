@@ -10,7 +10,7 @@ from .archive import API
 def allowed_path(path):
     parsed=urlsplit(path)
     if parsed.scheme or parsed.netloc or parsed.fragment:return False
-    return bool(re.fullmatch(r'/v1/(?:projects(?:/assignments|/effective)?|sharing/rules|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
+    return bool(re.fullmatch(r'/v1/(?:projects(?:/assignments|/effective)?|sharing/(?:rules|preview|previews(?:/[a-f0-9]{64}(?:/approve)?)?|releases(?:/[a-f0-9]{64}/revoke)?)|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
 
 
 def parse(command,arguments):
@@ -42,8 +42,11 @@ def parse(command,arguments):
         for name in ('show','history'):commands.add_parser(name).add_argument('id')
         change('correct').add_argument('--text-file',type=Path,required=True);change('retire')
     elif command=='sharing':
-        commands.add_parser('list').add_argument('--after',default='')
-        commands.add_parser('save').add_argument('--file',type=Path,required=True)
+        for name in ('list','previews','releases'):commands.add_parser(name).add_argument('--after',default='')
+        for name in ('save','preview'):commands.add_parser(name).add_argument('--file',type=Path,required=True)
+        commands.add_parser('show-preview').add_argument('id')
+        item=change('approve');item.add_argument('--guard-revision',type=int,required=True);item.add_argument('--text-hash',required=True)
+        change('revoke')
     else:raise ValueError('unknown_knowledge_command')
     arguments=list(arguments)
     for flag in ('--space','--scope-id'):
@@ -87,8 +90,12 @@ def operation(command,args):
             if action in ('correct','retire'):
                 body={**mutation(),'retired':action=='retire',**({'text':args.text_file.read_text()} if action=='correct' else {})}
     else:
-        path='/v1/sharing/rules'+('?'+urlencode({'after':args.after}) if action=='list' else '')
-        if action=='save':body=json.loads(args.file.read_text())
+        if action in ('list','previews','releases'):path='/v1/sharing/'+('rules' if action=='list' else action)+'?'+urlencode({'after':args.after})
+        elif action in ('save','preview'):path='/v1/sharing/'+('rules' if action=='save' else 'preview');body=json.loads(args.file.read_text())
+        elif action=='show-preview':path='/v1/sharing/previews/'+args.id
+        elif action=='approve':
+            path='/v1/sharing/previews/'+args.id+'/approve';body={**mutation(),'guard_revision':args.guard_revision or None,'text_hash':args.text_hash}
+        else:path='/v1/sharing/releases/'+args.id+'/revoke';body=mutation()
     if not allowed_path(path):raise ValueError('knowledge_route_denied')
     return path,body
 
