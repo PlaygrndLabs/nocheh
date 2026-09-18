@@ -26,11 +26,15 @@ def prepare_profile(root,scope,model):
         canonical=Path(root)/'profiles'/Scopes.profile(scope.space)
         parent=Path(root)/'profiles'/Scopes.profile(scope.chat_id)
         source=canonical if (canonical/'config.yaml').exists() else parent
+        if scope.logical_profile:
+            named=Path(root)/'profiles'/scope.logical_profile
+            if named.is_symlink():raise ValueError('profile_path_denied')
+            if (named/'config.yaml').exists():source=named
         if (source/'config.yaml').exists():atomic_yaml(profile/'config.yaml',read(source/'config.yaml'))
     configure_profile(profile, model)
     from .native_memory import save_receipt
     save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'revision':scope.revision,'owner':scope.owner,
-        'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose}))
+        'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose,'logical_profile':scope.logical_profile}))
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)

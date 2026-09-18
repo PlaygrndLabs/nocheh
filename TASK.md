@@ -477,6 +477,19 @@ arguments require complete review in Activity. Generated replies remain derived
 until confirmed delivery is captured. Five affected synthetic checks pass.
 [Owner command evidence](compatibility/results/2026-09-18-store-action-commands.json).
 
+Managed turn capabilities now carry the admitted logical profile. The broker
+rejects omitted or substituted profile claims, and named profiles in one audience
+have different native identities and prepared-text caches. TypeScript and Python
+derive the same identity. Default owner/group profiles retain their shared native
+identity across transports; owner reviews still share the default owner's notes.
+New native generations inherit their named profile's preferences without copying
+old notes into an unprepared context. Five affected repository checks, five token/
+broker regression checks (including one repeat), and twelve offline native checks
+pass. A test-only optional-property typing error was corrected before final
+compilation and the targeted regression run. Managed browser/scheduler routes and
+native administration still require migration before installation acceptance.
+[Managed profile evidence](compatibility/results/2026-09-18-store-managed-profiles.json).
+
 
 
 

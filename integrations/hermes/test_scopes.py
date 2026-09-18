@@ -39,6 +39,17 @@ class ScopeTests(unittest.TestCase):
             with self.assertRaises(ValueError):verify_capability(token,secret,a,event)
         for scope,target in ((b,event),(owner,event),(a,'b'*64)):
             with self.assertRaises(ValueError):verify_capability(token,secret,scope,target)
+        named_claims={'scope':'-20','space':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+                      'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':5,'logical_profile':'research'}
+        def signed(claims):
+            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
+            bound=Scopes.apply_revision(a,verify_capability(signed(named_claims),secret,a,event))
+            self.assertEqual(bound.logical_profile,'research')
+            self.assertEqual(verify_capability(signed(named_claims),secret,bound,event)['logical_profile'],'research')
+            for invalid in ('planning','../owner',None):
+                with self.assertRaises(ValueError):verify_capability(signed({**named_claims,'logical_profile':invalid}),secret,bound,event)
 
     def test_native_memory_and_session_search_cannot_open_other_profiles(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override

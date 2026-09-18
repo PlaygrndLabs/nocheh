@@ -19,6 +19,18 @@ class PreparedContextTests(unittest.TestCase):
         self.assertEqual(current.profile,review.profile)
         self.assertNotEqual(current.profile,filtered.profile)
         self.assertNotEqual(current.profile,Scopes.apply_revision(scope,{**claims,'generation':'22222222-2222-2222-2222-222222222222'}).profile)
+        default=Scopes.apply_revision(scope,{**claims,'logical_profile':Scopes.profile('123')})
+        self.assertEqual(current.profile,default.profile,'default profile shares owner notes across transports')
+        named=Scopes.apply_revision(scope,{**claims,'logical_profile':'research'})
+        identity=json.dumps([claims['generation'],'123','owner',5,'assistant','research'],separators=(',',':'))
+        self.assertEqual(named.profile,'nocheh-'+hashlib.sha256(identity.encode()).hexdigest()[:24])
+        self.assertEqual(named,Scopes.apply_revision(named,{**claims,'logical_profile':'research'}))
+        self.assertNotEqual(named.profile,current.profile)
+        self.assertNotEqual(named.profile,Scopes.apply_revision(scope,{**claims,'logical_profile':'planning'}).profile)
+        self.assertEqual(named.profile,Scopes.apply_revision(scope,{**claims,'logical_profile':'research','purpose':'memory-review'}).profile)
+        self.assertNotEqual(named.profile,Scopes.apply_revision(scope,{**claims,'logical_profile':'research','purpose':'filter'}).profile)
+        for invalid in ('../owner','a/b','a.b','x'*65,5):
+            with self.assertRaises(ValueError):Scopes.apply_revision(scope,{**claims,'logical_profile':invalid})
         for value in ({**claims,'generation':'invalid'},{**claims,'guard_epoch':None},{**claims,'purpose':'administrator'}):
             with self.assertRaises(ValueError):Scopes.apply_revision(scope,value)
 

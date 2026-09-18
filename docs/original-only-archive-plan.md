@@ -92,6 +92,12 @@ unregistered and admission fails closed until their repository migration is read
 Telegram review/approval/revocation commands use independently captured original
 owner DMs and store decision references in control. Imported messages, edits,
 guarded content, and group messages cannot grant administrative authority.
+Managed capabilities include the admitted logical profile. Named profiles have
+separate native identities and prepared-text caches within each audience and
+guard generation; default profiles share their identity across transports.
+Only preferences carry into a new native generation automatically, never old
+unprepared notes. Native administration and managed-run routing remain separate
+integration steps.
 Managed runtimes, host import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer

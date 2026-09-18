@@ -1,5 +1,5 @@
 import type {Reader} from '../access.js';
-import {canonical,digest} from '../archive.js';
+import {canonical} from '../archive.js';
 import {HttpError} from '../http.js';
 import {parentSpace} from '../spaces.js';
 import type {BrokerStorage,TurnBinding} from '../security/broker.js';
@@ -8,6 +8,7 @@ import type {OperationReference} from './operations.js';
 import type {SourceAccessRepository} from './access.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {GuardBinding} from './guards.js';
+import {defaultLogicalProfile,runtimeProfile} from './runtime-profile.js';
 
 export const runtimeTurnSchema=`
 CREATE TABLE IF NOT EXISTS runtime_turns (
@@ -24,19 +25,19 @@ export class RuntimeTurnRepository implements BrokerStorage {
   async assertAudience(principal:Reader):Promise<GuardBinding> {
     const binding=await this.prepared.audience.assert(principal);
     if(principal.turnEvent) {
-      const managed=(await this.access.stores.control.query('SELECT state,generation,guard_epoch FROM runtime_turns WHERE id=$1',[principal.turnEvent])).rows[0];
+      const managed=(await this.access.stores.control.query('SELECT state,generation,guard_epoch,logical_profile FROM runtime_turns WHERE id=$1',[principal.turnEvent])).rows[0];
       if(managed&&(managed.state!=='open'||managed.generation!==binding.generation||Number(managed.guard_epoch)!==binding.epoch))
         throw new HttpError(409,'runtime_turn_changed');
+      if(managed&&managed.logical_profile!==principal.logical_profile)throw new HttpError(409,'runtime_profile_changed');
     }
     return binding;
   }
   profile(principal:Reader,binding:GuardBinding):string {
-    return 'nocheh-'+digest(canonical([binding.generation,principal.space,principal.scope===null?'owner':'scoped',
-      binding.epoch,principal.purpose==='filter'?'filter':'assistant'])).slice(0,24);
+    return runtimeProfile(principal,binding);
   }
   /** Trusted admission only. The referenced operation/source must already be durable. */
   async register(principal:Reader,input:{logical_profile:string;job?:string}):Promise<void> {
-    if(principal.admin||!principal.turnEvent||!principal.space||!/^[-\w.]{1,128}$/.test(input.logical_profile)||
+    if(principal.admin||!principal.turnEvent||!principal.space||! /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(input.logical_profile)||principal.logical_profile!==input.logical_profile||
       input.job!==undefined&&!/^[-\w.]{1,200}$/.test(input.job))throw new HttpError(400,'invalid_runtime_turn');
     const binding=await this.assertAudience(principal),reference=await this.prepared.root(principal,binding);
     await this.checkSpace(principal,reference);
@@ -76,13 +77,13 @@ export class RuntimeTurnRepository implements BrokerStorage {
     if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');
     const current=await this.assertAudience(principal),reference=await this.prepared.root(principal,current),scope=await this.checkSpace(principal,reference);
     const managed=(await this.access.stores.control.query('SELECT * FROM runtime_turns WHERE id=$1',[reference.id])).rows[0];
-    if(reference.store==='control'&&!managed)throw new HttpError(403,'runtime_turn_not_admitted');
+    if((reference.store==='control'||principal.logical_profile!==undefined)&&!managed)throw new HttpError(403,'runtime_turn_not_admitted');
     if(managed&&(managed.generation!==current.generation||Number(managed.guard_epoch)!==current.epoch||managed.space_id!==principal.space||
       managed.owner!==(principal.scope===null)||managed.state!=='open'||canonical(managed.reference)!==canonical(reference)))
       throw new HttpError(409,'runtime_turn_changed');
     await this.assertAudience(principal);
     return {event_id:reference.id,reference,scope,profile:this.profile(principal,current),
-      logical_profile:managed?.logical_profile??'nocheh-'+digest(principal.scope===null?scope:principal.space+':policy:'+principal.revision).slice(0,24),
+      logical_profile:managed?.logical_profile??defaultLogicalProfile(principal),
       owner:principal.scope===null,guard_epoch:current.epoch,generation:current.generation,...(principal.revision===undefined?{}:{revision:principal.revision}),
       ...(managed?.job_id?{job:managed.job_id}:{})};
   }

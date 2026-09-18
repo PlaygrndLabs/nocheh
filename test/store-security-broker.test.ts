@@ -6,7 +6,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
-import {turnToken} from '../src/access.js';
+import {turnToken,reader} from '../src/access.js';
+import type {IncomingMessage} from 'node:http';
+import {preparedAudience} from '../src/stores/prepared-context.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
@@ -52,10 +54,31 @@ test('three-store broker binds original and scheduled turns, isolates generation
     await assert.rejects(services.turns.binding({...actor,generation:'00000000-0000-0000-0000-000000000000'}),{code:'audience_context_changed'});
 
     const operation=await services.operations.record({key:key+':scheduled',kind:'scheduled_trigger',scope:'-321/topic/9',input_hash:digest('schedule')});
-    const scheduled=await principal(operation.id,'-321/topic/9','-321');
+    const scheduled={...await principal(operation.id,'-321/topic/9','-321'),logical_profile:'fixture-project'};
     await assert.rejects(services.turns.binding(scheduled),{code:'runtime_turn_not_admitted'});
     await services.turns.register(scheduled,{logical_profile:'fixture-project',job:'fixture-job'});
     const managed=await services.turns.binding(scheduled);assert.equal(managed.scope,'-321');assert.equal(managed.logical_profile,'fixture-project');assert.equal(managed.job,'fixture-job');
+    const {logical_profile:ignoredProfile,...missingProfile}=scheduled;
+    await assert.rejects(services.turns.binding(missingProfile),{code:'runtime_profile_changed'});
+    await assert.rejects(services.turns.binding({...scheduled,logical_profile:'different'}),{code:'runtime_profile_changed'});
+    const namedToken=await services.prepared.audience.turn(token,scheduled,operation.id,Date.now()+60000);
+    const parsed=reader({headers:{authorization:'Bearer '+namedToken}} as IncomingMessage,token);
+    assert.equal(parsed.logical_profile,'fixture-project');assert.equal((await services.turns.binding(parsed)).profile,managed.profile);
+    const otherOperation=await services.operations.record({key:key+':other-profile',kind:'scheduled_trigger',scope:'-321/topic/9',input_hash:digest('schedule')});
+    const other={...scheduled,turnEvent:otherOperation.id,logical_profile:'fixture-research'};
+    await services.turns.register(other,{logical_profile:other.logical_profile,job:'fixture-job'});
+    assert.notEqual((await services.turns.binding(other)).profile,managed.profile,'named profiles cannot share native state');
+    assert.notEqual(preparedAudience(other),preparedAudience(scheduled),'prepared context cannot cross named profiles');
+    await services.prepared.allow(scheduled,'saffronpass');
+    assert.equal(await services.prepared.prepare(other,'saffronpass',async()=>['saffronpass']),'***','another named profile cannot reuse an allowed fragment');
+    const named={...actor,logical_profile:'research'},state=await services.guards.state();
+    assert.equal(services.turns.profile(named,state),'nocheh-'+digest(JSON.stringify([state.generation,'123','owner',state.epoch,'assistant','research'])).slice(0,24));
+    assert.equal(services.turns.profile({...actor,logical_profile:binding.logical_profile},state),binding.profile,'default native profile still shares owner notes');
+    await assert.rejects(services.turns.binding(named),{code:'runtime_turn_not_admitted'});
+    for(const invalid of ['../owner','a/b','a.b','x'.repeat(65)]) {
+      const bad=turnToken(token,null,Date.now()+60000,actor.turnEvent!,{space:'123',revision:state.epoch,guard_epoch:state.epoch,generation:state.generation,logical_profile:invalid});
+      assert.throws(()=>reader({headers:{authorization:'Bearer '+bad}} as IncomingMessage,token),{code:'invalid_scope_token'});
+    }
     await services.turns.close(operation.id);
     await assert.rejects(services.turns.binding(scheduled),{code:'runtime_turn_changed'});
 
