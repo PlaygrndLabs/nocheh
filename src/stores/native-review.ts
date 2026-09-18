@@ -67,7 +67,7 @@ export class NativeReviewRepository {
       const complete=async(resultId:string)=>{
         await db.query("UPDATE native_review_jobs SET state='done',result_id=$2,error_code=NULL,updated_at=now() WHERE id=$1",[id,resultId]);return 'done';
       };
-      const saved=(await this.derived.pool.query("SELECT id FROM derived_artifacts WHERE operation_id=$1 AND kind='runtime_result'",[operationId])).rows[0];
+      const saved=await this.derived.checkpoint(operationId);
       if(saved)return await complete(saved.id);
       const input=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[job.input_reference.id])).rows[0];
       if(!input||input.content_hash!==job.input_reference.input_hash||digest(input.content)!==input.content_hash)throw new HttpError(409,'native_review_input_conflict');

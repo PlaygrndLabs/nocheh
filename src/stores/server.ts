@@ -18,6 +18,7 @@ import {proxyInngestInspection} from '../workflows/inspection.js';
 import {controlStorageWorkflow} from './workflow-owner.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
 import {registerWorker} from '../workflows/store.js';
+import {drainSourceSpool} from './capture.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -54,6 +55,22 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // must observe the complete current authorization generation on every call.
     if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
     if(await owner.handle(principal,req,res,url))return;
+    if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
+      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/browser/'.length);
+      if(operation==='finish')return json(res,200,await s.browser.finish(body));
+      if(operation==='cancel')return json(res,200,await s.browser.cancel(body));
+      if(operation==='observe')return json(res,200,await s.browser.observe(body));
+      if(operation==='active')return json(res,200,await s.browser.active(body));
+      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
+      if(operation==='admit') {
+        await drainSourceSpool(s.capture,config.dataDir,string(body.event_id,64));
+        return json(res,200,await s.browser.admit(principal,body));
+      }
+      if(operation==='workflow-context')return json(res,200,await s.browser.context(body));
+      if(operation==='claim')return json(res,200,await s.browser.claim(body));
+      if(operation==='prepare')return json(res,200,await s.browser.prepare(body));
+      if(operation==='heartbeat')return json(res,200,await s.browser.heartbeat(body));
+    }
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
     if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {
       admin(principal);

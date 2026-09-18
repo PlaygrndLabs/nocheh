@@ -14,6 +14,14 @@ export interface DerivativeReference {store:'derived';kind:'artifact';id:string;
 export class DerivedRepository {
   constructor(readonly pool:pg.Pool,readonly archive:ArchiveRepository,readonly operations?:OperationRepository){}
 
+  /** Imported history preserves evidence but cannot acknowledge current work. */
+  async checkpoint(operation:string):Promise<any|undefined> {
+    const row=(await this.pool.query('SELECT * FROM derived_artifacts WHERE operation_id=$1',[operation])).rows[0];
+    if(row?.imported)throw new HttpError(409,'imported_result_not_execution_receipt');
+    if(row&&digest(row.content)!==row.content_hash)throw new HttpError(409,'derivative_integrity_failed');
+    return row;
+  }
+
   async record(input:DerivativeInput):Promise<DerivativeReference> {
     return this.write(input,this.pool);
   }
@@ -61,6 +69,7 @@ export class DerivedRepository {
       inputHash,input.producer,input.producer_version,configurationHash,input.operation_id,input.content.toString('utf8').replaceAll('\0',''),
       original?null:JSON.stringify(input.source)]);
     const stored=(await db.query('SELECT * FROM derived_artifacts WHERE operation_id=$1',[input.operation_id])).rows[0];
+    if(stored?.imported)throw new HttpError(409,'imported_result_not_execution_receipt');
     if(!stored||stored.content_hash!==contentHash||stored.input_hash!==inputHash||stored.event_id!==(original?.id??null)||
       canonical(stored.operation_reference)!==canonical(original?null:input.source)||
       stored.artifact_id!==(input.file?.id??null)||stored.kind!==input.kind||stored.source_revision!==(original?.revision??'0')||

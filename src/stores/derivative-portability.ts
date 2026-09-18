@@ -128,7 +128,7 @@ export class DerivativePortabilityRepository {
     const saved={...row};
     if(type==='guard_sources')saved.state='pending';
     if(type==='learned_entries'||type==='derivative_selections'||type==='content_operations')saved.imported=true;
-    if(type==='derived_artifacts')saved.search_text=(row.content as Buffer).toString().replaceAll('\0','');
+    if(type==='derived_artifacts'){saved.search_text=(row.content as Buffer).toString().replaceAll('\0','');saved.imported=true;}
     if(type==='guard_revisions')saved.search_text=textValues(JSON.parse((row.content as Buffer).toString())).join('\n').replaceAll('\0','');
     const columns=Object.keys(saved),values=columns.map(name=>definition.fields[name]==='json'&&saved[name]!==null?JSON.stringify(saved[name]):saved[name]);
     await db.query(`INSERT INTO ${type}(${columns.join(',')}) VALUES(${columns.map((_,i)=>'$'+(i+1)).join(',')}) ON CONFLICT DO NOTHING`,values);

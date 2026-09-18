@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.request import Request,urlopen
 from .async_runs import AsyncRuns,identity,CLOSED
 from .capture import canonical,immutable_file
-from .scopes import verify_capability
+from .scopes import Scope,verify_capability
 
 
 class ManagedAsync:
@@ -101,7 +101,16 @@ class ManagedAsync:
             context,scope,claim=ready['context'],ready['scope'],ready['claim']
         else:
             context=self.call('workflow-context',body)
-            name,_=self.admin.profile(context['profile']);scope=self.admin.binding(name)
+            if context.get('storage_layout')=='original-only-v1':
+                # The authenticated control service supplies the admitted logical
+                # profile. Native storage identity comes only from its signed
+                # capability, never from a caller's filesystem/profile lookup.
+                policy=self.admin.policy;chat=context['scope'];space=context['space'];name=context['profile']
+                if not policy.owner or chat!=policy.owner and chat not in policy.groups or space.split('/topic/')[0]!=chat:
+                    raise ValueError('profile_scope_denied')
+                scope=Scope(chat,policy.owner,chat==policy.owner,name,space,context['revision'],logical_profile=name)
+            else:
+                name,_=self.admin.profile(context['profile']);scope=self.admin.binding(name)
             if scope.chat_id!=context['scope']:raise ValueError('profile_scope_denied')
             claim=self.call('claim',context)
         immutable_file(self.directory,identity(body)+'.context',canonical(context))

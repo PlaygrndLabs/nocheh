@@ -11,13 +11,14 @@ CREATE OR REPLACE VIEW workflow_observations AS
 SELECT w.id,w.family,w.job_id,w.version,w.generation,w.state AS registry_state,w.revision,w.dispatch,
  w.created_at,w.created_at::text AS created_cursor,w.updated_at,w.owner_epoch,o.owner,o.admission,
  (w.lease_until>now()) IS TRUE AS active_step,
- coalesce(d.event_id,a.source_reference->>'id',t.source_reference->>'id',j.source_reference->>'id',h.source_reference->>'id',
+ coalesce(d.event_id,m.event_id,a.source_reference->>'id',t.source_reference->>'id',j.source_reference->>'id',h.source_reference->>'id',
    r.file_reference#>>'{event,id}',CASE WHEN w.family IN ('telegram','preparation') AND w.job_id ~ '^[a-f0-9]{64}$' THEN w.job_id
    WHEN w.family IN ('memory_review','honcho') AND w.job_id ~ '^source:[a-f0-9]{64}$' THEN substring(w.job_id FROM 8) END) AS source_event_id,
  CASE WHEN w.state IN ('completed','failed','skipped','cancelled','ambiguous','denied') THEN w.state
  WHEN d.event_id IS NOT NULL THEN CASE d.state WHEN 'done' THEN 'completed' WHEN 'suppressed' THEN 'skipped' WHEN 'pending' THEN w.state ELSE d.state END
  WHEN a.id IS NOT NULL THEN CASE a.state WHEN 'done' THEN 'completed' WHEN 'rejected' THEN 'denied' WHEN 'proposed' THEN 'waiting' WHEN 'approved' THEN w.state ELSE a.state END
  WHEN t.id IS NOT NULL THEN CASE t.state WHEN 'done' THEN 'completed' WHEN 'rejected' THEN 'denied' WHEN 'proposed' THEN 'waiting' WHEN 'approved' THEN w.state ELSE t.state END
+ WHEN m.event_id IS NOT NULL THEN CASE m.state WHEN 'done' THEN 'completed' WHEN 'interrupted' THEN 'ambiguous' WHEN 'captured' THEN w.state ELSE m.state END
  WHEN j.id IS NOT NULL THEN CASE WHEN j.paused OR j.state='paused' THEN 'waiting' WHEN j.state='done' THEN 'completed' WHEN j.state='pending' THEN w.state WHEN j.state='ambiguous' THEN 'waiting' ELSE j.state END
  WHEN h.id IS NOT NULL THEN CASE h.state WHEN 'done' THEN 'completed' WHEN 'uncertain' THEN 'waiting' ELSE w.state END
  WHEN r.state='done' THEN 'completed' ELSE w.state END AS state,
@@ -25,19 +26,20 @@ SELECT w.id,w.family,w.job_id,w.version,w.generation,w.state AS registry_state,w
  WHEN w.stage<>'admission' THEN w.stage WHEN d.event_id IS NOT NULL THEN d.runtime_stage
  WHEN w.family='preparation' THEN 'preparation' WHEN w.family='memory_review' THEN 'review'
  WHEN w.family='honcho' THEN 'sync' WHEN w.family IN ('actions','tools') THEN 'action' ELSE w.stage END AS stage,
- greatest(w.attempts,coalesce(d.attempts,0),coalesce(j.attempts,0),coalesce(h.attempts,0),coalesce(r.attempts,0),CASE WHEN t.started_at IS NOT NULL THEN 1 ELSE 0 END) AS attempts,
+ greatest(w.attempts,coalesce(d.attempts,0),coalesce(j.attempts,0),coalesce(h.attempts,0),coalesce(r.attempts,0),CASE WHEN t.started_at IS NOT NULL OR m.actor IS NOT NULL THEN 1 ELSE 0 END) AS attempts,
  coalesce(w.next_attempt,d.next_attempt,j.next_attempt,h.next_attempt) AS next_attempt,
  CASE WHEN a.state='proposed' OR t.state='proposed' THEN 'approval_required' WHEN j.paused OR j.state='paused' THEN 'owner_paused'
  WHEN j.state='ambiguous' OR h.state='uncertain' THEN 'receipt_pending' ELSE w.waiting_reason END AS waiting_reason,
  NULL::integer AS total,NULL::integer AS completed,NULL::integer AS duplicates,NULL::integer AS learning_after,
- NULL::text AS native_job_id,NULL::text AS native_profile,
- (w.family IN ('telegram','actions') OR w.family='tools' AND t.id IS NOT NULL OR w.family='memory_review' AND w.job_id LIKE 'native:%' AND coalesce(j.attempts,0)=0) AS domain_controllable,
- (w.family IN ('telegram','preparation','actions','memory_review','honcho') OR w.family='tools' AND t.id IS NOT NULL) AS retry_supported,
+ NULL::text AS native_job_id,m.logical_profile AS native_profile,
+ (w.family IN ('telegram','actions') OR w.family='browser' AND coalesce(m.state='captured',false) OR w.family='tools' AND t.id IS NOT NULL OR w.family='memory_review' AND w.job_id LIKE 'native:%' AND coalesce(j.attempts,0)=0) AS domain_controllable,
+ (w.family IN ('telegram','preparation','actions','memory_review','honcho') OR w.family='browser' AND coalesce(m.state='captured',false) OR w.family='tools' AND t.id IS NOT NULL) AS retry_supported,
  EXISTS(SELECT 1 FROM workflow_receipts r WHERE r.workflow_id=w.id AND r.state IN ('started','ambiguous','done')) AS receipt_blocked
 FROM workflow_registry w JOIN workflow_owners o USING(family)
 LEFT JOIN dispatches d ON w.family='telegram' AND d.event_id=w.job_id
 LEFT JOIN telegram_action_requests a ON w.family='actions' AND a.id=w.job_id
 LEFT JOIN controlled_actions t ON w.family='tools' AND t.id=w.job_id
+LEFT JOIN managed_runs m ON w.family='browser' AND m.channel='browser' AND m.event_id=w.job_id
 LEFT JOIN native_review_jobs j ON w.family='memory_review' AND w.job_id='native:'||j.id
 LEFT JOIN memory_ingestion_receipts h ON w.family='honcho' AND w.job_id IN ('receipt:'||h.id,'reconcile:'||h.id)
 LEFT JOIN reprocess_jobs r ON w.family='preparation' AND w.job_id='reprocess:'||r.id;
@@ -81,6 +83,10 @@ export async function controlStorageWorkflow(pool:pg.Pool,principal:Reader,id:st
         }
         if(row.family==='actions')changed=(await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='owner_cancelled',revision=revision+1,updated_at=now() WHERE id=$1 AND state IN ('proposed','approved')",[job])).rowCount??0;
         if(row.family==='tools')changed=(await db.query("UPDATE controlled_actions SET state='rejected',error_code='owner_cancelled',revision=revision+1,updated_at=now() WHERE id=$1 AND state IN ('proposed','approved') AND started_at IS NULL",[job])).rowCount??0;
+        if(row.family==='browser') {
+          changed=(await db.query("UPDATE managed_runs SET state='cancelled',cancel_requested=true,error_code='owner_cancelled',revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='captured' AND actor IS NULL",[job])).rowCount??0;
+          await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[job]);
+        }
         if(row.family==='memory_review'&&job.startsWith('native:'))changed=(await db.query("UPDATE native_review_jobs SET paused=true,state='paused',error_code='owner_cancelled',revision=revision+1,updated_at=now() WHERE id=$1 AND state IN ('pending','paused') AND attempts=0",[job.slice(7)])).rowCount??0;
         if(!changed)throw new HttpError(409,'workflow_domain_changed');
         await db.query("UPDATE workflow_registry SET state='cancelled',next_attempt=NULL,waiting_reason=NULL,lease_token=NULL,lease_until=NULL,revision=revision+1,updated_at=now() WHERE id=$1",[id]);

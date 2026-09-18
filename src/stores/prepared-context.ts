@@ -87,13 +87,13 @@ export class PreparedContextRepository {
         while(pending.length&&length+pending[0]![0].length+32<=50000){const item=pending.shift()!;batch.push(item);length+=item[0].length+32;}
         const inputs:{text:string;key:string;output:DerivativeReference;literals?:string[]}[]=[];
         for(const [text,key] of batch) {
-          const saved=(await this.derived.pool.query('SELECT id,content_hash,content,producer_version,configuration_hash FROM derived_artifacts WHERE operation_id=$1',['guard-context:'+key])).rows[0];
+          const saved=await this.derived.checkpoint('guard-context:'+key);
           if(saved&&(saved.content.toString()!==text||saved.producer_version!==this.detectorVersion||saved.configuration_hash!==digest(canonical({audience:scope,binding}))))
             throw new HttpError(409,'runtime_context_conflict');
           const output:DerivativeReference=saved?{store:'derived',kind:'artifact',id:saved.id,input_hash:saved.content_hash}:
             await this.derived.record({operation_id:'guard-context:'+key,source:root,kind:'runtime_context',content:Buffer.from(text),
               producer:'nocheh-context',producer_version:this.detectorVersion,configuration:{audience:scope,binding},provenance:{purpose:principal.purpose??'assistant'}});
-          const detection=(await this.derived.pool.query('SELECT content,input_hash FROM derived_artifacts WHERE operation_id=$1',['context-detection:'+key])).rows[0];
+          const detection=await this.derived.checkpoint('context-detection:'+key);
           if(detection&&detection.input_hash!==output.input_hash)throw new HttpError(409,'runtime_context_conflict');
           inputs.push({text,key,output,...(detection?{literals:JSON.parse(detection.content.toString()) as string[]}:{})});
         }

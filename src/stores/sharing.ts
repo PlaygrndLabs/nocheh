@@ -89,7 +89,7 @@ export class SharingContentRepository {
     const old=(await this.stores.control.query('SELECT * FROM sharing_previews WHERE id=$1',[id])).rows[0];
     if(old) {if(old.request_hash!==requestHash)throw new HttpError(409,'sharing_operation_conflict');return old;}
     const root=await this.derived.operations!.record({key:'sharing-preview:'+operation,kind:'sharing_request',scope:rule.destination,input_hash:requestHash});
-    const artifactId='sharing-input:'+id,stored=(await this.stores.derived.query('SELECT id,content_hash,content FROM derived_artifacts WHERE operation_id=$1',[artifactId])).rows[0];
+    const artifactId='sharing-input:'+id,stored=await this.derived.checkpoint(artifactId);
     let reference:DerivativeReference;
     if(stored)reference={store:'derived',kind:'artifact',id:stored.id,input_hash:stored.content_hash};
     else {
@@ -128,12 +128,12 @@ export class SharingContentRepository {
       if(!held)throw new HttpError(409,'sharing_preparation_busy');
       const row=await this.previewRow(id);if(row.state==='ready')return;
       const input=await this.inputs(row),binding=await this.guards.state();await this.validate(input,binding);
-      let output=(await this.stores.derived.query('SELECT id,content_hash FROM derived_artifacts WHERE operation_id=$1',['sharing-output:'+id])).rows[0];
+      let output=await this.derived.checkpoint('sharing-output:'+id);
       if(!output) {
         let items:{text:string}[],parents=[row.input_reference];
         if(input.rule.mode==='approved') {this.noPrivateCitation(input.content!,input);items=[{text:input.content!}];}
         else {
-          let result=(await this.stores.derived.query('SELECT id,content_hash,content FROM derived_artifacts WHERE operation_id=$1',['sharing-filter:'+id])).rows[0];
+          let result=await this.derived.checkpoint('sharing-filter:'+id);
           if(!result) {
             if(this.serviceToken.length<24)throw new HttpError(503,'runtime_signing_unavailable');
             const space=await this.access.space(input.sources[0]!);

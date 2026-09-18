@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS runtime_turns (
  created_at timestamptz NOT NULL DEFAULT now(),closed_at timestamptz
 );
 `;
+const sourceProcessing=(principal:Reader)=>!principal.logical_profile&&['memory-review','filter'].includes(principal.purpose??'assistant');
 
 /** Runtime authority uses original references or explicit control operations, never generated archive events. */
 export class RuntimeTurnRepository implements BrokerStorage {
@@ -25,10 +26,13 @@ export class RuntimeTurnRepository implements BrokerStorage {
   async assertAudience(principal:Reader):Promise<GuardBinding> {
     const binding=await this.prepared.audience.assert(principal);
     if(principal.turnEvent) {
-      const managed=(await this.access.stores.control.query('SELECT state,generation,guard_epoch,logical_profile FROM runtime_turns WHERE id=$1',[principal.turnEvent])).rows[0];
-      if(managed&&(managed.state!=='open'||managed.generation!==binding.generation||Number(managed.guard_epoch)!==binding.epoch))
+      const managed=(await this.access.stores.control.query('SELECT state,generation,guard_epoch,logical_profile,reference FROM runtime_turns WHERE id=$1',[principal.turnEvent])).rows[0];
+      const run=(await this.access.stores.control.query('SELECT state,cancel_requested,lease_until,source_reference FROM managed_runs WHERE event_id=$1',[principal.turnEvent])).rows[0];
+      const independent=sourceProcessing(principal)&&(managed?.reference?.store==='archive'||run?.source_reference?.store==='archive');
+      if(managed&&!independent&&(managed.state!=='open'||managed.generation!==binding.generation||Number(managed.guard_epoch)!==binding.epoch))
         throw new HttpError(409,'runtime_turn_changed');
-      if(managed&&managed.logical_profile!==principal.logical_profile)throw new HttpError(409,'runtime_profile_changed');
+      if(managed&&!independent&&managed.logical_profile!==principal.logical_profile)throw new HttpError(409,'runtime_profile_changed');
+      if(run&&!independent&&(run.cancel_requested||!['captured','running'].includes(run.state)||run.state==='running'&&(!run.lease_until||run.lease_until<=new Date())))throw new HttpError(409,'runtime_turn_changed');
     }
     return binding;
   }
@@ -76,7 +80,10 @@ export class RuntimeTurnRepository implements BrokerStorage {
   async binding(principal:Reader):Promise<TurnBinding> {
     if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');
     const current=await this.assertAudience(principal),reference=await this.prepared.root(principal,current),scope=await this.checkSpace(principal,reference);
-    const managed=(await this.access.stores.control.query('SELECT * FROM runtime_turns WHERE id=$1',[reference.id])).rows[0];
+    // A later permitted review/filter processes the original evidence under its
+    // own signed purpose. It does not reopen the original browser execution.
+    const managed=reference.store==='archive'&&sourceProcessing(principal)?null:
+      (await this.access.stores.control.query('SELECT * FROM runtime_turns WHERE id=$1',[reference.id])).rows[0];
     if((reference.store==='control'||principal.logical_profile!==undefined)&&!managed)throw new HttpError(403,'runtime_turn_not_admitted');
     if(managed&&(managed.generation!==current.generation||Number(managed.guard_epoch)!==current.epoch||managed.space_id!==principal.space||
       managed.owner!==(principal.scope===null)||managed.state!=='open'||canonical(managed.reference)!==canonical(reference)))

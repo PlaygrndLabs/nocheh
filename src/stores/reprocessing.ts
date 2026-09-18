@@ -76,7 +76,7 @@ export class ReprocessingRepository {
       if(!job)throw new HttpError(404,'reprocess_job_missing');
       const file=job.file_reference as FileReference;
       await this.archive.verify(file.event);
-      const previous=(await this.stores.derived.query('SELECT id,content_hash FROM derived_artifacts WHERE operation_id=$1',['reprocess:'+id])).rows[0];
+      const previous=await this.derived.checkpoint('reprocess:'+id);
       let result:DerivativeReference;
       if(previous)result={store:'derived',kind:'artifact',id:previous.id,input_hash:previous.content_hash};
       else {

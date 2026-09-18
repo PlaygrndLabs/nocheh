@@ -8,6 +8,7 @@ import {derivedLearnedSchema} from './learned-schema.js';
 import {controlOperationSchema} from './operations.js';
 import {runtimeContextSchema} from './prepared-context.js';
 import {runtimeTurnSchema} from './turns.js';
+import {managedStorageSchema} from './browser-runs.js';
 import {securityCoreSchema} from '../security/store.js';
 import {nativeReviewSchema} from './native-review.js';
 import {sharingContentSchema} from './sharing-schema.js';
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS derived_artifacts (
 CREATE INDEX IF NOT EXISTS derived_event ON derived_artifacts(event_id,created_at,id);
 ALTER TABLE derived_artifacts ALTER COLUMN event_id DROP NOT NULL;
 ALTER TABLE derived_artifacts ADD COLUMN IF NOT EXISTS operation_reference jsonb;
+ALTER TABLE derived_artifacts ADD COLUMN IF NOT EXISTS imported boolean NOT NULL DEFAULT false;
 ALTER TABLE derived_artifacts DROP CONSTRAINT IF EXISTS derived_anchor;
 ALTER TABLE derived_artifacts ADD CONSTRAINT derived_anchor CHECK(
  (event_id IS NOT NULL AND operation_reference IS NULL) OR
@@ -114,6 +116,7 @@ ${controlPolicySchema}
 ${controlMemorySchema}
 ${controlOperationSchema}
 ${runtimeTurnSchema}
+${managedStorageSchema}
 ${securityCoreSchema}
 ${nativeReviewSchema}
 ${sharingContentSchema}

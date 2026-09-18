@@ -82,6 +82,19 @@ test('separated application captures through control outages, exposes owner repo
     await services.guards.prepare((await services.archive.captured(digest(key))).reference,'fixture',services.detect);
     const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
+    await request('/v1/browser/admit',{...browserInput,event_id:browserSource.event_id},403,credential);
+    assert.equal((await request('/v1/browser/admit',{...browserInput,event_id:browserSource.event_id})).owned,true);
+    await services.preparation.run(browserSource.event_id,async()=>{throw Error('no browser files');},'fixture',services.detect,
+      {owner:'inngest',epoch:(await connected.control.query("SELECT epoch FROM workflow_owners WHERE family='preparation'")).rows[0].epoch});
+    const browserOwner=(await connected.control.query("SELECT epoch FROM workflow_owners WHERE family='browser'")).rows[0].epoch;
+    const browserContext=await request('/v1/browser/workflow-context',{event_id:browserSource.event_id,owner_epoch:browserOwner});
+    const browserClaim=await request('/v1/browser/claim',browserContext);assert.equal(browserClaim.claimed,true);
+    assert.equal((await request('/v1/browser/claim',browserContext)).claimed,false);
+    assert.deepEqual((await request('/v1/browser/prepare',browserContext)).files,[]);
+    assert.equal((await request('/v1/browser/heartbeat',browserContext)).cancel_requested,false);
+    await request('/v1/browser/finish',{event_id:browserSource.event_id,actor:browserContext.actor,state:'done',session:browserInput.conversation,text:'Synthetic browser result'});
+    assert.equal((await request('/v1/browser/observe',{...browserInput,event_id:browserSource.event_id})).text,'Synthetic browser result');
+    await request('/v1/memory/check',undefined,409,browserClaim.archive_credential);
     await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
     const proposal=await request('/v1/action-requests',{destination:'current',text:'Synthetic approval preview'},200,credential);
     const tool=await request('/v1/tools/propose',{kind:'shell',arguments:{command:'pwd'}},200,credential);

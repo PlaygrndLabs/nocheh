@@ -67,9 +67,10 @@ export class CaptureCoordinator {
 
 const cursors=new Map<string,string>();
 /** Retire originals only after both commits; failed control writes do not stop capture. */
-export async function drainSourceSpool(coordinator:CaptureCoordinator,root:string):Promise<void> {
+export async function drainSourceSpool(coordinator:CaptureCoordinator,root:string,only?:string):Promise<void> {
+  if(only!==undefined&&!/^[a-f0-9]{64}$/.test(only))throw new HttpError(400,'invalid_source_id');
   const directory=join(root,'spool','pending');await mkdir(directory,{recursive:true,mode:0o700});
-  const names=(await readdir(directory)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).sort();
+  const names=(await readdir(directory)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)&&(only===undefined||n===only+'.json')).sort();
   const start=Math.max(0,names.findIndex(n=>n>(cursors.get(root)??'')));
   const captured:{name:string;value:Envelope;sources:CapturedSource[];generated:boolean}[]=[];
   const failures:{name:string;code:string}[]=[];
