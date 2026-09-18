@@ -544,6 +544,20 @@ against this catalog, saved preference migration, and browser media preparation
 ordering still need their combined integration and acceptance.
 [Profile repository evidence](compatibility/results/2026-09-18-store-runtime-profiles.json).
 
+The browser media test exposed a first-submission cancellation: initial transcript
+selection advances the guard revision after intake. Execution now binds the
+current prepared representation immediately before its first native request, with
+that request intent persisted in control. It can rebind an unstarted submission
+after initial preparation; subsequent guard changes still revoke requested or
+running work. Installation generation and workflow ownership cannot change through
+this step. Default logical profile IDs are stable across guard revisions in both
+TypeScript and Python, while native directories remain generation/epoch isolated.
+The originally failing audio case now passes, alongside four affected PostgreSQL/
+HTTP checks and thirteen offline native checks. TypeScript, diff hygiene, and
+AST-only Graphify pass (419 files, 2,564 nodes, 10,337 edges; zero model calls).
+Native administration/catalog admission integration remains pending.
+[Browser media evidence](compatibility/results/2026-09-18-store-browser-media.json).
+
 
 
 
