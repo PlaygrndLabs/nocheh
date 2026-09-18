@@ -7,6 +7,19 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The reset now has a bounded setup-only database snapshot for current security
+policy, legacy conversation overrides or original-only guard/runtime configuration,
+projects, assignments, sharing rules, and active profile identities. It uses one
+read-only statement with explicit columns, rechecks maintenance/quiescence and the
+inactive fences, and fails if configuration changes before durable publication.
+Originals, derivatives, learned state, approvals, workflows, released shares and
+configuration history are excluded. Eight host and eight packaged network-disabled
+checks pass; a fresh real-PostgreSQL rehearsal passes for both layouts and confirms
+seeded source/derivative content is absent. This is one preservation component and
+does not advance the complete-preservation phase. Environment/provider setup,
+spending, native preferences, fresh-store admission and full orchestration remain
+pending. No live state changed. [Configuration snapshot evidence](compatibility/results/2026-09-18-reset-configuration.json).
+
 The offline settlement gate now checks durable native delivery/tool receipts and
 workflow/domain correspondence while reset quiescence and database maintenance
 remain held. It never resends an action or rewrites an ambiguous database receipt.
