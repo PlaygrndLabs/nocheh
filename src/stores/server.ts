@@ -52,7 +52,13 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024),held.job));
       }finally{await held.release();}
     }
-    if(req.method==='POST'&&path==='/v1/import'){admin(principal);return json(res,200,await s.imports.record(principal,await readJson(req,32*1024*1024)));}
+    if(req.method==='POST'&&path==='/v1/import'){
+      admin(principal);const body=object(await readJson(req,32*1024*1024));
+      // Desktop batch imports are original-only; historical mixed-format exports
+      // take the explicit converter and retain their generated/guarded domains.
+      return json(res,200,body.guarded!=null||Array.isArray(body.derived)&&body.derived.length||object(body.event).origin==='generated'?
+        await s.legacyImports.record(principal,body,url.searchParams.get('restore_guarded')==='true'):await s.imports.record(principal,body));
+    }
     if(req.method==='POST'&&path==='/v1/memory/reviews'){admin(principal);return json(res,200,await s.imports.approveLearning(principal,await readJson(req)));}
     if(/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)&&req.method==='POST'){admin(principal);return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024)));}
 

@@ -13,12 +13,17 @@ export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:projects(?:\/ass
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
   owns(path:string):boolean {
-    return ownerStoragePath(path)||/^\/v1\/(?:exports\/(?:sources|derivatives(?:\/types)?|derivative-history)|imports\/(?:sources|derivatives(?:\/verify)?)|original-files\/[a-f0-9]{64}\/bytes)$/.test(path);
+    return /^\/v1\/imports\/legacy(?:\/[a-f0-9]{64}|\/files\/[a-f0-9]{64}\/bytes)?$/.test(path)||ownerStoragePath(path)||/^\/v1\/(?:exports\/(?:sources|derivatives(?:\/types)?|derivative-history)|imports\/(?:sources|derivatives(?:\/verify)?)|original-files\/[a-f0-9]{64}\/bytes)$/.test(path);
   }
   async request(principal:Reader,method:string,url:URL,input?:unknown):Promise<unknown> {
     admin(principal);const path=url.pathname,s=this.services,q=url.searchParams;
     if(!this.owns(path))throw new HttpError(404,'not_found');
     if(!['GET','POST'].includes(method))throw new HttpError(405,'method_not_allowed');
+    if(path==='/v1/imports/legacy'&&method==='POST')return s.legacyImports.record(principal,input,q.get('restore_guarded')==='true');
+    const legacyFile=path.match(/^\/v1\/imports\/legacy\/files\/([a-f0-9]{64})\/bytes$/);
+    if(legacyFile&&method==='POST')return s.legacyImports.upload(principal,legacyFile[1]!,input);
+    const legacy=path.match(/^\/v1\/imports\/legacy\/([a-f0-9]{64})$/);
+    if(legacy&&method==='GET')return s.legacyImports.inspect(principal,legacy[1]!,q.get('after')??'',limit(q.get('limit'),20,50));
     if(path==='/v1/exports/sources'&&method==='GET')return s.sourcePortability.page(principal,q.get('after')??'',limit(q.get('limit'),20,50));
     if(path==='/v1/imports/sources'&&method==='POST')return s.sourcePortability.import(principal,input);
     if(path==='/v1/exports/derivatives/types'&&method==='GET')return {format:'nocheh-derivatives-v1',types:portableDerivativeTypes};
@@ -128,7 +133,7 @@ export class OwnerStorageApi {
   async handle(principal:Reader,req:IncomingMessage,res:ServerResponse,url:URL):Promise<boolean> {
     if(!this.owns(url.pathname))return false;
     admin(principal); // Reject scoped callers before parsing any mutation body.
-    const max=url.pathname.startsWith('/v1/original-files/')||url.pathname.startsWith('/v1/imports/derivatives')?70*1024*1024:url.pathname==='/v1/imports/sources'?32*1024*1024:8*1024*1024;
+    const max=url.pathname.startsWith('/v1/original-files/')||url.pathname.startsWith('/v1/imports/derivatives')||url.pathname.startsWith('/v1/imports/legacy/files/')?70*1024*1024:['/v1/imports/sources','/v1/imports/legacy'].includes(url.pathname)?32*1024*1024:8*1024*1024;
     const result=await this.request(principal,req.method??'GET',url,req.method==='POST'?await readJson(req,max):undefined);
     if(Buffer.isBuffer(result)){res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store'});res.end(result);return true;}
     json(res,200,result);return true;

@@ -101,6 +101,27 @@ class PortableBundleTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'native store unavailable'):export_all(root/'state',root/'package',API(),honcho_export=unavailable)
             self.assertFalse(json.loads((root/'package/manifest.json').read_text())['complete'])
 
+    def test_legacy_bundle_routes_generated_files_and_trusted_history_separately(self):
+        class LegacyAPI(API):
+            storage_layout='legacy'
+            def call(self,path,body=None,binary=False):
+                if path.startswith('/v1/export?'):return {'records':[{**self.record,'derived':[self.derived],'guarded':{'format':'nocheh-guarded-v1','sources':[]}}],'next':None}
+                return super().call(path,body,binary)
+        class Destination(API):
+            def call(self,path,body=None,binary=False):
+                if path.startswith('/v1/imports/legacy?'):
+                    self.calls.append((path,body));return {'files':[{'id':'b'*64,'store':'derived'}]}
+                return super().call(path,body,binary)
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);source=LegacyAPI();source.record['artifacts'][0]['byte_size']=str(len(source.bytes));manifest=export_all(root/'state',root/'package',source)
+            self.assertEqual(manifest['format'],'nocheh-portable-v1');self.assertEqual(validate_package(root/'package'),manifest)
+            target=Destination();result=import_all(root/'package',root/'inactive',target,restore_guarded=True)
+            self.assertTrue(result['complete']);self.assertFalse(result['honcho_included'])
+            paths=[path for path,_ in target.calls]
+            self.assertIn('/v1/imports/legacy?restore_guarded=true',paths)
+            self.assertIn('/v1/imports/legacy/files/'+'b'*64+'/bytes',paths)
+            self.assertFalse(any(path.startswith('/v1/imports/derivatives') for path in paths))
+
     def test_native_restore_requires_an_inactive_installation_before_any_process(self):
         from scripts.honcho_portable import restore_honcho
         from unittest.mock import patch

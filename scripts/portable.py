@@ -112,8 +112,9 @@ def validate_package(directory):
 
 def _validate_package(directory,manifest):
     metadata=directory/'manifest.json'
-    if manifest.get('format')!='nocheh-portable-v2' or manifest.get('complete') is not True or manifest.get('automatic_activation') is not False or manifest.get('credentials_included') is not False:
+    if manifest.get('format') not in ('nocheh-portable-v1','nocheh-portable-v2') or manifest.get('complete') is not True or manifest.get('automatic_activation') is not False or manifest.get('credentials_included') is not False:
         raise ValueError('portable_manifest_invalid')
+    legacy=manifest['format']=='nocheh-portable-v1'
     files=manifest.get('files')
     if not isinstance(files,dict) or len(files)>100000:raise ValueError('portable_files_invalid')
     actual=set()
@@ -126,12 +127,13 @@ def _validate_package(directory,manifest):
     for name,item in files.items():
         path=directory/_relative(name)
         if not isinstance(item,dict) or type(item.get('size')) is not int or path.stat().st_size!=item['size'] or sha(path)!=item.get('sha256'):raise ValueError('portable_integrity_failed')
-        if name.split('/')[0] not in ('archive','derivatives','native','honcho'):raise ValueError('portable_domain_invalid')
+        if name.split('/')[0] not in (('archive','native') if legacy else ('archive','derivatives','native','honcho')):raise ValueError('portable_domain_invalid')
     archive=validate_archive(directory/'archive')
-    if archive.get('format')!='nocheh-sources-v1' or archive!=manifest.get('archive'):raise ValueError('portable_archive_manifest_mismatch')
-    from .derivative_transfer import validate_derivatives,validate_references
-    if validate_derivatives(directory/'derivatives')!=manifest.get('derivatives'):raise ValueError('portable_derivatives_manifest_mismatch')
-    validate_references(directory/'derivatives',directory/'archive')
+    if archive.get('format')!=('nocheh-archive-v1' if legacy else 'nocheh-sources-v1') or archive!=manifest.get('archive'):raise ValueError('portable_archive_manifest_mismatch')
+    if not legacy:
+        from .derivative_transfer import validate_derivatives,validate_references
+        if validate_derivatives(directory/'derivatives')!=manifest.get('derivatives'):raise ValueError('portable_derivatives_manifest_mismatch')
+        validate_references(directory/'derivatives',directory/'archive')
     profiles=manifest.get('native_profiles')
     if not isinstance(profiles,list) or len(profiles)>10000:raise ValueError('portable_profiles_invalid')
     seen=set();allowed=set()
@@ -152,7 +154,7 @@ def _validate_package(directory,manifest):
                 if database.execute('PRAGMA quick_check').fetchone()[0]!='ok':raise ValueError('portable_native_integrity_failed')
             finally:database.close()
     if {name for name in files if name.startswith('native/')}!=allowed:raise ValueError('portable_native_inventory_mismatch')
-    honcho=manifest.get('honcho')
+    honcho=manifest.get('honcho',{'included':False} if legacy else None)
     if not isinstance(honcho,dict) or type(honcho.get('included')) is not bool:raise ValueError('portable_honcho_invalid')
     if honcho['included']:
         from .honcho_portable import validate_honcho,TABLES
@@ -176,7 +178,7 @@ def _atomic_bytes(path,content,replace=False):
     finally:os.close(descriptor)
 
 
-def import_all(directory,native_output,api=None):
+def import_all(directory,native_output,api=None,*,restore_guarded=False):
     """Import data idempotently; native files stay in an isolated inactive package.
 
     This path never overwrites Hermes homes, attaches Honcho, executes dump SQL,
@@ -229,9 +231,10 @@ def import_all(directory,native_output,api=None):
             try:os.fsync(descriptor)
             finally:os.close(descriptor)
     from .derivative_transfer import import_derivatives
-    sources=import_archive(api,directory/'archive')
-    derivatives=import_derivatives(api,directory/'derivatives')
-    result=save(True,sources=sources,derivatives=derivatives,native_profiles=len(manifest['native_profiles']),honcho_included=manifest['honcho']['included'])
+    legacy=manifest['format']=='nocheh-portable-v1'
+    sources=import_archive(api,directory/'archive',restore_guarded=restore_guarded if legacy else False)
+    derivatives={'included_with_legacy_records':True,'automatic_activation':False} if legacy else import_derivatives(api,directory/'derivatives')
+    result=save(True,sources=sources,derivatives=derivatives,native_profiles=len(manifest['native_profiles']),honcho_included=manifest.get('honcho',{}).get('included',False))
     return {**result,'native_path':str(target),'telegram_replies':0}
 
 
@@ -244,11 +247,12 @@ def import_main(state,args):
         print(json.dumps(restore_honcho(options.inactive_state,options.honcho_memory)));return 0
     parser=argparse.ArgumentParser(description='Import a portable package; stage native history without activation.')
     parser.add_argument('--portable',type=Path,required=True);parser.add_argument('--native-output',type=Path,required=True)
+    parser.add_argument('--restore-guarded',action='store_true',help='Materialize trusted legacy guarded history as inactive revisions; exact input verification still applies.')
     options=parser.parse_args(args)
     # A portable target is never an active installation directory.
     native=options.native_output.resolve();installation=Path(state).resolve()
     if native==installation or native.is_relative_to(installation) or installation.is_relative_to(native):raise ValueError('portable_native_target_must_be_separate')
-    print(json.dumps(import_all(options.portable,options.native_output)));return 0
+    print(json.dumps(import_all(options.portable,options.native_output,restore_guarded=options.restore_guarded)));return 0
 
 
 def main(state,args):

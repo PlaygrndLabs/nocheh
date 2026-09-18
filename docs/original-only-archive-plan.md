@@ -94,8 +94,8 @@ progress, cancellation, review approval, and retained completion receipts use
 control. Interrupted source commits replay idempotently without live replies or
 automatic learning. Batch review cannot enable sources from another job or undo a
 later owner revocation. Owner workflow inspection shows import progress and
-revision-checked retry/cancel operations. Legacy bundles containing derivatives
-still require the complete portable importer; they cannot be silently truncated.
+revision-checked retry/cancel operations. Legacy bundles containing derivatives use the explicit legacy converter; source-only
+import endpoints reject mixed records rather than silently truncating them.
 Telegram review/approval/revocation commands use independently captured original
 owner DMs and store decision references in control. Imported messages, edits,
 guarded content, and group messages cannot grant administrative authority.
@@ -121,8 +121,8 @@ file preparation/selection. The first native request intent is durable before th
 call; after that boundary a changed guard cannot silently rebind the run. Default
 logical profile IDs stay stable while native state remains generation isolated.
 Confirmed browser-delivery capture still needs its end-to-end integration.
-Host import coordination and the full installation rehearsal still
-require their separate increments. The opt-in layout is not
+Host import coordination is verified independently; the full installation rehearsal
+still requires its separate gate. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.
 
@@ -211,7 +211,7 @@ automatically authorizing imported sources for learning. Explicit owner learning
 consent remains separate. A duplicate import cannot change an existing live
 capture admission. Source-only imports reject bundles containing derivative or
 guarded records, rather than silently losing them. The complete v2 coordinator
-routes these domains separately; legacy bundle conversion remains pending.
+routes these domains separately; legacy bundles use the converter below.
 
 Verify source identity/wire/timestamps, exact binary and empty files, read-only
 export during control unavailability, import control-outage behavior, interrupted
@@ -246,8 +246,9 @@ guard restoration, prepared selection activation, or learned correction uses the
 normal revision and revocation paths. Duplicate imports preserve subsequent
 destination edits and selections; immutable conflicts fail without replacing data.
 
-The bundle coordinator below composes these repositories. Legacy bundle conversion and complete installation recovery remain separate
-gates; native Honcho row restoration has an explicit inactive coordinator below. A full export validates source/derivative reference completeness
+The bundle coordinator below composes these repositories. Complete installation
+recovery remains a separate gate; native Honcho row restoration has an explicit
+inactive coordinator below. A full export validates source/derivative reference completeness
 before publishing its complete manifest. A concurrent append or head change that
 leaves a missing parent/revision fails the candidate export explicitly.
 
@@ -299,8 +300,24 @@ namespace and imports into another through owner HTTP APIs, preserving exact
 original bytes, two engine versions, guarded owner edits, and inactive Hermes
 notes/sessions. Missing references/history, tampered files, symlinks, overlapping
 destinations, interrupted import, and changed destination notes have offline
-regression coverage. Legacy `nocheh-archive-v1`/`nocheh-portable-v1` conversion
-remains a separate migration increment.
+regression coverage.
+
+Legacy `nocheh-archive-v1`/`nocheh-portable-v1` imports use the owner-only
+`POST /v1/imports/legacy` converter. It retains each exact incoming document as
+an immutable imported derivative before routing original observations/files to
+archive and generated records/files to derived storage. Inspect retained input
+versions at `GET /v1/imports/legacy/:OLD_EVENT_ID`; generated file uploads use
+`POST /v1/imports/legacy/files/:OLD_ARTIFACT_ID/bytes`. Confirmed Telegram Message
+observations can become originals, but imported intents never authorize sends.
+
+`--restore-guarded` materializes legacy guard history as pending representations;
+without it the exact history remains in the retained legacy document. Conversion
+checks input hashes, authors, contiguous revisions, source/file identities, and
+bytes. Typed references use normalized safe-integer sizes; the retained document
+preserves legacy decimal strings. Conflicting immutable history fails without
+replacing existing or later destination edits. Retry retains all incoming versions.
+Both v1 and v2 complete import stage native history separately and inactive; a v1
+bundle does not claim Honcho data that its format never included.
 
 </complete_portable_rehearsal>
 
