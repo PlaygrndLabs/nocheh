@@ -94,7 +94,11 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
     stage=Path(tempfile.mkdtemp(prefix='.backup-',dir=output.parent));stage.chmod(0o700)
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
     three_stores=env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1'
-    stopped=([name for name in running if name not in ('nocheh-postgres','honcho-postgres','inngest-redis','nocheh-executor')]
+    from scripts.management_maintenance import coordinating_dashboard
+    coordinator=coordinating_dashboard(state,command,env) if three_stores else None
+    exempt={'nocheh-postgres','honcho-postgres','inngest-redis','nocheh-executor'}
+    if coordinator:exempt.add('nocheh-dashboard')
+    stopped=([name for name in running if name not in exempt]
         if three_stores else [name for name in SERVICES if name in running])
     barrier=ExitStack()
     workflow_was_running=workflows_running(state)
@@ -109,7 +113,7 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
                   'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
         if three_stores:
             from scripts.store_recovery import assert_no_state_writers
-            assert_no_state_writers(state,env,command)
+            assert_no_state_writers(state,env,command,coordinator)
             barrier.enter_context(recovery.barrier())
             manifest['stores']=recovery.snapshot(stage,sha)
             manifest['tables']={store:record['tables'] for store,record in manifest['stores']['databases'].items()}
@@ -170,6 +174,7 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
         archive.chmod(0o600);sync(archive);manifest['state_sha256']=sha(archive)
         if three_stores:
             recovery.assert_barrier();manifest.update(version=6,storage_layout='original-only-v1')
+            if coordinator:coordinator.assert_current()
         metadata=stage/'manifest.json';metadata.write_text(json.dumps(manifest,indent=2)+'\n');metadata.chmod(0o600);sync(metadata)
         if three_stores:validate_snapshot(stage)
         stage.rename(output)
@@ -180,8 +185,9 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
     finally:
         barrier.close()
         if three_stores:recovery.assert_maintenance()
+        if coordinator:coordinator.assert_current()
         # Resume precisely the services that were running before the snapshot.
-        if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180']+stopped,env=env,check=True)
+        if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--no-deps','--wait','--wait-timeout','180']+stopped,env=env,check=True)
         if workflow_was_running and not leave_stopped:start_workflows(state)
 
 

@@ -42,3 +42,21 @@ test('occupied callback port fails before starting OAuth and failed upstream rel
   await assert.rejects(oauth.start(),{code:'provider_oauth_unavailable'});
   const retry=createServer();retry.listen(callback,'127.0.0.1');await once(retry,'listening');await close(retry);
 });
+
+test('maintenance waits for an admitted OAuth callback before declaring provider writes drained',async()=>{
+  const state='synthetic-state-1234567890';let release!:()=>void,entered!:()=>void;
+  const waiting=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});
+  const monitor=createServer(async(req,res)=>{
+    req.resume();res.setHeader('content-type','application/json');
+    if(req.url?.endsWith('codex-auth-url'))res.end(JSON.stringify({state,url:'https://auth.openai.com/authorize?state='+state}));
+    else{entered();await waiting;res.end('{}');}
+  });
+  const port=await listen(monitor),probe=createServer(),callback=await listen(probe);await close(probe);
+  const oauth=new ProviderOAuth(port,'fixture',8783,callback);let drained=false;
+  try{
+    await oauth.start();const result=fetch(`http://127.0.0.1:${callback}/auth/callback?state=${state}&code=synthetic`,{redirect:'manual'});
+    await started;const drain=oauth.quiesce().then(()=>{drained=true;});await Promise.resolve();assert.equal(drained,false);
+    release();assert.equal((await result).status,303);await drain;assert.equal(drained,true);
+    await assert.rejects(fetch(`http://127.0.0.1:${callback}/auth/callback?state=${state}&code=synthetic`));
+  }finally{release();oauth.close();await close(monitor);}
+});
