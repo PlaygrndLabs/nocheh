@@ -299,8 +299,15 @@ before a single transaction materializes all eight memory tables. Exact complete
 replay is accepted; a populated conflicting target, nonempty native queue/webhook
 state, schema mismatch, or malformed row fails without replacing memory. Native
 identity sequences advance past imported IDs. The standalone synthetic rehearsal
-checks those boundaries; full acceptance against the pinned native service and
-coordinated installation restore remains a separate gate.
+checks those boundaries. The pinned-schema rehearsal additionally uses the actual
+Honcho Alembic migrations and ORM models on pgvector with 1,536-dimensional
+embeddings, citation ancestry, and soft-deleted history. Use the dedicated
+`compatibility/native-portability-compose.yml` with explicit fixture project and
+image variables, then run `python3 compatibility/native-portability-rehearsal.py
+--env-file FIXTURE_ENV`. It requires the native fixture cluster marker, creates
+random test databases, and removes only those databases afterward. The schema
+runner invokes no provider or deriver. Complete native service behavior and
+coordinated installation restore remain separate gates.
 
 Verify `store-portable-bundle.test.ts` using the fixture's read-only `scripts` and
 `integrations` mounts in addition to `dist`. It exports from one empty three-store
