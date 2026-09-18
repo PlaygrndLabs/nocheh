@@ -5,13 +5,12 @@ the manifest into its durable preservation evidence and supply a barrier that
 rechecks journal, maintenance, owner exclusion, preservation and inactive fences.
 No source bytes are read or copied. Database/container erasure is separate.
 """
-import hashlib
 import os
 import stat
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import reset_protocol
+from . import reset_ownership
 
 FORMAT = 'nocheh-reset-file-manifest-v1'
 MAX_ENTRIES = 100000
@@ -67,7 +66,7 @@ def inspect_at(fd, name):
         return None
 
 
-def freeze(preflight, protected, reviewed=None):
+def freeze(preflight, protected, ownership_review=None):
     """Return only metadata for reviewed installation-local content targets.
 
     External backups/restores require separate per-item ownership review; this
@@ -83,20 +82,16 @@ def freeze(preflight, protected, reviewed=None):
                 if row['action'] in ('erase', 'snapshot_preferences_then_erase')]
     retained = [absolute(row['path']) for row in preflight['paths']
                 if row['action'] not in ('erase', 'snapshot_preferences_then_erase', 'review_restore')]
+    explicit_roots = {row['path'] for row in preflight.get('paths', []) if row.get('action') == 'review_restore'}
+    explicit_roots.update(row['path'] for row in preflight.get('external_archives', []))
     reviewed_roots = []
-    if reviewed is not None:
-        expected_hash = hashlib.sha256(reset_protocol.canonical(preflight) + b'\n').hexdigest()
-        if (not isinstance(reviewed, dict) or reviewed.get('format') != 'nocheh-reset-reviewed-paths-v1' or
-                reviewed.get('preflight_sha256') != expected_hash or reviewed.get('content_copied') is not False or
-                any(not isinstance(reviewed.get(key), list) for key in ('roots', 'erase', 'preserve'))):
-            raise ValueError('reset_file_review_invalid')
-        explicit_roots = {row['path'] for row in preflight.get('paths', []) if row.get('action') == 'review_restore'}
-        explicit_roots.update(row['path'] for row in preflight.get('external_archives', []))
-        if set(reviewed['roots']) != explicit_roots:
-            raise ValueError('reset_file_review_invalid')
+    if ownership_review is not None:
+        reviewed = reset_ownership.validate(preflight, ownership_review)
         reviewed_roots = [absolute(value) for value in reviewed['roots']]
         selected.extend(reviewed['erase'])
         retained.extend(absolute(row['path']) for row in reviewed['preserve'])
+    elif explicit_roots:
+        raise ValueError('reset_file_review_required')
     planned = []
     count = 0
 

@@ -36,7 +36,7 @@ class ResetOwnershipTests(unittest.TestCase):
             reset_ownership.validate(self.preflight, draft)
         reviewed = reset_ownership.validate(self.preflight, self.reviewed())
         self.assertEqual(reviewed['items'], 3); self.assertEqual(len(reviewed['erase']), 2)
-        plan = reset_files.freeze(self.preflight, [], reviewed)
+        plan = reset_files.freeze(self.preflight, [], self.reviewed())
         reset_files.erase(plan, lambda: None)
         self.assertFalse(self.owned.exists()); self.assertFalse(self.restore.exists())
         self.assertEqual((self.foreign / 'sentinel').read_text(), 'unrelated')
@@ -72,7 +72,7 @@ class ResetOwnershipTests(unittest.TestCase):
         for row in review['roots'][0]['entries']:
             row['disposition'] = 'preserve-unrelated' if row['path'] == str(self.foreign) else 'erase-installation-owned'
         reviewed = reset_ownership.validate(self.preflight, review)
-        reset_files.erase(reset_files.freeze(self.preflight, [], reviewed), lambda: None)
+        reset_files.erase(reset_files.freeze(self.preflight, [], review), lambda: None)
         self.assertFalse(link.exists()); self.assertEqual((self.foreign / 'sentinel').read_text(), 'unrelated')
 
 

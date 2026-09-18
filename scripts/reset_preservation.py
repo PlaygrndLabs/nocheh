@@ -1,0 +1,375 @@
+"""Freeze every non-content reset preservation input before any erasure.
+
+The caller owns the reset journal and PostgreSQL maintenance lock.  This module
+binds current database setup, native preferences, sanitized provider accounting,
+retained files, explicit archive ownership decisions and the exact file-erasure
+manifest.  It does not erase source stores, containers or volumes.
+"""
+import hashlib
+import json
+import os
+import stat
+import uuid
+from pathlib import Path
+from types import SimpleNamespace
+
+from integrations.hermes import preference_transfer
+
+from . import (configuration, reset_accounting, reset_configuration, reset_files,
+               reset_ownership, reset_protocol, reset_quiescence)
+
+FORMAT = 'nocheh-reset-preservation-v1'
+PRIVATE_LIMIT = 64 * 1024 * 1024
+MAX_PRESERVED_ENTRIES = 100000
+MAX_PRESERVED_BYTES = 64 * 1024 * 1024 * 1024
+
+
+def _private_read(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_size > PRIVATE_LIMIT:
+            raise ValueError('reset_preservation_file_invalid')
+        raw = source.read(PRIVATE_LIMIT + 1)
+    if len(raw) > PRIVATE_LIMIT:
+        raise ValueError('reset_preservation_file_invalid')
+    return json.loads(raw)
+
+
+def _private_create(path, value):
+    raw = reset_protocol.canonical(value) + b'\n'
+    if len(raw) > PRIVATE_LIMIT:
+        raise ValueError('reset_preservation_file_limit')
+    temporary = path.with_name('.' + uuid.uuid4().hex + '.tmp')
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            output.write(raw); output.flush(); os.fsync(output.fileno())
+        os.link(temporary, path)
+        temporary.unlink()
+        reset_protocol.sync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _immutable(path, value):
+    if path.exists() or path.is_symlink():
+        if _private_read(path) != value:
+            raise ValueError('reset_preservation_artifact_changed')
+    else:
+        _private_create(path, value)
+    if _private_read(path) != value:
+        raise ValueError('reset_preservation_artifact_changed')
+
+
+def _kind(value):
+    if stat.S_ISDIR(value.st_mode):
+        return 'directory'
+    if stat.S_ISREG(value.st_mode):
+        if value.st_nlink != 1:
+            raise ValueError('reset_preserved_hardlink_denied')
+        return 'file'
+    if stat.S_ISLNK(value.st_mode):
+        return 'symlink'
+    raise ValueError('reset_preserved_type_denied')
+
+
+def _stable(value):
+    return {'device': value.st_dev, 'inode': value.st_ino, 'kind': _kind(value),
+            'mode': stat.S_IMODE(value.st_mode), 'size': value.st_size,
+            'mtime_ns': value.st_mtime_ns, 'ctime_ns': value.st_ctime_ns}
+
+
+def _fingerprint_path(row, *, transformed=False):
+    """Hash retained bytes and identities without retaining their contents."""
+    path = reset_files.absolute(row['path'])
+    digest = hashlib.sha256(); count = 0; total = 0
+
+    def add(kind, relative, metadata, payload=b''):
+        digest.update(reset_protocol.canonical([kind, relative, metadata]) + b'\n')
+        digest.update(hashlib.sha256(payload).digest())
+
+    def walk(fd, name, relative):
+        nonlocal count, total
+        value = os.stat(name, dir_fd=fd, follow_symlinks=False); metadata = _stable(value)
+        count += 1
+        if count > MAX_PRESERVED_ENTRIES:
+            raise ValueError('reset_preserved_entry_limit')
+        if metadata['kind'] == 'directory':
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            try:
+                if _stable(os.fstat(child)) != metadata:
+                    raise ValueError('reset_preserved_identity_changed')
+                names = sorted(os.listdir(child)); add('directory', relative, metadata)
+                for item in names:
+                    walk(child, item, relative + '/' + item if relative else item)
+                if _stable(os.fstat(child)) != metadata or names != sorted(os.listdir(child)):
+                    raise ValueError('reset_preserved_identity_changed')
+            finally:
+                os.close(child)
+        elif metadata['kind'] == 'file':
+            child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+            content = hashlib.sha256(); size = 0
+            try:
+                if _stable(os.fstat(child)) != metadata:
+                    raise ValueError('reset_preserved_identity_changed')
+                while chunk := os.read(child, 1024 * 1024):
+                    content.update(chunk); size += len(chunk)
+                if _stable(os.fstat(child)) != metadata or size != metadata['size']:
+                    raise ValueError('reset_preserved_identity_changed')
+            finally:
+                os.close(child)
+            total += size
+            add('file', relative, metadata, content.digest())
+        else:
+            target = os.readlink(name, dir_fd=fd).encode()
+            total += len(target); add('symlink', relative, metadata, target)
+
+    with reset_files.parent(path) as (fd, name, _):
+        observed = reset_files.inspect_at(fd, name)
+        present = observed is not None
+        if not transformed:
+            if present != row.get('exists'):
+                raise ValueError('reset_preserved_identity_changed')
+            if present and any(observed[key] != row.get(key) for key in ('device', 'inode', 'kind')):
+                raise ValueError('reset_preserved_identity_changed')
+        if present:
+            walk(fd, name, '')
+        else:
+            add('absent', '', {})
+    return {'path': str(path), 'action': row['action'], 'exists': present,
+            'sha256': digest.hexdigest(), 'entries': count, 'bytes': total}
+
+
+def _preserved_rows(preflight, reviewed):
+    rows = [row for row in preflight['paths'] if row['action'] in ('preserve', 'sanitize_accounting', 'sqlite_checkpoint')
+            and row.get('reason') != 'reset_coordinator_journal']
+    rows.extend(reviewed['preserve'])
+    paths = [row['path'] for row in rows]
+    if len(paths) != len(set(paths)):
+        raise ValueError('reset_preserved_scope_overlap')
+    ordered = sorted(rows, key=lambda row: row['path'])
+    for index, left in enumerate(ordered):
+        a = Path(left['path'])
+        if any(a in Path(right['path']).parents or Path(right['path']) in a.parents for right in ordered[index + 1:]):
+            raise ValueError('reset_preserved_scope_overlap')
+    return ordered
+
+
+def _snapshot_preserved(preflight, reviewed, accounting_path=None):
+    managed = set()
+    if accounting_path is not None:
+        # SQLite mutates the reviewed database in place. Its device/inode/kind
+        # therefore remain bound; only checkpoint companions and the native lock
+        # may appear or disappear around a safely retryable sanitization.
+        managed = {str(accounting_path) + suffix for suffix in ('-wal', '-shm', '-journal', '.manager.lock')}
+    values = [_fingerprint_path(row, transformed=row['path'] in managed)
+              for row in _preserved_rows(preflight, reviewed)]
+    if sum(row['entries'] for row in values) > MAX_PRESERVED_ENTRIES:
+        raise ValueError('reset_preserved_entry_limit')
+    if sum(row['bytes'] for row in values) > MAX_PRESERVED_BYTES:
+        raise ValueError('reset_preserved_byte_limit')
+    result = {'format': 'nocheh-reset-preserved-files-v1', 'entries': values,
+              'roots': len(values), 'files': sum(row['entries'] for row in values),
+              'bytes': sum(row['bytes'] for row in values)}
+    result['sha256'] = reset_protocol.fingerprint(result)
+    return result
+
+
+def _policy(values, snapshot):
+    configuration.validate(values)
+    groups = sorted(set(value.strip() for value in values['TELEGRAM_GROUP_IDS'].split(',') if value.strip()))
+    document = {'enabled': values['TELEGRAM_ENABLED'] == 'true',
+                'owner_id': values['TELEGRAM_OWNER_ID'] or None, 'group_ids': groups}
+    policy = SimpleNamespace(owner=document['owner_id'], groups=document['group_ids'])
+    if not policy.owner:
+        raise ValueError('reset_owner_configuration_missing')
+    if snapshot['layout'] == 'original-only-v1':
+        rows = snapshot['configuration']['runtime_configuration']
+        if len(rows) != 1 or rows[0] != {'name': 'assistant', 'document': document}:
+            raise ValueError('reset_runtime_configuration_mismatch')
+        if snapshot['configuration']['guard_mode'] != [{'mode': values['NOCHEH_GUARD_MODE']}]:
+            raise ValueError('reset_guard_configuration_mismatch')
+    return policy
+
+
+def _configuration(journal, preflight, recovery, inspect):
+    path = journal.directory / 'configuration.json'
+    if len(journal.value['steps']) == 3:
+        reset_configuration.freeze(journal, preflight, recovery, inspect=inspect)
+    receipt = reset_protocol.read(path)
+    if (receipt.get('format') != 'nocheh-reset-configuration-receipt-v1' or
+            receipt.get('reset_id') != journal.value['reset_id'] or
+            receipt.get('preflight_sha256') != journal.value['preflight_sha256'] or
+            receipt.get('snapshot_sha256') != reset_protocol.fingerprint(receipt.get('snapshot'))):
+        raise ValueError('reset_configuration_changed')
+    snapshot = reset_configuration.validate(receipt['snapshot'])
+    if reset_configuration.snapshot(recovery.query, snapshot['layout']) != snapshot:
+        raise ValueError('reset_configuration_changed')
+    return receipt
+
+
+def _preference_receipt(journal, preflight, policy, config_receipt):
+    snapshot = config_receipt['snapshot']; layout = snapshot['layout']
+    catalog = None
+    if layout == 'original-only-v1':
+        catalog = [{**row, 'state': 'active'} for row in snapshot['configuration']['runtime_profiles']]
+    native = journal.state / 'hermes'
+    path = journal.directory / 'preferences.json'
+    if path.exists() or path.is_symlink():
+        receipt = _private_read(path)
+    else:
+        captured = preference_transfer.capture(native, policy, catalog)
+        receipt = {'format': 'nocheh-reset-preferences-receipt-v1', 'reset_id': journal.value['reset_id'],
+                   'preflight_sha256': journal.value['preflight_sha256'],
+                   'snapshot_sha256': reset_protocol.fingerprint(captured), 'snapshot': captured}
+        _immutable(path, receipt)
+    if (not isinstance(receipt, dict) or receipt.get('format') != 'nocheh-reset-preferences-receipt-v1' or
+            receipt.get('reset_id') != journal.value['reset_id'] or
+            receipt.get('preflight_sha256') != journal.value['preflight_sha256'] or
+            receipt.get('snapshot_sha256') != reset_protocol.fingerprint(receipt.get('snapshot'))):
+        raise ValueError('reset_preferences_changed')
+    preference_transfer.validate_snapshot(receipt['snapshot'])
+    if (receipt['snapshot']['owner'] != policy.owner or receipt['snapshot']['groups'] != sorted(set(policy.groups))):
+        raise ValueError('reset_preferences_scope_changed')
+    preference_transfer.verify_source(native, receipt['snapshot'])
+    return receipt
+
+
+def _accounting_receipt(journal, preflight, reviewed, sanitize):
+    targets = [row for row in preflight['paths'] if row['action'] == 'sanitize_accounting']
+    if len(targets) > 1:
+        raise ValueError('reset_accounting_scope_invalid')
+    target = targets[0] if targets else None
+    path = journal.directory / 'accounting.json'
+    if target is None or not target['exists']:
+        receipt = {'format': 'nocheh-reset-accounting-receipt-v1', 'reset_id': journal.value['reset_id'],
+                   'preflight_sha256': journal.value['preflight_sha256'], 'present': False,
+                   'accounting_preserved': True, 'backup_created': False}
+        _immutable(path, receipt)
+        return receipt, None
+    accounting_path = reset_files.absolute(target['path'])
+    rows = [row for row in _preserved_rows(preflight, reviewed)
+            if row['path'] in {str(accounting_path) + suffix for suffix in ('', '-wal', '-shm', '-journal', '.manager.lock')}]
+    if path.exists() or path.is_symlink():
+        receipt = _private_read(path)
+    else:
+        result = sanitize(accounting_path)
+        if result.get('accounting_preserved') is not True or result.get('backup_created') is not False:
+            raise RuntimeError('reset_accounting_preservation_failed')
+        frozen = {'format': 'nocheh-reset-accounting-files-v1',
+                  'entries': [_fingerprint_path(row, transformed=row['path'] != str(accounting_path)) for row in rows]}
+        frozen['sha256'] = reset_protocol.fingerprint(frozen)
+        receipt = {'format': 'nocheh-reset-accounting-receipt-v1', 'reset_id': journal.value['reset_id'],
+                   'preflight_sha256': journal.value['preflight_sha256'], 'present': True,
+                   'accounting_preserved': True, 'backup_created': False,
+                   'files': frozen, 'erased_rows': result.get('erased_rows', {})}
+        _immutable(path, receipt)
+    required = {'format', 'reset_id', 'preflight_sha256', 'present', 'accounting_preserved',
+                'backup_created', 'files', 'erased_rows'}
+    if (not isinstance(receipt, dict) or set(receipt) != required or
+            receipt['format'] != 'nocheh-reset-accounting-receipt-v1' or
+            receipt['reset_id'] != journal.value['reset_id'] or
+            receipt['preflight_sha256'] != journal.value['preflight_sha256'] or
+            receipt['present'] is not True or receipt['accounting_preserved'] is not True or
+            receipt['backup_created'] is not False):
+        raise ValueError('reset_accounting_receipt_changed')
+    if (not isinstance(receipt['erased_rows'], dict) or
+            any(not isinstance(name, str) or type(count) is not int or count < 0
+                for name, count in receipt['erased_rows'].items())):
+        raise ValueError('reset_accounting_receipt_changed')
+    current = {'format': 'nocheh-reset-accounting-files-v1',
+               'entries': [_fingerprint_path(row, transformed=row['path'] != str(accounting_path)) for row in rows]}
+    current['sha256'] = reset_protocol.fingerprint(current)
+    if current != receipt['files']:
+        raise ValueError('reset_accounting_changed')
+    return receipt, accounting_path
+
+
+def _public(receipt):
+    return {'phase': 'preservation_frozen', **receipt['counts'],
+            'accounting_preserved': receipt['accounting_preserved'],
+            'content_backup_created': False, 'source_content_copied': False}
+
+
+def freeze(journal, preflight, recovery, ownership_review, *, inspect,
+           load_setup=configuration.load, sanitize=reset_accounting.sanitize):
+    """Freeze the complete preservation gate, safely retrying private artifacts."""
+    journal.assert_current()
+    if (journal.value is None or len(journal.value['steps']) not in (3, 4) or
+            [row['step'] for row in journal.value['steps'][:3]] != list(reset_protocol.STEPS[:3]) or
+            len(journal.value['steps']) == 4 and journal.value['steps'][3]['step'] != 'preservation_frozen'):
+        raise ValueError('reset_preservation_phase_required')
+    if reset_quiescence.hashlib_preflight(preflight) != journal.value['preflight_sha256']:
+        raise ValueError('reset_preflight_changed')
+
+    def held():
+        journal.assert_current(); recovery.assert_maintenance()
+        reset_quiescence.verify_quiescent(journal, preflight, inspect())
+
+    held()
+    reviewed = reset_ownership.validate(preflight, ownership_review)
+    ownership = {'format': reset_ownership.FORMAT, 'reset_id': journal.value['reset_id'],
+                 'review_sha256': reviewed['review_sha256'], 'review': ownership_review}
+    _immutable(journal.directory / 'ownership.json', ownership)
+    config_receipt = _configuration(journal, preflight, recovery, inspect)
+    values = load_setup(journal.state)
+    if (hashlib.sha256(reset_protocol.canonical(values)).hexdigest() !=
+            preflight['installation']['configuration_sha256'] or
+            values['NOCHEH_STORAGE_LAYOUT'] != preflight['installation']['storage_layout']):
+        raise ValueError('reset_setup_configuration_changed')
+    policy = _policy(values, config_receipt['snapshot'])
+    held(); preferences = _preference_receipt(journal, preflight, policy, config_receipt)
+    # Establish that credentials, login state, ledgers and the unsanitized
+    # accounting database still match the reviewed inventory before the one
+    # permitted preservation mutation begins. On retry, the immutable accounting
+    # receipt authorizes only the already-sanitized SQLite companions to differ.
+    accounting_targets = [row for row in preflight['paths'] if row['action'] == 'sanitize_accounting' and row['exists']]
+    accounting_identity = accounting_targets[0]['path'] if accounting_targets else None
+    held(); _snapshot_preserved(preflight, reviewed, accounting_identity)
+    held(); accounting, accounting_path = _accounting_receipt(journal, preflight, reviewed, sanitize)
+    held()
+
+    preserved = _snapshot_preserved(preflight, reviewed, accounting_path)
+    _immutable(journal.directory / 'preserved.json', preserved)
+    protected = [journal.state / relative for relative in reset_quiescence.FENCES]
+    file_manifest = reset_files.freeze(preflight, protected, ownership_review)
+    files_receipt = {'format': 'nocheh-reset-files-receipt-v1', 'reset_id': journal.value['reset_id'],
+                     'preflight_sha256': journal.value['preflight_sha256'],
+                     'ownership_sha256': reviewed['review_sha256'],
+                     'manifest_sha256': reset_protocol.fingerprint(file_manifest), 'manifest': file_manifest}
+    _immutable(journal.directory / 'files.json', files_receipt)
+
+    held()
+    if reset_ownership.validate(preflight, ownership_review) != reviewed:
+        raise ValueError('reset_ownership_review_changed')
+    if reset_configuration.snapshot(recovery.query, config_receipt['snapshot']['layout']) != config_receipt['snapshot']:
+        raise ValueError('reset_configuration_changed')
+    preference_transfer.verify_source(journal.state / 'hermes', preferences['snapshot'])
+    if _snapshot_preserved(preflight, reviewed, accounting_path) != preserved:
+        raise ValueError('reset_preserved_files_changed')
+    if reset_files.freeze(preflight, protected, ownership_review) != file_manifest:
+        raise ValueError('reset_file_manifest_changed')
+    held()
+
+    counts = {'configuration_records': sum(len(rows) for rows in config_receipt['snapshot']['configuration'].values()),
+              'preference_profiles': len(preferences['snapshot']['profiles']),
+              'preserved_roots': preserved['roots'], 'preserved_entries': preserved['files'],
+              'reviewed_items': reviewed['items'], 'erasure_targets': len(file_manifest['targets'])}
+    receipt = {'format': FORMAT, 'reset_id': journal.value['reset_id'],
+               'preflight_sha256': journal.value['preflight_sha256'],
+               'configuration_sha256': config_receipt['snapshot_sha256'],
+               'preferences_sha256': preferences['snapshot_sha256'],
+               'accounting_sha256': reset_protocol.fingerprint(accounting),
+               'preserved_sha256': preserved['sha256'], 'ownership_sha256': reviewed['review_sha256'],
+               'file_manifest_sha256': files_receipt['manifest_sha256'], 'counts': counts,
+               'accounting_preserved': accounting['accounting_preserved'],
+               'content_backup_created': False, 'source_content_copied': False}
+    path = journal.directory / 'preservation.json'
+    _immutable(path, receipt)
+    evidence = reset_protocol.fingerprint(receipt)
+    if len(journal.value['steps']) == 4 and journal.value['steps'][3]['evidence_sha256'] != evidence:
+        raise ValueError('reset_preservation_evidence_changed')
+    journal.complete('preservation_frozen', evidence)
+    held()
+    return _public(receipt)

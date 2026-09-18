@@ -562,6 +562,24 @@ This fixture has no network, creates its own state, proves exclusion by the real
 monitor lock, and restarts the pinned monitor after cleanup. It does not authorize
 or execute an installation reset.
 
+`scripts.reset_preservation.freeze` is the complete pre-erasure gate. While the
+journal and PostgreSQL maintenance exclusion remain held, it requires the exact
+ownership review, freezes and independently rechecks the current database setup,
+matches the saved environment policy, captures and verifies native preferences,
+sanitizes provider accounting, and fingerprints credentials, provider login,
+Honcho setup/spending state, and every other retained path without copying their
+contents. It then freezes the anchored file-erasure manifest and binds all component
+hashes into an immutable, content-free receipt before advancing
+`preservation_frozen`. Detailed private artifacts stay under the reset journal.
+Changed policy, files, source preferences, ownership, accounting, manifest scope,
+maintenance ownership or inactive fences stop the phase. A retry reuses a verified
+accounting receipt; a crash before that receipt reruns the idempotent sanitizer while
+requiring the reviewed database identity. Run
+`python3 compatibility/reset-preservation-rehearsal.py --directory NEW_DIRECTORY
+--management-image CANDIDATE` for a fresh internal-network rehearsal with real
+PostgreSQL configuration queries, the real SQLite sanitizer, and synthetic retained
+credentials, spending, original-file and source/derivative canaries.
+
 Stop ingress, scheduling, execution, learning, and provider refresh ownership;
 settle in-flight effects before erasing receipts. Resolve installation-owned
 paths and volumes explicitly; never use global pruning or touch unrelated state.
