@@ -20,14 +20,14 @@ FORMAT = 'nocheh-reset-empty-baseline-v1'
 STAGES = ('verified', 'retirement_intent', 'retired')
 PRIVATE = ('configuration.json', 'preferences.json', 'accounting.json',
            'preserved.json', 'ownership.json', 'files.json', 'settlement.json',
-           'setup.json')
+           'setup.json', 'layout.json')
 LIMIT = 64 * 1024 * 1024
 HASH = re.compile(r'[a-f0-9]{64}')
 ALLOWED_JOURNAL = frozenset({
     'coordinator.lock', 'progress.json', 'quiescence.json', 'settlement.json',
     'configuration.json', 'preferences.json', 'accounting.json', 'preserved.json',
     'ownership.json', 'files.json', 'preservation.json', 'erasure.json',
-    'setup.json', 'initialization.json', 'baseline.json'})
+    'setup.json', 'layout.json', 'initialization.json', 'baseline.json'})
 
 
 def _journal_names(journal):

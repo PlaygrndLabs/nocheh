@@ -44,6 +44,45 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertIsNone(query.call_args.args[0]); self.assertEqual(result['configuration'], values)
         self.assertNotIn('memory_shares', query.call_args.args[1])
 
+    def test_legacy_setup_converts_to_original_only_without_widening_access(self):
+        source = {'format': configuration.FORMAT, 'layout': 'legacy', 'configuration': {
+            'security_policy': self.values['security_policy'], 'memory_spaces': [
+                {'id': '-10', 'overrides': {'mode': 'filtered', 'sources': ['42'],
+                                            'privacy_instructions': 'Only fixture facts.'}},
+                {'id': '-20', 'overrides': {'mode': 'approved', 'sources': ['42']}},
+                {'id': '-30', 'overrides': {'mode': 'isolated', 'sources': ['42']}}]}}
+        custom = 'profile-' + 'a' * 48
+        preferences = {'owner': '42', 'groups': ['-10', '-20', '-30'], 'profiles': [
+            {'id': custom, 'space': '42', 'name': 'research', 'overrides': {}}]}
+        values = {'TELEGRAM_ENABLED': 'true', 'TELEGRAM_OWNER_ID': '42',
+                  'TELEGRAM_GROUP_IDS': '-30,-20,-10', 'NOCHEH_GUARD_MODE': 'off'}
+        reset_id = '22222222-2222-4222-8222-222222222222'
+        result = configuration.original_only(source, values, preferences, reset_id)
+        self.assertEqual(result['layout'], 'original-only-v1')
+        converted = result['configuration']
+        self.assertEqual(converted['runtime_configuration'][0]['document'],
+                         {'enabled': True, 'owner_id': '42', 'group_ids': ['-10', '-20', '-30']})
+        self.assertEqual(converted['guard_mode'], [{'mode': 'off'}])
+        self.assertEqual(converted['runtime_profiles'], [{'id': custom, 'name': 'research', 'owner_id': '42'}])
+        rules = {row['destination']: row for row in converted['sharing_rules']}
+        self.assertTrue(rules['-10']['enabled']); self.assertEqual(rules['-10']['mode'], 'filtered')
+        self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
+        self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')
+        self.assertEqual(configuration.original_only(source, values, preferences, reset_id), result)
+
+    def test_legacy_conversion_rejects_unrepresentable_or_mismatched_setup(self):
+        base = {'format': configuration.FORMAT, 'layout': 'legacy', 'configuration': {
+            'security_policy': self.values['security_policy'],
+            'memory_spaces': [{'id': '-10', 'overrides': {'mode': 'filtered', 'sources': ['-10']}}]}}
+        values = {'TELEGRAM_ENABLED': 'false', 'TELEGRAM_OWNER_ID': '42',
+                  'TELEGRAM_GROUP_IDS': '-10', 'NOCHEH_GUARD_MODE': 'on'}
+        preferences = {'owner': '42', 'groups': ['-10'], 'profiles': []}
+        with self.assertRaisesRegex(ValueError, 'requires_review'):
+            configuration.original_only(base, values, preferences, str(uuid.uuid4()))
+        safe = copy.deepcopy(base); safe['configuration']['memory_spaces'] = []
+        with self.assertRaisesRegex(ValueError, 'legacy_configuration_invalid'):
+            configuration.original_only(safe, values, {**preferences, 'owner': '99'}, str(uuid.uuid4()))
+
     def test_unknown_fields_and_missing_critical_configuration_fail_closed(self):
         for change in ('content', 'columns', 'security', 'generation', 'guard', 'runtime'):
             values = copy.deepcopy(self.values)
