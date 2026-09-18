@@ -82,6 +82,9 @@ test('separated application captures through control outages, exposes owner repo
     await services.guards.prepare((await services.archive.captured(digest(key))).reference,'fixture',services.detect);
     const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
+    await request('/v1/runtime/profiles',undefined,403,credential);
+    const profiles=await request('/v1/runtime/profiles');assert.ok(profiles.profiles.some((p:any)=>p.is_default));
+    assert.equal((await request('/v1/runtime/profiles/resolve',{profile:'default'})).space,'123');
     await request('/v1/browser/admit',{...browserInput,event_id:browserSource.event_id},403,credential);
     assert.equal((await request('/v1/browser/admit',{...browserInput,event_id:browserSource.event_id})).owned,true);
     await services.preparation.run(browserSource.event_id,async()=>{throw Error('no browser files');},'fixture',services.detect,

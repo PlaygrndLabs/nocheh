@@ -114,6 +114,13 @@ require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.
 
+The candidate native-profile catalog lives in control storage. Its owner-only
+`/v1/runtime/profiles` and `/v1/runtime/profiles/resolve` operations distinguish
+display names, stable logical/preference identities, and current native directory
+identities. Rename/retire revokes contexts in the same control transaction.
+Native administration and managed admission must consume this catalog before the
+candidate can be activated; saved native preferences require explicit migration.
+
 Run `NOCHEH_STORES_FIXTURE=1 python3 -m scripts.store_wiring_check` to render the
 combined Compose configuration with temporary synthetic credentials, inspect
 credential separation/dependencies, and start no services. The real database

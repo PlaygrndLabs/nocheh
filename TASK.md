@@ -530,6 +530,20 @@ confirmed browser delivery capture, scheduler migration, and full installation
 acceptance remain pending. No live service or content was changed.
 [Browser execution evidence](compatibility/results/2026-09-18-store-browser-runs.json).
 
+Native profile configuration now has a control repository and owner-only list,
+resolve, create, rename, and retire endpoints. A custom profile keeps its stable
+configuration/preference identity across rename; native directories remain bound
+to the installation and guard revision. Renaming/retiring atomically revokes old
+contexts, retired identities cannot reactivate, and a reused display name creates
+a different identity. Default and explicit topic bindings preserve exact audiences.
+One repository check and two HTTP/application checks pass in isolated Compose.
+The initial TypeScript readonly assignment and an overly broad reserved-name check
+were corrected before the final repository run. AST-only Graphify: 419 files,
+2,562 nodes, 10,329 edges; zero model calls. Native administration, browser admission
+against this catalog, saved preference migration, and browser media preparation
+ordering still need their combined integration and acceptance.
+[Profile repository evidence](compatibility/results/2026-09-18-store-runtime-profiles.json).
+
 
 
 
