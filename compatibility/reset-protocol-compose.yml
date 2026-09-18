@@ -1,0 +1,29 @@
+# Reset journal and ordinary-restart regression. No providers, ports or state mounts.
+name: ${NOCHEH_RESET_PROTOCOL_PROJECT:?Explicit fixture project required}
+services:
+  management:
+    image: ${NOCHEH_RESET_PROTOCOL_MANAGEMENT_IMAGE:?Explicit candidate image required}
+    user: "${NOCHEH_RESET_PROTOCOL_UID}:${NOCHEH_RESET_PROTOCOL_GID}"
+    network_mode: none
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=256m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    entrypoint: [python3, -m, unittest]
+    command: [integrations.hermes.test_reset_protocol, integrations.hermes.test_reset_inventory, integrations.hermes.test_reset_accounting, -q]
+    environment:
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+  native:
+    image: ${NOCHEH_RESET_PROTOCOL_NATIVE_IMAGE:?Explicit pinned native candidate required}
+    network_mode: none
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=256m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    entrypoint: [python, -m, unittest]
+    command: [integrations.hermes.test_capture, -q]
+    environment:
+      HOME: /tmp
+      HERMES_HOME: /tmp/nocheh-reset-protocol-fixture
+      SERVICE_TOKEN: reset-protocol-synthetic-not-a-real-credential
