@@ -65,6 +65,12 @@ requests are durable. Scoped requests wait for the configured guard mode and all
 three stores contribute to health. Restored installations refuse content access,
 including in the security service through a read-only spool marker mount.
 
+Preparing a source's first guarded copy leaves unrelated authorized contexts
+available. That new source remains unreadable until its own prepared pointer is
+ready. Replacement guards, derivative selection, and learned publications keep
+the pending-publication authorization barrier. Reconciliation includes first
+preparations even though they do not globally revoke existing contexts.
+
 Preparation, reprocessing, native review, Honcho, and contextual learning register
 with the existing Inngest workflow engine. Admission is bounded before borrowing
 database clients; refresh sweeps checkpoint source/projection cursors in control.

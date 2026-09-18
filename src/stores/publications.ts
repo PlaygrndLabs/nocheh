@@ -4,6 +4,11 @@ import {requestWorkflow} from '../workflows/store.js';
 import {canonical} from '../archive.js';
 import type {GuardBinding} from './guards.js';
 
+// Preparing the first guarded copy cannot revoke an unrelated authorized
+// context. Its own reads still require a ready derived pointer. Replacements,
+// selections and learned publications retain the global authorization barrier.
+export const blockingPublications="state='pending' AND (operation_kind<>'guard' OR expected_revision IS NOT NULL)";
+
 export interface RepresentationChange {
   kind:'guard'|'selection'|'memory';source_id:string;revision:number;expected_revision:number|null;operation_id:string;
   input_binding?:GuardBinding;

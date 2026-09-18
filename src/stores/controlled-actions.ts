@@ -1,3 +1,4 @@
+import {blockingPublications} from './publications.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -30,7 +31,7 @@ export class ControlledActionRepository {
   async fence(db:pg.PoolClient,binding:GuardBinding) {
     const state=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
     if(!state||canonical({generation:state.generation,epoch:Number(state.epoch),mode:state.mode})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
-    if((await db.query("SELECT 1 FROM guard_publications WHERE state='pending' LIMIT 1")).rowCount)throw new HttpError(409,'guard_transition_pending');
+    if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
   async arguments(row:any,current=true) {
     if(current)await this.guards.assertCurrent(row.binding);

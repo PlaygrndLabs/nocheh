@@ -1,3 +1,4 @@
+import {blockingPublications} from './publications.js';
 import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
@@ -20,7 +21,7 @@ export class GuardRepository {
 
   async state():Promise<GuardBinding> {
     const row=(await this.stores.control.query(`SELECT i.generation,g.epoch,g.mode,
-      EXISTS(SELECT 1 FROM guard_publications WHERE state='pending') AS pending
+      EXISTS(SELECT 1 FROM guard_publications WHERE ${blockingPublications}) AS pending
       FROM guard_state g CROSS JOIN installation i WHERE g.singleton AND i.singleton`)).rows[0];
     if(!row||row.pending)throw new HttpError(409,'guard_transition_pending');
     return {generation:row.generation,epoch:Number(row.epoch),mode:row.mode};
@@ -37,7 +38,7 @@ export class GuardRepository {
     try {
       await client.query('BEGIN');
       const current=(await client.query('SELECT mode FROM guard_state WHERE singleton FOR UPDATE')).rows[0];
-      if((await client.query("SELECT 1 FROM guard_publications WHERE state='pending' LIMIT 1")).rowCount)
+      if((await client.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)
         throw new HttpError(409,'guard_transition_pending');
       if(current.mode!==mode) {
         const epoch=Number((await client.query('UPDATE guard_state SET mode=$1,epoch=epoch+1 WHERE singleton RETURNING epoch',[mode])).rows[0].epoch);
