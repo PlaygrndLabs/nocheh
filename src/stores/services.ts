@@ -30,6 +30,7 @@ import {DerivativePortabilityRepository} from './derivative-portability.js';
 import {RuntimeConfigurationRepository} from './runtime-configuration.js';
 import {TelegramActionRepository} from './telegram-actions.js';
 import {TelegramDispatchRepository} from './telegram-dispatch.js';
+import {ControlledActionRepository} from './controlled-actions.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -59,6 +60,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
+    controlledActions:new ControlledActionRepository(access,derived,guards,prepared,turns,detect),
     telegramActions,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,telegramActions,options.runtime,options.serviceToken??'',detect),
     capture,sourcePortability:new SourcePortabilityRepository(capture,attachments),derivativePortability:new DerivativePortabilityRepository(stores,archive),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),

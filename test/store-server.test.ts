@@ -49,7 +49,7 @@ test('separated application captures through control outages, exposes owner repo
   try {
     assert.deepEqual((await request('/health')).databases,{archive:'ready',derived:'ready',control:'ready'});
     assert.equal((await request('/v1/security/policy')).source,'owner security policy');
-    await request('/v1/security/preview',{action_id:digest(key)},503);
+    await request('/v1/security/preview',{action_id:digest(key)},404);
     const project=await request('/v1/projects',{name:key,description:'HTTP rehearsal',state:'active',expected_revision:0,operation_id:key+':project'});
     assert.equal(project.name,key);
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:String(Date.now()),revision:'1',occurred_at:null,text:'Original HTTP observation',
@@ -80,6 +80,11 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
     await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
     const proposal=await request('/v1/action-requests',{destination:'current',text:'Synthetic approval preview'},200,credential);
+    const tool=await request('/v1/tools/propose',{kind:'shell',arguments:{command:'pwd'}},200,credential);
+    assert.equal((await request('/v1/tools/actions/'+tool.id)).arguments.command,'pwd');
+    assert.equal((await request('/v1/security/preview',{action_id:tool.id})).decision.outcome,'ask');
+    await request('/v1/tools/decide',{id:tool.id,fingerprint:tool.fingerprint,decision:'approve'},403,credential);
+    assert.equal((await request('/v1/tools/decide',{id:tool.id,fingerprint:tool.fingerprint,decision:'approve'})).state,'approved');
     assert.equal(proposal.state,'proposed');assert.equal((await request('/v1/tools/actions/'+proposal.id,undefined,200,credential)).arguments.text,'Synthetic approval preview');
     await request('/v1/tools/telegram-decision',{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'},403,credential);
     assert.equal((await request('/v1/tools/telegram-decision',{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'})).state,'approved');

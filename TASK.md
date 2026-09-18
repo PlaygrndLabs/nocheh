@@ -437,6 +437,18 @@ Managed runtimes, host tools/import coordination, full portability, full rehears
 reset, and live acceptance remain pending.
 [Workflow owner evidence](compatibility/results/2026-09-18-store-workflow-owner.json).
 
+Controlled shell, browser, and MCP proposals now retain immutable generated
+arguments and guarded history in derived storage. Control rows contain typed
+references, exact fingerprints, owner decisions, and bounded permissions.
+Approval and grant operations use revision checks and idempotency receipts;
+guard changes invalidate the proposal even with guarding off. Policy previews
+consume no permission and owner inspection retains the originally reviewed
+arguments after a later guarded edit. The owner HTTP routes and existing native
+proposal route use these repositories. Six affected real-PostgreSQL, HTTP, and
+legacy security checks pass. Host claim/start/result execution and owner-DM tool
+commands remain pending; this increment performs no tool execution.
+[Controlled proposal evidence](compatibility/results/2026-09-18-store-controlled-proposals.json).
+
 
 
 

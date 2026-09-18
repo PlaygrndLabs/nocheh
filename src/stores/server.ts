@@ -47,7 +47,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // must observe the complete current authorization generation on every call.
     if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
     if(await owner.handle(principal,req,res,url))return;
-    if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true}))return;
+    if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
     if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {
       admin(principal);
       if(path.startsWith('/v1/workflows/inspection/'))return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
@@ -66,12 +66,20 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,value);
     };
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.telegramActions.request(principal,await readJson(req)));
+    if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.controlledActions.propose(principal,await readJson(req)));
+    if(req.method==='POST'&&['/v1/tools/decide','/v1/tools/grant','/v1/tools/revoke'].includes(path)) {
+      admin(principal);const body=await readJson(req);
+      return json(res,200,await (path.endsWith('/decide')?s.controlledActions.decide(principal,body):path.endsWith('/grant')?s.controlledActions.grant(principal,body):s.controlledActions.revoke(principal,body)));
+    }
     if(path==='/v1/tools/actions'&&req.method==='GET') {
-      admin(principal);return json(res,200,{actions:[],permissions:[],telegram:await s.telegramActions.list(principal)});
+      admin(principal);return json(res,200,{...await s.controlledActions.list(principal),telegram:await s.telegramActions.list(principal)});
     }
     if(path==='/v1/tools/telegram-decision'&&req.method==='POST'){admin(principal);return json(res,200,await s.telegramActions.decide(principal,await readJson(req)));}
     const action=path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
-    if(action&&req.method==='GET')return result(await s.telegramActions.inspect(principal,action[1]!),true);
+    if(action&&req.method==='GET') {
+      const exists=(await s.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[action[1]])).rowCount;
+      return result(exists?await s.controlledActions.inspect(principal,action[1]):await s.telegramActions.inspect(principal,action[1]!),true);
+    }
     if(path==='/v1/context/prepare'&&req.method==='POST') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
       return result(await readJson(req,1024*1024));
