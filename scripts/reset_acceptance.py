@@ -272,7 +272,7 @@ def activate(journal, preflight, *, runner=run, environment=None, command=None,
              timeout=180):
     """Enter live acceptance with all automatic restart ownership disabled."""
     journal.assert_current()
-    if (journal.value is None or len(journal.value['steps']) != 8 or
+    if (journal.value is None or len(journal.value['steps']) not in (8, 9) or
             journal.value['steps'][7]['step'] != 'telegram_boundary' or
             journal.value['preflight_sha256'] != reset_quiescence.hashlib_preflight(preflight)):
         raise ValueError('reset_acceptance_phase_required')
@@ -336,3 +336,165 @@ def activate(journal, preflight, *, runner=run, environment=None, command=None,
     return {'phase': 'acceptance_running', 'services': len(plan['desired']),
             'containers': len(by_service), 'restart_ownership': False,
             'fresh_acceptance': False, 'resumed': False}
+
+
+def _fresh_result(raw, request):
+    lines = [line for line in raw.splitlines() if line.strip()]
+    try:
+        value = json.loads(lines[-1])
+    except (IndexError, json.JSONDecodeError):
+        raise RuntimeError('reset_fresh_acceptance_verification_failed') from None
+    names = ('owner_dm', 'dedicated_group', 'reply', 'human_reaction',
+             'subscription_transcription', 'learned_recall', 'owner_correction',
+             'isolation', 'intentional_silence', 'exact_approval',
+             'restart_recovery', 'honcho')
+    required = {'event', 'reset_id', 'generation', 'mode', 'boundary_confirmed_at',
+                'checks', 'source_events', 'live_only', 'historical_evidence',
+                'fixtures_accepted', 'dedicated_group_sha256',
+                'human_participant_sha256'}
+    if (not isinstance(value, dict) or set(value) != required or
+            value['event'] != 'reset_fresh_acceptance_verified' or
+            value['reset_id'] != request['reset_id'] or
+            value['generation'] != request['generation'] or
+            value['mode'] != 'live' or
+            value['boundary_confirmed_at'] != request['boundary_confirmed_at'] or
+            value['checks'] != {name: 'passed' for name in names} or
+            type(value['source_events']) is not int or value['source_events'] < 8 or
+            value['live_only'] is not True or value['historical_evidence'] is not False or
+            value['fixtures_accepted'] is not False or
+            value['dedicated_group_sha256'] != request['dedicated_group_sha256'] or
+            value['human_participant_sha256'] != request['human_participant_sha256']):
+        raise RuntimeError('reset_fresh_acceptance_verification_failed')
+    return value
+
+
+def _request(journal, evidence):
+    if (not isinstance(evidence, dict) or evidence.get('format') != 'nocheh-fresh-acceptance-v1' or
+            evidence.get('mode') != 'live' or evidence.get('reset_id') != journal.value['reset_id'] or
+            evidence.get('generation') != journal.value['generation'] or
+            evidence.get('boundary_confirmed_at') != journal.value['telegram']['confirmed_at']):
+        raise ValueError('reset_fresh_acceptance_request_invalid')
+    # The store verifier applies the complete closed schema.  Reject obvious
+    # attempts to label historical or fixture evidence before creating a file.
+    if any(key in evidence for key in ('fixture', 'synthetic', 'historical')):
+        raise ValueError('reset_fresh_acceptance_request_invalid')
+    return evidence
+
+
+def verify_fresh(journal, preflight, evidence, *, runner=run, environment=None,
+                 command=None, timeout=180):
+    """Advance only ``fresh_acceptance`` after current live store verification."""
+    journal.assert_current()
+    if (journal.value is None or len(journal.value['steps']) not in (8, 9) or
+            journal.value['steps'][7]['step'] != 'telegram_boundary' or
+            journal.value['preflight_sha256'] != reset_quiescence.hashlib_preflight(preflight)):
+        raise ValueError('reset_fresh_acceptance_phase_required')
+    request = _request(journal, evidence)
+    environment = configuration.compose_environment(journal.state) if environment is None else environment
+    command = configuration.compose_command(journal.state) if command is None else command
+    activate(journal, preflight, runner=runner, environment=environment,
+             command=command, timeout=timeout)
+    activation = reset_protocol.read(journal.directory / 'acceptance-mode.json')
+    if activation.get('stage') != 'acceptance_running':
+        raise ValueError('reset_fresh_acceptance_activation_changed')
+    request_path = journal.directory / 'fresh-acceptance-request.json'
+    if request_path.exists() or request_path.is_symlink():
+        if reset_protocol.read(request_path) != request:
+            raise ValueError('reset_fresh_acceptance_request_changed')
+    else:
+        reset_protocol.atomic(request_path, request, create=True)
+    profiles = ['reset', *activation['plan']['profiles']]
+    raw = runner(_compose(command, profiles, ['run', '--rm', '--no-deps', '--pull',
+                                               'never', 'nocheh-reset-acceptance']), environment)
+    verified = _fresh_result(raw, request)
+    receipt = {'format': 'nocheh-reset-fresh-acceptance-v1',
+               'reset_id': journal.value['reset_id'],
+               'generation': journal.value['generation'],
+               'telegram_sha256': journal.value['steps'][7]['evidence_sha256'],
+               'activation_sha256': reset_protocol.fingerprint(activation),
+               'request_sha256': reset_protocol.fingerprint(request),
+               'verified': verified}
+    path = journal.directory / 'fresh-acceptance.json'
+    if path.exists() or path.is_symlink():
+        if reset_protocol.read(path) != receipt:
+            raise ValueError('reset_fresh_acceptance_evidence_changed')
+    else:
+        reset_protocol.atomic(path, receipt, create=True)
+    evidence_sha256 = reset_protocol.fingerprint(receipt)
+    journal.complete('fresh_acceptance', evidence_sha256)
+    return {'phase': 'fresh_acceptance', 'checks': len(verified['checks']),
+            'live_only': True, 'restart_ownership': False, 'resumed': False}
+
+
+def _policy_argument(value):
+    policy = reset_quiescence.restart_policy(value)
+    if policy['Name'] == 'on-failure' and policy['MaximumRetryCount']:
+        return 'on-failure:' + str(policy['MaximumRetryCount'])
+    return policy['Name']
+
+
+def _resumption_base(journal, activation, acceptance):
+    return {'format': 'nocheh-reset-resumption-v1',
+            'reset_id': journal.value['reset_id'],
+            'generation': journal.value['generation'],
+            'acceptance_sha256': reset_protocol.fingerprint(acceptance),
+            'activation_sha256': reset_protocol.fingerprint(activation),
+            'containers': activation['containers'],
+            'restart_policies': activation['plan']['restart_policies'],
+            'stage': 'prepared'}
+
+
+def resume(journal, preflight, *, runner=run, environment=None, command=None,
+           timeout=180):
+    """Restore only saved restart ownership after the fresh live gate passes."""
+    journal.assert_current()
+    if (journal.value is None or len(journal.value['steps']) not in (9, 10) or
+            journal.value['steps'][8]['step'] != 'fresh_acceptance' or
+            journal.value['preflight_sha256'] != reset_quiescence.hashlib_preflight(preflight)):
+        raise ValueError('reset_resumption_phase_required')
+    environment = configuration.compose_environment(journal.state) if environment is None else environment
+    command = configuration.compose_command(journal.state) if command is None else command
+    activation = reset_protocol.read(journal.directory / 'acceptance-mode.json')
+    acceptance = reset_protocol.read(journal.directory / 'fresh-acceptance.json')
+    if (activation.get('stage') != 'acceptance_running' or
+            acceptance.get('format') != 'nocheh-reset-fresh-acceptance-v1' or
+            reset_protocol.fingerprint(acceptance) != journal.value['steps'][8]['evidence_sha256']):
+        raise ValueError('reset_resumption_evidence_changed')
+    plan = activation['plan']; profiles = plan['profiles']
+    rendered = _render(command, profiles, environment, runner)
+    receipt = _receipt(journal); initialization = _initialization_receipt(journal)
+    expected = _plan(journal, preflight, initialization, rendered, receipt, profiles)
+    if expected != plan:
+        raise ValueError('reset_resumption_plan_changed')
+    by_service = _owned(plan, runner, environment)
+    if _container_identity(by_service) != activation['containers']:
+        raise RuntimeError('reset_resumption_resource_changed')
+    if _fence_state(journal.state, journal.value['reset_id']) != 0:
+        raise RuntimeError('reset_resumption_fence_changed')
+    _start(plan, rendered, by_service, runner, environment, timeout)
+    path = journal.directory / 'resumption.json'; base = _resumption_base(journal, activation, acceptance)
+    if path.exists() or path.is_symlink():
+        value = reset_protocol.read(path)
+        if value != base and value != {**base, 'stage': 'policies_restored'}:
+            raise ValueError('reset_resumption_receipt_changed')
+    else:
+        reset_protocol.atomic(path, base, create=True); value = base
+    policies = plan['restart_policies']
+    for service in plan['desired']:
+        current = reset_quiescence.restart_policy(by_service[service]['restart_policy'])
+        expected_policy = reset_quiescence.restart_policy(policies[service])
+        if current not in ({'Name': 'no', 'MaximumRetryCount': 0}, expected_policy):
+            raise RuntimeError('reset_resumption_restart_policy_changed')
+        if current != expected_policy:
+            runner(['docker', 'update', '--restart=' + _policy_argument(expected_policy),
+                    by_service[service]['id']], environment)
+            by_service = _owned(plan, runner, environment)
+    if any(reset_quiescence.restart_policy(by_service[name]['restart_policy']) !=
+           reset_quiescence.restart_policy(policies[name]) for name in plan['desired']):
+        raise RuntimeError('reset_resumption_restart_policy_changed')
+    if value['stage'] == 'prepared':
+        value = {**base, 'stage': 'policies_restored'}; reset_protocol.atomic(path, value)
+    evidence_sha256 = reset_protocol.fingerprint(value)
+    journal.complete('resumed', evidence_sha256)
+    return {'phase': 'resumed', 'services': len(plan['desired']),
+            'fresh_acceptance': True, 'restart_ownership': True, 'resumed': True}
