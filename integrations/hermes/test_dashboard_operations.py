@@ -7,6 +7,14 @@ from scripts.admin_operations import run,identifier
 from scripts.graph import read
 
 class DashboardOperationsTests(unittest.TestCase):
+    def test_original_graph_does_not_depend_on_native_memory(self):
+        original={'nodes':[{'id':'event:'+'a'*64,'kind':'event'}],'edges':[], 'bounds':{'derived':0}}
+        with patch('scripts.graph.API') as api:
+            api.return_value.storage_layout='original-only-v1'
+            api.return_value.call.side_effect=lambda path: original if path.startswith('/v1/graph?') else self.fail('native memory requested')
+            self.assertIs(read('*'),original)
+            api.return_value.call.assert_called_once_with('/v1/graph?scope=%2A&after=&focus=')
+
     def test_graph_citations_only_join_selected_scoped_page(self):
         def call(path,body=None):
             if path.startswith('/v1/graph'):return {'nodes':[{'id':'event:'+'a'*64}],'edges':[]}

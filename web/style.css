@@ -55,7 +55,7 @@ html,body,#root{margin:0;min-height:100%;background:#f5f6f8}body{font-family:sys
 .n-kind-dot{display:inline-block;flex-shrink:0;width:9px;height:9px;border-radius:50%;background:#4a859f;border:1px solid #366377}
 .n-kind-scope,.n-kind-profile{background:#80d6c0;border-color:#2e796b}
 .n-kind-author{background:#edac90;border-color:#a46044;transform:rotate(45deg);border-radius:1px}
-.n-kind-message{background:#83c9f4;border-color:#3d7fa8}
+.n-kind-message,.n-kind-event{background:#83c9f4;border-color:#3d7fa8}
 .n-kind-attachment{background:#a6c2d7;border-color:#547891;border-radius:1px}
 .n-kind-memory{background:#c1aff5;border-color:#7b61ae;transform:rotate(45deg);border-radius:1px}
 .n-kind-derived{background:#e4c17a;border-color:#947031;clip-path:polygon(50% 0,100% 100%,0 100%);border-radius:0;width:11px;height:11px}

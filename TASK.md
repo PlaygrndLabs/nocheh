@@ -7,6 +7,18 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The original-only owner dashboard preview passes learned-memory correction/retirement
+with history, project management/topic inheritance, sharing preview/approval/revocation,
+and reprocessing/activation preserving prior owner edits and exact source bytes.
+Real preview testing found the graph proxy still enriching originals with native
+notes; that dependency is now retained only for legacy stores. Original observations
+are labeled, counted, filterable, and inspectable in the 3D view. Thirteen focused
+Python/graph checks and the full pinned candidate image build pass. The isolated
+preview was inspected at 375px/1440px in dark/light themes; keyboard focus restoration
+and mobile overflow checks pass. Its background workers are paused after fixture
+preparation. Fresh full-pipeline evidence is the separate G rehearsal below.
+[Owner dashboard evidence](compatibility/results/2026-09-18-original-dashboard.json).
+
 The complete synthetic installation rehearsal now passes across the three stores,
 Hermes, Honcho, Inngest, guard preparation, convention/reaction learning without
 acknowledgments, browser execution, delivered-message capture, duplicates, and a
