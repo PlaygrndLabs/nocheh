@@ -40,6 +40,10 @@ test('installation bootstrap provisions separate domains and workflow storage wi
       finally{await workflow.end();}
       await mkdir(join(root,'spool'));await writeFile(join(root,'spool/.restore-inactive'),'inactive');
       await assert.rejects(bootstrapStores(),/inactive_installation_requires_explicit_activation/);
+      process.env.NOCHEH_RESET_SETUP='1';
+      await assert.rejects(bootstrapStores('44444444-4444-4444-8444-444444444444'),/reset_inactive_fence_required/);
+      await writeFile(join(root,'spool/.restore-inactive'),'nocheh-reset:44444444-4444-4444-8444-444444444444\n');
+      await bootstrapStores('44444444-4444-4444-8444-444444444444');
       assert.equal((await stores.control.query('SELECT generation FROM installation')).rows[0].generation,before);
     }finally{await stores.close();}
   }finally {

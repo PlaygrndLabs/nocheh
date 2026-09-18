@@ -19,6 +19,7 @@ LEGACY = {
     'memory_spaces': ('SELECT id,overrides FROM memory_spaces ORDER BY id', ('id', 'overrides')),
 }
 ORIGINAL = {
+    'installation_generation': ("SELECT generation::text AS generation FROM installation WHERE singleton", ('generation',)),
     'guard_mode': ('SELECT mode FROM guard_state WHERE singleton', ('mode',)),
     'runtime_configuration': ('SELECT c.name,v.document FROM runtime_configuration c '
                               'JOIN runtime_configuration_versions v USING(name,revision) ORDER BY c.name', ('name', 'document')),
@@ -52,6 +53,15 @@ def validate(snapshot):
     if len(values['security_policy']) != 1 or not isinstance(values['security_policy'][0]['document'], dict):
         raise ValueError('reset_security_configuration_missing')
     if snapshot['layout'] == 'original-only-v1':
+        generations = values['installation_generation']
+        if len(generations) != 1 or not isinstance(generations[0]['generation'], str):
+            raise ValueError('reset_installation_generation_missing')
+        try:
+            import uuid
+            if str(uuid.UUID(generations[0]['generation'])) != generations[0]['generation']:
+                raise ValueError
+        except (ValueError, AttributeError):
+            raise ValueError('reset_installation_generation_invalid') from None
         if len(values['guard_mode']) != 1 or values['guard_mode'][0]['mode'] not in ('on', 'off'):
             raise ValueError('reset_guard_configuration_missing')
         # An unrecognized setup area must acquire an explicit transfer before

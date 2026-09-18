@@ -30,6 +30,38 @@ services:
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
     depends_on:
       nocheh-postgres: {condition: service_healthy}
+  nocheh-reset-setup:
+    image: nocheh-services:local
+    build:
+      context: .
+      target: runtime
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    profiles: [reset]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, dist/src/stores/reset-setup-cli.js, /reset/setup.json]
+    environment:
+      PGHOST: nocheh-postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Installation administrator credential required}
+      NOCHEH_DATA_DIR: /data
+      NOCHEH_STORAGE_LAYOUT: original-only-v1
+      NOCHEH_RESET_SETUP: "1"
+      NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
+      NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
+      NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:?Workflow credential required}
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/reset:/reset:ro
+    depends_on:
+      nocheh-postgres: {condition: service_healthy}
   nocheh-app:
     environment:
       PGUSER: ""
