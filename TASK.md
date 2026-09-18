@@ -7,6 +7,20 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+Saved runtime preference transfer is a verified candidate. It captures the eight
+supported native preferences, preserves global/profile inheritance, maps legacy
+owner profiles to stable control identities, and retains absent topic overrides
+so topics continue inheriting their group. Original-only catalogs remain the
+authority for custom profiles. Configuration drift, ambiguous names, symlinks,
+unadmitted profiles, retained target history, and conflicting partial restores
+fail before writes. Exact interrupted writes can resume. The transfer excludes
+prompts, native notes/sessions, credentials, and erased schedules' overrides.
+Ten offline pinned native checks and the candidate image build pass; Graphify was
+refreshed using ASTs only. [Preference evidence](compatibility/results/2026-09-18-runtime-preference-transfer.json).
+Connecting this library to the scoped reset coordinator and verifying that full
+procedure remain pending. The session's missing temporary worktree was restored
+from its committed branch; no installation data was touched.
+
 Browser completion recovery and media-generation handover are verified candidates.
 The dashboard pages current authorized missed results four at a time, renders them
 before acknowledgment, and retries opaque receipts through outages. Archive
