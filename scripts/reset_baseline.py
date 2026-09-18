@@ -8,6 +8,7 @@ retired under a durable intent.  Only content-free phase evidence remains.
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -21,11 +22,19 @@ PRIVATE = ('configuration.json', 'preferences.json', 'accounting.json',
            'preserved.json', 'ownership.json', 'files.json', 'settlement.json',
            'setup.json')
 LIMIT = 64 * 1024 * 1024
+HASH = re.compile(r'[a-f0-9]{64}')
 ALLOWED_JOURNAL = frozenset({
     'coordinator.lock', 'progress.json', 'quiescence.json', 'settlement.json',
     'configuration.json', 'preferences.json', 'accounting.json', 'preserved.json',
     'ownership.json', 'files.json', 'preservation.json', 'erasure.json',
     'setup.json', 'initialization.json', 'baseline.json'})
+
+
+def _journal_names(journal):
+    allowed = set(ALLOWED_JOURNAL)
+    if journal.value and journal.value.get('telegram') is not None:
+        allowed.add('telegram-' + journal.value['reset_id'] + '.attempt')
+    return allowed
 
 
 def run(arguments, environment):
@@ -50,6 +59,7 @@ def _store_result(raw, generation):
     except (IndexError, json.JSONDecodeError):
         raise RuntimeError('reset_baseline_store_verification_failed') from None
     required = {'event', 'generation', 'archive_rows', 'derived_rows', 'control_setup_rows',
+                'archive_state_sha256', 'derived_state_sha256', 'control_state_sha256',
                 'profiles', 'setup_only', 'source_content_present',
                 'derivative_content_present', 'history_present'}
     if (not isinstance(value, dict) or set(value) != required or
@@ -58,8 +68,31 @@ def _store_result(raw, generation):
             value['setup_only'] is not True or value['source_content_present'] is not False or
             value['derivative_content_present'] is not False or value['history_present'] is not False or
             type(value['control_setup_rows']) is not int or value['control_setup_rows'] < 0 or
-            type(value['profiles']) is not int or value['profiles'] < 0):
+            type(value['profiles']) is not int or value['profiles'] < 0 or
+            any(not isinstance(value[name], str) or not HASH.fullmatch(value[name]) for name in
+                ('archive_state_sha256', 'derived_state_sha256', 'control_state_sha256'))):
         raise RuntimeError('reset_baseline_store_verification_failed')
+    return value
+
+
+def _state_result(raw):
+    lines = [line for line in raw.splitlines() if line.strip()]
+    try:
+        value = json.loads(lines[-1])
+    except (IndexError, json.JSONDecodeError):
+        raise RuntimeError('reset_baseline_state_verification_failed') from None
+    required = {'event', 'generation', 'archive_rows', 'derived_rows', 'control_rows',
+                'archive_state_sha256', 'derived_state_sha256', 'control_state_sha256'}
+    if (not isinstance(value, dict) or set(value) != required or value['event'] != 'reset_state_observed' or
+            any(type(value[name]) is not int or value[name] < 0 for name in
+                ('archive_rows', 'derived_rows', 'control_rows')) or
+            any(not isinstance(value[name], str) or not HASH.fullmatch(value[name]) for name in
+                ('archive_state_sha256', 'derived_state_sha256', 'control_state_sha256'))):
+        raise RuntimeError('reset_baseline_state_verification_failed')
+    try:
+        reset_protocol.identifier(value['generation'])
+    except ValueError:
+        raise RuntimeError('reset_baseline_state_verification_failed') from None
     return value
 
 
@@ -120,7 +153,7 @@ def _verify_private(directory, inventory, allow_missing):
             raise ValueError('reset_baseline_private_artifact_changed')
 
 
-def _native_files(state, memory, preferences):
+def _native_files(state, memory, preferences=None, expected_count=None):
     state = Path(state); files = state / 'files'; spool = state / 'spool'; native = state / 'hermes'
     if files.is_symlink() or not files.is_dir() or any(files.iterdir()):
         raise RuntimeError('reset_baseline_original_files_not_empty')
@@ -132,25 +165,36 @@ def _native_files(state, memory, preferences):
     allowed_top = {'auth.json', 'auth.lock', 'nocheh-policy.yaml', 'profiles', 'scheduler-inactive'}
     if native.is_symlink() or not native.is_dir() or any(path.name not in allowed_top for path in native.iterdir()):
         raise RuntimeError('reset_baseline_native_state_not_empty')
-    expected = {row['id'] for row in preferences['profiles']}
     profiles = native / 'profiles'
     policy = native / 'nocheh-policy.yaml'
     if (policy.is_symlink() or not policy.is_file() or policy.stat().st_nlink != 1 or
             (native / 'scheduler-inactive').is_symlink() or not (native / 'scheduler-inactive').is_file()):
         raise RuntimeError('reset_baseline_native_state_not_empty')
-    if profiles.is_symlink() or not profiles.is_dir() or {path.name for path in profiles.iterdir()} != expected:
+    if profiles.is_symlink() or not profiles.is_dir():
         raise RuntimeError('reset_baseline_native_state_not_empty')
+    expected = ({row['id'] for row in preferences['profiles']} if preferences is not None else
+                {path.name for path in profiles.iterdir()})
+    if expected_count is not None and len(expected) != expected_count:
+        raise RuntimeError('reset_baseline_native_state_not_empty')
+    if {path.name for path in profiles.iterdir()} != expected:
+        raise RuntimeError('reset_baseline_native_state_not_empty')
+    fingerprints = []
     for path in profiles.iterdir():
         if path.is_symlink() or not path.is_dir() or sorted(item.name for item in path.iterdir()) != ['config.yaml']:
             raise RuntimeError('reset_baseline_native_state_not_empty')
         config = path / 'config.yaml'
         if config.is_symlink() or not config.is_file() or config.stat().st_nlink != 1:
             raise RuntimeError('reset_baseline_native_state_not_empty')
+        item = _regular_hash(config); fingerprints.append({'path': str(config.relative_to(native)),
+                                                            'sha256': item['sha256'], 'size': item['size']})
+    item = _regular_hash(policy); fingerprints.append({'path': str(policy.relative_to(native)),
+                                                        'sha256': item['sha256'], 'size': item['size']})
     for relative in ('baseline', 'reports'):
         path = memory / relative
         if path.exists() or path.is_symlink():
             raise RuntimeError('reset_baseline_native_memory_not_empty')
     return {'original_files': 0, 'spool_entries': 1, 'native_profiles': len(expected),
+            'native_preferences_sha256': reset_protocol.fingerprint(sorted(fingerprints, key=lambda row: row['path'])),
             'native_content_present': False}
 
 
@@ -208,7 +252,7 @@ def _advance(journal, path, value, stage):
 def verify(journal, preflight, *, runner=run, environment=None, command=None):
     """Advance only ``empty_baseline`` and leave every runtime owner fenced."""
     journal.assert_current()
-    if (journal.value is None or len(journal.value['steps']) not in (6, 7) or
+    if (journal.value is None or len(journal.value['steps']) not in (6, 7, 8) or
             journal.value['steps'][5]['step'] != 'initialized' or
             journal.value['preflight_sha256'] != reset_quiescence.hashlib_preflight(preflight)):
         raise ValueError('reset_baseline_phase_required')
@@ -216,34 +260,58 @@ def verify(journal, preflight, *, runner=run, environment=None, command=None):
     command = configuration.compose_command(journal.state) if command is None else command
     initialization = reset_initialization.assert_initialized(
         journal, preflight, runner=runner, environment=environment, command=command)
-    if len(journal.value['steps']) == 7:
+    profiles = ['reset', *(['honcho'] if environment.get('NOCHEH_HONCHO_ENABLED') == 'true' else [])]
+    by_service = {row['service']: row['id'] for row in initialization['resources']['containers']}
+
+    def cache_checks():
+        _postgres_empty(by_service['nocheh-postgres'], 'nocheh', 'nocheh_inngest', runner, environment)
+        _redis_empty(by_service['inngest-redis'], runner, environment)
+        result = {'inngest_postgres_relations': 0, 'inngest_redis_keys': 0,
+                  'honcho_postgres_relations': 0, 'honcho_redis_keys': 0}
+        if 'honcho-postgres' in by_service:
+            _postgres_empty(by_service['honcho-postgres'], 'experiment', 'honcho_experiment', runner, environment)
+            _redis_empty(by_service['honcho-redis'], runner, environment)
+        return result
+
+    def state_checks(expected):
+        raw = runner(_compose(command, profiles, ['run', '--rm', '--no-deps', '--pull', 'never',
+                                                   'nocheh-reset-state']), environment)
+        current = _state_result(raw)
+        if (current['generation'] != journal.value['generation'] or current['archive_rows'] != 0 or
+                current['derived_rows'] != 0 or current['control_rows'] != expected['control_setup_rows'] or
+                any(current[name] != expected[name] for name in
+                    ('archive_state_sha256', 'derived_state_sha256', 'control_state_sha256'))):
+            raise RuntimeError('reset_baseline_state_changed')
+        return current
+
+    if len(journal.value['steps']) in (7, 8):
         value = reset_protocol.read(journal.directory / 'baseline.json')
         if (value.get('stage') != 'retired' or reset_protocol.fingerprint(value) !=
                 journal.value['steps'][6]['evidence_sha256']):
             raise ValueError('reset_baseline_evidence_changed')
         reset_quiescence.assert_fences(journal.state, journal.value['reset_id'])
         _resource_exclusion(initialization, preflight, runner, environment)
+        state_checks(value['stores'])
+        if cache_checks() != value['caches']:
+            raise RuntimeError('reset_baseline_state_changed')
+        native = _native_files(journal.state, preflight['installation']['memory_state'],
+                               expected_count=value['native']['native_profiles'])
+        if native != value['native']:
+            raise RuntimeError('reset_baseline_state_changed')
         if any((journal.directory / name).exists() or (journal.directory / name).is_symlink() for name in PRIVATE):
             raise ValueError('reset_baseline_private_artifact_changed')
-        if not {path.name for path in journal.directory.iterdir()}.issubset(ALLOWED_JOURNAL):
+        if not {path.name for path in journal.directory.iterdir()}.issubset(_journal_names(journal)):
             raise ValueError('reset_baseline_private_artifact_unknown')
         return {'phase': 'empty_baseline', **value['stores'], **value['caches'], **value['native']}
-    profiles = ['reset', *(['honcho'] if environment.get('NOCHEH_HONCHO_ENABLED') == 'true' else [])]
     path = journal.directory / 'baseline.json'
     recorded_now = False
-    by_service = {row['service']: row['id'] for row in initialization['resources']['containers']}
 
     def current_checks():
         raw = runner(_compose(command, profiles, ['run', '--rm', '--no-deps', '--pull', 'never',
                                                    'nocheh-reset-baseline']), environment)
         stores = _store_result(raw, journal.value['generation'])
-        _postgres_empty(by_service['nocheh-postgres'], 'nocheh', 'nocheh_inngest', runner, environment)
-        _redis_empty(by_service['inngest-redis'], runner, environment)
-        caches = {'inngest_postgres_relations': 0, 'inngest_redis_keys': 0,
-                  'honcho_postgres_relations': 0, 'honcho_redis_keys': 0}
-        if 'honcho-postgres' in by_service:
-            _postgres_empty(by_service['honcho-postgres'], 'experiment', 'honcho_experiment', runner, environment)
-            _redis_empty(by_service['honcho-redis'], runner, environment)
+        state_checks(stores)
+        caches = cache_checks()
         native = _native_files(journal.state, preflight['installation']['memory_state'],
                                reset_protocol.read(journal.directory / 'preferences.json')['snapshot'])
         return stores, caches, native
