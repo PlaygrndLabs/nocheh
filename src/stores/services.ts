@@ -37,6 +37,7 @@ import {ControlledExecutionRepository} from './controlled-execution.js';
 import {ActionCommandRepository} from './action-commands.js';
 import {BrowserCaptureRepository} from './browser-capture.js';
 import {BrowserRunRepository} from './browser-runs.js';
+import {BrowserDeliveryRepository} from './browser-delivery.js';
 import {ScheduledRunRepository} from './scheduled-runs.js';
 import {ScheduleRepository} from './schedules.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
@@ -71,12 +72,14 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions);
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
+  const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
+    browserDelivery,
     schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.runtime,schedules,telegramActions),
     runtimeProfiles:new RuntimeProfileRepository(access),
-    browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime),
+    browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime,browserDelivery),
     controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,options.runtime,options.serviceToken??'',detect),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),

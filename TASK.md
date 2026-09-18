@@ -698,6 +698,31 @@ pending. No installation content or configuration changed.
 [Legacy import evidence](compatibility/results/2026-09-18-store-legacy-import.json).
 
 
+Browser completion now creates an immutable delivery offer outside archive.
+The native dashboard verifies the received text hash and retains only opaque
+receipt IDs/hashes for retry. Its authenticated acknowledgment fsyncs the exact
+assistant message and original reply relationship into the source spool, without
+requiring databases or Inngest. Server emission, drafts, hidden results, and failed
+runs do not count as client receipts. Duplicate receipts preserve one source;
+reset removes offers so old browser outboxes cannot restore deleted content.
+Receipt capture is independent of a later native profile generation, and source
+replay applies normal preparation and learning boundaries. The complete native
+candidate image builds. Its 232-check suite passes 230 checks offline; the two
+host-only Compose and actual container-isolation checks pass separately. Initial
+temporary-mount and missing fixture-parent failures were corrected and repeated;
+these were fixture issues, not fresh live evidence.
+
+Four PostgreSQL/HTTP checks, two filesystem/browser-client checks, and 28 offline
+pinned native checks pass, including outage/restart/replay, exact text, reply
+resolution, receipt integrity, missing offers, owner authentication, and inert
+server-side completion. Native dashboard assets compile. AST-only Graphify has
+438 files, 2,726 nodes, and 11,081 edges, with zero model calls. Combined browser
+reconnect/media-generation acceptance, full coordinated recovery, reset, and fresh
+live gates remain pending. A received browser transport frame proves client
+receipt, not that a human read it; no live installation was changed.
+[Browser delivery evidence](compatibility/results/2026-09-18-store-browser-delivery.json).
+
+
 
 
 

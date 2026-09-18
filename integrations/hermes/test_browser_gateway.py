@@ -66,6 +66,14 @@ class BrowserGatewayTests(unittest.TestCase):
         self.assertIn('error',self.invoke('nocheh.input',id='event-one',text='x',profile='owner'))
         self.failed_route='/v1/browser/input';self.assertIn('error',self.capture());self.assertIn('error',self.submit())
         self.assertNotIn('secret',json.dumps(self.events))
+    def test_completion_relays_offer_but_server_emission_does_not_acknowledge_delivery(self):
+        original=self.gateway.call
+        delivery={'receipt':'a'*64,'sha256':'b'*64}
+        self.gateway.call=lambda route,body: {**original(route,body),'delivery':delivery} if route=='/internal/browser/events' else original(route,body)
+        self.capture();self.submit()
+        completed=[payload for kind,_,payload in self.events if kind=='message.complete']
+        self.assertEqual(completed[0]['nocheh_delivery'],delivery)
+        self.assertFalse(any(route.endswith('/delivered') for route,_ in self.calls))
     def test_exact_files_and_one_execution(self):
         workspace=self.gateway.home/'workspace';workspace.mkdir(parents=True)
         path=workspace/'notes.txt';path.write_bytes(b'original\r\n')

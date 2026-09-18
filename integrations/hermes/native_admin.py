@@ -19,6 +19,26 @@ from .profile_config import (read, revision, resolved, inherited_config, inspect
 
 NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 
+def acknowledge_browser_delivery(token, body):
+    from urllib.request import Request, urlopen
+    from urllib.error import HTTPError
+    from .capture import canonical
+    if set(body) != {'receipt', 'sha256'} or any(not isinstance(value,str) or not re.fullmatch(r'[a-f0-9]{64}',value) for value in body.values()):
+        raise ValueError('invalid_delivery_receipt')
+    request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/browser/delivered', data=canonical(body),
+        headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+    try:
+        with urlopen(request,timeout=10) as response: return json.load(response)
+    except HTTPError as error:
+        # A deliberate installation reset removes offers. Old browser outboxes
+        # may discard those opaque receipts without reintroducing old content.
+        if error.code==404:
+            try: missing=json.load(error).get('error')=='delivery_offer_missing'
+            except Exception: missing=False
+            if missing:return {'state':'expired'}
+        raise RuntimeError('delivery_capture_unavailable') from None
+    except Exception: raise RuntimeError('delivery_capture_unavailable') from None
+
 
 def audience_revision(token,space):
     from urllib.request import Request,urlopen
@@ -190,6 +210,17 @@ class Administration:
                 from .presentation import presentation_route
                 if presentation_route(path,method):
                     return await self.app(scope,receive,send)
+                if path=='/api/nocheh/browser-delivered' and method=='POST' and self.browser_enabled:
+                    # The authenticated dashboard acknowledges an already observed
+                    # immutable offer; a later native profile generation is irrelevant.
+                    raw=bytearray()
+                    async for chunk in Request(scope,receive).stream():
+                        raw.extend(chunk)
+                        if len(raw)>1024:raise ValueError('body_size_limit')
+                    value=json.loads(raw)
+                    if not isinstance(value,dict):raise ValueError('expected_object')
+                    result=await asyncio.to_thread(acknowledge_browser_delivery,self.token,value)
+                    return await JSONResponse(result)(scope,receive,send)
                 selected=query.get('profile', [''])[0]
                 name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected)
                 if path.startswith('/api/files') and (method, path) in {

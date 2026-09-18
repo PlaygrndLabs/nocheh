@@ -34,7 +34,7 @@ export class SourceAccessRepository {
     if(source.origin!=='live'||source.kind==='telegram_wire')return false;
     const policy=this.policy();if(!policy.enabled||!policy.owner_id)return false;
     if(source.channel==='browser') {
-      if(source.kind!=='browser_input'||source.scope!==policy.owner_id&&!policy.group_ids.includes(source.scope))return false;
+      if(!['browser_input','browser_delivered_message'].includes(source.kind)||source.scope!==policy.owner_id&&!policy.group_ids.includes(source.scope))return false;
       const space=await this.space(reference);await this.guards.assertCurrent(binding);return space!==null;
     }
     if(source.channel!=='telegram'||!['telegram_update','telegram_delivered_message'].includes(source.kind))return false;

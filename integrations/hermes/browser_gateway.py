@@ -135,6 +135,7 @@ class BrowserGateway:
                             finally:db.close()
                         done=status['state']=='done' and status.get('visible')
                         self.server._emit('message.complete',sid,{'text':status['text'] if done else 'The managed turn ended. Its original input and execution evidence are preserved.',
+                            **({'nocheh_delivery':status['delivery']} if done and status.get('delivery') else {}),
                             'usage':{},'status':'complete' if done else 'interrupted' if status['state']=='cancelled' else 'error'})
                         return
                     stopped.wait(.25)
