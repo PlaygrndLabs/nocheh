@@ -44,6 +44,14 @@ export class RelationshipRepository {
       next:rows.length>limit?rows[limit-1].id:null};
   }
 
+  async activity(target:SourceIdentity,after='',limit=100):Promise<{references:SourceReference[];next:string|null}> {
+    if(!Number.isInteger(limit)||limit<1||limit>200)throw new HttpError(400,'invalid_relationship_page');
+    const {rows}=await this.pool.query(`SELECT DISTINCT e.id,e.revision,e.payload_hash FROM source_relations r JOIN events e ON e.id=r.event_id
+      WHERE r.target_id=$1 AND r.kind IN ('reply_to','reaction_to') AND e.id>$2 ORDER BY e.id LIMIT $3`,[sourceObjectId(target),after,limit+1]);
+    return {references:rows.slice(0,limit).map(r=>({store:'archive',kind:'event',id:r.id,revision:r.revision,input_hash:r.payload_hash})),
+      next:rows.length>limit?rows[limit-1].id:null};
+  }
+
   /** This scope filter is also intersected with the control repository's consent/access policy by callers. */
   async context(reference:SourceReference,audience:RelationshipAudience,limit=100):Promise<{
     source:SourceReference|null;targets:{kind:string;identity:SourceIdentity;references:SourceReference[];unresolved:boolean;next:string|null}[];
