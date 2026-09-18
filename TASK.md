@@ -250,6 +250,26 @@ source-only/complete portable exports and imports. This is a verified recovery
 increment, not completion of portability or release acceptance.
 [Three-store recovery evidence](compatibility/results/2026-09-18-store-recovery.json).
 
+Source-only portability is now implemented in the candidate repositories and
+owner API/CLI. `nocheh-sources-v1` preserves original envelopes, wire bytes,
+timestamps, typed source references, manifests, and binary/empty files. It contains
+no derivative or guarded records. Package integrity is checked before CLI import;
+an incomplete/corrupt export is not marked complete. Paginated exports remain
+distinct from coordinated backups.
+
+Control intake records preserve the distinction between imported history and live
+arrival without changing the observation's original provenance. Source import
+requires durable admission before archive commit; ordinary capture retains its
+archive-first outage behavior. Bounded reconciliation repairs interrupted imports
+without old Telegram dispatch, automatic memory learning, or provider file fetches.
+Owner learning consent is explicit and separately revisioned. The new source-only
+path rejects complete bundles rather than dropping derivative/guarded history.
+Complete portable exports/imports, legacy bundle routing, and production entrypoint
+activation remain pending.
+Five affected PostgreSQL checks and twelve Python portability/archive checks pass;
+TypeScript and AST-only Graphify pass. All data used by these checks is synthetic.
+[Source portability evidence](compatibility/results/2026-09-18-source-portability.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior

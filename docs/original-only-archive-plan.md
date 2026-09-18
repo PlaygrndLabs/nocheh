@@ -66,6 +66,36 @@ are the default source-version view; all internal derivatives remain inspectable
 
 </owner_interface_rehearsal>
 
+<source_portability_rehearsal>
+
+The candidate source-only API is `GET /v1/exports/sources`,
+`POST /v1/imports/sources`, and owner-only original-file byte transfers at
+`/v1/original-files/:id/bytes`. `./scripts/nocheh export --sources-only --output DIR`
+writes `nocheh-sources-v1`; `./scripts/nocheh import sources DIR` reads it.
+It contains original observations, capture timestamps, stable source references,
+file manifests, and exact bytes, without derivative or guarded content. The CLI
+checks record-file checksums, counts, and all original files before import.
+Paginated portable exports are not coordinated recovery points; use backup for
+that guarantee.
+
+Import admission is control state separate from an observation's original
+`origin`. Persist that admission before archive commit, then complete normal
+preparation handoff. Archive commit contains the observation and all supplied
+manifests atomically. Bounded reconciliation repairs a lost completion response
+without dispatching old replies, fetching historical Telegram attachments, or
+automatically authorizing imported sources for learning. Explicit owner learning
+consent remains separate. A duplicate import cannot change an existing live
+capture admission. Source-only imports reject bundles containing derivative or
+guarded records, rather than silently losing them; complete and legacy bundle
+routing is a separate implementation gate.
+
+Verify source identity/wire/timestamps, exact binary and empty files, read-only
+export during control unavailability, import control-outage behavior, interrupted
+archive/control handoffs, missing imported bytes, duplicate imports, and explicit
+learning consent. No provider credentials or live messages are required.
+
+</source_portability_rehearsal>
+
 <recovery_rehearsal>
 
 For the original-only layout, backup format 6 contains separate archive, derived,

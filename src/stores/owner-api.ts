@@ -12,12 +12,16 @@ export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:projects(?:\/ass
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
   owns(path:string):boolean {
-    return ownerStoragePath(path);
+    return ownerStoragePath(path)||/^\/v1\/(?:exports\/sources|imports\/sources|original-files\/[a-f0-9]{64}\/bytes)$/.test(path);
   }
   async request(principal:Reader,method:string,url:URL,input?:unknown):Promise<unknown> {
     admin(principal);const path=url.pathname,s=this.services,q=url.searchParams;
     if(!this.owns(path))throw new HttpError(404,'not_found');
     if(!['GET','POST'].includes(method))throw new HttpError(405,'method_not_allowed');
+    if(path==='/v1/exports/sources'&&method==='GET')return s.sourcePortability.page(principal,q.get('after')??'',limit(q.get('limit'),20,50));
+    if(path==='/v1/imports/sources'&&method==='POST')return s.sourcePortability.import(principal,input);
+    const originalFile=path.match(/^\/v1\/original-files\/([a-f0-9]{64})\/bytes$/);
+    if(originalFile)return method==='GET'?s.sourcePortability.bytes(principal,originalFile[1]!):s.sourcePortability.upload(principal,originalFile[1]!,input);
     if(path==='/v1/projects')return method==='GET'?s.projects.list(principal,q.get('after')??''):s.projects.save(principal,input);
     if(path==='/v1/projects/assignments')return method==='GET'?s.projects.assignments(principal,q.get('after')??''):s.projects.assign(principal,input);
     if(path==='/v1/projects/effective'&&method==='GET')return s.projects.effective(q.get('space')??'');
@@ -115,7 +119,9 @@ export class OwnerStorageApi {
   async handle(principal:Reader,req:IncomingMessage,res:ServerResponse,url:URL):Promise<boolean> {
     if(!this.owns(url.pathname))return false;
     admin(principal); // Reject scoped callers before parsing any mutation body.
-    const result=await this.request(principal,req.method??'GET',url,req.method==='POST'?await readJson(req,8*1024*1024):undefined);
+    const max=url.pathname.startsWith('/v1/original-files/')?70*1024*1024:url.pathname==='/v1/imports/sources'?32*1024*1024:8*1024*1024;
+    const result=await this.request(principal,req.method??'GET',url,req.method==='POST'?await readJson(req,max):undefined);
+    if(Buffer.isBuffer(result)){res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store'});res.end(result);return true;}
     json(res,200,result);return true;
   }
 }

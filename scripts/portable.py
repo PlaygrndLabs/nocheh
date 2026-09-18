@@ -88,6 +88,11 @@ def export_all(state,directory,api=None):
 
 def main(state,args):
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,required=True)
-    options=parser.parse_args(args);result=export_all(state,options.output)
+    parser.add_argument('--sources-only',action='store_true',help='Export only original observations and files, without derivatives or native memory.')
+    options=parser.parse_args(args)
+    if options.sources_only:
+        result=export_archive(API(),options.output,source_only=True)
+        print(json.dumps({'status':'exported','path':str(options.output.resolve()),**result}));return 0
+    result=export_all(state,options.output)
     print(json.dumps({'status':'exported','path':str(options.output.resolve()),'events':result['archive']['events'],
         'native_profiles':len(result['native_profiles']),'complete':result['complete']}));return 0

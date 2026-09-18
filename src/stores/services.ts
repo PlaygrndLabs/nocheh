@@ -25,6 +25,7 @@ import {RuntimeTurnRepository} from './turns.js';
 import {NativeMemoryRepository} from './native-memory.js';
 import {NativeReviewRepository} from './native-review.js';
 import {SharingContentRepository} from './sharing.js';
+import {SourcePortabilityRepository} from './source-portability.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -50,8 +51,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects),provenance=new HonchoProvenanceRepository(stores,archive,guards,options.honcho);
   const detect=async(text:string)=>(await options.runtime('guard.detect',{text})).literals;
   const turns=new RuntimeTurnRepository(access,prepared);
+  const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
-    capture:new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived)),
+    capture,sourcePortability:new SourcePortabilityRepository(capture,attachments),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),

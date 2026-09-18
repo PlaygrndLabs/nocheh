@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS capture_handoffs (
  event_id text PRIMARY KEY,source_revision text NOT NULL,payload_hash text NOT NULL,
  requested_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS source_intakes (
+ event_id text PRIMARY KEY,source_revision text NOT NULL,input_hash text NOT NULL,
+ transport text NOT NULL CHECK(transport IN ('capture','import')),
+ state text NOT NULL CHECK(state IN ('pending','ready')),created_at timestamptz NOT NULL DEFAULT now()
+);
 ${workflowSchema}
 ${controlGuardSchema}
 ${controlPolicySchema}
