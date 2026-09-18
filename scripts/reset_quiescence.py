@@ -11,7 +11,8 @@ from pathlib import Path
 from . import reset_inventory, reset_protocol
 from .configuration import compose_environment
 
-DATABASES = frozenset(('nocheh-postgres', 'honcho-postgres', 'honcho-redis', 'inngest-redis'))
+DATABASES = frozenset(('nocheh-postgres', 'honcho-postgres', 'honcho-redis',
+                       'inngest-postgres', 'inngest-redis'))
 FENCES = ('spool/.restore-inactive', 'hermes/scheduler-inactive',
           'admin/tools/inactive', 'workflows/inactive')
 IDENTIFIER = re.compile(r'[a-f0-9]{64}')

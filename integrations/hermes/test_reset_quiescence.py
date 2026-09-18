@@ -13,7 +13,7 @@ class ResetQuiescenceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
         self.state = Path(self.temporary.name).resolve(); self.generation = str(uuid.uuid4())
-        services = ['nocheh-postgres', 'honcho-postgres', 'honcho-redis', 'inngest-redis',
+        services = ['nocheh-postgres', 'honcho-postgres', 'honcho-redis', 'inngest-postgres', 'inngest-redis',
                     'hermes-runtime', 'nocheh-executor', 'hermes-agent-launcher', 'nocheh-app',
                     'nocheh-security', 'nocheh-dashboard', 'cliproxy-api', 'cliproxy-monitor',
                     'honcho-api', 'honcho-deriver', 'honcho-provider-gateway']

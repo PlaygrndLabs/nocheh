@@ -27,7 +27,8 @@ VOLUME_FORMAT = ('{"name":{{json .Name}},"created_at":{{json .CreatedAt}},"drive
                  '"project":{{json (index .Labels "com.docker.compose.project")}},'
                  '"compose_volume":{{json (index .Labels "com.docker.compose.volume")}}}')
 VOLUME_TARGETS = {'nocheh-postgres': '/var/lib/postgresql/data',
-                  'honcho-postgres': '/var/lib/postgresql/data', 'honcho-redis': '/data'}
+                  'honcho-postgres': '/var/lib/postgresql/data', 'honcho-redis': '/data',
+                  'inngest-postgres': '/var/lib/postgresql/data'}
 
 
 def canonical(value):
@@ -171,6 +172,8 @@ def inspect(state, *, root=INSTALLATION_ROOT, runner=run):
             blockers.append({'code': 'external_volume_driver_requires_review', 'volume': name})
         volumes.append({**record, 'service': service, 'target': target, 'configured_name': name,
                         'authority': 'explicit_configuration_and_installation_mount'})
+    external_paths = [root / 'data' / name for name in (
+        'backups', 'exports', 'recovery', 'worktree-archives', 'worktree-backups') if (root / 'data' / name).exists()]
     names = {volume['name'] for volume in volumes}
     for container in containers:
         if container in owned:
@@ -178,14 +181,14 @@ def inspect(state, *, root=INSTALLATION_ROOT, runner=run):
         for mount in container.get('mounts', []):
             if mount.get('Type') == 'volume' and mount.get('Name') in names:
                 blockers.append({'code': 'volume_has_another_container_owner', 'volume': mount['Name'], 'container': container['id'], 'project': container.get('project')})
-            if mount.get('Type') == 'bind' and mount.get('RW') and any(overlap(mount['Source'], path) for path in (state, memory)):
+            if mount.get('Type') == 'bind' and mount.get('RW') and any(
+                    overlap(mount['Source'], path) for path in (state, memory, *external_paths)):
                 blockers.append({'code': 'state_has_another_writer', 'container': container['id'], 'project': container.get('project')})
     config = env_path(state)
     paths = files(state, memory, config, blockers)
     # These locations may include unrelated worktrees, fixtures or restorations.
     # Never infer their ownership from a directory name or a shared provider key.
-    external = [entry(root / 'data' / name, 'review_archive', 'establish_per_item_installation_ownership') for name in (
-        'backups', 'exports', 'recovery', 'worktree-archives', 'worktree-backups') if (root / 'data' / name).exists()]
+    external = [entry(path, 'review_archive', 'establish_per_item_installation_ownership') for path in external_paths]
     pending = ['complete_isolated_acceptance', 'quiesce_all_owners', 'settle_external_effects', 'freeze_configuration_and_preferences',
                'review_restore_and_external_archive_ownership', 'verify_preserved_spending_and_credentials',
                'new_installation_generation', 'one_time_telegram_backlog_boundary', 'empty_baseline', 'fresh_live_acceptance']
