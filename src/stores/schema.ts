@@ -79,6 +79,9 @@ ${portableHistorySchema}
 `;
 
 export const initialControlSchema=`
+CREATE TABLE IF NOT EXISTS service_heartbeats (
+ service text PRIMARY KEY,seen_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS installation (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  generation uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now()

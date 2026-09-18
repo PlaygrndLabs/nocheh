@@ -35,6 +35,36 @@ session worktree and integrate verified increments under the shared Git lock.
 
 </increments>
 
+<storage_setup>
+
+The saved `NOCHEH_STORAGE_LAYOUT` selects the installation layout; existing
+configurations default to `legacy` until the controlled cutover. Ordinary settings
+Apply cannot change this internal setting. `original-only-v1` selects
+`deploy/original-only-compose.yml` through the shared Compose command builder.
+Shell overrides cannot silently select another layout.
+
+The setup-only `nocheh-store-bootstrap` service owns the administrator login and
+provisions archive, derived, control, and independent Inngest storage. It shares
+the installation maintenance lock with backup/reset and refuses an inactive
+restore marker. Archive, derived, control, administrator, and Inngest credentials
+are distinct. Runtime app/security services receive only the three domain
+credentials; Hermes receives none of these database credentials. Settings redact
+the role credentials and do not expose them as ordinary editable values.
+
+`src/stores/runtime-pools.ts` opens explicit domain pools and rejects bootstrap
+credentials. Legacy database initialization rejects the original-only layout.
+At this setup increment the production main/security/worker entrypoint migration
+is still pending, so the opt-in layout is not yet a runnable release candidate.
+Do not switch the installation or infer activation from a successful config render.
+
+Run `NOCHEH_STORES_FIXTURE=1 python3 -m scripts.store_wiring_check` to render the
+combined Compose configuration with temporary synthetic credentials, inspect
+credential separation/dependencies, and start no services. The real database
+bootstrap fixture additionally checks repeat setup, retained owner history,
+maintenance exclusion, runtime role restrictions, and inactive-restore refusal.
+
+</storage_setup>
+
 <owner_interface_rehearsal>
 
 Use `compatibility/stores-compose.yml` with

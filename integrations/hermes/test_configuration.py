@@ -66,3 +66,25 @@ class ConfigurationTests(unittest.TestCase):
             state = Path(folder); values = initialize(state)
             values['NOCHEH_PORT'] = '8795'; write_env(env_path(state), values)
             self.assertEqual(compose_environment(state)['NOCHEH_NATIVE_ADMIN_PORT'], '8800')
+
+    def test_separate_storage_credentials_are_private_stable_and_explicitly_selected(self):
+        from scripts.configuration import compose_command,validate
+        from scripts.settings import view,save
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            names=['NOCHEH_'+name+'_PASSWORD' for name in ('ARCHIVE','DERIVED','CONTROL')]
+            self.assertEqual(values['NOCHEH_STORAGE_LAYOUT'],'legacy')
+            self.assertEqual(len(set(values[name] for name in names)),3)
+            self.assertEqual(initialize(state),values)
+            fields=view(state)
+            for name in names:
+                self.assertNotIn(values[name],str(fields))
+                with self.assertRaisesRegex(ValueError,'unsupported_setting'):save(state,{name:'replacement'},fields['revision'])
+            with self.assertRaisesRegex(ValueError,'unsupported_setting'):save(state,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'},fields['revision'])
+            with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
+                self.assertNotIn('original-only-compose.yml',' '.join(compose_command(state)))
+                self.assertEqual(compose_environment(state)['NOCHEH_STORAGE_LAYOUT'],'legacy')
+            values['NOCHEH_STORAGE_LAYOUT']='original-only-v1';validate(values);write_env(env_path(state),values)
+            self.assertTrue(compose_command(state)[-1].endswith('/deploy/original-only-compose.yml'))
+            for bad in ['',values[names[0]],values['POSTGRES_PASSWORD']]:
+                with self.assertRaises(ValueError):validate({**values,names[1]:bad})
