@@ -10,8 +10,8 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import (configuration, reset_accounting, reset_baseline, reset_erasure,
-                     reset_initialization, reset_inventory, reset_ownership,
+from scripts import (configuration, reset_accounting, reset_baseline, reset_boundary,
+                     reset_erasure, reset_initialization, reset_inventory, reset_ownership,
                      reset_preservation, reset_protocol, reset_quiescence)
 from scripts.store_recovery import StoreRecovery
 
@@ -120,7 +120,12 @@ def main():
             'environment': {**{key: value for key, value in service_environment.items()
                                if key not in ('PGPASSWORD', 'INNGEST_POSTGRES_PASSWORD')},
                             'NOCHEH_RESET_BASELINE': '1'},
-            'volumes': [str(state / 'admin/reset') + ':/reset:ro']}},
+            'volumes': [str(state / 'admin/reset') + ':/reset:ro']},
+        'nocheh-reset-state': {'image': args.services_image, 'profiles': ['reset'],
+            'user': f'{os.getuid()}:{os.getgid()}', 'command': ['node', 'dist/src/stores/reset-state-cli.js'],
+            'environment': {**{key: value for key, value in service_environment.items()
+                               if key not in ('PGPASSWORD', 'INNGEST_POSTGRES_PASSWORD')},
+                            'NOCHEH_RESET_STATE': '1'}}},
         'volumes': {'nocheh_database': {},
                     'honcho_database': {'external': True, 'name': project + '_honcho_database'},
                     'honcho_redis': {'external': True, 'name': project + '_honcho_redis'}},
@@ -196,6 +201,12 @@ def main():
             baseline = reset_baseline.verify(journal, preflight, environment=environment, command=command)
             assert initialized['phase'] == 'initialized' and baseline['phase'] == 'empty_baseline'
             assert journal.value['steps'][-1]['step'] == 'empty_baseline'
+            calls = []
+            boundary = reset_boundary.discard_backlog(journal, preflight,
+                '123456:synthetic-reset-fixture-not-a-real-token', environment=environment, command=command,
+                transport=lambda _token: calls.append(1) or True)
+            assert boundary['phase'] == 'telegram_boundary' and boundary['reused'] is False and calls == [1]
+            assert journal.value['steps'][-1]['step'] == 'telegram_boundary'
         current_ids = output(command + ['--profile', 'honcho', 'ps', '-a', '-q'], environment).split()
         assert set(current_ids).isdisjoint(identifiers) and len(current_ids) == 4
         current = [json.loads(line) for line in output(['docker', 'inspect', '--format', reset_inventory.CONTAINER_FORMAT,
@@ -206,7 +217,7 @@ def main():
         assert (state / 'hermes/auth.json').read_text() == 'SYNTHETIC_LOGIN_RETAINED'
         assert (state / 'provider/auth/token').read_text() == 'SYNTHETIC_CREDENTIAL_RETAINED'
         assert (memory / 'ledger/spend').read_text() == 'SYNTHETIC_SPENDING_RETAINED'
-        report = {'passed': True, 'project': project, 'phase': 'empty_baseline',
+        report = {'passed': True, 'project': project, 'phase': 'telegram_boundary_fixture',
                   'old_containers_removed': len(containers), 'old_volumes_removed': len(volumes),
                   'fresh_services': len(current), 'fresh_volumes': initialized['volumes'],
                   'archive_rows': baseline['archive_rows'], 'derived_rows': baseline['derived_rows'],
@@ -215,6 +226,7 @@ def main():
                   'honcho_postgres_relations': baseline['honcho_postgres_relations'],
                   'honcho_redis_keys': baseline['honcho_redis_keys'],
                   'private_reset_artifacts_retired': True, 'inactive_fences_retained': True,
+                  'post_retirement_state_revalidated': True, 'fixture_boundary_calls': 1,
                   'credentials_login_and_spending_retained': True,
                   'runtime_activated': False, 'network': 'internal only',
                   'provider_calls': 0, 'live_state_changed': False}

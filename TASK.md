@@ -7,6 +7,22 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The one-attempt Telegram reset boundary is now bound to current empty-state proof
+instead of caller-supplied assertions alone. Reset-only store observation computes
+content-free fingerprints over every row and sequence in the exact archive,
+derivative, and control schemas. Immediately before and after the single transport
+call, the coordinator rechecks those fingerprints, zero content rows, exact new
+generation, empty Inngest/Honcho PostgreSQL and Redis state, unchanged native
+preferences, inactive fences, fresh resource identities, and foreign-writer
+exclusion. Dirty state or a changed generation fails before transport. A confirmed
+result replays without another call; an uncertain result retains the exclusive
+attempt and cannot retry automatically. Four focused checks, all 90 reset checks,
+15 protocol checks, a real PostgreSQL rehearsal, the candidate build, and a complete
+fixture-transport lifecycle pass. That lifecycle made zero live Telegram/provider
+requests and changed no live state. The live boundary, fresh acceptance, and
+controlled resumption remain pending.
+[Boundary binding evidence](compatibility/results/2026-09-18-reset-boundary-binding.json).
+
 Fresh reset initialization and the empty-baseline gate now pass a complete synthetic
 lifecycle. The coordinator records creation intent before making new resources,
 rejects every pre-reset container and volume identity, and starts only the selected
@@ -266,7 +282,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Repository/owner checks and deterministic native learning rehearsal pass; fresh human reaction and real reasoning/recall gates remain pending |
 | Complete isolated Compose and UI acceptance | Combined Compose rehearsal passes with deterministic providers; principal owner flows, Overview and Memory access compatibility verified in isolated previews |
 | Installation-scoped reset and empty baseline | Preservation, scoped erasure, fresh resource initialization, setup restoration, native preference restoration, and complete empty-baseline proof pass a combined synthetic lifecycle; live ownership review and the authorized reset remain pending |
-| Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
+| Fresh live acceptance and saved-setup resumption | Current-state validation is bound to the one-attempt boundary and passes with a fixture transport; the live boundary, dedicated test group, human participation, fresh evidence, and controlled resumption remain pending |
 
 Preserve configuration, external logins, and spending accounting during the
 authorized reset; erase installation-owned content, history, backups, and exports.

@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from integrations.hermes import preference_transfer
-from scripts import (reset_baseline, reset_initialization, reset_inventory, reset_protocol,
-                     reset_quiescence)
+from scripts import (reset_baseline, reset_boundary, reset_initialization, reset_inventory,
+                     reset_protocol, reset_quiescence)
 
 
 class FakeDocker:
@@ -16,6 +16,7 @@ class FakeDocker:
         self.root, self.state, self.project = Path(root), Path(state), project
         self.compose_file, self.request_path = str(compose_file), Path(request_path)
         self.containers, self.volumes, self.setup_calls, self.baseline_calls = {}, {}, 0, 0
+        self.state_calls, self.state_generation = 0, None
         self.redis_dirty = False
         self.fail_start_once = False
         self.rendered = {'name': project, 'services': {
@@ -84,6 +85,7 @@ class FakeDocker:
             return ''
         if 'run' in arguments and arguments[-1] == 'nocheh-reset-setup':
             request = json.loads(self.request_path.read_text()); self.setup_calls += 1
+            self.state_generation = request['generation']
             value = {'event': 'reset_setup_restored', 'generation': request['generation'],
                      'binding': {'generation': request['generation'], 'epoch': 1, 'mode': 'on'},
                      'configuration_records': 4, 'projects': 0, 'assignments': 0,
@@ -94,10 +96,18 @@ class FakeDocker:
             request = json.loads(self.request_path.read_text()); self.baseline_calls += 1
             value = {'event': 'reset_baseline_verified', 'generation': request['generation'],
                      'archive_rows': 0, 'derived_rows': 0, 'control_setup_rows': 16,
+                     'archive_state_sha256': '1' * 64, 'derived_state_sha256': '2' * 64,
+                     'control_state_sha256': '3' * 64,
                      'profiles': len(request['profile_commands']), 'setup_only': True,
                      'source_content_present': False, 'derivative_content_present': False,
                      'history_present': False}
             return json.dumps(value) + '\n'
+        if 'run' in arguments and arguments[-1] == 'nocheh-reset-state':
+            self.state_calls += 1
+            return json.dumps({'event': 'reset_state_observed', 'generation': self.state_generation,
+                'archive_rows': 0, 'derived_rows': 0, 'control_rows': 16,
+                'archive_state_sha256': '1' * 64, 'derived_state_sha256': '2' * 64,
+                'control_state_sha256': '3' * 64}) + '\n'
         raise AssertionError(arguments)
 
 
@@ -203,6 +213,48 @@ class ResetInitializationTests(unittest.TestCase):
             self.assertTrue(all(not (directory / name).exists() for name in reset_baseline.PRIVATE))
             self.assertEqual(reset_baseline.verify(journal, self.preflight, runner=fake,
                 environment=self.environment, command=self.command), result)
+            fake.redis_dirty = True
+            with self.assertRaisesRegex(RuntimeError, 'cache_not_empty'):
+                reset_baseline.verify(journal, self.preflight, runner=fake,
+                    environment=self.environment, command=self.command)
+
+    def test_telegram_boundary_rechecks_current_baseline_and_generation_without_retry(self):
+        fake = FakeDocker(self.root, self.state, self.project, self.command[3],
+                          self.state / 'admin/reset/setup.json')
+        calls = []
+        with reset_protocol.locked(self.state) as journal:
+            self.ready(journal)
+            with patch.object(reset_initialization.reset_preservation, 'assert_frozen', return_value=self.artifacts):
+                reset_initialization.initialize(journal, self.preflight, runner=fake,
+                    environment=self.environment, command=self.command)
+            for name in reset_baseline.PRIVATE:
+                path = journal.directory / name
+                if path.exists():
+                    continue
+                value = ({'snapshot': self.artifacts['preferences']['snapshot']}
+                         if name == 'preferences.json' else {'fixture': name})
+                reset_protocol.atomic(path, value, create=True)
+            reset_baseline.verify(journal, self.preflight, runner=fake,
+                                  environment=self.environment, command=self.command)
+            result = reset_boundary.discard_backlog(journal, self.preflight,
+                '123456:synthetic-reset-fixture-not-a-real-token', runner=fake,
+                environment=self.environment, command=self.command,
+                transport=lambda _token: calls.append(1) or True)
+            self.assertEqual(result, {'phase': 'telegram_boundary', 'state': 'confirmed',
+                                      'reused': False, 'runtime_activated': False})
+            self.assertEqual(journal.value['steps'][-1]['step'], 'telegram_boundary')
+            replay = reset_boundary.discard_backlog(journal, self.preflight,
+                '123456:synthetic-reset-fixture-not-a-real-token', runner=fake,
+                environment=self.environment, command=self.command,
+                transport=lambda _token: calls.append(1) or True)
+            self.assertTrue(replay['reused']); self.assertEqual(calls, [1])
+            fake.state_generation = str(uuid.uuid4())
+            with self.assertRaisesRegex(RuntimeError, 'state_changed'):
+                reset_boundary.discard_backlog(journal, self.preflight,
+                    '123456:synthetic-reset-fixture-not-a-real-token', runner=fake,
+                    environment=self.environment, command=self.command,
+                    transport=lambda _token: calls.append(1) or True)
+            self.assertEqual(calls, [1])
 
 
 if __name__ == '__main__':

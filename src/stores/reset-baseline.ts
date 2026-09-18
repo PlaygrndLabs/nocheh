@@ -13,6 +13,7 @@ const exact=(value:unknown,keys:string[])=>{
 };
 const same=(left:unknown,right:unknown)=>canonical(left)===canonical(right);
 const tables=(schema:string)=>[...schema.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)/g)].map(match=>match[1]!).sort();
+const NAME=/^[a-z_][a-z0-9_]*$/;
 
 async function counts(pool:pg.Pool,schema:keyof typeof storeSchemas) {
   const expected=tables(storeSchemas[schema]);
@@ -28,6 +29,37 @@ function only(value:Record<string,number>,allowed:Record<string,number|number[]>
     const expected=allowed[table]??0,accepted=Array.isArray(expected)?expected:[expected];
     if(!accepted.includes(count))throw Error('reset_baseline_not_empty');
   }
+}
+
+async function state(pool:pg.Pool,schema:keyof typeof storeSchemas) {
+  const expected=tables(storeSchemas[schema]);
+  const actual=(await pool.query("SELECT tablename FROM pg_tables WHERE schemaname=current_schema() ORDER BY tablename")).rows.map(row=>row.tablename);
+  if(!same(actual,expected))throw Error('reset_baseline_schema_changed');
+  const contents:Record<string,unknown[]>={};
+  for(const table of expected)contents[table]=(await pool.query(
+    `SELECT row_to_json(t) AS row FROM ${table} t ORDER BY (row_to_json(t)::text) COLLATE "C"`)).rows.map(value=>value.row);
+  const names=(await pool.query("SELECT sequencename FROM pg_sequences WHERE schemaname=current_schema() ORDER BY sequencename")).rows.map(row=>row.sequencename);
+  if(names.some(name=>typeof name!=='string'||!NAME.test(name)))throw Error('reset_baseline_schema_changed');
+  const sequences:Record<string,unknown>={};
+  for(const name of names)sequences[name]=(await pool.query(`SELECT last_value::text AS last_value,is_called FROM ${name}`)).rows[0];
+  return digest(canonical({tables:contents,sequences}));
+}
+
+/** Content-free identity for detecting any post-baseline store mutation. */
+export async function resetStoreState(stores:StorePools) {
+  const generation=(await stores.control.query('SELECT generation::text AS generation FROM installation WHERE singleton')).rows;
+  if(generation.length!==1||typeof generation[0]?.generation!=='string'||!UUID.test(generation[0].generation))
+    throw Error('reset_baseline_generation_changed');
+  const [archive,derived,control]=await Promise.all([
+    counts(stores.archive,'archive'),counts(stores.derived,'derived'),counts(stores.control,'control')]);
+  const archiveRows=Object.values(archive).reduce((a,b)=>a+b,0),derivedRows=Object.values(derived).reduce((a,b)=>a+b,0),
+    controlRows=Object.values(control).reduce((a,b)=>a+b,0);
+  if(archiveRows!==0||derivedRows!==0||controlRows>100000)throw Error('reset_baseline_not_empty');
+  const [archiveState,derivedState,controlState]=await Promise.all([
+    state(stores.archive,'archive'),state(stores.derived,'derived'),state(stores.control,'control')]);
+  return {generation:generation[0].generation,
+    archive_rows:archiveRows,derived_rows:derivedRows,control_rows:controlRows,archive_state_sha256:archiveState,
+    derived_state_sha256:derivedState,control_state_sha256:controlState};
 }
 
 /** Prove that fresh stores contain setup only and no pre-reset content/history. */
@@ -91,7 +123,11 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
   if(!same(memory,[{attached:false,verified:false,include_history:false,revision:0}]))throw Error('reset_baseline_setup_changed');
   const reconciliation=(await stores.control.query('SELECT after_sequence::int AS after_sequence FROM capture_reconciliation WHERE singleton')).rows;
   if(!same(reconciliation,[{after_sequence:0}]))throw Error('reset_baseline_setup_changed');
+  const current=await resetStoreState(stores);if(current.generation!==generation||current.archive_rows!==0||current.derived_rows!==0)
+    throw Error('reset_baseline_state_changed');
   return {generation,archive_rows:Object.values(archive).reduce((a,b)=>a+b,0),
     derived_rows:Object.values(derived).reduce((a,b)=>a+b,0),control_setup_rows:Object.values(control).reduce((a,b)=>a+b,0),
-    profiles:profileCount,setup_only:true,source_content_present:false,derivative_content_present:false,history_present:false};
+    archive_state_sha256:current.archive_state_sha256,derived_state_sha256:current.derived_state_sha256,
+    control_state_sha256:current.control_state_sha256,profiles:profileCount,setup_only:true,
+    source_content_present:false,derivative_content_present:false,history_present:false};
 }

@@ -485,6 +485,18 @@ an empty current queue alone cannot prove the earlier operation's outcome.
 Normal polling retains `drop_pending_updates=false` and never invokes this reset
 primitive. No public CLI discard operation is exposed by this library.
 
+Use `scripts.reset_boundary.discard_backlog` for that transition. It invokes the
+reset-only store-state service before and after transport confirmation. The service
+derives its table inventory from all three compiled schemas and fingerprints every
+row and sequence without returning their contents. The wrapper also reruns the
+empty Inngest/Honcho PostgreSQL and Redis checks, native preference fingerprint,
+fresh container/volume identity checks, inactive fences, and foreign-writer
+exclusion. The observed generation must equal the reset journal generation. Any
+change fails before the attempt is recorded; any change after a confirmed response
+blocks phase completion while retaining that confirmation. Retrying a confirmed
+operation uses the journal and makes no request. An attempted operation without a
+durable confirmation remains uncertain and cannot be retried automatically.
+
 Run `python3 compatibility/reset-protocol-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE --native-image PINNED_CANDIDATE` to exercise journal
 failure paths and the pinned adapter's normal restart behavior in network-disabled
