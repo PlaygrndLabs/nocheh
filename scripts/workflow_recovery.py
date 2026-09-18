@@ -79,8 +79,12 @@ def validate(directory,metadata,sha):
 
 def restore(command,env,snapshot_dir,state,metadata,sha):
     validate(snapshot_dir,metadata,sha)
-    # Override the app command: provision only, without API/capture/workers.
-    subprocess.run(command+['run','--rm','--no-deps','nocheh-app','node','dist/src/workflows/bootstrap.js'],env=env,check=True,stdout=subprocess.DEVNULL)
+    # Only the setup service owns administrator credentials in the separated
+    # layout. Run the workflow-only entrypoint: never bootstrap/reactivate the
+    # three restored stores or start API/capture/workers.
+    setup=(['-e','PGUSER=nocheh','-e','PGDATABASE=nocheh','nocheh-store-bootstrap']
+        if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1' else ['nocheh-app'])
+    subprocess.run(command+['run','--rm','--no-deps',*setup,'node','dist/src/workflows/bootstrap.js'],env=env,check=True,stdout=subprocess.DEVNULL)
     with (Path(snapshot_dir)/'inngest.dump').open('rb') as source:
         subprocess.run(command+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d',DATABASE,'--role=nocheh_inngest','--no-owner','--exit-on-error'],env=env,stdin=source,check=True,stdout=subprocess.DEVNULL)
     if fingerprints(command,env,metadata['tables'])!=metadata['tables']:raise RuntimeError('workflow_restore_fingerprint_mismatch')

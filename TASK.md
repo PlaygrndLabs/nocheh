@@ -734,6 +734,31 @@ coordinated backup/restore, installation reset, and fresh live evidence remain
 separate pending gates.
 [Pinned native portability evidence](compatibility/results/2026-09-18-pinned-native-portability.json).
 
+Production CLI backup/restore orchestration now passes a coordinated format-6
+rehearsal in two fresh synthetic Compose installations. It preserves all 74
+archive/derived/control tables, 12 native Honcho tables with real pgvector data,
+14 Inngest tables, Redis state, 23 state files, exact original bytes, two generated
+versions, durable owner-guarded history, native sessions/notes, and spending
+accounting. Restore verifies rows/sequences and leaves domain roles NOLOGIN,
+provider logins inactive, Honcho detached, and only its PostgreSQL container up.
+Both fixture projects and their volumes/networks were removed after verification.
+
+This exposed and fixed workflow restore's use of the application administrator
+credential: the original-only layout now runs its workflow-only provisioning
+entrypoint through the setup service without activating the restored domains.
+Eighteen recovery checks pass. The first rehearsal rejected an incorrectly shaped
+synthetic detector response; correcting the fixture allowed the complete run to
+pass. No production data or provider credential was used.
+
+The dashboard-started backup path still needs a coordinator that survives stopping
+writers: the current original-only shutdown list includes its own dashboard
+container. It must enforce maintenance exclusion while keeping progress visible;
+CLI rehearsal evidence does not close that gate. Full native/application/UI
+rehearsal, saved preference migration, scoped reset, and fresh live gates also
+remain pending.
+[Coordinated recovery evidence](compatibility/results/2026-09-18-coordinated-store-recovery.json).
+
+
 
 
 

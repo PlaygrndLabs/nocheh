@@ -1,0 +1,29 @@
+# Overlay only for coordinated-recovery-rehearsal.py's newly owned installation.
+# No network egress, published ports, providers, or borrowed installation state.
+services:
+  nocheh-postgres:
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=64, -c, cluster_name=nocheh-recovery-fixture]
+    mem_limit: 512m
+  honcho-postgres:
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=32, -c, cluster_name=nocheh-native-portable-fixture]
+    mem_limit: 512m
+  nocheh-store-bootstrap:
+    image: ${NOCHEH_RECOVERY_SERVICES_IMAGE:?Explicit candidate required}
+  nocheh-app:
+    image: ${NOCHEH_RECOVERY_SERVICES_IMAGE}
+    ports: !reset []
+  nocheh-security:
+    image: ${NOCHEH_RECOVERY_SERVICES_IMAGE}
+  honcho-api:
+    image: ${NOCHEH_RECOVERY_HONCHO_IMAGE:?Explicit pinned candidate required}
+    environment:
+      PYTHON_DOTENV_DISABLED: "1"
+      HONCHO_CONFIG_TOML_DISABLED: "1"
+      EMBEDDING_VECTOR_DIMENSIONS: "1536"
+      LLM_OPENAI_API_KEY: synthetic-no-provider
+      CACHE_ENABLED: "false"
+      AUTH_USE_AUTH: "false"
+      LOG_LEVEL: WARNING
+networks:
+  default: {internal: true}
+  honcho-egress: {internal: true}
