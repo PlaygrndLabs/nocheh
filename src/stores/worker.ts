@@ -14,7 +14,10 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
   const jobs:Record<string,()=>Promise<unknown>>={
     capture:()=>drainSourceSpool(s.capture,config.dataDir),
     reconciliation:()=>s.capture.reconcile(),
-    guards:async()=>{await s.guards.reconcile();if(!configured){await s.guards.setMode(config.guardMode);configured=true;}},
+    guards:async()=>{
+      await s.guards.reconcile();await s.selections.reconcile();await s.learned.reconcile();
+      if(!configured){await s.guards.setMode(config.guardMode);configured=true;}
+    },
     outbox:async()=>{
       if(existsSync(join(config.dataDir,'workflows/inactive'))){status.outbox='inactive';return;}
       publisher??=workflowClient('pipeline');await publishOutbox(s.stores.control,event=>publisher!.send(event));

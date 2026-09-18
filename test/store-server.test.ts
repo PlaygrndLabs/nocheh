@@ -68,6 +68,13 @@ test('separated application captures through control outages, exposes owner repo
     await until(async()=>!(await readdir(join(root,'spool/pending'))).includes(digest(key)+'.json'));
     assert.equal((await connected.archive.query('SELECT count(*)::int AS count FROM events WHERE id=$1',[digest(key)])).rows[0].count,1);
     assert.equal((await connected.control.query('SELECT state FROM source_intakes WHERE event_id=$1',[digest(key)])).rows[0].state,'ready');
+    const captured=(await services.archive.captured(digest(key))).reference;
+    const output=await services.derived.record({operation_id:key+':derivative',source:captured,kind:'extracted_text',content:Buffer.from('Synthetic derived reading'),producer:'fixture',producer_version:'1',configuration:{}});
+    await services.guards.prepare(output,'fixture',services.detect);
+    const finish=services.selections.finish.bind(services.selections);services.selections.finish=async()=>{throw Error('lost selection completion');};
+    try{await assert.rejects(services.selections.activate(output,null,key+':selection'),/lost selection completion/);}finally{services.selections.finish=finish;}
+    await until(async()=>!(await connected.control.query("SELECT 1 FROM guard_publications WHERE id=$1 AND state='pending'",[key+':selection'])).rowCount);
+    assert.equal((await services.selections.current(captured.id,null,'extracted_text',await services.guards.state())).id,output.id,'worker repairs interrupted selection publication');
     await services.guards.prepare((await services.archive.captured(digest(key))).reference,'fixture',services.detect);
     const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);

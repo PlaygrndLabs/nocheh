@@ -19,17 +19,17 @@ projects, and explicitly managed sharing are accepted requirements.
 | Increment | Status |
 | --- | --- |
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
-| Three stores, repositories, capture handoff, role isolation | Foundation verified in isolated Compose; production wiring and remaining repository migrations pending |
-| Guard/control separation and recovery | Guard repository and publication recovery verified; production callers and remaining control-state migrations pending |
+| Three stores, repositories, capture handoff, role isolation | Foundation and app/security/capture wiring verified in isolated Compose; remaining repository migrations pending |
+| Guard/control separation and recovery | Guard repositories, service callers, and publication recovery verified; remaining action/managed control-state migrations pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; three-store backup/inactive restore candidates verified; portability, full coordinated rehearsal, and production routing pending |
-| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, workers, explicit sharing, and owner API/CLI/dashboard verified as candidates; production wiring pending |
+| Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, explicit sharing, owner interfaces, and preparation/memory workflow wiring verified as candidates; full installation rehearsal pending |
 | Complete isolated Compose and UI acceptance | Pending |
 | Installation-scoped reset and empty baseline | Authorized after isolated acceptance; not performed |
 | Fresh live acceptance and saved-setup resumption | Pending; dedicated test group and human participation required |
 
 Preserve configuration, external logins, and spending accounting during the
 authorized reset; erase installation-owned content, history, backups, and exports.
-No live services or data have changed in this documentation increment. Earlier
+Implementation has not changed live services or data. Earlier
 storage/classification and convention-design questions below are resolved by the
 accepted plan; those entries are historical observations, not remaining decisions.
 
@@ -330,6 +330,28 @@ execution, action/managed-runtime endpoints (including action security preview),
 complete portable coordination, full Compose rehearsal, reset, and fresh live
 acceptance remain pending. No live installation configuration was changed.
 [Service entrypoint evidence](compatibility/results/2026-09-18-store-entrypoints.json).
+
+The separated application now registers preparation, reprocessing, native Hermes
+review, Honcho ingestion/context, and contextual learning with the existing
+Inngest engine. Only metadata crosses its event/step boundary. Two concurrent
+domain operations leave pool capacity for nested publications. Bounded refresh
+sweeps persist their cursors together with deterministic source/projection
+requests. Unknown reaction targets wait for independently captured context;
+learning itself performs no delivery or action. Uncertain native effects continue
+observation under their original identity instead of being re-executed.
+
+Native memory work revisions create a fresh observation job when new receipts
+arrive after an earlier observation completed. A concurrent receipt invalidates an
+older readiness check. The capture worker now reconciles pending guard, derivative
+selection, and learned-memory publications, including after an interrupted owner
+activation. Nine affected synthetic PostgreSQL/engine/process checks pass;
+TypeScript and AST-only Graphify pass. Tests invoke the actual workflow step engine
+with deterministic native adapters; a complete running Inngest/native installation
+rehearsal remains pending. Telegram dispatch, actions, browser/scheduler and owner
+workflow controls still require migration. No provider calls or installation reset
+were performed.
+[Workflow integration evidence](compatibility/results/2026-09-18-store-workflows.json).
+
 
 
 The guard repository now stores immutable inputs, fragments, automatic/owner
