@@ -11,7 +11,17 @@ import type {StorePools} from './connections.js';
 
 export interface DerivationEngine {
   readonly name:string;readonly version:string;readonly outputKind:'transcript'|'extracted_text';
-  run(bytes:Buffer,metadata:{kind:string;metadata:Record<string,unknown>},configuration:Record<string,unknown>):Promise<string>;
+  run(bytes:Buffer,metadata:{kind:string;metadata:Record<string,unknown>},configuration:Record<string,unknown>):Promise<string|{kind:'extraction_status';text:string}>;
+}
+
+export function utf8Extraction():DerivationEngine {
+  return {name:'nocheh-utf8',version:'1',outputKind:'extracted_text',async run(bytes,file,configuration){
+    if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_extraction_configuration');
+    if(!['photo','image','video','sticker','animation'].includes(file.kind)&&bytes.length<=200000&&!bytes.includes(0)) {
+      try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* preserve unsupported original bytes */}
+    }
+    return {kind:'extraction_status',text:'Text extraction is unavailable for this original file.'};
+  }};
 }
 
 export function subscriptionTranscription(call:RuntimeCall):DerivationEngine {
@@ -77,8 +87,10 @@ export class ReprocessingRepository {
           throw new HttpError(409,'file_reference_conflict');
         const bytes=await readFile(join(this.dataDir,'files',file.input_hash));
         if(digest(bytes)!==file.input_hash||bytes.length!==file.byte_size)throw new HttpError(409,'original_file_integrity_failed');
-        const engine=this.engine(job.producer,job.producer_version),text=await engine.run(bytes,manifest,job.configuration);
-        result=await this.derived.record({operation_id:'reprocess:'+id,source:file.event,file,kind:engine.outputKind,content:Buffer.from(text),
+        const engine=this.engine(job.producer,job.producer_version),output=await engine.run(bytes,manifest,job.configuration);
+        if(typeof output!=='string'&&(engine.outputKind!=='extracted_text'||output.kind!=='extraction_status'||typeof output.text!=='string'))
+          throw new HttpError(503,'invalid_derivation_result');
+        result=await this.derived.record({operation_id:'reprocess:'+id,source:file.event,file,kind:typeof output==='string'?engine.outputKind:output.kind,content:Buffer.from(typeof output==='string'?output:output.text),
           producer:job.producer,producer_version:job.producer_version,configuration:job.configuration});
       }
       // Output is committed before guarding or completion; a retry reuses it.

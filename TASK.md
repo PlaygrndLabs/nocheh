@@ -77,6 +77,19 @@ pass (337 files, 2,051 nodes, 7,572 edges, zero model calls).
 Production service routing, attachment preparation, and the remaining owner and
 runtime interfaces still require integration before the isolated full rehearsal.
 
+Attachment and preparation repositories now separate immutable manifests from
+download attempts/backoff. Original bytes are fsynced before manifest commit and
+control completion; interrupted completion repairs from the existing bytes without
+downloading again. Imported files wait for owner uploads. The preparation step
+uses the existing workflow family fence and versioned reprocessing/selection for
+subscription transcripts, UTF-8 extraction, and explicit unsupported-file results.
+Automatic preparation cannot replace an existing selection or an owner's guard edit.
+Four affected synthetic PostgreSQL checks pass, including wrong-epoch admission,
+file mutation denial, interrupted receipt recovery, backoff, text/binary handling,
+and repeated preparation. Production workflow handlers still await the common
+service composition; no live transcription or full rehearsal is claimed.
+[Preparation evidence](compatibility/results/2026-09-18-store-preparation.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior
