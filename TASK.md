@@ -7,6 +7,20 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The reset's provider-accounting cleanup is a verified candidate. The installation
+audit found that the monitor mixes accounting with raw failure bodies, response
+metadata, inspection logs, and search text. The pinned-schema cleanup preserves
+retained accounting/configuration rows and cache-accounting hints, erases content
+fields and execution logs, rebuilds search, and removes old SQLite pages/WAL data.
+It uses the monitor's native writer lock and rejects unknown schemas before writes.
+Six offline checks pass, including interrupted transactions and preservation
+mismatch rollback. A separate network-disabled Compose rehearsal passes against
+the real pinned monitor before and after restart, preserving pricing, usage, saved
+settings, and the separate spending ledger. No live data was changed and no content
+backup was created. [Accounting reset evidence](compatibility/results/2026-09-18-reset-accounting.json).
+The full reset coordinator, installation rehearsal, deletion, and fresh live gates
+remain pending.
+
 Saved runtime preference transfer is a verified candidate. It captures the eight
 supported native preferences, preserves global/profile inheritance, maps legacy
 owner profiles to stable control identities, and retains absent topic overrides

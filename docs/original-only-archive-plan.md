@@ -420,6 +420,21 @@ write. Job preferences disappear with schedules. This library neither quiesces
 services nor deletes data; those operations still require the complete scoped
 coordinator and isolated reset rehearsal.
 
+The provider monitor contains both accounting and content-bearing diagnostics.
+After stopping its writer, use `scripts.reset_accounting.sanitize` on the exact
+owned usage database. It requires the pinned schema and native manager lock,
+preserves retained accounting/configuration fingerprints and cache-accounting
+hints, erases raw response/error/log content, rebuilds full-text search, and
+compacts SQLite plus its WAL. The Honcho spending ledger remains separate and
+untouched. A compaction interruption requires a retry before service resumption;
+an unknown schema needs review before deletion. Erase old usage-import files
+through the scoped manifest as well. Verify with
+`python3 compatibility/reset-accounting-rehearsal.py --directory NEW_DIRECTORY
+--monitor-image PINNED_MONITOR --checks-image CANDIDATE_MANAGEMENT`.
+This fixture has no network, creates its own state, proves exclusion by the real
+monitor lock, and restarts the pinned monitor after cleanup. It does not authorize
+or execute an installation reset.
+
 Stop ingress, scheduling, execution, learning, and provider refresh ownership;
 settle in-flight effects before erasing receipts. Resolve installation-owned
 paths and volumes explicitly; never use global pruning or touch unrelated state.
