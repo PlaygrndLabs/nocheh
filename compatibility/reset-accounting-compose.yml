@@ -1,0 +1,43 @@
+# Synthetic monitor/reset acceptance. No network or installation state.
+name: ${NOCHEH_RESET_FIXTURE_PROJECT:?Explicit fixture project required}
+services:
+  monitor:
+    image: ${NOCHEH_RESET_MONITOR_IMAGE:?Explicit pinned monitor image required}
+    user: "${NOCHEH_RESET_UID}:${NOCHEH_RESET_GID}"
+    network_mode: none
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      HTTP_ADDR: 127.0.0.1:18317
+      USAGE_DATA_DIR: /fixture
+      USAGE_DB_PATH: /fixture/usage.sqlite
+      CPA_UPSTREAM_URL: http://127.0.0.1:9
+      CPA_MANAGEMENT_KEY: synthetic-management-not-a-real-credential
+      CPA_MANAGER_ADMIN_KEY: synthetic-admin-not-a-real-credential
+      CPA_MANAGER_DATA_KEY: synthetic-data-not-a-real-credential
+      USAGE_COLLECTOR_MODE: http
+      USAGE_QUOTA_COOLDOWN_ENABLED: "false"
+      USAGE_ACCOUNT_ACTIONS_ENABLED: "false"
+      USAGE_ACCOUNT_ACTIONS_AUTO_DISABLE: "false"
+    volumes: ["${NOCHEH_RESET_FIXTURE_STATE:?Explicit synthetic directory required}:/fixture"]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:18317/health]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+  checks:
+    image: ${NOCHEH_RESET_CHECKS_IMAGE:?Explicit candidate checks image required}
+    user: "${NOCHEH_RESET_UID}:${NOCHEH_RESET_GID}"
+    network_mode: none
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    entrypoint: [python3, /app/compatibility/reset-accounting-rehearsal.py]
+    profiles: [checks]
+    volumes:
+      - ${NOCHEH_RESET_FIXTURE_STATE}:/fixture
+      - ../scripts/reset_accounting.py:/app/scripts/reset_accounting.py:ro
+      - ./reset-accounting-rehearsal.py:/app/compatibility/reset-accounting-rehearsal.py:ro
