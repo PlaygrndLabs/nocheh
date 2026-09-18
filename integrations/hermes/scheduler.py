@@ -130,7 +130,8 @@ class Scheduler:
             if home.name!=context['logical_profile']:continue
             with store(home):
                 job=next((job for job in inspect(home) if job['id']==context['job_id']),None)
-                if not job or job.get('nocheh_removed') or bound.profile!=context['profile'] or job.get('nocheh_definition_version')!=context['definition'].get('execution_version'):
+                selected=bound.logical_profile if context.get('storage_layout')=='original-only-v1' else bound.profile
+                if not job or job.get('nocheh_removed') or selected!=context['profile'] or job.get('nocheh_definition_version')!=context['definition'].get('execution_version'):
                     self.call('cancel',{'event_id':context['event_id']});return {'state':'cancelled'}
                 if job.get('nocheh_running')!=context['event_id']:return {'state':'waiting'}
                 return {'state':'ready','context':context,'scope':bound,**({'claim':self.call('claim',context)} if claim else {})}

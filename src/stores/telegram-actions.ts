@@ -9,6 +9,8 @@ import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionA
 import {observation,type Observation} from '../workflows/pipeline.js';
 import type {StorePools} from './connections.js';
 import type {SourceReference} from './archive.js';
+import {OperationRepository,type OperationReference} from './operations.js';
+import {RuntimeProfileRepository} from './runtime-profiles.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository} from './derived.js';
 import type {GuardRepository,GuardBinding} from './guards.js';
@@ -61,6 +63,34 @@ export class TelegramActionRepository {
       if(original.origin!=='live'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'external_effect_requires_live_turn');
       channel=original.channel;
     }
+    return this.propose(principal,turn,binding,source,input,channel);
+  }
+  /** Only a trusted completion path can stage delivery from a closed scheduled
+   * run. This creates an exact proposal; it never reopens the runtime capability. */
+  async requestScheduled(principal:Reader,id:string){
+    admin(principal);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_run_identity');
+    const row=(await this.stores.control.query("SELECT * FROM managed_runs WHERE event_id=$1 AND channel='scheduler'",[id])).rows[0];
+    if(!row||row.state!=='done'||row.cancel_requested||!row.result_reference)return {state:'withheld',reason:'run_not_complete'};
+    try{await this.guards.assertCurrent(row.binding);}catch(error){if(!(error instanceof HttpError)||error.status>=500)throw error;return {state:'withheld',reason:'guard_context_changed'};}
+    const version=(await this.stores.control.query(`SELECT v.*,a.execution_version AS active_execution,a.configuration AS active_configuration
+      FROM schedule_versions v JOIN workflow_schedules s ON s.id=v.schedule_id JOIN schedule_versions a ON a.id=s.version_id WHERE v.id=$1`,[row.schedule_version])).rows[0];
+    if(!version||version.execution_version!==version.active_execution||version.active_configuration.removed)return {state:'withheld',reason:'schedule_definition_changed'};
+    const selected=await new RuntimeProfileRepository(this.access).resolve(principal,{profile:row.logical_profile});
+    if(selected.logical_profile!==row.logical_profile||selected.scope!==row.scope||row.space_id!==row.scope)throw new HttpError(403,'profile_scope_denied');
+    await new OperationRepository(this.stores.control).verify(row.source_reference);
+    const result=await this.derived.checkpoint('scheduler-result:'+id);
+    if(!result||result.id!==row.result_reference.id||result.content_hash!==row.result_reference.input_hash||result.kind!=='scheduled_result'||
+      result.producer!=='hermes'||result.producer_version!=='managed-scheduler-v2'||canonical(result.operation_reference)!==canonical(row.source_reference))
+      throw new HttpError(409,'run_result_conflict');
+    const output=JSON.parse(result.content.toString());if(output.state!=='done')return {state:'withheld',reason:'run_not_complete'};
+    const text=string(output.text,1000000);if(version.configuration.deliver!=='telegram'||!text.trim())return {state:'local'};
+    if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
+    const audience:Reader={admin:false,scope:row.scope===this.access.policy().owner_id?null:row.scope,space:row.space_id,
+      turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
+    return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text});
+  }
+  private async propose(principal:Reader,turn:{scope:string;logical_profile:string},binding:GuardBinding,
+    source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string){
     const requested=string(input.destination,32),destination=requested==='current'&&channel==='telegram'?turn.scope:requested,text=string(input.text,3500);
     if(!/^-?[1-9]\d{0,18}$/.test(destination)||!text.trim())throw new HttpError(400,'invalid_action');
     const id=digest(canonical([protocol,source,binding,destination,text]));

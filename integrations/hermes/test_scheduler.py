@@ -198,4 +198,41 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(self.scheduler.advance(request)['state'],'skipped')
 
 
+class StoreSchedulerTests(SchedulerTests):
+    """Repeat native cadence/receipt checks with generation-bound control profiles."""
+    def setUp(self):
+        super().setUp()
+        from .test_runtime_profiles import ControlFixture
+        from .runtime_profiles import ProfileCatalog
+        self.store_env=patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'});self.store_env.start()
+        self.control=ControlFixture()
+        self.admin.policy=Scopes({'enabled':False,'owner_id':'42','group_ids':['-10']})
+        self.admin.profile_catalog=ProfileCatalog(self.root,self.admin.policy,self.admin.token,self.control.request)
+
+    def tearDown(self):
+        self.store_env.stop();super().tearDown()
+
+    def call(self,route,body):
+        result=super().call(route,body)
+        if route=='claim' and result.get('claimed'):
+            claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42',
+                'revision':self.control.epoch,'guard_epoch':self.control.epoch,'generation':self.control.generation,
+                'logical_profile':body['profile'],'expires':(time.time()+600)*1000}
+            encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+            signature=base64.urlsafe_b64encode(hmac.new(self.admin.token.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+            result['archive_credential']='turn.'+encoded+'.'+signature
+        return result
+
+    def migrate(self):
+        managed=super().migrate();original=self.scheduler.call
+        def call(route,body):
+            result=original(route,body)
+            if route=='workflow-context':
+                result={**result,'storage_layout':'original-only-v1',
+                    'definition':{k:v for k,v in result['definition'].items() if k not in ('prompt','name')}}
+            return result
+        self.scheduler.call=call
+        return managed
+
+
 if __name__=='__main__':unittest.main()

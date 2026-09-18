@@ -109,7 +109,12 @@ test('separated application captures through control outages, exposes owner repo
       scheduled_for:'2026-09-18T12:00:00Z',fire_reason:'manual',owner_epoch:scheduleOwner.epoch});
     assert.equal(scheduled.state,'captured');
     assert.equal((await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[scheduled.event_id])).rowCount,0);
-    await request('/v1/scheduler/claim',{event_id:scheduled.event_id},503);
+    const scheduledContext=await request('/v1/scheduler/workflow-context',{event_id:scheduled.event_id,owner_epoch:scheduleOwner.epoch});
+    const scheduledClaim=await request('/v1/scheduler/claim',scheduledContext);assert.equal(scheduledClaim.claimed,true);
+    assert.equal((await request('/v1/scheduler/prepare',scheduledContext)).files.length,0);
+    await request('/v1/scheduler/finish',{event_id:scheduled.event_id,actor:scheduledContext.actor,state:'done',session:scheduledContext.conversation,text:'Scheduled result'});
+    assert.equal((await request('/v1/scheduler/delivery',{event_id:scheduled.event_id})).state,'local');
+    await request('/v1/memory/check',undefined,409,scheduledClaim.archive_credential);
 
     await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
     const proposal=await request('/v1/action-requests',{destination:'current',text:'Synthetic approval preview'},200,credential);
