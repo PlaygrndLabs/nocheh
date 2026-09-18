@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import (configuration, reset_accounting, reset_baseline, reset_boundary,
+from scripts import (configuration, reset_acceptance, reset_accounting, reset_baseline, reset_boundary,
                      reset_erasure, reset_initialization, reset_inventory, reset_ownership,
                      reset_preservation, reset_protocol, reset_quiescence)
 from scripts.store_recovery import StoreRecovery
@@ -182,6 +182,13 @@ def main():
         recovery = StoreRecovery(command, environment); review = reset_ownership.prepare(preflight)
         with recovery.maintenance(), reset_protocol.locked(state) as journal:
             journal.create(preflight, str(uuid.uuid4()))
+            quiescence = {'format': 'nocheh-reset-quiescence-v1', 'reset_id': journal.value['reset_id'],
+                'preflight_sha256': journal.value['preflight_sha256'],
+                'binding_sha256': reset_protocol.fingerprint(reset_quiescence.binding(preflight)),
+                'fences_absent_at_start': True,
+                'containers': [{'id': row['id'], 'service': row['service'], 'state': row['state'],
+                                'restart_policy': row['restart_policy']} for row in preflight['containers']]}
+            reset_protocol.atomic(journal.directory / 'quiescence.json', quiescence, create=True)
             for step in reset_protocol.STEPS[:3]: journal.complete(step, 'c' * 64)
             reset_protocol.atomic(journal.directory / 'settlement.json', {'synthetic': True}, create=True)
             reset_quiescence.fence(state, journal.value['reset_id'])
@@ -207,6 +214,10 @@ def main():
                 transport=lambda _token: calls.append(1) or True)
             assert boundary['phase'] == 'telegram_boundary' and boundary['reused'] is False and calls == [1]
             assert journal.value['steps'][-1]['step'] == 'telegram_boundary'
+            acceptance = reset_acceptance.activate(journal, preflight, environment=environment,
+                                                    command=command)
+            assert acceptance['phase'] == 'acceptance_running'
+            assert acceptance['restart_ownership'] is False and journal.value['steps'][-1]['step'] == 'telegram_boundary'
         current_ids = output(command + ['--profile', 'honcho', 'ps', '-a', '-q'], environment).split()
         assert set(current_ids).isdisjoint(identifiers) and len(current_ids) == 4
         current = [json.loads(line) for line in output(['docker', 'inspect', '--format', reset_inventory.CONTAINER_FORMAT,
@@ -214,10 +225,11 @@ def main():
         assert {row['service'] for row in current} == {'nocheh-postgres', 'inngest-redis', 'honcho-postgres', 'honcho-redis'}
         assert all(row['restart_policy'] == {'Name': 'no', 'MaximumRetryCount': 0} and row['state'] == 'running' for row in current)
         assert all(not (state / 'admin/reset' / name).exists() for name in reset_baseline.PRIVATE)
+        assert all(not (state / name).exists() for name in reset_quiescence.FENCES)
         assert (state / 'hermes/auth.json').read_text() == 'SYNTHETIC_LOGIN_RETAINED'
         assert (state / 'provider/auth/token').read_text() == 'SYNTHETIC_CREDENTIAL_RETAINED'
         assert (memory / 'ledger/spend').read_text() == 'SYNTHETIC_SPENDING_RETAINED'
-        report = {'passed': True, 'project': project, 'phase': 'telegram_boundary_fixture',
+        report = {'passed': True, 'project': project, 'phase': 'acceptance_mode_fixture',
                   'old_containers_removed': len(containers), 'old_volumes_removed': len(volumes),
                   'fresh_services': len(current), 'fresh_volumes': initialized['volumes'],
                   'archive_rows': baseline['archive_rows'], 'derived_rows': baseline['derived_rows'],
@@ -225,9 +237,10 @@ def main():
                   'inngest_redis_keys': baseline['inngest_redis_keys'],
                   'honcho_postgres_relations': baseline['honcho_postgres_relations'],
                   'honcho_redis_keys': baseline['honcho_redis_keys'],
-                  'private_reset_artifacts_retired': True, 'inactive_fences_retained': True,
+                  'private_reset_artifacts_retired': True, 'inactive_fences_released': True,
                   'post_retirement_state_revalidated': True, 'fixture_boundary_calls': 1,
                   'credentials_login_and_spending_retained': True,
+                  'restart_ownership': False, 'fresh_acceptance': False,
                   'runtime_activated': False, 'network': 'internal only',
                   'provider_calls': 0, 'live_state_changed': False}
         (directory / 'result.json').write_text(json.dumps(report, indent=2) + '\n'); print(json.dumps(report))

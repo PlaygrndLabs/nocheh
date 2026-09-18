@@ -497,6 +497,27 @@ blocks phase completion while retaining that confirmation. Retrying a confirmed
 operation uses the journal and makes no request. An attempted operation without a
 durable confirmation remains uncertain and cannot be retried automatically.
 
+After a confirmed boundary, use `scripts.reset_acceptance.activate` to enter the
+fresh live acceptance window. It derives the enabled services and their saved
+restart policies only from the immutable pre-reset quiescence receipt, expands the
+current Compose dependency graph, and records that plan before creating anything.
+All fresh dependency containers are created while the four reset fences remain in
+place. The coordinator proves that their identities are new, that the initialized
+database/cache container identities did not change, and that every container has
+restart policy `no`. It then records fence-release intent, removes only markers
+owned by this reset, and starts dependencies in order while honoring healthy and
+successful-completion conditions. Failed or interrupted startup is retryable from
+the recorded identities, with restart ownership still disabled. This transition
+does not complete `fresh_acceptance`, restore a prior restart policy, or establish
+that any live check passed. Fixtures and historical reports remain ineligible for
+the next phase.
+
+Run the reset fresh-baseline rehearsal through `acceptance_mode_fixture` to verify
+this transition with isolated synthetic PostgreSQL, Redis and Honcho services. The
+rehearsal must release the fixture fences while leaving all four fresh containers
+on restart policy `no`; it makes one in-process boundary call and no provider or
+live Telegram request.
+
 Run `python3 compatibility/reset-protocol-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE --native-image PINNED_CANDIDATE` to exercise journal
 failure paths and the pinned adapter's normal restart behavior in network-disabled
