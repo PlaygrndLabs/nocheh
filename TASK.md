@@ -20,7 +20,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | --- | --- |
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation and app/security/capture wiring verified in isolated Compose; remaining repository migrations pending |
-| Guard/control separation and recovery | Guard, action, browser execution, service callers, and publication recovery verified as candidates; native administration and scheduler migrations pending |
+| Guard/control separation and recovery | Guard, action, browser execution, service callers, and publication recovery verified as candidates; native profile administration verified as a candidate; scheduler migration pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; three-store backup/inactive restore candidates verified; portability, full coordinated rehearsal, and production routing pending |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, explicit sharing, owner interfaces, and preparation/memory workflow wiring verified as candidates; full installation rehearsal pending |
 | Complete isolated Compose and UI acceptance | Pending |
@@ -557,6 +557,24 @@ HTTP checks and thirteen offline native checks. TypeScript, diff hygiene, and
 AST-only Graphify pass (419 files, 2,564 nodes, 10,337 edges; zero model calls).
 Native administration/catalog admission integration remains pending.
 [Browser media evidence](compatibility/results/2026-09-18-store-browser-media.json).
+
+Native Hermes administration now resolves profile authority through control storage
+for the original-only layout. Filesystem owner markers cannot grant a profile;
+old generation paths, wrong audiences, and symlinked homes fail closed. Create,
+rename, and retirement use the owner profile repository. Stable preference homes
+survive rename/retirement, and the next native turn receives saved preferences
+without copying old sessions or notes. Native launches carry installation, guard,
+and logical-profile identities; browser capture/admission use the stable identity.
+Admission and execution recheck active catalog membership, including retirement
+while a prepared run is queued. Capture can still spool through database outages.
+Four PostgreSQL/HTTP checks and 35 offline pinned-native checks pass. An initial
+assertion expected not-found instead of the existing scope-denied response; the
+assertion was corrected and the entire affected database batch repeated. TypeScript,
+diff hygiene, and AST-only Graphify pass (421 files, 2,590 nodes, 10,427 edges;
+zero model calls). Saved preference migration, confirmed browser delivery, complete
+UI/runtime rehearsal, and scheduler integration remain pending.
+[Native profile evidence](compatibility/results/2026-09-18-store-profile-administration.json).
+
 
 
 

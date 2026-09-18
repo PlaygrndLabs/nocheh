@@ -21,7 +21,7 @@ def prepare_profile(root,scope,model):
     profile=Path(root)/'profiles'/scope.profile
     profile.mkdir(parents=True,exist_ok=True,mode=0o700)
     from .profile_config import configure_profile
-    if not (profile/'config.yaml').exists() and (scope.revision or scope.guard_epoch):
+    if (scope.generation or not (profile/'config.yaml').exists()) and (scope.revision or scope.guard_epoch):
         from .profile_config import read, atomic_yaml
         canonical=Path(root)/'profiles'/Scopes.profile(scope.space)
         parent=Path(root)/'profiles'/Scopes.profile(scope.chat_id)

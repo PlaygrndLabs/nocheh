@@ -50,7 +50,7 @@ class BrowserGateway:
         text = params.get('text')
         if not isinstance(text,str) or len(text)>100000: raise ValueError('invalid_text')
         files = list(session.get('_nocheh_attachments',{}).values())
-        request = {'scope':self.scope.chat_id, 'profile':self.scope.profile,
+        request = {'scope':self.scope.chat_id, 'profile':self.scope.logical_profile or self.scope.profile,
                    'space':self.scope.space or self.scope.chat_id,'revision':self.scope.revision,
                    'conversation':session['session_key'], 'id':params['id'], 'text':text, 'files':files,
                    'submission':params.get('submission','composer'), 'display':params.get('display',text)}
@@ -109,7 +109,7 @@ class BrowserGateway:
             raise RuntimeError('workflow_admission_unavailable')
 
     def workflow_context(self,session,event=None):
-        return {'scope':self.scope.chat_id,'profile':self.scope.profile,'conversation':session['session_key'],
+        return {'scope':self.scope.chat_id,'profile':self.scope.logical_profile or self.scope.profile,'conversation':session['session_key'],
                 **({'event_id':event} if event else {})}
 
     def follow(self,sid,session,event):
@@ -169,7 +169,7 @@ class BrowserGateway:
 
     def invoke(self, name, rid, params):
         try:
-            if params.get('profile') not in (None,'',self.scope.profile): raise ValueError('profile_scope_denied')
+            if params.get('profile') not in (None,'',self.scope.profile,self.scope.logical_profile): raise ValueError('profile_scope_denied')
             params = {**params};params.pop('profile',None)
             if name == 'nocheh.input': return self.capture(rid,params)
             if name in ('image.attach','image.attach_bytes','image.detach','file.attach','pdf.attach'): return self.attach(name,rid,params)
@@ -230,7 +230,7 @@ class BrowserGateway:
         self.server._start_agent_build = lambda *_:None
         self.server._make_agent = lambda *_args,**_kwargs: (_ for _ in ()).throw(RuntimeError('managed_bootstrap_required'))
         # Native resume must never discover/adopt a sibling profile's session.
-        self.server._profile_home = lambda name: None if name in (None,'',self.scope.profile) else (_ for _ in ()).throw(ValueError('profile_scope_denied'))
+        self.server._profile_home = lambda name: None if name in (None,'',self.scope.profile,self.scope.logical_profile) else (_ for _ in ()).throw(ValueError('profile_scope_denied'))
         self.server._resume_adopt_stranded = lambda *_:None
 
 
@@ -242,7 +242,14 @@ def main():
     profile=os.environ['NOCHEH_BROWSER_PROFILE'];chat=os.environ['NOCHEH_BROWSER_SCOPE']
     if home != root/'profiles'/profile: raise SystemExit('managed_profile_mismatch')
     scope=Scope(chat,os.environ['NOCHEH_BROWSER_OWNER_ID'],os.environ['NOCHEH_BROWSER_OWNER']=='1',profile,
-                os.environ.get('NOCHEH_BROWSER_SPACE',chat),int(os.environ.get('NOCHEH_BROWSER_REVISION','0')))
+                os.environ.get('NOCHEH_BROWSER_SPACE',chat),int(os.environ.get('NOCHEH_BROWSER_REVISION','0')),
+                int(os.environ.get('NOCHEH_BROWSER_GUARD_EPOCH','0')),os.environ.get('NOCHEH_BROWSER_GENERATION',''),
+                'assistant',os.environ.get('NOCHEH_BROWSER_LOGICAL_PROFILE',''))
+    if os.environ.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
+        from .scopes import Scopes
+        expected=Scopes.apply_revision(scope,{'generation':scope.generation,'guard_epoch':scope.guard_epoch,
+            'revision':scope.revision,'logical_profile':scope.logical_profile})
+        if expected.profile!=profile: raise SystemExit('managed_profile_mismatch')
     from tui_gateway import server
     gateway=BrowserGateway(server,root,scope,os.environ['NOCHEH_MODEL']);gateway.install();gateway.flush_receipts()
     from .request_boundary import install

@@ -11,6 +11,7 @@ import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {PreparationRepository} from './preparation.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {GuardBinding} from './guards.js';
+import {RuntimeProfileRepository} from './runtime-profiles.js';
 
 export const managedStorageSchema=`
 CREATE TABLE IF NOT EXISTS managed_runs (
@@ -46,7 +47,13 @@ export class BrowserRunRepository {
   private async scoped(input:unknown){const body=object(input),id=eventId(body.event_id),scope=this.scope(body.scope),profile=identity(body.profile),row=await this.row(id);
     if(!row||row.scope!==scope)throw new HttpError(404,'captured_run_not_found');
     if(profile!==row.logical_profile||body.conversation!==undefined&&body.conversation!==row.conversation_id)throw new HttpError(403,'run_profile_mismatch');return row;}
+  private async profile(scope:string,space:string,profile:string,binding:GuardBinding){
+    const entry=await new RuntimeProfileRepository(this.access).resolve({admin:true,scope:null},{profile,space});
+    if(entry.logical_profile!==profile||entry.scope!==scope)throw new HttpError(403,'profile_scope_denied');
+    if(entry.generation!==binding.generation||entry.guard_epoch!==binding.epoch)throw new HttpError(409,'guard_context_changed');
+  }
   private async current(row:any){this.scope(row.scope);await this.guards.assertCurrent(row.binding);
+    await this.profile(row.scope,row.space_id,row.logical_profile,row.binding);
     if(!await this.access.canRead(this.principal(row),row.source_reference,row.binding)||await this.access.space(row.source_reference)!==row.space_id)
       throw new HttpError(403,'turn_source_denied');await this.guards.assertCurrent(row.binding);}
   private async fence(db:pg.PoolClient,binding:GuardBinding){
@@ -69,9 +76,10 @@ export class BrowserRunRepository {
       const owner=(await db.query("SELECT * FROM workflow_owners WHERE family='browser'")).rows[0];
       held=await enterFamily(db,'browser',owner.owner,owner.epoch);if(!held)throw new HttpError(409,'workflow_owner_changed');
       await db.query('BEGIN');await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,803366))",[canonical([scope,profile,payload.conversation_id])]);
+      const binding=await this.guards.state();await this.fence(db,binding);
+      await this.profile(scope,space,profile,binding);
       const saved=(await db.query('SELECT * FROM managed_runs WHERE event_id=$1 FOR UPDATE',[id])).rows[0];
       if(saved){await db.query('COMMIT');return {owned:true,event_id:id,state:saved.state};}
-      const binding=await this.guards.state();await this.fence(db,binding);
       if(scope!==this.access.policy().owner_id&&payload.revision!==binding.epoch)throw new HttpError(409,'browser_audience_changed');
       if((await db.query("SELECT 1 FROM managed_runs WHERE scope=$1 AND logical_profile=$2 AND conversation_id=$3 AND state IN ('captured','running')",[scope,profile,payload.conversation_id])).rowCount)
         throw new HttpError(409,'session_busy');
@@ -85,6 +93,7 @@ export class BrowserRunRepository {
   private async bindPrepared(row:any,epoch:number){
     if((await this.preparation.status(row.event_id)).state!=='completed')throw new HttpError(409,'run_preparation_pending');
     const binding=await this.guards.state();this.scope(row.scope);
+    await this.profile(row.scope,row.space_id,row.logical_profile,binding);
     if(binding.generation!==row.binding.generation)throw new HttpError(409,'audience_context_changed');
     if(await this.access.space(row.source_reference)!==row.space_id)throw new HttpError(403,'turn_source_denied');
     const db=await this.control.connect();try{await db.query('BEGIN');await this.fence(db,binding);
@@ -227,7 +236,10 @@ export class BrowserRunRepository {
       if(closed.has(row.state))return this.status(row);
       if(row.state==='captured'&&!row.launch_requested_at&&!row.cancel_requested&&row.owner_epoch===authority.epoch){
         const ready=await this.preparation.status(id);if(ready.state!=='completed')return observation('waiting',ready.stage,0,ready.next_attempt,'prerequisite');
-        row=await this.bindPrepared(row,authority.epoch);
+        try{row=await this.bindPrepared(row,authority.epoch);}catch(error){
+          if(!(error instanceof HttpError)||!['profile_not_found','profile_scope_denied'].includes(error.code))throw error;
+          await this.cancelRow(id);return this.status(await this.row(id));
+        }
       }
       let current=row.owner_epoch===authority.epoch;try{await this.current(row);}catch(error){if(!(error instanceof HttpError))throw error;current=false;}
       const body={channel:'browser',event_id:id,attempt:1,owner_epoch:row.owner_epoch??authority.epoch,asynchronous:true};
