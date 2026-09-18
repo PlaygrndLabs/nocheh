@@ -60,6 +60,23 @@ single-database path: this increment is a tested foundation, not a completed
 storage cutover. Reset, guard migration, reprocessing activation, learning/UI,
 portability, and fresh live acceptance remain pending.
 
+Generated capture now uses installation-bound control operation references and
+durable derivative content, so prompts and schedules require no invented archive
+event. The spool classifies outbound results before touching control: confirmed
+Telegram Message responses become original evidence, while intents, responses,
+uncertain effects, and generated inputs remain outside the archive. Boolean or
+message-ID-only responses cannot turn a draft into observed speech. Control
+receipts retain references and effect state; replay reuses the immutable output.
+Guarding accepts operation-rooted derivatives, while source-version activation
+rejects them. No new delivery or retry of an external effect occurs in this path.
+
+Four affected real-PostgreSQL checks pass; the final generated-capture pair also
+passes after adding the activation rejection. Compilation and AST-only Graphify
+pass (337 files, 2,051 nodes, 7,572 edges, zero model calls).
+[Generated capture evidence](compatibility/results/2026-09-18-generated-capture.json).
+Production service routing, attachment preparation, and the remaining owner and
+runtime interfaces still require integration before the isolated full rehearsal.
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior

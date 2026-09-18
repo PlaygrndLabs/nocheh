@@ -5,10 +5,12 @@ import {digest,envelope} from '../archive.js';
 import {syncDirectory} from '../storage.js';
 import {HttpError} from '../http.js';
 import {ArchiveRepository,type CapturedSource} from './archive.js';
+import {captureEvidence,GeneratedCaptureRepository} from './generated-capture.js';
+import type {Envelope} from '../archive.js';
 import {requestWorkflow} from '../workflows/store.js';
 
 export class CaptureCoordinator {
-  constructor(readonly archive:ArchiveRepository,readonly control:pg.Pool){}
+  constructor(readonly archive:ArchiveRepository,readonly control:pg.Pool,readonly generated?:GeneratedCaptureRepository){}
 
   private async request(client:pg.PoolClient,source:CapturedSource):Promise<void> {
     await client.query(`INSERT INTO capture_handoffs(event_id,source_revision,payload_hash) VALUES($1,$2,$3)
@@ -61,7 +63,7 @@ export async function drainSourceSpool(coordinator:CaptureCoordinator,root:strin
   const directory=join(root,'spool','pending');await mkdir(directory,{recursive:true,mode:0o700});
   const names=(await readdir(directory)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).sort();
   const start=Math.max(0,names.findIndex(n=>n>(cursors.get(root)??'')));
-  const captured:{name:string;source:CapturedSource}[]=[];
+  const captured:{name:string;value:Envelope;sources:CapturedSource[];generated:boolean}[]=[];
   const failures:{name:string;code:string}[]=[];
   for(const name of [...names.slice(start),...names.slice(0,start)].slice(0,100)) {
     cursors.set(root,name);
@@ -70,14 +72,20 @@ export async function drainSourceSpool(coordinator:CaptureCoordinator,root:strin
       if(bytes.length>16*1024*1024)throw new HttpError(413,'spool_too_large');
       const value=envelope(JSON.parse(bytes.toString()));
       if(`${digest(value.key)}.json`!==name)throw new HttpError(400,'spool_identity_mismatch');
-      captured.push({name,source:(await coordinator.archive.capture(value)).source});
+      const classified=captureEvidence(value),sources:CapturedSource[]=[];
+      for(const original of classified.originals)sources.push((await coordinator.archive.capture(original)).source);
+      captured.push({name,value,sources,generated:classified.generated});
     } catch(error) {failures.push({name,code:error instanceof HttpError?error.code:'capture_commit_failed'});}
   }
   // Commit the entire bounded archive batch before touching control. A control
   // outage cannot delay later originals in this batch behind failed handoffs.
-  for(const {name,source} of captured) {
+  for(const {name,value,sources,generated} of captured) {
     try {
-      await coordinator.handoff(source);
+      for(const source of sources)await coordinator.handoff(source);
+      if(generated) {
+        if(!coordinator.generated)throw new HttpError(503,'generated_repository_required');
+        await coordinator.generated.commit(value,sources);
+      }
       await unlink(join(directory,name));await syncDirectory(directory);
       await coordinator.control.query('DELETE FROM spool_failures WHERE file_name=$1',[name]);
     } catch(error) {

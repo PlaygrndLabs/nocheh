@@ -23,6 +23,7 @@ export class SelectionRepository {
       await client.query('BEGIN');
       const derived=(await client.query('SELECT event_id,artifact_id,kind,content_hash FROM derived_artifacts WHERE id=$1',[output.id])).rows[0];
       if(!derived||derived.content_hash!==output.input_hash)throw new HttpError(409,'derivative_reference_conflict');
+      if(!derived.event_id)throw new HttpError(400,'source_derivative_required');
       const prepared=(await client.query(`SELECT 1 FROM guard_sources s JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision
         WHERE s.id=$1 AND s.state='ready'`,['derived_artifacts:'+output.id])).rowCount;
       if(!prepared)throw new HttpError(409,'guard_preparation_pending');

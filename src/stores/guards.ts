@@ -7,6 +7,7 @@ import {ArchiveRepository,type SourceReference,type FileReference} from './archi
 import type {DerivativeReference} from './derived.js';
 import type {StorePools} from './connections.js';
 import {revokeBeforePublication} from './publications.js';
+import {OperationRepository} from './operations.js';
 
 export type GuardReference=SourceReference|FileReference|DerivativeReference;
 export interface GuardBinding {generation:string;epoch:number;mode:'on'|'off'}
@@ -47,7 +48,7 @@ export class GuardRepository {
   }
 
   async register(reference:GuardReference):Promise<string> {
-    let id:string,eventId:string,kind:string,input:unknown;
+    let id:string,eventId:string|null,kind:string,input:unknown;
     if(reference.store==='archive'&&reference.kind==='event') {
       await this.archive.verify(reference);
       const row=(await this.stores.archive.query('SELECT original_text,payload FROM events WHERE id=$1',[reference.id])).rows[0];
@@ -60,9 +61,10 @@ export class GuardRepository {
         throw new HttpError(409,'file_reference_conflict');
       kind='artifacts';id=`artifacts:${reference.id}`;eventId=row.event_id;input={kind:row.kind,metadata:row.metadata};
     } else if(reference.store==='derived'&&reference.kind==='artifact') {
-      const row=(await this.stores.derived.query('SELECT event_id,content,content_hash,kind,provenance FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
+      const row=(await this.stores.derived.query('SELECT event_id,operation_reference,content,content_hash,kind,provenance FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
       if(!row||row.content_hash!==reference.input_hash)throw new HttpError(409,'derivative_reference_conflict');
-      await this.archive.captured(row.event_id);
+      if(row.event_id)await this.archive.captured(row.event_id);
+      else await new OperationRepository(this.stores.control).verify(row.operation_reference);
       let text:string;try {text=new TextDecoder('utf-8',{fatal:true}).decode(row.content);}
       catch {throw new HttpError(422,'guard_unsupported_binary');}
       kind='derived_artifacts';id=`derived_artifacts:${reference.id}`;eventId=row.event_id;input={text,kind:row.kind,provenance:row.provenance};
