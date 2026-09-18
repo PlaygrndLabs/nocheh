@@ -18,7 +18,7 @@ export function startStorageWorkflows(s:StorageServices,config:Settings,call:Run
   const operations:Partial<Record<WorkflowFamily,WorkflowOperation>>={};
   for(const [family,operation] of Object.entries(storageWorkflowOperations(s,call)))operations[family as WorkflowFamily]=async(...args)=>{
     if(stopping||inactive())return observation('waiting','admission',0,Date.now()+30000,'owner_paused');
-    await assertGuardConfiguration(s.guards,config.guardMode);return operation(...args);
+    await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);return operation(...args);
   };
   const service=superviseConnection(async()=>{
     const client=workflowClient('pipeline');

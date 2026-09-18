@@ -16,7 +16,7 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     reconciliation:()=>s.capture.reconcile(),
     guards:async()=>{
       await s.guards.reconcile();await s.selections.reconcile();await s.learned.reconcile();
-      if(!configured){await s.guards.setMode(config.guardMode);configured=true;}
+      if(!configured){await s.configuration.configure(config.assistant,config.guardMode);configured=true;}
     },
     outbox:async()=>{
       if(existsSync(join(config.dataDir,'workflows/inactive'))){status.outbox='inactive';return;}
