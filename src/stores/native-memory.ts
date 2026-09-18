@@ -97,8 +97,12 @@ export class NativeMemoryRepository {
             prepared_id,content_hash,dependencies,projection_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING id`,
             [id,workspace,source,JSON.stringify(evidence),'events:'+source.id,dependencies.find(d=>d.source_id==='events:'+source.id)?.revision??null,
               prepared.id,prepared.input_hash,JSON.stringify(dependencies),projection??null]);
-          if(added.rowCount)await db.query("UPDATE memory_generations SET state='building' WHERE id=$1 AND state<>'retired'",[workspace]);
-          await requestWorkflow(db,'honcho','receipt:'+id);await requestWorkflow(db,'honcho','generation:'+workspace);
+          if(added.rowCount) {
+            const changed=(await db.query("UPDATE memory_generations SET state='building',work_revision=work_revision+1 WHERE id=$1 AND state<>'retired' RETURNING work_revision",[workspace])).rows[0];
+            if(!changed)throw new HttpError(409,'memory_context_retired');
+            await requestWorkflow(db,'honcho','generation:'+workspace,changed.work_revision);
+          }
+          await requestWorkflow(db,'honcho','receipt:'+id);
           await db.query('COMMIT');
         } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
         receipts.push(id);
@@ -195,12 +199,12 @@ export class NativeMemoryRepository {
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803358)');if(fenced)await leaveFamily(db,'honcho');});}
   }
   async observe(id:string):Promise<boolean> {
-    await this.current(id);
+    const current=await this.current(id);
     const pending=(await this.control.query("SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND state<>'done' LIMIT 1",[id])).rowCount;
     const queue=await this.call('/v3/workspaces/'+id+'/queue/status');await this.current(id);
     const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0;
-    await this.control.query(`UPDATE memory_generations SET state=$2,error_code=NULL,last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END
-      WHERE id=$1 AND state<>'retired'`,[id,ready?'ready':'building']);return ready;
+    const changed=await this.control.query(`UPDATE memory_generations SET state=$2,error_code=NULL,last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END
+      WHERE id=$1 AND state<>'retired' AND work_revision=$3`,[id,ready?'ready':'building',current.row.work_revision]);return ready&&changed.rowCount===1;
   }
   async prepareRequest(input:unknown) {
     const body=object(input),current=await this.current(string(body.workspace,64)),payload=object(body.payload);

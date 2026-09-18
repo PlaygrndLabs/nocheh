@@ -61,8 +61,14 @@ requests are durable. Scoped requests wait for the configured guard mode and all
 three stores contribute to health. Restored installations refuse content access,
 including in the security service through a read-only spool marker mount.
 
-Workflow execution, actions, and managed-runtime migration still require their
-separate increments and the full installation rehearsal. The opt-in layout is not
+Preparation, reprocessing, native review, Honcho, and contextual learning register
+with the existing Inngest workflow engine. Admission is bounded before borrowing
+database clients; refresh sweeps checkpoint source/projection cursors in control.
+Native ingestion uses work revisions so later inputs can schedule observation
+after an earlier job completed. Uncertain effects retain their identity while
+being reconciled. Guard, selection, and learned-publication recovery runs alongside
+capture. Telegram dispatch, actions, managed runtimes, and owner workflow controls
+still require their separate increments and the full installation rehearsal. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.
 

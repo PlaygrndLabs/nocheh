@@ -15,6 +15,7 @@ ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS root_reference jsonb;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS root_space text;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS last_ready_at timestamptz;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS error_code text;
+ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS work_revision integer NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS memory_ingestion_receipts (
  id text PRIMARY KEY,generation text NOT NULL REFERENCES memory_generations(id),
  source_reference jsonb NOT NULL,guard_source_id text NOT NULL,guarded_revision integer,
