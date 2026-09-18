@@ -521,6 +521,21 @@ write. Job preferences disappear with schedules. This library neither quiesces
 services nor deletes data; those operations still require the complete scoped
 coordinator and isolated reset rehearsal.
 
+Use `scripts.reset_configuration.freeze` after effect settlement to capture only
+the current setup rows. Legacy storage contributes the current security policy and
+explicit conversation overrides. Original-only storage contributes the current
+security policy, guard mode, admitted assistant configuration, projects and
+assignments, sharing rules, and active logical profile identities. The query is one
+read-only statement with explicit columns and bounded rows; it does not select
+originals, derivatives, learned state, approvals, schedules, workflows, released
+share text, owner-command receipts, or old configuration revisions. Recheck the
+same snapshot before publishing it. A changed or unknown configuration area stops
+the reset. Keep this private snapshot until fresh-store admission is verified, then
+retire its content-bearing copy and retain only its digest and record counts.
+`compatibility/reset-configuration-rehearsal.py` verifies both real database layouts
+with seeded source/derivative canaries on an internal-only network. This component
+does not complete the preservation phase by itself.
+
 The provider monitor contains both accounting and content-bearing diagnostics.
 After stopping its writer, use `scripts.reset_accounting.sanitize` on the exact
 owned usage database. It requires the pinned schema and native manager lock,
