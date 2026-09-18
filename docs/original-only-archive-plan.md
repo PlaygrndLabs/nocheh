@@ -77,8 +77,12 @@ current authorization and treats an unconfirmed prior intent as uncertain, with
 no resend. Telegram dispatch stores prepared inputs and terminal native results in
 derived storage and receipt metadata in control. Native observation precedes any
 same-identity continuation; revoked queued contexts are cancelled. Original routing
-identifiers cannot be changed through guarded edits. Broader controlled tools, managed runtimes, and owner workflow controls
-still require their separate increments and the full installation rehearsal. The opt-in layout is not
+identifiers cannot be changed through guarded edits. Workflow inspection, health,
+metrics, and owner retry/cancel use control-only metadata and receipt/family fences.
+They remain available without the Inngest control plane. Legacy family migration
+does not apply to fresh original-only databases. Broader controlled tools, managed
+runtimes, host import coordination, and the full installation rehearsal still
+require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.
 

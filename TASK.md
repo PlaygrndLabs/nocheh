@@ -417,6 +417,26 @@ Python CLI checks pass, with TypeScript and AST-only Graphify. This exposes the
 existing consent boundary without enabling imported-source replies or effects.
 [Learning consent evidence](compatibility/results/2026-09-18-source-learning-consent.json).
 
+Workflow list/detail, health, metrics, and receipt-aware owner retry/cancel routes
+now use a control-only observation view. No archive or derivative SQL joins are
+needed to inspect orchestration, including while Inngest is unavailable. Pending
+Telegram cancellation survives capture reconciliation; guarded action approval
+can be cancelled before execution. Family locks, active-step checks, revisions,
+and effect receipts prevent unsafe controls. Retry retains the domain execution
+identity and publishes a new orchestration request. Unmigrated domain controls
+are not advertised. Legacy owner-migration requests explicitly report that they
+do not apply to a fresh original-only installation.
+
+Eight checks pass across separated workflow ownership, service and dispatch tests,
+existing legacy workflow ownership/metrics regressions, and inspection boundary
+parsing. The pinned running Inngest UI test was skipped because its opt-in fixture flag
+was not enabled for this run; that browser/runtime gate remains pending.
+TypeScript and AST-only Graphify pass. The initial TypeScript run flagged nullable
+fixture list entries; the assertions were fixed before the combined verification.
+Managed runtimes, host tools/import coordination, full portability, full rehearsal,
+reset, and live acceptance remain pending.
+[Workflow owner evidence](compatibility/results/2026-09-18-store-workflow-owner.json).
+
 
 
 

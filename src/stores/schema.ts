@@ -16,6 +16,7 @@ import {storageWorkflowSchema} from './workflow-schema.js';
 import {runtimeConfigurationSchema} from './runtime-configuration.js';
 import {telegramActionSchema} from './telegram-action-schema.js';
 import {telegramDispatchSchema} from './telegram-dispatch.js';
+import {storageWorkflowOwnerSchema} from './workflow-owner.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -133,6 +134,7 @@ CREATE TABLE IF NOT EXISTS spool_failures (
  file_name text PRIMARY KEY,attempts integer NOT NULL DEFAULT 1,error_code text NOT NULL,
  seen_at timestamptz NOT NULL DEFAULT now()
 );
+${storageWorkflowOwnerSchema}
 `;
 
 export const storeSchemas={archive:originalArchiveSchema,derived:initialDerivedSchema,control:initialControlSchema} as const;
