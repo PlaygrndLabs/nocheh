@@ -447,6 +447,19 @@ and a separate sentinel. It verifies interruption/retry, preserved restart setti
 durable inactivity, database access for reconciliation, and unrelated-owner isolation.
 Its synthetic lifecycle evidence does not satisfy full native/provider acceptance.
 
+After quiescence, `scripts.reset_effects.settle` reads the current database layout
+and native journals while maintenance remains held. Original source identity reads
+use archive storage separately from control receipts. Confirmed transport records
+are distinguished from no recorded send and stopped local results with unknown
+outcomes. Uncertain external effects, orphan ambiguous receipts, or workflow effects
+without domain evidence block progression. Never convert unknown results into
+successful execution or replay delivery during reset. Recheck the evidence before
+publishing the content-free settlement report and advancing the journal. The
+complete preservation coordinator must retain receipts until this gate passes.
+`compatibility/reset-effects-rehearsal.py --directory NEW_DIRECTORY
+--management-image CANDIDATE` verifies both real schemas and native journal formats
+on an internal-only Compose network with synthetic responses and no provider calls.
+
 The internal `scripts.reset_files` primitive freezes the reviewed post-quiescence
 installation-local paths into a metadata-only manifest. Bind its exact hash into
 the coordinator's durable preservation evidence before calling `erase`. Its barrier
