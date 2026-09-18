@@ -236,6 +236,12 @@ def import_all(directory,native_output,api=None):
 
 
 def import_main(state,args):
+    if '--honcho-memory' in args:
+        parser=argparse.ArgumentParser(description='Restore portable Honcho rows into an empty initialized native database in an inactive installation.')
+        parser.add_argument('--honcho-memory',type=Path,required=True);parser.add_argument('--inactive-state',type=Path,required=True)
+        options=parser.parse_args(args)
+        from .honcho_portable import restore_honcho
+        print(json.dumps(restore_honcho(options.inactive_state,options.honcho_memory)));return 0
     parser=argparse.ArgumentParser(description='Import a portable package; stage native history without activation.')
     parser.add_argument('--portable',type=Path,required=True);parser.add_argument('--native-output',type=Path,required=True)
     options=parser.parse_args(args)

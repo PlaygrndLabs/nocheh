@@ -658,6 +658,26 @@ reset, and fresh live gates remain pending. Native staging is not native databas
 restore or activation evidence; no live data or provider was used.
 [Portable bundle evidence](compatibility/results/2026-09-18-store-portable-bundle.json).
 
+Portable Honcho memory rows now restore into a schema-compatible initialized
+native database in an inactive installation. The coordinator checks inactive
+ownership and running/orphan writers before connecting. Restore stages typed
+rows in temporary tables, checks all target memory and operational tables, and
+materializes memory in one transaction. It accepts an exact completed replay,
+advances native identity sequences, and rejects conflicting destination content,
+queued native work, incompatible columns, or malformed rows. It does not start
+services, attach memory, copy credentials, or change spending accounting.
+
+The PostgreSQL rehearsal verifies eight-table export/restore, consistent concurrent
+snapshot, malformed later-row rollback, queue and schema rejection, exact replay,
+identity sequences, and preserved destination changes. Twenty-six offline pinned
+Python checks pass. Python compilation, documentation links, diff hygiene, and
+AST-only Graphify pass (432 files, 2,689 nodes, 10,923 edges; zero model calls).
+This uses synthetic native table fixtures; complete acceptance against the pinned
+Honcho service, coordinated full recovery, legacy bundle conversion, and the
+remaining installation/reset/live gates are still pending.
+[Native portable restore evidence](compatibility/results/2026-09-18-native-portable-restore.json).
+
+
 
 
 
