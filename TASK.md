@@ -270,6 +270,26 @@ Five affected PostgreSQL checks and twelve Python portability/archive checks pas
 TypeScript and AST-only Graphify pass. All data used by these checks is synthetic.
 [Source portability evidence](compatibility/results/2026-09-18-source-portability.json).
 
+Derivative transfer now has a fixed-format owner API and a Python transfer library.
+It preserves immutable outputs/provenance, guarded inputs and owner history,
+selection history, learned revisions, and exact imported records. Historical
+operation roots are marked imported and cannot authorize execution. Imported
+prepared caches and guard fragments remain inspectable history without entering
+active preparation tables. Imported selections and learned projections stay
+unavailable to runtime readers even with guarding off. Normal explicit owner
+restoration/activation/correction makes reviewed content usable with revocation.
+Duplicate imports cannot replace later destination edits or choices.
+
+The real PostgreSQL round-trip uses empty, isolated namespaces in all three
+fixture databases with their actual domain roles. It verifies binary originals,
+two transcript engines/versions, owner-edited guards, selection and learned history,
+generated-context lineage, inert same-generation/epoch caches, and explicit owner
+adoption. Eleven affected PostgreSQL/Node checks and fifteen Python checks pass;
+TypeScript and AST-only Graphify pass. No live provider or installation data is used.
+Top-level coordinated portable bundles, native Honcho transfer, legacy import
+conversion, production wiring, and full inactive native round-trip remain pending.
+[Derivative transfer evidence](compatibility/results/2026-09-18-derivative-portability.json).
+
 The guard repository now stores immutable inputs, fragments, automatic/owner
 revision history, and activation evidence in derived storage. Control owns mode,
 epoch, invalidations, and publication receipts. Publication first revokes prior

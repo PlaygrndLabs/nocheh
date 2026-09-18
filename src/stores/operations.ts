@@ -18,14 +18,14 @@ export class OperationRepository {
     await this.pool.query(`INSERT INTO content_operations(id,generation,operation_key,kind,scope,input_hash)
       VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,[id,generation,input.key,input.kind,input.scope,input.input_hash]);
     const row=(await this.pool.query('SELECT * FROM content_operations WHERE id=$1',[id])).rows[0];
-    if(!row||row.generation!==generation||row.operation_key!==input.key||row.kind!==input.kind||
+    if(!row||row.imported||row.generation!==generation||row.operation_key!==input.key||row.kind!==input.kind||
       row.scope!==input.scope||row.input_hash!==input.input_hash)throw new HttpError(409,'operation_identity_conflict');
     return {store:'control',kind:'operation',id,generation,input_hash:input.input_hash};
   }
   async verify(reference:OperationReference):Promise<void> {
     if(reference.store!=='control'||reference.kind!=='operation')throw new HttpError(400,'invalid_operation_reference');
     const row=(await this.pool.query(`SELECT o.input_hash FROM content_operations o JOIN installation i ON i.generation=o.generation
-      WHERE o.id=$1 AND o.generation=$2 AND i.singleton`,[reference.id,reference.generation])).rows[0];
+      WHERE o.id=$1 AND o.generation=$2 AND i.singleton AND NOT o.imported`,[reference.id,reference.generation])).rows[0];
     if(!row||row.input_hash!==reference.input_hash)throw new HttpError(409,'operation_reference_conflict');
   }
 }
@@ -41,4 +41,5 @@ CREATE TABLE IF NOT EXISTS capture_effect_receipts (
  state text NOT NULL CHECK(state IN ('recorded','attempting','delivered','rejected','ambiguous')),
  sources jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE content_operations ADD COLUMN IF NOT EXISTS imported boolean NOT NULL DEFAULT false;
 `;

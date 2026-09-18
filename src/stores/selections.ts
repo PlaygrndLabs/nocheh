@@ -67,7 +67,7 @@ export class SelectionRepository {
         else {
           if(!(await client.query("SELECT 1 FROM guard_sources WHERE id=$1 AND state='ready' AND active_revision IS NOT NULL",['derived_artifacts:'+revision.derived_id])).rowCount)
             throw new HttpError(409,'guard_preparation_pending');
-          await client.query('UPDATE derivative_selections SET active_revision=$2 WHERE id=$1',[operation.source_id,operation.revision]);
+          await client.query('UPDATE derivative_selections SET active_revision=$2,imported=false WHERE id=$1',[operation.source_id,operation.revision]);
           await client.query('INSERT INTO derivative_activations(operation_id) VALUES($1)',[operationId]);
         }
       }
@@ -90,7 +90,7 @@ export class SelectionRepository {
     await this.guards.assertCurrent(binding);
     const row=(await this.stores.derived.query(`SELECT r.revision,d.id,d.content_hash,d.producer,d.producer_version,d.provenance
       FROM derivative_selections s JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
-      JOIN derived_artifacts d ON d.id=r.derived_id WHERE s.id=$1`,[selectionId(eventId,artifactId,kind)])).rows[0];
+      JOIN derived_artifacts d ON d.id=r.derived_id WHERE s.id=$1 AND NOT s.imported`,[selectionId(eventId,artifactId,kind)])).rows[0];
     if(!row)throw new HttpError(409,'derivative_selection_pending');
     const guarded=await this.guards.read('derived_artifacts:'+row.id,binding);
     return {id:row.id,revision:row.revision,guard_revision:guarded.revision,value:guarded.value};
@@ -100,7 +100,7 @@ export class SelectionRepository {
     if(!Number.isInteger(limit)||limit<1||limit>100||after.length>64||!['all','readings'].includes(view))throw new HttpError(400,'invalid_derivative_page');
     const rows=(await this.stores.derived.query(`SELECT d.id,d.artifact_id,d.kind,d.created_at,d.source_revision,d.input_hash,
       d.content_hash,d.producer,d.producer_version,d.configuration_hash,d.provenance,g.active_revision AS guard_revision,
-      EXISTS(SELECT 1 FROM derivative_selections s JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision WHERE r.derived_id=d.id) AS active,
+      EXISTS(SELECT 1 FROM derivative_selections s JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision WHERE r.derived_id=d.id AND NOT s.imported) AS active,
       (SELECT s.active_revision FROM derivative_selections s WHERE s.event_id=d.event_id AND s.artifact_id IS NOT DISTINCT FROM d.artifact_id AND s.kind=d.kind LIMIT 1) AS selection_revision
       FROM derived_artifacts d LEFT JOIN guard_sources g ON g.id='derived_artifacts:'||d.id
       WHERE d.event_id=$1 AND d.id>$2 AND ($4='all' OR d.kind IN ('transcript','extracted_text','extraction_status'))

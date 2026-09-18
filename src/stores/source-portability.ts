@@ -23,8 +23,12 @@ export class SourcePortabilityRepository {
   async page(principal:Reader,after='',count=20) {
     admin(principal);limit(count,20,50);if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_export_cursor');
     const rows=(await this.capture.archive.pool.query('SELECT id FROM events WHERE id>$1 ORDER BY id LIMIT $2',[after,count])).rows;
-    const records=[];for(const row of rows)records.push(await this.record(principal,row.id));
-    return {format:'nocheh-sources-v1',records,next:rows.length===count?rows.at(-1)!.id:null};
+    const records=[];let size=0;
+    for(const row of rows) {
+      const record=await this.record(principal,row.id),bytes=Buffer.byteLength(JSON.stringify(record));
+      if(records.length&&size+bytes>8*1024*1024)break;records.push(record);size+=bytes;
+    }
+    return {format:'nocheh-sources-v1',records,next:records.length<rows.length||rows.length===count?records.at(-1)!.id:null};
   }
   async import(principal:Reader,input:unknown) {
     admin(principal);const record=object(input),{value,id,inputHash}=sourceIdentity(record.event);

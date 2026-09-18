@@ -71,7 +71,7 @@ export class LearnedMemoryRepository {
         if(prior.request_hash!==requestHash)throw new HttpError(409,'learning_operation_conflict');version=prior;
       } else {
         if(current.active_revision!==expected)throw new HttpError(409,'learned_revision_conflict');
-        if(current.author==='owner'&&author!=='owner')throw new HttpError(409,'owner_correction_is_authoritative');
+        if((current.author==='owner'||current.imported)&&author!=='owner')throw new HttpError(409,'owner_correction_is_authoritative');
         const revision=Number((await client.query('SELECT coalesce(max(revision),0)+1 AS revision FROM learned_versions WHERE entry_id=$1',[id])).rows[0].revision);
         await client.query(`INSERT INTO learned_versions(operation_id,entry_id,revision,expected_revision,derived_id,author,retired,evidence,dependencies,input_binding,request_hash)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[operationId,id,revision,expected,output.id,author,retired,
@@ -159,7 +159,7 @@ export class LearnedMemoryRepository {
         else {
           if(!(await client.query("SELECT 1 FROM guard_sources WHERE id=$1 AND state='ready' AND active_revision IS NOT NULL",['derived_artifacts:'+revision.derived_id])).rowCount)
             throw new HttpError(409,'guard_preparation_pending');
-          await client.query('UPDATE learned_entries SET active_revision=$2 WHERE id=$1',[operation.source_id,operation.revision]);
+          await client.query('UPDATE learned_entries SET active_revision=$2,imported=false WHERE id=$1',[operation.source_id,operation.revision]);
           await client.query('INSERT INTO learned_activations(operation_id) VALUES($1)',[operationId]);
         }
       }
@@ -181,7 +181,7 @@ export class LearnedMemoryRepository {
     await this.guards.assertCurrent(binding);
     const row=(await this.stores.derived.query(`SELECT e.*,v.author,v.retired,v.evidence,v.dependencies,v.derived_id FROM learned_entries e
       JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[id])).rows[0];
-    if(!row||row.retired)throw new HttpError(404,'learned_memory_not_found');
+    if(!row||row.retired||row.imported&&!principal.admin)throw new HttpError(404,'learned_memory_not_found');
     if(!principal.admin&&principal.scope!==null) {
       const space=principal.space??principal.scope;
       if(row.scope_kind==='conversation'&&row.scope_id!==space)throw new HttpError(404,'learned_memory_not_found');
