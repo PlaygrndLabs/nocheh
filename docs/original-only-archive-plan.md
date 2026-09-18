@@ -83,8 +83,13 @@ They remain available without the Inngest control plane. Legacy family migration
 does not apply to fresh original-only databases. Controlled shell/browser/MCP
 proposals use immutable derived arguments and exact guarded fingerprints; owner
 decisions, bounded grants, revocations, and idempotency receipts live in control.
-Policy previews consume no grant. Host tool execution, managed runtimes, host
-import coordination, and the full installation rehearsal still
+Policy previews consume no grant. Host tool execution uses a durable claim/start
+boundary, rechecks current authority, and saves derived results before control
+completion. Retained receipts repair lost completion and settle uncertainty;
+expired claims never authorize a repeat execution. The original-only listener
+supports host Connect with inactive-installation checks. Host imports remain
+unregistered and admission fails closed until their repository migration is ready.
+Managed runtimes, host import coordination, and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.

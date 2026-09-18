@@ -8,7 +8,7 @@ import {createHash,timingSafeEqual} from 'node:crypto';
 import type {Duplex} from 'node:stream';
 
 const paths=new Set(['/v0/connect/start','/v0/connect/flush','/v1/traces/userland']);
-export function hostTransport(key:string,upstream='http://inngest-server:8288',gateway='http://inngest-server:8289') {
+export function hostTransport(key:string,upstream='http://inngest-server:8288',gateway='http://inngest-server:8289',active=()=>true) {
   if(!/^[a-f0-9]{64}$/.test(key))throw Error('workflow_keys_missing');
   const expected=Buffer.from('Bearer '+createHash('sha256').update(Buffer.from(key,'hex')).digest('hex'));
   const sockets=new Set<Duplex>();
@@ -17,7 +17,7 @@ export function hostTransport(key:string,upstream='http://inngest-server:8288',g
     handle(req:IncomingMessage,res:ServerResponse):boolean {
       if(!paths.has(req.url??''))return false;
       const actual=Buffer.from(String(req.headers.authorization??''));
-      if(browser(req)||req.method!=='POST'||actual.length!==expected.length||!timingSafeEqual(actual,expected)) {
+      if(!active()||browser(req)||req.method!=='POST'||actual.length!==expected.length||!timingSafeEqual(actual,expected)) {
         res.writeHead(403);res.end();return true;
       }
       const target=new URL(req.url!,upstream);
@@ -29,7 +29,7 @@ export function hostTransport(key:string,upstream='http://inngest-server:8288',g
       req.on('aborted',()=>outgoing.destroy());req.pipe(outgoing);return true;
     },
     attach(server:Server){server.on('upgrade',(req,socket,head)=>{
-      if(browser(req)||req.url!=='/v0/connect'||req.headers['sec-websocket-protocol']!=='v0.connect.inngest.com') {
+      if(!active()||browser(req)||req.url!=='/v0/connect'||req.headers['sec-websocket-protocol']!=='v0.connect.inngest.com') {
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;
       }
       const target=new URL('/v0/connect',gateway);

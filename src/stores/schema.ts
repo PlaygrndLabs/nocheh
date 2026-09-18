@@ -18,6 +18,7 @@ import {telegramActionSchema} from './telegram-action-schema.js';
 import {telegramDispatchSchema} from './telegram-dispatch.js';
 import {storageWorkflowOwnerSchema} from './workflow-owner.js';
 import {controlledActionSchema} from './controlled-action-schema.js';
+import {importWorkflowSchema} from '../workflows/imports.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -102,6 +103,7 @@ CREATE TABLE IF NOT EXISTS source_intakes (
  state text NOT NULL CHECK(state IN ('pending','ready')),created_at timestamptz NOT NULL DEFAULT now()
 );
 ${workflowSchema}
+${importWorkflowSchema}
 ${storageWorkflowSchema}
 ${runtimeConfigurationSchema}
 ${telegramActionSchema}

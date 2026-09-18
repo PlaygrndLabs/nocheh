@@ -449,6 +449,24 @@ legacy security checks pass. Host claim/start/result execution and owner-DM tool
 commands remain pending; this increment performs no tool execution.
 [Controlled proposal evidence](compatibility/results/2026-09-18-store-controlled-proposals.json).
 
+Host tool claim/start/result routes now use separated repositories and the existing
+Inngest host coordinator. A claim releases exact guarded arguments once; start
+rechecks the workflow lease, owner epoch, guard generation, security policy, and
+permission revocation. Expired claims become ambiguous and cannot be executed
+again. Immutable derived results precede control completion; replay repairs a lost
+completion and a retained late receipt can settle an uncertain workflow without
+new execution. Workflow inspection and cancellation include admitted tool jobs.
+Host Connect transport rejects inactive installations. Import admission remains
+closed until its separate repository migration is implemented.
+
+Seven affected PostgreSQL/HTTP/workflow checks and eight offline native executor
+checks pass. The first database run had one incorrect expectation that replaying
+an identical owner command should reject; its idempotent receipt correctly left
+the ambiguous action unchanged. The corrected test additionally checks that a new
+approval cannot revive it. This is synthetic receipt verification, not a live
+tool-effect or full Connect installation acceptance pass.
+[Controlled execution evidence](compatibility/results/2026-09-18-store-controlled-execution.json).
+
 
 
 

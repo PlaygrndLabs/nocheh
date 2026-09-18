@@ -31,6 +31,7 @@ import {RuntimeConfigurationRepository} from './runtime-configuration.js';
 import {TelegramActionRepository} from './telegram-actions.js';
 import {TelegramDispatchRepository} from './telegram-dispatch.js';
 import {ControlledActionRepository} from './controlled-actions.js';
+import {ControlledExecutionRepository} from './controlled-execution.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -58,9 +59,10 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const turns=new RuntimeTurnRepository(access,prepared);
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
+  const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
-    controlledActions:new ControlledActionRepository(access,derived,guards,prepared,turns,detect),
+    controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),
     telegramActions,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,telegramActions,options.runtime,options.serviceToken??'',detect),
     capture,sourcePortability:new SourcePortabilityRepository(capture,attachments),derivativePortability:new DerivativePortabilityRepository(stores,archive),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
