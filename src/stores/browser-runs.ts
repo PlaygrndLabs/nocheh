@@ -11,6 +11,8 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {GuardBinding} from './guards.js';
 import type {BrowserDeliveryRepository} from './browser-delivery.js';
 import {ManagedExecutionRepository,managedIdentity as identity,managedEventId as eventId,type ManagedInput as Input} from './managed-execution.js';
+import {RuntimeProfileRepository} from './runtime-profiles.js';
+import {runtimeProfile} from './runtime-profile.js';
 export {managedStorageSchema} from './managed-execution.js';
 
 const protocol='managed-browser-v2';
@@ -23,11 +25,37 @@ export class BrowserRunRepository extends ManagedExecutionRepository {
     readonly delivery:BrowserDeliveryRepository){super(access,derived,turns,token,call);}
   override async observe(input:unknown){
     const status=await super.observe(input);
-    if(status.state!=='done'||!status.visible||!status.text)return {...status,delivery:null};
+    if(!status.visible)return {...status,delivery:null,context:null};
     const row=await this.scoped(input);await this.current(row);
+    const context={scope:row.scope,space:row.space_id,logical_profile:row.logical_profile,owner:row.scope===this.access.policy().owner_id,
+      generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch,native_profile:runtimeProfile(this.principal(row),row.binding)};
+    if(status.state!=='done'||!status.text)return {...status,delivery:null,context};
     const original=(await this.access.stores.archive.query('SELECT source_id FROM events WHERE id=$1',[row.event_id])).rows[0];
     const delivery=await this.delivery.offer(row,status.text,original.source_id);
-    await this.current(row);return {...status,delivery};
+    await this.current(row);return {...status,delivery,context};
+  }
+  /** Bounded recovery independent of the best-effort native event connection.
+   * Reading offers is not delivery. The rendered browser response is acknowledged
+   * separately through filesystem-only capture, including during DB outages. */
+  async undelivered(principal:Reader,input:unknown){
+    admin(principal);const body=object(input);
+    if(Object.keys(body).some(key=>!['profile','space','after'].includes(key)))throw new HttpError(400,'invalid_delivery_request');
+    const profile=await new RuntimeProfileRepository(this.access).resolve(principal,{profile:body.profile??'',...(body.space?{space:body.space}:{})});
+    const binding=await this.guards.state(),after=body.after===undefined||body.after===null?'':eventId(body.after);
+    await this.profile(profile.scope,profile.space,profile.logical_profile!,binding);
+    const rows=(await this.control.query(`SELECT * FROM managed_runs WHERE channel='browser' AND state='done' AND NOT cancel_requested
+      AND scope=$1 AND space_id=$2 AND logical_profile=$3 AND binding=$4 AND event_id>$5 ORDER BY event_id LIMIT 4`,
+      [profile.scope,profile.space,profile.logical_profile,binding,after])).rows;
+    const delivered=rows.length?(await this.access.stores.archive.query('SELECT id FROM events WHERE id=ANY($1::text[])',
+      [rows.map(row=>this.delivery.eventId(row))])).rows.map(row=>row.id):[];
+    const items=[];
+    for(const row of rows){
+      if(delivered.includes(this.delivery.eventId(row)))continue;
+      const status=await this.observe({scope:row.scope,profile:row.logical_profile,conversation:row.conversation_id,event_id:row.event_id});
+      if(status.visible&&status.delivery)items.push({event_id:row.event_id,conversation:row.conversation_id,text:status.text,status:'complete' as const,nocheh_delivery:status.delivery});
+    }
+    await this.guards.assertCurrent(binding);
+    return {items,next:rows.length===4?rows.at(-1).event_id:null};
   }
   protected readiness(row:any){return this.preparation.status(row.event_id);}
   protected async sourceAllowed(row:any,binding:GuardBinding){

@@ -24,7 +24,9 @@ class BrowserGatewayTests(unittest.TestCase):
             _emit=lambda kind,sid,payload:self.events.append((kind,sid,payload)))
         self.gateway=BrowserGateway(self.server,self.root,Scope('-10','42',False,'group-one'),'model',self.call,self.runner)
         self.gateway.install()
-    def tearDown(self): self.temp.cleanup()
+    def tearDown(self):
+        if self.gateway.native_db is not None:self.gateway.native_db.close()
+        self.temp.cleanup()
     def call(self,route,body):
         self.calls.append((route,body))
         if route==self.failed_route: raise RuntimeError('outage with secret provider response')
@@ -60,6 +62,55 @@ class BrowserGatewayTests(unittest.TestCase):
             if route.endswith(('/input','/admit')) or route=='/internal/browser/events':
                 self.assertEqual(body['profile'],self.gateway.scope.logical_profile)
         self.assertEqual(self.gateway.home,self.root/'profiles/group-one')
+    def test_media_preparation_adopts_only_current_native_context_without_copying_history(self):
+        from dataclasses import replace
+        from .scopes import Scopes
+        from hermes_state import SessionDB
+        from .isolated_profile import database_path
+        logical=Scopes.profile('-10');generation='11111111-1111-4111-8111-111111111111'
+        self.gateway.scope=Scopes.apply_revision(Scope('-10','42',False,logical,'-10',1),
+            {'generation':generation,'guard_epoch':1,'revision':1,'logical_profile':logical})
+        self.gateway.home=self.root/'profiles'/self.gateway.scope.profile
+        self.gateway.home.mkdir(parents=True)
+        old_home=self.gateway.home;(old_home/'memories').mkdir();(old_home/'memories/MEMORY.md').write_text('old unprepared memory')
+        old_db=self.gateway.database();old_db.create_session('stored-one',source='browser');old_db.append_message('stored-one','user','old unprepared context')
+        self.server._sessions['sid']['history']=[{'role':'user','content':'old unprepared context'}]
+        self.invoke('file.attach',filename='next.txt',content_base64=base64.b64encode(b'next original').decode())
+        fresh=Scopes.apply_revision(replace(self.gateway.scope,revision=2),
+            {'generation':generation,'guard_epoch':2,'revision':2,'logical_profile':logical})
+        home=self.root/'profiles'/fresh.profile;home.mkdir(parents=True);(home/'native-state').mkdir()
+        db=SessionDB(database_path(home));db.create_session('stored-one',source='browser');db.append_message('stored-one','assistant','prepared answer');db.close()
+        status={'visible':True,'context':{'scope':'-10','space':'-10','owner':False,'logical_profile':logical,
+            'generation':generation,'guard_epoch':2,'revision':2,'native_profile':fresh.profile}}
+        self.gateway.adopt_context(status)
+        self.assertEqual(self.gateway.scope,fresh);self.assertEqual(self.gateway.home,home)
+        self.assertEqual(self.server._sessions['sid']['history'],[])
+        self.assertEqual(self.server._get_db().get_messages_as_conversation('stored-one')[0]['content'],'prepared answer')
+        self.assertFalse((home/'memories/MEMORY.md').exists())
+        self.capture();self.assertEqual(self.calls[-1][1]['revision'],2)
+        self.assertEqual(base64.b64decode(self.calls[-1][1]['files'][0]['bytes_base64']),b'next original','an accepted next attachment survives history invalidation')
+        for changed in ({'owner':True},{'scope':'42'},{'space':'-10/topic/4'},{'logical_profile':'other'},
+                        {'generation':'22222222-2222-4222-8222-222222222222'},{'native_profile':old_home.name},{'revision':1}):
+            with self.assertRaisesRegex(ValueError,'profile_scope_denied'):
+                self.gateway.adopt_context({**status,'context':{**status['context'],**changed}})
+        self.assertEqual((old_home/'memories/MEMORY.md').read_text(),'old unprepared memory')
+        # Exercise the pinned method bindings, not only the database helper.
+        from tui_gateway import server as native
+        with patch.dict(native.__dict__):
+            native._methods=dict(native._methods)
+            native._sessions={'sid':{'session_key':'stored-one','history':[]}}
+            old=Scopes.apply_revision(Scope('-10','42',False,logical,'-10',1),
+                {'generation':generation,'guard_epoch':1,'revision':1,'logical_profile':logical})
+            gateway=BrowserGateway(native,self.root,old,'model',self.call)
+            gateway.install()
+            try:
+                prior=gateway.invoke('session.history',1,{'session_id':'sid'})
+                self.assertIn('old unprepared context',json.dumps(prior))
+                gateway.adopt_context(status)
+                current=gateway.invoke('session.history',1,{'session_id':'sid'})
+                self.assertIn('prepared answer',json.dumps(current));self.assertNotIn('old unprepared context',json.dumps(current))
+            finally:
+                if gateway.native_db is not None:gateway.native_db.close()
     def test_capture_required_scope_and_forbidden_operations(self):
         self.assertIn('error',self.submit());self.assertEqual(self.run_count,0)
         self.assertIn('error',self.invoke('shell.exec',command='echo secret'))

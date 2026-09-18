@@ -108,6 +108,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(operation==='cancel')return json(res,200,await s.browser.cancel(body));
       if(operation==='observe')return json(res,200,await s.browser.observe(body));
       if(operation==='active')return json(res,200,await s.browser.active(body));
+      if(operation==='undelivered')return json(res,200,await s.browser.undelivered(principal,body));
       await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       if(operation==='admit') {
         await drainSourceSpool(s.capture,config.dataDir,string(body.event_id,64));

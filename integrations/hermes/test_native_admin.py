@@ -50,6 +50,26 @@ class PolicyTests(unittest.TestCase):
 
 
 class NativeAdminTests(unittest.TestCase):
+    def test_recovery_uses_authenticated_current_profile_and_bounded_cursor(self):
+        from types import SimpleNamespace
+        from fastapi.testclient import TestClient
+        from .native_admin import Administration
+        calls=[]
+        def resolve(profile):
+            calls.append(('resolve',profile))
+            if profile!='research':raise ValueError('profile_scope_denied')
+            return {'logical_profile':'profile-'+'a'*48,'space':'42'}
+        def request(route,body):calls.append((route,body));return {'items':[],'next':None}
+        app=Administration(self.app,self.root,'model',self.policy,self.token,browser_enabled=True,
+            profile_catalog=SimpleNamespace(resolve=resolve,request=request))
+        client=TestClient(app,base_url='http://127.0.0.1')
+        url='/api/nocheh/browser-undelivered?profile=research&after='+'a'*64
+        self.assertEqual(client.get(url).status_code,401);self.assertEqual(calls,[])
+        self.assertEqual(client.get(url,headers=self.headers).status_code,200)
+        self.assertEqual(calls[-1],('/v1/browser/undelivered',{'profile':'profile-'+'a'*48,'space':'42','after':'a'*64}))
+        self.assertEqual(client.get(url+'&scope=-10',headers=self.headers).status_code,400)
+        self.assertEqual(client.get('/api/nocheh/browser-undelivered?profile=retired',headers=self.headers).status_code,400)
+
     def setUp(self):
         from fastapi.testclient import TestClient
         from .native_admin import create_app

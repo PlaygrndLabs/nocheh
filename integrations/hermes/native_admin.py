@@ -189,7 +189,10 @@ class Administration:
                     finally: db.close()
                 query['profile']=[name]
                 if scope['path']!='/api/pub' and (channel:=query.get('channel',[''])[0]):
-                    query['channel']=['nocheh-'+hashlib.sha256((name+':'+channel).encode()).hexdigest()[:32]]
+                    # Keep the transport attached while preparation advances the
+                    # native guard generation; logical profiles remain isolated.
+                    identity=self.binding(name).logical_profile or name
+                    query['channel']=['nocheh-'+hashlib.sha256((identity+':'+channel).encode()).hexdigest()[:32]]
             except ValueError:
                 await send({'type':'websocket.close','code':1008});return
             # This authenticated internal connection was verified by Nocheh's
@@ -222,6 +225,13 @@ class Administration:
                     result=await asyncio.to_thread(acknowledge_browser_delivery,self.token,value)
                     return await JSONResponse(result)(scope,receive,send)
                 selected=query.get('profile', [''])[0]
+                if path=='/api/nocheh/browser-undelivered' and method=='GET' and self.browser_enabled:
+                    if not self.profile_catalog: return await JSONResponse({'items':[],'next':None})(scope,receive,send)
+                    if any(key not in ('profile','after') for key in query):raise ValueError('invalid_delivery_request')
+                    entry=await asyncio.to_thread(self.profile_catalog.resolve,selected)
+                    result=await asyncio.to_thread(self.profile_catalog.request,'/v1/browser/undelivered',
+                        {'profile':entry['logical_profile'],'space':entry['space'],**({'after':query['after'][0]} if 'after' in query else {})})
+                    return await JSONResponse(result)(scope,receive,send)
                 name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected)
                 if path.startswith('/api/files') and (method, path) in {
                     ('GET','/api/files'), ('GET','/api/files/read'), ('GET','/api/files/download'),

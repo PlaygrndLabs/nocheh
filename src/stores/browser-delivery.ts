@@ -11,12 +11,14 @@ import {immutableFile} from '../storage.js';
  * outside archive and erased with installation content during a reset. */
 export class BrowserDeliveryRepository {
   constructor(readonly root:string,readonly secret:string){}
+  private key(row:any){return canonical(['browser-delivered',row.binding.generation,row.event_id,row.result_reference.id]);}
+  eventId(row:any){return digest(this.key(row));}
   private receipt(value:Envelope){
     if(this.secret.length<24)throw new HttpError(503,'service_credential_required');
     return createHmac('sha256',this.secret).update('browser-delivery-v1:'+canonical(value)).digest('hex');
   }
   async offer(row:any,text:string,inputId:string){
-    const namespace=canonical([row.scope,row.logical_profile,row.conversation_id]),key=canonical(['browser-delivered',row.binding.generation,row.event_id,row.result_reference.id]);
+    const namespace=canonical([row.scope,row.logical_profile,row.conversation_id]),key=this.key(row);
     const original=envelope({version:1,key,channel:'browser',origin:'live',kind:'browser_delivered_message',bot_id:'',scope:row.scope,
       source_id:row.result_reference.id,revision:'0',occurred_at:null,text,
       payload:{profile:row.logical_profile,space:row.space_id,conversation_id:row.conversation_id,role:'assistant',in_reply_to:inputId},

@@ -71,9 +71,17 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     assert.equal((await advanceWorkflow(stores.control,firstWorkflow,1,'browser','fixture-recovery',storageWorkflowOperations(s,runtime).browser!)).state,'completed');
     const delivered=await s.browser.observe(first);
     assert.equal(delivered.text,'Generated answer');assert.ok(delivered.delivery);assert.equal((await s.browser.active(first)).active,false);
+    await assert.rejects(s.browser.undelivered({admin:false,scope:'123'},{profile:research}),{status:403});
+    const missed=await s.browser.undelivered(owner,{profile:research});
+    assert.equal(missed.items.length,1);assert.equal(missed.items[0]!.text,delivered.text);assert.deepEqual(missed.items[0]!.nocheh_delivery,delivered.delivery);
+    assert.deepEqual(await s.browser.undelivered(owner,{profile:research}),missed,'recovery reads do not acknowledge delivery');
+    assert.equal((await s.browser.undelivered(owner,{profile:planning})).items.length,0);
+    await assert.rejects(s.browser.undelivered(owner,{profile:research,space:group}),{code:'profile_scope_denied'});
+    await assert.rejects(s.browser.undelivered(owner,{profile:research,after:'../bad'}),{code:'invalid_run_identity'});
     assert.equal((await stores.archive.query("SELECT 1 FROM events WHERE channel='browser' AND source_id=$1",[(await saved(first.event_id)).result_reference.id])).rowCount,0,'offering generated text is not delivery');
     const receipt=await s.browserDelivery.acknowledge(owner,delivered.delivery);
     await drainSourceSpool(s.capture,root,receipt.event_id);
+    assert.equal((await s.browser.undelivered(owner,{profile:research})).items.length,0,'captured delivery retires the recovery offer');
     const witnessed=(await s.archive.captured(receipt.event_id)).reference;
     assert.equal((await stores.archive.query('SELECT original_text,kind FROM events WHERE id=$1',[receipt.event_id])).rows[0].original_text.toString(),'Generated answer');
     assert.equal(await s.access.canLearn(witnessed,await s.guards.state()),true);
@@ -112,9 +120,15 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     await s.browser.admit(owner,media);await prepare(media.event_id);assert.equal((await run(media.event_id)).state,'completed','initial transcript preparation must not cancel an unstarted browser submission');
     const queued=await capture();await s.browser.admit(owner,queued);await prepare(queued.event_id);mode='queued';await run(queued.event_id);
     await s.guards.setMode('off');assert.equal((await s.browser.observe(queued)).visible,false);assert.equal((await run(queued.event_id)).state,'cancelled');
+    assert.equal((await s.browser.undelivered(owner,{profile:research})).items.length,0,'revoked output is not replayed');
     assert.equal(calls.filter(c=>c.body.event_id===queued.event_id&&c.op==='run.start').length,1);
     const stale=await capture({scope:group,revision:1});await assert.rejects(s.browser.admit(owner,stale),{code:'browser_audience_changed'});
     const off=await capture({text:'Plain off mode'});await s.browser.admit(owner,off);await prepare(off.event_id);mode='done';assert.equal((await run(off.event_id)).state,'completed');
+    const recoveryIds=[off.event_id];
+    for(let i=0;i<4;i++){const item=await capture({text:'Recovery page '+i});await s.browser.admit(owner,item);await prepare(item.event_id);await run(item.event_id);recoveryIds.push(item.event_id);}
+    const pageOne=await s.browser.undelivered(owner,{profile:research});assert.equal(pageOne.items.length,4);assert.ok(pageOne.next);
+    const pageTwo=await s.browser.undelivered(owner,{profile:research,after:pageOne.next});assert.equal(pageTwo.items.length,1);assert.equal(pageTwo.next,null);
+    assert.deepEqual([...pageOne.items,...pageTwo.items].map(item=>item.event_id).sort(),recoveryIds.sort());
     const imported=await capture();await stores.control.query("UPDATE source_intakes SET transport='import' WHERE event_id=$1",[imported.event_id]);await assert.rejects(s.browser.admit(owner,imported),{code:'browser_original_required'});
     const queuedOwner=await capture();await s.browser.admit(owner,queuedOwner);
     const workflow=(await stores.control.query("SELECT id,revision FROM workflow_registry WHERE family='browser' AND job_id=$1",[queuedOwner.event_id])).rows[0];

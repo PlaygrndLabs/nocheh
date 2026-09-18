@@ -21,8 +21,9 @@ class ProfileCatalog:
             headers={'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'})
         try:
             with urlopen(request, timeout=10) as response:
-                data = response.read(1024 * 1024 + 1)
-                if len(data) > 1024 * 1024: raise RuntimeError('profile_catalog_unavailable')
+                limit = 20 * 1024 * 1024 if route == '/v1/browser/undelivered' else 1024 * 1024
+                data = response.read(limit + 1)
+                if len(data) > limit: raise RuntimeError('profile_catalog_unavailable')
                 return json.loads(data)
         except HTTPError as error:
             # Do not expose a server body (or transport credentials) through the

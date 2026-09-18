@@ -7,6 +7,21 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+Browser completion recovery and media-generation handover are verified candidates.
+The dashboard pages current authorized missed results four at a time, renders them
+before acknowledgment, and retries opaque receipts through outages. Archive
+observations retire delivered offers; reads and native emissions alone do not.
+The native gateway initializes sidebar publication and switches history reads to
+an authenticated completed run's current guard generation without copying old
+notes/history or discarding accepted next attachments. Five PostgreSQL/client/HTTP
+checks and 35 offline pinned native checks pass. The image build and isolated React
+preview pass, including 375px light/dark layouts, profile switching, receipt replay,
+and keyboard focus after dismissal. Host-mounted native startup timeouts were
+replaced with a passing image-based run; they are not counted as passes.
+[Browser recovery evidence](compatibility/results/2026-09-18-browser-recovery.json).
+The combined Compose/native/browser rehearsal, saved preference migration, scoped
+reset manifest/execution, and fresh live gates remain pending.
+
 ## Original-only archive and clean restart — 2026-09-18
 
 The owner authorized implementation of the [complete execution plan](docs/original-only-archive-plan.md).
