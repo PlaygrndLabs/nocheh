@@ -61,12 +61,22 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(req.method==='POST')return json(res,200,await (path.endsWith('/resolve')?s.runtimeProfiles.resolve(principal,await readJson(req)):s.runtimeProfiles.save(principal,await readJson(req))));
     }
     if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
-      admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
+      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
+      if(operation==='finish')return json(res,200,await s.scheduled.finish(body));
+      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       if(operation==='ownership')return json(res,200,await s.schedules.ownership());
       if(operation==='definition')return json(res,200,await s.schedules.definition(principal,body));
       if(operation==='input')return json(res,200,await s.schedules.capture(principal,body));
-      throw new HttpError(503,'scheduler_execution_migration_pending');
+      if(operation==='workflow-context')return json(res,200,await s.scheduled.context(body));
+      if(operation==='claim')return json(res,200,await s.scheduled.claim(body));
+      if(operation==='prepare')return json(res,200,await s.scheduled.prepare(body));
+      if(operation==='heartbeat')return json(res,200,await s.scheduled.heartbeat(body));
+      if(operation==='observe')return json(res,200,await s.scheduled.observe(body));
+      if(operation==='cancel')return json(res,200,await s.scheduled.cancel(body));
+      if(operation==='recover')return json(res,200,await s.scheduled.recoverExpired());
+      if(operation==='runs')return json(res,200,await s.scheduled.history(body));
+      if(operation==='delivery')return json(res,200,await s.scheduled.delivery(body));
+      throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/browser/'.length);

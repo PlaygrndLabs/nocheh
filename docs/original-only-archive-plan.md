@@ -97,7 +97,8 @@ separate native identities and prepared-text caches within each audience and
 guard generation; default profiles share their identity across transports.
 Only preferences carry into a new native generation automatically, never old
 unprepared notes. Native profile administration and browser admission resolve
-the control catalog; scheduler routing remains a separate integration step.
+the control catalog. Scheduled execution shares the managed claim/receipt protocol;
+the combined installation rehearsal remains a separate gate.
 Browser submission capture is filesystem-only until replay: original file bytes
 are durable before the source spool entry, and archive commits all manifests with
 the source. API acknowledgment reports `spooled`; execution requires separate
@@ -113,7 +114,7 @@ file preparation/selection. The first native request intent is durable before th
 call; after that boundary a changed guard cannot silently rebind the run. Default
 logical profile IDs stay stable while native state remains generation isolated.
 Confirmed browser-delivery capture still needs its end-to-end integration.
-Scheduler migration, host import coordination, and the full installation rehearsal still
+Host import coordination and the full installation rehearsal still
 require their separate increments. The opt-in layout is not
 yet a complete release candidate. Do not switch the live installation or infer
 activation from a successful config render or repository-level HTTP check.
@@ -135,10 +136,13 @@ versioned derivatives. Control stores configuration, active version pointers,
 monotonic cursors, and occurrence identities; prompt/definition/trigger content
 stays in derived storage. Changed execution versions revoke before publication;
 clock-only cursor updates do not revoke their admitted run. Replays repair failed
-handoffs without a new fire identity. Scheduler execution/receipt/delivery routes
-and Inngest schedule operations remain gated until their separate migration and
-verification. The native schedule file remains the candidate clock adapter; the
-combined rehearsal must verify its recovery against committed control versions.
+handoffs without a new fire identity. Scheduler claims, preparation, heartbeat,
+results, recovery, history, delivery proposals, and Inngest operations use these
+repositories and the shared managed execution protocol. The native schedule file
+remains the clock adapter; the combined rehearsal must verify its recovery against
+committed control versions. Completed results close their runtime capability. A
+trusted result-specific path stages exact approval proposals without reopening it;
+uncertain executions never authorize delivery or a replacement run.
 
 Run `NOCHEH_STORES_FIXTURE=1 python3 -m scripts.store_wiring_check` to render the
 combined Compose configuration with temporary synthetic credentials, inspect

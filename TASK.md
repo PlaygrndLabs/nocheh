@@ -20,7 +20,7 @@ projects, and explicitly managed sharing are accepted requirements.
 | --- | --- |
 | Requirements, decision, and reset procedure | Complete; structure, local links, consistency, coverage, and diff hygiene checked |
 | Three stores, repositories, capture handoff, role isolation | Foundation and app/security/capture wiring verified in isolated Compose; remaining repository migrations pending |
-| Guard/control separation and recovery | Guard, action, browser execution, service callers, and publication recovery verified as candidates; native profile administration verified as a candidate; scheduler migration pending |
+| Guard/control separation and recovery | Guard, action, browser/scheduler execution, profile administration, and publication recovery verified as candidates; complete installation rehearsal pending |
 | Derivative versioning, reprocessing, portability, backup | Reprocessing, guarded selection, and owner API/CLI/dashboard verified as candidates; three-store backup/inactive restore candidates verified; portability, full coordinated rehearsal, and production routing pending |
 | Replies/reactions, Honcho provenance, learning, projects, owner interfaces | Relationships, policies, provenance, learned versions, explicit sharing, owner interfaces, and preparation/memory workflow wiring verified as candidates; full installation rehearsal pending |
 | Complete isolated Compose and UI acceptance | Pending |
@@ -593,6 +593,29 @@ compilation and the repeated affected database batch. AST-only Graphify: 423 fil
 approval, native execution/recovery, and Inngest operation registration remain
 pending; those HTTP operations fail closed until their migration is complete.
 [Schedule storage evidence](compatibility/results/2026-09-18-store-schedule-storage.json).
+
+Browser and scheduled execution now share the same claim/lease/result recovery
+protocol with explicit channel-specific root and preparation repositories.
+Scheduled turns use control operation roots and current guarded prompt derivatives;
+no invented archive source is required. Claims carry logical profile, installation,
+guard, and job bindings. Revocation, cancellation, expired leases, missing native
+receipts, and durable derivative recovery use the same identity without rerunning
+uncertain effects. Scheduled result history remains derived, and completion closes
+the runtime capability. A separate trusted completion path stages an exact Telegram
+proposal from a verified local result; it cannot reopen that capability or send
+without the existing approval path. Inngest schedule/run operations and owner
+workflow cancellation now use control metadata. Generated runs have no archive
+source link. Native scheduling resolves stable profiles for both layouts.
+Eight PostgreSQL/HTTP checks and 37 offline pinned-native checks pass, including
+browser/action regression coverage. An initial native batch found test environment
+restoration leaking a deleted temporary home; cleanup was corrected and the entire
+37-check batch passed. TypeScript, diff hygiene, and AST-only Graphify pass
+(426 files, 2,640 nodes, 10,702 edges; zero model calls). These are synthetic service
+and native checks, not the complete Inngest/Compose/UI installation rehearsal or
+fresh provider/live acceptance. Host imports, complete portable bundles and backup
+coordination, browser delivery evidence, reset, and fresh gates remain pending.
+[Scheduled execution evidence](compatibility/results/2026-09-18-store-scheduled-execution.json).
+
 
 
 

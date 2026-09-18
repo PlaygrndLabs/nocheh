@@ -58,7 +58,7 @@ test('browser originals and file manifests survive database outages and replay w
     await assert.rejects(s.archive.capture(spooled,{manifests:manifests.map((m,i)=>i?m:{...m,file_hash:digest('changed')})}),{code:'artifact_metadata_conflict'});
     const exported=await s.sourcePortability.record(owner,first.event_id);
     assert.equal(exported.event.text,text);assert.equal(exported.artifacts.length,2);assert.deepEqual(exported.event.source,spooled.source);
-    for(const kind of ['browser_result','scheduled_result','scheduled_trigger'])await assert.rejects(s.archive.capture({...spooled,key:spooled.key+kind,kind}),{code:'original_source_required'});
+    for(const kind of ['browser_result','scheduled_result','scheduled_prompt','scheduled_trigger'])await assert.rejects(s.archive.capture({...spooled,key:spooled.key+kind,kind}),{code:'original_source_required'});
     assert.equal((await connected.control.query("SELECT count(*)::int AS n FROM attachment_retrievals WHERE event_id=$1 AND state='done'",[first.event_id])).rows[0].n,2);
   }finally{await connected.close();await rm(root,{recursive:true,force:true});}
 });

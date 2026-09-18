@@ -71,6 +71,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
   const operations:Partial<Record<WorkflowFamily,WorkflowOperation>>={
     telegram:(id,authority)=>s.telegram.run(id,authority),
     browser:(id,authority)=>s.browser.run(id,authority),
+    schedules:(id,authority)=>s.scheduled.operation(id,authority),
     actions:(id,authority)=>s.telegramActions.run(id,authority),
     preparation:async(job,authority)=>{
       const match=/^reprocess:([a-f0-9]{64})$/.exec(job);

@@ -35,6 +35,7 @@ import {ControlledExecutionRepository} from './controlled-execution.js';
 import {ActionCommandRepository} from './action-commands.js';
 import {BrowserCaptureRepository} from './browser-capture.js';
 import {BrowserRunRepository} from './browser-runs.js';
+import {ScheduledRunRepository} from './scheduled-runs.js';
 import {ScheduleRepository} from './schedules.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 
@@ -66,10 +67,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions);
+  const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
-    schedules:new ScheduleRepository(access,derived,options.detectorVersion,detect),
+    schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.runtime,schedules,telegramActions),
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime),
     controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),

@@ -23,7 +23,7 @@ export function sourceIdentity(input:unknown) {
 
 const internalKinds=new Set(['runtime_context','transcript','extracted_text','shared_knowledge',
   'outbound_intent','outbound_result','schedule_definition','schedule_fire','guard_result','learning_result','learned_memory','extraction_status',
-  'memory_input','memory_result','memory_context','runtime_result','browser_result','scheduled_result','scheduled_trigger','action_request','action_result','action_decision','owner_action_decision','action_control_reply','controlled_action_request','controlled_action_result']);
+  'memory_input','memory_result','memory_context','runtime_result','browser_result','scheduled_result','scheduled_prompt','scheduled_trigger','action_request','action_result','action_decision','owner_action_decision','action_control_reply','controlled_action_request','controlled_action_result']);
 export function originalEnvelope(input:unknown):Envelope {
   const value=envelope(input);
   if(value.origin==='generated'||value.channel==='scheduler'||internalKinds.has(value.kind))
