@@ -30,8 +30,8 @@ empty, confirms the fixture Telegram boundary, and reaches acceptance mode with
 restart ownership disabled. The first rehearsal attempt used the management image
 where a runtime image was required, failed before setup, and cleaned up; the repeated
 runtime-image attempt passed. No provider or live Telegram request was made. The
-live installation is currently stopped and remains unchanged; its setup aggregate
-cannot be checked until PostgreSQL is running under the pre-reset fences.
+live installation is currently stopped and remains unchanged; the later locked
+read-only setup/effect audit below supersedes the earlier missing aggregate check.
 [Legacy transition evidence](compatibility/results/2026-09-18-reset-legacy-transition.json).
 
 Integrated commit `9fa7f51` now has a fresh installation-scoped, non-executable
@@ -41,8 +41,8 @@ The private ownership review covers all 15 immediate restore/archive items: 12
 installation-owned backup, export, restore and recovery entries are selected for
 erasure, while three worktree archive/backup entries are preserved as unrelated.
 The preflight and reviewed-path artifacts are mode `0600`, copied no content and
-remain private under `data/local/admin/reset/`. Current services are stopped, so no
-legacy database setup aggregate was read. Reset execution, the one-attempt Telegram
+remain private under `data/local/admin/reset/`. That preflight did not start the
+stopped legacy database. Reset execution, the one-attempt Telegram
 boundary, the dedicated test-group/human evidence and fresh acceptance remain
 pending. [Live preflight evidence](compatibility/results/2026-09-18-reset-live-preflight.json).
 
@@ -54,6 +54,19 @@ the same bound identity with 17 containers, three volumes, 65 paths and zero
 blockers. All 98 reset checks pass on the host and in the read-only,
 network-disabled candidate management image. No live service or data changed.
 [Mount-order evidence](compatibility/results/2026-09-19-reset-mount-canonicalization.json).
+
+The locked current-installation audit now verifies the legacy setup aggregate and
+effect settlement without exposing content. PostgreSQL alone was temporarily
+started with restart ownership suppressed, the maintenance lock and writer check
+held, then returned to its saved stopped state and restart policy. The setup has one
+configuration record with a stable content-free fingerprint. All 311 outbound
+receipts are retained: 283 are delivered and 28 are explicitly ambiguous
+`deleteWebhook(drop_pending_updates=false)` polling setup calls. Settlement now
+classifies only that exact non-dropping setup operation separately from delivery;
+ambiguous sends and dropping webhook operations still block. The live audit has
+zero delivery blockers, and all 100 reset checks pass on the host and in the
+read-only, network-disabled management image. No receipt was changed or replayed.
+[Effect-settlement evidence](compatibility/results/2026-09-19-reset-effect-settlement.json).
 
 The post-reset live gate and controlled resumption are now implemented as separate
 internal coordinator transitions. The reset-only validator accepts one closed
