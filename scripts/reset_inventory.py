@@ -35,6 +35,14 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
 
 
+def normalize_container(value):
+    """Canonicalize Docker's set-like mount inventory before identity binding."""
+    if not isinstance(value, dict) or not isinstance(value.get('mounts'), list):
+        raise ValueError('reset_container_inventory_invalid')
+    mounts = sorted(value['mounts'], key=lambda row: canonical(row))
+    return {**value, 'mounts': mounts}
+
+
 def run(arguments, environment):
     result = subprocess.run(arguments, env=environment, capture_output=True, text=True, timeout=60)
     if result.returncode or len(result.stdout) > 32 * 1024 * 1024:
@@ -143,7 +151,7 @@ def inspect(state, *, root=INSTALLATION_ROOT, runner=run):
     containers = []
     for start in range(0, len(identifiers), 64):
         lines = runner(['docker', 'inspect', '--format', CONTAINER_FORMAT, *identifiers[start:start + 64]], environment)
-        containers.extend(json.loads(line) for line in lines.splitlines() if line)
+        containers.extend(normalize_container(json.loads(line)) for line in lines.splitlines() if line)
     owned = [item for item in containers if item.get('project') == project]
     expected_files = {str(Path(command[i + 1]).resolve()) for i, part in enumerate(command[:-1]) if part == '-f'}
     for item in owned:

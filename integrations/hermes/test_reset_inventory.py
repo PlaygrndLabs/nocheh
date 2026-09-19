@@ -127,6 +127,16 @@ class ResetInventoryTests(unittest.TestCase):
         self.values['NOCHEH_HONCHO_ENABLED'] = 'false'
         self.assertEqual(len(self.inspect()['volumes']), 4)
 
+    def test_docker_mount_order_does_not_change_container_identity(self):
+        self.containers[0]['mounts'].append({
+            'Type': 'bind', 'Source': str(self.state / 'files'),
+            'Destination': '/data/files', 'RW': False})
+        first = self.inspect()['containers']
+        for row in self.containers:
+            row['mounts'].reverse()
+        second = self.inspect()['containers']
+        self.assertEqual(first, second)
+
 
 if __name__ == '__main__':
     unittest.main()

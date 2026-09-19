@@ -46,6 +46,15 @@ legacy database setup aggregate was read. Reset execution, the one-attempt Teleg
 boundary, the dedicated test-group/human evidence and fresh acceptance remain
 pending. [Live preflight evidence](compatibility/results/2026-09-18-reset-live-preflight.json).
 
+The live preflight retry exposed unstable Docker mount ordering in three otherwise
+unchanged container inspections. Reset identity now canonicalizes each container's
+set-like mount inventory at every Docker inspection boundary used by planning,
+erasure and initialization. Two consecutive live read-only inventories now produce
+the same bound identity with 17 containers, three volumes, 65 paths and zero
+blockers. All 98 reset checks pass on the host and in the read-only,
+network-disabled candidate management image. No live service or data changed.
+[Mount-order evidence](compatibility/results/2026-09-19-reset-mount-canonicalization.json).
+
 The post-reset live gate and controlled resumption are now implemented as separate
 internal coordinator transitions. The reset-only validator accepts one closed
 `nocheh-fresh-acceptance-v1` request bound to the current reset ID, installation
