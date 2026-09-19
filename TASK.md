@@ -68,6 +68,18 @@ zero delivery blockers, and all 100 reset checks pass on the host and in the
 read-only, network-disabled management image. No receipt was changed or replayed.
 [Effect-settlement evidence](compatibility/results/2026-09-19-reset-effect-settlement.json).
 
+The final private reset inputs are regenerated from integrated commit `09e6d7b`:
+17 stopped containers, three volumes, 65 paths, zero blockers, and the same exact
+15 ownership decisions (12 erase, three preserve). The selected runtime,
+management and Hermes image digests are recorded without changing any container.
+Read-only Telegram metadata finds one configured group with three members; the
+owner and bot are members, the bot can read group messages, and another human is
+present. Its title has no test/acceptance/Nocheh signal, so the configured group
+cannot be designated as the dedicated acceptance group by inference. Reset
+execution remains withheld until the owner designates that group and the other
+human can produce the required post-boundary reply/reaction. GitHub authentication
+also remains unavailable. [Final readiness evidence](compatibility/results/2026-09-19-reset-live-readiness.json).
+
 The post-reset live gate and controlled resumption are now implemented as separate
 internal coordinator transitions. The reset-only validator accepts one closed
 `nocheh-fresh-acceptance-v1` request bound to the current reset ID, installation
