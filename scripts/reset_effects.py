@@ -79,8 +79,12 @@ def outbound(state):
             if result.get('state') not in ('delivered','rejected','ambiguous') or result.get('event',{}).get('payload',{}).get('intent_key')!=key:
                 raise ValueError('reset_effect_result_identity_invalid')
             outcome=result['state']
-        by_dispatch.setdefault(dispatch,[]).append(outcome)
-        evidence.append({'id':name[:-7],'intent_sha256':checksum,'result_sha256':result_hash,'outcome':outcome})
+        effect = ('transport_setup' if method == 'deleteWebhook' and
+                  parameters == {'drop_pending_updates': False} else 'delivery')
+        if effect == 'delivery':
+            by_dispatch.setdefault(dispatch,[]).append(outcome)
+        evidence.append({'id':name[:-7],'intent_sha256':checksum,'result_sha256':result_hash,
+                         'effect':effect,'outcome':outcome})
     if any(name.endswith('.result') and name[:-7]+'.intent' not in names for name in names):
         raise ValueError('reset_effect_orphan_result')
     return by_dispatch,evidence
@@ -127,7 +131,7 @@ def evaluate(state,observed):
         if identifier not in known and value['state']=='ambiguous':
             blockers.append({'kind':'tool','id':identifier,'reason':'orphan_external_outcome_unconfirmed'})
     for row in evidence:
-        if row['outcome'] in ('uncertain','ambiguous'):
+        if row['effect']=='delivery' and row['outcome'] in ('uncertain','ambiguous'):
             blockers.append({'kind':'telegram_delivery','id':row['id'],'reason':'external_outcome_unconfirmed'})
     def add(kind,identifier,outcome,checksum=None):
         if not isinstance(identifier,str) or not HASH.fullmatch(identifier):raise ValueError('reset_effect_identity_invalid')

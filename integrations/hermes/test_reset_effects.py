@@ -54,6 +54,25 @@ class ResetEffectsTests(unittest.TestCase):
         empty={key:[] for key in self.observed}
         self.assertFalse(effects.evaluate(self.state,empty)['settled'],'an orphan uncertain external send is still a blocker')
 
+    def test_ambiguous_non_dropping_webhook_setup_is_not_a_delivery_blocker(self):
+        parameters={'drop_pending_updates':False}
+        key,_=self.capture.outbound('deleteWebhook',parameters,'telegram-polling-setup')
+        self.capture.complete(key,'deleteWebhook',parameters,None)
+        empty={key:[] for key in self.observed}
+        result=effects.evaluate(self.state,empty)
+        self.assertTrue(result['settled'])
+        self.assertEqual(result['outbound'][0]['effect'],'transport_setup')
+        self.assertEqual(result['outbound'][0]['outcome'],'ambiguous')
+
+    def test_ambiguous_dropping_webhook_remains_an_external_effect_blocker(self):
+        parameters={'drop_pending_updates':True}
+        key,_=self.capture.outbound('deleteWebhook',parameters,'telegram-reset-boundary')
+        self.capture.complete(key,'deleteWebhook',parameters,None)
+        empty={key:[] for key in self.observed}
+        result=effects.evaluate(self.state,empty)
+        self.assertFalse(result['settled'])
+        self.assertEqual(result['outbound'][0]['effect'],'delivery')
+
     def test_mismatched_result_or_unrecognized_journal_entry_fails_closed(self):
         self.deliver();path=next((self.state/'spool/outbound').glob('*.result'));value=json.loads(path.read_text())
         value['event']['payload']['intent_key']='different intent';path.write_text(json.dumps(value))
