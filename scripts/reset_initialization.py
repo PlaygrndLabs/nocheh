@@ -114,7 +114,7 @@ def _all_containers(runner, environment):
     for start in range(0, len(identifiers), 64):
         output = runner(['docker', 'inspect', '--format', reset_inventory.CONTAINER_FORMAT,
                          *identifiers[start:start + 64]], environment)
-        rows.extend(json.loads(line) for line in output.splitlines() if line)
+        rows.extend(reset_inventory.normalize_container(json.loads(line)) for line in output.splitlines() if line)
     return rows
 
 

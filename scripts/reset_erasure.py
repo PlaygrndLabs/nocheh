@@ -75,7 +75,7 @@ def _docker(preflight, runner, environment, *, allow_missing_containers=False,
     for start in range(0, len(identifiers), 64):
         output = runner(['docker', 'inspect', '--format', reset_inventory.CONTAINER_FORMAT,
                          *identifiers[start:start + 64]], environment)
-        containers.extend(json.loads(line) for line in output.splitlines() if line)
+        containers.extend(reset_inventory.normalize_container(json.loads(line)) for line in output.splitlines() if line)
     current = {row['id']: row for row in containers}; expected = {row['id']: row for row in preflight['containers']}
     for identifier, row in expected.items():
         actual = current.get(identifier)
