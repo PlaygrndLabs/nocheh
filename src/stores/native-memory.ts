@@ -245,19 +245,22 @@ export class NativeMemoryRepository {
     const prepared=await this.prepared.prepare(current.principal,payload,this.detect);await this.current(current.row.id);return {payload:prepared};
   }
   private async connectedPeers(current:Awaited<ReturnType<NativeMemoryRepository['current']>>,principal:Reader,query='') {
-    let connected=query.trim()?await this.contexts.entities.connected(principal,query,12):{entities:[],partial:false};
+    let connected=query.trim()?await this.contexts.entities.connected(principal,query,12):{entities:[],partial:false,ambiguities:[]};
+    const clarification=principal.scope===null&&connected.ambiguities.length?
+      `Please clarify which ${connected.ambiguities.map(item=>item.name).join(', ')} identity you mean.`:undefined;
+    if(clarification)return {items:[],partial:connected.partial,clarification};
     if(!connected.entities.length) {
       let source=current.row.root_reference as SourceReference;
       if(principal.turnEvent)try{source=(await this.contexts.access.archive.captured(principal.turnEvent)).reference;}catch{}
       const local=await this.contexts.entities.context(source,[]),seeds=[local.speaker?.id,local.project?.id].filter((value):value is string=>!!value);
-      connected=await this.contexts.entities.connectedFrom(principal,seeds,12);
+      connected={...await this.contexts.entities.connectedFrom(principal,seeds,12),ambiguities:[]};
     }
     const candidates=connected.entities.map(item=>({peer:honchoPeerId(item.entity),path:item.path.join(' → ')}));
-    if(!candidates.length)return {items:[],partial:connected.partial};
+    if(!candidates.length)return {items:[],partial:connected.partial,clarification:undefined};
     const available=new Set((await this.control.query(`SELECT DISTINCT peer.value AS peer_id FROM memory_ingestion_receipts r
       CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_array_length(r.peer_ids)>0 THEN r.peer_ids ELSE jsonb_build_array(r.peer_id) END) peer(value)
       WHERE r.generation=$1 AND r.state='done' AND peer.value=ANY($2::text[])`,[current.row.id,candidates.map(item=>item.peer)])).rows.map(row=>String(row.peer_id)));
-    return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial};
+    return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial,clarification:undefined};
   }
   async refreshContext(id:string,requestId=String(Math.floor(Date.now()/120000))):Promise<boolean> {
     const current=await this.current(id);if(!current.row.last_ready_at&&current.row.state!=='ready')return false;
@@ -315,6 +318,7 @@ export class NativeMemoryRepository {
       const input=await this.derived.record({operation_id:'native-recall-input:'+requestId,source:root,kind:'runtime_context',content:Buffer.from(String(question)),
         producer:'nocheh',producer_version:protocol,configuration:{workspace:id,reasoning_level:'low'},provenance:{binding:current.binding}});
       const connected=await this.connectedPeers(current,actor,String(question)),answers=[];
+      if(connected.clarification)return {sources:[],limited_memory:false,syncing:current.row.state==='building',clarification_required:true,note:connected.clarification};
       for(const item of connected.items.slice(0,4)) {
         await this.current(id);const response=await this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',{query:question,reasoning_level:'low',stream:false});
         answers.push(`[related through ${item.path}]\n${string(response.content,20000)}`);
