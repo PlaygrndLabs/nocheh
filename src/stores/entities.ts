@@ -292,8 +292,12 @@ export class EntityRepository {
     return {versions,next:rows.length>50?rows[49].revision:null};
   }
   async connected(principal:Reader,query:string,limit=12) {
-    const first=await this.list(principal,{query}),connected=await this.connectedFrom(principal,first.entities.slice(0,3).map(entity=>entity.id),limit);
-    return {...connected,partial:connected.partial||!!first.next||first.entities.length>3};
+    const corpus=query.trim().toLocaleLowerCase(),first=await this.list(principal),matches=first.entities
+      .filter(entity=>corpus.includes(entity.name.trim().toLocaleLowerCase())).sort((a,b)=>b.name.length-a.name.length||a.id.localeCompare(b.id));
+    const names=new Map<string,MemoryEntity[]>();for(const entity of matches){const name=entity.name.trim().toLocaleLowerCase(),group=names.get(name)??[];group.push(entity);names.set(name,group);}
+    const ambiguities=[...names.entries()].filter(([,entities])=>entities.length>1).map(([name,entities])=>({name,entity_ids:entities.map(entity=>entity.id)}));
+    const connected=await this.connectedFrom(principal,matches.slice(0,3).map(entity=>entity.id),limit);
+    return {...connected,ambiguities,partial:connected.partial||!!first.next||matches.length>3};
   }
   async connectedFrom(principal:Reader,seedIds:string[],limit=12) {
     const seeds=[];for(const id of [...new Set(seedIds)].slice(0,3)){const entity=await this.row(id);if(await this.visible(principal,entity))seeds.push(entity);}

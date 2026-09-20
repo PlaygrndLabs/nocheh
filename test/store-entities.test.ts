@@ -35,6 +35,7 @@ test('people and projects keep stable identity, attributed evidence, connected r
     const sam=await entities.ensureParticipant(samSource),samAgain=await entities.ensureParticipant(samSource),otherAlex=await entities.ensureParticipant(otherAlexSource);
     assert.ok(sam&&otherAlex);assert.equal(sam!.name,'Alex');assert.equal(otherAlex!.name,'Alex');
     assert.equal(sam!.id,samAgain!.id);assert.notEqual(sam!.id,otherAlex!.id,'same display name never merges exact platform identities');
+    const ambiguous=await entities.connected(owner,'What did Alex promise?');assert.ok((ambiguous.ambiguities[0]?.entity_ids.length??0)>=2,'owner-private natural-language questions retain same-name ambiguity');
 
     const context=await entities.context(samSource,[beacon],'Beacon needs Alex to deliver Friday.');
     assert.equal(context.project?.project_id,atlas.id);assert.equal(context.mentioned_projects[0]?.project_id,beacon.id);
