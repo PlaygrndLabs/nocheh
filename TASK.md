@@ -7,6 +7,33 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The owner-directed Docker restart on 2026-09-20 retained one Git worktree and
+removed only Nocheh-owned Docker state: 47 containers, 40 volumes, 22 networks and
+55 old image tags. The deleted volumes included the stopped installation's legacy
+PostgreSQL and native-store data; its earlier reset preflight and ownership review
+are no longer current. The repository bind-mounted state and saved `.env` still
+exist, so this Docker cleanup is not the complete installation reset. The unrelated
+`coopr` Compose project remained intact. A full
+no-cache build with current pinned bases completed for every declared Nocheh image;
+Go dependency downloads now have a checksum-verified secondary proxy, and the
+Hermes TUI install has bounded retries plus a persistent BuildKit npm cache. The
+standard test entrypoint now creates a temporary state directory and distinct
+Compose project with synthetic credentials, runs the backend-termination check
+only under its explicit isolated-fixture flag, runs Hermes offline, and removes its
+containers, volumes and networks even when a check fails.
+
+The final image refresh passes 107 ordinary service checks with 44 environment-
+specific skips, the separately isolated database-loss check, 343 Hermes checks
+with three skips, and all 100 reset checks in the read-only management image. The
+AST graph refresh covers 498 files with 3,433 nodes and 12,675 edges without model
+calls. A repeated internal-only fresh-baseline rehearsal converts a synthetic
+legacy setup to the original-only layout, proves archive, derivative, workflow and
+Honcho stores empty, retains synthetic setup/accounting, and leaves runtime
+activation disabled. The rehearsal cleaned up after itself; the daemon again has
+zero Nocheh containers, volumes or networks while the verified images remain. The
+live reset and fresh Telegram acceptance gates remain pending.
+[Fresh Docker evidence](compatibility/results/2026-09-20-fresh-docker-build.json).
+
 The reset can now start from the installed legacy database and finish on the
 required three-store layout. After preservation and erasure, initialization writes
 a private layout-transition intent before changing only the saved

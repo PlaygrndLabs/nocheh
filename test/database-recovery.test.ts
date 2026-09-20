@@ -7,7 +7,9 @@ import {ingest} from '../src/archive.js';
 import {setGuardMode} from '../src/guarded.js';
 import {prepareContext} from '../src/prepared-context.js';
 
-test('database loss during an external wait rejects work, releases the client and permits recovery',{skip:!process.env.PGHOST,timeout:60000},async()=>{
+test('database loss during an external wait rejects work, releases the client and permits recovery',{
+  skip:!process.env.PGHOST||process.env.NOCHEH_WORKFLOW_FIXTURE!=='1',timeout:60000,
+},async()=>{
   assert.equal(process.env.NOCHEH_WORKFLOW_FIXTURE,'1','backend termination is restricted to the isolated fixture');
   const pool=connectDatabase(settings()),admin=new pg.Pool(),namespace='disconnect_'+Date.now();
   const previous=process.env.PGOPTIONS;

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from configuration import initialize, load, write_env, env_path, compose_environment, compose_command, DEFAULT_STATE, INSTALLATION_ROOT
@@ -26,10 +27,52 @@ def bootstrap():
         print("Transferred the dedicated Hermes login into the Compose runtime.")
 
 
+def run_isolated_tests(rest):
+    # A test run owns a fresh Compose project and generated fixture credentials.
+    # It never starts, reads, or tears down the installation's database project.
+    with tempfile.TemporaryDirectory(prefix='nocheh-test-') as folder:
+        state = Path(folder)
+        initialize(state)
+        sys.path.insert(0, str(ROOT))
+        from scripts.provider import ensure_source, ensure_monitor_source
+        ensure_source(); ensure_monitor_source()
+        from compatibility.setup import checkout, LOCK
+        checkout('hermes-agent', LOCK['hermes'])
+        project = state.name
+        command = compose_command(state, project) + ['-f', str(INSTALLATION_ROOT / 'docker-compose.dev.yml')]
+        env = compose_environment(state)
+        env['COMPOSE_PROJECT_NAME'] = project
+        env['NOCHEH_AGENT_NETWORK'] = project + '-agent'
+        env['NOCHEH_MEMORY_NETWORK'] = project + '-memory'
+        try:
+            result = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-postgres'], cwd=ROOT, env=env)
+            if result == 0:
+                result = subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
+                    'nocheh-app', 'npm', 'test'] + rest, cwd=ROOT, env=env)
+            if result == 0:
+                result = subprocess.call(command + ['run', '--rm', '--no-deps',
+                    '-e', 'NOCHEH_WORKFLOW_FIXTURE=1', 'nocheh-app', 'node', '--test',
+                    'dist/test/database-recovery.test.js'], cwd=ROOT, env=env)
+            if result == 0:
+                result = subprocess.call(command + ['build', 'hermes-runtime'], cwd=ROOT, env=env)
+            if result == 0:
+                # Native unit tests get only a synthetic token, no Compose secrets.
+                result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
+                    '--tmpfs', '/tmp:rw,exec,nosuid,nodev,mode=1777', '--entrypoint', 'python',
+                    '-e', 'HERMES_HOME=/tmp/nocheh-tests', '-e', 'SERVICE_TOKEN=test-service-token',
+                    'nocheh-hermes:local', '-m', 'unittest', 'discover', '-s', 'integrations/hermes',
+                    '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
+        finally:
+            cleanup = subprocess.call(command + ['down', '--volumes', '--remove-orphans'], cwd=ROOT, env=env)
+        return result or cleanup
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "reset"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
+    if args.command == 'test':
+        return run_isolated_tests(rest)
     if args.command=='reset':
         sys.path.insert(0,str(ROOT))
         from scripts.reset_inventory import main as reset_inventory
@@ -154,14 +197,14 @@ def main():
         sys.path.insert(0,str(ROOT))
         from scripts.honcho_runtime import normalize_endpoints
         normalize_endpoints(env.get('NOCHEH_HONCHO_STATE_DIR') or STATE/'honcho')
-    if args.command in ('up','dev','build','test'):
+    if args.command in ('up','dev','build'):
         sys.path.insert(0,str(ROOT))
         from scripts.provider import ensure_source,ensure_monitor_source
         ensure_source();ensure_monitor_source()
         from compatibility.setup import checkout,LOCK
         checkout('hermes-agent',LOCK['hermes'])
     command = compose_command(STATE)
-    if args.command in ("dev", "test"):
+    if args.command == "dev":
         command += ["-f", str(INSTALLATION_ROOT / "docker-compose.dev.yml")]
     if args.command == 'db':
         from database_viewer import start
@@ -182,25 +225,16 @@ def main():
         "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
         "dev": ["up", "--build", "--watch"], "down": ["down"], "status": ["ps"],
         "logs": ["logs", "--tail", "100", "-f"], "build": ["build"],
-        "test": ["run", "--rm", "--build", "--no-deps", "nocheh-app", "npm", "test"],
         "verify": ["exec", "-T", "hermes-runtime", "python", "-m", "integrations.hermes.verify", "--live"],
         "config": ["config", "--quiet"],
         "discover-telegram": ["exec", "-T", "hermes-runtime", "python", "-m", "integrations.hermes.discover_telegram"],
         "login": ["exec", "hermes-runtime", "python", "-c",
             "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
     }
-    if args.command == 'test':
-        ready = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-postgres'], cwd=ROOT, env=env)
-        if ready:
-            return ready
     result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
     if args.command=='up' and result==0:
         result=subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
 
-    if args.command == 'test' and result == 0:
-        return subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
-            '-e', 'HERMES_HOME=/tmp/nocheh-tests', 'hermes-runtime', 'python', '-m', 'unittest',
-            'discover', '-s', 'integrations/hermes', '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
     return result
 
 

@@ -16,6 +16,9 @@ RUN VERSION=$VERSION npm run build
 FROM golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191 AS service-build
 ARG TARGETOS
 ARG TARGETARCH
+ARG GOPROXY=https://proxy.golang.org|https://goproxy.io|direct
+ENV GOPROXY=${GOPROXY}
+RUN apk add --no-cache ca-certificates git
 WORKDIR /src
 COPY apps/manager-server ./apps/manager-server
 COPY --from=web-build /app/apps/web/dist/index.html ./apps/manager-server/internal/httpapi/web/management.html
