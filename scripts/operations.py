@@ -18,7 +18,7 @@ from pathlib import Path,PurePosixPath
 try: from .configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
 except ImportError: from configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
 ROOT=INSTALLATION_ROOT
-SERVICES=['hermes-runtime','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-launcher','nocheh-security','chatgpt-speech','cliproxy-monitor','cliproxy-api']
+SERVICES=['hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security','chatgpt-speech','cliproxy-monitor','cliproxy-api']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -60,14 +60,14 @@ def sync(path):
 def fingerprints(command,env,tables=None):
     result={}
     if tables is None:
-        raw=subprocess.check_output(command+['exec','-T','nocheh-postgres','psql','-X','-A','-t','-U','nocheh','-d','nocheh','-c',
+        raw=subprocess.check_output(command+['exec','-T','nocheh-db','psql','-X','-A','-t','-U','nocheh','-d','nocheh','-c',
             "SELECT tablename FROM pg_tables WHERE schemaname='public'"],env=env,text=True)
         tables=[name for name in raw.split() if name in TABLES]
     if not set(tables).issubset(TABLES): raise ValueError('Unknown snapshot table')
     for table in tables:
         key=TABLES[table]
         query=f'COPY (SELECT row_to_json(t) FROM (SELECT * FROM public.{table} ORDER BY {key}) t) TO STDOUT'
-        process=subprocess.Popen(command+['exec','-T','nocheh-postgres','psql','-X','-q','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',query],env=env,stdout=subprocess.PIPE)
+        process=subprocess.Popen(command+['exec','-T','nocheh-db','psql','-X','-q','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',query],env=env,stdout=subprocess.PIPE)
         digest=hashlib.sha256()
         while chunk:=process.stdout.read(1024*1024): digest.update(chunk)
         if process.wait(): raise RuntimeError('database_fingerprint_failed')
@@ -96,18 +96,18 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
     three_stores=env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1'
     from scripts.management_maintenance import coordinating_dashboard
     coordinator=coordinating_dashboard(state,command,env) if three_stores else None
-    exempt={'nocheh-postgres','honcho-postgres','inngest-redis','nocheh-executor'}
+    exempt={'nocheh-db','honcho-postgres','inngest-redis','nocheh-executor'}
     if coordinator:exempt.add('nocheh-dashboard')
     stopped=([name for name in running if name not in exempt]
         if three_stores else [name for name in SERVICES if name in running])
     barrier=ExitStack()
     workflow_was_running=workflows_running(state)
     try:
-        if 'hermes-runtime' in stopped:subprocess.run(command+['stop','hermes-runtime'],env=env,check=True)
+        if 'hermes' in stopped:subprocess.run(command+['stop','hermes'],env=env,check=True)
         if workflow_was_running:stop_workflows(state,wait=True)
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
         for service in stopped:
-            if service!='hermes-runtime':subprocess.run(command+['stop',service],env=env,check=True)
+            if service!='hermes':subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                   'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
@@ -121,7 +121,7 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
             manifest['tables']=fingerprints(command,env)
             dump=stage/'archive.dump'
             with dump.open('xb') as file:
-                subprocess.run(command+['exec','-T','nocheh-postgres','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
+                subprocess.run(command+['exec','-T','nocheh-db','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
             dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
         from scripts.workflow_recovery import enabled_or_present,snapshot as workflow_snapshot
         if enabled_or_present(state,env):
@@ -263,14 +263,14 @@ def restore(snapshot,state,project,port):
     if manifest['version']==6:config['NOCHEH_STORAGE_LAYOUT']='original-only-v1'
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
-    subprocess.run(command+['up','-d','--wait','nocheh-postgres'],env=env,check=True)
+    subprocess.run(command+['up','-d','--wait','nocheh-db'],env=env,check=True)
     if manifest['version']==6:
         from scripts.store_recovery import StoreRecovery
         StoreRecovery(command,env).restore_inactive(snapshot,manifest['stores'],sha)
         actual=manifest['tables']
     else:
         with (snapshot/'archive.dump').open('rb') as file:
-            subprocess.run(command+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
+            subprocess.run(command+['exec','-T','nocheh-db','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
         # Old snapshots predate the policy tables; verify exactly their recorded set.
         actual=fingerprints(command,env,manifest['tables'])
         if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
@@ -281,10 +281,10 @@ def restore(snapshot,state,project,port):
         from scripts.honcho_recovery import restore as restore_honcho
         restore_honcho(command,env,snapshot,state,manifest['honcho'],sha)
     if 'honcho_connection' in manifest['tables']:
-        subprocess.run(command+['exec','-T','nocheh-postgres','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
+        subprocess.run(command+['exec','-T','nocheh-db','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
             "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
     if manifest['version']!=6:
-        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes-runtime','hermes-agent-launcher','chatgpt-speech','cliproxy-api','cliproxy-monitor','inngest-server'],env=env,check=True)
+        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes','hermes-agent-sb','chatgpt-speech','cliproxy-api','cliproxy-monitor','inngest-server'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
             'telegram_enabled':False,'subscription_login_activated':False}
@@ -314,7 +314,7 @@ def main(command,state,rest):
             with urllib.request.urlopen(request,timeout=10) as response: result['archive']=json.load(response)
         except Exception as error: result['archive']={'error':type(error).__name__}
         try:
-            raw=subprocess.check_output(compose(state)+['exec','-T','hermes-runtime','python','-c',
+            raw=subprocess.check_output(compose(state)+['exec','-T','hermes','python','-c',
                 "import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:8781/health',timeout=5))))"],env=environment(state),text=True)
             result['hermes']=json.loads(raw)
         except Exception as error: result['hermes']={'error':type(error).__name__}

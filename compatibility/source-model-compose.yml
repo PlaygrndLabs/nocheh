@@ -1,7 +1,7 @@
 # Independent synthetic PostgreSQL acceptance; do not combine with installation Compose.
 name: ${NOCHEH_SOURCE_FIXTURE_PROJECT:?Explicit fixture project required}
 services:
-  nocheh-postgres:
+  nocheh-db:
     image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
     mem_limit: 512m
     command: [postgres, -c, shared_buffers=32MB, -c, max_connections=64]
@@ -22,7 +22,7 @@ services:
     profiles: [checks]
     command: [node, --test, --test-concurrency=1, dist/test/source-model.test.js]
     environment:
-      PGHOST: nocheh-postgres
+      PGHOST: nocheh-db
       PGUSER: nocheh
       PGDATABASE: nocheh
       PGPASSWORD: ${NOCHEH_SOURCE_FIXTURE_PASSWORD}
@@ -30,7 +30,7 @@ services:
       NOCHEH_DATA_DIR: /tmp/source-model-fixture
       TELEGRAM_ENABLED: "false"
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
 networks:
   default: {internal: true}
 volumes:

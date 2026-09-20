@@ -23,7 +23,7 @@ export function settings() {
     service: service as Service, host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 8780),
     token: secret('SERVICE_TOKEN'), databasePassword: layout==='legacy'?secret('PGPASSWORD'):'',storageLayout:layout,
     dataDir: process.env.NOCHEH_DATA_DIR ?? '/data',
-    hermesUrl: process.env.HERMES_URL ?? 'http://hermes-runtime:8781',
+    hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
     honchoUrl:process.env.HONCHO_URL??'http://honcho-api:8000',
     memoryToken:process.env.NOCHEH_MEMORY_TOKEN??'',
     guardMode: mode as 'off' | 'on',

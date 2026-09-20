@@ -53,7 +53,7 @@ Apply cannot change this internal setting. `original-only-v1` selects
 `deploy/original-only-compose.yml` through the shared Compose command builder.
 Shell overrides cannot silently select another layout.
 
-The `nocheh-postgres` service already owns the administrator login and provisions
+The `nocheh-db` service already owns the administrator login and provisions
 archive, derived, control, and independent Inngest storage before its health
 check succeeds. It shares the installation maintenance lock with backup/reset.
 An inactive restore marker makes PostgreSQL available to the recovery coordinator

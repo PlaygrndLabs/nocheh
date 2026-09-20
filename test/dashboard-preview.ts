@@ -36,7 +36,7 @@ const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state
 const actions:any[]=[{id:'c'.repeat(64),fingerprint:'d'.repeat(64),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-preview',workspace:'synthetic-demo'},state:'proposed',created_at:new Date().toISOString()}],permissions:any[]=[];
 let spaceRevision=1,spaceOverrides:Record<string,any>={mode:'approved'},shares:any[]=[];
 let memoryAttached=true;
-const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes-runtime','Hermes','Assistant runtime','running'],['cliproxy-monitor','CPA Manager Plus','Provider observations','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
+const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes','Hermes','Assistant runtime','running'],['cliproxy-monitor','CPA Manager Plus','Provider observations','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
 async function scenario(){try{return (await readFile('/tmp/nocheh-ui-scenario','utf8')).trim();}catch{return 'normal';}}
 const server=createServer((req,res)=>{void(async()=>{
  const url=new URL(req.url||'/','http://fixture'),path=url.pathname;

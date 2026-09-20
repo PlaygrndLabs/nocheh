@@ -18,7 +18,7 @@ import {initialize} from './dist/src/database.js';
 import {digest,ingest} from './dist/src/archive.js';
 import {initializeStoreDatabases,connectStores} from './dist/src/stores/connections.js';
 import {ArchiveRepository} from './dist/src/stores/archive.js';
-const config={host:'nocheh-postgres',user:'nocheh',database:'nocheh',password:'synthetic-reset-effects-only'};
+const config={host:'nocheh-db',user:'nocheh',database:'nocheh',password:'synthetic-reset-effects-only'};
 const legacy=new pg.Pool(config);
 if((await legacy.query("SELECT current_setting('cluster_name') AS name")).rows[0].name!=='nocheh-reset-effects-fixture')throw Error('wrong_cluster');
 await initialize(legacy);
@@ -45,18 +45,18 @@ def main():
     args=parser.parse_args();directory=args.directory.resolve();directory.mkdir(mode=0o700)
     project='nocheh-reset-effects-'+uuid.uuid4().hex[:12]
     compose={'name':project,'services':{
-        'nocheh-postgres':{'image':'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'nocheh-db':{'image':'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
             'command':['postgres','-c','cluster_name=nocheh-reset-effects-fixture'],
             'environment':{'POSTGRES_USER':'nocheh','POSTGRES_DB':'nocheh','POSTGRES_PASSWORD':'synthetic-reset-effects-only'},
             'volumes':['fixture:/var/lib/postgresql/data'],
             'healthcheck':{'test':['CMD-SHELL','pg_isready -U nocheh -d nocheh'],'interval':'2s','retries':30}},
         'checks':{'image':args.management_image,'entrypoint':['node','--input-type=module','-e',BOOTSTRAP],
-            'profiles':['checks'],'depends_on':{'nocheh-postgres':{'condition':'service_healthy'}}}},
+            'profiles':['checks'],'depends_on':{'nocheh-db':{'condition':'service_healthy'}}}},
         'volumes':{'fixture':{}},'networks':{'default':{'internal':True}}}
     file=directory/'compose.json';file.write_text(json.dumps(compose));command=['docker','compose','-p',project,'-f',str(file)]
     environment=dict(os.environ);recovery=StoreRecovery(command,environment)
     try:
-        subprocess.run(command+['up','-d','--no-build','--wait','nocheh-postgres'],check=True)
+        subprocess.run(command+['up','-d','--no-build','--wait','nocheh-db'],check=True)
         subprocess.run(command+['run','--rm','--no-deps','checks'],check=True)
         checks=[]
         with recovery.maintenance():

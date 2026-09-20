@@ -13,8 +13,8 @@ class ResetQuiescenceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
         self.state = Path(self.temporary.name).resolve(); self.generation = str(uuid.uuid4())
-        services = ['nocheh-postgres', 'honcho-postgres', 'honcho-redis', 'inngest-postgres', 'inngest-redis',
-                    'hermes-runtime', 'nocheh-executor', 'hermes-agent-launcher', 'nocheh-app',
+        services = ['nocheh-db', 'honcho-postgres', 'honcho-redis', 'inngest-postgres', 'inngest-redis',
+                    'hermes', 'nocheh-executor', 'hermes-agent-sb', 'nocheh-app',
                     'nocheh-security', 'nocheh-dashboard', 'cliproxy-api', 'cliproxy-monitor',
                     'honcho-api', 'honcho-deriver', 'honcho-provider-gateway']
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False,
@@ -60,7 +60,7 @@ class ResetQuiescenceTests(unittest.TestCase):
             self.assertEqual(receipt['containers'][-1]['state'], 'exited')
             self.assertEqual(journal.value['steps'][-1]['step'], 'quiesced')
             stops=[call for call in self.calls if call[1]=='stop']
-            self.assertEqual(stops[0][4:], [row['id'] for row in self.current['containers'] if row['service']=='hermes-runtime'])
+            self.assertEqual(stops[0][4:], [row['id'] for row in self.current['containers'] if row['service']=='hermes'])
             stopped={identifier for call in stops for identifier in call[4:]}
             self.assertEqual(stopped,{row['id'] for row in self.current['containers'] if row['service'] not in shutdown.DATABASES})
             original=(journal.directory/'quiescence.json').read_bytes()

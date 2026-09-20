@@ -29,7 +29,7 @@ trap - EXIT
 
 
 def fingerprints(command,env,tables=None):
-    prefix=command+['exec','-T','nocheh-postgres','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d',DATABASE]
+    prefix=command+['exec','-T','nocheh-db','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d',DATABASE]
     if tables is None:
         raw=subprocess.check_output(prefix+['-c',"SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY 1"],env=env,text=True)
         tables=raw.split()
@@ -55,7 +55,7 @@ def snapshot(command,env,stage,sha):
     # still up solely to export its quiesced dataset as a portable RDB.
     result={'version':1,'tables':fingerprints(command,env)}
     for filename,args in (
-        ('inngest.dump',['nocheh-postgres','pg_dump','-U','nocheh','-d',DATABASE,'-Fc','--no-owner']),
+        ('inngest.dump',['nocheh-db','pg_dump','-U','nocheh','-d',DATABASE,'-Fc','--no-owner']),
         ('workflow-redis.rdb',['inngest-redis','redis-cli','--rdb','-']),
     ):
         path=Path(stage)/filename
@@ -82,12 +82,12 @@ def restore(command,env,snapshot_dir,state,metadata,sha):
     # Provision workflow metadata inside the already-running database service.
     # The inactive restore fence prevents ordinary three-store initialization.
     if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
-        setup=command+['exec','-T','nocheh-postgres','node','/app/dist/src/workflows/bootstrap.js']
+        setup=command+['exec','-T','nocheh-db','node','/app/dist/src/workflows/bootstrap.js']
     else:
         setup=command+['run','--rm','--no-deps','nocheh-app','node','dist/src/workflows/bootstrap.js']
     subprocess.run(setup,env=env,check=True,stdout=subprocess.DEVNULL)
     with (Path(snapshot_dir)/'inngest.dump').open('rb') as source:
-        subprocess.run(command+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d',DATABASE,'--role=nocheh_inngest','--no-owner','--exit-on-error'],env=env,stdin=source,check=True,stdout=subprocess.DEVNULL)
+        subprocess.run(command+['exec','-T','nocheh-db','pg_restore','-U','nocheh','-d',DATABASE,'--role=nocheh_inngest','--no-owner','--exit-on-error'],env=env,stdin=source,check=True,stdout=subprocess.DEVNULL)
     if fingerprints(command,env,metadata['tables'])!=metadata['tables']:raise RuntimeError('workflow_restore_fingerprint_mismatch')
     directory=Path(state)/'workflows/redis';directory.mkdir(parents=True,mode=0o700)
     target=directory/'dump.rdb';shutil.copyfile(Path(snapshot_dir)/'workflow-redis.rdb',target);target.chmod(0o600)

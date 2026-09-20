@@ -26,7 +26,7 @@ CONTAINER_FORMAT = ('{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Im
 VOLUME_FORMAT = ('{"name":{{json .Name}},"created_at":{{json .CreatedAt}},"driver":{{json .Driver}},"options_count":{{len .Options}},'
                  '"project":{{json (index .Labels "com.docker.compose.project")}},'
                  '"compose_volume":{{json (index .Labels "com.docker.compose.volume")}}}')
-VOLUME_TARGETS = {'nocheh-postgres': '/var/lib/postgresql/data',
+VOLUME_TARGETS = {'nocheh-db': '/var/lib/postgresql/data',
                   'honcho-postgres': '/var/lib/postgresql/data', 'honcho-redis': '/data',
                   'inngest-postgres': '/var/lib/postgresql/data'}
 

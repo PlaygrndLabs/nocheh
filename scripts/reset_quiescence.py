@@ -11,7 +11,7 @@ from pathlib import Path
 from . import reset_inventory, reset_protocol
 from .configuration import compose_environment
 
-DATABASES = frozenset(('nocheh-postgres', 'honcho-postgres', 'honcho-redis',
+DATABASES = frozenset(('nocheh-db', 'honcho-postgres', 'honcho-redis',
                        'inngest-postgres', 'inngest-redis'))
 FENCES = ('spool/.restore-inactive', 'hermes/scheduler-inactive',
           'admin/tools/inactive', 'workflows/inactive')
@@ -185,7 +185,7 @@ def quiesce(journal, preflight, assert_maintenance, *, inspect=None, runner=run,
     # First stop ingress and native scheduling, then host executors/launchers,
     # then all other writers and credential refresh owners. Databases/cache
     # servers remain available solely for reconciliation and later scoped erasure.
-    groups = [('hermes-runtime',), ('nocheh-executor', 'hermes-agent-launcher')]
+    groups = [('hermes',), ('nocheh-executor', 'hermes-agent-sb')]
     groups.append(tuple(sorted({row['service'] for row in current['containers']} - DATABASES -
                                {name for group in groups for name in group})))
     for services in groups:

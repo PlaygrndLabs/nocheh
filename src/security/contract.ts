@@ -6,7 +6,7 @@ export const manifest = Object.freeze({
   id:'nocheh.security', version:'1.0.0', api_version:1,
   capabilities:['policy.preview','policy.configure','effect.authorize','effect.receipt','provider.forward','context.preserve'],
   configuration_schema:'nocheh.security.policy.v1',
-  enforcement:'external', storage:'nocheh-postgresql',
+  enforcement:'external', storage:'nocheh-db',
 });
 export const effectKinds = ['archive.read','memory.read','memory.write','model.request','browser','shell','mcp','telegram.send'] as const;
 export type EffectKind = typeof effectKinds[number];

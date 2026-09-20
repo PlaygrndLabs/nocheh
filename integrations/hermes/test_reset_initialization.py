@@ -21,7 +21,7 @@ class FakeDocker:
         self.redis_dirty = False
         self.fail_start_once = False
         self.rendered = {'name': project, 'services': {
-            'nocheh-postgres': {'volumes': [{'type': 'volume', 'source': 'postgres_data',
+            'nocheh-db': {'volumes': [{'type': 'volume', 'source': 'postgres_data',
                                               'target': '/var/lib/postgresql/data'}]},
             'inngest-redis': {'volumes': [{'type': 'bind', 'source': str(state / 'workflows/redis'),
                                            'target': '/data'}]},
@@ -31,7 +31,7 @@ class FakeDocker:
     def container(self, service, identifier):
         mounts = ([{'Type': 'volume', 'Name': self.project + '_postgres_data',
                     'Source': self.project + '_postgres_data', 'Destination': '/var/lib/postgresql/data', 'RW': True}]
-                  if service == 'nocheh-postgres' else
+                  if service == 'nocheh-db' else
                   [{'Type': 'bind', 'Source': str(self.state / 'workflows/redis'),
                     'Destination': '/data', 'RW': True}])
         return {'id': identifier, 'name': '/' + self.project + '-' + service + '-1',
@@ -77,7 +77,7 @@ class FakeDocker:
         if 'create' in arguments:
             if not self.containers:
                 pg, redis = 'b' * 64, 'c' * 64
-                self.containers[pg] = self.container('nocheh-postgres', pg)
+                self.containers[pg] = self.container('nocheh-db', pg)
                 self.containers[redis] = self.container('inngest-redis', redis)
                 self.volumes[self.project + '_postgres_data'] = {
                     'name': self.project + '_postgres_data', 'created_at': 'new', 'driver': 'local', 'options': {},
@@ -196,7 +196,7 @@ class ResetInitializationTests(unittest.TestCase):
     def test_old_resource_identity_blocks_before_fresh_creation(self):
         fake = FakeDocker(self.root, self.state, self.project, self.command[3],
                           self.state / 'admin/reset/setup.json')
-        fake.containers['a' * 64] = fake.container('nocheh-postgres', 'a' * 64)
+        fake.containers['a' * 64] = fake.container('nocheh-db', 'a' * 64)
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)
             with patch.object(reset_initialization.reset_preservation, 'assert_frozen', return_value=self.artifacts):

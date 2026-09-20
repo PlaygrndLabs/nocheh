@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {connectStores} from '../dist/src/stores/connections.js';
 import {storageServices} from '../dist/src/stores/services.js';
-const config={host:'nocheh-postgres'};
+const config={host:'nocheh-db'};
 const stores=connectStores(config,Object.fromEntries(['archive','derived','control'].map(s=>[s,process.env['NOCHEH_'+s.toUpperCase()+'_PASSWORD']])));
 try {
   assert.equal((await stores.archive.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-recovery-fixture');

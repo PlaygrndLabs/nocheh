@@ -16,16 +16,16 @@ class FakeDocker:
         self.fail_start_once = False; self.start_calls = []
         self.fail_restart_once = False; self.acceptance_calls = 0
         self.rendered = {'name': project, 'services': {
-            'nocheh-postgres': {}, 'inngest-redis': {},
+            'nocheh-db': {}, 'inngest-redis': {},
             'nocheh-app': {'depends_on': {
-                'nocheh-postgres': {'condition': 'service_healthy'},
+                'nocheh-db': {'condition': 'service_healthy'},
                 'inngest-redis': {'condition': 'service_healthy'}}},
-            'hermes-runtime': {'depends_on': {
+            'hermes': {'depends_on': {
                 'nocheh-app': {'condition': 'service_healthy'}}},
             'nocheh-reset-state': {'profiles': ['reset']},
         }}
         self.containers = {}
-        self.add('nocheh-postgres', 'b' * 64, 'running')
+        self.add('nocheh-db', 'b' * 64, 'running')
         self.add('inngest-redis', 'c' * 64, 'running')
 
     def add(self, service, identifier, state):
@@ -52,7 +52,7 @@ class FakeDocker:
         if 'create' in arguments:
             existing = {row['service'] for row in self.containers.values()}
             for marker, service in zip(('e', 'f'),
-                                       ('nocheh-app', 'hermes-runtime')):
+                                       ('nocheh-app', 'hermes')):
                 if service not in existing:
                     self.add(service, marker * 64, 'created')
             return ''
@@ -100,10 +100,10 @@ class ResetAcceptanceTests(unittest.TestCase):
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()),
             'executable': False, 'content_copied': False, 'blockers': [],
             'containers': [
-                {'id': '1' * 64, 'service': 'nocheh-postgres'},
+                {'id': '1' * 64, 'service': 'nocheh-db'},
                 {'id': '2' * 64, 'service': 'inngest-redis'},
                 {'id': '4' * 64, 'service': 'nocheh-app'},
-                {'id': '5' * 64, 'service': 'hermes-runtime'}],
+                {'id': '5' * 64, 'service': 'hermes'}],
             'volumes': [], 'installation': {'root': str(self.root), 'state': str(self.state),
                 'memory_state': str(self.root / 'memory'), 'project': self.project,
                 'storage_layout': 'original-only-v1', 'config_path': str(self.state / '.env'),
@@ -117,7 +117,7 @@ class ResetAcceptanceTests(unittest.TestCase):
         initialization = {'format': reset_initialization.FORMAT,
             'reset_id': journal.value['reset_id'], 'stage': reset_initialization.STAGES[-1],
             'resources': {'containers': [
-                {'service': 'nocheh-postgres', 'id': 'b' * 64},
+                {'service': 'nocheh-db', 'id': 'b' * 64},
                 {'service': 'inngest-redis', 'id': 'c' * 64}], 'volumes': []}}
         for index, step in enumerate(reset_protocol.STEPS[:7]):
             evidence = reset_protocol.fingerprint(initialization) if step == 'initialized' else str(index + 1) * 64
@@ -159,7 +159,7 @@ class ResetAcceptanceTests(unittest.TestCase):
                 self.assertEqual(len(journal.value['steps']), 8)
                 self.assertEqual(reset_acceptance.activate(journal, self.preflight, runner=fake,
                     environment=self.environment, command=self.command, timeout=0), result)
-        self.assertEqual(fake.start_calls.count('nocheh-postgres'), 0)
+        self.assertEqual(fake.start_calls.count('nocheh-db'), 0)
         self.assertEqual(fake.start_calls.count('nocheh-app'), 2)
 
     def test_changed_recorded_plan_is_rejected(self):
@@ -171,7 +171,7 @@ class ResetAcceptanceTests(unittest.TestCase):
                 reset_acceptance.activate(journal, self.preflight, runner=fake,
                     environment=self.environment, command=self.command, timeout=0)
             path = journal.directory / 'acceptance-mode.json'; value = reset_protocol.read(path)
-            value['plan']['desired'].remove('hermes-runtime'); reset_protocol.atomic(path, value)
+            value['plan']['desired'].remove('hermes'); reset_protocol.atomic(path, value)
             with self.assertRaisesRegex(ValueError, 'plan_changed'):
                 reset_acceptance.activate(journal, self.preflight, runner=fake,
                     environment=self.environment, command=self.command, timeout=0)

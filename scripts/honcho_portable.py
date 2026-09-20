@@ -136,7 +136,7 @@ def restore_honcho(state,directory):
     if marker.is_symlink() or not marker.is_file():raise ValueError('native_memory_restore_requires_inactive_installation')
     command=compose_command(state);environment=compose_environment(state)
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=environment,text=True).split()
-    if set(running)-{'nocheh-postgres','honcho-postgres','inngest-redis'}:raise ValueError('native_memory_restore_writers_active')
+    if set(running)-{'nocheh-db','honcho-postgres','inngest-redis'}:raise ValueError('native_memory_restore_writers_active')
     assert_no_state_writers(state,environment,command)
     return NativeMemoryExport(command,environment).restore_inactive(directory)
 

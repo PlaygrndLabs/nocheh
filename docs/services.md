@@ -10,7 +10,7 @@ Docker administration access is explicitly owner-authorized.
 
 One Compose project contains 17 continuously running containers when Honcho is
 enabled, or 18 with pgweb. In the original-only layout, database initialization
-runs inside `nocheh-postgres` before it reports healthy. The legacy layout retains
+runs inside `nocheh-db` before it reports healthy. The legacy layout retains
 its application startup initialization.
 Temporary isolated agent containers are additional.
 
@@ -19,10 +19,10 @@ Temporary isolated agent containers are additional.
 | `nocheh-dashboard` | Owner dashboard, configuration, monitoring and recovery | Docker / running |
 | `nocheh-executor` | Inngest executor workflows and independent receipt recovery | Docker / running |
 | `nocheh-app` | API, source capture, durable event publisher and ordinary Inngest handlers | Docker / running |
-| `nocheh-postgres` | Separate Nocheh and Inngest databases and roles | Docker / running |
+| `nocheh-db` | Separate Nocheh and Inngest databases and roles | Docker / running |
 | `nocheh-security` | Security broker, guard and exact authorization checks | Docker / running |
-| `hermes-runtime` | Managed Hermes runtime and native dashboard | Docker / running |
-| `hermes-agent-launcher` | Launch isolated agents; only agent infrastructure container mounting the Docker socket | Docker / running |
+| `hermes` | Managed Hermes runtime and native dashboard | Docker / running |
+| `hermes-agent-sb` | Launch isolated agents; only agent infrastructure container mounting the Docker socket | Docker / running |
 | `chatgpt-speech` | Subscription transcription; read-only shared login | Docker / running |
 | `cliproxy-api` | Shared model provider; sole OAuth refresh authority | Docker / running |
 | `cliproxy-monitor` | CPA Manager Plus full request history and analytics | Docker / running |
@@ -53,11 +53,11 @@ flowchart TB
         Dashboard["nocheh-dashboard :8783"]
         Executor["nocheh-executor<br/>imports · approved tools · receipt recovery"]
         App["nocheh-app<br/>API · capture · publisher · workflow handlers"]
-        PG["nocheh-postgres<br/>separate Nocheh and Inngest databases"]
+        PG["nocheh-db<br/>separate Nocheh and Inngest databases"]
         Engine[inngest-server]
         Queue[inngest-redis]
-        Hermes["hermes-runtime<br/>managed runtime and native dashboard"]
-        Launcher[hermes-agent-launcher]
+        Hermes["hermes<br/>managed runtime and native dashboard"]
+        Launcher[hermes-agent-sb]
         Security["nocheh-security<br/>broker and guard"]
         Speech[chatgpt-speech]
         Provider["cliproxy-api<br/>shared provider and sole login refresh"]

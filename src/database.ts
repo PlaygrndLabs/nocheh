@@ -23,7 +23,7 @@ import {migrateSourceModel} from './source-model.js';
 export function connectDatabase(config: Settings): pg.Pool {
   if(config.storageLayout==='original-only-v1')throw Error('separated_storage_repositories_required');
   const pool = new pg.Pool({
-    host: process.env.PGHOST ?? 'nocheh-postgres', port: Number(process.env.PGPORT ?? 5432),
+    host: process.env.PGHOST ?? 'nocheh-db', port: Number(process.env.PGPORT ?? 5432),
     user: process.env.PGUSER ?? 'nocheh', database: process.env.PGDATABASE ?? 'nocheh',
     password: config.databasePassword, max: 8, connectionTimeoutMillis: 5000,
     statement_timeout: 15000, idleTimeoutMillis: 30000,

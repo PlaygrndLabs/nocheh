@@ -17,5 +17,5 @@ export function storageConfiguration(env:NodeJS.ProcessEnv=process.env):{connect
   };
   const passwords:StorePasswords={archive:password('archive'),derived:password('derived'),control:password('control')};
   if(new Set(Object.values(passwords)).size!==3)throw Error('store_credentials_must_differ');
-  return {connection:{host:env.PGHOST??'nocheh-postgres',port},passwords};
+  return {connection:{host:env.PGHOST??'nocheh-db',port},passwords};
 }

@@ -45,7 +45,7 @@ def run_isolated_tests(rest):
         env['NOCHEH_AGENT_NETWORK'] = project + '-agent'
         env['NOCHEH_MEMORY_NETWORK'] = project + '-memory'
         try:
-            result = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-postgres'], cwd=ROOT, env=env)
+            result = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-db'], cwd=ROOT, env=env)
             if result == 0:
                 result = subprocess.call(command + ['run', '--rm', '--build', '--no-deps',
                     'nocheh-app', 'npm', 'test'] + rest, cwd=ROOT, env=env)
@@ -54,7 +54,7 @@ def run_isolated_tests(rest):
                     '-e', 'NOCHEH_WORKFLOW_FIXTURE=1', 'nocheh-app', 'node', '--test',
                     'dist/test/database-recovery.test.js'], cwd=ROOT, env=env)
             if result == 0:
-                result = subprocess.call(command + ['build', 'hermes-runtime'], cwd=ROOT, env=env)
+                result = subprocess.call(command + ['build', 'hermes'], cwd=ROOT, env=env)
             if result == 0:
                 # Native unit tests get only a synthetic token, no Compose secrets.
                 result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
@@ -225,10 +225,10 @@ def main():
         "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
         "dev": ["up", "--build", "--watch"], "down": ["down"], "status": ["ps"],
         "logs": ["logs", "--tail", "100", "-f"], "build": ["build"],
-        "verify": ["exec", "-T", "hermes-runtime", "python", "-m", "integrations.hermes.verify", "--live"],
+        "verify": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.verify", "--live"],
         "config": ["config", "--quiet"],
-        "discover-telegram": ["exec", "-T", "hermes-runtime", "python", "-m", "integrations.hermes.discover_telegram"],
-        "login": ["exec", "hermes-runtime", "python", "-c",
+        "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.discover_telegram"],
+        "login": ["exec", "hermes", "python", "-c",
             "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
     }
     result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)

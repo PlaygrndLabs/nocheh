@@ -24,7 +24,7 @@ def assert_no_state_writers(state,environment,command,coordinator=None):
     environment. Databases are covered by the barrier; quiesced workflow Redis
     remains up only to produce its own snapshot.
     """
-    allowed=set(subprocess.check_output(command+['ps','-q','nocheh-postgres','honcho-postgres','inngest-redis'],
+    allowed=set(subprocess.check_output(command+['ps','-q','nocheh-db','honcho-postgres','inngest-redis'],
         env=environment,text=True).split())
     if coordinator:
         coordinator.assert_current();allowed.add(coordinator.identity['id'])
@@ -42,7 +42,7 @@ def assert_no_state_writers(state,environment,command,coordinator=None):
 
 
 class StoreRecovery:
-    def __init__(self,command,environment,service='nocheh-postgres'):
+    def __init__(self,command,environment,service='nocheh-db'):
         if not IDENTIFIER.fullmatch(service.replace('-','_')):raise ValueError('invalid_database_service')
         self.command=list(command);self.environment=environment;self.service=service;self.holders=[];self.coordinator=None
 

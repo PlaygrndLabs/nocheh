@@ -96,7 +96,7 @@ class StoreRecoveryTests(unittest.TestCase):
                     test.assertIn('released',order);order.append('resumed')
             with patch('scripts.operations.compose',return_value=['fixture']),\
                  patch('scripts.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
-                 patch('scripts.operations.subprocess.check_output',side_effect=['hermes-runtime\nnocheh-app\nnocheh-dashboard\nnocheh-postgres\n','fixture-revision']),\
+                 patch('scripts.operations.subprocess.check_output',side_effect=['hermes\nnocheh-app\nnocheh-dashboard\nnocheh-db\n','fixture-revision']),\
                  patch('scripts.operations.subprocess.run',side_effect=run),patch('scripts.workflow_worker.running',return_value=False),\
                  patch('scripts.store_recovery.StoreRecovery',Recovery),patch('scripts.store_recovery.assert_no_state_writers') as idle:
                 backup(state,root/'backup');idle.assert_called_once()
@@ -130,7 +130,7 @@ class StoreRecoveryTests(unittest.TestCase):
                  patch('scripts.operations.subprocess.run',side_effect=run),patch('scripts.store_recovery.StoreRecovery') as recovery:
                 result=restore(snapshot,state,'nocheh-three-restore',18990)
                 recovery.return_value.restore_inactive.assert_called_once_with(snapshot,stores,sha)
-            self.assertEqual(len(starts),1);self.assertEqual(starts[0][-1],'nocheh-postgres')
+            self.assertEqual(len(starts),1);self.assertEqual(starts[0][-1],'nocheh-db')
             self.assertFalse(result['executors_active']);self.assertFalse(result['telegram_enabled'])
             self.assertFalse(result['subscription_login_activated'])
 
@@ -161,7 +161,7 @@ class StoreRecoveryTests(unittest.TestCase):
                 def assert_maintenance(self):raise RuntimeError('store_maintenance_lost')
             with patch('scripts.operations.compose',return_value=['fixture']),\
                  patch('scripts.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
-                 patch('scripts.operations.subprocess.check_output',side_effect=['nocheh-app\nnocheh-postgres\n','fixture-revision']),\
+                 patch('scripts.operations.subprocess.check_output',side_effect=['nocheh-app\nnocheh-db\n','fixture-revision']),\
                  patch('scripts.operations.subprocess.run',side_effect=lambda args,**_:calls.append(args)),\
                  patch('scripts.workflow_worker.running',return_value=False),\
                  patch('scripts.store_recovery.StoreRecovery',Lost),patch('scripts.store_recovery.assert_no_state_writers'):
