@@ -1,35 +1,30 @@
 # Opt-in installation wiring. Selected from the saved layout, never a shell flag.
 # The full installation rehearsal and activation gates remain separate.
 services:
-  nocheh-store-bootstrap:
-    image: nocheh-services:local
+  nocheh-postgres:
+    image: nocheh-store-postgres:local
     build:
       context: .
-      target: runtime
-      args:
-        LOCAL_UID: ${NOCHEH_UID:-1000}
-        LOCAL_GID: ${NOCHEH_GID:-1000}
-    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+      target: store-postgres
     init: true
-    restart: "no"
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    command: [node, dist/src/stores/bootstrap.js]
     environment:
-      PGHOST: nocheh-postgres
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Installation administrator credential required}
-      NOCHEH_DATA_DIR: /data
+      POSTGRES_USER: nocheh
+      POSTGRES_DB: nocheh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Installation administrator credential required}
       NOCHEH_STORAGE_LAYOUT: original-only-v1
+      NOCHEH_DATA_DIR: /data
       NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
       NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
       NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
       INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:?Workflow credential required}
     volumes:
+      - postgres_data:/var/lib/postgresql/data
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
-    depends_on:
-      nocheh-postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "test -f /tmp/nocheh-stores-ready && pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
   nocheh-reset-setup:
     image: nocheh-services:local
     build:
@@ -155,7 +150,7 @@ services:
       NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
       NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
     depends_on:
-      nocheh-store-bootstrap: {condition: service_completed_successfully}
+      nocheh-postgres: {condition: service_healthy}
   nocheh-security:
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro

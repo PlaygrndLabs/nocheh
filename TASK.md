@@ -7,6 +7,34 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The owner requested removing the visible `nocheh-store-bootstrap` container and
+merging its work into the related service. The original-only layout now builds a
+dedicated `nocheh-store-postgres:local` image and runs the existing idempotent,
+advisory-lock protected archive/derived/control/Inngest provisioning inside
+`nocheh-postgres` before its health check succeeds. `nocheh-app` and
+`nocheh-security` retain only restricted store credentials. Inactive restore
+starts PostgreSQL without ordinary provisioning and performs workflow-only setup
+inside that database container; the explicit reset setup command remains
+separate. ADR-0054 records the placement decision.
+
+A fresh disposable database rehearsal provisions all four databases, preserves
+the installation generation across restart, fails closed on an invalid role
+credential, and keeps restored runtime roles `NOLOGIN`. The complete isolated
+installation rehearsal passes all 19 recorded checks with deterministic provider
+fixtures and zero external calls, including capture, guarding, native memory,
+learning, delivery, database/workflow outage recovery, and cleanup. Coordinated
+format-6 backup and inactive restore preserves 7 archive, 14 derived, 53 control,
+14 workflow, and 12 native-memory tables, original bytes, guarded owner edits,
+workflow Redis and spending state while leaving only PostgreSQL active. Focused
+TypeScript/Python tests, Compose wiring, image builds, shell/Python syntax, and
+the AST graph refresh pass. The persistent synthetic preview has 12 healthy
+containers and no bootstrap container. A raw host `npm test` run is not an
+installation fixture: 68 checks passed, 78 environment-specific checks skipped,
+and five checks correctly lacked the fixture database/service credentials; the
+full isolated installation rehearsal supplies and passes those integration
+boundaries. Live Telegram/reset acceptance remains pending.
+[PostgreSQL bootstrap evidence](compatibility/results/2026-09-20-postgres-owned-bootstrap.json).
+
 The owner-directed Docker restart on 2026-09-20 retained one Git worktree and
 removed only Nocheh-owned Docker state: 47 containers, 40 volumes, 22 networks and
 55 old image tags. The deleted volumes included the stopped installation's legacy

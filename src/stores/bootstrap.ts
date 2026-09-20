@@ -7,7 +7,7 @@ import {initializeStoreDatabases} from './connections.js';
 import {storageConfiguration} from './config.js';
 import {bootstrapWorkflowDatabase} from '../workflows/bootstrap.js';
 
-/** Installation setup only; runtime services cannot run this with their roles. */
+/** PostgreSQL startup and explicit reset setup own this administrator operation. */
 function inactive(root:string,resetId?:string) {
   const path=join(root,'spool/.restore-inactive'),present=existsSync(path);
   if(resetId===undefined) {if(present)throw Error('inactive_installation_requires_explicit_activation');return;}

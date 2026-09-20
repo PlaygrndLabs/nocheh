@@ -30,7 +30,10 @@ export async function bootstrapWorkflowDatabase(client:pg.Client,password:string
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
-  const client=new pg.Client();
+  const client=new pg.Client({host:process.env.PGHOST??'127.0.0.1',
+    user:process.env.PGUSER??process.env.POSTGRES_USER,
+    database:process.env.PGDATABASE??process.env.POSTGRES_DB,
+    password:process.env.PGPASSWORD??process.env.POSTGRES_PASSWORD});
   try {
     await client.connect();await bootstrapWorkflowDatabase(client,process.env.INNGEST_POSTGRES_PASSWORD??'');
     console.log(JSON.stringify({event:'workflow_database_ready'}));
