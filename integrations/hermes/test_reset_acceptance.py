@@ -17,10 +17,8 @@ class FakeDocker:
         self.fail_restart_once = False; self.acceptance_calls = 0
         self.rendered = {'name': project, 'services': {
             'nocheh-postgres': {}, 'inngest-redis': {},
-            'nocheh-store-bootstrap': {'depends_on': {
-                'nocheh-postgres': {'condition': 'service_healthy'}}},
             'nocheh-app': {'depends_on': {
-                'nocheh-store-bootstrap': {'condition': 'service_completed_successfully'},
+                'nocheh-postgres': {'condition': 'service_healthy'},
                 'inngest-redis': {'condition': 'service_healthy'}}},
             'hermes-runtime': {'depends_on': {
                 'nocheh-app': {'condition': 'service_healthy'}}},
@@ -38,10 +36,8 @@ class FakeDocker:
             'working_dir': self.root, 'config_files': self.files, 'mounts': []}
 
     def state(self, row):
-        exited = row['service'] == 'nocheh-store-bootstrap' and row['state'] == 'exited'
-        value = {'Status': row['state'], 'ExitCode': 0 if exited else None}
-        if row['service'] != 'nocheh-store-bootstrap':
-            value['Health'] = {'Status': 'healthy'}
+        value = {'Status': row['state'], 'ExitCode': None}
+        value['Health'] = {'Status': 'healthy'}
         return value
 
     def __call__(self, arguments, _environment):
@@ -55,8 +51,8 @@ class FakeDocker:
             return json.dumps(self.state(self.containers[arguments[-1]])) + '\n'
         if 'create' in arguments:
             existing = {row['service'] for row in self.containers.values()}
-            for marker, service in zip(('d', 'e', 'f'),
-                                       ('nocheh-store-bootstrap', 'nocheh-app', 'hermes-runtime')):
+            for marker, service in zip(('e', 'f'),
+                                       ('nocheh-app', 'hermes-runtime')):
                 if service not in existing:
                     self.add(service, marker * 64, 'created')
             return ''
@@ -76,7 +72,7 @@ class FakeDocker:
             if self.fail_start_once and row['service'] == 'nocheh-app':
                 self.fail_start_once = False
                 raise RuntimeError('synthetic_acceptance_start_interruption')
-            row['state'] = 'exited' if row['service'] == 'nocheh-store-bootstrap' else 'running'
+            row['state'] = 'running'
             return ''
         if 'run' in arguments and arguments[-1] == 'nocheh-reset-acceptance':
             self.acceptance_calls += 1
@@ -106,7 +102,6 @@ class ResetAcceptanceTests(unittest.TestCase):
             'containers': [
                 {'id': '1' * 64, 'service': 'nocheh-postgres'},
                 {'id': '2' * 64, 'service': 'inngest-redis'},
-                {'id': '3' * 64, 'service': 'nocheh-store-bootstrap'},
                 {'id': '4' * 64, 'service': 'nocheh-app'},
                 {'id': '5' * 64, 'service': 'hermes-runtime'}],
             'volumes': [], 'installation': {'root': str(self.root), 'state': str(self.state),
@@ -136,7 +131,7 @@ class ResetAcceptanceTests(unittest.TestCase):
             'preflight_sha256': journal.value['preflight_sha256'], 'binding_sha256': '9' * 64,
             'fences_absent_at_start': True, 'containers': [
                 {'id': row['id'], 'service': row['service'],
-                 'state': 'exited' if row['service'] == 'nocheh-store-bootstrap' else 'running',
+                 'state': 'running',
                  'restart_policy': {'Name': 'unless-stopped', 'MaximumRetryCount': 0}}
                 for row in self.preflight['containers']]}
         reset_protocol.atomic(journal.directory / 'quiescence.json', receipt, create=True)
@@ -164,7 +159,7 @@ class ResetAcceptanceTests(unittest.TestCase):
                 self.assertEqual(len(journal.value['steps']), 8)
                 self.assertEqual(reset_acceptance.activate(journal, self.preflight, runner=fake,
                     environment=self.environment, command=self.command, timeout=0), result)
-        self.assertEqual(fake.start_calls.count('nocheh-store-bootstrap'), 1)
+        self.assertEqual(fake.start_calls.count('nocheh-postgres'), 0)
         self.assertEqual(fake.start_calls.count('nocheh-app'), 2)
 
     def test_changed_recorded_plan_is_rejected(self):
@@ -209,7 +204,6 @@ class ResetAcceptanceTests(unittest.TestCase):
                 environment=self.environment, command=self.command, timeout=0)
             self.assertTrue(resumed['resumed']); self.assertTrue(resumed['restart_ownership'])
             self.assertEqual(journal.value['steps'][-1]['step'], 'resumed')
-            self.assertEqual(fake.containers['d' * 64]['restart_policy']['Name'], 'no')
             for marker in ('b', 'c', 'e', 'f'):
                 self.assertEqual(fake.containers[marker * 64]['restart_policy']['Name'], 'unless-stopped')
             self.assertEqual(reset_acceptance.resume(journal, self.preflight, runner=fake,

@@ -53,13 +53,15 @@ Apply cannot change this internal setting. `original-only-v1` selects
 `deploy/original-only-compose.yml` through the shared Compose command builder.
 Shell overrides cannot silently select another layout.
 
-The setup-only `nocheh-store-bootstrap` service owns the administrator login and
-provisions archive, derived, control, and independent Inngest storage. It shares
-the installation maintenance lock with backup/reset and refuses an inactive
-restore marker. Archive, derived, control, administrator, and Inngest credentials
-are distinct. Runtime app/security services receive only the three domain
-credentials; Hermes receives none of these database credentials. Settings redact
-the role credentials and do not expose them as ordinary editable values.
+The `nocheh-postgres` service already owns the administrator login and provisions
+archive, derived, control, and independent Inngest storage before its health
+check succeeds. It shares the installation maintenance lock with backup/reset.
+An inactive restore marker makes PostgreSQL available to the recovery coordinator
+without running ordinary store provisioning. Archive, derived, control,
+administrator, and Inngest credentials are distinct. Runtime app/security
+services receive only the three domain credentials; Hermes receives none of
+these database credentials. Settings redact the role credentials and do not
+expose them as ordinary editable values.
 
 `src/stores/runtime-pools.ts` opens explicit domain pools and rejects bootstrap
 credentials. Legacy database initialization rejects the original-only layout.
@@ -390,7 +392,9 @@ Hermes, Honcho, Inngest, Redis, and accounting snapshots through the final servi
 composition. Database-only fixture evidence does not satisfy that complete gate.
 
 `compatibility/coordinated-recovery-rehearsal.py --directory NEW_DIRECTORY
---services-image CANDIDATE --honcho-image PINNED_CANDIDATE` exercises production
+--services-image CANDIDATE --management-image MANAGEMENT_CANDIDATE
+--postgres-image DATABASE_CANDIDATE
+--honcho-image PINNED_CANDIDATE` exercises production
 CLI format-6 backup/restore through the real Compose definitions with a synthetic
 internal-network overlay. It creates fresh source/target installations, real
 Honcho migrations and embeddings, both derivative versions and owner edits, native

@@ -2,13 +2,12 @@
 # No network egress, published ports, providers, or borrowed installation state.
 services:
   nocheh-postgres:
+    image: ${NOCHEH_RECOVERY_POSTGRES_IMAGE:?Explicit candidate required}
     command: [postgres, -c, shared_buffers=32MB, -c, max_connections=64, -c, cluster_name=nocheh-recovery-fixture]
     mem_limit: 512m
   honcho-postgres:
     command: [postgres, -c, shared_buffers=32MB, -c, max_connections=32, -c, cluster_name=nocheh-native-portable-fixture]
     mem_limit: 512m
-  nocheh-store-bootstrap:
-    image: ${NOCHEH_RECOVERY_SERVICES_IMAGE:?Explicit candidate required}
   nocheh-app:
     image: ${NOCHEH_RECOVERY_SERVICES_IMAGE}
     ports: !reset []

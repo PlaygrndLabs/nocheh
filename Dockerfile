@@ -28,6 +28,19 @@ COPY --from=build --chown=node:node /app/dist ./dist
 USER node
 CMD ["node", "dist/src/main.js"]
 
+# The database service already holds the installation administrator credential.
+# Run store provisioning there before declaring PostgreSQL healthy, so application
+# processes retain only their restricted per-store credentials.
+FROM postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0 AS store-postgres
+WORKDIR /app
+COPY --from=runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=runtime /app/node_modules ./node_modules
+COPY --from=runtime /app/dist ./dist
+COPY deploy/store-postgres-entrypoint.sh /usr/local/bin/store-postgres-entrypoint
+RUN chmod 0755 /usr/local/bin/store-postgres-entrypoint
+ENTRYPOINT ["store-postgres-entrypoint"]
+CMD ["postgres"]
+
 FROM docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS docker-cli
 
 # Trusted installation administration; agent images never inherit this target.

@@ -9,7 +9,7 @@ from scripts.store_recovery import StoreRecovery
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--directory',type=Path,required=True)
-parser.add_argument('--services-image',required=True);parser.add_argument('--honcho-image',required=True)
+parser.add_argument('--services-image',required=True);parser.add_argument('--postgres-image',required=True);parser.add_argument('--honcho-image',required=True)
 parser.add_argument('--management-image',help='Also verify real dashboard-started backup and automatic service resumption')
 args=parser.parse_args();root=Path(__file__).resolve().parents[1];directory=args.directory.resolve()
 if directory.exists():raise ValueError('new_fixture_directory_required')
@@ -17,7 +17,8 @@ directory.mkdir(mode=0o700);source=directory/'source';target=directory/'target'
 prefix='nocheh-recovery-'+uuid.uuid4().hex[:12];projects={source:prefix+'-source',target:prefix+'-target'}
 overlay=root/'compatibility/coordinated-recovery-compose.yml'
 def command(state,project=None):return compose_command(state,project or projects[state])+['-f',str(overlay)]
-def environment(state):return {**compose_environment(state),'NOCHEH_RECOVERY_SERVICES_IMAGE':args.services_image,'NOCHEH_RECOVERY_HONCHO_IMAGE':args.honcho_image,
+def environment(state):return {**compose_environment(state),'NOCHEH_RECOVERY_SERVICES_IMAGE':args.services_image,
+    'NOCHEH_RECOVERY_POSTGRES_IMAGE':args.postgres_image,'NOCHEH_RECOVERY_HONCHO_IMAGE':args.honcho_image,
     **({'NOCHEH_RECOVERY_MANAGEMENT_IMAGE':args.management_image} if args.management_image else {})}
 def run(state,arguments,**kwargs):return subprocess.run(command(state)+arguments,env=environment(state),check=True,**kwargs)
 def query(state,service,database,sql,user='nocheh'):
@@ -42,9 +43,8 @@ try:
     rendered=json.loads(subprocess.check_output(command(source)+['config','--format','json'],env=environment(source),text=True))
     assert all(network.get('internal') for network in rendered['networks'].values())
     run(source,['up','-d','--no-build','--wait','nocheh-postgres','honcho-postgres','inngest-redis'])
-    run(source,['run','--rm','--no-deps','nocheh-store-bootstrap'])
     run(source,['run','--rm','--no-deps','-v',str(root/'compatibility')+':/app/compatibility:ro',
-        '-v',str(source/'files')+':/data/files','-v',str(source/'spool')+':/data/spool','nocheh-store-bootstrap','node','compatibility/coordinated-recovery-seed.mjs'])
+        'nocheh-app','node','compatibility/coordinated-recovery-seed.mjs'])
     run(source,['run','--rm','--no-deps','--entrypoint','/app/.venv/bin/python','honcho-api','scripts/provision_db.py'])
     run(source,['run','--rm','--no-deps','--entrypoint','/app/.venv/bin/python','-v',str(root/'compatibility/native-portability-seed.py')+':/fixture/seed.py:ro','honcho-api','/fixture/seed.py'])
     run(source,['up','-d','--no-deps','--no-build','--wait','inngest-server'])
@@ -61,7 +61,9 @@ try:
         # definitions without a production hook for arbitrary Compose overrides.
         installation=directory/'installation';(installation/'deploy').mkdir(parents=True,mode=0o700)
         (installation/'deploy/original-only-compose.yml').write_text('services: {}\n')
-        (installation/'.git').write_text((root/'.git').read_text())
+        repository = root / '.git'
+        (installation/'.git').write_text(repository.read_text() if repository.is_file()
+                                         else 'gitdir: '+str(repository.resolve())+'\n')
         dashboard=rendered['services']['nocheh-dashboard'];dashboard['environment']['NOCHEH_INSTALLATION_ROOT']=str(installation)
         dashboard['volumes'].append({'type':'bind','source':str(installation),'target':str(installation),'read_only':True})
         git_directory=Path(subprocess.check_output(['git','rev-parse','--git-common-dir'],cwd=root,text=True).strip()).resolve()

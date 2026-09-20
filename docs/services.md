@@ -9,7 +9,9 @@ Docker administration access is explicitly owner-authorized.
 <layout>
 
 One Compose project contains 17 continuously running containers when Honcho is
-enabled, or 18 with pgweb. Database initialization runs inside `nocheh-app` startup.
+enabled, or 18 with pgweb. In the original-only layout, database initialization
+runs inside `nocheh-postgres` before it reports healthy. The legacy layout retains
+its application startup initialization.
 Temporary isolated agent containers are additional.
 
 | Service | Tool and purpose | Location / expected state |
@@ -104,10 +106,11 @@ concurrency two. The application gives API/capture and workflow handlers separat
 PostgreSQL pools, each capped at eight. SDK reconnection does not gate API startup.
 Inngest Redis uses AOF, `appendfsync always` and `noeviction`.
 
-Startup: PostgreSQL → application schema and Inngest database initialization →
+Startup in the original-only layout: PostgreSQL and store provisioning →
 application healthy → Inngest (also waits for Redis). Initialization preserves
 existing data. Inngest retains its restricted database role and cannot connect to
-the archive. See [ADR-0049](adr/0049-application-database-bootstrap.md).
+the archive. See [ADR-0054](adr/0054-postgres-owned-store-bootstrap.md). The
+legacy layout follows [ADR-0049](adr/0049-application-database-bootstrap.md).
 
 </relationships>
 

@@ -27,6 +27,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--services-image', required=True)
+    parser.add_argument('--management-image', required=True)
+    parser.add_argument('--postgres-image', required=True)
     parser.add_argument('--native-image', required=True)
     parser.add_argument('--honcho-image', required=True)
     parser.add_argument('--keep', action='store_true', help='Retain only this synthetic installation for diagnosis/preview')
@@ -97,7 +99,8 @@ def main():
 
     try:
         images = {}
-        for role, value in [('services', args.services_image), ('native', args.native_image), ('honcho', args.honcho_image)]:
+        for role, value in [('services', args.services_image), ('management', args.management_image),
+                            ('postgres', args.postgres_image), ('native', args.native_image), ('honcho', args.honcho_image)]:
             images[role] = json.loads(subprocess.check_output(['docker', 'image', 'inspect', value], text=True))[0]['Id']
         for key in ('NOCHEH_HONCHO_DATABASE_VOLUME', 'NOCHEH_HONCHO_REDIS_VOLUME'):
             volume = config[key]
@@ -106,7 +109,7 @@ def main():
             subprocess.run(['docker', 'volume', 'create', '--label', 'nocheh.fixture=' + project, volume], check=True, stdout=subprocess.DEVNULL)
             owned.append(volume)
         rendered = json.loads(subprocess.check_output(compose_command(state, project) + ['config', '--format', 'json'], env=env, text=True))
-        selected = {'nocheh-postgres', 'nocheh-store-bootstrap', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
+        selected = {'nocheh-postgres', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
             'hermes-runtime', 'hermes-agent-launcher', 'chatgpt-speech', 'cliproxy-api', 'honcho-postgres', 'honcho-redis',
             'honcho-api', 'honcho-deriver', 'honcho-provider-gateway', 'nocheh-dashboard', 'nocheh-executor'}
         rendered['services'] = {name: value for name, value in rendered['services'].items() if name in selected}
@@ -117,17 +120,18 @@ def main():
             service.pop('ports', None)
             service.pop('profiles', None)
             service['restart'] = 'no'
-            if name in ('nocheh-app', 'nocheh-security', 'nocheh-store-bootstrap'):
+            if name in ('nocheh-app', 'nocheh-security'):
                 service['image'] = images['services']
                 service['entrypoint'] = []
                 if name == 'nocheh-app':
                     service['command'] = ['node', 'dist/src/main.js']
                 # Allow the capture policy while keeping the native Telegram
                 # adapter disabled: fixture observations enter /v1/ingest.
-                if name != 'nocheh-store-bootstrap':
-                    service['environment']['TELEGRAM_ENABLED'] = 'true'
+                service['environment']['TELEGRAM_ENABLED'] = 'true'
+            if name == 'nocheh-postgres':
+                service['image'] = images['postgres']
             if name in ('nocheh-dashboard', 'nocheh-executor'):
-                service['image'] = images['services']
+                service['image'] = images['management']
                 service['environment']['NOCHEH_INSTALLATION_ROOT'] = str(installation)
                 service['volumes'] = [mount for mount in service['volumes'] if mount.get('source') != str(root)]
                 service['volumes'].append({'type': 'bind', 'source': str(installation), 'target': str(installation), 'read_only': True})
