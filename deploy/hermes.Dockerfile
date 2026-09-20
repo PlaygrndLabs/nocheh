@@ -60,7 +60,10 @@ COPY --from=native-runtime /opt/hermes/apps/shared ./apps/shared
 COPY --from=native-runtime /opt/hermes/web/package.json ./web/package.json
 COPY scripts/patch-native-tui.py /tmp/patch-native-tui.py
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/* && python3 /tmp/patch-native-tui.py /opt/hermes
-RUN npm ci --workspace ui-tui --workspace apps/shared --ignore-scripts --no-audit --no-fund && npm run build --workspace ui-tui
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --workspace ui-tui --workspace apps/shared --ignore-scripts --no-audit --no-fund \
+      --fetch-retries=5 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=20000 --fetch-timeout=120000 && \
+    npm run build --workspace ui-tui
 
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS dashboard-assets
 WORKDIR /opt/hermes

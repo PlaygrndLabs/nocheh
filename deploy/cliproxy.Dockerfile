@@ -1,5 +1,7 @@
 FROM golang:1.26-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS builder
 
+ARG GOPROXY=https://proxy.golang.org|https://goproxy.io|direct
+ENV GOPROXY=${GOPROXY}
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential git && rm -rf /var/lib/apt/lists/*
 COPY go.mod go.sum ./
