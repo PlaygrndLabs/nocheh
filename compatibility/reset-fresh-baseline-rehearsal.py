@@ -22,7 +22,7 @@ BOOTSTRAP = r'''
 import pg from 'pg';
 import {digest} from './dist/src/archive.js';
 import {initialize} from './dist/src/database.js';
-const config={host:'nocheh-postgres',user:'nocheh',database:'nocheh',password:process.env.POSTGRES_PASSWORD};
+const config={host:'nocheh-db',user:'nocheh',database:'nocheh',password:process.env.POSTGRES_PASSWORD};
 const pool=new pg.Pool(config);await initialize(pool);
 await pool.query("INSERT INTO events(id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,payload,payload_hash,original_text,search_text) VALUES($1,'fixture-source','telegram','fixture','42','1','1','live','telegram_update',$2,$3,$4,$5)",
  ['a'.repeat(64),Buffer.from('{}'),digest('{}'),Buffer.from(process.env.PRIVATE_MARKER),process.env.PRIVATE_MARKER]);
@@ -82,14 +82,14 @@ def main():
     project = 'nocheh-reset-fresh-' + uuid.uuid4().hex[:12]
     store_passwords = {name: hashlib.sha256((name + '-fixture').encode()).hexdigest()
                        for name in ('archive', 'derived', 'control')}
-    service_environment = {'PGHOST': 'nocheh-postgres', 'PGPASSWORD': POSTGRES_PASSWORD,
+    service_environment = {'PGHOST': 'nocheh-db', 'PGPASSWORD': POSTGRES_PASSWORD,
         'NOCHEH_DATA_DIR': '/data', 'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
         'NOCHEH_ARCHIVE_PASSWORD': store_passwords['archive'],
         'NOCHEH_DERIVED_PASSWORD': store_passwords['derived'],
         'NOCHEH_CONTROL_PASSWORD': store_passwords['control'],
         'INNGEST_POSTGRES_PASSWORD': INNGEST_PASSWORD}
     compose = {'name': project, 'services': {
-        'nocheh-postgres': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'nocheh-db': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
             'command': ['postgres', '-c', 'cluster_name=nocheh-reset-fresh-fixture'],
             'environment': {'POSTGRES_USER': 'nocheh', 'POSTGRES_DB': 'nocheh', 'POSTGRES_PASSWORD': POSTGRES_PASSWORD},
             'volumes': ['nocheh_database:/var/lib/postgresql/data'],
@@ -111,7 +111,7 @@ def main():
             'healthcheck': {'test': ['CMD', 'redis-cli', 'ping'], 'interval': '1s', 'retries': 30}},
         'bootstrap': {'image': args.services_image, 'entrypoint': ['node', '--input-type=module', '-e', BOOTSTRAP],
             'profiles': ['checks'], 'environment': {'POSTGRES_PASSWORD': POSTGRES_PASSWORD, 'PRIVATE_MARKER': MARKER},
-            'depends_on': {'nocheh-postgres': {'condition': 'service_healthy'}}},
+            'depends_on': {'nocheh-db': {'condition': 'service_healthy'}}},
         'nocheh-reset-setup': {'image': args.services_image, 'profiles': ['reset'],
             'user': f'{os.getuid()}:{os.getgid()}', 'command': ['node', 'dist/src/stores/reset-setup-cli.js', '/reset/setup.json'],
             'environment': {**service_environment, 'NOCHEH_RESET_SETUP': '1'},
@@ -139,7 +139,7 @@ def main():
         for name in external_volume_names:
             subprocess.run(['docker', 'volume', 'create', name], check=True, stdout=subprocess.DEVNULL)
         subprocess.run(command + ['--profile', 'honcho', 'up', '-d', '--no-build', '--wait',
-                                   'nocheh-postgres', 'inngest-redis', 'honcho-postgres', 'honcho-redis'],
+                                   'nocheh-db', 'inngest-redis', 'honcho-postgres', 'honcho-redis'],
                        env=environment, check=True)
         subprocess.run(command + ['run', '--rm', '--no-deps', 'bootstrap'], env=environment, check=True)
         redis_id = output(command + ['ps', '-q', 'inngest-redis'], environment).strip()
@@ -232,7 +232,7 @@ def main():
         assert set(current_ids).isdisjoint(identifiers) and len(current_ids) == 4
         current = [json.loads(line) for line in output(['docker', 'inspect', '--format', reset_inventory.CONTAINER_FORMAT,
                                                         *current_ids], environment).splitlines()]
-        assert {row['service'] for row in current} == {'nocheh-postgres', 'inngest-redis', 'honcho-postgres', 'honcho-redis'}
+        assert {row['service'] for row in current} == {'nocheh-db', 'inngest-redis', 'honcho-postgres', 'honcho-redis'}
         assert all(row['restart_policy'] == {'Name': 'no', 'MaximumRetryCount': 0} and row['state'] == 'running' for row in current)
         assert all(not (state / 'admin/reset' / name).exists() for name in reset_baseline.PRIVATE)
         assert all(not (state / name).exists() for name in reset_quiescence.FENCES)

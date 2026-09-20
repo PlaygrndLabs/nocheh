@@ -41,7 +41,7 @@ sys.stdout.write(json.dumps(result))
 '''
     from .provider import compose
     command,env=compose(ROOT/'data/local')
-    result=subprocess.run(command+['exec','-T','hermes-runtime','python','-c',code],env=env,input=json.dumps(body).encode(),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=120)
+    result=subprocess.run(command+['exec','-T','hermes','python','-c',code],env=env,input=json.dumps(body).encode(),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=120)
     if result.returncode:raise RuntimeError('live_subscription_unavailable')
     return json.loads(result.stdout)
 

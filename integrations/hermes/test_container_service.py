@@ -13,7 +13,7 @@ class ContainerServiceTests(unittest.TestCase):
     def test_internal_endpoints_ignore_host_published_ports(self):
         with patch.dict(os.environ,{'NOCHEH_CONTAINER':'1','NOCHEH_NATIVE_ADMIN_PORT':'19005'}):
             self.assertEqual(archive_url(Path('/missing')),'http://nocheh-app:8780')
-            self.assertEqual(native_endpoint(Path('/missing')),('hermes-runtime',8785))
+            self.assertEqual(native_endpoint(Path('/missing')),('hermes',8785))
 
     def test_compose_uses_installation_paths_and_separate_dashboard_port(self):
         with tempfile.TemporaryDirectory() as folder:

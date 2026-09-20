@@ -264,7 +264,7 @@ def verify(journal, preflight, *, runner=run, environment=None, command=None):
     by_service = {row['service']: row['id'] for row in initialization['resources']['containers']}
 
     def cache_checks():
-        _postgres_empty(by_service['nocheh-postgres'], 'nocheh', 'nocheh_inngest', runner, environment)
+        _postgres_empty(by_service['nocheh-db'], 'nocheh', 'nocheh_inngest', runner, environment)
         _redis_empty(by_service['inngest-redis'], runner, environment)
         result = {'inngest_postgres_relations': 0, 'inngest_redis_keys': 0,
                   'honcho_postgres_relations': 0, 'honcho_redis_keys': 0}

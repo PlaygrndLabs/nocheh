@@ -519,7 +519,7 @@ preview file with `compatibility/dashboard-native-checks-compose.yml`, enable th
 It starts pinned Inngest and Redis only on the private fixture network, without
 registered runtime workers or published ports. The `checks` service runs against
 that same fixture. The container-dashboard boundary test additionally requires a
-separate network-isolated container with `nocheh-app`, `hermes-runtime`, and
+separate network-isolated container with `nocheh-app`, `hermes`, and
 `cliproxy-monitor` mapped to loopback and `NOCHEH_CONTAINER_TEST=1`.
 
 </synthetic_preview>

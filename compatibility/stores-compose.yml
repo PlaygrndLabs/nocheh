@@ -22,7 +22,7 @@ services:
     mem_limit: 768m
     command: [node, --test, --test-concurrency=1, dist/test/stores.test.js]
     # Optional container-boundary tests bind synthetic servers inside checks.
-    extra_hosts: ["nocheh-app=127.0.0.1", "hermes-runtime=127.0.0.1", "cliproxy-monitor=127.0.0.1"]
+    extra_hosts: ["nocheh-app=127.0.0.1", "hermes=127.0.0.1", "cliproxy-monitor=127.0.0.1"]
     environment:
       PGHOST: database
       PGUSER: nocheh

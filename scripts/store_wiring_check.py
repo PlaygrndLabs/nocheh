@@ -14,7 +14,7 @@ def check():
         command=compose_command(state,'nocheh-wiring-fixture')
         result=subprocess.run(command+['config','--format','json'],env=compose_environment(state),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         if result.returncode:raise RuntimeError('compose_render_failed')
-        services=json.loads(result.stdout)['services'];database=services['nocheh-postgres']
+        services=json.loads(result.stdout)['services'];database=services['nocheh-db']
         assert 'nocheh-store-bootstrap' not in services
         assert database['build']['target']=='store-postgres'
         assert database['environment']['POSTGRES_PASSWORD']==values['POSTGRES_PASSWORD']
@@ -30,11 +30,11 @@ def check():
             assert env['NOCHEH_STORAGE_LAYOUT']=='original-only-v1'
             for store in ('ARCHIVE','DERIVED','CONTROL'):
                 key='NOCHEH_'+store+'_PASSWORD';assert env[key]==values[key] and env[key]!=values['POSTGRES_PASSWORD']
-        assert services['nocheh-app']['depends_on']['nocheh-postgres']['condition']=='service_healthy'
+        assert services['nocheh-app']['depends_on']['nocheh-db']['condition']=='service_healthy'
         marker_mount=[v for v in services['nocheh-security']['volumes'] if v['target']=='/data/spool']
         assert len(marker_mount)==1 and marker_mount[0]['read_only'] is True
-        assert services['hermes-runtime']['environment']['NOCHEH_STORAGE_LAYOUT']=='original-only-v1'
-        assert all('NOCHEH_ARCHIVE_PASSWORD' not in services[name].get('environment',{}) for name in ('hermes-runtime','hermes-agent-launcher'))
+        assert services['hermes']['environment']['NOCHEH_STORAGE_LAYOUT']=='original-only-v1'
+        assert all('NOCHEH_ARCHIVE_PASSWORD' not in services[name].get('environment',{}) for name in ('hermes','hermes-agent-sb'))
         return {'status':'pass','layout':'original-only-v1','services_started':0,'credentials':'synthetic','runtime_administrator_credentials':False}
 
 

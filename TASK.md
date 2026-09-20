@@ -7,11 +7,25 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+The owner-facing Compose names now describe the three core boundaries directly:
+`hermes` is the single managed Hermes core, `hermes-agent-sb` launches isolated
+agent sandboxes, and `nocheh-db` owns PostgreSQL. Internal database names remain
+`nocheh_archive`, `nocheh_derived`, `nocheh_control`, and `nocheh_inngest`, with
+separate restricted roles. The full containerized test entrypoint passes 107
+service checks with 44 environment-specific skips, the isolated database-loss
+check, and 343 Hermes checks with three skips. A fresh database rehearsal confirms
+all four databases, restart preservation, invalid-credential failure, disabled
+restore roles, and zero bootstrap containers. The persistent synthetic preview is
+running all 12 configured core services healthy under the new names. Telegram and
+Honcho remain disabled in that isolated profile; the live installation still
+requires its pending reset and Telegram acceptance gates.
+[Service-name evidence](compatibility/results/2026-09-20-core-service-renames.json).
+
 The owner requested removing the visible `nocheh-store-bootstrap` container and
 merging its work into the related service. The original-only layout now builds a
 dedicated `nocheh-store-postgres:local` image and runs the existing idempotent,
 advisory-lock protected archive/derived/control/Inngest provisioning inside
-`nocheh-postgres` before its health check succeeds. `nocheh-app` and
+`nocheh-db` before its health check succeeds. `nocheh-app` and
 `nocheh-security` retain only restricted store credentials. Inactive restore
 starts PostgreSQL without ordinary provisioning and performs workflow-only setup
 inside that database container; the explicit reset setup command remains

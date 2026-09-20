@@ -13,13 +13,13 @@ x-service: &service
   restart: unless-stopped
   stop_grace_period: 30s
   environment: &environment
-    PGHOST: nocheh-postgres
+    PGHOST: nocheh-db
     PGUSER: nocheh
     PGDATABASE: nocheh
     PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
     SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
     NOCHEH_DATA_DIR: /data
-    HERMES_URL: http://hermes-runtime:8781
+    HERMES_URL: http://hermes:8781
     HONCHO_URL: http://honcho-memory:8000
     NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
@@ -199,7 +199,7 @@ services:
     depends_on:
       nocheh-app: {condition: service_healthy}
 
-  hermes-agent-launcher:
+  hermes-agent-sb:
     image: nocheh-hermes:local
     command: [python, -m, integrations.hermes.security_launcher]
     user: "0:0"
@@ -303,17 +303,17 @@ services:
     restart: unless-stopped
     command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
     environment:
-      PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@nocheh-postgres:5432/nocheh?sslmode=disable
+      PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@nocheh-db:5432/nocheh?sslmode=disable
     ports: ["127.0.0.1:8782:8081"]
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
     healthcheck:
       test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8081/]
       interval: 5s
       timeout: 3s
       retries: 12
 
-  nocheh-postgres:
+  nocheh-db:
     image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
     restart: unless-stopped
     environment:
@@ -348,7 +348,7 @@ services:
     environment:
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
-      INNGEST_POSTGRES_URI: postgres://nocheh_inngest:${INNGEST_POSTGRES_PASSWORD:-}@nocheh-postgres:5432/nocheh_inngest?sslmode=disable
+      INNGEST_POSTGRES_URI: postgres://nocheh_inngest:${INNGEST_POSTGRES_PASSWORD:-}@nocheh-db:5432/nocheh_inngest?sslmode=disable
       INNGEST_REDIS_URI: redis://inngest-redis:6379
       INNGEST_POSTGRES_MAX_OPEN_CONNS: "10"
       INNGEST_POSTGRES_MAX_IDLE_CONNS: "3"
@@ -377,7 +377,7 @@ services:
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
 
   chatgpt-speech:
     image: nocheh-hermes:local
@@ -403,7 +403,7 @@ services:
       retries: 12
       start_period: 10s
 
-  hermes-runtime:
+  hermes:
     image: nocheh-hermes:local
     build:
       context: .

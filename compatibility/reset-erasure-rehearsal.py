@@ -21,7 +21,7 @@ BOOTSTRAP = r'''
 import pg from 'pg';
 import {canonical,digest} from './dist/src/archive.js';
 import {initializeStoreDatabases,connectStores} from './dist/src/stores/connections.js';
-const config={host:'nocheh-postgres',user:'nocheh',database:'nocheh',password:process.env.POSTGRES_PASSWORD};
+const config={host:'nocheh-db',user:'nocheh',database:'nocheh',password:process.env.POSTGRES_PASSWORD};
 const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
 await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords);
 const policy={enabled:false,owner_id:'42',group_ids:['-10']};
@@ -80,7 +80,7 @@ def main():
 
     project = 'nocheh-reset-erasure-' + uuid.uuid4().hex[:12]
     compose = {'name': project, 'services': {
-        'nocheh-postgres': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'nocheh-db': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
             'command': ['postgres', '-c', 'cluster_name=nocheh-reset-erasure-fixture'],
             'environment': {'POSTGRES_USER': 'nocheh', 'POSTGRES_DB': 'nocheh', 'POSTGRES_PASSWORD': POSTGRES_PASSWORD},
             'volumes': ['nocheh_database:/var/lib/postgresql/data'],
@@ -93,7 +93,7 @@ def main():
             'volumes': [str(state / 'files') + ':/data/files']},
         'bootstrap': {'image': args.management_image, 'entrypoint': ['node', '--input-type=module', '-e', BOOTSTRAP],
             'profiles': ['checks'], 'environment': {'POSTGRES_PASSWORD': POSTGRES_PASSWORD, 'PRIVATE_MARKER': MARKER},
-            'depends_on': {'nocheh-postgres': {'condition': 'service_healthy'}}}},
+            'depends_on': {'nocheh-db': {'condition': 'service_healthy'}}}},
         'volumes': {'nocheh_database': {}, 'inngest_database': {}},
         'networks': {'default': {'internal': True}}}
     compose_file = directory / 'compose.json'; compose_file.write_text(json.dumps(compose))
@@ -101,7 +101,7 @@ def main():
     sentinel_volume = project + '-unrelated'; sentinel_container = project + '-unrelated'
     expected_volume_names = []
     try:
-        subprocess.run(command + ['up', '-d', '--no-build', '--wait', 'nocheh-postgres', 'inngest-postgres'], env=environment, check=True)
+        subprocess.run(command + ['up', '-d', '--no-build', '--wait', 'nocheh-db', 'inngest-postgres'], env=environment, check=True)
         subprocess.run(command + ['create', 'fixture-app'], env=environment, check=True, stdout=subprocess.DEVNULL)
         subprocess.run(command + ['run', '--rm', '--no-deps', 'bootstrap'], env=environment, check=True)
         subprocess.run(['docker', 'volume', 'create', sentinel_volume], check=True, stdout=subprocess.DEVNULL)

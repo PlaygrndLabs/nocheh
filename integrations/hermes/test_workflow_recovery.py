@@ -69,7 +69,7 @@ class WorkflowRecoveryTests(unittest.TestCase):
             commands=[]
             with patch('scripts.workflow_recovery.fingerprints',return_value=metadata['tables']),patch('scripts.workflow_recovery.subprocess.run',side_effect=lambda command,**kwargs:commands.append(command)):
                 restore(['fixture'],{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'},backup,state,metadata,sha)
-            self.assertEqual(commands[0],['fixture','exec','-T','nocheh-postgres','node','/app/dist/src/workflows/bootstrap.js'])
+            self.assertEqual(commands[0],['fixture','exec','-T','nocheh-db','node','/app/dist/src/workflows/bootstrap.js'])
             self.assertFalse(any('nocheh-app' in c or 'dist/src/stores/bootstrap.js' in c for c in commands))
 
 

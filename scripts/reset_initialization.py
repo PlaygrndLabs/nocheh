@@ -27,7 +27,7 @@ STAGES = ('prepared', 'resource_create_intent', 'resources_created',
 VOLUME_FORMAT = ('{"name":{{json .Name}},"created_at":{{json .CreatedAt}},'
                  '"driver":{{json .Driver}},"options":{{json .Options}},'
                  '"labels":{{json .Labels}}}')
-DATABASE_SERVICES = ('nocheh-postgres', 'inngest-redis')
+DATABASE_SERVICES = ('nocheh-db', 'inngest-redis')
 HONCHO_SERVICES = ('honcho-postgres', 'honcho-redis')
 
 

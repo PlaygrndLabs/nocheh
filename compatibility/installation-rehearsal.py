@@ -109,8 +109,8 @@ def main():
             subprocess.run(['docker', 'volume', 'create', '--label', 'nocheh.fixture=' + project, volume], check=True, stdout=subprocess.DEVNULL)
             owned.append(volume)
         rendered = json.loads(subprocess.check_output(compose_command(state, project) + ['config', '--format', 'json'], env=env, text=True))
-        selected = {'nocheh-postgres', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
-            'hermes-runtime', 'hermes-agent-launcher', 'chatgpt-speech', 'cliproxy-api', 'honcho-postgres', 'honcho-redis',
+        selected = {'nocheh-db', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
+            'hermes', 'hermes-agent-sb', 'chatgpt-speech', 'cliproxy-api', 'honcho-postgres', 'honcho-redis',
             'honcho-api', 'honcho-deriver', 'honcho-provider-gateway', 'nocheh-dashboard', 'nocheh-executor'}
         rendered['services'] = {name: value for name, value in rendered['services'].items() if name in selected}
         for network in rendered['networks'].values():
@@ -128,20 +128,20 @@ def main():
                 # Allow the capture policy while keeping the native Telegram
                 # adapter disabled: fixture observations enter /v1/ingest.
                 service['environment']['TELEGRAM_ENABLED'] = 'true'
-            if name == 'nocheh-postgres':
+            if name == 'nocheh-db':
                 service['image'] = images['postgres']
             if name in ('nocheh-dashboard', 'nocheh-executor'):
                 service['image'] = images['management']
                 service['environment']['NOCHEH_INSTALLATION_ROOT'] = str(installation)
                 service['volumes'] = [mount for mount in service['volumes'] if mount.get('source') != str(root)]
                 service['volumes'].append({'type': 'bind', 'source': str(installation), 'target': str(installation), 'read_only': True})
-            if name in ('hermes-runtime', 'hermes-agent-launcher', 'chatgpt-speech'):
+            if name in ('hermes', 'hermes-agent-sb', 'chatgpt-speech'):
                 service['image'] = images['native']
-            if name == 'hermes-agent-launcher':
+            if name == 'hermes-agent-sb':
                 service['environment']['NOCHEH_TURN_IMAGE'] = images['native']
             if name in ('honcho-api', 'honcho-deriver'):
                 service['image'] = images['honcho']
-            if name in ('nocheh-postgres', 'honcho-postgres'):
+            if name in ('nocheh-db', 'honcho-postgres'):
                 service['command'] = ['postgres', '-c', 'shared_buffers=32MB', '-c', 'max_connections=80',
                                       '-c', 'cluster_name=nocheh-installation-fixture']
                 service['mem_limit'] = '512m'
@@ -161,7 +161,7 @@ def main():
             for mount in service.get('volumes', []):
                 if mount['type'] == 'bind':
                     path = Path(mount['source'])
-                    assert path.is_relative_to(directory) or mount.get('read_only') and path.is_relative_to(root) or (str(path) == '/var/run/docker.sock' and name in ('hermes-agent-launcher', 'nocheh-dashboard', 'nocheh-executor')), (name, path)
+                    assert path.is_relative_to(directory) or mount.get('read_only') and path.is_relative_to(root) or (str(path) == '/var/run/docker.sock' and name in ('hermes-agent-sb', 'nocheh-dashboard', 'nocheh-executor')), (name, path)
         if args.preview_port:
             add_preview(rendered, args.preview_port, images['services'])
         file = directory / 'compose.json'
@@ -207,7 +207,7 @@ def verify(directory, command, env, project, images):
         return subprocess.run(command + arguments, env=env, check=True, **options)
 
     def query(database, sql):
-        return subprocess.check_output(command + ['exec', '-T', 'nocheh-postgres', 'psql', '-X', '-q', '-A', '-t',
+        return subprocess.check_output(command + ['exec', '-T', 'nocheh-db', 'psql', '-X', '-q', '-A', '-t',
             '-v', 'ON_ERROR_STOP=1', '-U', 'nocheh', '-d', database, '-c', sql], env=env, text=True).strip()
 
     def http(path, body=None, service='nocheh-app', port=8780):
@@ -285,7 +285,7 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
     assert not http('/v1/browser/undelivered', {'profile': profile['id']})['items']
     # Admission must remain available when every PostgreSQL store and the
     # workflow engine are stopped. Only fixture owners are affected.
-    run(['stop', '-t', '30', 'inngest-server', 'nocheh-postgres'], stdout=subprocess.DEVNULL)
+    run(['stop', '-t', '30', 'inngest-server', 'nocheh-db'], stdout=subprocess.DEVNULL)
     delayed = {**event, 'key': 'installation-fixture:edited:outage', 'source_id': '2', 'text': 'Captured during the fixture outage.',
         'payload': {'update_id': 2, 'edited_message': {'message_id': 2, 'date': 3, 'edit_date': 4,
             'chat': {'id': 123, 'type': 'private'}, 'from': {'id': 123, 'is_bot': False}, 'text': 'Captured during the fixture outage.'}}}
@@ -294,7 +294,7 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
     assert http('/v1/ingest', delayed) == pending
     # --no-deps bypasses Compose's PostgreSQL health dependency. Restore the
     # database first: the pinned Inngest process exits on connection refusal.
-    run(['up', '-d', '--no-deps', '--no-build', '--wait', 'nocheh-postgres'], stdout=subprocess.DEVNULL)
+    run(['up', '-d', '--no-deps', '--no-build', '--wait', 'nocheh-db'], stdout=subprocess.DEVNULL)
     run(['up', '-d', '--no-deps', '--no-build', '--wait', 'inngest-server'], stdout=subprocess.DEVNULL)
     wait('outage_capture_recovered', lambda: query('nocheh_archive', "SELECT count(*) FROM events WHERE id='" + pending['id'] + "'") == '1')
     wait('outage_handoff_recovered', lambda: query('nocheh_control', "SELECT count(*) FROM source_intakes WHERE event_id='" + pending['id'] + "' AND state='ready'") == '1')

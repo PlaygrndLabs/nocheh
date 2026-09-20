@@ -17,7 +17,7 @@ services:
     develop:
       watch:
         - {action: sync+restart, path: ./src, target: /app/src}
-  hermes-runtime:
+  hermes:
     develop:
       watch:
         - {action: sync+restart, path: ./integrations, target: /workspace/integrations}

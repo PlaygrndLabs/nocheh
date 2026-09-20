@@ -1,7 +1,7 @@
 # Opt-in installation wiring. Selected from the saved layout, never a shell flag.
 # The full installation rehearsal and activation gates remain separate.
 services:
-  nocheh-postgres:
+  nocheh-db:
     image: nocheh-store-postgres:local
     build:
       context: .
@@ -43,7 +43,7 @@ services:
     security_opt: [no-new-privileges:true]
     command: [node, dist/src/stores/reset-setup-cli.js, /reset/setup.json]
     environment:
-      PGHOST: nocheh-postgres
+      PGHOST: nocheh-db
       PGPASSWORD: ${POSTGRES_PASSWORD:?Installation administrator credential required}
       NOCHEH_DATA_DIR: /data
       NOCHEH_STORAGE_LAYOUT: original-only-v1
@@ -56,7 +56,7 @@ services:
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
       - ${NOCHEH_STATE_DIR:-./data/local}/admin/reset:/reset:ro
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
   nocheh-reset-baseline:
     image: nocheh-services:local
     build:
@@ -75,7 +75,7 @@ services:
     security_opt: [no-new-privileges:true]
     command: [node, dist/src/stores/reset-baseline-cli.js, /reset/setup.json]
     environment:
-      PGHOST: nocheh-postgres
+      PGHOST: nocheh-db
       NOCHEH_STORAGE_LAYOUT: original-only-v1
       NOCHEH_RESET_BASELINE: "1"
       NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
@@ -84,7 +84,7 @@ services:
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/admin/reset:/reset:ro
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
   nocheh-reset-state:
     image: nocheh-services:local
     build:
@@ -103,14 +103,14 @@ services:
     security_opt: [no-new-privileges:true]
     command: [node, dist/src/stores/reset-state-cli.js]
     environment:
-      PGHOST: nocheh-postgres
+      PGHOST: nocheh-db
       NOCHEH_STORAGE_LAYOUT: original-only-v1
       NOCHEH_RESET_STATE: "1"
       NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
       NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
       NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
   nocheh-reset-acceptance:
     image: nocheh-services:local
     build:
@@ -129,7 +129,7 @@ services:
     security_opt: [no-new-privileges:true]
     command: [node, dist/src/stores/reset-acceptance-cli.js, /reset/fresh-acceptance-request.json]
     environment:
-      PGHOST: nocheh-postgres
+      PGHOST: nocheh-db
       NOCHEH_STORAGE_LAYOUT: original-only-v1
       NOCHEH_RESET_ACCEPTANCE: "1"
       NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
@@ -138,7 +138,7 @@ services:
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/admin/reset:/reset:ro
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
   nocheh-app:
     environment:
       PGUSER: ""
@@ -150,7 +150,7 @@ services:
       NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
       NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
     depends_on:
-      nocheh-postgres: {condition: service_healthy}
+      nocheh-db: {condition: service_healthy}
   nocheh-security:
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
@@ -162,6 +162,6 @@ services:
       NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
       NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
       NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
-  hermes-runtime:
+  hermes:
     environment:
       NOCHEH_STORAGE_LAYOUT: original-only-v1

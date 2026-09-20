@@ -69,3 +69,4 @@ and governs subsequent agent work without changing those product decisions.
 | [0052](0052-pure-source-archive.md) | Archive limited to pure source data and guarded versions; memory/runtime/workflow state stored separately | Owner-defined boundary; classification and migration pending |
 | [0053](0053-original-only-archive.md) | Original-only archive; guarded and generated records in derived storage; control in a third database | Supersedes 0052 guarded placement; owner-authorized implementation and clean restart |
 | [0054](0054-postgres-owned-store-bootstrap.md) | Original-only store initialization in PostgreSQL startup | Owner-requested; acceptance tracked in TASK.md |
+| [0055](0055-concise-core-service-names.md) | `hermes`, `hermes-agent-sb`, and `nocheh-db` service identities | Owner-requested; implementation and activation tracked in TASK.md |

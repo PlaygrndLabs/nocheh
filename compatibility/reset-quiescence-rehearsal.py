@@ -42,9 +42,9 @@ def main():
     project='nocheh-reset-stop-'+uuid.uuid4().hex[:12];sentinel=project+'-sentinel'
     config=configuration.initialize(state);config.update(COMPOSE_PROJECT_NAME=project)
     configuration.write_env(state/'.env',config)
-    writers=('hermes-runtime','nocheh-executor','hermes-agent-launcher','nocheh-app','nocheh-security',
+    writers=('hermes','nocheh-executor','hermes-agent-sb','nocheh-app','nocheh-security',
              'nocheh-dashboard','honcho-deriver','cliproxy-api')
-    services={'nocheh-postgres': {
+    services={'nocheh-db': {
         'image':'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
         'restart':'unless-stopped', 'command':['postgres','-c','cluster_name=nocheh-reset-quiescence-fixture'],
         'environment':{'POSTGRES_DB':'nocheh','POSTGRES_USER':'nocheh','POSTGRES_PASSWORD':'synthetic-shutdown-not-a-real-credential'},
@@ -120,7 +120,7 @@ def main():
                 assert journal.value['steps'][-1]['step']=='isolated_acceptance'
                 subprocess.run(['docker','rm','-f',foreign],check=True,stdout=subprocess.DEVNULL);foreign=None
                 result=reset_quiescence.quiesce(journal,preflight,recovery.assert_maintenance,inspect=inspect,runner=run,environment=environment)
-                assert result['remaining_services']==['nocheh-postgres']
+                assert result['remaining_services']==['nocheh-db']
                 assert (journal.directory/'quiescence.json').read_bytes()==original
                 reset_quiescence.verify_quiescent(journal,preflight,inspect())
                 assert recovery.query(None,'SELECT 1').strip()=='1'
@@ -133,7 +133,7 @@ def main():
             report={'passed':True,'project':project,'reviewed_containers':len(identifiers),'synthetic_writers_stopped':len(writers),
                 'maintenance_exclusion':True,'interrupted_shutdown_recovered':True,'foreign_writer_blocks_completion':True,
                 'original_restart_settings_preserved':True,'restart_suppressed':True,'inactive_fences_retained':True,
-                'remaining_services':['nocheh-postgres'],'unrelated_sentinel_unchanged':True,'provider_calls':0,'live_state_changed':False,
+                'remaining_services':['nocheh-db'],'unrelated_sentinel_unchanged':True,'provider_calls':0,'live_state_changed':False,
                 'fixture_kind':'real Compose lifecycle and PostgreSQL lock with synthetic heartbeat writers; not full installation acceptance'}
             (directory/'result.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))
     finally:

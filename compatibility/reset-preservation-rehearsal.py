@@ -17,7 +17,7 @@ MARKER = 'SYNTHETIC_PRIVATE_RESET_PRESERVATION_5b27867c'
 PASSWORD = 'synthetic-reset-preservation-only'
 QUERY = r'''(async()=>{const fs=require('node:fs');const pg=require('pg');
 const request=JSON.parse(fs.readFileSync(0,'utf8'));
-const pool=new pg.Pool({host:'nocheh-postgres',user:'nocheh',database:request.store==='control'?'nocheh_control':'nocheh',password:process.env.NOCHEH_RESET_DB_PASSWORD});
+const pool=new pg.Pool({host:'nocheh-db',user:'nocheh',database:request.store==='control'?'nocheh_control':'nocheh',password:process.env.NOCHEH_RESET_DB_PASSWORD});
 const result=await pool.query(request.sql),results=Array.isArray(result)?result:[result];
 const selected=results.find(value=>value.rows&&value.rows.length);if(!selected)throw Error('query_result_missing');
 process.stdout.write(JSON.stringify(Object.values(selected.rows[0])[0]));await pool.end();})().catch(()=>process.exit(1));'''
@@ -25,7 +25,7 @@ BOOTSTRAP = r'''
 import pg from 'pg';
 import {canonical,digest} from './dist/src/archive.js';
 import {initializeStoreDatabases,connectStores} from './dist/src/stores/connections.js';
-const config={host:'nocheh-postgres',user:'nocheh',database:'nocheh',password:process.env.NOCHEH_RESET_DB_PASSWORD};
+const config={host:'nocheh-db',user:'nocheh',database:'nocheh',password:process.env.NOCHEH_RESET_DB_PASSWORD};
 const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
 await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords);
 const policy={enabled:false,owner_id:'42',group_ids:['-10']};
@@ -138,7 +138,7 @@ def main():
     project = 'nocheh-reset-preservation-' + uuid.uuid4().hex[:12]
     environment = {**os.environ, 'NOCHEH_RESET_PRESERVATION_PROJECT': project}
     compose = {'name': project, 'services': {
-        'nocheh-postgres': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'nocheh-db': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
             'command': ['postgres', '-c', 'cluster_name=nocheh-reset-preservation-fixture'],
             'environment': {'POSTGRES_USER': 'nocheh', 'POSTGRES_DB': 'nocheh', 'POSTGRES_PASSWORD': PASSWORD},
             'volumes': ['database:/var/lib/postgresql/data'],
@@ -146,20 +146,20 @@ def main():
         'bootstrap': {'image': args.management_image, 'user': str(os.getuid()) + ':' + str(os.getgid()),
             'entrypoint': ['node', '--input-type=module', '-e', BOOTSTRAP],
             'profiles': ['checks'], 'environment': {'NOCHEH_RESET_DB_PASSWORD': PASSWORD, 'NOCHEH_RESET_PRIVATE_MARKER': MARKER},
-            'depends_on': {'nocheh-postgres': {'condition': 'service_healthy'}}},
+            'depends_on': {'nocheh-db': {'condition': 'service_healthy'}}},
         'checks': {'image': args.management_image, 'user': str(os.getuid()) + ':' + str(os.getgid()),
             'entrypoint': ['python3', '/app/compatibility/reset-preservation-rehearsal.py', '--check'],
             'profiles': ['checks'], 'read_only': True, 'tmpfs': ['/tmp:rw,nosuid,nodev,size=128m,mode=1777'],
             'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'],
             'environment': {'NOCHEH_RESET_DB_PASSWORD': PASSWORD, 'PYTHONDONTWRITEBYTECODE': '1'},
             'volumes': [str(directory) + ':/fixture'],
-            'depends_on': {'nocheh-postgres': {'condition': 'service_healthy'}}}},
+            'depends_on': {'nocheh-db': {'condition': 'service_healthy'}}}},
         'volumes': {'database': {}}, 'networks': {'default': {'internal': True}}}
     file = directory / 'compose.json'; file.write_text(json.dumps(compose)); command = ['docker', 'compose', '-p', project, '-f', str(file)]
     try:
         rendered = json.loads(subprocess.check_output(command + ['config', '--format', 'json'], env=environment, text=True))
         assert rendered['networks']['default']['internal'] is True and all(not service.get('ports') for service in rendered['services'].values())
-        subprocess.run(command + ['up', '-d', '--no-build', '--wait', 'nocheh-postgres'], env=environment, check=True)
+        subprocess.run(command + ['up', '-d', '--no-build', '--wait', 'nocheh-db'], env=environment, check=True)
         subprocess.run(command + ['run', '--rm', '--no-deps', 'bootstrap'], env=environment, check=True)
         output = subprocess.check_output(command + ['run', '--rm', '--no-deps', 'checks'], env=environment, text=True)
         report = json.loads(output); report.update(project=project, network='internal only', management_image=args.management_image)

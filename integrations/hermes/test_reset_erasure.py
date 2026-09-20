@@ -50,7 +50,7 @@ class ResetErasureTests(unittest.TestCase):
         self.state = self.fixture.state; self.preflight = self.fixture.preflight; self.recovery = self.fixture.recovery
         volume_rows = []
         containers = []
-        for index, service in enumerate(('nocheh-postgres', 'inngest-postgres'), 1):
+        for index, service in enumerate(('nocheh-db', 'inngest-postgres'), 1):
             volume = {'name': 'fixture-volume-' + str(index), 'created_at': '2026-09-18T00:00:00Z',
                       'driver': 'local', 'options_count': 0, 'project': 'fixture', 'compose_volume': 'database' + str(index),
                       'service': service, 'target': '/var/lib/postgresql/data', 'configured_name': 'fixture-volume-' + str(index),

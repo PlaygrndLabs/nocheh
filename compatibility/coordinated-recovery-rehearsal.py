@@ -42,7 +42,7 @@ try:
         subprocess.run(['docker','volume','create','--label','nocheh.fixture='+prefix,volume],check=True,stdout=subprocess.DEVNULL);owned_volumes.append(volume)
     rendered=json.loads(subprocess.check_output(command(source)+['config','--format','json'],env=environment(source),text=True))
     assert all(network.get('internal') for network in rendered['networks'].values())
-    run(source,['up','-d','--no-build','--wait','nocheh-postgres','honcho-postgres','inngest-redis'])
+    run(source,['up','-d','--no-build','--wait','nocheh-db','honcho-postgres','inngest-redis'])
     run(source,['run','--rm','--no-deps','-v',str(root/'compatibility')+':/app/compatibility:ro',
         'nocheh-app','node','compatibility/coordinated-recovery-seed.mjs'])
     run(source,['run','--rm','--no-deps','--entrypoint','/app/.venv/bin/python','honcho-api','scripts/provision_db.py'])
@@ -111,7 +111,7 @@ with urllib.request.urlopen(request,timeout=120) as response:print(response.read
     target_config=load(target)
     recovery=StoreRecovery(command(target),environment(target))
     assert recovery.query(None,"SELECT count(*) FROM pg_roles WHERE rolname IN ('nocheh_archive','nocheh_derived','nocheh_control') AND rolcanlogin").strip()=='0'
-    assert query(target,'nocheh-postgres','nocheh_derived',"SELECT count(*) FROM guard_revisions WHERE author='owner'")=='1'
+    assert query(target,'nocheh-db','nocheh_derived',"SELECT count(*) FROM guard_revisions WHERE author='owner'")=='1'
     assert (target/'hermes/profiles/fixture/MEMORY.md').read_bytes()==(profile/'MEMORY.md').read_bytes()
     assert (target/'hermes/profiles/fixture/state.db').read_bytes()==(profile/'state.db').read_bytes()
     for path in (source/'files').rglob('*'):
@@ -120,7 +120,7 @@ with urllib.request.urlopen(request,timeout=120) as response:print(response.read
     assert (target/'spool/.restore-inactive').exists() and (target/'workflows/inactive').exists()
     with sqlite3.connect(target/'honcho/ledger/budget.sqlite') as db:assert db.execute('SELECT cost FROM reservations').fetchone()==(17,)
     running=subprocess.check_output(command(target)+['ps','--services','--status','running'],env=environment(target),text=True).split()
-    assert running==['nocheh-postgres'],running
+    assert running==['nocheh-db'],running
     redis=run(target,['run','--rm','--no-deps','inngest-redis','sh','-c',
         "redis-server --bind 127.0.0.1 --port 6380 --dir /data --appendonly yes --save '' --daemonize yes; trap 'redis-cli -p 6380 shutdown nosave >/dev/null' EXIT; i=0; until redis-cli -p 6380 ping >/dev/null 2>&1; do i=$((i+1)); test $i -lt 300 || exit 1; sleep 0.1; done; test \"$(redis-cli -p 6380 GET fixture:owned)\" = workflow-evidence"],stdout=subprocess.DEVNULL)
     report={'passed':True,'format':6,'source_project':projects[source],'restore_project':projects[target],

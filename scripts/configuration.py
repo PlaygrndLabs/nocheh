@@ -46,7 +46,7 @@ def archive_url(state):
 
 
 def native_endpoint(state):
-    return ('hermes-runtime',8785) if os.environ.get('NOCHEH_CONTAINER')=='1' else ('127.0.0.1',int(os.environ.get('NOCHEH_NATIVE_ADMIN_PORT') or native_admin_port(state)))
+    return ('hermes',8785) if os.environ.get('NOCHEH_CONTAINER')=='1' else ('127.0.0.1',int(os.environ.get('NOCHEH_NATIVE_ADMIN_PORT') or native_admin_port(state)))
 
 
 def read_env(path):

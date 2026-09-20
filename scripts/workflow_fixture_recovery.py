@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def archive_fingerprints(command,env,schema):
-    prefix=command+['exec','-T','nocheh-postgres','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh']
+    prefix=command+['exec','-T','nocheh-db','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh']
     names=subprocess.check_output(prefix+['-c',f"SELECT tablename FROM pg_tables WHERE schemaname='{schema}' ORDER BY 1"],env=env,text=True).split()
     import hashlib
     result={}
@@ -46,26 +46,26 @@ def main(env_file,destination):
         archive=archive_fingerprints(command,environment,schema)
         dump=backup/'archive.dump'
         with dump.open('xb') as output:
-            dump.chmod(0o600);subprocess.run(command+['exec','-T','nocheh-postgres','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=environment,stdout=output,check=True)
+            dump.chmod(0o600);subprocess.run(command+['exec','-T','nocheh-db','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=environment,stdout=output,check=True)
         sync(dump)
         files={str(path.relative_to(state)):sha(path) for path in state.rglob('*') if path.is_file()}
         shutil.copytree(state,target_state)
-        subprocess.run(restored+['up','-d','--wait','--no-build','nocheh-postgres'],env=environment,check=True)
+        subprocess.run(restored+['up','-d','--wait','--no-build','nocheh-db'],env=environment,check=True)
         result=restore(restored,environment,backup,target_state,metadata,sha)
         with dump.open('rb') as source_dump:
-            subprocess.run(restored+['exec','-T','nocheh-postgres','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=environment,stdin=source_dump,check=True)
+            subprocess.run(restored+['exec','-T','nocheh-db','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=environment,stdin=source_dump,check=True)
         if archive_fingerprints(restored,environment,schema)!=archive:raise RuntimeError('fixture_archive_mismatch')
         if any(sha(target_state/path)!=value for path,value in files.items()):raise RuntimeError('fixture_file_mismatch')
         (target_state/'spool/.restore-inactive').touch();(target_state/'workflows/inactive').touch()
         subprocess.run(restored+['up','-d','--wait','--no-build','inngest-redis'],env=environment,check=True)
         redis_count=int(subprocess.check_output(restored+['exec','-T','inngest-redis','redis-cli','dbsize'],env=environment,text=True).strip())
-        subprocess.run(restored+['restart','nocheh-postgres','inngest-redis'],env=environment,check=True)
-        subprocess.run(restored+['up','-d','--wait','--no-build','nocheh-postgres','inngest-redis'],env=environment,check=True)
+        subprocess.run(restored+['restart','nocheh-db','inngest-redis'],env=environment,check=True)
+        subprocess.run(restored+['up','-d','--wait','--no-build','nocheh-db','inngest-redis'],env=environment,check=True)
         if archive_fingerprints(restored,environment,schema)!=archive:raise RuntimeError('fixture_restart_archive_mismatch')
         from .workflow_recovery import fingerprints
         if fingerprints(restored,environment)!=metadata['tables']:raise RuntimeError('fixture_restart_workflow_mismatch')
         services=subprocess.check_output(restored+['ps','--services','--status','running'],env=environment,text=True).split()
-        if set(services)!={'nocheh-postgres','inngest-redis'}:raise RuntimeError('restored_executor_active')
+        if set(services)!={'nocheh-db','inngest-redis'}:raise RuntimeError('restored_executor_active')
         result.update(archive_tables=len(archive),workflow_tables=len(metadata['tables']),protected_files=len(files),redis_keys=redis_count,
                       archive_dump_sha256=sha(dump),redis_snapshot_bytes=metadata['workflow-redis.rdb']['size'],restart_verified=True)
         (destination/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
