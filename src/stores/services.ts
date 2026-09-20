@@ -41,6 +41,7 @@ import {BrowserDeliveryRepository} from './browser-delivery.js';
 import {ScheduledRunRepository} from './scheduled-runs.js';
 import {ScheduleRepository} from './schedules.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
+import {EntityRepository} from './entities.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -62,8 +63,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     await operations.verify(reference);return reference;
   },options.detectorVersion);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
-  const projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
-  const contexts=new LearningContextRepository(access,guards,learned,selections,projects),provenance=new HonchoProvenanceRepository(stores,archive,guards,options.honcho);
+  const projects=new ProjectRepository(stores.control),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
+  const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new HonchoProvenanceRepository(stores,archive,guards,options.honcho);
   const detect=async(text:string)=>(await options.runtime('guard.detect',{text})).literals;
   const turns=new RuntimeTurnRepository(access,prepared);
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
@@ -73,7 +74,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
-  return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,sharing,learned,contexts,provenance,
+  return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

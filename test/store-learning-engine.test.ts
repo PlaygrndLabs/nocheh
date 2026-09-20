@@ -7,6 +7,7 @@ import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {ProjectRepository} from '../src/stores/projects.js';
+import {EntityRepository} from '../src/stores/entities.js';
 import {SelectionRepository} from '../src/stores/selections.js';
 import {LearnedMemoryRepository} from '../src/stores/learned.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
@@ -24,13 +25,13 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
   const key='learning:'+Date.now(),group=String(-Date.now()),space=group+'/topic/17';
   const policy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
   const learned=new LearnedMemoryRepository(stores,archive,derived,guards),projects=new ProjectRepository(stores.control),selections=new SelectionRepository(stores,guards);
-  const contexts=new LearningContextRepository(access,guards,learned,selections,projects);
+  const contexts=new LearningContextRepository(access,guards,learned,selections,projects,new EntityRepository(stores,access,projects));
   const event=(label:string,payload:any):Envelope=>({version:1,key:key+':'+label,origin:'live',bot_id:key,kind:'telegram_update',scope:group,
     source_id:String(payload.message?.message_id??payload.message_reaction?.message_id),revision:String(payload.update_id),occurred_at:null,text:payload.message?.text??null,payload});
   const detect=async(text:string)=>text.includes('fixture-secret')?['fixture-secret']:[];
   const authority={owner:'inngest' as const,epoch:1};let calls=0,response:unknown;
   const call=async(path:string,body:any)=>{
-    calls++;assert.ok(path.endsWith('/peers/source/chat'),'the only effect is bounded Honcho reasoning');
+    calls++;assert.match(path,/\/peers\/person_[a-f0-9]{64}\/chat$/,'the only effect is bounded Honcho reasoning for the actual speaker');
     assert.ok(body.query.includes('message_reaction'));assert.ok(!body.query.includes('fixture-secret'));
     assert.ok(!body.query.includes('nested-unverified-target'));
     return {content:JSON.stringify(response)};

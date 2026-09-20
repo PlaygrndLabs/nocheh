@@ -78,6 +78,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // Owners can inspect and repair incomplete guard changes; scoped callers
     // must observe the complete current authorization generation on every call.
     if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
+    if(req.method==='GET'&&path==='/v1/entities')return json(res,200,await s.entities.list(principal,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
+      after:url.searchParams.get('after')??'',state:url.searchParams.get('state')??'active'}));
+    const entityHistory=path.match(/^\/v1\/entities\/claims\/([a-f0-9]{64})\/history$/);
+    if(req.method==='GET'&&entityHistory)return json(res,200,await s.entities.history(principal,entityHistory[1]!,url.searchParams.has('before')?Number(url.searchParams.get('before')):undefined));
+    const entityRead=path.match(/^\/v1\/entities\/([a-f0-9]{64})$/);
+    if(req.method==='GET'&&entityRead)return json(res,200,await s.entities.inspect(principal,entityRead[1]!));
     if(await owner.handle(principal,req,res,url))return;
     if(path==='/v1/runtime/profiles'||path==='/v1/runtime/profiles/resolve') {
       admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);

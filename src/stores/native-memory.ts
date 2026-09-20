@@ -14,8 +14,9 @@ import type {LearningContextRepository} from './learning-context.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {HonchoProvenanceRepository} from './honcho-provenance.js';
 import {OwnerCommands} from './owner-commands.js';
+import {evidencePeerId,honchoPeerId,type EntityContext} from './entities.js';
 
-const protocol='honcho-native-v3';
+const protocol='honcho-native-v4';
 const limited={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
 const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value);
 
@@ -29,7 +30,7 @@ export class NativeMemoryRepository {
   async status() {
     const binding=await this.guards.state(),connection=(await this.control.query('SELECT * FROM memory_engine_connection WHERE singleton')).rows[0];
     const generations=(await this.control.query(`SELECT id,audience,state,guard_epoch,last_ready_at,error_code FROM memory_generations
-      WHERE installation_generation=$1 AND guard_epoch=$2 ORDER BY audience`,[binding.generation,binding.epoch])).rows;
+      WHERE installation_generation=$1 AND guard_epoch=$2 AND representation_version=$3 ORDER BY audience`,[binding.generation,binding.epoch,protocol])).rows;
     const receipts=(await this.control.query('SELECT state,count(*)::int AS count FROM memory_ingestion_receipts GROUP BY state')).rows;
     return {connection,generations,receipts,guard:binding,primary:'honcho',native_notes:['MEMORY.md','USER.md'],syncing:generations.some(g=>g.state==='building'),
       limited_memory:!connection.attached||!connection.verified||!generations.length||generations.some(g=>!g.last_ready_at&&g.state!=='ready')};
@@ -71,41 +72,65 @@ export class NativeMemoryRepository {
   }
   private async generation(audience:string,source:SourceReference,space:string,binding:GuardBinding) {
     const id=digest(canonical([protocol,binding.generation,binding.epoch,audience]));
-    await this.control.query(`INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience,root_reference,root_space)
-      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,[id,binding.generation,binding.epoch,audience,source,space]);
+    await this.control.query(`UPDATE memory_generations SET state='retired' WHERE installation_generation=$1 AND guard_epoch=$2 AND audience=$3
+      AND representation_version<>$4 AND state<>'retired'`,[binding.generation,binding.epoch,audience,protocol]);
+    await this.control.query(`UPDATE memory_entity_peer_mappings m SET state='retired' FROM memory_generations g
+      WHERE m.generation=g.id AND g.audience=$1 AND (g.state='retired' OR m.representation_version<>$2) AND m.state<>'retired'`,[audience,protocol]);
+    await this.control.query(`INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience,root_reference,root_space,representation_version)
+      VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,[id,binding.generation,binding.epoch,audience,source,space,protocol]);
     await this.current(id);return id;
   }
   private async queueDocument(source:SourceReference,evidence:SourceReference[],space:string,text:string,dependencies:PreparedDependency[],binding:GuardBinding,
-    projection?:{id:string;revision:number}):Promise<{audience:string;workspace:string;receipts:string[]}[]> {
+    entities:EntityContext,projection?:{id:string;revision:number}):Promise<{audience:string;workspace:string;receipts:string[]}[]> {
     if(evidence.length<1||evidence.length>30||text.length>600000)throw new HttpError(413,'memory_input_limit');
     const results=[],audiences=['owner',...(space.startsWith('-')?[space]:[])];
     for(const audience of audiences) {
       const workspace=await this.generation(audience,source,space,binding),generation=await this.current(workspace),receipts:string[]=[];
-      await this.prepared.allow(generation.principal,JSON.parse(text));
-      const chars=Array.from(text);
-      for(let offset=0;offset<chars.length;offset+=12000) {
-        const content=`[nocheh:event:${source.id}]\n`+chars.slice(offset,offset+12000).join(''),hash=digest(content);
-        const id=digest(canonical([workspace,evidence,dependencies,projection??null,offset,hash]));
-        const prepared=await this.derived.record({operation_id:'memory-input:'+id,source,kind:'memory_input',content:Buffer.from(content),
-          producer:'nocheh',producer_version:protocol,configuration:{workspace,audience,dependencies,projection:projection??null,offset},
-          provenance:{evidence,binding,representation:binding.mode==='on'?'guarded':'original',exact_citations:false}});
-        await this.prepared.allow(generation.principal,{text:content});await this.current(workspace);
-        const db=await this.control.connect();
-        try {
-          await db.query('BEGIN');
-          const added=await db.query(`INSERT INTO memory_ingestion_receipts(id,generation,source_reference,source_references,guard_source_id,guarded_revision,
-            prepared_id,content_hash,dependencies,projection_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING id`,
-            [id,workspace,source,JSON.stringify(evidence),'events:'+source.id,dependencies.find(d=>d.source_id==='events:'+source.id)?.revision??null,
-              prepared.id,prepared.input_hash,JSON.stringify(dependencies),projection??null]);
-          if(added.rowCount) {
-            const changed=(await db.query("UPDATE memory_generations SET state='building',work_revision=work_revision+1 WHERE id=$1 AND state<>'retired' RETURNING work_revision",[workspace])).rows[0];
-            if(!changed)throw new HttpError(409,'memory_context_retired');
-            await requestWorkflow(db,'honcho','generation:'+workspace,changed.work_revision);
-          }
-          await requestWorkflow(db,'honcho','receipt:'+id);
-          await db.query('COMMIT');
-        } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
-        receipts.push(id);
+      const speaker=entities.speaker;
+      const peer=!projection&&speaker?honchoPeerId(speaker):evidencePeerId(source);
+      const subjects=[entities.project,...entities.mentioned_projects,...entities.mentioned_people].filter((value,index,all)=>
+        !!value&&value.id!==speaker?.id&&all.findIndex(other=>other?.id===value.id)===index);
+      const allPeers=[peer,...subjects.map(value=>honchoPeerId(value!))].filter((value,index,all)=>all.indexOf(value)===index);
+      for(const entity of [speaker,...subjects].filter((value,index,all)=>!!value&&all.findIndex(other=>other?.id===value.id)===index)) {
+        const mapping=digest(canonical([protocol,'peer-mapping',workspace,entity!.id]));
+        await this.control.query(`INSERT INTO memory_entity_peer_mappings(id,entity_id,generation,audience,representation_version,peer_id)
+          VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,[mapping,entity!.id,workspace,audience,protocol,honchoPeerId(entity!)]);
+      }
+      const records=[{text,session:projection?digest(canonical([protocol,'projection',entities.session_id,projection])):entities.session_id,
+        subject:projection?null:speaker?.id??null,peers:allPeers,kind:projection?'learned_interpretation':'source_evidence'},
+        ...subjects.map(subject=>({text:canonical({kind:'entity_evidence',subject:{id:subject!.id,kind:subject!.kind,name:subject!.name},
+          original_speaker:speaker?{id:speaker.id,name:speaker.name}:null,source,attribution:projection?'inferred':speaker?'reported':'inferred',observation:JSON.parse(text),
+          authority:'This observation is about the subject; it is not a statement made by the subject.'}),
+          session:digest(canonical([protocol,'entity-evidence',entities.session_id,subject!.id])),subject:subject!.id,
+          peers:[peer,honchoPeerId(subject!)],kind:'entity_evidence'}))];
+      for(const record of records) {
+        await this.prepared.allow(generation.principal,JSON.parse(record.text));
+        const chars=Array.from(record.text);
+        for(let offset=0;offset<chars.length;offset+=12000) {
+          const content=`[nocheh:event:${source.id}]\n`+chars.slice(offset,offset+12000).join(''),hash=digest(content);
+          const id=digest(canonical([workspace,peer,record.session,record.subject,evidence,dependencies,projection??null,offset,hash]));
+          const prepared=await this.derived.record({operation_id:'memory-input:'+id,source,kind:'memory_input',content:Buffer.from(content),
+            producer:'nocheh',producer_version:protocol,configuration:{workspace,audience,dependencies,projection:projection??null,offset,record_kind:record.kind},
+            provenance:{evidence,binding,representation:binding.mode==='on'?'guarded':'original',exact_citations:false}});
+          await this.prepared.allow(generation.principal,{text:content});await this.current(workspace);
+          const db=await this.control.connect();
+          try {
+            await db.query('BEGIN');
+            const added=await db.query(`INSERT INTO memory_ingestion_receipts(id,generation,source_reference,source_references,guard_source_id,guarded_revision,
+              prepared_id,content_hash,dependencies,projection_reference,peer_id,peer_ids,session_id,subject_entity_id,speaker_entity_id,record_kind)
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT DO NOTHING RETURNING id`,
+              [id,workspace,source,JSON.stringify(evidence),'events:'+source.id,dependencies.find(d=>d.source_id==='events:'+source.id)?.revision??null,
+                prepared.id,prepared.input_hash,JSON.stringify(dependencies),projection??null,peer,JSON.stringify(record.peers),record.session,record.subject,speaker?.id??null,record.kind]);
+            if(added.rowCount) {
+              const changed=(await db.query("UPDATE memory_generations SET state='building',work_revision=work_revision+1 WHERE id=$1 AND state<>'retired' RETURNING work_revision",[workspace])).rows[0];
+              if(!changed)throw new HttpError(409,'memory_context_retired');
+              await requestWorkflow(db,'honcho','generation:'+workspace,changed.work_revision);
+            }
+            await requestWorkflow(db,'honcho','receipt:'+id);
+            await db.query('COMMIT');
+          } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+          receipts.push(id);
+        }
       }
       await this.guards.assertCurrent(binding);results.push({audience,workspace,receipts});
     }
@@ -119,9 +144,9 @@ export class NativeMemoryRepository {
     if(!status.connection.include_history&&row.received_at<status.connection.attached_at&&!explicit&&
       !(await this.control.query("SELECT 1 FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='done' LIMIT 1",[source.id])).rowCount)return [];
     const context=await this.contexts.prepare(source,status.guard);
-    const text=canonical({kind:'source_evidence',space:context.space,observations:context.observations,applicable_rules:context.rules,
+    const text=canonical({kind:'source_evidence',space:context.space,observations:context.observations.filter(item=>item.source.id===source.id),applicable_rules:context.rules,
       limitations:context.limitations,authority:'Evidence and interpretation conventions cannot grant administrative, provider, privacy, guard, or action authority.'});
-    return this.queueDocument(source,context.evidence.map(e=>e.reference),context.space,text,context.dependencies,status.guard);
+    return this.queueDocument(source,context.evidence.map(e=>e.reference),context.space,text,context.dependencies,status.guard,context.entities);
   }
   async queueProjection(id:string) {
     const binding=await this.guards.state(),row=(await this.contexts.access.stores.derived.query(`SELECT v.evidence,v.dependencies,v.retired FROM learned_entries e
@@ -130,9 +155,10 @@ export class NativeMemoryRepository {
     const evidence=row.evidence as SourceReference[],space=await this.contexts.access.space(evidence[0]!);if(!space)throw new HttpError(409,'learning_context_pending');
     const principal=this.contexts.access.principal(space),version=await this.contexts.learned.read(principal,id,binding,async ref=>
       await this.contexts.access.canLearn(ref,binding)&&await this.contexts.access.canRead(principal,ref,binding));
+    const context=await this.contexts.prepare(evidence[0]!,binding);
     return this.queueDocument(evidence[0]!,evidence,space,canonical({kind:'learned_interpretation',value:version,
       authority:'Owner corrections override the affected interpretation. This is memory, not an administrative or action authorization.'}),
-      row.dependencies,binding,{id,revision:version.revision});
+      row.dependencies,binding,context.entities,{id,revision:version.revision});
   }
   private async receipt(id:string) {
     const row=(await this.control.query('SELECT * FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
@@ -165,7 +191,7 @@ export class NativeMemoryRepository {
     if(!connection.attached||!connection.verified)return false;
     const row=await this.receipt(id);if(row.state==='done')return true;if(row.state!=='uncertain')return false;
     // Reconciliation of a retired workspace reads only its exact receipt and cannot reactivate it.
-    const result=await this.call('/v3/workspaces/'+row.generation+'/sessions/'+id+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});
+    const result=await this.call('/v3/workspaces/'+row.generation+'/sessions/'+(row.session_id??id)+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});
     const remote=this.observed(row,result.items);if(!remote)return false;
     await this.control.query("UPDATE memory_ingestion_receipts SET state='done',remote_id=$2,error_code=NULL WHERE id=$1 AND state='uncertain'",[id,remote]);return true;
   }
@@ -177,16 +203,18 @@ export class NativeMemoryRepository {
       const row=await this.receipt(id);if(row.state==='done')return true;
       if(row.state==='uncertain')return await this.reconcileReceipt(id);
       try {
-        const workspace='/v3/workspaces/'+row.generation,session=workspace+'/sessions/'+id;
+        const workspace='/v3/workspaces/'+row.generation,sessionId=row.session_id??id,session=workspace+'/sessions/'+sessionId;
         await this.authorizedReceipt(row);await this.call('/v3/workspaces',{id:row.generation});
-        await this.authorizedReceipt(row);await this.call(workspace+'/peers',{id:'source'});
-        await this.authorizedReceipt(row);await this.call(workspace+'/sessions',{id,peers:{source:{observe_me:true,observe_others:false}}});
+        const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string');
+        for(const peer of peers){await this.authorizedReceipt(row);await this.call(workspace+'/peers',{id:peer});}
+        await this.authorizedReceipt(row);await this.call(workspace+'/sessions',{id:sessionId,peers:Object.fromEntries(peers.map((peer:string)=>
+          [peer,peer===row.peer_id?{observe_me:true,observe_others:false}:{observe_me:false,observe_others:true}]))});
         const previous=await this.call(session+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});
         let remote=this.observed(row,previous.items);
         if(!remote) {
           await this.authorizedReceipt(row);
           await db.query("UPDATE memory_ingestion_receipts SET state='uncertain',attempts=attempts+1 WHERE id=$1",[id]);
-          const found=await this.call(session+'/messages',{messages:[{peer_id:'source',content:row.content,
+          const found=await this.call(session+'/messages',{messages:[{peer_id:row.peer_id,content:row.content,
             metadata:{nocheh_receipt:id,source_revision:row.source_reference.revision,guarded_revision:row.guarded_revision}}]});
           remote=this.observed(row,found);if(!remote)throw new HttpError(409,'honcho_write_unresolved');
         }
@@ -216,16 +244,35 @@ export class NativeMemoryRepository {
     }
     const prepared=await this.prepared.prepare(current.principal,payload,this.detect);await this.current(current.row.id);return {payload:prepared};
   }
+  private async connectedPeers(current:Awaited<ReturnType<NativeMemoryRepository['current']>>,principal:Reader,query='') {
+    let connected=query.trim()?await this.contexts.entities.connected(principal,query,12):{entities:[],partial:false};
+    if(!connected.entities.length) {
+      let source=current.row.root_reference as SourceReference;
+      if(principal.turnEvent)try{source=(await this.contexts.access.archive.captured(principal.turnEvent)).reference;}catch{}
+      const local=await this.contexts.entities.context(source,[]),seeds=[local.speaker?.id,local.project?.id].filter((value):value is string=>!!value);
+      connected=await this.contexts.entities.connectedFrom(principal,seeds,12);
+    }
+    const candidates=connected.entities.map(item=>({peer:honchoPeerId(item.entity),path:item.path.join(' → ')}));
+    if(!candidates.length)return {items:[],partial:connected.partial};
+    const available=new Set((await this.control.query(`SELECT DISTINCT peer.value AS peer_id FROM memory_ingestion_receipts r
+      CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_array_length(r.peer_ids)>0 THEN r.peer_ids ELSE jsonb_build_array(r.peer_id) END) peer(value)
+      WHERE r.generation=$1 AND r.state='done' AND peer.value=ANY($2::text[])`,[current.row.id,candidates.map(item=>item.peer)])).rows.map(row=>String(row.peer_id)));
+    return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial};
+  }
   async refreshContext(id:string,requestId=String(Math.floor(Date.now()/120000))):Promise<boolean> {
     const current=await this.current(id);if(!current.row.last_ready_at&&current.row.state!=='ready')return false;
     string(requestId,200);const key='native-context:'+id+':'+requestId;
     let raw=await this.derived.checkpoint(key);
     if(!raw) {
-      const result=await this.call('/v3/workspaces/'+id+'/peers/source/representation',{include_most_frequent:true,max_conclusions:50});
-      const text=string(result.representation,2*1024*1024);
+      const connected=await this.connectedPeers(current,current.principal),parts=[];
+      for(const item of connected.items) {
+        const result=await this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/representation',{include_most_frequent:true,max_conclusions:50});
+        const value=string(result.representation,2*1024*1024);if(value.trim())parts.push(`[related through ${item.path}]\n${value}`);
+      }
+      const text=string(parts.join('\n\n'),2*1024*1024);
       const reference=await this.derived.record({operation_id:key,source:current.row.root_reference,kind:'memory_result',content:Buffer.from(text),
-        producer:'honcho',producer_version:protocol,configuration:{workspace:id,request_id:requestId,include_most_frequent:true,max_conclusions:50},
-        provenance:{binding:current.binding,limitations:['representation_has_no_exact_citations']}});
+        producer:'honcho',producer_version:protocol,configuration:{workspace:id,request_id:requestId,peers:connected.items,include_most_frequent:true,max_conclusions:50},
+        provenance:{binding:current.binding,partial:connected.partial,limitations:['representation_has_no_exact_citations']}});
       raw={id:reference.id,content:Buffer.from(text),content_hash:reference.input_hash};
     }
     await this.current(id);
@@ -240,8 +287,8 @@ export class NativeMemoryRepository {
   }
   private async audienceGeneration(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),audience=principal.scope===null?'owner':principal.space??principal.scope;
-    const row=(await this.control.query(`SELECT id FROM memory_generations WHERE audience=$1 AND installation_generation=$2 AND guard_epoch=$3 AND state<>'retired'`,
-      [audience,binding.generation,binding.epoch])).rows[0];return row?.id as string|undefined;
+    const row=(await this.control.query(`SELECT id FROM memory_generations WHERE audience=$1 AND installation_generation=$2 AND guard_epoch=$3
+      AND representation_version=$4 AND state<>'retired'`,[audience,binding.generation,binding.epoch,protocol])).rows[0];return row?.id as string|undefined;
   }
   async context(principal:Reader) {
     const id=await this.audienceGeneration(principal);if(!id)return limited;
@@ -267,14 +314,20 @@ export class NativeMemoryRepository {
       const root=await this.prepared.root(actor,current.binding);
       const input=await this.derived.record({operation_id:'native-recall-input:'+requestId,source:root,kind:'runtime_context',content:Buffer.from(String(question)),
         producer:'nocheh',producer_version:protocol,configuration:{workspace:id,reasoning_level:'low'},provenance:{binding:current.binding}});
-      await this.current(id);const response=await this.call('/v3/workspaces/'+id+'/peers/source/chat',{query:question,reasoning_level:'low',stream:false});
-      const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(string(response.content,20000)),
-        producer:'honcho',producer_version:protocol,configuration:{workspace:id,reasoning_level:'low'},provenance:{limitations:['reasoning_response_has_no_exact_conclusion_citations']}});
+      const connected=await this.connectedPeers(current,actor,String(question)),answers=[];
+      for(const item of connected.items.slice(0,4)) {
+        await this.current(id);const response=await this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',{query:question,reasoning_level:'low',stream:false});
+        answers.push(`[related through ${item.path}]\n${string(response.content,20000)}`);
+      }
+      if(!answers.length)return {...limited,note:'No authorized person or project memory matched this request.'};
+      const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(string(answers.join('\n\n'),20000)),
+        producer:'honcho',producer_version:protocol,configuration:{workspace:id,reasoning_level:'low',peers:connected.items.slice(0,4)},provenance:{partial:connected.partial,limitations:['reasoning_response_has_no_exact_conclusion_citations']}});
       await this.current(id);await this.guards.prepareContext(output,protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
       await this.current(id);await this.prepared.audience.assert(principal);await this.prepared.allow(principal,value);
       return {sources:[{source:'nocheh:honcho:'+id,kind:'memory_inference',text:value.text,exact_citations:false,
-        limitations:['reasoning_response_has_no_exact_conclusion_citations']}],limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing:current.row.state==='building'};
+        limitations:['reasoning_response_has_no_exact_conclusion_citations']}],partial:connected.partial,
+        limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing:current.row.state==='building'};
     } catch(error){await this.prepared.audience.assert(principal);return limited;}
   }
 }

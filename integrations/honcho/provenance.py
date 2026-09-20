@@ -92,13 +92,13 @@ def install(app):
                 jsonb_path_query_array(internal_metadata->'message_ids', '$[0 to 255]') AS message_ids,
                 CASE WHEN jsonb_typeof(source_ids)='array' THEN jsonb_array_length(source_ids)>128 ELSE false END AS parents_truncated,
                 CASE WHEN jsonb_typeof(internal_metadata->'message_ids')='array' THEN jsonb_array_length(internal_metadata->'message_ids')>256 ELSE false END AS messages_truncated
-                FROM documents WHERE workspace_name=:workspace AND observer='source' AND observed='source' AND id=ANY(:ids) LIMIT 128'''),
+                FROM documents WHERE workspace_name=:workspace AND id=ANY(:ids) LIMIT 128'''),
                 {'workspace': workspace_id, 'ids': ids})
             return [dict(row) for row in result.mappings()]
 
         async def messages(ids):
             result = await db.execute(text('''SELECT id,public_id,metadata->>'nocheh_receipt' AS receipt_id
-                FROM messages WHERE workspace_name=:workspace AND peer_name='source' AND id=ANY(:ids) LIMIT 256'''),
+                FROM messages WHERE workspace_name=:workspace AND id=ANY(:ids) LIMIT 256'''),
                 {'workspace': workspace_id, 'ids': ids})
             return [dict(row) for row in result.mappings()]
 

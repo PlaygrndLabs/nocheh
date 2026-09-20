@@ -3,6 +3,7 @@ import {workflowSchema} from '../workflows/store.js';
 import {derivedGuardSchema,controlGuardSchema} from './guard-schema.js';
 import {derivativeSelectionSchema} from './selection-schema.js';
 import {controlPolicySchema} from './policy-schema.js';
+import {controlEntitySchema,derivedEntitySchema} from './entity-schema.js';
 import {controlMemorySchema} from './memory-schema.js';
 import {derivedLearnedSchema} from './learned-schema.js';
 import {controlOperationSchema} from './operations.js';
@@ -87,6 +88,7 @@ ${derivedGuardSchema}
 ${runtimeContextSchema}
 ${derivativeSelectionSchema}
 ${derivedLearnedSchema}
+${derivedEntitySchema}
 ${portableHistorySchema}
 `;
 
@@ -117,6 +119,7 @@ ${telegramDispatchSchema}
 ${controlledActionSchema}
 ${controlGuardSchema}
 ${controlPolicySchema}
+${controlEntitySchema}
 ${controlMemorySchema}
 ${controlOperationSchema}
 ${runtimeTurnSchema}

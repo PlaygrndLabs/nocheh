@@ -16,6 +16,16 @@ ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS root_space text;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS last_ready_at timestamptz;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS error_code text;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS work_revision integer NOT NULL DEFAULT 1;
+ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS representation_version text NOT NULL DEFAULT 'legacy-source-v1';
+ALTER TABLE memory_generations DROP CONSTRAINT IF EXISTS memory_generations_installation_generation_guard_epoch_audience_key;
+CREATE UNIQUE INDEX IF NOT EXISTS memory_generations_versioned_audience ON memory_generations(installation_generation,guard_epoch,audience,representation_version);
+CREATE TABLE IF NOT EXISTS memory_entity_peer_mappings (
+ id text PRIMARY KEY,entity_id text NOT NULL REFERENCES memory_entities(id),generation text NOT NULL REFERENCES memory_generations(id),
+ audience text NOT NULL,representation_version text NOT NULL,peer_id text NOT NULL,
+ state text NOT NULL DEFAULT 'active' CHECK(state IN ('active','retired')),created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(generation,entity_id,representation_version),UNIQUE(generation,peer_id)
+);
+CREATE INDEX IF NOT EXISTS memory_entity_peer_mappings_entity ON memory_entity_peer_mappings(entity_id,audience,state);
 CREATE TABLE IF NOT EXISTS memory_ingestion_receipts (
  id text PRIMARY KEY,generation text NOT NULL REFERENCES memory_generations(id),
  source_reference jsonb NOT NULL,guard_source_id text NOT NULL,guarded_revision integer,
@@ -24,6 +34,12 @@ CREATE TABLE IF NOT EXISTS memory_ingestion_receipts (
  remote_id text,attempts integer NOT NULL DEFAULT 0,error_code text,
  next_attempt timestamptz NOT NULL DEFAULT now(),created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS peer_id text NOT NULL DEFAULT 'source';
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS peer_ids jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS session_id text;
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS subject_entity_id text;
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS speaker_entity_id text;
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS record_kind text NOT NULL DEFAULT 'legacy_source';
 CREATE INDEX IF NOT EXISTS memory_receipts_remote ON memory_ingestion_receipts(generation,remote_id);
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS source_references jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS dependencies jsonb NOT NULL DEFAULT '[]';

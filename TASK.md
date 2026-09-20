@@ -7,6 +7,18 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+#### Connected memory for people and projects — 2026-09-20
+
+Implementation is complete in the separated-store runtime. Control storage owns stable person/project identities, exact and confirmed bindings, suggestions, reversible link history, and versioned Honcho peer mappings. Derived storage owns revisioned entity claims and relationships with direct, reported, or inferred attribution and source evidence. The original archive remains unchanged.
+
+The Honcho writer uses actual speaker peers, persistent conversation sessions, and separate typed entity-evidence sessions for projects and mentioned people. Connected recall starts from a permitted entity, follows bounded evidence-backed paths with cycle detection and deduplication, labels why related memory was included, and retains the 20,000-character context ceiling with partial-result status. The first version-4 write retires the corresponding generic-peer generation in place. No production Honcho activation or live installation resume is authorized by this change.
+
+Owner and scoped APIs under `/v1/entities` expose audience-filtered search, current memory, evidence, relationships, uncertainty, and correction history. Owner commands review suggestions, link or unlink identities, and correct or retire claims. The dashboard adds People and Project memory views while keeping inferred relationships separate from the observed-source Graph page.
+
+The focused isolated PostgreSQL acceptance passes four checks with no skips: same-name separation and stable platform identity; reported attribution; Atlas–Beacon contextual and multi-step recall with cycles, bounds and privacy; typed Honcho ingestion and uncertain-write recovery; and complete portable entity history. The TypeScript/web build, 14 dashboard tests, and `git diff --check` pass. The AST-only Graphify refresh records 3,470 nodes and 15,232 edges. Desktop browser acceptance covers People, Project memory, suggestions, evidence, reported attribution, contextual relationships, corrections, and history at the isolated preview. [Content-free evidence](compatibility/results/2026-09-20-connected-entity-memory.json).
+
+An attempted complete container suite reached the existing dashboard-boundary fixture and timed out because its external host aliases were unavailable in that test container; it is not recorded as a pass. Live Honcho provider acceptance, production activation, and resuming the installation remain pending under the existing gates.
+
 The owner-facing Compose names now describe the three core boundaries directly:
 `hermes` is the single managed Hermes core, `hermes-agent-sb` launches isolated
 agent sandboxes, and `nocheh-db` owns PostgreSQL. Internal database names remain

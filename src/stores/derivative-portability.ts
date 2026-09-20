@@ -26,7 +26,14 @@ const shapes:Record<string,Shape>={
   derivative_activations:shape('derived','operation_id',{operation_id:'text',activated_at:'date'}),
   learned_entries:shape('derived','id',{id:'text',scope_kind:'text',scope_id:'text',kind:'text',subject:'text',active_revision:'number',created_at:'date'}),
   learned_versions:shape('derived','operation_id',{operation_id:'text',entry_id:'text',revision:'number',expected_revision:'number',derived_id:'text',request_hash:'text',author:'text',retired:'boolean',evidence:'json',dependencies:'json',input_binding:'json',created_at:'date'}),
-  learned_activations:shape('derived','operation_id',{operation_id:'text',activated_at:'date'})
+  learned_activations:shape('derived','operation_id',{operation_id:'text',activated_at:'date'}),
+  projects:shape('control','id',{id:'text',name:'text',description:'text',state:'text',revision:'number',updated_at:'date'}),
+  memory_entities:shape('control','id',{id:'text',kind:'text',name:'text',state:'text',project_id:'text',merged_into:'text',revision:'number',created_at:'date',updated_at:'date'}),
+  memory_entity_bindings:shape('control','id',{id:'text',entity_id:'text',binding_kind:'text',source_object_id:'text',mention_key:'text',label:'text',state:'text',revision:'number',created_at:'date',updated_at:'date'}),
+  memory_entity_binding_moves:shape('control','id',{id:'text',binding_id:'text',from_entity_id:'text',to_entity_id:'text',merge_revision:'number',undone:'boolean',created_at:'date'}),
+  memory_entity_suggestions:shape('control','id',{id:'text',kind:'text',name:'text',candidate_entity_id:'text',source_reference:'json',reason:'text',status:'text',revision:'number',created_at:'date',updated_at:'date'}),
+  entity_claims:shape('derived','id',{id:'text',subject_entity_id:'text',predicate:'text',object_entity_id:'text',active_revision:'number',created_at:'date'}),
+  entity_claim_versions:shape('derived','operation_id',{operation_id:'text',claim_id:'text',revision:'number',expected_revision:'number',content:'text',relationship_kind:'text',attribution:'text',speaker_entity_id:'text',uncertainty:'text',author:'text',retired:'boolean',evidence:'json',dependencies:'json',input_binding:'json',created_at:'date'})
 };
 export const portableDerivativeTypes=Object.keys(shapes);
 export interface PortableRecord {format:'nocheh-derivative-record-v1';type:string;key:string;value:Record<string,unknown>;sha256:string}
@@ -116,7 +123,8 @@ export class DerivativePortabilityRepository {
       if(!saved)throw new HttpError(409,'portable_record_missing');
       await this.validate(db,record.type,row);
       if(row.active_revision!==undefined&&row.active_revision!==null) {
-        const target=record.type==='guard_sources'?['guard_revisions','source_id']:record.type==='derivative_selections'?['derivative_selection_revisions','selection_id']:['learned_versions','entry_id'];
+        const target=record.type==='guard_sources'?['guard_revisions','source_id']:record.type==='derivative_selections'?['derivative_selection_revisions','selection_id']:
+          record.type==='entity_claims'?['entity_claim_versions','claim_id']:['learned_versions','entry_id'];
         if(!(await this.stores.derived.query(`SELECT 1 FROM ${target[0]} WHERE ${target[1]}=$1 AND revision=$2`,[record.key,row.active_revision])).rowCount)throw new HttpError(409,'portable_history_incomplete');
       }
     }
@@ -220,6 +228,32 @@ export class DerivativePortabilityRepository {
         JOIN derived_artifacts d ON d.id=$2 AND d.kind='learned_memory' WHERE e.id=$1`,[row.entry_id,row.derived_id])).rows[0];
       const learning=stored?.provenance?.learning;
       if(!learning||learning.scope?.kind!==stored.scope_kind||learning.scope?.id!==stored.scope_id||learning.kind!==stored.kind||learning.subject!==stored.subject||canonical(learning.evidence)!==canonical(row.evidence))throw new HttpError(409,'portable_learning_integrity');
+    }
+    if(type==='memory_entities') {
+      if(!['person','project'].includes(String(row.kind))||!['active','merged','rejected'].includes(String(row.state))||
+        (row.kind==='project')!==(row.project_id!==null))throw new HttpError(409,'portable_entity_integrity');
+      if(row.project_id!==null&&!(await this.stores.control.query('SELECT 1 FROM projects WHERE id=$1',[row.project_id])).rowCount)throw new HttpError(409,'portable_project_pending');
+    }
+    if(type==='memory_entity_bindings') {
+      if(!(await this.stores.control.query('SELECT 1 FROM memory_entities WHERE id=$1',[row.entity_id])).rowCount)throw new HttpError(409,'portable_entity_pending');
+      if(row.binding_kind==='source_identity'&&!(await this.stores.archive.query('SELECT 1 FROM source_objects WHERE id=$1',[row.source_object_id])).rowCount)throw new HttpError(409,'portable_source_identity_pending');
+    }
+    if(type==='memory_entity_binding_moves') {
+      if(!(await this.stores.control.query('SELECT 1 FROM memory_entity_bindings WHERE id=$1',[row.binding_id])).rowCount)throw new HttpError(409,'portable_entity_binding_pending');
+      for(const id of [row.from_entity_id,row.to_entity_id])if(!(await this.stores.control.query('SELECT 1 FROM memory_entities WHERE id=$1',[id])).rowCount)throw new HttpError(409,'portable_entity_pending');
+    }
+    if(type==='memory_entity_suggestions') {
+      await this.archive.verify(row.source_reference as unknown as SourceReference);
+      if(row.candidate_entity_id!==null&&!(await this.stores.control.query('SELECT 1 FROM memory_entities WHERE id=$1',[row.candidate_entity_id])).rowCount)throw new HttpError(409,'portable_entity_pending');
+    }
+    if(type==='entity_claims') {
+      for(const id of [row.subject_entity_id,row.object_entity_id].filter(Boolean))if(!(await this.stores.control.query('SELECT 1 FROM memory_entities WHERE id=$1',[id])).rowCount)throw new HttpError(409,'portable_entity_pending');
+    }
+    if(type==='entity_claim_versions') {
+      if(!Array.isArray(row.evidence)||!row.evidence.length||row.evidence.length>30)throw new HttpError(400,'invalid_entity_evidence');
+      for(const reference of row.evidence)await this.archive.verify(reference);
+      if(!(await db.query('SELECT 1 FROM entity_claims WHERE id=$1',[row.claim_id])).rowCount)throw new HttpError(409,'portable_entity_claim_pending');
+      if(row.speaker_entity_id!==null&&!(await this.stores.control.query('SELECT 1 FROM memory_entities WHERE id=$1',[row.speaker_entity_id])).rowCount)throw new HttpError(409,'portable_entity_pending');
     }
   }
 }

@@ -8,7 +8,7 @@ import {portableDerivativeTypes} from './derivative-portability.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|correct))?)?|projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -35,6 +35,16 @@ export class OwnerStorageApi {
     }
     const originalFile=path.match(/^\/v1\/original-files\/([a-f0-9]{64})\/bytes$/);
     if(originalFile)return method==='GET'?s.sourcePortability.bytes(principal,originalFile[1]!):s.sourcePortability.upload(principal,originalFile[1]!,input);
+    if(path==='/v1/entities/suggestions'&&method==='GET')return s.entities.suggestions(principal,q.get('after')??'');
+    const claimCorrection=path.match(/^\/v1\/entities\/claims\/([a-f0-9]{64})\/correct$/);
+    if(claimCorrection&&method==='POST')return s.entities.correct(principal,claimCorrection[1]!,input);
+    const entity=path.match(/^\/v1\/entities\/([a-f0-9]{64})(?:\/(decide|merge|unmerge|correct))?$/);
+    if(entity&&method==='POST') {
+      if(entity[2]==='decide')return s.entities.decide(principal,entity[1]!,input);
+      if(entity[2]==='merge')return s.entities.merge(principal,entity[1]!,input);
+      if(entity[2]==='unmerge')return s.entities.unmerge(principal,entity[1]!,input);
+      if(entity[2]==='correct')return s.entities.correct(principal,entity[1]!,input);
+    }
     if(path==='/v1/projects')return method==='GET'?s.projects.list(principal,q.get('after')??''):s.projects.save(principal,input);
     if(path==='/v1/projects/assignments')return method==='GET'?s.projects.assignments(principal,q.get('after')??''):s.projects.assign(principal,input);
     if(path==='/v1/projects/effective'&&method==='GET')return s.projects.effective(q.get('space')??'');

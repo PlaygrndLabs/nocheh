@@ -70,3 +70,4 @@ and governs subsequent agent work without changing those product decisions.
 | [0053](0053-original-only-archive.md) | Original-only archive; guarded and generated records in derived storage; control in a third database | Supersedes 0052 guarded placement; owner-authorized implementation and clean restart |
 | [0054](0054-postgres-owned-store-bootstrap.md) | Original-only store initialization in PostgreSQL startup | Owner-requested; acceptance tracked in TASK.md |
 | [0055](0055-concise-core-service-names.md) | `hermes`, `hermes-agent-sb`, and `nocheh-db` service identities | Owner-requested; implementation and activation tracked in TASK.md |
+| [0056](0056-connected-entity-memory.md) | Stable people/project peers, attributed entity evidence, and authorized connected recall | Owner-requested; implementation and activation tracked in TASK.md |
