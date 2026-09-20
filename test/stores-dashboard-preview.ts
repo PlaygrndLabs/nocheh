@@ -28,14 +28,15 @@ const services=storageServices(stores,{dataDir,detectorVersion:'ui-fixture',serv
 const api=new OwnerStorageApi(services),owner={admin:true,scope:null},sessions=new DashboardSessions();
 await services.guards.reconcile();await services.guards.setMode('on');
 const originals=[];
-for(const [index,scope,text,voice] of [
- [1,'123','Field recording from the observatory. sample-secret-value',true],
- [2,'-10042','For the Observatory project, 👀 means under review.',false],
- [3,'-10042','The northern telescope inspection is complete.',false],
- [4,'-10043','The amber reaction means waiting for a reply in this conversation.',false]
+for(const [index,scope,text,voice,user] of [
+ [1,'123','Field recording from the observatory. sample-secret-value',true,123],
+ [2,'-10042','For the Observatory project, 👀 means under review.',false,123],
+ [3,'-10042','The northern telescope inspection is complete.',false,123],
+ [4,'-10043','The amber reaction means waiting for a reply in this conversation.',false,123],
+ [5,'-10042','Beacon is blocked while Alex checks the telescope.',false,456]
 ] as const){
  const event:Envelope={version:1,key:'original-ui-fixture:'+index,origin:'live',bot_id:'fixture',kind:'telegram_update',scope,source_id:String(index),revision:'1',occurred_at:null,text,
-  payload:{message:{message_id:index,date:1700000000,chat:{id:Number(scope),type:scope==='123'?'private':'group'},from:{id:123},text,...(voice?{voice:{file_id:'synthetic-voice'}}:{})}}};
+  payload:{message:{message_id:index,date:1700000000,chat:{id:Number(scope),type:scope==='123'?'private':'group'},from:{id:user},text,...(voice?{voice:{file_id:'synthetic-voice'}}:{})}}};
  const source=(await services.capture.capture(event)).source;await services.guards.prepare(source.reference,'ui-fixture',services.detect);originals.push(source);
 }
 const file=await services.attachments.commit(originals[0]!.artifact_ids[0]!,Buffer.from('Synthetic original audio bytes'));await services.guards.prepare(file,'ui-fixture',services.detect);
@@ -43,7 +44,16 @@ const first=await services.derived.record({operation_id:'ui-transcript-v1',sourc
 await services.guards.prepare(first,'ui-fixture',services.detect);
 if(!(await stores.derived.query('SELECT 1 FROM derivative_selections WHERE event_id=$1 AND active_revision IS NOT NULL',[file.event.id])).rowCount)await services.selections.activate(first,null,'ui-first-selection');
 const project=await services.projects.save(owner,{name:'Observatory',description:'Instrument inspections and field observations across the team.',state:'active',expected_revision:0,operation_id:'ui-project'});
+const beacon=await services.projects.save(owner,{name:'Beacon',description:'A connected project mentioned by the observatory team.',state:'active',expected_revision:0,operation_id:'ui-project-beacon'});
 await services.projects.assign(owner,{space_id:'-10042',mode:'assigned',project_id:project.id,expected_revision:0,operation_id:'ui-project-assignment'});
+const entityContext=await services.entities.context(originals[4]!.reference,[beacon],'Beacon is blocked while Alex checks the telescope.');
+const entityBinding=await services.guards.state();
+await services.entities.publishDiscoveries({source:originals[4]!.reference,source_object:'ui-fixture',space:'-10042',binding:entityBinding,
+ evidence:[{reference:originals[4]!.reference,text:'Beacon is blocked while Alex checks the telescope.',space:'-10042'}],dependencies:[],observations:[],
+ rules:[],rule_ids:[],projects:[{id:project.id,name:project.name},{id:beacon.id,name:beacon.name}],entities:entityContext,limitations:[]},
+ {entity_suggestions:[{kind:'person',name:'Alex',reason:'The mention is not bound to a platform identity.',evidence_ids:[originals[4]!.reference.id]}],
+  entity_claims:[{subject_id:entityContext.mentioned_projects[0]!.id,predicate:'blocker',content:'Alex is checking the telescope, according to the participant.',
+   attribution:'reported',speaker_entity_id:entityContext.speaker!.id,uncertainty:'supported',evidence_ids:[originals[4]!.reference.id]}]},'ui-entity-learning');
 await services.sharing.save(owner,{name:'Observatory updates',sources:['123'],destination:'-10042',enabled:true,mode:'approved',instructions:'Share only the selected project status.',expected_revision:0,operation_id:'ui-approved-rule'});
 await services.sharing.save(owner,{name:'Filtered field notes',sources:['123'],destination:'-10043',enabled:true,mode:'filtered',instructions:'Only general instrument facts; omit private details.',expected_revision:0,operation_id:'ui-filter-rule'});
 for(const [index,subject,text,uncertainty,conflict] of [
@@ -70,6 +80,9 @@ const server=createServer((req,res)=>{void(async()=>{
   res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('web/dist',path.slice(8))));return;
  }
  sessions.authorize(req,req.method!=='GET');const route=path.replace(/^\/api\/nocheh/,'');
+ if(req.method==='GET'&&route==='/entities')return json(res,200,await services.entities.list(owner,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',after:url.searchParams.get('after')??'',state:url.searchParams.get('state')??'active'}));
+ const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);if(req.method==='GET'&&entityRead)return json(res,200,await services.entities.inspect(owner,entityRead[1]!));
+ const entityHistory=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/history$/);if(req.method==='GET'&&entityHistory)return json(res,200,await services.entities.history(owner,entityHistory[1]!,url.searchParams.has('before')?Number(url.searchParams.get('before')):undefined));
  if(api.owns('/v1'+route)){
   const body=req.method==='POST'?await readJson(req,8*1024*1024):undefined,result:any=await api.request(owner,req.method??'GET',new URL('/v1'+route+url.search,'http://fixture'),body);
   // Only explicit owner requests execute deterministic fixture preparation; no background scheduler or provider exists.

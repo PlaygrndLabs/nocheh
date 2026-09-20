@@ -36,6 +36,7 @@ test('complete derivative transfer retains edits and lineage while imported auth
       else if(name==='derived') {
         await db.query('GRANT UPDATE(active_revision,state) ON guard_sources TO nocheh_derived');
         await db.query('GRANT UPDATE(active_revision,imported) ON derivative_selections,learned_entries TO nocheh_derived');
+        await db.query('GRANT UPDATE(active_revision) ON entity_claims TO nocheh_derived');
       } else await db.query(`GRANT UPDATE,DELETE ON ALL TABLES IN SCHEMA ${schema} TO nocheh_control`);
     } finally {await db.end();}
   }
@@ -46,7 +47,7 @@ test('complete derivative transfer retains edits and lineage while imported auth
   const source=storageServices(stores,options('source')),restored=storageServices(target,options('target'));
   try {
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'88',revision:'1',occurred_at:null,text:'Original evidence',
-      payload:{message:{message_id:88,chat:{id:123,type:'private'},voice:{file_id:key}}}};
+      payload:{message:{message_id:88,chat:{id:123,type:'private'},from:{id:123,first_name:'Owner'},voice:{file_id:key}}}};
     const original=(await source.capture.capture(event)).source,bytes=Buffer.from([79,103,103,0,255]),file=await source.attachments.commit(original.artifact_ids[0]!,bytes);
     await source.guards.prepare(original.reference,'fixture',async()=>[]);
     await source.guards.prepare(file,'fixture',async()=>[]);
@@ -63,6 +64,12 @@ test('complete derivative transfer retains edits and lineage while imported auth
     await source.learned.publishAutomatic(entry,{kind:'meaning',subject:'blue square',text:'A contextual interpretation',scope:{kind:'conversation',id:'123'},
       uncertainty:'supported',evidence:[original.reference],conflicts:[]},null,key+':learned',[{source_id:'events:'+original.reference.id,revision:guard.revision,value_hash:digest(canonical(guard.value))}],binding,'fixture',async()=>[]);
     await source.learned.correct(owner,entry,{expected_revision:1,operation_id:key+':correction',text:'Owner interpretation',retired:false},async()=>[]);
+    const project=await source.projects.save(owner,{name:'Portable project',description:'Entity portability fixture',state:'active',expected_revision:0,operation_id:key+':project'});
+    const assignmentRevision=(await stores.control.query('SELECT revision FROM project_assignments WHERE space_id=$1',['123'])).rows[0]?.revision??0;
+    await source.projects.assign(owner,{space_id:'123',project_id:project.id,mode:'assigned',expected_revision:assignmentRevision,operation_id:key+':assign'});
+    const entityContext=await source.entities.context(original.reference,[]),entityBinding=await source.guards.state();
+    const entityClaim=await source.entities.publishClaim({subject_id:entityContext.project!.id,predicate:'commitment',content:'The owner reported a portable commitment.',
+      attribution:'reported',speaker_entity_id:entityContext.speaker!.id,uncertainty:'supported',evidence:[original.reference]},entityBinding,key+':entity-claim');
     const operation=await source.operations.record({key:key+':runtime',kind:'scheduled_trigger',scope:'123',input_hash:digest('trigger')});
     const generated=await source.derived.record({operation_id:key+':generated',source:operation,kind:'runtime_context',content:Buffer.from('Runtime content'),producer:'fixture',producer_version:'1',configuration:{}});
     await source.guards.prepare(generated,'fixture',async()=>[]);
@@ -74,12 +81,14 @@ test('complete derivative transfer retains edits and lineage while imported auth
     await target.control.query('UPDATE installation SET generation=$1',[current.generation]);await target.control.query('UPDATE guard_state SET epoch=$1,mode=$2',[current.epoch,'off']);
     await restored.sourcePortability.import(owner,await source.sourcePortability.record(owner,original.reference.id));
     await restored.attachments.commit(file.id,bytes);
-    const records:PortableRecord[]=[],keys=new Set<string>([entry,cacheId,operation.id]);
+    const records:PortableRecord[]=[],keys=new Set<string>([entry,cacheId,operation.id]),entityKeys=new Set([project.id,entityContext.project!.id,entityContext.speaker!.id,entityClaim.id]);
     for(const type of portableDerivativeTypes) {
       let after='';do {
         const page=await source.derivativePortability.page(owner,type,after,100);
         for(const record of page.records) {
-          const v=record.value,related=v.event_id===original.reference.id||v.source_id==='events:'+original.reference.id||
+          const v=record.value,entityRelated=entityKeys.has(record.key)||v.entity_id===entityContext.project!.id||v.entity_id===entityContext.speaker!.id||
+            v.subject_entity_id===entityContext.project!.id||v.claim_id===entityClaim.id||v.project_id===project.id;
+          const related=v.event_id===original.reference.id||v.source_id==='events:'+original.reference.id||entityRelated||
             (v.provenance as any)?.source?.id===operation.id||keys.has(record.key)||[v.source_id,v.selection_id,v.entry_id,v.operation_id].some(x=>typeof x==='string'&&keys.has(x));
           if(related){records.push(record);keys.add(record.key);if(typeof v.operation_id==='string')keys.add(v.operation_id);}
         }
@@ -87,6 +96,7 @@ test('complete derivative transfer retains edits and lineage while imported auth
       }while(after);
     }
     assert.ok(records.some(r=>r.type==='runtime_prepared_values'));assert.ok(records.some(r=>r.type==='learned_versions'));assert.ok(records.some(r=>r.type==='guard_revisions'&&r.value.author==='owner'));
+    assert.ok(records.some(r=>r.type==='memory_entities'));assert.ok(records.some(r=>r.type==='entity_claim_versions'));
     // File/transcript parents can be sorted after their children in export order.
     // Retry only missing-parent records after another successful insertion.
     for(const type of portableDerivativeTypes) {
@@ -103,6 +113,7 @@ test('complete derivative transfer retains edits and lineage while imported auth
     assert.equal((await target.archive.query('SELECT count(*) FROM events')).rows[0].count,'1');
     assert.equal((await target.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[generated.id])).rows[0].content.toString(),'Runtime content');
     assert.equal((await target.derived.query('SELECT imported FROM derived_artifacts WHERE id=$1',[child.id])).rows[0].imported,true);
+    assert.equal((await target.derived.query('SELECT content FROM entity_claim_versions WHERE claim_id=$1',[entityClaim.id])).rows[0].content,'The owner reported a portable commitment.');
     await assert.rejects(restored.derived.checkpoint(key+':child'),{code:'imported_result_not_execution_receipt'});
     await assert.rejects(restored.derived.record({operation_id:key+':child',source:original.reference,parents:[outputs[0]!],kind:'runtime_context',content:Buffer.from('Interpreted context'),producer:'fixture',producer_version:'1',configuration:{}}),{code:'imported_result_not_execution_receipt'});
     assert.equal((await source.derived.checkpoint(key+':child')).id,child.id,'a local checkpoint still repairs lost workflow completion');

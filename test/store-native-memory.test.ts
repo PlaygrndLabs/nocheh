@@ -38,7 +38,8 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   const insertRemote=async(id:string)=>{
     const row=(await stores.control.query('SELECT * FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
     const content=(await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[row.prepared_id])).rows[0].content.toString();
-    remote.set('/v3/workspaces/'+row.generation+'/sessions/'+id+'/messages',[{id:String(++sequence).padStart(21,'r'),content,metadata:{nocheh_receipt:id}}]);
+    remote.set('/v3/workspaces/'+row.generation+'/sessions/'+row.session_id+'/messages',[{id:String(++sequence).padStart(21,'r'),content,
+      peer_id:row.peer_id,metadata:{nocheh_receipt:id}}]);
   };
   try {
     await services.guards.reconcile();await services.guards.setMode('off');await services.guards.setMode('on');
@@ -50,6 +51,8 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     // Synthetic fixture authority only; this does not create a live acceptance report.
     await stores.control.query('UPDATE memory_engine_connection SET verified=true WHERE singleton');
     status=await services.memory.connection(owner,connect);assert.equal(status.connection.attached,true);
+    const project=await services.projects.save(owner,{name:'Atlas',description:'Connected memory fixture',state:'active',expected_revision:0,operation_id:key+':project'});
+    await services.projects.assign(owner,{space_id:group,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':project-assignment'});
     const event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:key,revision:'1',occurred_at:null,
       text:'The checkmark means done. saffronpass',payload:{message:{message_id:1,date:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:123},text:'The checkmark means done. saffronpass'}}};
     const source=(await services.capture.capture(event)).source.reference;
@@ -58,6 +61,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const ownerValue=structuredClone(sourceGuard.value) as any;ownerValue.text=ownerApproved;ownerValue.payload.message.text=ownerApproved;
     await services.guards.edit('events:'+source.id,sourceGuard.revision,ownerValue,key+':owner-source-edit');
     const queued=await services.memory.queueSource(source);assert.equal(queued.length,2);assert.deepEqual(queued.map(q=>q.audience),['owner',group]);
+    assert.deepEqual(queued.map(q=>q.receipts.length),[2,2],'speaker evidence and typed project evidence are separate receipts');
     assert.deepEqual(await services.memory.queueSource(source),queued,'duplicate queuing reuses receipts and derivatives');
     const originalCount=(await stores.archive.query('SELECT count(*) FROM events')).rows[0].count;
     const receipt=queued[0]!.receipts[0]!,groupReceipt=queued[1]!.receipts[0]!,authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='honcho'")).rows[0].epoch};
@@ -70,8 +74,11 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     await stores.control.query("UPDATE memory_ingestion_receipts SET state='uncertain' WHERE id=$1",[groupReceipt]);
     assert.equal(await services.memory.syncReceipt(groupReceipt,authority),false);assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,writes,'absence cannot authorize repeating an uncertain effect');
     await insertRemote(groupReceipt);assert.equal(await services.memory.reconcileReceipt(groupReceipt),true);
+    for(const id of [...queued[0]!.receipts.slice(1),...queued[1]!.receipts.slice(1)])assert.equal(await services.memory.syncReceipt(id,authority),true);
     for(const item of queued)assert.equal(await services.memory.observe(item.workspace),true);
     const groupWorkspace=queued[1]!.workspace;
+    const entityReceipt=(await stores.control.query("SELECT peer_id,peer_ids FROM memory_ingestion_receipts WHERE generation=$1 AND record_kind='entity_evidence'",[groupWorkspace])).rows[0];
+    assert.match(entityReceipt.peer_id,/^person_/);assert.ok(entityReceipt.peer_ids.some((peer:string)=>peer.startsWith('project_')),'the project peer observes attributed evidence');
     const input=(await services.memory.prepareRequest({workspace:groupWorkspace,route:'/v1/embeddings',payload:{model:'fixture',input:'Embedding saffronpass'}})).payload;
     assert.ok(!JSON.stringify(input).includes('saffronpass'));
     assert.equal(((await services.memory.prepareRequest({workspace:groupWorkspace,route:'/v1/embeddings',payload:{input:ownerApproved}})).payload as any).input,ownerApproved);
@@ -88,6 +95,8 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const fetched=calls.filter(c=>c.path.endsWith('/representation')).length;
     assert.equal(await services.memory.refreshContext(groupWorkspace,key+':snapshot'),true);
     assert.equal(calls.filter(c=>c.path.endsWith('/representation')).length,fetched,'completed native results survive a lost control write');
+    const recalledPeers=new Set(calls.filter(c=>c.path.endsWith('/representation')).map(c=>c.path.split('/peers/')[1]!.split('/')[0]));
+    assert.ok([...recalledPeers].some(peer=>String(peer).startsWith('person_'))&&[...recalledPeers].some(peer=>String(peer).startsWith('project_')),'cached context includes authorized person and project peers');
     const principal=await actor(source.id),context=await services.memory.context(principal);
     assert.equal(context.limited_memory,false);assert.ok(!JSON.stringify(context).includes('saffronpass'));assert.ok(JSON.stringify(context).includes('representation_has_no_exact_citations'));
     assert.ok(JSON.stringify(context).includes(ownerApproved),'native context preserves exact owner-approved guarded passages');

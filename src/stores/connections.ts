@@ -64,6 +64,7 @@ export async function initializeStoreDatabases(connection:pg.PoolConfig,password
           await client.query(`GRANT UPDATE(active_revision,state) ON guard_sources TO ${db}`);
           await client.query(`GRANT UPDATE(active_revision,imported) ON derivative_selections TO ${db}`);
           await client.query(`GRANT UPDATE(active_revision,imported) ON learned_entries TO ${db}`);
+          await client.query(`GRANT UPDATE(active_revision) ON entity_claims TO ${db}`);
         }
         else if(name==='control')await client.query(`GRANT UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO ${db}`);
         await client.query('COMMIT');

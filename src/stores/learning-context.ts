@@ -7,17 +7,19 @@ import {GuardRepository,type GuardBinding} from './guards.js';
 import {LearnedMemoryRepository,type PreparedDependency} from './learned.js';
 import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
+import {EntityRepository,type EntityContext} from './entities.js';
 
 export interface PreparedLearningContext {
   source:SourceReference;source_object:string;space:string;binding:GuardBinding;
   evidence:LearningEvidence[];dependencies:PreparedDependency[];
   observations:{source:SourceReference;value:unknown;derivatives:{kind:string;id:string;value:unknown}[]}[];
   rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];projects:{id:string;name:string}[];
+  entities:EntityContext;
   limitations:string[];
 }
 export class LearningContextRepository {
   constructor(readonly access:SourceAccessRepository,readonly guards:GuardRepository,readonly learned:LearnedMemoryRepository,
-    readonly selections:SelectionRepository,readonly projects:ProjectRepository){}
+    readonly selections:SelectionRepository,readonly projects:ProjectRepository,readonly entities:EntityRepository){}
 
   async prepare(source:SourceReference,binding:GuardBinding):Promise<PreparedLearningContext> {
     const space=await this.access.space(source);
@@ -69,6 +71,15 @@ export class LearningContextRepository {
       const duplicate=(await this.access.stores.control.query("SELECT id FROM projects WHERE id<>$1 AND name=$2 AND state='active' LIMIT 1",[project.id,project.name])).rows[0];
       if(duplicate)projects.push({id:duplicate.id,name:project.name});
     }
+    const all=(await this.access.stores.control.query("SELECT id,name,description,state,revision FROM projects WHERE state='active' ORDER BY id LIMIT 101")).rows;
+    if(all.length>100)limitations.push('project_catalog_limit');
+    const corpus=(evidence.find(item=>item.reference.id===source.id)?.text??'').toLocaleLowerCase(),mentioned=[];
+    for(const candidate of all.slice(0,100))if(candidate.id!==project?.id&&candidate.name.trim()&&corpus.includes(candidate.name.toLocaleLowerCase())) {
+      const matches=all.filter(other=>other.name.toLocaleLowerCase()===candidate.name.toLocaleLowerCase());
+      if(matches.length===1){projects.push({id:candidate.id,name:candidate.name});mentioned.push(candidate);}
+      else limitations.push('ambiguous_project_reference');
+    }
+    const entities=await this.entities.context(source,mentioned,corpus);
     const candidates=(await this.access.stores.derived.query(`SELECT id FROM learned_entries WHERE active_revision IS NOT NULL AND
       ((scope_kind='conversation' AND scope_id=$1) OR (scope_kind='project' AND scope_id=$2)) ORDER BY id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
     if(candidates.length>100)throw new HttpError(409,'learning_rule_limit');
@@ -85,6 +96,6 @@ export class LearningContextRepository {
     }
     await this.guards.assertCurrent(binding);
     return {source,source_object:observed.object_id,space,binding,evidence,dependencies,observations,
-      rules:applicableInterpretations(versions),rule_ids:versions.map(v=>v.id),projects,limitations:[...new Set(limitations)]};
+      rules:applicableInterpretations(versions),rule_ids:versions.map(v=>v.id),projects,entities,limitations:[...new Set(limitations)]};
   }
 }
