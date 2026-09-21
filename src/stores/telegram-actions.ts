@@ -113,6 +113,33 @@ export class TelegramActionRepository {
       await db.query('COMMIT');return {id,state:row.state,fingerprint,message:'Owner approval is required for this exact message and destination.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
+  /** Stage an exact message from a trusted owner-policy workflow. The caller
+   * supplies the durable source and audience; the normal guard, security,
+   * delivery authorization, workflow, and receipt path still applies. */
+  async approvedSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string) {
+    if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
+    if(!/^-?[1-9]\d{0,18}$/.test(destination)||!text.trim()||text.length>3500)throw new HttpError(400,'invalid_action');
+    await this.guards.assertCurrent(binding);await this.access.archive.verify(source);
+    const id=digest(canonical(['nocheh-trusted-telegram-v1',key,source,binding,destination,text]));
+    const proposal=await this.derived.record({operation_id:'telegram-system-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
+      producer:'nocheh',producer_version:protocol,configuration:{destination,binding,key},provenance:{purpose:'exact_owner_approval',trusted_workflow:key}});
+    await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
+    const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,3500);
+    if(!preparedText.trim())throw new HttpError(400,'invalid_action');
+    const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
+    try {
+      await db.query('BEGIN');await this.fence(db,binding);
+      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,state,authority)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved','exact_owner_approval') ON CONFLICT DO NOTHING`,
+        [id,source,proposal,binding,principal.scope,principal.space,principal.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
+      const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
+      const effect=this.effect(row),decision=await evaluate(db,effect,row.authority,true);
+      if(decision.outcome!=='allow')throw new HttpError(403,'action_delivery_denied');
+      await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
+      await db.query('COMMIT');return {id,state:row.state,fingerprint};
+    } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
   async inspect(principal:Reader,id:string) {
     const row=await this.row(id);
     if(!principal.admin) {
@@ -135,7 +162,7 @@ export class TelegramActionRepository {
       digest(canonical({destination:body.destination,text:body.text}))!==row.fingerprint)
       throw new HttpError(403,'action_delivery_denied');
     await this.text(row);
-    if((await evaluate(this.stores.control,this.effect(row),'exact_owner_approval')).outcome!=='allow')
+    if((await evaluate(this.stores.control,this.effect(row),row.authority??'exact_owner_approval')).outcome!=='allow')
       throw new HttpError(403,'action_delivery_denied');
     await this.guards.assertCurrent(row.binding);return {valid:true};
   }
@@ -203,7 +230,7 @@ export class TelegramActionRepository {
         }
         await db.query('BEGIN');
         try {
-          await this.fence(db,row.binding);decision=await evaluate(db,effect,'exact_owner_approval',true);
+          await this.fence(db,row.binding);decision=await evaluate(db,effect,row.authority??'exact_owner_approval',true);
           if(decision.outcome!=='allow') {
             await recordEffect(db,effect,'blocked',decision,row.source_reference);await db.query("UPDATE telegram_action_requests SET state='rejected',security_decision=$2,revision=revision+1,updated_at=now() WHERE id=$1",[id,decision]);
             await db.query('COMMIT');return observation('denied','action');
