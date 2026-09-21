@@ -15,6 +15,7 @@ type SetupSnapshot={format:'nocheh-reset-configuration-v1';layout:'original-only
   projects:{id:string;name:string;description:string;state:'active'|'archived'}[];
   project_assignments:{space_id:string;project_id:string|null;mode:'assigned'|'none'|'inherit'}[];
   sharing_rules:{id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string}[];
+  memory_access_settings:{destination:string;suggestions:'related'|'off'|null;notify_owner:boolean|null;auto_followup:boolean|null;request_ttl_seconds:number|null;default_grant_mode:'one_time'|'persistent'|null}[];
   runtime_profiles:{id:string;name:string;owner_id:string}[];
 }};
 type ProfileCommand={id:string;name:string;state:'active';expected_revision:0;operation_id:string};
@@ -46,7 +47,7 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
   const snapshot=exact(input,['format','layout','configuration']);
   if(snapshot.format!=='nocheh-reset-configuration-v1'||snapshot.layout!=='original-only-v1')throw Error('reset_setup_snapshot_invalid');
   const c=exact(snapshot.configuration,['security_policy','installation_generation','guard_mode','runtime_configuration',
-    'projects','project_assignments','sharing_rules','runtime_profiles']);
+    'projects','project_assignments','sharing_rules','memory_access_settings','runtime_profiles']);
   for(const value of Object.values(c))if(!Array.isArray(value)||value.length>10000)throw Error('reset_setup_snapshot_invalid');
   if((c.security_policy as unknown[]).length!==1||(c.installation_generation as unknown[]).length!==1||
     (c.guard_mode as unknown[]).length!==1||(c.runtime_configuration as unknown[]).length!==1)throw Error('reset_setup_snapshot_invalid');
@@ -68,6 +69,12 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
     if(rules.has(id)||typeof row.name!=='string'||Buffer.byteLength(row.name)>200||typeof row.instructions!=='string'||Buffer.byteLength(row.instructions)>4000||
       typeof row.enabled!=='boolean'||!['approved','filtered'].includes(String(row.mode))||!Array.isArray(row.sources)||row.sources.length>100)throw Error('reset_setup_snapshot_invalid');
     const sources=row.sources.map(validateSpace);if(sources.join('\0')!==[...new Set(sources)].sort().join('\0')||sources.includes(validateSpace(row.destination))||row.enabled&&!sources.length)throw Error('reset_setup_snapshot_invalid');rules.add(id);}
+  const destinations=new Set<string>();for(const item of c.memory_access_settings as unknown[]) {const row=exact(item,['destination','suggestions','notify_owner','auto_followup','request_ttl_seconds','default_grant_mode']);
+    const destination=row.destination==='*'?'*':validateSpace(row.destination);if(destinations.has(destination)||row.suggestions!==null&&!['related','off'].includes(String(row.suggestions))||
+      row.notify_owner!==null&&typeof row.notify_owner!=='boolean'||row.auto_followup!==null&&typeof row.auto_followup!=='boolean'||
+      row.request_ttl_seconds!==null&&(!Number.isSafeInteger(row.request_ttl_seconds)||Number(row.request_ttl_seconds)<60||Number(row.request_ttl_seconds)>2592000)||
+      row.default_grant_mode!==null&&!['one_time','persistent'].includes(String(row.default_grant_mode))||destination==='*'&&Object.values(row).some(value=>value===null))throw Error('reset_setup_snapshot_invalid');destinations.add(destination);}
+  if(!destinations.has('*'))throw Error('reset_setup_snapshot_invalid');
   const profiles=new Set<string>(),names=new Set<string>();
   for(const item of c.runtime_profiles as unknown[]) {const row=exact(item,['id','name','owner_id']),id=identifier(row.id,PROFILE),name=text(row.name,64);
     if(row.owner_id!==owner||profiles.has(id)||names.has(name))throw Error('reset_setup_snapshot_invalid');profiles.add(id);names.add(name);}
@@ -85,7 +92,8 @@ function profileCommands(input:unknown,snapshot:SetupSnapshot):ProfileCommand[] 
 async function setupRows(control:pg.Pool|pg.PoolClient) {
   const queries={projects:'SELECT id,name,description,state FROM projects ORDER BY id',
     project_assignments:'SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id',
-    sharing_rules:'SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules ORDER BY id'};
+    sharing_rules:'SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules ORDER BY id',
+    memory_access_settings:'SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination'};
   const result:Record<string,unknown[]>={};for(const [key,sql] of Object.entries(queries))result[key]=(await control.query(sql)).rows;return result;
 }
 
@@ -120,11 +128,16 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     if(!same(savedPolicy.document,desired)) {if(Number(savedPolicy.revision)!==1)throw Error('reset_setup_target_changed');
       const revision=(await db.query("INSERT INTO security_policy_versions(document,actor) VALUES($1,'reset') RETURNING revision",[JSON.stringify(desired)])).rows[0].revision;
       await db.query('UPDATE security_policy SET revision=$1',[revision]);}
-    for(const [name,rows] of Object.entries(current))if((rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
+    const defaultAccess=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}];
+    if(!same(current.memory_access_settings,defaultAccess)&&!same(current.memory_access_settings,configuration.memory_access_settings))throw Error('reset_setup_target_changed');
+    for(const [name,rows] of Object.entries(current))if(name!=='memory_access_settings'&&(rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
     for(const row of configuration.projects)await db.query('INSERT INTO projects(id,name,description,state,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',[row.id,row.name,row.description,row.state]);
     for(const row of configuration.project_assignments)await db.query('INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,1) ON CONFLICT DO NOTHING',[row.space_id,row.project_id,row.mode]);
     for(const row of configuration.sharing_rules)await db.query('INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,$2,$3,$4,$5,$6,$7,1) ON CONFLICT DO NOTHING',
       [row.id,row.name,JSON.stringify(row.sources),row.destination,row.enabled,row.mode,row.instructions]);
+    for(const row of configuration.memory_access_settings)await db.query(`INSERT INTO memory_access_settings(destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode,revision)
+      VALUES($1,$2,$3,$4,$5,$6,1) ON CONFLICT(destination) DO UPDATE SET suggestions=$2,notify_owner=$3,auto_followup=$4,request_ttl_seconds=$5,default_grant_mode=$6,revision=1,updated_at=now()`,
+      [row.destination,row.suggestions,row.notify_owner,row.auto_followup,row.request_ttl_seconds,row.default_grant_mode]);
     const updated=await setupRows(db);for(const name of Object.keys(updated))if(!same(updated[name],(configuration as any)[name]))throw Error('reset_setup_target_changed');
     await db.query('COMMIT');
   } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
@@ -133,9 +146,9 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
   const admitted=[];for(const command of commands)admitted.push(await profiles.save(owner,command));
   const restored=await setupRows(stores.control),runtimeProfiles=(await stores.control.query('SELECT id,name,owner_id FROM runtime_profiles WHERE state=\'active\' ORDER BY id')).rows;
   if(!same(restored.projects,configuration.projects)||!same(restored.project_assignments,configuration.project_assignments)||
-    !same(restored.sharing_rules,configuration.sharing_rules)||!same(runtimeProfiles,configuration.runtime_profiles))throw Error('reset_setup_verification_failed');
+    !same(restored.sharing_rules,configuration.sharing_rules)||!same(restored.memory_access_settings,configuration.memory_access_settings)||!same(runtimeProfiles,configuration.runtime_profiles))throw Error('reset_setup_verification_failed');
   const binding=await guards.state();if(binding.generation!==generation||binding.mode!==configuration.guard_mode[0]!.mode)throw Error('reset_setup_verification_failed');
   return {reset_id:resetId,generation,binding,configuration_records:Object.values(configuration).reduce((count,rows)=>count+rows.length,0),
-    projects:configuration.projects.length,assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,
+    projects:configuration.projects.length,assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,memory_access_settings:configuration.memory_access_settings.length,
     profiles:admitted,source_content_copied:false,history_copied:false};
 }

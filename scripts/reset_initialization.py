@@ -305,7 +305,7 @@ def _setup_result(raw, request):
     except (IndexError, json.JSONDecodeError):
         raise RuntimeError('reset_initialization_setup_failed') from None
     required = {'event', 'generation', 'binding', 'configuration_records', 'projects',
-                'assignments', 'sharing_rules', 'profiles', 'source_content_copied', 'history_copied'}
+                'assignments', 'sharing_rules', 'memory_access_settings', 'profiles', 'source_content_copied', 'history_copied'}
     if (not isinstance(value, dict) or set(value) != required or value['event'] != 'reset_setup_restored' or
             value['generation'] != request['generation'] or not isinstance(value['binding'], dict) or
             value['binding'].get('generation') != request['generation'] or
