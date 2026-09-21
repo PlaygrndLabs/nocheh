@@ -34,6 +34,7 @@ test('reset setup restores only current configuration under a new generation and
     projects:[{id:'a'.repeat(64),name:'Saved project',description:'Configuration only',state:'archived'}],
     project_assignments:[{space_id:'-1001',project_id:'a'.repeat(64),mode:'assigned'}],
     sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:'-1002',enabled:true,mode:'approved',instructions:'Share only approved text'}],
+    memory_access_settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}],
     runtime_profiles:[{id:profile,name:'research',owner_id:'123'}]}} as const;
   const input={snapshot,generation:'22222222-2222-4222-8222-222222222222',reset_id:'44444444-4444-4444-8444-444444444444',
     profile_commands:[{id:profile,name:'research',state:'active',expected_revision:0,operation_id:'restore-preferences:'+profile}]};
@@ -44,7 +45,7 @@ test('reset setup restores only current configuration under a new generation and
     await assert.rejects(restoreResetSetup(stores,{...input,profile_commands:[{...input.profile_commands[0],operation_id:'forged'}]}),/profiles_invalid/);
     const first=await restoreResetSetup(stores,input),again=await restoreResetSetup(stores,input);
     assert.deepEqual(again,first);assert.equal(first.generation,input.generation);assert.equal(first.binding.generation,input.generation);
-    assert.equal(first.binding.mode,'off');assert.equal(first.binding.epoch,2);assert.equal(first.configuration_records,8);
+    assert.equal(first.binding.mode,'off');assert.equal(first.binding.epoch,2);assert.equal(first.configuration_records,9);
     assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events')).rows[0].count,0);
     assert.equal((await stores.derived.query('SELECT count(*)::int AS count FROM derived_artifacts')).rows[0].count,0);
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM owner_commands')).rows[0].count,1);

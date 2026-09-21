@@ -20,7 +20,8 @@ Group turns first answer from their existing authorized context. A separate trus
 review path may inspect owner-authorized facts reached through bounded confirmed or
 evidence-backed relationships and create a private request afterward. The dashboard
 contains exact content and provenance; Telegram receives only a content-free owner
-notification. Rejection closes only the current request.
+notification with a link to that authenticated dashboard. Rejection closes only
+the current request.
 
 Owner approval creates either a request-bound one-time grant or a persistent grant.
 One-time access is consumed only by confirmed delivery. Persistent access lasts

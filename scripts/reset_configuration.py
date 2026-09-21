@@ -33,6 +33,8 @@ ORIGINAL = {
     'project_assignments': ('SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id', ('space_id', 'project_id', 'mode')),
     'sharing_rules': ('SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules ORDER BY id',
                       ('id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions')),
+    'memory_access_settings': ('SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination',
+                               ('destination', 'suggestions', 'notify_owner', 'auto_followup', 'request_ttl_seconds', 'default_grant_mode')),
     'runtime_profiles': ("SELECT id,name,owner_id FROM runtime_profiles WHERE state='active' ORDER BY id", ('id', 'name', 'owner_id')),
 }
 
@@ -168,6 +170,9 @@ def original_only(snapshot_value, values, preferences, reset_id):
         'runtime_configuration': [{'name': 'assistant', 'document': assistant}],
         'projects': [], 'project_assignments': [],
         'sharing_rules': _legacy_rules(source['configuration']['memory_spaces']),
+        'memory_access_settings': [{'destination': '*', 'suggestions': 'related', 'notify_owner': True,
+                                    'auto_followup': True, 'request_ttl_seconds': 86400,
+                                    'default_grant_mode': 'one_time'}],
         'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id'])}}
     return validate(converted)
 
