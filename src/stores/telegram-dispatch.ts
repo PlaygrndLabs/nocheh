@@ -16,6 +16,7 @@ import type {PreparationRepository} from './preparation.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
+import type {MemoryAccessRepository} from './memory-access.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -50,7 +51,7 @@ export class TelegramDispatchRepository {
   constructor(readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,readonly sources:SourceRepository,
     readonly derived:DerivedRepository,readonly guards:GuardRepository,readonly preparation:PreparationRepository,
     readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:ActionCommandRepository,
-    readonly call:RuntimeCall,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
+    readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
   private get control(){return this.access.stores.control;}
   private observation(row:any):Observation {
     const states:Record<string,Observation['state']>={pending:'waiting',running:'running',done:'completed',failed:'failed',ambiguous:'ambiguous',suppressed:'skipped',cancelled:'cancelled'};
@@ -69,6 +70,9 @@ export class TelegramDispatchRepository {
   private async finish(row:any,result:{state:string;error_code?:string},reference:DerivativeReference) {
     await this.control.query(`UPDATE dispatches SET state=$2,result_reference=$3,error_code=$4,runtime_stage=$5,
       revision=revision+1,updated_at=now() WHERE event_id=$1`,[row.event_id,result.state,reference,result.error_code??null,result.state==='done'?'delivery':'assistant']);
+    if(result.state==='done'&&row.input_reference)try {const input=await this.input(row.input_reference);
+      if(input.principal.scope!==null)await this.memoryAccess.suggest(input.principal,String(input.body.text??''));
+    } catch {/* Suggestions are a separate best-effort workflow and never affect the delivered reply. */}
     return this.observation(await this.row(row.event_id));
   }
   private async receive(row:any,result:Record<string,unknown>) {

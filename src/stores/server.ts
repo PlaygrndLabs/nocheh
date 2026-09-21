@@ -206,7 +206,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
       const body=object(await readJson(req));return result(path.endsWith('/context')?await s.memory.context(principal):await s.memory.recall(principal,string(body.query??'',2000)),true);
     }
-    if(path==='/v1/memory/context'&&req.method==='GET')return result(await s.shared.context(principal,url.searchParams.get('q')??''),true);
+    if(path==='/v1/memory/context'&&req.method==='GET') {
+      const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
+      return result({...existing,sources:[...existing.sources,...granted.sources]},true);
+    }
     const shared=path.match(/^\/v1\/memory\/(?:shared|filtered)\/([a-f0-9]{64})$/);
     if(shared&&req.method==='GET')return result(await s.shared.read(principal,shared[1]!),true);
     if(path==='/v1/memory/recall'&&req.method==='POST') {
