@@ -58,6 +58,10 @@ test('people and projects keep stable identity, attributed evidence, connected r
     await assert.rejects(entities.inspect(privateReader,context.mentioned_projects[0]!.id),{code:'entity_not_found'});
     assert.equal((await entities.list(privateReader,{query:'Beacon'})).entities.length,0,'private entity names do not leak through search');
 
+    const renamed=await entities.rename(owner,sam!.id,{name:'Alex Morgan',expected_revision:sam!.revision,operation_id:`${stamp}:rename`});
+    assert.equal(renamed.name,'Alex Morgan');assert.equal((await stores.control.query('SELECT name FROM memory_entities WHERE id=$1',[sam!.id])).rows[0].name,'Alex Morgan');
+    await assert.rejects(entities.rename(owner,sam!.id,{name:'Stale name',expected_revision:sam!.revision,operation_id:`${stamp}:stale-rename`}),{code:'entity_revision_conflict'});
+
     await entities.merge(owner,otherAlex!.id,{target_id:sam!.id,expected_revision:otherAlex!.revision,operation_id:`${stamp}:merge`});
     assert.equal((await stores.control.query('SELECT entity_id FROM memory_entity_bindings WHERE source_object_id IS NOT NULL AND entity_id=$1',[sam!.id])).rowCount,2);
     await entities.unmerge(owner,otherAlex!.id,{expected_revision:otherAlex!.revision+1,operation_id:`${stamp}:unmerge`});
