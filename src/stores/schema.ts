@@ -24,6 +24,7 @@ import {storageWorkflowOwnerSchema} from './workflow-owner.js';
 import {controlledActionSchema} from './controlled-action-schema.js';
 import {storageImportSchema} from './imports.js';
 import {importWorkflowSchema} from '../workflows/imports.js';
+import {memoryAccessSchema} from './memory-access-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -129,6 +130,7 @@ ${scheduleStorageSchema}
 ${securityCoreSchema}
 ${nativeReviewSchema}
 ${sharingContentSchema}
+${memoryAccessSchema}
 CREATE TABLE IF NOT EXISTS attachment_retrievals (
  artifact_id text PRIMARY KEY,event_id text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
