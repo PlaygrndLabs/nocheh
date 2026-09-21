@@ -20,8 +20,10 @@ const ID=/^[a-f0-9]{64}$/;
 const identity=(value:unknown)=>{const id=string(value,64);if(!ID.test(id))throw new HttpError(400,'invalid_memory_access_identity');return id;};
 const exact=(value:unknown,keys:string[])=>{const row=object(value);if(Object.keys(row).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_memory_access_field');return row;};
 const revision=(value:unknown)=>{if(!Number.isSafeInteger(value)||Number(value)<1)throw new HttpError(400,'invalid_revision');return Number(value);};
-const tokens=(value:string)=>new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu)??[]);
-const relevant=(query:string,text:string)=>{const wanted=tokens(query),available=tokens(text);if(!wanted.size)return false;let hits=0;for(const word of wanted)if(available.has(word))hits++;return hits>=Math.min(2,wanted.size);};
+const STOP_WORDS=new Set(['about','after','before','could','does','from','have','into','only','should','that','their','there','these','they','this','what','when','where','which','with','would']);
+const tokens=(value:string)=>new Set((value.toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu)??[]).filter(word=>!STOP_WORDS.has(word)));
+const relevant=(query:string,text:string)=>{const wanted=tokens(query),available=tokens(text);if(wanted.size<2)return false;let hits=0;for(const word of wanted)if(available.has(word))hits++;
+  return hits>=Math.max(2,Math.ceil(Math.min(wanted.size,6)/2));};
 
 type Settings={suggestions:'related'|'off';notify_owner:boolean;auto_followup:boolean;request_ttl_seconds:number;default_grant_mode:'one_time'|'persistent'};
 type Fact={id:string;subject_entity_id:string;predicate:string;object_entity_id:string|null;active_revision:number;revision:number;content:string;
@@ -39,6 +41,11 @@ export class MemoryAccessRepository {
     const row=(await this.stores.derived.query(`SELECT e.*,v.revision,v.content,v.relationship_kind,v.attribution,v.uncertainty,v.retired,v.evidence,v.input_binding
       FROM entity_claims e JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[identity(id)])).rows[0];
     if(!row||row.retired)throw new HttpError(404,'memory_fact_not_found');return row;
+  }
+  private async artifacts(rows:any[],field:'proposal_reference'|'representation_reference') {
+    const ids=[...new Set(rows.map(row=>row[field]?.id).filter(Boolean))];if(!ids.length)return new Map<string,any>();
+    const artifacts=(await this.stores.derived.query('SELECT id,content,provenance FROM derived_artifacts WHERE id=ANY($1::text[])',[ids])).rows;
+    return new Map(artifacts.map(row=>[row.id,row]));
   }
   private async effective(destination:string):Promise<{global:Settings;override:Partial<Settings>|null;effective:Settings;revision:number}> {
     validateSpace(destination);const rows=(await this.stores.control.query("SELECT * FROM memory_access_settings WHERE destination IN ('*',$1)",[destination])).rows;
@@ -120,16 +127,21 @@ export class MemoryAccessRepository {
     const row=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id=$1',[id])).rows[0];
     if(setting.notify_owner&&!row.notification_action_id) {
       const owner=this.access.policy().owner_id;if(owner)try {const action=await this.actions.approvedSystem({...principal,logical_profile:logical},source,binding,owner,
-        `A memory access suggestion needs review. Open Nocheh → Memory map · request ${id}.`,'memory-access-notification:'+id);
+        `A memory access suggestion needs review: ${this.dashboardLink(id)}`,'memory-access-notification:'+id);
         await this.stores.control.query('UPDATE memory_access_requests SET notification_action_id=$2,updated_at=now() WHERE id=$1 AND notification_action_id IS NULL',[id,action.id]);} catch {/* The request remains durable and visible in the dashboard. */}
     }
     return {id};
   }
+  private dashboardLink(requestId:string) {
+    const configured=process.env.NOCHEH_DASHBOARD_URL?.trim();let base='http://localhost:'+(process.env.NOCHEH_DASHBOARD_PORT??'8783');
+    if(configured)try {if(['http:','https:'].includes(new URL(configured).protocol))base=configured;}catch{/* Keep the safe local dashboard route. */}
+    return base.replace(/\/$/,'')+'/#memoryMap?request='+encodeURIComponent(requestId);
+  }
   async list(principal:Reader,after='') {admin(principal);if(after)identity(after);await this.reconcile();const rows=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
-    const requests=[];for(const row of rows.slice(0,100)){const artifact=(await this.stores.derived.query('SELECT content,provenance FROM derived_artifacts WHERE id=$1',[row.proposal_reference.id])).rows[0];requests.push({...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null});}
+    const page=rows.slice(0,100),artifacts=await this.artifacts(page,'proposal_reference'),requests=page.map(row=>{const artifact=artifacts.get(row.proposal_reference.id);return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null};});
     return {requests,next:rows.length>100?rows[99].id:null};}
   async grants(principal:Reader,after='') {admin(principal);if(after)identity(after);await this.reconcile();const rows=(await this.stores.control.query('SELECT * FROM memory_fact_grants WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
-    const grants=[];for(const row of rows.slice(0,100)){const artifact=(await this.stores.derived.query('SELECT content,provenance FROM derived_artifacts WHERE id=$1',[row.representation_reference.id])).rows[0];grants.push({...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null});}
+    const page=rows.slice(0,100),artifacts=await this.artifacts(page,'representation_reference'),grants=page.map(row=>{const artifact=artifacts.get(row.representation_reference.id);return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null};});
     return {grants,next:rows.length>100?rows[99].id:null};}
   async decide(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['decision','wording','expected_revision','operation_id']),decision=String(body.decision);
@@ -146,8 +158,9 @@ export class MemoryAccessRepository {
       await db.query("UPDATE memory_access_requests SET state='rejected',decision='reject',revision=revision+1,updated_at=now() WHERE id=$1",[requestId]);
       await db.query("INSERT INTO memory_access_decisions(operation_id,request_hash,request_id,decision,revision) VALUES($1,$2,$3,'reject',$4)",[operation,hash,requestId,expected+1]);
       await db.query('COMMIT');return {id:requestId,state:'rejected',revision:expected+1};}catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}}
-    const fact=await this.fact(request.fact_id);if(fact.revision!==request.fact_revision)throw new HttpError(409,'memory_fact_changed');
-    const binding=await this.guards.state();if(canonical(binding)!==canonical(request.binding))throw new HttpError(409,'memory_access_context_changed');
+    const fact=await this.fact(request.fact_id).catch(async()=>{await this.suspendRequest(requestId,expected);throw new HttpError(409,'memory_fact_changed');});
+    if(fact.revision!==request.fact_revision){await this.suspendRequest(requestId,expected);throw new HttpError(409,'memory_fact_changed');}
+    const binding=await this.guards.state();if(canonical(binding)!==canonical(request.binding)){await this.suspendRequest(requestId,expected);throw new HttpError(409,'memory_access_context_changed');}
     const wording=body.wording===undefined?fact.content:string(body.wording,12000),representation=await this.representation(fact,wording,binding,operation);
     const grantId=digest(canonical([protocol,'grant',operation,requestId,decision,representation.hash])),db=await this.stores.control.connect();
     try {await db.query('BEGIN');await this.fence(db,binding,fact);const current=(await db.query('SELECT * FROM memory_access_requests WHERE id=$1 FOR UPDATE',[requestId])).rows[0];
@@ -196,6 +209,7 @@ export class MemoryAccessRepository {
     }catch(error){if(!(error instanceof HttpError))throw error;await this.suspend(row.id,'guarded_representation_changed');return null;}
   }
   private async suspend(id:string,reason:string){await this.stores.control.query("UPDATE memory_fact_grants SET state='suspended',suspended_reason=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='active'",[id,reason]);}
+  private async suspendRequest(id:string,expected:number){await this.stores.control.query("UPDATE memory_access_requests SET state='suspended',revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2 AND state='pending'",[id,expected]);}
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);await this.reconcile();
     const binding=await this.prepared.audience.assert(principal),rows=(await this.stores.control.query(`SELECT * FROM memory_fact_grants
