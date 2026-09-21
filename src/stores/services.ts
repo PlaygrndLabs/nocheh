@@ -42,6 +42,8 @@ import {ScheduledRunRepository} from './scheduled-runs.js';
 import {ScheduleRepository} from './schedules.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {EntityRepository} from './entities.js';
+import {MemoryAccessRepository} from './memory-access.js';
+import {MemoryMapRepository} from './memory-map.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -69,6 +71,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const turns=new RuntimeTurnRepository(access,prepared);
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
+  const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
+  const memoryMap=new MemoryMapRepository(stores,memoryAccess);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions);
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
@@ -81,8 +85,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.runtime,schedules,telegramActions),
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime,browserDelivery),
-    controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),
-    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,options.runtime,options.serviceToken??'',detect),
+    controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),memoryAccess,memoryMap,
+    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
