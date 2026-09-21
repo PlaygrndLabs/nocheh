@@ -76,6 +76,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
     security_policy:1,security_policy_versions:[1,2],runtime_configuration:1,runtime_configuration_versions:1,
     workflow_owners:families.length,projects:configuration.projects.length,
     project_assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,
+    memory_access_settings:configuration.memory_access_settings.length,
     runtime_profiles:profileCount,owner_commands:profileCount,workflow_registry:profileCount*2,workflow_outbox:profileCount*2});
   const installed=(await stores.control.query('SELECT generation::text AS generation FROM installation WHERE singleton')).rows;
   if(!same(installed,[{generation}]))throw Error('reset_baseline_generation_changed');
@@ -100,6 +101,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
     projects:(await stores.control.query('SELECT id,name,description,state FROM projects ORDER BY id')).rows,
     project_assignments:(await stores.control.query('SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id')).rows,
     sharing_rules:(await stores.control.query('SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules ORDER BY id')).rows,
+    memory_access_settings:(await stores.control.query('SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination')).rows,
     runtime_profiles:(await stores.control.query("SELECT id,name,owner_id FROM runtime_profiles WHERE state='active' ORDER BY id")).rows};
   for(const [name,rows] of Object.entries(setupRows))if(!same(rows,(configuration as any)[name]))throw Error('reset_baseline_setup_changed');
   const commands=request.profile_commands as any[];

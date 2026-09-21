@@ -26,7 +26,7 @@ export async function main(argv=process.argv.slice(2)) {
     const result=await restoreResetSetup(stores,value);
     console.log(JSON.stringify({event:'reset_setup_restored',generation:result.generation,binding:result.binding,
       configuration_records:result.configuration_records,projects:result.projects,assignments:result.assignments,
-      sharing_rules:result.sharing_rules,profiles:result.profiles.length,source_content_copied:false,history_copied:false}));
+      sharing_rules:result.sharing_rules,memory_access_settings:result.memory_access_settings,profiles:result.profiles.length,source_content_copied:false,history_copied:false}));
   } finally {await stores.close();}
 }
 

@@ -27,6 +27,8 @@ x-service: &service
     TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
     TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
     TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
+    NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
+    NOCHEH_DASHBOARD_URL: ${NOCHEH_DASHBOARD_URL:-}
   volumes:
     - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files
     - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
