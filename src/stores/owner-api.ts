@@ -8,7 +8,7 @@ import {portableDerivativeTypes} from './derivative-portability.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|correct))?)?|projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|correct))?)?|projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -20,6 +20,14 @@ export class OwnerStorageApi {
     if(!this.owns(path))throw new HttpError(404,'not_found');
     if(!['GET','POST'].includes(method))throw new HttpError(405,'method_not_allowed');
     if(path==='/v1/imports/legacy'&&method==='POST')return s.legacyImports.record(principal,input,q.get('restore_guarded')==='true');
+    if(path==='/v1/memory-map'&&method==='GET')return s.memoryMap.read(principal,{after:q.get('after')??'',limit:limit(q.get('limit'),100,250),focus:q.get('focus')??'',query:q.get('q')??'',kind:q.get('kind')??'',state:q.get('state')??''});
+    if(path==='/v1/memory-access/settings')return method==='GET'?(q.has('destination')?s.memoryAccess.settings(principal,q.get('destination')!):s.memoryAccess.settings(principal)):s.memoryAccess.saveSettings(principal,input);
+    if(path==='/v1/memory-access/requests'&&method==='GET')return s.memoryAccess.list(principal,q.get('after')??'');
+    const accessRequest=path.match(/^\/v1\/memory-access\/requests\/([a-f0-9]{64})\/decide$/);
+    if(accessRequest&&method==='POST')return s.memoryAccess.decide(principal,accessRequest[1]!,input);
+    if(path==='/v1/memory-access/grants')return method==='GET'?s.memoryAccess.grants(principal,q.get('after')??''):s.memoryAccess.grant(principal,input);
+    const factGrant=path.match(/^\/v1\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/);
+    if(factGrant&&method==='POST')return s.memoryAccess.revoke(principal,factGrant[1]!,input);
     const legacyFile=path.match(/^\/v1\/imports\/legacy\/files\/([a-f0-9]{64})\/bytes$/);
     if(legacyFile&&method==='POST')return s.legacyImports.upload(principal,legacyFile[1]!,input);
     const legacy=path.match(/^\/v1\/imports\/legacy\/([a-f0-9]{64})$/);
