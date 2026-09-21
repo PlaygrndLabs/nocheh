@@ -72,3 +72,4 @@ and governs subsequent agent work without changing those product decisions.
 | [0055](0055-concise-core-service-names.md) | `hermes`, `hermes-agent-sb`, and `nocheh-db` service identities | Owner-requested; implementation and activation tracked in TASK.md |
 | [0056](0056-connected-entity-memory.md) | Stable people/project peers, attributed entity evidence, and authorized connected recall | Owner-requested; implementation and activation tracked in TASK.md |
 | [0057](0057-memory-relationship-access-map.md) | Human relationship map with fact-level conversation access and private suggestions | Owner-requested; implementation and activation tracked in TASK.md |
+| [0058](0058-semantic-react-flow-memory-map-editing.md) | React Flow canvas with semantic, revision-checked node and edge editing | Owner-requested; implementation and acceptance tracked in TASK.md |

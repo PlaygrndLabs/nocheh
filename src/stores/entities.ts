@@ -156,6 +156,17 @@ export class EntityRepository {
       return {id:source,state:'merged',merged_into:target,revision:expected+1};
     });
   }
+  async rename(principal:Reader,id:string,input:unknown) {
+    admin(principal);const body=exact(input,['name','expected_revision','operation_id']),target=entityId(id),expected=revision(body.expected_revision),name=string(body.name,200).trim();
+    if(!name)throw new HttpError(400,'invalid_entity_name');
+    return this.commands.run(principal,string(body.operation_id,200),{kind:'entity_rename',target,expected,name},async db=>{
+      const row=(await db.query('SELECT * FROM memory_entities WHERE id=$1 FOR UPDATE',[target])).rows[0];
+      if(!row)throw new HttpError(404,'entity_not_found');if(row.revision!==expected)throw new HttpError(409,'entity_revision_conflict');
+      if(row.kind!=='person'||row.state!=='active')throw new HttpError(409,'entity_rename_invalid');
+      await db.query('UPDATE memory_entities SET name=$2,revision=revision+1,updated_at=now() WHERE id=$1',[target,name]);
+      return {id:target,name,revision:expected+1};
+    });
+  }
   async unmerge(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['expected_revision','operation_id']),source=entityId(id),expected=revision(body.expected_revision);
     return this.commands.run(principal,string(body.operation_id,200),{kind:'entity_unmerge',source,expected},async db=>{
@@ -233,7 +244,7 @@ export class EntityRepository {
     return {published,suggestions};
   }
   async correct(principal:Reader,id:string,input:unknown) {
-    admin(principal);const body=exact(input,['content','attribution','uncertainty','retired','expected_revision','operation_id']),claim=entityId(id),expected=revision(body.expected_revision);
+    admin(principal);const body=exact(input,['content','relationship_kind','attribution','uncertainty','retired','expected_revision','operation_id']),claim=entityId(id),expected=revision(body.expected_revision);
     const attribution=String(body.attribution),uncertainty=String(body.uncertainty);
     if(!['direct','reported','inferred'].includes(attribution)||!['uncertain','supported','explicit'].includes(uncertainty)||typeof body.retired!=='boolean')
       throw new HttpError(400,'invalid_entity_correction');
@@ -245,9 +256,12 @@ export class EntityRepository {
         const entry=(await db.query('SELECT * FROM entity_claims WHERE id=$1 FOR UPDATE',[claim])).rows[0];
         if(!entry)throw new HttpError(404,'entity_claim_not_found');if(entry.active_revision!==expected)throw new HttpError(409,'entity_claim_revision_conflict');
         const prior=(await db.query('SELECT * FROM entity_claim_versions WHERE claim_id=$1 AND revision=$2',[claim,expected])).rows[0],next=expected+1;
+        const relationshipKind=body.relationship_kind===undefined?prior.relationship_kind:String(body.relationship_kind);
+        if(entry.object_entity_id&&!['contextual','participates','responsible','depends_on','associated'].includes(relationshipKind)||!entry.object_entity_id&&body.relationship_kind!==undefined)
+          throw new HttpError(400,'invalid_entity_relationship');
         await db.query(`INSERT INTO entity_claim_versions(operation_id,claim_id,revision,expected_revision,content,relationship_kind,attribution,speaker_entity_id,
           uncertainty,author,retired,evidence,dependencies,input_binding) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'owner',$10,$11,$12,$13)`,
-          [operation,claim,next,expected,string(body.content,8000),prior.relationship_kind,attribution,prior.speaker_entity_id,uncertainty,body.retired,
+          [operation,claim,next,expected,string(body.content,8000),relationshipKind,attribution,prior.speaker_entity_id,uncertainty,body.retired,
             JSON.stringify(prior.evidence),JSON.stringify(prior.dependencies),JSON.stringify(prior.input_binding)]);
         await db.query('UPDATE entity_claims SET active_revision=$2 WHERE id=$1',[claim,next]);await db.query('COMMIT');return {id:claim,revision:next,retired:body.retired};
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}

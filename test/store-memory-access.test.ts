@@ -40,13 +40,14 @@ test('fact grants authorize exact destinations while relationships only create r
     assert.equal(pending.wording,'Apollo launch schedule milestone is October.');assert.equal(pending.state,'pending');
     const rejected=await services.memoryAccess.decide(owner,pending.id,{decision:'reject',expected_revision:pending.revision,operation_id:key+':reject'});assert.equal(rejected.state,'rejected');
     const nextSource=await capture(group,3,'Apollo launch schedule October?'),again=await services.memoryAccess.suggest(await principal(nextSource),'Apollo launch schedule October');assert.ok(again);assert.notEqual(again!.id,pending.id,'a later independent request may suggest again');
-    await services.entities.correct(owner,suggestedFact.id,{content:'Apollo launch schedule milestone is November.',attribution:'reported',uncertainty:'supported',retired:false,expected_revision:suggestedFact.revision,operation_id:key+':correct'});
+    const corrected=await services.entities.correct(owner,suggestedFact.id,{content:'Apollo launch schedule milestone is November.',relationship_kind:'associated',attribution:'reported',uncertainty:'supported',retired:false,expected_revision:suggestedFact.revision,operation_id:key+':correct'});
+    assert.equal(corrected.revision,suggestedFact.revision+1);assert.equal((await stores.derived.query('SELECT relationship_kind FROM entity_claim_versions WHERE claim_id=$1 AND revision=$2',[suggestedFact.id,corrected.revision])).rows[0].relationship_kind,'associated');
     requests=await services.memoryAccess.list(owner);pending=requests.requests.find(row=>row.id===again!.id)!;
     await assert.rejects(services.memoryAccess.decide(owner,pending.id,{decision:'persistent',expected_revision:pending.revision,operation_id:key+':stale'}),{code:'memory_fact_changed'});
     requests=await services.memoryAccess.list(owner);assert.equal(requests.requests.find(row=>row.id===again!.id)!.state,'suspended','stale requests require a new review');
     actor=await principal(groupSource);context=await services.memoryAccess.context(actor,'checkpoint complete');assert.equal(context.sources.length,0,'authorization generation changes suspend prior grants');
     const saved=(await services.memoryAccess.grants(owner)).grants.find(row=>row.id===grant.id)!;assert.equal(saved.state,'suspended');
-    const map=await services.memoryMap.read(owner,{after:'',limit:250,focus:'',query:'',kind:'',state:''});assert.ok(map.edges.some(edge=>edge.kind==='relationship'&&!edge.authoritative));assert.ok(map.edges.some(edge=>edge.kind==='access'&&edge.authoritative));
+    const map=await services.memoryMap.read(owner,{after:'',limit:250,focus:'',query:'',kind:'',state:''});assert.ok(map.edges.some(edge=>edge.kind==='relationship'&&!edge.authoritative&&edge.detail?.claim_id===suggestedFact.id&&edge.detail?.relationship_kind==='associated'));assert.ok(map.edges.some(edge=>edge.kind==='access'&&edge.authoritative));
     await assert.rejects(services.memoryMap.read(actor,{after:'',limit:10,focus:'',query:'',kind:'',state:''}),{code:'owner_required'});
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.default_grant_mode,'one_time');
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.request_ttl_seconds,86400);
