@@ -14,7 +14,7 @@ The owner directed that all session worktrees be closed, their work merged into
 for new real tests. All six non-main worktrees were clean before removal and
 their branches are ancestors of `main`; the only outstanding branch work, the
 consolidated Memory workspace, is merged by `ebbbee4`. Only the main worktree
-remains. The local branch is eight commits ahead of `origin/main`; fetch and push
+remains. The local branch is nine commits ahead of `origin/main`; fetch and push
 remain blocked because the HTTPS remote has no available username credential.
 
 All Nocheh containers, Compose networks, old image tags, PostgreSQL volumes,
@@ -34,6 +34,17 @@ bind-mounted pre-reset state is quarantined under
 `data/retired/pre-real-tests-20260922/` and is outside the active runtime paths.
 The merged dashboard suite passes all 17 checks, and the clean pinned Node 24
 Docker build passes.
+
+On the owner's subsequent directive to run Nocheh fully, the configured stack
+started with Honcho and Telegram enabled. All 17 required runtime services are
+healthy; the two inspection CLIs remain stopped as intended. The tools image also
+built successfully. Live diagnostics report no execution holds, the four core
+service heartbeats present, provider and monitor healthy, subscription login
+available, and Telegram connected. The synthetic live runtime gate passes provider
+refresh, exact chat, secret detection, and subscription transcription. Those four
+guarded verification events are the first content in the new archive; they produced
+no Telegram deliveries or actions. The owner dashboard responds on
+`http://127.0.0.1:8783/`.
 
 #### Archive owner table and editing flow — 2026-09-22
 
