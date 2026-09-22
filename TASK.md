@@ -41,8 +41,15 @@ The broader sequential Node/dashboard run reached 152 passes and four expected
 environment skips; its only remaining failure was an unrelated portability fixture
 whose prebuilt image omitted current Hermes modules. The reconciled pinned Node
 build, 12 Archive/Graph dashboard checks, and five focused Hermes checks pass. The
-AST-only Graphify refresh covers 515 files with 3,491 nodes and 13,081 edges and zero model calls. Production
-rebuild and a fresh two-message owner Telegram acceptance remain pending.
+AST-only Graphify refresh covers 515 files with 3,491 nodes and 13,081 edges and
+zero model calls. The services, management, and Hermes images were rebuilt from
+merged `main`; the app, security, dashboard, executor, and Hermes containers were
+recreated and all installation services report their expected healthy state. The
+live Archive visibly lists the two source messages only, labels their reply states
+`Replied` and `Needs review`, and contains no outbound or wire rows. No workflow is
+running or retry-failed. The old ambiguous receipt remains closed to prevent a
+duplicate delayed send; a fresh two-message owner Telegram acceptance remains
+pending.
 
 #### Context-entity graph filtering — 2026-09-22
 
