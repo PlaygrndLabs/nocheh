@@ -66,6 +66,7 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     assert.ok(graph.edges.some(e=>e.from==='message:'+reply.id&&e.to==='message:'+target.id&&e.kind==='reply_to_source'));
     assert.ok(graph.nodes.some(n=>n.kind==='user'));
     assert.ok(graph.nodes.some(n=>n.kind==='group'&&n.label==='Quillmarsh team'));
+    assert.ok(graph.nodes.some(n=>n.kind==='group'&&n.chat_type==='group'));
     assert.ok(graph.nodes.some(n=>n.kind==='user'&&n.label==='@alex_quill'));
     assert.deepEqual([...new Set(graph.nodes.map(n=>n.kind))].sort(),['group','message','user']);
     assert.ok(!graph.nodes.some(n=>n.label==='runtime_context'));

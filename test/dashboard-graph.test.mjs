@@ -19,7 +19,7 @@ const fixture = () => ({
 });
 
 test('management adapter normalizes legacy context entities and removes dangling operational links',()=>{
-  const legacy={nodes:[{id:'scope:*',kind:'scope',label:'All'},{id:'author:a',kind:'author',label:'A'},
+  const legacy={nodes:[{id:'scope:*',kind:'scope',label:'All',chat_type:'private'},{id:'author:a',kind:'author',label:'A'},
     {id:'event:m',kind:'message',label:'M'},{id:'project:p',kind:'project',label:'P'},
     {id:'event:x',kind:'event',label:'Action'},{id:'derived:x',kind:'derived',label:'runtime_context'}],
     edges:[{from:'scope:*',to:'event:m',kind:'contains'},{from:'event:x',to:'derived:x',kind:'derived_from'}],bounds:{messages:20,derived:200,truncated:true}};
@@ -27,6 +27,7 @@ test('management adapter normalizes legacy context entities and removes dangling
   const data=JSON.parse(execFileSync('python3',['-c',code,JSON.stringify(legacy)],{encoding:'utf8'}));
   assert.deepEqual(data.nodes.map(node=>node.kind),['group','user','message','project']);
   assert.deepEqual(data.nodes.map(node=>node.id),['group:*','user:a','message:m','project:p']);
+  assert.equal(data.nodes[0].chat_type,'private');
   assert.deepEqual(data.edges,[{from:'group:*',to:'message:m',kind:'contains'}]);
   assert.deepEqual(data.bounds,{users:1,projects:1,groups:1,messages:1,truncated:true});
 });
@@ -166,5 +167,20 @@ test('only users, projects, groups and messages reach the browser',async()=>{
   assert.ok(view.elements().some(node=>node.children.includes('Page 1 · 1 messages · 0 reply references outside this page')));
   assert.ok(!view.elements().some(node=>node.props.title==='derived: runtime_context'||node.props.title==='event: action'));
   assert.ok(!view.elements().some(node=>node.children.some(child=>typeof child==='string'&&child.startsWith('No messages'))));
+  view.unmount();
+});
+
+test('private conversations are named as private chats across browser, search, filter and inspector',async()=>{
+  const original=page('a','Original');
+  original.nodes.unshift({id:'group:123',kind:'group',chat_type:'private',label:'Private chat · 123'});
+  const view=componentDriver(path=>Promise.resolve(path.includes('/scopes?')?{scopes:[{scope:'a',events:1}]}:original));
+  await view.flush();
+  assert.ok(view.elements().some(node=>node.props.title==='private chat: Private chat · 123'));
+  assert.ok(view.elements().some(node=>node.type==='option'&&node.props.value==='group'&&node.children.includes('Private chats')));
+  assert.ok(view.elements().some(node=>node.children.includes('Private chat')),'the node browser and legend expose the semantic subtype');
+  const search=view.elements().find(node=>node.props.id==='n-node-search');search.props.onChange({target:{value:'private chat'}});await view.flush();
+  assert.ok(view.elements().some(node=>node.children.includes('1 of 2 nodes')),'the semantic subtype is searchable');
+  view.elements().find(node=>node.props.title==='private chat: Private chat · 123').props.onClick();await view.flush();
+  assert.ok(view.elements().some(node=>node.type==='h3'&&node.children.includes('Private chat')),'the inspector keeps the subtype');
   view.unmount();
 });

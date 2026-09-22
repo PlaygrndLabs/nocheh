@@ -4,9 +4,9 @@ import {assertAudience} from './access.js';
 import {parentSpace} from './spaces.js';
 import { HttpError, string } from './http.js';
 import { limit } from './retrieval.js';
-import {evidenceNodeLabel,graphGroupLabel,graphUserLabel} from './graph-labels.js';
+import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel,type GraphChatType} from './graph-labels.js';
 
-type Node = {id:string; kind:'group'|'user'|'message'; label:string; event_id?:string; source_id?:string};
+type Node = {id:string; kind:'group'|'user'|'message'; label:string; chat_type?:GraphChatType; event_id?:string; source_id?:string};
 type Edge = {from:string; to:string; kind:string};
 export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string, after='', count=20, focus='') {
   await assertAudience(pool,principal);
@@ -21,7 +21,10 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
      AND ($5::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$5)) ORDER BY e.id LIMIT $4`,[parentSpace(scope)??scope,after,focus,count+1,principal.space??(parentSpace(scope)?scope:null)]);
   const events=rows.slice(0,count),ids=events.map(e=>e.id);
   const nodes:Node[]=[{id:'group:'+scope,kind:'group',label:scope==='*'?'All private knowledge':scope}],edges:Edge[]=[];
-  const add=(node:Node,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;};
+  const add=(node:Node,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else {
+    if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;
+    if(node.chat_type&&!current.chat_type)current.chat_type=node.chat_type;
+  }};
   const link=(from:string,to:string,kind:string)=>{if(!edges.some(e=>e.from===from&&e.to===to&&e.kind===kind))edges.push({from,to,kind});};
   const sources=new Map<string,string[]>();
   for(const event of events)sources.set(event.object_id,[...(sources.get(event.object_id)||[]),event.id]);
@@ -29,8 +32,8 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
     FROM source_relations r JOIN source_objects o ON o.id=r.target_id WHERE r.event_id=ANY($1::text[]) ORDER BY r.event_id,r.kind,r.target_id`,[ids]);
   let unresolvedReplies=0;
   for(const event of events){
-    const ownScope=scope==='*'?event.space_id:scope;
-    add({id:'group:'+ownScope,kind:'group',label:graphGroupLabel(event.payload,ownScope)??ownScope},ownScope);
+    const ownScope=scope==='*'?event.space_id:scope,chatType=graphChatType(event.payload,ownScope);
+    add({id:'group:'+ownScope,kind:'group',label:graphGroupLabel(event.payload,ownScope)??ownScope,...(chatType?{chat_type:chatType}:{})},ownScope);
     if(scope==='*')link('group:*','group:'+ownScope,'contains');
     const id='message:'+event.id;
     add({id,kind:'message',label:evidenceNodeLabel(event.text,event.event_kind,event.id),event_id:event.id,source_id:event.source_id});link('group:'+ownScope,id,'contains');
@@ -52,5 +55,5 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
   await assertAudience(pool,principal);
   return {format:'nocheh-context-graph-v1',scope,nodes,edges,next:rows.length>count?events.at(-1)?.id:null,
     bounds:{messages:count,groups:nodes.filter(node=>node.kind==='group').length,users:nodes.filter(node=>node.kind==='user').length,projects:0,truncated:false},
-    unresolved_replies:unresolvedReplies,note:'Context entities only: users, projects, groups, and original messages. Actions, events, files, runtime context, and generated artifacts are excluded.'};
+    unresolved_replies:unresolvedReplies,note:'Context entities only: users, projects, groups or private chats, and original messages. Actions, events, files, runtime context, and generated artifacts are excluded.'};
 }
