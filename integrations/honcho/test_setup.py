@@ -1,4 +1,7 @@
 """Production Honcho setup keeps acceptance and spending policy explicit."""
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +11,16 @@ from scripts import honcho_setup
 
 
 class HonchoSetupTests(unittest.TestCase):
+    def test_default_installation_root_is_repository(self):
+        repository = Path(__file__).resolve().parents[2]
+        environment = os.environ.copy()
+        environment.pop('NOCHEH_INSTALLATION_ROOT', None)
+        result = subprocess.check_output(
+            [sys.executable, '-c', 'from scripts.honcho_setup import ROOT; print(ROOT)'],
+            cwd=repository, env=environment, text=True,
+        )
+        self.assertEqual(Path(result.strip()), repository)
+
     def test_monthly_cutover_requires_live_acceptance_and_attachment(self):
         with tempfile.TemporaryDirectory() as folder:
             ledger = Path(folder) / 'ledger/budget.sqlite'
