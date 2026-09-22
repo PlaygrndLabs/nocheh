@@ -13,9 +13,9 @@ then run:
 ```
 
 Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
-Open Hermes from the sidebar for its dedicated native dashboard at `/hermes/`;
+Open Hermes from the sidebar for its dedicated native dashboard at `/hermes/nocheh`;
 its return link brings you back to Nocheh. Old `/nocheh#…` bookmarks still work.
-Open Provider monitor for the CPA Manager Plus Full Mode UI at
+Open CPA dashboard from the sidebar for the CPA Manager Plus Full Mode UI at
 `/providers/management.html`; it reuses the Nocheh owner session and keeps all
 provider credentials server-side.
 

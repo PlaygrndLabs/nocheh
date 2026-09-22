@@ -14,8 +14,8 @@ test('dashboard navigation has one task-oriented destination per responsibility'
 
   assert.doesNotMatch(app,/\['spaces','Memory access'/);
   assert.match(app,/key==='spaces'\)return 'sharing'/);
-  assert.doesNotMatch(app,/href="\/hermes\/nocheh"/);
-  assert.doesNotMatch(app,/href="\/providers\/management\.html"/);
+  assert.match(app,/href="\/hermes\/nocheh" aria-label="Open Hermes dashboard"/);
+  assert.match(app,/href="\/providers\/management\.html" aria-label="Open CPA dashboard"/);
   assert.match(integrations,/\/hermes\/nocheh/);
   assert.match(integrations,/\/providers\/management\.html/);
 
