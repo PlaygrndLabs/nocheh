@@ -28,8 +28,8 @@ export async function layoutMemoryMap<N extends LayoutNode,E extends LayoutEdge>
     layoutOptions:{...memoryMapLayoutOptions,'elk.direction':direction},
     children:orderedNodes.map(node=>({
       id:node.id,
-      width:node.measured?.width??node.width??224,
-      height:node.measured?.height??node.height??88,
+      width:node.measured?.width??node.width??184,
+      height:node.measured?.height??node.height??64,
     })),
     edges:[...edges].sort((a,b)=>a.id.localeCompare(b.id)).map(edge=>({id:edge.id,sources:[edge.source],targets:[edge.target]})),
   });
