@@ -5,6 +5,47 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<fresh_mvp_test_baseline>
+
+#### Fresh local data baseline and MVP test — 2026-09-22
+
+The owner asked to close all session worktrees, clear the databases, and test from
+fresh data to assess MVP readiness. The read-only reset preflight found 17 owned
+containers, three mounted database/cache volumes, and no ownership blockers. A
+private recovery backup completed at `data/backups/pre-mvp-reset-20260922` before
+shutdown. The three owned PostgreSQL/Honcho Redis volumes were removed, and 37
+active content paths were moved to `data/retired/pre-mvp-reset-20260922/`. The
+provider monitor sanitizer erased content fields and preserved usage accounting;
+the shared login, provider keys, Honcho setup, and spending ledger were retained.
+These private paths are outside active runtime mounts and are not committed.
+
+Fresh volumes were created and the pinned images rebuilt. All 17 required services
+became healthy. The shared login is present and Telegram reports connected. The
+new archive has no incoming Telegram source messages; its four records are two
+generated outbound intents and two generated outbound results. The prior uncertain
+Telegram receipt remains only in the private backup and was not replayed. Fresh
+live subscription checks pass refresh, chat, literal detection, and required
+transcription. The isolated Docker test gate passes 119 Node checks with 46
+explicit skips, the separate database-recovery check, and 348 Hermes tests with
+three skips. Three stale Hermes graph tests initially failed because they expected
+event and profile nodes; they were updated to the context-entity contract and the
+full gate passed after local integration. Graphify's AST-only refresh covers 518
+files, 3,632 nodes, and 13,338 edges with zero model calls.
+
+This operational wipe is not a completed product reset. The saved installation
+still selects `NOCHEH_STORAGE_LAYOUT=legacy`, so the required archive, derived,
+and control database layout and its controlled legacy-to-original-only transition
+have not passed live acceptance. The documented reset journal, fresh Telegram
+backlog boundary, and post-reset row-linked acceptance were not executed. Real
+owner Telegram text, voice, group silence/isolation, exact approval, and restart
+checks remain pending; synthetic checks and service health do not establish MVP
+readiness. The complete isolated gate was rerun at merge `63a812b`; concurrent
+dashboard commits have their own focused checks but were not included in that
+specific full-suite run. Git fetch and push remain blocked by missing HTTPS
+username credentials, so local and remote `main` are not synchronized.
+
+</fresh_mvp_test_baseline>
+
 <honcho_attachment_controls>
 
 #### Honcho attachment option layout — 2026-09-22
