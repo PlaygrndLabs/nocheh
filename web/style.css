@@ -284,8 +284,6 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .settings-page .n-secret-status{float:right;margin-left:12px;color:var(--n-muted);font-size:11px;font-weight:500}
 .settings-page .n-panel>h2{margin-bottom:6px}
 .settings-page .n-panel>p.n-muted{max-width:68ch;line-height:1.6}
-.settings-page .n-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0 22px;padding:16px 0}
-.settings-page .n-steps li{align-items:flex-start;line-height:1.4}
 .settings-page .n-settings-group{min-width:0;margin:20px 0 0;padding:18px 20px 20px;border:1px solid var(--n-line);border-radius:9px;background:var(--n-subtle)}
 .settings-page .n-settings-group h3{font-size:16px;margin:0 0 4px}
 .settings-page .n-settings-group>p{margin:0;max-width:70ch}
@@ -304,7 +302,6 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .settings-page .n-preference-control button{flex:0 0 44px;min-width:44px;min-height:44px;margin:0}
 @media(max-width:600px){
  .n-panel{padding:18px}
- .settings-page .n-steps{grid-template-columns:1fr;gap:10px;padding:14px 0}
  .settings-page .n-settings-group,.settings-page .n-review,.settings-page .n-apply{padding:16px}
  .settings-page .n-settings-group .n-form{gap:20px}
 }

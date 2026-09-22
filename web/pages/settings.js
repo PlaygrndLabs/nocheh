@@ -1,6 +1,6 @@
 import {useRevisionDraft} from '../lib/draft';
 import {RotateCcw} from 'lucide-react';
-import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
+import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 export function Settings({notify}) {
  const [defaultsRevision,setDefaultsRevision]=useState(0);
  return h(Tabs,{defaultValue:'nocheh',className:'settings-page'},h(TabsList,{'aria-label':'Settings category'},h(TabsTrigger,{value:'nocheh'},'Nocheh settings'),h(TabsTrigger,{value:'hermes'},'Hermes preferences')),
@@ -67,7 +67,6 @@ export function Settings({notify}) {
       error&&h(Alert,null,'Saved settings may be stale. Edits are retained.'),
       editRevision!==data.revision&&h(Alert,null,'These settings changed elsewhere. Your edits are retained against the original revision. Discard edits to load the new values, or attempt Save to see the conflict.'),
       h(StatusBadge,{state:data.apply_state,label:({current:'Saved settings match the last successful apply',pending:'Saved changes are waiting to be applied',unverified:'Running settings have not been verified by this dashboard'})[data.apply_state]||data.apply_state}),
-      h(Steps,{items:['Edit and review','Save configuration','Apply to running services']}),
       h('form',{onSubmit:e=>{e.preventDefault();setReview(true);}},
         group('Telegram access','Choose who can use the assistant and which groups it can participate in.',['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_BOT_TOKEN']),
         accessEditor,

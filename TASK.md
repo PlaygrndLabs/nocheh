@@ -63,6 +63,14 @@ the four stars are visible and the input value length is zero. The pinned Node 2
 dashboard build, 19 dashboard tests, two settings tests, and AST-only graph refresh
 pass; no live credential was read into the browser or changed.
 
+The owner requested a simpler dashboard after seeing the numbered Edit, Save,
+Apply strip. Settings now shows the saved/apply status directly above its grouped
+fields and keeps its Review, Save, and Apply controls without that strip. The
+isolated preview verifies the simplified layout; the pinned Node 24 dashboard
+build and 19 dashboard tests pass. The AST-only graph refresh covers 515 files,
+3,507 nodes, and 13,171 edges with zero model calls. No live runtime settings
+were changed.
+
 </settings_clarity>
 
 <telegram_group_participant_access>
