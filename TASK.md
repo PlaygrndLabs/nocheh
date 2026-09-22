@@ -5,6 +5,26 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<native_dashboard_shortcuts>
+
+#### Hermes and CPA sidebar access — 2026-09-22
+
+Direct links to the native Hermes and CPA dashboards are restored in the Nocheh
+sidebar and mobile navigation drawer. The desktop sidebar keeps the links visible
+while its main navigation scrolls. The links use the existing owner-session proxy
+routes `/hermes/nocheh` and `/providers/management.html`; Integrations also retains
+its runtime and provider details and links.
+
+The dashboard build passes, all 19 dashboard checks pass, and the pinned Node 24
+development image builds. An isolated synthetic preview on port 18943 verifies the
+expanded and collapsed desktop sidebar, the 390px mobile drawer, and navigation to
+both fixture boundary pages. It has no Telegram poller, provider login, scheduler,
+or external execution authority. The AST-only Graphify refresh covers 518 files,
+3,516 nodes, and 13,162 edges with zero model calls. Live Hermes and CPA proxy
+behavior was not rerun.
+
+</native_dashboard_shortcuts>
+
 <original_only_archive>
 
 #### Archive status, filters, and message-detail clarity — 2026-09-22
