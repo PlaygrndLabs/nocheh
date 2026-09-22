@@ -64,6 +64,7 @@ validates the complete configuration. Apply is a background job that recreates
 affected Compose services and checks health; failed apply attempts restore the
 previous environment and report whether recovery succeeded. Runtime state is
 shown as unverified until the management apply operation verifies it.
+The page shows these actions directly without a numbered progress strip.
 
 Imports accept Telegram Desktop JSON, an export directory or ZIP. Review counts,
 missing media and chat scopes before starting. Unmapped chats remain owner-only.
