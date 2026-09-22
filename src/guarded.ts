@@ -244,8 +244,10 @@ export async function browseData(pool:pg.Pool,principal:Reader,after='') {
   admin(principal);
   const {rows}=await pool.query(`SELECT e.id,e.scope,e.kind,e.original_text,e.received_at,
     (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id AND s.state='ready') AS ready,
-    (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id) AS total
-    FROM events e WHERE e.id>$1 ORDER BY e.id LIMIT 51`,[string(after,64)]);
+    (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id) AS total,
+    d.state AS assistant_state,d.runtime_stage AS assistant_stage,d.error_code AS assistant_error,d.attempts AS assistant_attempts
+    FROM events e LEFT JOIN dispatches d ON d.event_id=e.id
+    WHERE e.id>$1 AND e.origin<>'generated' AND e.kind<>'telegram_wire' ORDER BY e.id LIMIT 51`,[string(after,64)]);
   return {records:rows.slice(0,50).map(({original_text,...row})=>({...row,text:original_text?.toString().slice(0,500)??null})),next:rows.length>50?rows[49].id:null};
 }
 

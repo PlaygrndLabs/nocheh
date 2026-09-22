@@ -22,7 +22,7 @@ async function dispatchReceipt(client:pg.PoolClient,eventId:string,result:Record
   const allowed=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence'];
   await client.query(`UPDATE dispatches SET state=$2,error_code=$3,next_attempt=now()+($4*interval '1 second'),updated_at=now(),
     runtime_stage=coalesce($5,runtime_stage) WHERE event_id=$1`,[eventId,active?'running':result.state,active?'awaiting_dispatch_receipt':allowed.includes(String(result.error_code))?result.error_code:null,
-    active?5:60,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:result.state==='done'?'delivery':null]);
+    active?5:result.state==='failed'?10:60,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:result.state==='done'?'delivery':null]);
 }
 
 export async function storedTranscripts(client:pg.Pool|pg.PoolClient,eventId:string):Promise<string[]|null> {

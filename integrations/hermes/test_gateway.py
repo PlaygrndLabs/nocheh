@@ -117,9 +117,32 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     silent=envelope(21,'Intentional silence')
                     self.assertEqual(await gateway.dispatch(silent),{'state':'suppressed','error_code':'intentional_silence'})
                     self.assertEqual(await gateway.dispatch(silent),{'state':'suppressed','error_code':'intentional_silence'})
+                    failures=[]
+                    async def fail_before_delivery(event):
+                        failures.append(event)
+                        TURN.get()['agent_result']={'state':'failed','error_code':'assistant_runtime_unavailable'}
+                        return None
+                    adapter.set_message_handler(fail_before_delivery)
+                    retry=envelope(23,'Retry a failed assistant turn')
+                    self.assertEqual(await gateway.dispatch(retry),{'state':'failed','error_code':'assistant_runtime_unavailable'})
+                    self.assertEqual(len(request.sent),before,'pre-delivery failure cannot send')
+                    self.assertEqual(await gateway.dispatch(retry),{'state':'failed','error_code':'assistant_runtime_unavailable'})
+                    self.assertEqual(len(failures),1,'same attempt reuses its failed receipt')
+                    adapter.set_message_handler(message);retry['attempt']=2
+                    self.assertEqual(await gateway.dispatch(retry),{'state':'done'})
+                    self.assertEqual(len(request.sent),before+1,'fresh retry attempt sends exactly once')
+                    uncertain_calls=[]
+                    async def interrupt_after_delivery_started(event):
+                        uncertain_calls.append(event);TURN.get()['delivery_started']=True
+                        raise RuntimeError('synthetic interruption')
+                    adapter.set_message_handler(interrupt_after_delivery_started)
+                    uncertain=envelope(24,'Do not repeat an uncertain send')
+                    self.assertEqual(await gateway.dispatch(uncertain),{'state':'ambiguous','error_code':'dispatch_interrupted'})
+                    self.assertEqual(await gateway.dispatch(uncertain),{'state':'ambiguous','error_code':'dispatch_interrupted'})
+                    self.assertEqual(len(uncertain_calls),1,'uncertain effect receipt cannot be retried')
                     cancel=threading.Event();cancel.set()
                     self.assertEqual(await gateway.dispatch(envelope(22,'Cancelled'),cancelled=cancel),{'state':'cancelled'})
-                    self.assertEqual(len(request.sent),before,'silence and cancellation cannot send a reply')
+                    self.assertEqual(len(request.sent),before+1,'silence, failed attempts, and cancellation do not add sends')
                     adapter.set_message_handler(message)
                     prepared=envelope(30,'[An attachment or non-text message was archived.]','00000000-0000-4000-8000-000000000001')
                     prepared.update(text=None,transcripts=['Prepared replacement transcript'],files=[{'kind':'file','name':'Attachment','sha256':'d'*64,'text':None}])
@@ -128,7 +151,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
                         self.assertEqual(await gateway.dispatch(prepared),{'state':'done'})
                         self.assertEqual(await gateway.dispatch(prepared),{'state':'done'})
-                    self.assertEqual(len(request.sent),before+1,'minimal prepared-media dispatch uses the committed receipt and sends once')
+                    self.assertEqual(len(request.sent),before+2,'minimal prepared-media dispatch uses the committed receipt and sends once')
                 finally:await app.shutdown()
 
 

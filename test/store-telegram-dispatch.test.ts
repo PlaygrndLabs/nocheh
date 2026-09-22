@@ -45,7 +45,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     if(operation==='run.cancel'){native.set(id,{state:'cancelled'});return {state:'cancelled'};}
     await services.turns.binding(reader({headers:{authorization:'Bearer '+String(input.archive_credential)}} as any,token));
     if(mode==='absent'){mode='done';throw Error('request lost before native admission');}
-    const prior=native.get(id);assert.ok(!prior||prior.state==='queued','a native execution must not be launched twice');
+    const prior=native.get(id);assert.ok(!prior||['queued','failed'].includes(prior.state),'only an explicitly failed pre-delivery attempt may launch a fresh execution');
     const state=['running','queued','suppressed','failed','ambiguous'].includes(mode)?mode:'done';native.set(id,{state});
     if(mode==='lost_ack'){mode='done';throw Error('native result acknowledgement lost');}
     return {state,stage:state==='done'?'delivery':'assistant',private_output:'not copied into workflow metadata'};
@@ -102,11 +102,19 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal(voiceInput.transcripts.length,1);assert.ok(!voiceInput.transcripts[0].includes('fixture-secret'));
     assert.equal(voiceInput.payload.message.voice,undefined,'prepared media does not enter native download handlers');
     assert.deepEqual(await services.attachments.bytes(await services.attachments.file(voice.artifact_ids[0]!)),Buffer.from([79,103,103,0,255]));
-    for(const state of ['suppressed','failed','ambiguous']) {
+    for(const state of ['suppressed','ambiguous']) {
       const source=await capture('Terminal '+state);await prepare(source.reference.id);mode=state;
-      const result=await run(source.reference.id);assert.equal(result.state,state==='suppressed'?'skipped':state);
+      const result=await run(source.reference.id);assert.equal(result.state,state==='suppressed'?'skipped':'ambiguous');
       const count:number=calls.length;await due(source.reference.id);await run(source.reference.id);assert.equal(calls.length,count,'terminal execution cannot automatically restart');
     }
+    const failed=await capture('Retryable assistant failure');await prepare(failed.reference.id);mode='failed';
+    assert.equal((await run(failed.reference.id)).state,'retryable_failed');
+    const failedRetry=await stores.control.query("SELECT extract(epoch FROM next_attempt-now()) AS delay FROM dispatches WHERE event_id=$1",[failed.reference.id]);
+    assert.ok(Number(failedRetry.rows[0].delay)<=11,'the first safe retry should be due in about ten seconds');
+    assert.equal(calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start').length,1);
+    await due(failed.reference.id);mode='done';assert.equal((await run(failed.reference.id)).state,'completed');
+    const retried=calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start');
+    assert.deepEqual(retried.map(c=>c.input.attempt),[1,2]);
     const reaction={...envelope(''),payload:{update_id:++serial,message_reaction:{chat:{id:Number(group)},message_id:1,date:1700000000,user:{id:9},old_reaction:[],new_reaction:[]}}};
     const reactionSource=(await services.capture.capture(reaction)).source.reference;assert.equal((await advance(reactionSource.id)).state,'skipped');
     const imported=await capture('Historical message');await stores.control.query("UPDATE source_intakes SET transport='import' WHERE event_id=$1",[imported.reference.id]);

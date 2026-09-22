@@ -7,6 +7,42 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+#### Telegram follow-up recovery and source-only Archive — 2026-09-22
+
+Live diagnosis of the owner's MVP test found that the first Telegram turn held the
+selected native profile while it completed, so the second captured message waited
+behind it. The second turn then exhausted the former 15-second prepared-context
+deadline before model execution or Telegram delivery began. The Hermes gateway's
+outer exception handler incorrectly classified that pre-delivery failure as an
+ambiguous possible delivery, which made the durable dispatcher treat it as terminal
+and never try it again.
+
+Prepared context now has a bounded 60-second deadline for cold guarded preparation.
+Hermes records when Telegram delivery actually starts: failures before that point
+are retryable under a fresh attempt identity, while interruptions after sending may
+have begun remain ambiguous and are never automatically resent. Both the legacy and
+separated-store dispatchers preserve that distinction, expose retryable failure to
+the workflow owner, and make the first safe retry due after about ten seconds. The
+selected-profile ordering and duplicate-delivery protections remain intact.
+
+The owner Archive now defaults to source evidence only. Generated records, Telegram
+wire captures, outbound intents/results, and other operational receipts do not
+appear as message rows; they remain available in Monitoring. Incoming Telegram rows
+show reply progress separately from source capture and guarded-copy readiness, with
+explicit queued, working, retrying, replied, no-reply, cancelled, and needs-review
+labels. The prior `outbound intent` and `outbound result` rows are operational
+request/receipt evidence, not independent source messages.
+
+The focused pinned-container regression set passes eight Node/dashboard checks and
+five Hermes checks, covering archive browse/search filtering, owner-only source
+search, reply status, fresh retry attempts, terminal uncertain delivery, manual
+owner retry, the longer context deadline, and pre/post-delivery failure handling.
+The broader sequential Node/dashboard run reached 152 passes and four expected
+environment skips; its only remaining failure was an unrelated portability fixture
+whose prebuilt image omitted current Hermes modules. The AST-only Graphify refresh
+covers 515 files with 3,489 nodes and 13,077 edges and zero model calls. Production
+rebuild and a fresh two-message owner Telegram acceptance remain pending.
+
 #### Worktree consolidation and clean real-test baseline — 2026-09-22
 
 The owner directed that all session worktrees be closed, their work merged into

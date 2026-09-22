@@ -3,14 +3,20 @@ import {Check,PencilLine,Search} from 'lucide-react';
 import {useResource} from '../lib/resource';
 import {CursorButtons} from '../lib/owner-controls';
 import {Button,Badge,EmptyState,Alert,Skeleton,Table} from '../components/ui/primitives';
+import {StatusBadge} from '../components/status';
 import {Source} from './source.js';
 
-type RecordRow={id?:string;event_id?:string;derived_id?:string;scope:string;text?:string;snippet?:string;preview?:string;total?:number;ready?:number;channel?:string;kind?:string;received_at?:string};
+type RecordRow={id?:string;event_id?:string;derived_id?:string;scope:string;text?:string;snippet?:string;preview?:string;total?:number;ready?:number;channel?:string;kind?:string;received_at?:string;assistant_state?:string;assistant_stage?:string;assistant_error?:string;assistant_attempts?:number};
 type Records={records?:RecordRow[];results?:RecordRow[];items?:RecordRow[];next?:string}|RecordRow[];
 
 const sourceFromHash=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('source');
 const recordText=(row:RecordRow)=>row.text||row.snippet||row.preview||'(No message text)';
-const recordType=(row:RecordRow)=>row.kind?.replaceAll('_',' ')||row.channel?.replaceAll('_',' ')||'Message';
+const recordType=(row:RecordRow)=>row.kind==='telegram_update'?'Incoming Telegram':row.kind==='telegram_delivered_message'?'Assistant reply':row.kind?.replaceAll('_',' ')||row.channel?.replaceAll('_',' ')||'Message';
+const replyState=(row:RecordRow)=>{
+ if(row.kind!=='telegram_update')return null;
+ const values:Record<string,{label:string;state:string}>={done:{label:'Replied',state:'ready'},running:{label:'Working',state:'running'},pending:{label:'Queued',state:'queued'},failed:{label:'Retrying',state:'retryable_failed'},ambiguous:{label:'Needs review',state:'ambiguous'},suppressed:{label:'No reply',state:'skipped'},cancelled:{label:'Cancelled',state:'cancelled'}};
+ return values[row.assistant_state||'']||{label:'Not started',state:'unknown'};
+};
 
 export function Archive({notify}:{notify:(message:string,error?:boolean)=>void}){
  const [draft,setDraft]=useState(''),[query,setQuery]=useState(''),[pages,setPages]=useState(['']),[selected,setSelected]=useState<string|null>(sourceFromHash);
@@ -40,14 +46,14 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
   </section>
   <div className={'archive-workspace archive-table-workspace'+(selected?' has-selection':'')}>
    <section className="n-panel archive-list" aria-labelledby="archive-results-title">
-    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Original messages</h2><p className="archive-table-help">Originals are read-only. Select View / edit to change the separate guarded copy used by agents.</p></div>{data&&<Badge>{visible.length} {visible.length===1?'message':'messages'}</Badge>}</div>
+    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Original messages</h2><p className="archive-table-help">Source archive only. Delivery attempts and receipts are operational records shown in Monitoring, not original messages. Select View / edit to change the separate guarded copy used by agents.</p></div>{data&&<Badge>{visible.length} {visible.length===1?'message':'messages'}</Badge>}</div>
     {query&&<p className="archive-query-summary">Matching “{query}”</p>}
     {error&&<Alert>{data?'Results may be stale.':'Archive results are unavailable.'}</Alert>}
     {!data&&loading&&<Skeleton className="chart-skeleton"/>}
     {data&&!visible.length&&<EmptyState title={query?'No matching messages':'No archived messages'}>{query?'Try fewer words or show all messages.':'Original messages will appear here after they are captured.'}</EmptyState>}
-    {!!visible.length&&<Table aria-label="Archive records"><thead><tr><th>Record</th><th>Type</th><th>Scope</th><th>Received</th><th>Agent copy</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
-     {visible.map((row,index)=>{const id=row.event_id||row.id,isSelected=selected===id,ready=row.total!==undefined&&row.total>0&&row.ready===row.total;return <tr key={id||index} className={isSelected?'selected':undefined}>
-      <td><span className="archive-record-text" dir="auto" title={recordText(row)}>{recordText(row)}</span></td><td>{recordType(row)}</td><td><code>{row.scope}</code></td><td>{row.received_at?<time dateTime={row.received_at}>{new Date(row.received_at).toLocaleString()}</time>:'—'}</td><td>{ready?<span className="archive-ready"><Check size={13} aria-hidden="true"/>Ready</span>:row.total!==undefined?<span>{row.ready} / {row.total} ready</span>:'—'}</td><td><Button size="sm" onClick={()=>id&&choose(id,true)} disabled={!id} aria-pressed={isSelected} aria-label={'View and edit record '+(id||index)}><PencilLine size={13} aria-hidden="true"/>View / edit</Button></td>
+    {!!visible.length&&<Table aria-label="Archive records"><thead><tr><th>Record</th><th>Type</th><th>Scope</th><th>Received</th><th>Reply</th><th>Agent copy</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+     {visible.map((row,index)=>{const id=row.event_id||row.id,isSelected=selected===id,ready=row.total!==undefined&&row.total>0&&row.ready===row.total,reply=replyState(row);return <tr key={id||index} className={isSelected?'selected':undefined}>
+      <td><span className="archive-record-text" dir="auto" title={recordText(row)}>{recordText(row)}</span></td><td>{recordType(row)}</td><td><code>{row.scope}</code></td><td>{row.received_at?<time dateTime={row.received_at}>{new Date(row.received_at).toLocaleString()}</time>:'—'}</td><td title={[row.assistant_stage,row.assistant_error,row.assistant_attempts?`attempt ${row.assistant_attempts}`:''].filter(Boolean).join(' · ')||undefined}>{reply?<StatusBadge state={reply.state} label={reply.label}/>:'—'}</td><td>{ready?<span className="archive-ready"><Check size={13} aria-hidden="true"/>Ready</span>:row.total!==undefined?<span>{row.ready} / {row.total} ready</span>:'—'}</td><td><Button size="sm" onClick={()=>id&&choose(id,true)} disabled={!id} aria-pressed={isSelected} aria-label={'View and edit record '+(id||index)}><PencilLine size={13} aria-hidden="true"/>View / edit</Button></td>
      </tr>;})}
     </tbody></Table>}
     {!query&&<CursorButtons pages={pages} next={next} onChange={changePage}/>}

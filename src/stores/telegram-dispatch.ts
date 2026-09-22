@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS dispatches (
 `;
 const protocol='telegram-dispatch-v2';
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
+const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
   'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence']);
 type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
@@ -54,8 +55,8 @@ export class TelegramDispatchRepository {
     readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
   private get control(){return this.access.stores.control;}
   private observation(row:any):Observation {
-    const states:Record<string,Observation['state']>={pending:'waiting',running:'running',done:'completed',failed:'failed',ambiguous:'ambiguous',suppressed:'skipped',cancelled:'cancelled'};
-    return observation(states[row.state]!,row.runtime_stage,row.attempts,row.next_attempt.getTime(),row.state==='running'?'receipt_pending':row.state==='pending'?'prerequisite':null);
+    const states:Record<string,Observation['state']>={pending:'waiting',running:'running',done:'completed',failed:'retryable_failed',ambiguous:'ambiguous',suppressed:'skipped',cancelled:'cancelled'};
+    return observation(states[row.state]!,row.runtime_stage,row.attempts,row.next_attempt.getTime(),row.state==='running'?'receipt_pending':row.state==='failed'?'runtime_unavailable':row.state==='pending'?'prerequisite':null);
   }
   private async row(id:string) {return (await this.control.query('SELECT * FROM dispatches WHERE event_id=$1',[id])).rows[0];}
   private async storeResult(row:any,response:Record<string,unknown>) {
@@ -69,6 +70,7 @@ export class TelegramDispatchRepository {
   }
   private async finish(row:any,result:{state:string;error_code?:string},reference:DerivativeReference) {
     await this.control.query(`UPDATE dispatches SET state=$2,result_reference=$3,error_code=$4,runtime_stage=$5,
+      next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       revision=revision+1,updated_at=now() WHERE event_id=$1`,[row.event_id,result.state,reference,result.error_code??null,result.state==='done'?'delivery':'assistant']);
     if(result.state==='done'&&row.input_reference)try {const input=await this.input(row.input_reference);
       if(input.principal.scope!==null)await this.memoryAccess.suggest(input.principal,String(input.body.text??''));
@@ -98,7 +100,7 @@ export class TelegramDispatchRepository {
     if(!row||canonical({generation:row.generation,epoch:Number(row.epoch),mode:row.mode})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
     if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
-  private async build(source:SourceReference):Promise<{reference:DerivativeReference;input:Input}|Observation> {
+  private async build(source:SourceReference,attempt:number):Promise<{reference:DerivativeReference;input:Input}|Observation> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
     if(!scope)return observation('skipped','admission');
@@ -124,7 +126,7 @@ export class TelegramDispatchRepository {
     // Command authority comes from the original owner DM, never a guarded edit.
     const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const text=selected.event.text??null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
-      payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt:1,control_reply:control,guard_mode:binding.mode};
+      payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control});await this.current(input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
@@ -142,8 +144,8 @@ export class TelegramDispatchRepository {
       if(captured.origin!=='live'||captured.channel!=='telegram'||captured.kind!=='telegram_update'||intake?.transport!=='capture'||intake?.state!=='ready')
         return observation('skipped','admission');
       await db.query('INSERT INTO dispatches(event_id,source_reference) VALUES($1,$2) ON CONFLICT DO NOTHING',[id,captured.reference]);
-      let row=await this.row(id);if(closed.has(row.state))return this.observation(row);
-      if(row.attempts) {
+      let row=await this.row(id);if(terminal.has(row.state))return this.observation(row);
+      if(row.state==='running'&&row.attempts) {
         const saved=await this.derived.checkpoint(`telegram-dispatch-result:${id}:${row.attempts}`);
         if(saved) {
           const value=JSON.parse(saved.content.toString());if(digest(saved.content)!==saved.content_hash||!closed.has(value.state))throw new HttpError(409,'dispatch_result_conflict');
@@ -169,7 +171,7 @@ export class TelegramDispatchRepository {
         // same identity, after current binding checks. Running work is observed.
       } else {
         if(!this.access.policy().enabled)return observation('waiting','admission',0,Date.now()+60000,'owner_paused');
-        const built=await this.build(captured.reference);
+        const attempt=row.attempts+1,built=await this.build(captured.reference,attempt);
         if('state' in built) {
           if(built.state==='skipped')await db.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[id]);
           return built;
@@ -178,8 +180,8 @@ export class TelegramDispatchRepository {
         await db.query('BEGIN');
         try {
           await this.fence(db,input.binding);
-          await db.query(`UPDATE dispatches SET state='running',attempts=1,input_reference=$2,binding=$3,error_code=NULL,
-            revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='pending'`,[id,built.reference,input.binding]);
+          await db.query(`UPDATE dispatches SET state='running',attempts=$4,input_reference=$2,result_reference=NULL,binding=$3,error_code=NULL,
+            revision=revision+1,updated_at=now() WHERE event_id=$1 AND state IN ('pending','failed')`,[id,built.reference,input.binding,attempt]);
           await db.query('COMMIT');row=await this.row(id);
         }catch(error){await db.query('ROLLBACK');throw error;}
       }

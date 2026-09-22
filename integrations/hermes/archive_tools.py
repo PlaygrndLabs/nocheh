@@ -31,8 +31,9 @@ def request(path,body=None):
     req = urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780') + path,
                                  data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
-    # Leave time for the broker's bounded Honcho recall, including cold guarding.
-    timeout = 615 if path == '/v1/memory/honcho/recall' else 15
+    # Prepared context can include a cold guard-model pass. It is still bounded,
+    # but must not share the short timeout used by ordinary archive reads.
+    timeout = 615 if path == '/v1/memory/honcho/recall' else 60 if path == '/v1/context/prepare' else 15
     with urllib.request.urlopen(req,timeout=timeout) as response:
         data=response.read(2*1024*1024+1)
         if len(data)>2*1024*1024:

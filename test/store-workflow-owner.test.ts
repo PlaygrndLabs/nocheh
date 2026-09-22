@@ -41,6 +41,15 @@ test('owner workflow inspection and receipt-aware controls use control storage o
     assert.equal((await controlStorageWorkflow(stores.control,owner,telegram,'cancel',{revision})).revision,detail.revision);assert.equal(detail.controls.length,1);
     assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[captured.reference.id])).rows[0].state,'cancelled');
     await s.capture.handoff(captured);assert.equal((await workflowDetail(stores.control,telegram)).state,'cancelled','capture reconciliation cannot undo owner cancellation');
+    const retryEvent:Envelope={...event,key:key+':retry',source_id:'2',text:'retry state canary',payload:{message:{...(event.payload as any).message,message_id:2,text:'retry state canary',voice:undefined}}};
+    const retrySource=(await s.capture.capture(retryEvent)).source,retryWorkflow=await find('telegram',retrySource.reference.id);
+    await stores.control.query(`INSERT INTO dispatches(event_id,source_reference) SELECT event_id,jsonb_build_object('store','archive','kind','event','id',event_id,'revision',source_revision,'input_hash',payload_hash)
+      FROM capture_handoffs WHERE event_id=$1`,[retrySource.reference.id]);
+    await stores.control.query("UPDATE dispatches SET state='failed',attempts=1,next_attempt=now()+interval '1 day',error_code='assistant_runtime_unavailable' WHERE event_id=$1",[retrySource.reference.id]);
+    await stores.control.query("UPDATE workflow_registry SET state='retryable_failed' WHERE id=$1",[retryWorkflow]);
+    const retryDetail=await workflowDetail(stores.control,retryWorkflow);assert.equal(retryDetail.can_retry,true);
+    await controlStorageWorkflow(stores.control,owner,retryWorkflow,'retry',{revision:retryDetail.revision});
+    assert.ok((await stores.control.query('SELECT next_attempt<=now() AS due FROM dispatches WHERE event_id=$1',[retrySource.reference.id])).rows[0].due,'owner retry makes a failed Telegram attempt immediately due');
     await stores.control.query("UPDATE workflow_registry SET state='retryable_failed' WHERE id=$1",[preparation]);
     await stores.control.query("UPDATE attachment_retrievals SET state='failed',next_attempt=now()+interval '1 day',error_code='provider_unavailable' WHERE event_id=$1",[captured.reference.id]);
     detail=await workflowDetail(stores.control,preparation);assert.equal(detail.can_retry,true);const retryRevision=detail.revision;

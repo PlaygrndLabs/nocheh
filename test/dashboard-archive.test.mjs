@@ -15,7 +15,10 @@ test('archive presents one accessible table-to-agent-copy workflow',async()=>{
   assert.doesNotMatch(archive,/Previous records|Next records|Inspect source/);
   assert.match(controls,/if\(pages\.length===1&&!next\)return null/);
   assert.match(archive,/<Table aria-label="Archive records">/);
-  assert.match(archive,/>Record<\/th><th>Type<\/th><th>Scope<\/th><th>Received<\/th><th>Agent copy<\/th>/);
+  assert.match(archive,/>Record<\/th><th>Type<\/th><th>Scope<\/th><th>Received<\/th><th>Reply<\/th><th>Agent copy<\/th>/);
+  assert.match(archive,/Delivery attempts and receipts are operational records shown in Monitoring/);
+  assert.match(archive,/ambiguous:\{label:'Needs review',state:'ambiguous'/);
+  assert.match(archive,/<StatusBadge state=\{reply\.state\} label=\{reply\.label\}/);
   assert.match(archive,/View \/ edit/);
   assert.match(archive,/Permanent evidence/);
   assert.match(archive,/Editable and guarded/);
