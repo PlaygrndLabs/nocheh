@@ -18,7 +18,22 @@ explicit note `Inngest will retry`. A genuinely uncertain remote send is instead
 `Delivery uncertain` with `Not auto-retried`; neither is presented as an
 approval. The existing dispatch contract continues to return pre-delivery
 failures as retryable work under a fresh attempt identity and keeps only sends
-that may have started terminal and uncertain.
+that may have started terminal and uncertain. A supervised receipt reconciler
+also inspects legacy `dispatch_interrupted` outcomes through Hermes `run.events`.
+It reopens the Inngest workflow under a new dispatch and attempt only when the
+complete durable journal contains assistant progress and no delivery-stage event.
+Incomplete evidence or any delivery progress remains terminal, preventing a
+duplicate Telegram reply.
+
+The build, two focused journal-classification checks, the source-only Archive
+check, and all 18 dashboard checks pass. The separated-store PostgreSQL fixture
+now covers the full ambiguous-to-failed receipt transition, fresh Inngest
+dispatch, second runtime attempt, and the delivery-progress no-retry case; that
+fixture remains pending in this worktree because no isolated stores fixture was
+assigned. The broader synthetic run passed its non-database checks; four
+unscoped PostgreSQL integration tests could not authenticate without a database
+password and are not claimed as passes. The AST-only Graphify refresh covers
+518 files with 3,511 nodes and 13,148 edges and zero model calls.
 
 The Archive now has visible, server-backed filters for record/message direction,
 conversation scope, and reply-processing state. The default is explicitly `All
