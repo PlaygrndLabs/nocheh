@@ -26,7 +26,8 @@ export function ResourceState({error,loading,hasData}:{error:string;loading:bool
  return error?<Alert>{hasData?'The displayed information may be stale. ':''}{ownerError(error)}</Alert>:loading&&!hasData?<p role="status">Loading…</p>:null;
 }
 export function CursorButtons({pages,next,onChange}:{pages:string[];next:string|null|undefined;onChange:(pages:string[])=>void}){
- return <div className="n-actions"><Button disabled={pages.length===1} onClick={()=>onChange(pages.slice(0,-1))}>Previous page</Button><span>Page {pages.length}</span><Button disabled={!next} onClick={()=>onChange([...pages,next!])}>Next page</Button></div>;
+ if(pages.length===1&&!next)return null;
+ return <nav className="owner-pagination" aria-label="Pagination"><Button disabled={pages.length===1} onClick={()=>onChange(pages.slice(0,-1))}>Previous page</Button><span className="owner-pagination-current" aria-current="page">Page {pages.length}</span><Button disabled={!next} onClick={()=>onChange([...pages,next!])}>Next page</Button></nav>;
 }
 export function EvidenceLinks({sources}:{sources:{id:string}[]}){
  return <ul className="evidence-links">{sources.map((source,index)=><li key={source.id}><a href={'#archive?source='+source.id}>Original evidence {index+1}</a></li>)}</ul>;
