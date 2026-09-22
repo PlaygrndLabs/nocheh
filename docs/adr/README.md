@@ -1,76 +1,95 @@
-# ADRs
+# Architecture decisions
 
 [SPECS.md](../../SPECS.md) is the authoritative product definition;
-[AGENTS.md](../../AGENTS.md) defines agent workflow and [TASK.md](../../TASK.md)
-records current implementation and activation. ADRs are decision history, oldest
-first. Accepted ADR files are preserved unchanged; later accepted decisions
-supersede conflicting earlier requirements. Table statuses are historical notes,
-not a substitute for TASK.md.
+[AGENTS.md](../../AGENTS.md) defines agent workflow; and [TASK.md](../../TASK.md)
+records implementation, evidence, and activation state. ADRs explain why decisions
+were made. They do not replace any of those sources.
 
-ADR-0018 began the rebuild; ADR-0019 selects local Compose; ADR-0027 gives Nocheh
-product ownership; ADR-0030 updates space privacy; ADR-0033 replaces guard/memory
-semantics; ADRs 0035 and 0037 define provider and security boundaries. ADR-0039
-separates main integration from release. ADR-0040 consolidates the specification
-and governs subsequent agent work without changing those product decisions.
+Read this summary first. Open an individual ADR when its rationale, rejected
+alternatives, or exact boundary matters. The [complete catalog](CATALOG.md) retains
+the chronological index of every ADR.
 
-| ADR | Decision | Recorded relationship / supersession |
+Accepted ADR files are historical records and remain unchanged. A later accepted
+ADR supersedes only the conflicting parts of an earlier decision. Status wording
+inside an ADR or the catalog describes history; current progress belongs in
+`TASK.md`.
+
+## Current decision map
+
+| Area | Current decisions | Resulting direction |
 | --- | --- | --- |
-| [0001](0001-phase-1-core-processing.md) | Clean architecture, Telegram -> redaction -> tasks -> Notion MCP | Yes |
-| [0002](0002-phase-1-5-validation-observability.md) | Per-step audit records, task validation, metrics port | Yes |
-| [0003](0003-phase-2-structured-memory.md) | 6 structured memory record types + local retrieval | Yes, extended by 0008 |
-| [0004](0004-live-buffering-history-import-ai-context.md) | Live buffering, history import, bounded AI context | Yes |
-| [0005](0005-sqlite-vps-persistence.md) | SQLite as the only runtime store, encrypted payload columns | Yes |
-| [0006](0006-setup-dashboard.md) | React dashboard at `/app` for setup, simulation, inspection | Yes |
-| [0007](0007-personal-ai-brain-roadmap.md) | Product direction: personal AI brain, not a task bot | Direction only; sequencing lives in `TASK.md` |
-| [0008](0008-memory-graph-architecture.md) | Memory graph nodes/edges, expanded payloads, suggestions | Yes |
-| [0009](0009-bootstrap-and-env-source-of-truth.md) | Bind-mounted `.env` as one config source of truth, scripted VPS bootstrap | Yes, extends 0005 |
-| [0010](0010-multimodal-ingestion-model-roles-secret-guard.md) | Image/voice ingestion, per-content-type model roles, model-backed secret guard | Yes |
-| [0011](0011-embedding-backed-recall.md) | Embedding role, hybrid vector + word-overlap recall, vectors in SQLite | Yes, extends 0003 |
-| [0012](0012-wiring-recall-into-analysis.md) | Recall grounds analysis: context built post-guard, graph seeded from recalled memory | Yes, extends 0011 and 0004 |
-| [0013](0013-importer-core-message-log-projections.md) | Importer core: one guarded append-only message log, replayable projections with cursors | Yes, replaces the buffer from 0004 |
-| [0014](0014-postgres-plaintext-at-rest-owner-column.md) | Postgres + pgvector, plaintext `jsonb` payloads, encryption kept only for credentials, `owner_id` everywhere | Yes, supersedes 0005 on engine and encryption |
-| [0015](0015-not-adopting-honcho-as-memory-layer.md) | Honcho rejected as the memory layer on evidence; own recall and own consolidation; spike gated by a named test | Historical; superseded by 0018 and 0033 |
-| [0016](0016-answer-path-outbound-delivery-approval-rule.md) | Reply contract, single audited egress, scheduler, rule 3 amended to bounded autonomous sending | Yes, amends rule 3 |
-| [0017](0017-memory-backend-evidence-gate.md) | Choose owned, Honcho-primary, or hybrid memory from an early frozen bake-off; the guarded log remains owned in every outcome | Yes, amends 0015 sequencing |
-| [0018](0018-hermes-owned-archive-subscription-rebuild.md) | Hermes rebuild, owned originals, optional guard, subscription production, isolated Honcho trial | Rebuild baseline; later ADRs supersede specific policies |
-| [0019](0019-local-compose-development-and-acceptance.md) | Local Compose for development, automation and acceptance; VPS deferred | Active deployment target |
-| [0020](0020-mandatory-outgoing-request-guard.md) | Mandatory per-attempt guard at pinned HTTPX boundary, explicit trust and unsupported-transport rejection | Active guard implementation |
-| [0021](0021-scoped-native-assistant-processes.md) | Native per-profile assistant processes, scoped capabilities and owner-DM approval | Implemented; live Telegram acceptance pending |
-| [0022](0022-isolated-metered-honcho-experiment.md) | Synthetic Honcho comparison, separate subscription bridge and persistent $5 embedding budget | Optional experiment; live evaluation pending |
-| [0023](0023-consistent-backups-and-inactive-restore.md) | Quiesced snapshots, verified restore and inactive recovered credentials | Local rehearsal verified; cutover remains gated |
-| [0024](0024-single-environment-configuration.md) | One editable `.env`, native OAuth state and inactive environment restores | Active configuration |
-| [0025](0025-owner-dashboard-and-management-cli.md) | Native dashboard extension, shared owner operations and configuration ownership | Implementation in phases |
-| [0026](0026-three-dimensional-evidence-view.md) | Local 3D evidence space with accessible source inspection | Active dashboard presentation |
-| [0027](0027-native-hermes-dashboard-integration.md) | Nocheh product ownership and replaceable Hermes runtime, native dashboard and controlled operations | Active direction; see TASK.md |
-| [0028](0028-isolated-native-browser-turns.md) | Captured native browser turns, scoped sessions and one refresh authority | Implemented |
-| [0029](0029-controlled-tool-execution.md) | Exact approvals, isolated execution and bounded revocable permissions | Implemented |
-| [0030](0030-configurable-space-memory.md) | Owner-wide native recall, manual import review and versioned group/topic sharing | Current memory direction; see space-memory-plan.md for gates |
-| [0031](0031-native-managed-schedules.md) | One supervised native scheduler and durable captured fires | Implemented |
-| [0032](0032-isolated-upgrades-and-portable-memory.md) | Isolated candidate checks, complete restore holds and portable native memory | Tooling implemented; live release gates remain separate |
-| [0033](0033-guarded-projections-and-honcho-memory.md) | Durable editable guarding and Honcho primary memory | Implemented; live Honcho activation pending |
-| [0034](0034-explicit-embedding-environment.md) | Explicit dedicated OpenAI embedding provider, model and capped key | Configured; live embedding acceptance pending |
-| [0035](0035-shared-cliproxy-provider-and-monitoring.md) | One CLIProxyAPI login for Hermes and Honcho, with CPA Manager Plus monitoring | Active implementation plan |
-| [0036](0036-one-compose-project.md) | All local containers in one Compose project while the owner server stays host-managed | Active local packaging |
-| [0037](0037-external-security-plugin-service.md) | Configurable external security service, bounded autonomy and memory-preserving runtime isolation | Accepted; see security-service-plan.md |
-| [0038](0038-observed-telegram-health-and-local-oauth-callback.md) | Observed Telegram polling health, recovery supervision and local OAuth callback | Active locally; shared-provider sign-in and cutover pending |
-| [0039](0039-main-refactor-consolidation.md) | Owner-directed refactor integration into main, separate from release acceptance | Supersedes earlier merge sequencing; remaining live gates stay pending |
-| [0040](0040-specifications-and-agent-workflow.md) | Canonical SPECS.md, AGENTS.md workflow, separate status/evidence, and session integration | Active documentation and coding workflow; product/activation gates preserved |
-| [0041](0041-local-inngest-workflows.md) | Local Inngest for product workflows, owned outbox/receipts, phased cutover and independent host recovery | Accepted; implementation and activation tracked in TASK.md |
-| [0042](0042-host-workflow-archive-coordination.md) | Host Connect over the archive listener, protected checkpoints, registration-aware publication and independent supervision | Implementation of ADR-0041; activation pending |
-| [0043](0043-owner-workflow-inspection.md) | Owner workflow controls, metadata observations and authenticated inspection-only native Inngest history | Implementation of ADR-0041; activation pending |
-| [0044](0044-automatic-honcho-context.md) | Automatic primary Honcho context, protected generation cache and background refresh | Implementation and activation tracked in TASK.md |
-| [0045](0045-honcho-in-installation-compose.md) | Production Honcho in the installation project, preserved external volumes and inactive restores | Implementation and local transition tracked in TASK.md |
-| [0046](0046-consolidated-inngest-installation.md) | Consolidated Nocheh applications, clear tool service names and Inngest-only execution | Accepted; implementation and activation tracked in TASK.md |
-| [0047](0047-receipted-event-handoff.md) | Retry the same event identity until a fenced workflow records receipt | Durability implementation of the approved Inngest migration |
-| [0048](0048-containerized-management.md) | Dashboard and executor as separate Compose services | Owner-requested; Docker administration access awaits explicit authorization |
-| [0049](0049-application-database-bootstrap.md) | Inngest database initialization in application startup | Owner-requested; acceptance tracked in TASK.md |
-| [0050](0050-dashboard-components-and-workflow-metrics.md) | Shared dashboard components, adaptive themes and persisted workflow aggregates | Owner-accepted; implementation and acceptance tracked in TASK.md |
-| [0051](0051-platform-independent-sources.md) | Platform-independent source identities, observations, and relationships | Owner-authorized implementation; acceptance tracked in TASK.md |
-| [0052](0052-pure-source-archive.md) | Archive limited to pure source data and guarded versions; memory/runtime/workflow state stored separately | Owner-defined boundary; classification and migration pending |
-| [0053](0053-original-only-archive.md) | Original-only archive; guarded and generated records in derived storage; control in a third database | Supersedes 0052 guarded placement; owner-authorized implementation and clean restart |
-| [0054](0054-postgres-owned-store-bootstrap.md) | Original-only store initialization in PostgreSQL startup | Owner-requested; acceptance tracked in TASK.md |
-| [0055](0055-concise-core-service-names.md) | `hermes`, `hermes-agent-sb`, and `nocheh-db` service identities | Owner-requested; implementation and activation tracked in TASK.md |
-| [0056](0056-connected-entity-memory.md) | Stable people/project peers, attributed entity evidence, and authorized connected recall | Owner-requested; implementation and activation tracked in TASK.md |
-| [0057](0057-memory-relationship-access-map.md) | Human relationship map with fact-level conversation access and private suggestions | Owner-requested; implementation and activation tracked in TASK.md |
-| [0058](0058-semantic-react-flow-memory-map-editing.md) | React Flow canvas with semantic, revision-checked node and edge editing | Owner-requested; implementation and acceptance tracked in TASK.md |
-| [0059](0059-elk-layered-memory-map-layout.md) | ELK layered positioning for the interactive Memory map | Owner-requested; implementation and acceptance tracked in TASK.md |
+| Product and runtime ownership | [0018](0018-hermes-owned-archive-subscription-rebuild.md), [0027](0027-native-hermes-dashboard-integration.md), [0039](0039-main-refactor-consolidation.md), [0040](0040-specifications-and-agent-workflow.md) | Nocheh owns source data, memory, policy, and its product surface. Hermes is the first replaceable runtime. Integration into `main`, release acceptance, and activation are separate concerns. |
+| Local installation and recovery | [0019](0019-local-compose-development-and-acceptance.md), [0023](0023-consistent-backups-and-inactive-restore.md), [0024](0024-single-environment-configuration.md), [0032](0032-isolated-upgrades-and-portable-memory.md), [0036](0036-one-compose-project.md), [0045](0045-honcho-in-installation-compose.md), [0048](0048-containerized-management.md), [0054](0054-postgres-owned-store-bootstrap.md), [0055](0055-concise-core-service-names.md) | Local Compose is the acceptance target. Configuration has one editable source, upgrades are isolated, backups restore inactive credentials, and the installation preserves owned data across replaceable services. |
+| Guarding, security, and controlled effects | [0020](0020-mandatory-outgoing-request-guard.md), [0021](0021-scoped-native-assistant-processes.md), [0028](0028-isolated-native-browser-turns.md), [0029](0029-controlled-tool-execution.md), [0033](0033-guarded-projections-and-honcho-memory.md), [0037](0037-external-security-plugin-service.md) | Guarded projections are durable and editable. Every physical model attempt is checked at the outbound boundary. Agent processes remain scoped; broader effects use exact approvals, isolated execution, and revocable permissions. |
+| Providers and observed health | [0034](0034-explicit-embedding-environment.md), [0035](0035-shared-cliproxy-provider-and-monitoring.md), [0038](0038-observed-telegram-health-and-local-oauth-callback.md) | Reasoning uses the shared subscription provider, embeddings use an explicit capped provider, and polling, OAuth ownership, recovery, and provider health are observed explicitly. |
+| Memory and audience access | [0030](0030-configurable-space-memory.md), [0033](0033-guarded-projections-and-honcho-memory.md), [0044](0044-automatic-honcho-context.md), [0056](0056-connected-entity-memory.md), [0057](0057-memory-relationship-access-map.md) | Honcho is primary long-term memory, while Nocheh owns evidence, policy, and rebuildability. Recall is entity-aware and audience-scoped; relationships and project membership never grant access. |
+| Workflows and schedules | [0031](0031-native-managed-schedules.md), [0041](0041-local-inngest-workflows.md), [0042](0042-host-workflow-archive-coordination.md), [0043](0043-owner-workflow-inspection.md), [0046](0046-consolidated-inngest-installation.md), [0047](0047-receipted-event-handoff.md), [0049](0049-application-database-bootstrap.md) | Local Inngest owns product workflow execution. Nocheh retains durable event identity, receipts, checkpoints, inspection, and independent host recovery. |
+| Owned source and derived storage | [0051](0051-platform-independent-sources.md), [0053](0053-original-only-archive.md), [0054](0054-postgres-owned-store-bootstrap.md) | The archive contains platform-independent original source data only. Guarded and generated material lives in derived storage; authority and operational control live in a separate control store. |
+| Owner interface | [0025](0025-owner-dashboard-and-management-cli.md), [0026](0026-three-dimensional-evidence-view.md), [0050](0050-dashboard-components-and-workflow-metrics.md), [0058](0058-semantic-react-flow-memory-map-editing.md), [0059](0059-elk-layered-memory-map-layout.md) | The dashboard and CLI expose owner operations and evidence. The Evidence view stays separate from the editable React Flow Memory map, whose changes are semantic, reviewed commands rather than diagram mutations. |
+
+## Historical eras
+
+### Foundation: ADR-0001 through ADR-0017
+
+The first architecture established a Telegram processing pipeline, audit records,
+structured local memory, buffering and import, SQLite persistence, a setup
+dashboard, and a personal-AI-brain direction. It then added graph memory,
+multimodal preparation, embedding-backed recall, a guarded append-only message
+log, PostgreSQL, outbound delivery rules, and an evidence gate for choosing a
+memory backend.
+
+Treat this era as rationale, not as a description of the current system. Its main
+replacement chains are:
+
+- [0004](0004-live-buffering-history-import-ai-context.md) buffering was replaced
+  by the guarded append-only log in [0013](0013-importer-core-message-log-projections.md),
+  then by the owned-source rebuild beginning with [0018](0018-hermes-owned-archive-subscription-rebuild.md).
+- [0005](0005-sqlite-vps-persistence.md) SQLite and encrypted payload columns were
+  superseded by PostgreSQL in [0014](0014-postgres-plaintext-at-rest-owner-column.md)
+  and later by the three-store boundary in [0053](0053-original-only-archive.md).
+- [0015](0015-not-adopting-honcho-as-memory-layer.md) and
+  [0017](0017-memory-backend-evidence-gate.md) record the earlier Honcho rejection
+  and bake-off. [0033](0033-guarded-projections-and-honcho-memory.md) is the accepted
+  current choice of Honcho as primary memory under Nocheh-owned evidence and policy.
+- The early product direction in [0007](0007-personal-ai-brain-roadmap.md) survives,
+  but its roadmap sequencing does not. `TASK.md` owns sequencing and activation.
+
+### Rebuild and product ownership: ADR-0018 through ADR-0040
+
+[0018](0018-hermes-owned-archive-subscription-rebuild.md) reset the implementation
+baseline around Hermes, owned originals, subscription reasoning, and an isolated
+Honcho trial. This era established local Compose, scoped native assistants,
+controlled execution, configurable space privacy, native schedules, portable
+recovery, durable guarded projections, provider and security boundaries, and
+Nocheh's ownership of the dashboard and product surface.
+
+[0040](0040-specifications-and-agent-workflow.md) closed the era by making
+`SPECS.md` the consolidated product definition and separating durable
+requirements, historical decisions, working instructions, and implementation
+evidence.
+
+### Current expansion: ADR-0041 onward
+
+The current era moves product workflows to local Inngest, makes automatic Honcho
+context part of normal turns, consolidates installation services, and strengthens
+durable handoff and owner inspection. It also introduces platform-independent
+source identities, the original-only archive boundary, connected entity memory,
+fact-level audience access, and the interactive Memory map.
+
+Within this era, [0053](0053-original-only-archive.md) supersedes
+[0052](0052-pure-source-archive.md) on guarded-data placement: the archive holds
+originals only, not guarded copies.
+
+## How to add or interpret an ADR
+
+- Use `SPECS.md` to determine the intended product and `TASK.md` to determine what
+  is implemented or active.
+- Add an ADR only for a durable architectural choice whose rationale or rejected
+  alternatives will matter later. Do not use ADRs as progress logs.
+- State exactly which earlier decision is extended or superseded. Do not mark an
+  entire ADR obsolete when only one boundary changed.
+- Add the new ADR to the current decision map and to the
+  [complete catalog](CATALOG.md). Move an older decision into the appropriate
+  historical summary when it is no longer current.
+- Preserve accepted ADR files unchanged. Correct the current specification,
+  summary, catalog relationship, or a new superseding ADR instead.
