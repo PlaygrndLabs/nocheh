@@ -13,6 +13,9 @@ test('memory map is a separate accessible owner surface with explicit authority 
   assert.match(page,/layoutMemoryMap/);assert.match(page,/ELK layered/);assert.match(layout,/elk\.algorithm':'layered/);assert.match(layout,/elk\.edgeRouting':'ORTHOGONAL/);
   assert.match(page,/useDeferredValue/);assert.match(page,/Clear filters/);assert.match(page,/Memory map view/);assert.match(page,/Complete list fallback/);
   assert.match(page,/interactionWidth=\{24\}/);assert.match(page,/useCompactGraph/);assert.match(layout,/direction:'RIGHT'\|'DOWN'/);
+  assert.match(style,/memory-flow-node\{[^}]*width:184px;min-height:64px/);assert.match(style,/memory-flow-node\{width:176px/);assert.match(layout,/node\.width\?\?184/);assert.match(layout,/node\.height\?\?64/);
+  assert.match(page,/aria-label="Reset layout"/);assert.match(style,/memory-flow-reset-compact\{display:inline/);
+  assert.match(page,/fitViewOptions=\{\{padding:\.24,maxZoom:\.9\}\}/);assert.match(page,/fitView\(\{padding:\.24,maxZoom:\.9,duration:180\}\)/);
   assert.match(page,/deleteKeyCode=\{null\}/);assert.match(page,/Every change opens for review before it is saved/);
   assert.match(page,/Edit memory fact/);assert.match(page,/Edit person/);assert.match(page,/Edit project assignment/);assert.match(page,/Revoke this access/);
   assert.match(style,/@media\(prefers-reduced-motion:reduce\)/);assert.match(style,/memory-flow-edge\.access/);assert.match(style,/memory-flow-edge\.suggestion/);
