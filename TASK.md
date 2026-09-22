@@ -56,9 +56,20 @@ The synthetic dashboard preview on dedicated port 18849 showed the owner-only
 default and working Grant, Deny, and Revoke controls. The AST-only Graphify
 refresh covers 515 files, 3,507 nodes, and 13,172 edges with zero model calls.
 
-Live activation and fresh group human traffic remain pending. The owner's DM
-receipt above does not establish group silence, participant revocation, source
-isolation, or MVP release readiness.
+After integration into local `main` at `f62d817`, the app, Hermes, and dashboard
+images were rebuilt. The running local Compose installation applied the new
+policy with group replies initially disabled, then restored the one previously
+selected group from the private backup with zero participant grants or denies.
+All 17 required services are running, Hermes reports Telegram connected, the
+live dashboard shows the owner-only default, and no-send checks inside both
+running images permit the owner and block an ungranted participant. The
+content-free activation result is in
+`compatibility/results/2026-09-23-group-policy-activation.json`.
+
+Fresh group human traffic remains pending. The owner's DM receipt above and
+synthetic live-image checks do not establish group silence, participant
+revocation, source isolation, or MVP release readiness. `origin/main` push is
+still blocked by missing GitHub HTTPS username credentials.
 
 </telegram_group_participant_access>
 
