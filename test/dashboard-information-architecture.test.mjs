@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 test('dashboard navigation has one task-oriented destination per responsibility',async()=>{
-  const [app,overview,memory,projects,integrations]=await Promise.all([
+  const [app,overview,memory,honcho,projects,integrations]=await Promise.all([
     readFile('web/app.tsx','utf8'),
     readFile('web/pages/overview.tsx','utf8'),
     readFile('web/pages/memory-workspace.tsx','utf8'),
+    readFile('web/pages/honcho.js','utf8'),
     readFile('web/pages/projects.tsx','utf8'),
     readFile('web/pages/integrations.js','utf8'),
   ]);
@@ -28,6 +29,8 @@ test('dashboard navigation has one task-oriented destination per responsibility'
   assert.match(app,/\['learned','entities','memoryMap','honcho'\]\.includes\(key\)\)return 'memory'/);
   assert.match(memory,/Notes & history/);
   assert.match(memory,/<TabsTrigger value="honcho"/);
+  assert.match(honcho,/useOwnerCommand/);
+  assert.match(honcho,/expected_revision:memory\.connection\.revision/);
   assert.match(memory,/<Honcho notify=\{notify\}\/>/);
   assert.match(memory,/<TabsTrigger value="relations"/);
   assert.match(memory,/<MemoryMap\/>/);

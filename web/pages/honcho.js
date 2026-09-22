@@ -1,7 +1,9 @@
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
+import {useOwnerCommand} from '../lib/owner-controls.tsx';
 export function Honcho({notify}) {
     const [tick,setTick]=useState(0),{data:memory,error:memoryError}=useResource('/memory/honcho',10000,tick),[history,setHistory]=useState(false),[catchUp,setCatchUp]=useState(false);
-    const connect=async attached=>{setBusy(true);try{await call('/memory/honcho',{attached,include_history:history,catch_up:catchUp});setTick(v=>v+1);notify(attached?'Memory attached. Current authorized sources are being prepared.':'Memory detached. Originals and guarded edits are preserved.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
+    const connectionCommand=useOwnerCommand();
+    const connect=async attached=>{const result=await connectionCommand.run('/memory/honcho',{attached,include_history:history,catch_up:catchUp,expected_revision:memory.connection.revision});if(result){setTick(v=>v+1);notify(attached?'Memory attached. Current authorized sources are being prepared.':'Memory detached. Originals and guarded edits are preserved.');}};
     const {data:status,error}=useResource('/honcho/status',10000),[workspace,setWorkspace]=useState(''),[kind,setKind]=useState('workspace'),[data,setData]=useState(null),[busy,setBusy]=useState(false);
     const query=async()=>{setBusy(true);setData(null);try{setData(await call('/honcho/read',{args:kind==='workspace'?['workspace','list']:[kind,'list','-w',workspace]}));}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     const total=(memory?.receipts||[]).reduce((n,r)=>n+r.count,0),done=(memory?.receipts||[]).filter(r=>r.state==='done').reduce((n,r)=>n+r.count,0);
@@ -20,7 +22,8 @@ export function Honcho({notify}) {
         h('label',null,h('input',{type:'checkbox',checked:history,onChange:e=>setHistory(e.target.checked)}),'Include previously consented history when attaching'),
         h('label',null,h('input',{type:'checkbox',checked:catchUp,onChange:e=>setCatchUp(e.target.checked)}),'Catch up on consented sources received while detached'),
         h('p',{className:'n-muted'},'Previously learned sources rebuild in the current mode. These options do not approve learning from any new import.'),
-        button(memory.connection.attached?'Detach memory':'Attach memory',()=>connect(!memory.connection.attached),busy||!!memoryError||!memory.connection.attached&&!memory.connection.verified),
+        connectionCommand.error&&h(Alert,null,connectionCommand.error),
+        button(memory.connection.attached?'Detach memory':'Attach memory',()=>connect(!memory.connection.attached),connectionCommand.busy||!!memoryError||!memory.connection.attached&&!memory.connection.verified),
         h(Details,{value:{generations:memory.generations,receipts:memory.receipts},label:'Preparation and ingestion receipts'}))),
       h(Panel,{title:'Connection checks',note:'Pinned local Honcho services use subscription reasoning and a dedicated, capped embeddings route.'},
       error&&h('p',{role:'alert'},error),!status&&!error&&h('p',{role:'status'},'Checking the experiment…'),status&&h('div',null,
