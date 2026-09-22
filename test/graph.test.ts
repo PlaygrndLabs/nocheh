@@ -6,7 +6,7 @@ import {initialize} from '../src/database.js';
 import {ingest,digest,type Envelope} from '../src/archive.js';
 import {evidenceGraph} from '../src/graph.js';
 
-test('real PostgreSQL: graph links refer to observed scoped sources, revisions and derived provenance', {skip:!process.env.PGHOST}, async()=>{
+test('real PostgreSQL: graph contains only scoped context entities and recorded message relationships', {skip:!process.env.PGHOST}, async()=>{
   const config=settings(),connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
   const admin=new pg.Pool(connection),namespace='graph_'+Date.now();await admin.query(`CREATE SCHEMA ${namespace}`);
   const pool=new pg.Pool({...connection,options:`-c search_path=${namespace}`});
@@ -23,8 +23,8 @@ test('real PostgreSQL: graph links refer to observed scoped sources, revisions a
     assert.ok(graph.edges.every(e=>ids.has(e.from)&&ids.has(e.to)));
     assert.equal(graph.edges.filter(e=>e.kind==='reply_to_source').length,2);
     assert.equal(graph.edges.filter(e=>e.kind==='same_source_revision').length,1);
-    assert.equal(graph.edges.filter(e=>e.kind==='derived_from').length,1);
-    assert.deepEqual(graph.nodes.find(n=>n.kind==='derived')?.provenance,{model:'fixture',source_sha256:'proof'});
+    assert.deepEqual([...new Set(graph.nodes.map(n=>n.kind))].sort(),['group','message','user']);
+    assert.ok(!JSON.stringify(graph).includes('transcript'));
     assert.equal(graph.unresolved_replies,1);
     await assert.rejects(evidenceGraph(pool,{scope:'-30',admin:false},'-20'),{code:'graph_scope_denied'});
     const first=await evidenceGraph(pool,{scope:null,admin:true},'-20','',2);assert.ok(first.next);
@@ -36,7 +36,7 @@ test('real PostgreSQL: graph links refer to observed scoped sources, revisions a
     assert.equal(mapped.edges.filter(e=>e.kind==='same_source_revision').length,1,'mapped exports from different original chats never share a source identity');
     const focus=await evidenceGraph(pool,{scope:null,admin:true},'-20','',20,digest('private'));assert.equal(focus.nodes.length,1);
     const all=await evidenceGraph(pool,{scope:null,admin:true},'*');
-    assert.ok(all.nodes.some(n=>n.id===digest('private')||n.id==='event:'+digest('private')));
+    assert.ok(all.nodes.some(n=>n.id==='message:'+digest('private')));
     assert.equal(all.edges.filter(e=>e.kind==='reply_to_source').length,2,'cross-chat source numbers do not create false reply links');
     await assert.rejects(evidenceGraph(pool,{scope:'-20',admin:false},'*'),{code:'graph_scope_denied'});
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}

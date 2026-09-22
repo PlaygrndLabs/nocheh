@@ -1,13 +1,9 @@
 // Coordinates are a navigation aid, never a semantic claim or a source fact.
 export const NODE_STYLES = {
-  scope: {color: '#80d6c0', label: 'Scope', size: 7},
-  profile: {color: '#80d6c0', label: 'Profile', size: 5},
+  group: {color: '#80d6c0', label: 'Group', size: 7},
+  project: {color: '#c1aff5', label: 'Project', size: 5.5},
+  user: {color: '#edac90', label: 'User', size: 5.5},
   message: {color: '#83c9f4', label: 'Message', size: 3.7},
-  event: {color: '#83c9f4', label: 'Observation', size: 3.7},
-  author: {color: '#edac90', label: 'Author', size: 5.5},
-  attachment: {color: '#a6c2d7', label: 'File', size: 3.5},
-  memory: {color: '#c1aff5', label: 'Memory', size: 5},
-  derived: {color: '#e4c17a', label: 'Derived', size: 3.5},
 };
 export const nodeStyle = kind => NODE_STYLES[kind] || NODE_STYLES.message;
 export const isReference = edge => ['derived_from', 'explicit_citation'].includes(edge.kind);
@@ -31,6 +27,7 @@ export function layoutGraph(data) {
       z: radius * ring * Math.sin(angle), vx: 0, vy: 0, vz: 0};
   });
   const byId = new Map(nodes.map(node => [node.id, node]));
+  const rootId = byId.has('group:*') ? 'group:*' : nodes.find(node => node.kind === 'group')?.id;
   const edges = data.edges.filter(edge => byId.has(edge.from) && byId.has(edge.to));
   // A bounded deterministic spring layout. It settles before display; no idle motion.
   for (let step = 0; step < 100; step++) {
@@ -60,7 +57,7 @@ export function layoutGraph(data) {
         node[velocity] = (node[velocity] - node[axis] * .003 * cooling) * .7;
         node[axis] += node[velocity];
       }
-      if (node.kind === 'scope') node.x = node.y = node.z = 0;
+      if (node.id === rootId) node.x = node.y = node.z = 0;
     }
   }
   return {nodes, edges};

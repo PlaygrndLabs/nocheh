@@ -43,6 +43,34 @@ whose prebuilt image omitted current Hermes modules. The AST-only Graphify refre
 covers 515 files with 3,489 nodes and 13,077 edges and zero model calls. Production
 rebuild and a fresh two-message owner Telegram acceptance remain pending.
 
+#### Context-entity graph filtering — 2026-09-22
+
+The owner requested that redundant graph nodes be filtered: useful graph nodes
+are users, projects, groups, and messages, while actions and events are context,
+not graph entities. The graph contract, management adapter, browser allowlist,
+legend, labels, and 3D styles now enforce exactly those four node kinds. Legacy
+scope/author nodes are normalized to group/user nodes during rollout;
+`runtime_context`, operational events, files, generated derivatives, native
+profiles, and memory-note nodes are removed together with dangling links.
+Original source and derived records are unchanged and remain available in their
+authoritative inspection surfaces. The separated-store graph also adds explicit
+project-to-group context from current project assignments without granting access.
+
+The pinned Node 24 development image builds successfully. All eleven focused 3D,
+browser, and management-adapter graph checks and all 18 dashboard checks pass, and
+both the legacy PostgreSQL graph test and separated-store retrieval graph test
+pass against an isolated synthetic PostgreSQL cluster. The broader container
+suite completed 72 passes and 80 explicit skips; five unrelated workflow tests
+failed because that general run intentionally had neither the default PostgreSQL
+fixture nor the required runtime token, so it is not recorded as a full-suite
+pass. `git diff --check` passes. The AST-only Graphify refresh covers 515 files
+with 3,489 nodes and 13,074 edges and zero model calls. An isolated owner preview
+on port 18935 visibly shows 12 user/project/group/message nodes, all four type
+filters, and no runtime nodes; searching `runtime_context` returns zero matches.
+The preview uses no live credentials, provider, poller, scheduler, or
+external-effect authority. Production
+services were not rebuilt or activated by this change.
+
 #### Worktree consolidation and clean real-test baseline — 2026-09-22
 
 The owner directed that all session worktrees be closed, their work merged into
