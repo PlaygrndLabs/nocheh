@@ -42,7 +42,8 @@ def dispatch(root, model, policy, body):
             if marker.is_symlink():raise ValueError('profile_path_denied')
             metadata=json.loads(marker.read_text()) if marker.exists() else {}
             historical[path.name]={'scope':metadata.get('space',historical.get(path.name,{}).get('scope',path.name)),
-                                   'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),'exists':True}
+                                   'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),
+                                   'guard_epoch':metadata.get('guard_epoch',0),'exists':True}
         return {'profiles':profiles,'history_profiles':list(historical.values())}
     path = profile_path(root, body.get('scope'), policy,body.get('profile') if action=='memory' else None)
     if action == 'preferences':

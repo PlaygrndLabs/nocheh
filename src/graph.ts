@@ -4,6 +4,7 @@ import {assertAudience} from './access.js';
 import {parentSpace} from './spaces.js';
 import { HttpError, string } from './http.js';
 import { limit } from './retrieval.js';
+import {evidenceNodeLabel} from './graph-labels.js';
 
 type Node = {id:string; kind:string; label:string; event_id?:string; source_id?:string; state?:string; provenance?:unknown};
 type Edge = {from:string; to:string; kind:string};
@@ -12,8 +13,8 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
   string(scope,256); limit(count,20,50);
   if (!scope || (principal.scope!==null && (principal.space??principal.scope)!==scope)) throw new HttpError(403,'graph_scope_denied');
   for(const id of [after,focus]) if(id && !/^[a-f0-9]{64}$/.test(id)) throw new HttpError(400,'invalid_graph_cursor');
-  const {rows}=await pool.query<{id:string;source_id:string;object_id:string;object_kind:string;text:string;scope:string;space_id:string}>(
-    `SELECT e.id,e.source_id,o.id AS object_id,o.kind AS object_kind,left(e.search_text,160) AS text,e.scope,
+  const {rows}=await pool.query<{id:string;source_id:string;object_id:string;object_kind:string;event_kind:string;text:string;scope:string;space_id:string}>(
+    `SELECT e.id,e.source_id,e.kind AS event_kind,o.id AS object_id,o.kind AS object_kind,left(e.search_text,160) AS text,e.scope,
      (SELECT space_id FROM event_spaces WHERE event_id=e.id) AS space_id FROM events e
      JOIN source_observations s ON s.event_id=e.id JOIN source_revisions r ON r.id=s.revision_id JOIN source_objects o ON o.id=r.object_id
      WHERE ($1='*' OR e.scope=$1) AND ($6::boolean OR e.origin<>'generated') AND e.id>$2 AND ($3='' OR e.id=$3)
@@ -31,7 +32,7 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
     const ownScope=scope==='*'?event.space_id:scope;
     if(scope==='*'){add({id:'scope:'+ownScope,kind:'scope',label:ownScope});link('scope:*','scope:'+ownScope,'contains');}
     const id='event:'+event.id;
-    add({id,kind:event.object_kind,label:event.text||'(source without text)',event_id:event.id,source_id:event.source_id});link('scope:'+ownScope,id,'contains');
+    add({id,kind:event.object_kind,label:evidenceNodeLabel(event.text,event.event_kind,event.id),event_id:event.id,source_id:event.source_id});link('scope:'+ownScope,id,'contains');
     for(const relation of relations.rows.filter(r=>r.event_id===event.id)) {
       if(relation.kind==='authored_by') {
         const authorId='author:'+ownScope+':'+relation.target_id;

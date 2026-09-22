@@ -169,6 +169,10 @@ and budget instructions; fixture tests do not certify live provider behavior.
 Graph defaults to all private knowledge; you can select one archive scope. It pages through 20 events at a time and includes up to 20 native profiles per page. It includes
 observed authorship, replies to original source IDs, same-source revisions,
 attachments, derived-artifact provenance, and explicit Hermes note references.
+Current and historical Hermes profiles have visibly distinct labels; historical
+labels include their guard epoch when available and a stable profile fragment.
+Observations without display text use their event kind and a stable short event ID
+instead of sharing an indistinguishable placeholder.
 Original chat identity remains part of an imported message's identity even when
 multiple Desktop exports are mapped into one scope. Group-scoped API credentials
 cannot request a different scope. Citations outside the current page or scope do

@@ -27,6 +27,23 @@ class DashboardOperationsTests(unittest.TestCase):
         self.assertEqual([e['to'] for e in citations],['event:'+'a'*64]);self.assertEqual(graph['nodes'][-1]['unresolved_citations'],1)
         self.assertNotIn('b'*64,json.dumps(graph))
 
+    def test_graph_labels_current_and_historical_profiles_distinctly(self):
+        profiles={'profiles':[{'scope':'123','profile':'nocheh-current','exists':True}],
+                  'history_profiles':[{'scope':'123','profile':'nocheh-current','exists':True},
+                                      {'scope':'123','profile':'nocheh-history-a','guard_epoch':2,'exists':True},
+                                      {'scope':'123','profile':'nocheh-history-b','guard_epoch':3,'exists':True}]}
+        def call(path,body=None):
+            if path.startswith('/v1/graph'):return {'nodes':[{'id':'scope:*'}],'edges':[]}
+            if body['action']=='profiles':return profiles
+            return {'profile':body['profile'],'memories':[]}
+        with patch('scripts.graph.API') as api:
+            api.return_value.call.side_effect=call
+            graph=read('*')
+        labels=[node['label'] for node in graph['nodes'] if node.get('kind')=='profile']
+        self.assertEqual(labels,['Hermes · 123 · current','Hermes · 123 · historical guard 2 · history-a',
+                                 'Hermes · 123 · historical guard 3 · history-b'])
+        self.assertEqual(len(labels),len(set(labels)))
+
     def test_operations_fixed_destinations_and_inactive_restore(self):
         job='11111111-1111-4111-8111-111111111111';backup='22222222-2222-4222-8222-222222222222'
         with tempfile.TemporaryDirectory() as folder,patch('scripts.admin_operations.subprocess.run') as command:

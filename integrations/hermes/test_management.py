@@ -36,10 +36,11 @@ class ManagementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);name=Scopes.profile('-20/topic/1:policy:2');path=root/'profiles'/name
             (path/'memories').mkdir(parents=True)
-            (path/'space.json').write_text(json.dumps({'space':'-20/topic/1','revision':2,'owner':False}))
+            (path/'space.json').write_text(json.dumps({'space':'-20/topic/1','revision':2,'guard_epoch':7,'owner':False}))
             (path/'memories/MEMORY.md').write_text('Historical topic note')
             listing=dispatch(root,'test',policy,{'action':'profiles'})
             self.assertTrue(any(p.get('revision')==2 for p in listing['history_profiles']))
+            self.assertTrue(any(p.get('guard_epoch')==7 for p in listing['history_profiles']))
             result=dispatch(root,'test',policy,{'action':'memory','scope':'-20/topic/1','profile':name})
             self.assertEqual(result['memories'][0]['text'],'Historical topic note')
             with self.assertRaises(ValueError):dispatch(root,'test',policy,{'action':'memory','scope':'-20/topic/2','profile':name})

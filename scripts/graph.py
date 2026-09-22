@@ -3,6 +3,16 @@ from urllib.parse import urlencode
 from .archive import API
 
 
+def profile_label(profile,current):
+    base='Hermes · '+profile['scope']
+    if profile['profile'] in current:return base+' · current'
+    detail='historical'
+    if isinstance(profile.get('guard_epoch'),int) and profile['guard_epoch']>0:detail+=' guard '+str(profile['guard_epoch'])
+    elif isinstance(profile.get('revision'),int) and profile['revision']>0:detail+=' revision '+str(profile['revision'])
+    identity=str(profile['profile']);short=identity[len('nocheh-'):] if identity.startswith('nocheh-') else identity
+    return base+' · '+detail+' · '+short[:12]
+
+
 def read(scope,after='',focus=''):
     api=API();graph=api.call('/v1/graph?'+urlencode({'scope':scope,'after':after,'focus':focus}))
     if api.storage_layout == 'original-only-v1':
@@ -10,11 +20,12 @@ def read(scope,after='',focus=''):
     profiles=api.call('/v1/manage/hermes',{'action':'profiles'})
     choices=profiles.get('history_profiles',profiles['profiles'])
     choices=[p for p in choices if p.get('exists') and (scope=='*' or p['scope']==scope)]
+    current={p['profile'] for p in profiles['profiles'] if p.get('exists')}
     graph['native_profiles_truncated']=len(choices)>20
     for profile in choices[:20]:
         memory=api.call('/v1/manage/hermes',{'action':'memory','scope':profile['scope'],'profile':profile['profile']})
         profile_id='profile:'+memory['profile']
-        graph['nodes'].append({'id':profile_id,'kind':'profile','label':'Hermes · '+profile['scope']})
+        graph['nodes'].append({'id':profile_id,'kind':'profile','label':profile_label(profile,current)})
         graph['edges'].append({'from':'scope:'+scope,'to':profile_id,'kind':'native_profile'})
         present={node['id'] for node in graph['nodes']}
         for note in memory['memories']:
