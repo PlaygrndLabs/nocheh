@@ -25,7 +25,7 @@ inside an ADR or the catalog describes history; current progress belongs in
 | Memory and audience access | [0030](0030-configurable-space-memory.md), [0033](0033-guarded-projections-and-honcho-memory.md), [0044](0044-automatic-honcho-context.md), [0056](0056-connected-entity-memory.md), [0057](0057-memory-relationship-access-map.md) | Honcho is primary long-term memory, while Nocheh owns evidence, policy, and rebuildability. Recall is entity-aware and audience-scoped; relationships and project membership never grant access. |
 | Workflows and schedules | [0031](0031-native-managed-schedules.md), [0041](0041-local-inngest-workflows.md), [0042](0042-host-workflow-archive-coordination.md), [0043](0043-owner-workflow-inspection.md), [0046](0046-consolidated-inngest-installation.md), [0047](0047-receipted-event-handoff.md), [0049](0049-application-database-bootstrap.md) | Local Inngest owns product workflow execution. Nocheh retains durable event identity, receipts, checkpoints, inspection, and independent host recovery. |
 | Owned source and derived storage | [0051](0051-platform-independent-sources.md), [0053](0053-original-only-archive.md), [0054](0054-postgres-owned-store-bootstrap.md) | The archive contains platform-independent original source data only. Guarded and generated material lives in derived storage; authority and operational control live in a separate control store. |
-| Owner interface | [0025](0025-owner-dashboard-and-management-cli.md), [0026](0026-three-dimensional-evidence-view.md), [0050](0050-dashboard-components-and-workflow-metrics.md), [0058](0058-semantic-react-flow-memory-map-editing.md), [0059](0059-elk-layered-memory-map-layout.md) | The dashboard and CLI expose owner operations and evidence. The Evidence view stays separate from the editable React Flow Memory map, whose changes are semantic, reviewed commands rather than diagram mutations. |
+| Owner interface | [0025](0025-owner-dashboard-and-management-cli.md), [0026](0026-three-dimensional-evidence-view.md), [0050](0050-dashboard-components-and-workflow-metrics.md), [0058](0058-semantic-react-flow-memory-map-editing.md), [0059](0059-elk-layered-memory-map-layout.md), [0060](0060-context-entity-evidence-graph.md) | The dashboard and CLI expose owner operations and evidence. The 3D graph is limited to users, projects, groups, and messages and stays separate from the editable React Flow Memory map, whose changes are semantic, reviewed commands rather than diagram mutations. |
 
 ## Historical eras
 
@@ -74,7 +74,8 @@ The current era moves product workflows to local Inngest, makes automatic Honcho
 context part of normal turns, consolidates installation services, and strengthens
 durable handoff and owner inspection. It also introduces platform-independent
 source identities, the original-only archive boundary, connected entity memory,
-fact-level audience access, and the interactive Memory map.
+fact-level audience access, the interactive Memory map, and a context-entity-only
+3D evidence graph.
 
 Within this era, [0053](0053-original-only-archive.md) supersedes
 [0052](0052-pure-source-archive.md) on guarded-data placement: the archive holds
