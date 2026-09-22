@@ -1,4 +1,6 @@
 import os
+import io
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -57,9 +59,29 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_environment_policy_and_explicit_empty_secret(self):
         with patch.dict(os.environ,{'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':'-10, -20','TELEGRAM_BOT_TOKEN':'','TELEGRAM_BOT_TOKEN_FILE':'/does/not/exist'},clear=True):
-            self.assertEqual(telegram_policy(),{'enabled':True,'owner_id':'42','group_ids':['-10','-20']})
+            self.assertEqual(telegram_policy(),{'enabled':True,'owner_id':'42','group_ids':['-10','-20'],'group_access':{}})
             self.assertEqual(secret('TELEGRAM_BOT_TOKEN',required=False),'')
             with self.assertRaises(ValueError): secret('TELEGRAM_BOT_TOKEN')
+
+    def test_group_access_grant_deny_revoke_and_invalid_setting(self):
+        from scripts.configuration import group_access, validate
+        from scripts.settings import save, view
+        from scripts.group_access import main
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            save(state,{'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':'-10'},view(state)['revision'])
+            output=io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(main(state,['grant','-10','77','--save-only']),0)
+                self.assertEqual(main(state,['deny','-10','77','--save-only']),0)
+            self.assertEqual(group_access(load(state)),{'-10':{'granted':[],'denied':['77']}})
+            with contextlib.redirect_stdout(output):self.assertEqual(main(state,['revoke','-10','77','--save-only']),0)
+            self.assertEqual(group_access(load(state)),{})
+            for bad in ('{"-20":{"granted":["77"],"denied":[]}}',
+                        '{"-10":{"granted":["42"],"denied":[]}}',
+                        '{"-10":{"granted":"77","denied":[]}}'):
+                with self.assertRaisesRegex(ValueError,'TELEGRAM_GROUP_ACCESS'):
+                    validate({**load(state),'TELEGRAM_GROUP_ACCESS':bad})
 
     def test_native_admin_port_follows_isolated_archive_port(self):
         with tempfile.TemporaryDirectory() as folder:

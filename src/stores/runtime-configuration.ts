@@ -1,6 +1,6 @@
 import {blockingPublications} from './publications.js';
 import type pg from 'pg';
-import type {AssistantPolicy} from '../assistant-policy.js';
+import {groupAccess,type AssistantPolicy} from '../assistant-policy.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError} from '../http.js';
 import {requestWorkflow} from '../workflows/store.js';
@@ -19,7 +19,9 @@ function policyDocument(policy:AssistantPolicy):AssistantPolicy {
   if(typeof policy.enabled!=='boolean'||policy.owner_id!==null&&(typeof policy.owner_id!=='string'||!/^[1-9]\d{0,18}$/.test(policy.owner_id))||
     !Array.isArray(policy.group_ids)||policy.group_ids.some(id=>typeof id!=='string'||!/^-[1-9]\d{0,18}$/.test(id))||policy.enabled&&!policy.owner_id)
     throw new HttpError(400,'invalid_assistant_policy');
-  return {enabled:policy.enabled,owner_id:policy.owner_id,group_ids:[...new Set(policy.group_ids)].sort()};
+  const groups=[...new Set(policy.group_ids)].sort();
+  return {enabled:policy.enabled,owner_id:policy.owner_id,group_ids:groups,
+    group_access:groupAccess(policy.group_access??{},groups,policy.owner_id)};
 }
 
 /** Saved installation setup is admitted into control before a runtime can use it. */

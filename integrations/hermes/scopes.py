@@ -52,6 +52,14 @@ class Scopes:
         if self.owner is not None and (not isinstance(self.owner,str) or not re.fullmatch(r'[1-9]\d{0,18}',self.owner)):raise ValueError('invalid_owner')
         if not isinstance(self.groups,list) or any(not isinstance(g,str) or not re.fullmatch(r'-\d{1,19}',g) for g in self.groups):raise ValueError('invalid_groups')
         if self.enabled and not self.owner:raise ValueError('owner_required')
+        self.group_access=value.get('group_access',{})
+        if not isinstance(self.group_access,dict) or len(self.group_access)>100:raise ValueError('invalid_group_access')
+        for group,entry in self.group_access.items():
+            if group not in self.groups or not isinstance(entry,dict) or set(entry)!={'granted','denied'}:raise ValueError('invalid_group_access')
+            for users in entry.values():
+                if (not isinstance(users,list) or len(users)>1000 or
+                        any(not isinstance(user,str) or not re.fullmatch(r'[1-9]\d{0,18}',user) or user==self.owner for user in users)):
+                    raise ValueError('invalid_group_access')
         from gateway.profile_routing import parse_profile_routes
         self.routes=parse_profile_routes([{'platform':'telegram','chat_id':chat,'profile':self.profile(chat),'name':chat}
                                           for chat in ([self.owner] if self.owner else [])+self.groups])
@@ -100,6 +108,9 @@ class Scopes:
         if sender.get('is_bot') or not user_id:return None
         owner=chat.get('type')=='private' and chat_id==self.owner and user_id==self.owner
         if not owner and (chat.get('type') not in ('group','supergroup') or chat_id not in self.groups):return None
+        if not owner and user_id!=self.owner:
+            access=self.group_access.get(chat_id,{})
+            if user_id not in access.get('granted',[]) or user_id in access.get('denied',[]):return None
         from gateway.profile_routing import match_profile_route
         route=match_profile_route(self.routes,'telegram',chat_id=chat_id)
         if not route:raise ValueError('missing_profile_route')

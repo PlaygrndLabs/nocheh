@@ -70,3 +70,4 @@ records current implementation and activation.
 | [0059](0059-elk-layered-memory-map-layout.md) | ELK layered positioning for the Memory map | Current Memory map layout |
 | [0060](0060-context-entity-evidence-graph.md) | Limit the 3D evidence graph to users, projects, groups, and messages | Supersedes ADR-0026's broad node taxonomy and unchanged-export clause |
 | [0061](0061-retire-isolated-honcho-comparison.md) | Retire optional Honcho comparison; keep production support and legacy data identities | Current Honcho repository boundary; supersedes 0045 experiment retention |
+| [0062](0062-owner-managed-telegram-group-participants.md) | Owner-only group replies by default with per-group participant grants and denies | Extends 0021 group scope and 0024 configuration; separate from memory sharing |

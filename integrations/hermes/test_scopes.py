@@ -18,10 +18,19 @@ from .capture import canonical,immutable_file
 
 class ScopeTests(unittest.TestCase):
     def setUp(self):
-        self.scopes=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20','-30']})
+        self.scopes=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20','-30'],
+                            'group_access':{'-30':{'granted':['456'],'denied':[]}}})
 
     def update(self,chat,user,kind='group'):
         return {'update_id':1,'message':{'message_id':1,'chat':{'id':chat,'type':kind},'from':{'id':user,'is_bot':False}}}
+
+    def test_group_access_defaults_to_owner_and_denies_override_grants(self):
+        self.assertIsNone(self.scopes.resolve(self.update(-20,456),'-20'))
+        self.assertIsNotNone(self.scopes.resolve(self.update(-30,456),'-30'))
+        denied=Scopes({'enabled':True,'owner_id':'123','group_ids':['-30'],
+                       'group_access':{'-30':{'granted':['456'],'denied':['456']}}})
+        self.assertIsNone(denied.resolve(self.update(-30,456),'-30'))
+        self.assertIsNotNone(denied.resolve(self.update(-30,123),'-30'))
 
     def test_native_profile_routes_and_capability_must_agree(self):
         a=self.scopes.resolve(self.update(-20,123),'-20');b=self.scopes.resolve(self.update(-30,456),'-30')
