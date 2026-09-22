@@ -1,6 +1,7 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 import {admin,reader} from '../access.js';
+import {telegramDeliveryAllowed} from '../assistant-policy.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
@@ -196,7 +197,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
       return result(await readJson(req,1024*1024));
     }
-    if(path==='/v1/memory/check'&&req.method==='GET')return json(res,200,{valid:true});
+    if(path==='/v1/memory/check'&&req.method==='GET'){
+      const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
+      return json(res,200,{valid:principal.admin||telegramDeliveryAllowed(s.access.policy(),principal,source)});
+    }
     if(path==='/v1/memory/honcho') {
       admin(principal);
       if(req.method==='GET')return json(res,200,await s.memory.status());

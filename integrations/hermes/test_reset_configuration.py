@@ -61,7 +61,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertEqual(result['layout'], 'original-only-v1')
         converted = result['configuration']
         self.assertEqual(converted['runtime_configuration'][0]['document'],
-                         {'enabled': True, 'owner_id': '42', 'group_ids': ['-10', '-20', '-30']})
+                         {'enabled': True, 'owner_id': '42', 'group_ids': ['-10', '-20', '-30'], 'group_access': {}})
         self.assertEqual(converted['guard_mode'], [{'mode': 'off'}])
         self.assertEqual(converted['runtime_profiles'], [{'id': custom, 'name': 'research', 'owner_id': '42'}])
         rules = {row['destination']: row for row in converted['sharing_rules']}
@@ -69,6 +69,10 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
         self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')
         self.assertEqual(configuration.original_only(source, values, preferences, reset_id), result)
+        values['TELEGRAM_GROUP_ACCESS'] = '{"-10":{"granted":["77"],"denied":["88"]}}'
+        preserved = configuration.original_only(source, values, preferences, reset_id)
+        self.assertEqual(preserved['configuration']['runtime_configuration'][0]['document']['group_access'],
+                         {'-10': {'granted': ['77'], 'denied': ['88']}})
 
     def test_legacy_conversion_rejects_unrepresentable_or_mismatched_setup(self):
         base = {'format': configuration.FORMAT, 'layout': 'legacy', 'configuration': {

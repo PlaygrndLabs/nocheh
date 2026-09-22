@@ -8,7 +8,7 @@ import {settings} from '../src/config.js';
 import {initialize} from '../src/database.js';
 import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
-import {conversationScope} from '../src/assistant-policy.js';
+import {conversationScope,telegramDeliveryAllowed} from '../src/assistant-policy.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {dispatchCommitted} from '../src/assistant.js';
 import {requestAction,controlReply,executeApproved} from '../src/actions.js';
@@ -22,6 +22,27 @@ test('only owner private messages receive owner scope; selected groups stay grou
   assert.equal(conversationScope(policy,update(-99,123),'-99'),null);
   assert.equal(conversationScope(policy,{edited_message:update(-20,123).message},'-20'),null);
   assert.throws(()=>conversationScope(policy,update(-20,123),'-30'),{code:'source_scope_mismatch'});
+});
+
+test('group participants need an explicit grant and a deny overrides it',()=>{
+  assert.equal(conversationScope(policy,update(-20,456),'-20'),null);
+  const granted={...policy,group_access:{'-20':{granted:['456'],denied:[]}}};
+  assert.equal(conversationScope(granted,update(-20,456),'-20')?.user_id,'456');
+  assert.equal(conversationScope(granted,update(-30,456),'-30'),null);
+  const denied={...policy,group_access:{'-20':{granted:['456'],denied:['456']}}};
+  assert.equal(conversationScope(denied,update(-20,456),'-20'),null);
+  assert.equal(conversationScope(denied,update(-20,123),'-20')?.owner,false);
+});
+
+test('final Telegram delivery checks the original sender after grant revocation',()=>{
+  const source={origin:'live',channel:'telegram',kind:'telegram_update',scope:'-20',payload:Buffer.from(JSON.stringify(update(-20,456)))};
+  const granted={...policy,group_access:{'-20':{granted:['456'],denied:[]}}};
+  assert.equal(telegramDeliveryAllowed(granted,{scope:'-20'},source),true);
+  assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},source),false);
+  assert.equal(telegramDeliveryAllowed(granted,{scope:null},source),false);
+  assert.equal(telegramDeliveryAllowed(granted,{scope:'-20'},{...source,origin:'import'}),false);
+  assert.equal(telegramDeliveryAllowed(granted,{scope:'-20'},null),false);
+  assert.equal(telegramDeliveryAllowed(granted,{scope:null},{...source,channel:'browser'}),true);
 });
 
 test('real PostgreSQL: action proposals require a bound turn; only a captured owner DM can approve exact immutable arguments',{skip:!process.env.PGHOST},async()=>{
@@ -63,7 +84,7 @@ test('real PostgreSQL: action proposals require a bound turn; only a captured ow
 });
 
 test('real PostgreSQL: voice is stored as derived text before dispatch; quotas pause, uncertain RPC reuses receipt identity, history never replies',{skip:!process.env.PGHOST},async()=>{
-  const config={...settings(),assistant:policy};
+  const config={...settings(),assistant:{...policy,group_access:{'-20':{granted:['456'],denied:[]}}}};
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
   const admin=new pg.Pool(connection),namespace=`assistant_${Date.now()}`;
   await admin.query(`CREATE SCHEMA ${namespace}`);
@@ -106,6 +127,9 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     await dispatchCommitted(pool,config,async()=>({state:'ambiguous',error_code:'delivery_unconfirmed'}),undefined,{owner:'inngest',epoch:1});
     await dispatchCommitted(pool,config,async()=>{throw Error('ambiguous delivery must not resend');},undefined,{owner:'inngest',epoch:1});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[second.id])).rows[0].state,'ambiguous');
+    const ungranted=await ingest(pool,{...other,key:'telegram:fixture:update:ungranted',payload:update(-20,789)});
+    await dispatchCommitted(pool,config,async()=>{throw Error('ungranted participant must not reach Hermes');},undefined,{owner:'inngest',epoch:1});
+    assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[ungranted.id])).rows[0].state,'suppressed');
     const malformed=await ingest(pool,{...other,key:'telegram:fixture:update:3',payload:update(-30,456)});
     const later=await ingest(pool,{...other,key:'telegram:fixture:update:4'});
     await dispatchCommitted(pool,config,async()=>{throw Error('invalid scope must not reach Hermes');},undefined,{owner:'inngest',epoch:1});

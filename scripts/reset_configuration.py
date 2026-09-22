@@ -9,7 +9,7 @@ import json
 import re
 import uuid
 
-from . import reset_protocol, reset_quiescence
+from . import configuration, reset_protocol, reset_quiescence
 
 FORMAT = 'nocheh-reset-configuration-v1'
 ROW_LIMIT = 10000
@@ -159,7 +159,8 @@ def original_only(snapshot_value, values, preferences, reset_id):
         runtime_profiles = [{'id': row['id'], 'name': row['name'], 'owner_id': owner}
                             for row in profiles if row.get('name') is not None]
         assistant = {'enabled': values['TELEGRAM_ENABLED'] == 'true',
-                     'owner_id': owner, 'group_ids': groups}
+                     'owner_id': owner, 'group_ids': groups,
+                     'group_access': configuration.group_access(values)}
     except (KeyError, TypeError, AttributeError, ValueError):
         raise ValueError('reset_legacy_configuration_invalid') from None
     converted = {'format': FORMAT, 'layout': 'original-only-v1', 'configuration': {

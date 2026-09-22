@@ -27,7 +27,7 @@ const source={id,event:{text:'A synthetic conversation about the northern lights
 let modeRevision=false;
 let revision=1,guarded='A synthetic conversation about the northern lights.',settingsRevision='fixture-1';
 let settingsChanges:Record<string,unknown>={};
-const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'NOCHEH_MODEL',value:'gpt-5.6-sol',editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true}];
+const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'NOCHEH_MODEL',value:'gpt-5.6-sol',editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true}];
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
