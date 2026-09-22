@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 test('dashboard navigation has one task-oriented destination per responsibility',async()=>{
-  const [app,overview,entities,projects,integrations]=await Promise.all([
+  const [app,overview,memory,projects,integrations]=await Promise.all([
     readFile('web/app.tsx','utf8'),
     readFile('web/pages/overview.tsx','utf8'),
-    readFile('web/pages/entities.tsx','utf8'),
+    readFile('web/pages/memory-workspace.tsx','utf8'),
     readFile('web/pages/projects.tsx','utf8'),
     readFile('web/pages/integrations.js','utf8'),
   ]);
@@ -21,9 +21,17 @@ test('dashboard navigation has one task-oriented destination per responsibility'
   assert.doesNotMatch(overview,/Analytics/);
   assert.match(overview,/href="#monitoring">Review status/);
 
-  assert.match(app,/\['entities','People'/);
-  assert.match(entities,/export function EntityMemory/);
-  assert.doesNotMatch(entities,/<TabsTrigger value="project">Project memory/);
+  assert.doesNotMatch(app,/\['learned','Learned memory'/);
+  assert.doesNotMatch(app,/\['entities','People'/);
+  assert.doesNotMatch(app,/\['memoryMap','Memory map'/);
+  assert.doesNotMatch(app,/\['honcho','Honcho memory'/);
+  assert.match(app,/\['learned','entities','memoryMap','honcho'\]\.includes\(key\)\)return 'memory'/);
+  assert.match(memory,/Notes & history/);
+  assert.match(memory,/<TabsTrigger value="honcho"/);
+  assert.match(memory,/<Honcho notify=\{notify\}\/>/);
+  assert.match(memory,/<TabsTrigger value="relations"/);
+  assert.match(memory,/<MemoryMap\/>/);
+  assert.doesNotMatch(integrations,/Open Honcho memory/);
   assert.match(projects,/import \{EntityMemory\} from '\.\/entities'/);
   assert.match(projects,/<TabsTrigger value="memory">Project memory/);
   assert.match(projects,/<EntityMemory kind="project"\/>/);
