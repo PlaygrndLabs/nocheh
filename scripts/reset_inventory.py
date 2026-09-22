@@ -95,6 +95,8 @@ def files(state, memory, config_path, blockers):
                  **{name: ('preserve', 'saved_setup_and_credentials') for name in ('secrets', 'compose.env', 'assistant.json', 'previous-configuration')},
                  **{name: ('delegate', '') for name in ('admin', 'hermes', 'provider', 'honcho')}})
     area(state / 'admin', {**{name: ('erase', 'installation_content_and_receipts') for name in ('backups', 'exports', 'jobs', 'tools', 'workflows', 'dashboard')},
+                           'applied.json': ('erase', 'stale_applied_configuration_revision'),
+                           'settings.lock': ('preserve', 'configuration_advisory_lock'),
                            'reset': ('preserve', 'reset_coordinator_journal'), 'restores': ('review_restore', 'separate_restore_ownership_required')})
     native = state / 'hermes'
     if native.is_symlink():

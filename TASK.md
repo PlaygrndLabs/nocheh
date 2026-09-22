@@ -27,6 +27,17 @@ intentional silence, private/group isolation, exact approval, and restart receip
 recovery await real owner/human traffic. The live test has not established MVP
 readiness.
 
+After applying owner-only access to the one selected group, the merged dashboard
+image was rebuilt and its local container recreated healthy. A count of group
+archive and delivery events since policy activation found no new human group
+traffic. The current read-only reset preflight initially flagged the expected
+`admin/applied.json` and `admin/settings.lock` files as unclassified. The reset
+inventory now plans to erase the stale applied revision and preserve the advisory
+lock; 25 focused reset tests pass. Rechecking the live inventory with that code
+finds 17 owned containers, zero blockers, and ten remaining reset phases. The
+legacy-to-original-only transition and row-linked fresh acceptance are still
+pending; no reset or source-content deletion was performed.
+
 The live inspection exposed a Honcho CLI default-root error. The one-level path
 fix and focused regression check passed, and `honcho doctor` now reports the
 running service and shared login without an environment override. This fix was
