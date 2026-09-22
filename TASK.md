@@ -100,6 +100,12 @@ isolated synthetic preview on port 18935 visibly shows `@mira_sky`,
 nodes. It has no live credentials, provider, poller, scheduler, or external-effect
 authority. Production services were not rebuilt or activated.
 
+Feature commit `c40eddd` is merged into local `main` by `aa17afe`, preserving the
+concurrent live-archive work already on `main`. The post-merge focused and full
+dashboard checks pass. Fetch and push remain blocked because the HTTPS GitHub
+remote has no available username credential; local `main` is therefore ahead of
+`origin/main` at `9c13606` and remote synchronization is pending.
+
 #### Worktree consolidation and clean real-test baseline — 2026-09-22
 
 The owner directed that all session worktrees be closed, their work merged into
