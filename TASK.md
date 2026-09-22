@@ -7,6 +7,34 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+#### Worktree consolidation and clean real-test baseline — 2026-09-22
+
+The owner directed that all session worktrees be closed, their work merged into
+`main`, and the local Docker/runtime databases be rebuilt from a clean baseline
+for new real tests. All six non-main worktrees were clean before removal and
+their branches are ancestors of `main`; the only outstanding branch work, the
+consolidated Memory workspace, is merged by `ebbbee4`. Only the main worktree
+remains. The local branch is eight commits ahead of `origin/main`; fetch and push
+remain blocked because the HTTPS remote has no available username credential.
+
+All Nocheh containers, Compose networks, old image tags, PostgreSQL volumes,
+Honcho database/cache volumes, preview resources, and the final verified-empty
+anonymous volume were removed. The unrelated `coopr` Compose project was left
+untouched. A no-cache build with refreshed pinned bases completed successfully
+for the services, management, Hermes, Honcho, CLI proxy, and provider-monitor
+images. No Nocheh service was restarted, so the fresh baseline remains stopped.
+
+Active archive, derived, control, workflow, native-memory, session, cache, and
+test-report state is empty. The configured Honcho PostgreSQL and Redis volumes
+were recreated empty; the primary PostgreSQL volume is intentionally absent and
+will be created on first startup. Provider credentials and configuration,
+provider accounting, and the Honcho spending ledger were retained. The provider
+monitor database was scrubbed through the pinned reset sanitizer. Recoverable
+bind-mounted pre-reset state is quarantined under
+`data/retired/pre-real-tests-20260922/` and is outside the active runtime paths.
+The merged dashboard suite passes all 17 checks, and the clean pinned Node 24
+Docker build passes.
+
 #### Archive owner table and editing flow — 2026-09-22
 
 The owner requested a place to see database records in a table and edit them.
