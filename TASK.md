@@ -124,6 +124,19 @@ service or Telegram behavior was changed.
 
 </sidebar_toggle_layout>
 
+<sidebar_footer_caption>
+
+#### Sidebar footer caption — 2026-09-22
+
+The owner asked to remove “Local owner dashboard.” The shared sidebar and mobile
+drawer footer now show only the Hermes and CPA dashboard links. The dashboard
+build, all 19 dashboard checks, and the pinned Node 24 preview image build pass.
+The isolated synthetic preview confirms the caption is absent at desktop and
+390px mobile widths. The AST-only Graphify refresh covers 514 files, 3,532 nodes,
+and 13,228 edges with zero model calls. No live runtime services were changed.
+
+</sidebar_footer_caption>
+
 <honcho_attachment_controls>
 
 #### Honcho attachment option layout — 2026-09-22
