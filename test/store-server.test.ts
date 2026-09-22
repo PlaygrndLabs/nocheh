@@ -91,6 +91,9 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await services.selections.current(captured.id,null,'extracted_text',await services.guards.state())).id,output.id,'worker repairs interrupted selection publication');
     await services.guards.prepare((await services.archive.captured(digest(key))).reference,'fixture',services.detect);
     const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
+    assert.equal((await request('/v1/memory/check',undefined,200,credential)).valid,true);
+    const mismatched=await services.prepared.audience.turn(token,{scope:'-42',space:'-42'},digest(key),Date.now()+60000);
+    assert.equal((await request('/v1/memory/check',undefined,200,mismatched)).valid,false);
     await request('/v1/status',undefined,403,credential);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
     await request('/v1/runtime/profiles',undefined,403,credential);

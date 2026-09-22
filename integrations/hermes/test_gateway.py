@@ -39,7 +39,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_ptb_batching_and_send_finish_before_durable_receipt_and_commands_cannot_enter_admin_handlers(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);secret='synthetic-service-token-123456789';(root/'token').write_text(secret)
-            policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+            policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20'],
+                           'group_access':{'-20':{'granted':['456'],'denied':[]}}})
             with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN':secret}), patch('integrations.hermes.assistant_gateway.check_delivery_policy',return_value=True):
                 adapter=committed_adapter_class()(PlatformConfig(enabled=True,token='123456:synthetic',typing_indicator=False))
                 request=BotFixtureRequest();instrument_request(request,adapter.capture)

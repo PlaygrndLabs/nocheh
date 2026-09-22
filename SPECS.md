@@ -180,6 +180,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Durable claims, leases, heartbeats, and result receipts distinguish completion, interruption, and late evidence. Lost responses are reconciled; abandoned work is not automatically rerun as a new external effect.
 - Runtime operations provide asynchronous `run.start`, `run.events`, `run.resume`, and `run.cancel` for Telegram, browser, and scheduled channels. Resume reconciles the same execution identity and preserves browser streaming, reconnect, cancellation, and session identities.
 - Useful proactive conversation is permitted in selected Telegram groups. Intentional silence is a valid captured outcome. Group participants cannot approve actions or change administrative, provider, privacy, or guard settings.
+- In each selected Telegram group, only the owner may address Nocheh by default. The owner can fully manage who else may address it through explicit participant grants and denies for that group, including revoking a grant. A deny takes precedence over a grant. Only permitted participants can start a bot response or tool-using turn, and permission is rechecked before delivery. The owner can inspect and change these permissions in the dashboard and CLI; group participants cannot administer them.
 
 <area name="Security and controlled tools">
 

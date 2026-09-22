@@ -46,14 +46,44 @@ explains an empty Telegram group selection. The saved local settings inspection
 reported Telegram enabled, owner and bot token configured, zero selected groups,
 and `apply_state=current`; no credential value was printed or changed.
 
-The pinned Node 24 dashboard build, 19 dashboard tests, and two configuration
+After integration with the owner-managed group access increment, the pinned Node
+24 full and dashboard builds, 19 dashboard tests, and ten settings/configuration
 tests pass. An isolated localhost preview with synthetic settings verified the
-desktop layout, reset staging, and save feedback without using the active
-installation. The AST-only Graphify refresh covers 514 files, 3,499 nodes, and
-13,129 edges with zero model calls. Phone layout and live runtime behavior were
-not newly tested.
+desktop layout, reset staging, save feedback, and coexistence with the group
+access section without using the active installation. The AST-only Graphify
+refresh covers 515 files, 3,507 nodes, and 13,172 edges with zero model calls.
+Six direct native scope tests could not run outside the pinned Hermes environment
+because the upstream `gateway` module is unavailable on the host. Phone layout
+and live runtime behavior were not newly tested.
 
 </settings_clarity>
+
+<telegram_group_participant_access>
+
+#### Owner-managed Telegram group participants — 2026-09-23
+
+The owner's live group request defined an owner-only default with explicit
+participant grants and denies. The selected group's live reply allowlist was
+temporarily cleared while the former all-members policy was still running;
+owner DM remained enabled. The new policy is implemented in the Telegram
+adapter, archive dispatch admission, and final delivery check against the
+captured original sender. It is editable through structured dashboard controls
+and `./scripts/nocheh group-access`; reset conversion preserves decisions.
+ADR-0062 records the configuration and enforcement boundary.
+
+The isolated `./scripts/nocheh test` gate passes, including database-backed
+group suppression and 350 native Hermes tests (three skips). The separate
+synthetic store HTTP check passes both tests, including the final Telegram
+delivery scope check. Docker Compose preserves nonempty JSON configuration.
+The synthetic dashboard preview on dedicated port 18849 showed the owner-only
+default and working Grant, Deny, and Revoke controls. The AST-only Graphify
+refresh covers 515 files, 3,507 nodes, and 13,172 edges with zero model calls.
+
+Live activation and fresh group human traffic remain pending. The owner's DM
+receipt above does not establish group silence, participant revocation, source
+isolation, or MVP release readiness.
+
+</telegram_group_participant_access>
 
 <mvp_cleanup_recheck>
 
