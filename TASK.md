@@ -7,6 +7,39 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+#### Archive status, filters, and message-detail clarity — 2026-09-22
+
+The owner clarified that `Needs review` looked like an approval request even
+though no approval action existed, that work proven not to have reached Telegram
+must be retried through Inngest, that the Archive's source-only behavior was an
+invisible fixed filter, and that the record editor exposed too much internal
+detail. Archive now labels a pre-delivery failure `Retry scheduled` with the
+explicit note `Inngest will retry`. A genuinely uncertain remote send is instead
+`Delivery uncertain` with `Not auto-retried`; neither is presented as an
+approval. The existing dispatch contract continues to return pre-delivery
+failures as retryable work under a fresh attempt identity and keeps only sends
+that may have started terminal and uncertain.
+
+The Archive now has visible, server-backed filters for record/message direction,
+conversation scope, and reply-processing state. The default is explicitly `All
+source records`; operational attempts and receipts remain in Monitoring rather
+than becoming archive rows. Invalid filter values fail closed. The message action
+is now `Open`, and the selected panel prioritizes two ordinary concepts: the
+permanent read-only original and the separately editable agent copy. Generated
+items, provenance, raw agent-copy fields, source identity, and export controls
+remain available under advanced disclosures.
+
+The full TypeScript/dashboard build and all 18 dashboard tests pass. The compact
+full Node/dashboard run completes 120 tests without failure under synthetic
+service configuration; PostgreSQL-dependent checks retain their explicit fixture
+skips. Four focused Node archive/filter checks pass separately. The host Python
+environment lacks the pinned Telegram package, so the Hermes gateway test was not
+rerun there; the change does not alter that gateway, and its existing focused
+pre-delivery/post-delivery regression remains in place. An isolated synthetic
+preview on port 18941 verifies all-source, incoming-message, and retry-status
+filtering plus the simplified original/agent copy detail panel. It contains no
+credentials, provider, poller, scheduler, or external-effect authority.
+
 #### Telegram follow-up recovery and source-only Archive — 2026-09-22
 
 Live diagnosis of the owner's MVP test found that the first Telegram turn held the

@@ -4,6 +4,7 @@ import {DETECTOR_VERSION,literalSpans,mask,patternSpans} from './guard.js';
 import {HttpError,object,string} from './http.js';
 import {admin,type Reader} from './access.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
+import {matchesArchiveFilters,type ArchiveFilters} from './archive-filters.js';
 
 // The archive is evidence. These independently versioned projections are disposable
 // except for owner revisions, which must be retained and never overwritten by jobs.
@@ -240,15 +241,18 @@ export async function editGuarded(pool:pg.Pool,principal:Reader,eventId:string,i
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 
-export async function browseData(pool:pg.Pool,principal:Reader,after='') {
+export async function browseData(pool:pg.Pool,principal:Reader,after='',filters:ArchiveFilters={kind:'',scope:'',reply:''}) {
   admin(principal);
   const {rows}=await pool.query(`SELECT e.id,e.scope,e.kind,e.original_text,e.received_at,
     (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id AND s.state='ready') AS ready,
     (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id) AS total,
     d.state AS assistant_state,d.runtime_stage AS assistant_stage,d.error_code AS assistant_error,d.attempts AS assistant_attempts
     FROM events e LEFT JOIN dispatches d ON d.event_id=e.id
-    WHERE e.id>$1 AND e.origin<>'generated' AND e.kind<>'telegram_wire' ORDER BY e.id LIMIT 51`,[string(after,64)]);
-  return {records:rows.slice(0,50).map(({original_text,...row})=>({...row,text:original_text?.toString().slice(0,500)??null})),next:rows.length>50?rows[49].id:null};
+    WHERE e.id>$1 AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2)
+      AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message')
+    ORDER BY e.id LIMIT $4`,[string(after,64),filters.scope,filters.kind,filters.reply?201:51]);
+  const filtered=rows.filter(row=>matchesArchiveFilters(row,row.assistant_state,filters));
+  return {records:filtered.slice(0,50).map(({original_text,...row})=>({...row,text:original_text?.toString().slice(0,500)??null})),next:filtered.length>50?filtered[49].id:filters.reply&&rows.length===201?rows.at(-1)?.id:null};
 }
 
 export async function exportGuarded(pool:pg.Pool,eventId:string) {

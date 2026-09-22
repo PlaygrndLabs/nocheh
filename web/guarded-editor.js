@@ -34,17 +34,15 @@ function Projection({source:latest,original,eventId,call,refresh,notify}) {
     try{setPreview(await call('/data/'+eventId+'/guarded/history?source_id='+encodeURIComponent(source.id)+'&revision='+revision));}catch(error){setProblem(error.message);}
   }
   return h('article',{className:'n-projection'},
-    h('div',{className:'n-projection-heading'},h('div',null,h('p',{className:'archive-kicker'},source.kind==='events'?'Message text':source.kind==='artifacts'?'File information':'Generated text'),h('h3',null,source.kind==='events'?'Original compared with agent copy':source.kind==='artifacts'?'Original file information compared with agent copy':original?.kind?.replaceAll('_',' ')||'Generated text')),h(StatusBadge,{state:source.active_revision?'ready':source.state||'pending',label:source.active_revision?'Revision '+source.active_revision+' · '+(source.author==='owner'?'Owner edited':'Automatic'):source.state==='failed'?'Preparation failed':'Waiting for preparation'})),
+    h('div',{className:'n-projection-heading'},h('div',null,h('p',{className:'archive-kicker'},source.kind==='events'?'Message wording':source.kind==='artifacts'?'File information':'Generated text'),h('h3',null,source.kind==='events'?'Agent copy':source.kind==='artifacts'?'Agent file copy':original?.kind?.replaceAll('_',' ')||'Generated item')),h(StatusBadge,{state:source.active_revision?'ready':source.state||'pending',label:source.active_revision?'Revision '+source.active_revision+' · '+(source.author==='owner'?'Owner edited':'Automatic'):source.state==='failed'?'Preparation failed':'Waiting for preparation'})),
     latest.active_revision!==source.active_revision&&h('p',{role:'alert'},'A newer revision is available. Your edits and original revision are retained. Review the latest copy before saving.'),
     latest.active_revision!==source.active_revision&&h('button',{type:'button',onClick:refresh,disabled:busy},'Discard edits and load latest copy'),
     source.error_code&&h('p',{role:'status'},source.error_code.replaceAll('_',' ')),
-    h('div',{className:'n-guard-comparison'},
-      h('section',{className:'n-guard-original'},h('div',{className:'n-version-label'},h('span',null,'1'),h('div',null,h('h4',null,'Original'),h('small',null,'Permanent, read-only evidence'))),h('pre',{className:'n-data',dir:'auto'},hasText?original?.text:JSON.stringify(original,null,2)),hasText&&h('details',null,h('summary',null,'Original fields'),h('pre',{className:'n-data'},JSON.stringify(original,null,2)))),
-      h('section',{className:'n-guard-editable'},h('div',{className:'n-version-label'},h('span',null,'2'),h('div',null,h('h4',null,'Agent copy'),h('small',null,'Editable wording agents use when guarding is on'))),!source.content&&h('p',{className:'n-muted'},'No agent copy exists yet. Editing starts from the original.'),
+    h('section',{className:'n-guard-editable n-agent-copy-editor'},!source.content&&h('p',{className:'n-muted'},'No agent copy exists yet. Editing starts from the original.'),
         hasText&&h('label',null,'Wording for agents',h('textarea',{rows:5,dir:'auto',value:text,disabled:busy,onChange:event=>setText(event.target.value)})),
-        h('details',null,h('summary',null,hasText?'Other agent-copy fields':'Agent-copy file information'),h('label',null,'Fields (JSON)',h('textarea',{rows:10,value:metadata,disabled:busy,onChange:event=>setMetadata(event.target.value)}))),
+        h('details',null,h('summary',null,hasText?'Advanced agent-copy fields':'Agent-copy file information'),h('label',null,'Fields (JSON)',h('textarea',{rows:10,value:metadata,disabled:busy,onChange:event=>setMetadata(event.target.value)}))),
         h('p',{className:'n-guard-note'},'Saving changes only the agent copy. The original above remains unchanged.'),
-        h('div',{className:'n-actions'},h('button',{type:'button',disabled:busy,onClick:()=>save(),className:'n-primary'},busy?'Saving…':'Save agent copy'),h('button',{type:'button',onClick:()=>versions(),disabled:busy},'Revision history')))),
+        h('div',{className:'n-actions'},h('button',{type:'button',disabled:busy,onClick:()=>save(),className:'n-primary'},busy?'Saving…':'Save agent copy'),h('button',{type:'button',onClick:()=>versions(),disabled:busy},'Revision history'))),
     problem&&h('p',{role:'alert'},problem),
     history&&h('div',{className:'n-revision-history'},h('h4',null,'Revision history'),...history.revisions.map(revision=>h('div',{className:'n-row',key:revision.revision},h('span',null,'Revision '+revision.revision+' · '+revision.author+' · '+new Date(revision.created_at).toLocaleString()),h('button',{type:'button',onClick:()=>view(revision.revision)},'View revision'))),history.next&&h('button',{type:'button',onClick:()=>versions(history.next)},'Older revisions')),
     preview&&h('section',null,h('h4',null,'Revision '+preview.revision+' · read only'),h('pre',{className:'n-data'},JSON.stringify(preview.content,null,2)),h('button',{type:'button',disabled:busy||preview.revision===source.active_revision,onClick:()=>save(preview.revision)},'Restore as new revision')));
@@ -59,8 +57,8 @@ export function GuardedEditor({record,call,notify}) {
     const d=record.derived.find(d=>d.id===source.source_id);
     return {text:d?new TextDecoder().decode(Uint8Array.from(atob(d.content_base64),c=>c.charCodeAt(0))):'',kind:d?.kind,provenance:d?.provenance};
   }
-  return h('section',{className:'n-panel n-agent-copy'},h('p',{className:'archive-kicker'},'Step 2'),h('h2',null,'Control what agents can use'),
-    h('p',{className:'n-muted'},'Review the permanent original beside its editable agent copy. Saving never changes the archive.'),
+  return h('section',{className:'n-panel n-agent-copy'},h('p',{className:'archive-kicker'},'Agent copy'),h('h2',null,'What agents can use'),
+    h('p',{className:'n-muted'},'Edit this only when agents should use different wording. Saving never changes the original message above.'),
     error&&h('p',{role:'alert'},error),!data&&!error&&h('p',{role:'status'},'Loading guarded versions…'),
     ...(data?.projections??[]).map(source=>h(Projection,{key:source.id+':'+reset,source,original:original(source),eventId:record.id,call,notify,refresh:reload})));
 }
