@@ -19,4 +19,4 @@ Measure answer matches, source-label matches, latency, upstream usage and failur
 on a fixed synthetic dataset. Preserve incomplete runs. These measurements are
 limited smoke evidence, not a broad memory-quality claim. Missing experiment
 credentials do not block the production release. See the
-[runnable comparison](../../experiments/honcho/README.md).
+[runnable comparison](https://github.com/devbymak/nocheh/blob/2d27262803e97d9f511e7768ef92ffaa6a15f439/experiments/honcho/README.md).
