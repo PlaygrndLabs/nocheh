@@ -254,7 +254,7 @@ Telegram and guard/trust settings with its existing save/apply behavior.
 together. Each profile preference shows its effective origin and has a reset icon
 beside its input; resetting removes the profile override after saving so the global
 value applies. Existing native values remain explicit overrides. Nocheh settings
-shows whether the Telegram bot token is configured without exposing it and explains
+shows `****` for a configured Telegram bot token without exposing its value and explains
 that an empty selected group list still permits owner private messages.
 Job preference overrides can be stored via CLI; scheduler execution is P6 work.
 Broader tool and approval policy controls are P5 work, not active capabilities yet.

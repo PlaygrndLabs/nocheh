@@ -56,6 +56,13 @@ Six direct native scope tests could not run outside the pinned Hermes environmen
 because the upstream `gateway` module is unavailable on the host. Phone layout
 and live runtime behavior were not newly tested.
 
+The owner then requested `****` in configured secret inputs instead of an empty
+appearance. The UI uses a placeholder while leaving the input value empty, so an
+untouched field still preserves its saved secret. The isolated preview confirmed
+the four stars are visible and the input value length is zero. The pinned Node 24
+dashboard build, 19 dashboard tests, two settings tests, and AST-only graph refresh
+pass; no live credential was read into the browser or changed.
+
 </settings_clarity>
 
 <telegram_group_participant_access>
