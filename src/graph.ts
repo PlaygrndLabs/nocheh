@@ -4,7 +4,7 @@ import {assertAudience} from './access.js';
 import {parentSpace} from './spaces.js';
 import { HttpError, string } from './http.js';
 import { limit } from './retrieval.js';
-import {evidenceNodeLabel} from './graph-labels.js';
+import {evidenceNodeLabel,graphGroupLabel,graphUserLabel} from './graph-labels.js';
 
 type Node = {id:string; kind:'group'|'user'|'message'; label:string; event_id?:string; source_id?:string};
 type Edge = {from:string; to:string; kind:string};
@@ -13,15 +13,15 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
   string(scope,256); limit(count,20,50);
   if (!scope || (principal.scope!==null && (principal.space??principal.scope)!==scope)) throw new HttpError(403,'graph_scope_denied');
   for(const id of [after,focus]) if(id && !/^[a-f0-9]{64}$/.test(id)) throw new HttpError(400,'invalid_graph_cursor');
-  const {rows}=await pool.query<{id:string;source_id:string;object_id:string;object_kind:string;event_kind:string;text:string;scope:string;space_id:string}>(
-    `SELECT e.id,e.source_id,e.kind AS event_kind,o.id AS object_id,o.kind AS object_kind,left(e.search_text,160) AS text,e.scope,
+  const {rows}=await pool.query<{id:string;source_id:string;object_id:string;object_kind:string;event_kind:string;text:string;scope:string;space_id:string;payload:Buffer}>(
+    `SELECT e.id,e.source_id,e.kind AS event_kind,o.id AS object_id,o.kind AS object_kind,left(e.search_text,160) AS text,e.scope,e.payload,
      (SELECT space_id FROM event_spaces WHERE event_id=e.id) AS space_id FROM events e
      JOIN source_observations s ON s.event_id=e.id JOIN source_revisions r ON r.id=s.revision_id JOIN source_objects o ON o.id=r.object_id
      WHERE o.kind='message' AND ($1='*' OR e.scope=$1) AND e.origin<>'generated' AND e.id>$2 AND ($3='' OR e.id=$3)
      AND ($5::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$5)) ORDER BY e.id LIMIT $4`,[parentSpace(scope)??scope,after,focus,count+1,principal.space??(parentSpace(scope)?scope:null)]);
   const events=rows.slice(0,count),ids=events.map(e=>e.id);
   const nodes:Node[]=[{id:'group:'+scope,kind:'group',label:scope==='*'?'All private knowledge':scope}],edges:Edge[]=[];
-  const add=(node:Node)=>{if(!nodes.some(n=>n.id===node.id))nodes.push(node);};
+  const add=(node:Node,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;};
   const link=(from:string,to:string,kind:string)=>{if(!edges.some(e=>e.from===from&&e.to===to&&e.kind===kind))edges.push({from,to,kind});};
   const sources=new Map<string,string[]>();
   for(const event of events)sources.set(event.object_id,[...(sources.get(event.object_id)||[]),event.id]);
@@ -30,13 +30,14 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
   let unresolvedReplies=0;
   for(const event of events){
     const ownScope=scope==='*'?event.space_id:scope;
-    if(scope==='*'){add({id:'group:'+ownScope,kind:'group',label:ownScope});link('group:*','group:'+ownScope,'contains');}
+    add({id:'group:'+ownScope,kind:'group',label:graphGroupLabel(event.payload,ownScope)??ownScope},ownScope);
+    if(scope==='*')link('group:*','group:'+ownScope,'contains');
     const id='message:'+event.id;
     add({id,kind:'message',label:evidenceNodeLabel(event.text,event.event_kind,event.id),event_id:event.id,source_id:event.source_id});link('group:'+ownScope,id,'contains');
     for(const relation of relations.rows.filter(r=>r.event_id===event.id)) {
       if(relation.kind==='authored_by') {
         const authorId='user:'+ownScope+':'+relation.target_id;
-        add({id:authorId,kind:'user',label:relation.external_id});link(authorId,id,'authored');continue;
+        add({id:authorId,kind:'user',label:graphUserLabel(event.payload,relation.external_id)??relation.external_id},relation.external_id);link(authorId,id,'authored');continue;
       }
       // Resolve only against this already-authorized page. A foreign key is not access.
       const targets=sources.get(relation.target_id);

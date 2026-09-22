@@ -11,7 +11,7 @@ test('real PostgreSQL: graph contains only scoped context entities and recorded 
   const admin=new pg.Pool(connection),namespace='graph_'+Date.now();await admin.query(`CREATE SCHEMA ${namespace}`);
   const pool=new pg.Pool({...connection,options:`-c search_path=${namespace}`});
   const event=(key:string,source:string,scope='-20',reply?:number):Envelope=>({version:1,key,source_id:source,scope,revision:key,bot_id:'fixture',kind:'telegram_update',origin:'import',occurred_at:null,text:'source '+key,
-    payload:{message:{message_id:Number(source),from:{id:42},...(reply?{reply_to_message:{message_id:reply}}:{})}}});
+    payload:{message:{message_id:Number(source),chat:{id:Number(scope),type:'supergroup',title:'Observatory team'},from:{id:42,username:'mira_sky'},...(reply?{reply_to_message:{message_id:reply}}:{})}}});
   try{
     await initialize(pool);
     for(const e of [event('first','1'),event('edit','1'),event('reply','2','-20',1),event('private','1','-30'),event('unresolved','3','-20',99)])await ingest(pool,e,false);
@@ -24,6 +24,8 @@ test('real PostgreSQL: graph contains only scoped context entities and recorded 
     assert.equal(graph.edges.filter(e=>e.kind==='reply_to_source').length,2);
     assert.equal(graph.edges.filter(e=>e.kind==='same_source_revision').length,1);
     assert.deepEqual([...new Set(graph.nodes.map(n=>n.kind))].sort(),['group','message','user']);
+    assert.ok(graph.nodes.some(n=>n.kind==='group'&&n.label==='Observatory team'));
+    assert.ok(graph.nodes.some(n=>n.kind==='user'&&n.label==='@mira_sky'));
     assert.ok(!JSON.stringify(graph).includes('transcript'));
     assert.equal(graph.unresolved_replies,1);
     await assert.rejects(evidenceGraph(pool,{scope:'-30',admin:false},'-20'),{code:'graph_scope_denied'});
