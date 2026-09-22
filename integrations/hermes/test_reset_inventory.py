@@ -19,6 +19,8 @@ class ResetInventoryTests(unittest.TestCase):
         (self.state / 'hermes/auth.json').write_text('LOGIN_MUST_NOT_BE_READ_OR_COPIED')
         (self.state / 'files/original.bin').write_bytes(b'PRIVATE_ORIGINAL_MUST_NOT_BE_COPIED')
         (self.state / 'provider/monitor/usage.sqlite').write_bytes(b'ACCOUNTING_NOT_TOUCHED')
+        (self.state / 'admin/applied.json').write_text('STALE_REVISION_MUST_NOT_BE_COPIED')
+        (self.state / 'admin/settings.lock').touch()
         (self.memory / 'ledger').mkdir()
         (self.root / 'data/backups').mkdir()
         self.values = {'NOCHEH_STORAGE_LAYOUT': 'legacy', 'NOCHEH_HONCHO_ENABLED': 'true', 'SERVICE_TOKEN': 'SECRET_NEVER_SERIALIZED'}
@@ -65,7 +67,7 @@ class ResetInventoryTests(unittest.TestCase):
         self.assertEqual(manifest['blockers'], [])
         self.assertEqual(len(manifest['volumes']), 4)
         text = json.dumps(manifest)
-        for forbidden in ('SECRET_NEVER_SERIALIZED', 'DO_NOT_SERIALIZE', 'LOGIN_MUST', 'PRIVATE_ORIGINAL', 'ACCOUNTING_NOT_TOUCHED'):
+        for forbidden in ('SECRET_NEVER_SERIALIZED', 'DO_NOT_SERIALIZE', 'LOGIN_MUST', 'PRIVATE_ORIGINAL', 'ACCOUNTING_NOT_TOUCHED', 'STALE_REVISION_MUST_NOT_BE_COPIED'):
             self.assertNotIn(forbidden, text)
         actions = {item['path']: item['action'] for item in manifest['paths']}
         self.assertEqual(actions[str(self.state / 'files')], 'erase')
@@ -74,6 +76,8 @@ class ResetInventoryTests(unittest.TestCase):
         self.assertEqual(actions[str(self.state / 'provider/monitor/usage.sqlite')], 'sanitize_accounting')
         self.assertEqual(actions[str(self.memory / 'ledger')], 'preserve')
         self.assertEqual(actions[str(self.state / 'admin/restores')], 'review_restore')
+        self.assertEqual(actions[str(self.state / 'admin/applied.json')], 'erase')
+        self.assertEqual(actions[str(self.state / 'admin/settings.lock')], 'preserve')
         self.assertEqual(manifest['external_archives'][0]['action'], 'review_archive')
         self.assertIn('settle_external_effects', manifest['pending'])
         self.assertEqual(before, {str(path): path.read_bytes() for path in self.root.rglob('*') if path.is_file()})
