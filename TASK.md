@@ -7,6 +7,25 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+#### Owner archive records table — 2026-09-22
+
+The owner requested a place to see database records in a table and edit them.
+The dashboard Archive page now presents searchable, paginated original records in
+a semantic table with text, scope, received time, guarded-copy readiness, and a
+visible **View / edit** action. Selecting a record keeps the full-width table
+readable and opens the existing revision-checked guarded editor below it. The UI
+states explicitly that original evidence is immutable; it never exposes raw row
+updates. The optional pgweb database browser remains read-only and its guide now
+directs ordinary editing to the owner dashboard.
+
+The action column remains sticky in the horizontally scrollable 390px layout.
+All 16 dashboard checks and `git diff --check` pass. The pinned Node 24 Docker
+build passes. The AST-only Graphify refresh covers 511 files with 3,470 nodes and
+13,046 edges and zero model calls. An isolated synthetic preview on port 18933
+verifies the full-width desktop table, row selection, guarded editor, and mobile
+sticky edit action with no Telegram, provider, poller, scheduler, or external
+execution authority. The preview remains running for review.
+
 #### Unified Memory relationship and access map — 2026-09-21
 
 On 2026-09-22, the owner requested smaller Memory map nodes. The graph uses compact label-first cards with narrower width, reduced padding and visual weight, and no repeated action helper line inside every node. ELK fallback dimensions match the rendered card footprint so initial and reset layouts remain stable; automatic fit is capped below 1× so the canvas does not enlarge compact cards back to their old visual footprint, while manual zoom remains available. Connection handles retain their existing interaction size. All 15 dashboard checks, the standalone dashboard build, and the pinned Node 24 full build pass. The isolated preview verifies the compact cards at desktop and 390px, including a shortened mobile reset label with the full accessible name preserved.
