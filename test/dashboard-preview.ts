@@ -37,6 +37,22 @@ const actions:any[]=[{id:'c'.repeat(64),fingerprint:'d'.repeat(64),kind:'shell',
 let spaceRevision=1,spaceOverrides:Record<string,any>={mode:'approved'},shares:any[]=[];
 let memoryAttached=true;
 const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes','Hermes','Assistant runtime','running'],['cliproxy-monitor','CPA Manager Plus','Provider observations','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
+const personId='1'.repeat(64),projectEntityId='2'.repeat(64),projectId='project-fixture',factId='3'.repeat(64),requestId='4'.repeat(64),grantId='5'.repeat(64),conversation='-10042',topic='-10042/topic/7';
+const memoryMapNodes:any[]=[
+ {id:`person:${personId}`,kind:'person',label:'Mira Chen',state:'active',detail:{revision:2,fact_count:2}},
+ {id:`project:${projectEntityId}`,kind:'project',label:'Aurora field guide',state:'active',detail:{revision:1,project_id:projectId,project:{id:projectId,name:'Aurora field guide',description:'Synthetic project for the isolated preview.',state:'active',revision:1}}},
+ {id:`conversation:${conversation}`,kind:'conversation',label:'Friends travel group',detail:{space_id:conversation,assignment:{space_id:conversation,project_id:projectId,mode:'assigned',revision:1}}},
+ {id:`topic:${topic}`,kind:'topic',label:'Topic 7 · Iceland planning',detail:{space_id:topic,parent:conversation,assignment:{space_id:topic,project_id:null,mode:'inherit',revision:1}}},
+ {id:`fact:${factId}`,kind:'fact',label:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',state:'active',detail:{revision:1,predicate:'preference',attribution:'direct',uncertainty:'explicit',evidence:[{id}],author:'fixture-owner',created_at:new Date().toISOString()}},
+];
+const memoryMapEdges:any[]=[
+ {id:`relationship:fact:${factId}`,kind:'relationship',source:`person:${personId}`,target:`fact:${factId}`,label:'preference',authoritative:false,detail:{claim_id:factId,content:memoryMapNodes[4].label,attribution:'direct',uncertainty:'explicit',evidence:[{id}],revision:1}},
+ {id:`project_assignment:${conversation}`,kind:'project_assignment',source:`project:${projectEntityId}`,target:`conversation:${conversation}`,label:'contains',authoritative:false,detail:{destination:conversation,project_id:projectId,mode:'assigned',revision:1}},
+ {id:`access:${grantId}`,kind:'access',source:`fact:${factId}`,target:`topic:${topic}`,state:'active',label:'persistent',authoritative:true,detail:{grant_id:grantId,destination:topic,wording:'Mira prefers quiet aurora viewpoints.',mode:'persistent',revision:1,fact_revision:1}},
+ {id:`suggestion:${requestId}`,kind:'suggestion',source:`fact:${factId}`,target:`conversation:${conversation}`,state:'pending',label:'suggested',authoritative:false,detail:{request_id:requestId,destination:conversation,wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',revision:1,fact_revision:1,relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],expires_at:new Date(Date.now()+86400000).toISOString()}},
+];
+const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true}};
+const memoryGrant={id:grantId,destination:topic,fact_revision:1,mode:'persistent',state:'active',revision:1,wording:'Mira prefers quiet aurora viewpoints.',suspended_reason:null,provenance:{fixture:true}};
 async function scenario(){try{return (await readFile('/tmp/nocheh-ui-scenario','utf8')).trim();}catch{return 'normal';}}
 const server=createServer((req,res)=>{void(async()=>{
  const url=new URL(req.url||'/','http://fixture'),path=url.pathname;
@@ -81,6 +97,11 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/shares')return json(res,200,shares);
   if(route==='/memory/preview')return json(res,200,{originals:[],shares,filtered_sources:[]});
   if(route==='/memory/reviews')return json(res,200,{jobs:[{id:'e'.repeat(64),event_id:id,reason:'import',state:'paused',chunk_index:0}],next:null});
+  if(route==='/memory-map'){const query=(url.searchParams.get('q')??'').trim().toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'';const stateEdges=state?memoryMapEdges.filter(edge=>edge.state===state||edge.label===state):memoryMapEdges,stateNodes=new Set(stateEdges.flatMap(edge=>[edge.source,edge.target])),nodes=memoryMapNodes.filter(node=>(!kind||node.kind===kind)&&(!state||node.state===state||stateNodes.has(node.id))&&(!query||`${node.label} ${node.kind}`.toLocaleLowerCase().includes(query))),ids=new Set(nodes.map(node=>node.id));return json(res,200,{format:'nocheh-memory-map-v1',nodes,edges:stateEdges.filter(edge=>ids.has(edge.source)||ids.has(edge.target)),next:null,collapsed_facts:true,focus:null,counts:{nodes:nodes.length,edges:memoryMapEdges.length},relationship_edges_grant_access:false});}
+  if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest]});
+  if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant]});
+  if(route==='/memory-access/settings')return json(res,200,{settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}]});
+  if(route==='/projects')return json(res,200,{projects:[memoryMapNodes[1].detail.project],next:null});
  }
  if(req.method==='POST'){
   const body=await readJson(req) as any;
