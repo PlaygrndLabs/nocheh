@@ -7,7 +7,6 @@ export function Integrations() {
         h('p',{className:'n-muted'},data.status?.model||'Check runtime health or restart services in Maintenance.'),
         h('a',{className:'n-text-link',href:'/hermes/nocheh'},'Open native Hermes dashboard →'),
         h('div',{className:'capability-list'},...Object.entries(data.capabilities||{}).filter(([,v])=>typeof v==='boolean').map(([name,value])=>h('div',{className:'n-row',key:name},h('b',null,name.replaceAll('_',' ')),h(StatusBadge,{state:value?'ready':'disabled',label:value?'Available':'Disabled'})))),h(Details,{value:data,label:'Runtime status and capabilities'}))),
-      h(Panel,{title:'Honcho',note:'Primary long-term memory with scoped recall, guarded sources and durable ingestion receipts.'},h(RouteLink,{page:'honcho'},'Open Honcho memory →')),
       h(Panel,{title:'Provider monitoring',note:'Request history, usage, latency, failures and subscription account observations from CPA Manager Plus.'},
         h('a',{className:'n-text-link',href:'/providers/management.html'},'Open provider monitoring →')));
   }
