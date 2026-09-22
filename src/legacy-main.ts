@@ -34,6 +34,7 @@ import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from './workflows/host-coordinator.js';
 import {registerWorker} from './workflows/store.js';
 import {hostActionAuthority} from './workflows/host-tools.js';
+import {telegramDeliveryAllowed} from './assistant-policy.js';
 
 const config = settings();
 const servesArchive=true;
@@ -130,7 +131,10 @@ const server = createServer((req, res) => { void (async () => {
   };
 
   if(servesArchive && !principal.admin && req.method==='POST' && path==='/v1/context/prepare')return agentResult(await readJson(req,1024*1024));
-  if(servesArchive && path==='/v1/memory/check' && req.method==='GET')return json(res,200,{valid:true});
+  if(servesArchive && path==='/v1/memory/check' && req.method==='GET'){
+    const source=principal.turnEvent?(await pool.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
+    return json(res,200,{valid:principal.admin||telegramDeliveryAllowed(config.assistant,principal,source)});
+  }
   if(servesArchive&&path==='/v1/memory/honcho') {
     admin(principal);
     if(req.method==='GET')return json(res,200,await memoryStatus(pool));

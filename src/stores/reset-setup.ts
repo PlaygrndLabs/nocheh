@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
+import {groupAccess,type GroupAccess} from '../assistant-policy.js';
 import {validatePolicy} from '../security/contract.js';
 import {validateSpace} from '../spaces.js';
 import type {StorePools} from './connections.js';
@@ -8,7 +9,7 @@ import {GuardRepository} from './guards.js';
 import {SourceAccessRepository} from './access.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 
-type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids:string[]};
+type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids:string[];group_access?:Record<string,GroupAccess>};
 type SetupSnapshot={format:'nocheh-reset-configuration-v1';layout:'original-only-v1';configuration:{
   security_policy:{document:unknown}[];installation_generation:{generation:string}[];
   guard_mode:{mode:'on'|'off'}[];runtime_configuration:{name:'assistant';document:AssistantPolicy}[];
@@ -34,11 +35,15 @@ const identifier=(value:unknown,pattern:RegExp)=>{const result=text(value,100);i
 const same=(left:unknown,right:unknown)=>canonical(left)===canonical(right);
 
 function policy(value:unknown):AssistantPolicy {
-  const row=exact(value,['enabled','owner_id','group_ids']);
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('reset_setup_snapshot_invalid');
+  const row=value as Record<string,unknown>;
+  if(Object.keys(row).some(key=>!['enabled','owner_id','group_ids','group_access'].includes(key))||
+    !['enabled','owner_id','group_ids'].every(key=>key in row))throw Error('reset_setup_snapshot_invalid');
   if(typeof row.enabled!=='boolean'||row.owner_id!==null&&(typeof row.owner_id!=='string'||!/^[1-9]\d{0,18}$/.test(row.owner_id))||
     !Array.isArray(row.group_ids)||row.group_ids.some(id=>typeof id!=='string'||!/^-[1-9]\d{0,18}$/.test(id))||
     row.group_ids.join('\0')!==[...new Set(row.group_ids)].sort().join('\0')||row.enabled&&!row.owner_id)
     throw Error('reset_setup_snapshot_invalid');
+  try {groupAccess(row.group_access??{},row.group_ids as string[],row.owner_id as string|null);}catch {throw Error('reset_setup_snapshot_invalid');}
   return row as unknown as AssistantPolicy;
 }
 

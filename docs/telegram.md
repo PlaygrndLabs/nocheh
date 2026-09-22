@@ -23,6 +23,23 @@ Omit `--group-id` for DM only, or repeat it to select multiple groups. These IDs
 are examples; use the discovered values. The ignored `.env`
 holds the policy. To disable the assistant, set `TELEGRAM_ENABLED=false` and run `up`.
 
+Only the owner may address Nocheh in a selected group by default. The owner can
+manage individual participant IDs in **Settings → Nocheh settings → Who may address
+Nocheh in groups**, then Save and Apply. The same controls are available in the CLI:
+
+```sh
+./scripts/nocheh group-access list
+./scripts/nocheh group-access grant -1001234567890 987654321
+./scripts/nocheh group-access deny -1001234567890 987654321
+./scripts/nocheh group-access revoke -1001234567890 987654321
+```
+
+Use discovered numeric user IDs. Each change applies to the running services;
+`--save-only` saves a batch for a later `./scripts/nocheh config apply`.
+Grant permits a participant to start a reply or tool-using turn in that group.
+Deny overrides grant. Revoke removes either decision and returns that participant
+to the owner-only default. Only the owner can administer these decisions.
+
 For proactive group conversation, disable the bot's group privacy mode in
 BotFather or give it the appropriate group administrator role. Telegram otherwise
 delivers a limited set of group messages. The archive can preserve only updates
@@ -33,8 +50,9 @@ Desktop media can be imported separately.
 
 Each selected group/topic has its own native Hermes memory and history. Memory
 access supports isolated, approved and filtered derived sharing under ADR-0030;
-the owner DM may search the complete archive and registered native memory. Other chats are captured but cannot trigger
-the assistant. Bot senders, edits and historical replay do not trigger new replies.
+the owner DM may search the complete archive and registered native memory. Unselected
+chats and participants without a group grant cannot trigger the assistant. Bot
+senders, edits and historical replay do not trigger new replies.
 Normal group chatter can produce intentional silence. Voice transcripts are
 derived records, never replacements for original audio or message payloads.
 Round video notes follow the same transcription path. Media bytes are downloaded
