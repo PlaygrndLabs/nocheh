@@ -33,6 +33,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Capture, attachment retrieval, assistant work, and approved actions have independent progress; slow inference does not block source capture. Unsupported or malformed input is retained with a visible processing outcome.
 - Browser text and attachments are captured before command interpretation or inference. Scheduled definitions and fires retain stable operational identities in control storage. Outbound results, execution attempts, and delivery receipts remain separate evidence; confirmed delivered messages can reference that evidence.
 - Search, source reads, artifact downloads, graphs, export, and replay preserve identities and enforce audience access. Queries are bounded and paginated. Archive search and the default archive graph show original evidence; source details link to derivatives. Knowledge retrieval can combine authorized sources and memory with clear labels.
+- The owner dashboard presents archive records in a searchable, paginated, responsive table. Selecting a row opens its source details and the applicable revision-checked editor for guarded or derived records; immutable original evidence remains visibly read-only and is never edited as a raw database row.
 
 <area name="Versioned derivatives and reprocessing">
 
