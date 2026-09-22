@@ -262,3 +262,10 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .n-sidebar-foot a{min-height:44px}
 .nocheh-app>.n-sidebar{overflow:hidden}
 .nocheh-app>.n-sidebar nav{flex:1;min-height:0;overflow-y:auto}
+
+.honcho-attachment-options{max-width:720px;margin:16px 0 12px;padding:4px 14px;border:1px solid var(--n-line);border-radius:8px}
+.honcho-attachment-options legend{padding:0 5px;color:var(--n-muted);font-size:11px;font-weight:650}
+.nocheh-app .honcho-attachment-option{display:flex;align-items:center;gap:12px;min-height:48px;margin:0;padding:10px 2px;font-size:13px;line-height:1.4;cursor:pointer}
+.honcho-attachment-option+.honcho-attachment-option{border-top:1px solid var(--n-line)}
+.nocheh-app .honcho-attachment-option input[type=checkbox]{display:block;flex:0 0 18px;width:18px;min-width:18px;height:18px;min-height:18px;margin:0;padding:0;accent-color:var(--n-accent)}
+.honcho-attachment-note{max-width:720px}
