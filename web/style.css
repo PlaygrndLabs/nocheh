@@ -306,3 +306,11 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
  .settings-page .n-settings-group,.settings-page .n-review,.settings-page .n-apply{padding:16px}
  .settings-page .n-settings-group .n-form{gap:20px}
 }
+
+/* The desktop sidebar control lives beside the brand, not below navigation. */
+.n-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
+.n-sidebar-head .n-brand{flex:1;min-width:0;gap:8px;padding-inline:0}
+.n-sidebar-head .n-brand small{font-size:10px;white-space:nowrap}
+.n-sidebar-head .sidebar-toggle{flex:0 0 40px;width:40px;min-height:40px!important;height:40px;padding:8px!important}
+.sidebar-collapsed .n-sidebar-head{flex-direction:column;gap:8px}
+.sidebar-collapsed .n-sidebar-head .n-brand{flex:0 0 auto;padding:0}
