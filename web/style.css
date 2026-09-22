@@ -269,3 +269,40 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .honcho-attachment-option+.honcho-attachment-option{border-top:1px solid var(--n-line)}
 .nocheh-app .honcho-attachment-option input[type=checkbox]{display:block;flex:0 0 18px;width:18px;min-width:18px;height:18px;min-height:18px;margin:0;padding:0;accent-color:var(--n-accent)}
 .honcho-attachment-note{max-width:720px}
+
+/* Consistent reading rhythm across the owner dashboard. */
+.nocheh-app{font-size:15px}
+.nocheh-app h2{font-size:17px}
+.nocheh-app small{font-size:13px}
+.n-page-description{font-size:14px!important}
+.n-panel{padding:22px;margin-bottom:20px}
+
+/* Settings: every group and action has a clear, contained place. */
+.settings-page>.ui-tabs-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;overflow:visible;padding:5px;margin-bottom:20px}
+.settings-page>.ui-tabs-list .ui-tabs-trigger{justify-content:center;min-width:0;min-height:44px!important;white-space:normal;text-align:center}
+.settings-page .n-panel>h2{margin-bottom:6px}
+.settings-page .n-panel>p.n-muted{max-width:68ch;line-height:1.6}
+.settings-page .n-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0 22px;padding:16px 0}
+.settings-page .n-steps li{align-items:flex-start;line-height:1.4}
+.settings-page .n-settings-group{min-width:0;margin:20px 0 0;padding:18px 20px 20px;border:1px solid var(--n-line);border-radius:9px;background:var(--n-subtle)}
+.settings-page .n-settings-group h3{font-size:16px;margin:0 0 4px}
+.settings-page .n-settings-group>p{margin:0;max-width:70ch}
+.settings-page .n-settings-group .n-form{gap:20px 24px;margin-top:20px}
+.settings-page .n-settings-group .n-field{margin:0}
+.settings-page .n-field small{line-height:1.5}
+.settings-page .n-advanced{margin-top:22px}
+.settings-page .n-review,.settings-page .n-apply{margin-top:20px;padding:18px 20px;border:1px solid var(--n-line);border-radius:9px;background:var(--n-subtle)}
+.settings-page .n-apply h3{font-size:16px}
+.settings-page .n-apply>p{max-width:70ch}
+.settings-page .n-settings-preferences{gap:0 28px}
+.settings-page .n-settings-preference{display:flex;flex-direction:column;align-items:flex-start;min-width:0;margin:0;padding:18px 0;border-bottom:1px solid var(--n-line)}
+.settings-page .n-settings-preference label,.settings-page .n-settings-preference input,.settings-page .n-settings-preference select,.settings-page .n-settings-preference small{width:100%}
+.settings-page .n-settings-preference button{margin-top:12px}
+@media(max-width:600px){
+ .n-panel{padding:18px}
+ .settings-page>.ui-tabs-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .settings-page>.ui-tabs-list .ui-tabs-trigger:last-child{grid-column:1/-1}
+ .settings-page .n-steps{grid-template-columns:1fr;gap:10px;padding:14px 0}
+ .settings-page .n-settings-group,.settings-page .n-review,.settings-page .n-apply{padding:16px}
+ .settings-page .n-settings-group .n-form{gap:20px}
+}

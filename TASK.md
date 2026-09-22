@@ -46,6 +46,29 @@ username credentials, so local and remote `main` are not synchronized.
 
 </fresh_mvp_test_baseline>
 
+<dashboard_page_design_review>
+
+#### Dashboard page design review — 2026-09-22
+
+The owner asked to check and fix all pages, citing Settings as a poor example.
+All 12 sidebar routes were inspected in the isolated synthetic preview at desktop
+and 390px widths. The large Settings issue was an unpadded fieldset background
+that swallowed section labels and controls. Its category bar also clipped the
+third tab on phones. Settings now uses bounded, padded sections, a two-row phone
+tab layout, aligned preference rows, and distinct review and apply panels. Shared
+page text and panel spacing were adjusted for readability. The Archive and Activity
+tables retain their intentional, contained horizontal scrolling on phones.
+
+The standalone dashboard build, all 19 dashboard checks, and the pinned Node 24
+development image build pass. Every sidebar route has zero page-level horizontal
+overflow at 390px in the synthetic preview. The final Settings category layout
+was checked again at desktop and 390px widths. The AST-only Graphify refresh
+covers 518 files, 3,516 nodes, and 13,162 edges with zero model calls.
+Runtime settings save/apply, Telegram, Hermes, CPA, and live provider behavior
+were not exercised by this visual pass.
+
+</dashboard_page_design_review>
+
 <honcho_attachment_controls>
 
 #### Honcho attachment option layout — 2026-09-22
