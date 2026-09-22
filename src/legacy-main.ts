@@ -21,6 +21,7 @@ import {initializeWorkflowDatabase} from './workflows/bootstrap.js';
 import { hermesAdapter } from './hermes-adapter.js';
 import { runtimeCall, type RuntimeOperation } from './runtime.js';
 import {prepareContext,allowPrepared} from './prepared-context.js';
+import {archiveFilters} from './archive-filters.js';
 import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState} from './guarded.js';
 import {requestPreparation} from './workflows/preparation-request.js';
 import { requestAction,telegramActions,decideTelegram } from './actions.js';
@@ -223,7 +224,7 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   admin(principal);
-  if(servesArchive && path==='/v1/data' && req.method==='GET')return json(res,200,await browseData(pool,principal,url.searchParams.get('after')??''));
+  if(servesArchive && path==='/v1/data' && req.method==='GET')return json(res,200,await browseData(pool,principal,url.searchParams.get('after')??'',archiveFilters(url.searchParams)));
   const projection=path.match(/^\/v1\/data\/([a-f0-9]{64})\/guarded(?:\/(history))?$/);
   if(servesArchive && projection) {
     if(req.method==='GET' && projection[2] && url.searchParams.has('revision'))return json(res,200,await inspectRevision(pool,principal,projection[1]!,url.searchParams.get('source_id')??'',Number(url.searchParams.get('revision'))));

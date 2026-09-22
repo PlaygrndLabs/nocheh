@@ -4,6 +4,7 @@ import {admin,reader} from '../access.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
+import {archiveFilters,matchesArchiveFilters} from '../archive-filters.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
 import {immutableFile} from '../storage.js';
@@ -224,7 +225,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.reviews.controlJob(principal,string(body.id,64),{action:body.action,expected_revision:body.expected_revision}));
     }
     if(req.method==='GET') {
-      if(path==='/v1/search')return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit'))),true);
+      if(path==='/v1/search')return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
       if(path==='/v1/graph')return json(res,200,await s.sources.graph(principal,url.searchParams.get('scope')??'*',url.searchParams.get('after')??'',limit(url.searchParams.get('limit')),url.searchParams.get('focus')??''));
       const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
       if(event)return result(await s.sources.read(principal,event[1]!),true);
@@ -236,11 +237,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99].scope:null});
       }
       if(path==='/v1/data') {
-        const after=url.searchParams.get('after')??'';if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
-        const rows=(await s.stores.archive.query("SELECT id,channel,scope,source_id,revision,kind,origin,occurred_at,received_at,original_text FROM events WHERE id>$1 AND origin<>'generated' AND kind<>'telegram_wire' ORDER BY id LIMIT 51",[after])).rows;
-        const states=rows.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
-          error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[rows.map(row=>row.id)])).rows:[];
-        return json(res,200,{records:rows.slice(0,50).map(row=>({...row,...states.find(state=>state.event_id===row.id),original_text:undefined,text:row.original_text?.toString()??null})),next:rows.length>50?rows[49].id:null});
+        const after=url.searchParams.get('after')??'',filters=archiveFilters(url.searchParams);if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
+        const candidates=(await s.stores.archive.query("SELECT id,channel,scope,source_id,revision,kind,origin,occurred_at,received_at,original_text FROM events WHERE id>$1 AND origin<>'generated' AND kind<>'telegram_wire' AND ($2='' OR scope=$2) AND ($3='' OR $3='incoming' AND kind IN ('telegram_update','browser_input') OR $3='assistant' AND kind LIKE '%_delivered_message') ORDER BY id LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51])).rows;
+        const states=candidates.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
+          error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[candidates.map(row=>row.id)])).rows:[];
+        const stateById=new Map(states.map(state=>[state.event_id,state])),matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters));
+        const records=matched.slice(0,50).map(row=>({...row,...stateById.get(row.id),original_text:undefined,text:row.original_text?.toString()??null}));
+        const next=matched.length>50?matched[49].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
+        return json(res,200,{records,next});
       }
       if(path==='/v1/status') {
         const [guard,archive,services]=await Promise.all([s.guards.state(),s.sources.status(principal),

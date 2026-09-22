@@ -1,5 +1,6 @@
 import {admin,type Reader} from '../access.js';
 import {HttpError,string} from '../http.js';
+import {matchesArchiveFilters,type ArchiveFilters} from '../archive-filters.js';
 import {limit} from '../retrieval.js';
 import {type Envelope} from '../archive.js';
 import {SourceAccessRepository} from './access.js';
@@ -80,7 +81,7 @@ export class SourceRepository {
   }
 
   /** Archive search deliberately excludes transcripts, contexts and learned results. */
-  async search(principal:Reader,query:string,count=20) {
+  async search(principal:Reader,query:string,count=20,filters:ArchiveFilters={kind:'',scope:'',reply:''}) {
     string(query,2000);limit(count);if(!query.trim())throw new HttpError(400,'empty_query');
     const binding=principal.admin?null:await this.audience.assert(principal);
     const rows=await (binding?.mode==='on'?this.stores.derived.query(`SELECT s.event_id AS id,r.content FROM guard_sources s
@@ -89,17 +90,19 @@ export class SourceRepository {
       ORDER BY ts_rank(to_tsvector('simple',r.search_text),plainto_tsquery('simple',$1)) DESC,s.id LIMIT 200`,[query]):
       this.stores.archive.query(`SELECT id FROM events WHERE to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
         ORDER BY ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) DESC,id LIMIT 200`,[query]));
-    const hits=[];
+    const stateRows=principal.admin&&rows.rows.length?(await this.stores.control.query('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[rows.rows.map(row=>row.id)])).rows:[];
+    const states=new Map(stateRows.map(row=>[row.event_id,row.state])),hits=[];
     for(const candidate of rows.rows) {
       const reference=(await this.access.archive.captured(candidate.id)).reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
       const original=(await this.stores.archive.query('SELECT scope,source_id,revision,kind,origin,occurred_at,original_text FROM events WHERE id=$1',[reference.id])).rows[0];
+      if(!matchesArchiveFilters(original,states.get(reference.id),filters))continue;
       const value=binding?.mode==='on'?scopedObservation((await this.access.guards.read('events:'+reference.id,binding)).value):{text:original.original_text?.toString()??''};
       // The lexical index includes payload metadata, but a scoped hit must also
       // match the independent message text, never a stripped reply snapshot.
       const text=String(value.text??'');
       if(binding&&!(await this.stores.derived.query("SELECT to_tsvector('simple',$1) @@ plainto_tsquery('simple',$2) AS matches",[text,query])).rows[0].matches)continue;
-      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...original,original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
+      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...original,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000});
       if(hits.length===count)break;
     }
