@@ -35,6 +35,26 @@ by unavailable HTTPS username credentials.
 
 </live_mvp_acceptance>
 
+<settings_clarity>
+
+#### Settings clarity — 2026-09-23
+
+The Hermes preferences view now contains both per-profile controls and their global
+defaults. Each preference has an accessible reset icon beside its input; a reset
+is staged until Save. Nocheh settings shows token presence without its value and
+explains an empty Telegram group selection. The saved local settings inspection
+reported Telegram enabled, owner and bot token configured, zero selected groups,
+and `apply_state=current`; no credential value was printed or changed.
+
+The pinned Node 24 dashboard build, 19 dashboard tests, and two configuration
+tests pass. An isolated localhost preview with synthetic settings verified the
+desktop layout, reset staging, and save feedback without using the active
+installation. The AST-only Graphify refresh covers 514 files, 3,499 nodes, and
+13,129 edges with zero model calls. Phone layout and live runtime behavior were
+not newly tested.
+
+</settings_clarity>
+
 <mvp_cleanup_recheck>
 
 #### Worktree and Docker cleanup with isolated MVP recheck — 2026-09-22

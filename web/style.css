@@ -278,8 +278,10 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .n-panel{padding:22px;margin-bottom:20px}
 
 /* Settings: every group and action has a clear, contained place. */
-.settings-page>.ui-tabs-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;overflow:visible;padding:5px;margin-bottom:20px}
+.settings-page>.ui-tabs-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;overflow:visible;padding:5px;margin-bottom:20px}
 .settings-page>.ui-tabs-list .ui-tabs-trigger{justify-content:center;min-width:0;min-height:44px!important;white-space:normal;text-align:center}
+.settings-page [role=tabpanel]>.n-panel+.n-panel{margin-top:20px}
+.settings-page .n-secret-status{float:right;margin-left:12px;color:var(--n-muted);font-size:11px;font-weight:500}
 .settings-page .n-panel>h2{margin-bottom:6px}
 .settings-page .n-panel>p.n-muted{max-width:68ch;line-height:1.6}
 .settings-page .n-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0 22px;padding:16px 0}
@@ -296,12 +298,12 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .settings-page .n-apply>p{max-width:70ch}
 .settings-page .n-settings-preferences{gap:0 28px}
 .settings-page .n-settings-preference{display:flex;flex-direction:column;align-items:flex-start;min-width:0;margin:0;padding:18px 0;border-bottom:1px solid var(--n-line)}
-.settings-page .n-settings-preference label,.settings-page .n-settings-preference input,.settings-page .n-settings-preference select,.settings-page .n-settings-preference small{width:100%}
-.settings-page .n-settings-preference button{margin-top:12px}
+.settings-page .n-settings-preference label,.settings-page .n-settings-preference small{width:100%}
+.settings-page .n-preference-control{display:flex;align-items:stretch;gap:8px;width:100%;margin:8px 0}
+.settings-page .n-preference-control input,.settings-page .n-preference-control select{min-width:0;flex:1;margin:0}
+.settings-page .n-preference-control button{flex:0 0 44px;min-width:44px;min-height:44px;margin:0}
 @media(max-width:600px){
  .n-panel{padding:18px}
- .settings-page>.ui-tabs-list{grid-template-columns:repeat(2,minmax(0,1fr))}
- .settings-page>.ui-tabs-list .ui-tabs-trigger:last-child{grid-column:1/-1}
  .settings-page .n-steps{grid-template-columns:1fr;gap:10px;padding:14px 0}
  .settings-page .n-settings-group,.settings-page .n-review,.settings-page .n-apply{padding:16px}
  .settings-page .n-settings-group .n-form{gap:20px}

@@ -250,9 +250,12 @@ tools, provider authentication and scope bindings cannot be changed by native fo
 Raw YAML inspection is read-only. Nocheh Settings retains the deployment model,
 Telegram and guard/trust settings with its existing save/apply behavior.
 
-**Settings → Policy defaults** edits global preference defaults. **Hermes
-preferences** shows each effective value's origin and can remove a profile override
-with **Inherit global value**. Existing native values remain explicit overrides.
+**Settings → Hermes preferences** shows profile preferences and global Hermes defaults
+together. Each profile preference shows its effective origin and has a reset icon
+beside its input; resetting removes the profile override after saving so the global
+value applies. Existing native values remain explicit overrides. Nocheh settings
+shows whether the Telegram bot token is configured without exposing it and explains
+that an empty selected group list still permits owner private messages.
 Job preference overrides can be stored via CLI; scheduler execution is P6 work.
 Broader tool and approval policy controls are P5 work, not active capabilities yet.
 
