@@ -5,6 +5,25 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<honcho_attachment_controls>
+
+#### Honcho attachment option layout — 2026-09-22
+
+The owner reported a Honcho attachment form whose consent checkboxes appeared as
+oversized boxes separated from their labels. The shared text-input rule was
+setting checkbox width and minimum height. The two existing options now sit in
+one labeled group with compact checkboxes, full-row click targets, and explanatory
+copy underneath. The attachment command and consent semantics are unchanged.
+
+The dashboard build and all 19 dashboard checks pass. The pinned Node 24
+development image builds. The isolated synthetic preview on port 18943 verifies
+the layout on desktop and at 390px, plus label-click toggling. It has no Telegram
+poller, provider login, scheduler, or external execution authority. No live Honcho
+attachment was attempted. The AST-only Graphify refresh covers 518 files, 3,516
+nodes, and 13,162 edges with zero model calls.
+
+</honcho_attachment_controls>
+
 <native_dashboard_shortcuts>
 
 #### Hermes and CPA sidebar access — 2026-09-22
