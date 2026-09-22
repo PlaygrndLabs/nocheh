@@ -64,6 +64,15 @@ module run was not counted because this host lacks PyYAML and an unrelated resto
 test's fixed port was already occupied; the focused Python checks pass in the
 pinned Hermes container.
 
+After local integration, the services, management, and Hermes images rebuilt from
+the pinned bases and the three affected services were recreated. All active
+Compose services report healthy. The authenticated live graph returns 18 nodes and
+17 links with no repeated labels, and the owner browser visibly shows the distinct
+current/historical profile and intent/result labels. Recreating the runtime added
+four more content-free Telegram webhook-control audit observations (intent plus
+result pairs); these are operational evidence, not conversation test data, and no
+delivery or external message was created.
+
 #### Archive owner table and editing flow — 2026-09-22
 
 The owner requested a place to see database records in a table and edit them.
