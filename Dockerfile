@@ -6,6 +6,7 @@ ARG LOCAL_GID=1000
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json tsconfig.web.json ./
+COPY SPECS.md ./SPECS.md
 COPY scripts ./scripts
 COPY compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
 COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
