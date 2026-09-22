@@ -5,7 +5,7 @@ import secrets
 import subprocess
 from pathlib import Path
 
-ROOT=Path(os.environ.get('NOCHEH_INSTALLATION_ROOT',Path(__file__).resolve().parents[2])).resolve()
+ROOT=Path(os.environ.get('NOCHEH_INSTALLATION_ROOT',Path(__file__).resolve().parents[1])).resolve()
 PROVIDER_STATE=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local')).resolve()
 from scripts.configuration import read_env,env_path
 STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
