@@ -24,7 +24,7 @@ function MemoryDetail({entry}:{entry:Entry}){
  return <><p className="n-muted">{entry.scope_kind==='project'?'Project':'Conversation'} · <span className="owner-identifier">{entry.scope_id}</span></p>
  <p className="memory-prose">{entry.text}</p><div className="n-actions"><Badge>{entry.author==='owner'?'Owner corrected':metadata.uncertainty}</Badge><Badge>Revision {entry.active_revision}</Badge>{entry.retired&&<Badge>Retired</Badge>}</div>
  <h3>Supporting evidence</h3><EvidenceLinks sources={metadata.evidence}/>
- {metadata.conflicts.length>0&&<Alert>This interpretation conflicts with other learned versions. It is not a settled rule.<ul>{metadata.conflicts.map(id=><li key={id}><a href={'#learned?entry='+id}>Inspect conflicting interpretation</a></li>)}</ul></Alert>}
+ {metadata.conflicts.length>0&&<Alert>This interpretation conflicts with other learned versions. It is not a settled rule.<ul>{metadata.conflicts.map(id=><li key={id}><a href={'#memory?view=learned&entry='+id}>Inspect conflicting interpretation</a></li>)}</ul></Alert>}
  <Provenance value={entry.provenance} label="Producer, evidence, and citation limits"/>
  <MemoryEditor key={entry.id+':'+edit} entry={entry} onSaved={()=>setEdit(v=>v+1)}/>
  <section><h3>Revision history</h3><ResourceState {...history} hasData={!!history.data}/>{history.data?.versions.map(version=><article className="owner-history" key={version.revision}>
@@ -54,6 +54,6 @@ export function LearnedMemory(){
   {entry.provenance.learning.conflicts.length>0&&<p className="owner-conflict">Conflicting interpretations need review</p>}
   <Button onClick={e=>{setTrigger(e.currentTarget);setSelected(entry.id);}}>Inspect and correct</Button></article>)}</div>
  <CursorButtons pages={pages} next={entries.data?.next} onChange={setPages}/></section>
- <Sheet open={!!selected} onOpenChange={open=>{if(!open){setSelected('');if(selection())history.replaceState(null,'','#learned');}}} title={detail?.subject||'Learned interpretation'} returnFocus={trigger}>
+ <Sheet open={!!selected} onOpenChange={open=>{if(!open){setSelected('');if(selection())history.replaceState(null,'','#memory?view=learned');}}} title={detail?.subject||'Learned interpretation'} returnFocus={trigger}>
   <ResourceState {...selectedData} hasData={!!detail}/>{detail&&<MemoryDetail key={selected} entry={detail}/>}</Sheet></>;
 }
