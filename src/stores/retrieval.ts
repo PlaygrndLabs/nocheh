@@ -9,6 +9,7 @@ import {SelectionRepository} from './selections.js';
 import type {SourceReference} from './archive.js';
 import type {GuardBinding} from './guards.js';
 import {evidenceNodeLabel} from '../graph-labels.js';
+import {ProjectRepository} from './projects.js';
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
 export function scopedObservation(value:unknown):any {
@@ -114,23 +115,29 @@ export class SourceRepository {
   async graph(principal:Reader,scope:string,after='',count=20,focus='') {
     admin(principal);string(scope,256);limit(count);if(!scope)throw new HttpError(400,'graph_scope_required');
     for(const cursor of [after,focus])if(cursor&&!/^[a-f0-9]{64}$/.test(cursor))throw new HttpError(400,'invalid_graph_cursor');
-    const candidates=(await this.stores.archive.query(`SELECT id FROM events WHERE id>$1 AND ($2='' OR id=$2) ORDER BY id LIMIT 201`,[after,focus])).rows;
-    const nodes:any[]=[{id:'scope:'+scope,kind:'scope',label:scope==='*'?'All private knowledge':scope}],edges:any[]=[],selected:string[]=[];
+    const candidates=(await this.stores.archive.query(`SELECT e.id FROM events e
+      JOIN source_observations s ON s.event_id=e.id JOIN source_revisions r ON r.id=s.revision_id
+      JOIN source_objects o ON o.id=r.object_id
+      WHERE o.kind='message' AND e.origin<>'generated' AND e.id>$1 AND ($2='' OR e.id=$2) ORDER BY e.id LIMIT 201`,[after,focus])).rows;
+    const nodes:any[]=[{id:'group:'+scope,kind:'group',label:scope==='*'?'All private knowledge':scope}],edges:any[]=[],selected:string[]=[],spaces=new Set<string>();
     const add=(node:any)=>{if(!nodes.some(n=>n.id===node.id))nodes.push(node);};
     const link=(from:string,to:string,kind:string)=>{if(!edges.some(e=>e.from===from&&e.to===to&&e.kind===kind))edges.push({from,to,kind});};
     const allowed=async(id:string)=>scope==='*'||await this.access.space((await this.access.archive.captured(id)).reference)===scope;
     const addEvent=async(id:string)=>{
-      const row=(await this.stores.archive.query('SELECT id,scope,source_id,kind,search_text FROM events WHERE id=$1',[id])).rows[0];
+      const row=(await this.stores.archive.query(`SELECT e.id,e.scope,e.source_id,e.kind,e.origin,e.search_text,o.kind AS object_kind FROM events e
+        JOIN source_observations s ON s.event_id=e.id JOIN source_revisions r ON r.id=s.revision_id
+        JOIN source_objects o ON o.id=r.object_id WHERE e.id=$1`,[id])).rows[0];
+      if(!row||row.object_kind!=='message'||row.origin==='generated')return false;
       const space=await this.access.space((await this.access.archive.captured(id)).reference)??row.scope;
-      add({id:'scope:'+space,kind:'scope',label:space});if(scope==='*')link('scope:*','scope:'+space,'contains');
-      add({id:'event:'+id,kind:'event',label:evidenceNodeLabel(row.search_text.slice(0,160),row.kind,id),event_id:id,source_id:row.source_id});
-      link('scope:'+space,'event:'+id,'contains');
+      spaces.add(space);add({id:'group:'+space,kind:'group',label:space});if(scope==='*')link('group:*','group:'+space,'contains');
+      add({id:'message:'+id,kind:'message',label:evidenceNodeLabel(row.search_text.slice(0,160),row.kind,id),event_id:id,source_id:row.source_id});
+      link('group:'+space,'message:'+id,'contains');return true;
     };
     let cursor=after,hasMore=candidates.length>200,unresolved=0,truncated=false;
     for(const candidate of candidates.slice(0,200)) {
       if(!await allowed(candidate.id)){cursor=candidate.id;continue;}
       if(selected.length===count){hasMore=true;break;}
-      cursor=candidate.id;selected.push(candidate.id);await addEvent(candidate.id);
+      cursor=candidate.id;if(await addEvent(candidate.id))selected.push(candidate.id);
     }
     for(const id of selected) {
       const source=(await this.access.archive.captured(id)).reference,context=await this.access.relationships.context(source,{kind:'owner'},5);
@@ -138,26 +145,27 @@ export class SourceRepository {
         if(target.unresolved)unresolved++;if(target.next)truncated=true;
         for(const reference of target.references) {
           if(nodes.length>=250){truncated=true;break;}
-          if(!await allowed(reference.id))continue;await addEvent(reference.id);
-          link('event:'+id,'event:'+reference.id,target.kind==='reply_to'?'reply_to_source':target.kind);
+          if(!await allowed(reference.id)||!await addEvent(reference.id))continue;
+          link('message:'+id,'message:'+reference.id,target.kind==='reply_to'?'reply_to_source':target.kind);
         }
       }
       const authors=(await this.stores.archive.query(`SELECT o.id,o.external_id FROM source_relations r JOIN source_objects o ON o.id=r.target_id
         WHERE r.event_id=$1 AND r.kind='authored_by' ORDER BY o.id LIMIT 20`,[id])).rows;
       for(const author of authors) {
         if(nodes.length>=250){truncated=true;break;}
-        add({id:'author:'+author.id,kind:'author',label:author.external_id});link('author:'+author.id,'event:'+id,'authored');
-      }
-      const files=(await this.stores.archive.query('SELECT id,kind,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id LIMIT 51',[id])).rows;
-      if(files.length>50)truncated=true;
-      for(const file of files.slice(0,50)) {
-        if(nodes.length>=250){truncated=true;break;}
-        add({id:'artifact:'+file.id,kind:'attachment',label:file.kind,event_id:id,state:file.file_hash?'ready':'pending'});
-        link('event:'+id,'artifact:'+file.id,'attachment');
+        add({id:'user:'+author.id,kind:'user',label:author.external_id});link('user:'+author.id,'message:'+id,'authored');
       }
     }
-    return {format:'nocheh-evidence-graph-v1',scope,nodes,edges,next:hasMore?cursor:null,
-      bounds:{messages:count,attachments:50,derived:0,truncated},unresolved_replies:unresolved,
-      note:'Original evidence only. Reply and reaction targets are resolved independently of this page; derivatives are linked from source details.'};
+    const projects=new ProjectRepository(this.stores.control);
+    for(const space of spaces) {
+      const project=(await projects.effective(space)).project;if(!project)continue;
+      if(nodes.length>=250){truncated=true;break;}
+      add({id:'project:'+project.id,kind:'project',label:project.name,state:project.state});
+      link('project:'+project.id,'group:'+space,'project_context');
+    }
+    return {format:'nocheh-context-graph-v1',scope,nodes,edges,next:hasMore?cursor:null,
+      bounds:{messages:count,groups:spaces.size,users:nodes.filter(node=>node.kind==='user').length,
+        projects:nodes.filter(node=>node.kind==='project').length,truncated},unresolved_replies:unresolved,
+      note:'Context entities only: users, projects, groups, and original messages. Actions, events, files, runtime context, and generated artifacts are excluded.'};
   }
 }

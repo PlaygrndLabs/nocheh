@@ -166,13 +166,14 @@ and budget instructions; fixture tests do not certify live provider behavior.
 
 ## Evidence graph and local operations
 
-Graph defaults to all private knowledge; you can select one archive scope. It pages through 20 events at a time and includes up to 20 native profiles per page. It includes
-observed authorship, replies to original source IDs, same-source revisions,
-attachments, derived-artifact provenance, and explicit Hermes note references.
-Current and historical Hermes profiles have visibly distinct labels; historical
-labels include their guard epoch when available and a stable profile fragment.
-Observations without display text use their event kind and a stable short event ID
-instead of sharing an indistinguishable placeholder.
+Graph defaults to all private knowledge; you can select one archive scope. It pages
+through 20 messages at a time. The only node types are users, projects, groups,
+and messages. It includes recorded authorship, replies to original source IDs,
+same-source revisions, and explicit group-to-project assignments. Actions, events,
+runtime context, files, generated artifacts, Hermes profiles, and memory notes are
+excluded from both the visual graph and its JSON export. Messages without display
+text use their source kind and a stable short message ID instead of sharing an
+indistinguishable placeholder.
 Original chat identity remains part of an imported message's identity even when
 multiple Desktop exports are mapped into one scope. Group-scoped API credentials
 cannot request a different scope. Citations outside the current page or scope do
@@ -186,11 +187,11 @@ Camera buttons offer orbit/zoom/reset, selected-node focus and full screen where
 supported. With the scene focused, arrow keys orbit, Shift+arrows pan, +/- zoom,
 and Home resets. No automatic rotation or ongoing render loop runs while idle.
 
-Search the node browser or choose a type, then select a node in the list or scene
+Search the node browser or choose a context-entity type, then select a node in the list or scene
 to highlight its direct connections. The inspector shows incoming/outgoing
 relationships and opens original sources. A deterministic spatial layout helps
-navigation; distance is not a semantic assertion. Shapes, colors, labels and
-dashed citation/derived links distinguish the evidence types. If WebGL is
+navigation; distance is not a semantic assertion. Shapes, colors, and labels
+distinguish the context-entity types. If WebGL is
 unavailable or its context is lost, the node browser and source inspection remain
 available with a reload control. The renderer is bundled locally using pinned
 Three.js/esbuild versions; no CDN or additional model calls are used.
