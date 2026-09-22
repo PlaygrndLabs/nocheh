@@ -79,6 +79,27 @@ The preview uses no live credentials, provider, poller, scheduler, or
 external-effect authority. Production
 services were not rebuilt or activated by this change.
 
+#### Human-readable evidence graph identity labels — 2026-09-22
+
+The owner asked whether the graph can show usernames and group names after a
+private conversation node and its author both appeared as `123`. User nodes now
+prefer the `@username` recorded in the original Telegram observation, then its
+recorded first/last name. Group nodes prefer the recorded chat title. A private
+conversation is explicitly labeled `Private chat · @username` (or its recorded
+display name), so it remains distinct from the participant even though Telegram
+uses the same external ID for both. Numeric IDs remain fallbacks. Stable node IDs,
+relationships, source records, and access behavior are unchanged.
+
+The pinned Node 24 development image builds successfully. All 13 focused graph
+label/browser checks, all 18 dashboard checks, and both the legacy and
+separated-store PostgreSQL graph regressions pass. The host-only build is not
+counted because that worktree's host `node_modules` lacks the pinned `elkjs` and
+React Flow packages; the clean pinned container installs and builds them. The
+isolated synthetic preview on port 18935 visibly shows `@mira_sky`,
+`Private chat · @mira_sky`, `Observatory team`, and `Field reports` as distinct
+nodes. It has no live credentials, provider, poller, scheduler, or external-effect
+authority. Production services were not rebuilt or activated.
+
 #### Worktree consolidation and clean real-test baseline — 2026-09-22
 
 The owner directed that all session worktrees be closed, their work merged into
