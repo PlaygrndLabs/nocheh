@@ -44,16 +44,14 @@ permanent read-only original and the separately editable agent copy. Generated
 items, provenance, raw agent-copy fields, source identity, and export controls
 remain available under advanced disclosures.
 
-The full TypeScript/dashboard build and all 18 dashboard tests pass. The compact
-full Node/dashboard run completes 120 tests without failure under synthetic
-service configuration; PostgreSQL-dependent checks retain their explicit fixture
-skips. Four focused Node archive/filter checks pass separately. The host Python
-environment lacks the pinned Telegram package, so the Hermes gateway test was not
-rerun there; the change does not alter that gateway, and its existing focused
-pre-delivery/post-delivery regression remains in place. An isolated synthetic
-preview on port 18941 verifies all-source, incoming-message, and retry-status
-filtering plus the simplified original/agent copy detail panel. It contains no
-credentials, provider, poller, scheduler, or external-effect authority.
+The TypeScript/dashboard build, all 18 dashboard tests, and four focused Node
+archive/filter checks pass. The host Python environment lacks the pinned Telegram
+package, so the Hermes gateway test was not rerun there; the change does not alter
+that gateway, and its existing focused pre-delivery/post-delivery regression
+remains in place. An isolated synthetic preview on port 18941 verifies all-source,
+incoming-message, and retry-status filtering plus the simplified original/agent
+copy detail panel. It contains no credentials, provider, poller, scheduler, or
+external-effect authority.
 
 #### Telegram follow-up recovery and source-only Archive — 2026-09-22
 
