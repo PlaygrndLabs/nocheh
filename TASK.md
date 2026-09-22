@@ -39,8 +39,9 @@ search, reply status, fresh retry attempts, terminal uncertain delivery, manual
 owner retry, the longer context deadline, and pre/post-delivery failure handling.
 The broader sequential Node/dashboard run reached 152 passes and four expected
 environment skips; its only remaining failure was an unrelated portability fixture
-whose prebuilt image omitted current Hermes modules. The AST-only Graphify refresh
-covers 515 files with 3,489 nodes and 13,077 edges and zero model calls. Production
+whose prebuilt image omitted current Hermes modules. The reconciled pinned Node
+build, 12 Archive/Graph dashboard checks, and five focused Hermes checks pass. The
+AST-only Graphify refresh covers 515 files with 3,491 nodes and 13,081 edges and zero model calls. Production
 rebuild and a fresh two-message owner Telegram acceptance remain pending.
 
 #### Context-entity graph filtering — 2026-09-22
