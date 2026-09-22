@@ -8,6 +8,7 @@ import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
 import type {SourceReference} from './archive.js';
 import type {GuardBinding} from './guards.js';
+import {evidenceNodeLabel} from '../graph-labels.js';
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
 export function scopedObservation(value:unknown):any {
@@ -122,7 +123,7 @@ export class SourceRepository {
       const row=(await this.stores.archive.query('SELECT id,scope,source_id,kind,search_text FROM events WHERE id=$1',[id])).rows[0];
       const space=await this.access.space((await this.access.archive.captured(id)).reference)??row.scope;
       add({id:'scope:'+space,kind:'scope',label:space});if(scope==='*')link('scope:*','scope:'+space,'contains');
-      add({id:'event:'+id,kind:'event',label:row.search_text.slice(0,160)||'(source without text)',event_id:id,source_id:row.source_id});
+      add({id:'event:'+id,kind:'event',label:evidenceNodeLabel(row.search_text.slice(0,160),row.kind,id),event_id:id,source_id:row.source_id});
       link('scope:'+space,'event:'+id,'contains');
     };
     let cursor=after,hasMore=candidates.length>200,unresolved=0,truncated=false;
