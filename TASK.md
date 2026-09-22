@@ -33,6 +33,12 @@ the expected connection status; its project, network, volume, image, and
 credentials are separate from the installation. The AST-only Graphify refresh
 covers 514 files, 3,498 nodes, and 13,128 edges with zero model calls. Live
 production image recreation and runtime migration were not part of this check.
+After local integration, the running Honcho gateway was healthy but still reported
+the former `experiments/honcho/meter.py` bind mount. The host path is removed in
+the new checkout; container recreation using the new Compose mount, image, and
+live health checks remains pending. Git integration alone did not authorize that
+runtime change. The GitHub push failed because this host has no HTTPS username
+credential; local and remote `main` remain separate.
 
 </honcho_comparison_retirement>
 
