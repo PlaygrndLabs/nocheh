@@ -1,5 +1,38 @@
 # Nocheh implementation status
 
+<mvp_cleanup_recheck>
+
+#### Worktree and Docker cleanup with isolated MVP recheck — 2026-09-22
+
+The owner requested closure of open worktrees, Docker cleanup, a fresh test, and
+an MVP readiness answer. Both older session worktrees were clean and already
+merged into `main`; they are no longer registered, and their merged branches
+were deleted. Their two preview projects and a separate context-graph preview
+were removed, including their containers, networks, and fixture volumes. The 17
+installation containers and their Compose networks were stopped and removed.
+The unrelated `coopr` project was left intact.
+
+Before stopping the installation, `./scripts/nocheh backup --leave-stopped`
+created the private snapshot at `data/backups/pre-mvp-clean-20260922` (60 state
+files and 50 tables). `validate_snapshot` passed. The saved installation still
+selects the legacy storage layout. Automatic approval review rejected deletion
+of its primary PostgreSQL volume because the broad cleanup request and local
+backup did not establish authority to discard that legacy database. The volume,
+the old unlabeled Honcho experiment volume, and bind-mounted runtime state were
+retained; the installation remains stopped. This is a Docker cleanup and isolated
+test, not a completed three-store product reset or empty live installation.
+
+The repository's `./scripts/nocheh test` passed from an isolated temporary
+Compose project with a newly created database volume and synthetic credentials.
+Its temporary containers, volume, and networks were removed. The Hermes portion
+ran 348 tests with three skips. No fresh owner Telegram text, voice, dedicated
+group human activity, exact approval, reconnect/restart, post-boundary row-linked
+reset acceptance, or Honcho production acceptance was performed. Those live gates,
+the original-only storage transition, and GitHub push remain pending; the local
+test pass does not establish MVP readiness.
+
+</mvp_cleanup_recheck>
+
 [SPECS.md](SPECS.md) defines the intended product. [AGENTS.md](AGENTS.md) defines
 how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
