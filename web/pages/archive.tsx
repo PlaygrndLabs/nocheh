@@ -1,8 +1,8 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
-import {Check,ChevronRight,Search} from 'lucide-react';
+import {Check,PencilLine,Search} from 'lucide-react';
 import {useResource} from '../lib/resource';
 import {CursorButtons} from '../lib/owner-controls';
-import {Button,Badge,EmptyState,Alert,Skeleton} from '../components/ui/primitives';
+import {Button,Badge,EmptyState,Alert,Skeleton,Table} from '../components/ui/primitives';
 import {Source} from './source.js';
 
 type RecordRow={id?:string;event_id?:string;derived_id?:string;scope:string;text?:string;snippet?:string;preview?:string;total?:number;ready?:number;channel?:string;kind?:string;received_at?:string};
@@ -24,7 +24,7 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
   setSelected(id);
   const suffix=id?'?source='+encodeURIComponent(id):'';
   if(location.hash!=='#archive'+suffix)location.hash='archive'+suffix;
-  if(scroll&&matchMedia('(max-width: 767px)').matches)requestAnimationFrame(()=>detail.current?.scrollIntoView({block:'start'}));
+  if(scroll)requestAnimationFrame(()=>detail.current?.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}));
  };
  const resetSelection=()=>choose(null);
  const submit=(event:FormEvent)=>{event.preventDefault();setQuery(draft.trim());setPages(['']);resetSelection();};
@@ -38,19 +38,18 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
     {query&&<Button onClick={()=>{setDraft('');setQuery('');setPages(['']);resetSelection();}}>Show all</Button>}
    </form>
   </section>
-  <div className={'archive-workspace'+(selected?' has-selection':'')}>
+  <div className={'archive-workspace archive-table-workspace'+(selected?' has-selection':'')}>
    <section className="n-panel archive-list" aria-labelledby="archive-results-title">
-    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Original messages</h2></div>{data&&<Badge>{visible.length} {visible.length===1?'message':'messages'}</Badge>}</div>
+    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Original messages</h2><p className="archive-table-help">Originals are read-only. Select View / edit to change the separate guarded copy used by agents.</p></div>{data&&<Badge>{visible.length} {visible.length===1?'message':'messages'}</Badge>}</div>
     {query&&<p className="archive-query-summary">Matching “{query}”</p>}
     {error&&<Alert>{data?'Results may be stale.':'Archive results are unavailable.'}</Alert>}
     {!data&&loading&&<Skeleton className="chart-skeleton"/>}
     {data&&!visible.length&&<EmptyState title={query?'No matching messages':'No archived messages'}>{query?'Try fewer words or show all messages.':'Original messages will appear here after they are captured.'}</EmptyState>}
-    <div className="archive-records">
-     {visible.map((row,index)=>{const id=row.event_id||row.id,isSelected=selected===id,ready=row.total!==undefined&&row.total>0&&row.ready===row.total;return <button type="button" key={id||index} className={'archive-result'+(isSelected?' selected':'')} onClick={()=>id&&choose(id,true)} disabled={!id} aria-current={isSelected?'true':undefined}>
-      <span className="archive-result-main"><span className="result-meta"><span>{recordType(row)}</span><span>Scope {row.scope}</span></span><span className="archive-result-text" dir="auto">{recordText(row)}</span><span className="archive-result-foot">{row.received_at&&<time dateTime={row.received_at}>{new Date(row.received_at).toLocaleString()}</time>}{ready&&<span className="archive-ready"><Check size={13} aria-hidden="true"/>Agent copy ready</span>}</span></span>
-      <ChevronRight size={18} aria-hidden="true" className="archive-result-arrow"/>
-     </button>;})}
-    </div>
+    {!!visible.length&&<Table aria-label="Archive records"><thead><tr><th>Record</th><th>Type</th><th>Scope</th><th>Received</th><th>Agent copy</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+     {visible.map((row,index)=>{const id=row.event_id||row.id,isSelected=selected===id,ready=row.total!==undefined&&row.total>0&&row.ready===row.total;return <tr key={id||index} className={isSelected?'selected':undefined}>
+      <td><span className="archive-record-text" dir="auto" title={recordText(row)}>{recordText(row)}</span></td><td>{recordType(row)}</td><td><code>{row.scope}</code></td><td>{row.received_at?<time dateTime={row.received_at}>{new Date(row.received_at).toLocaleString()}</time>:'—'}</td><td>{ready?<span className="archive-ready"><Check size={13} aria-hidden="true"/>Ready</span>:row.total!==undefined?<span>{row.ready} / {row.total} ready</span>:'—'}</td><td><Button size="sm" onClick={()=>id&&choose(id,true)} disabled={!id} aria-pressed={isSelected} aria-label={'View and edit record '+(id||index)}><PencilLine size={13} aria-hidden="true"/>View / edit</Button></td>
+     </tr>;})}
+    </tbody></Table>}
     {!query&&<CursorButtons pages={pages} next={next} onChange={changePage}/>}
    </section>
    <section ref={detail} className="archive-detail" aria-labelledby={selected?'archive-detail-title':undefined} aria-label={selected?undefined:'Message details'}>
@@ -60,7 +59,7 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
      {source.error&&<Alert>The message is unavailable. Choose it again or refresh to retry.</Alert>}
      {!source.data&&!source.error&&<Skeleton className="chart-skeleton"/>}
      {source.data&&<Source record={source.data} notify={notify}/>}
-    </>:<div className="n-panel archive-empty-detail"><EmptyState title="Choose a message">Select a message on the left to see its original evidence, the editable agent copy, and where each version is used.</EmptyState></div>}
+    </>:<div className="n-panel archive-empty-detail"><EmptyState title="Choose a message">Select View / edit in the table to see original evidence, change the guarded agent copy, and inspect where each version is used.</EmptyState></div>}
    </section>
   </div>
  </div>;

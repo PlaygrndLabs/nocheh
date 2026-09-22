@@ -1,5 +1,15 @@
 # Browse the owned archive
 
+For the ordinary owner workflow, run `./scripts/nocheh dashboard`, open
+**Archive**, and use the records table. Selecting **View / edit** opens the
+immutable original beside its editable guarded version. Saves create a new
+revision and never rewrite the source evidence.
+
+Use the pgweb browser below only for raw table inspection, SQL queries, and
+exports. It is intentionally read-only; product records must be changed through
+their dashboard, API, or CLI commands so revision, authorization, invalidation,
+and provenance rules still apply.
+
 Run `./scripts/nocheh db`, then open <http://127.0.0.1:8782>.
 This starts the pinned pgweb image from the optional Compose `tools` profile.
 It reuses the current PostgreSQL archive and does not restart the assistant.

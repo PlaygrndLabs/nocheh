@@ -7,11 +7,31 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
-#### Archive owner flow — 2026-09-22
+#### Archive owner table and editing flow — 2026-09-22
 
-The Archive is now one explicit owner workflow: find or browse an original message, select the record itself, review immutable evidence, and inspect or edit the separate copy agents use when guarding is on. Redundant **Inspect source** controls and inert single-page pagination are removed; multi-page browsing uses the shared balanced pager and clears stale detail selection when its page changes. Record selection is deep-linked, metadata and readiness are legible at a glance, technical fields are progressively disclosed, and the original precedes the compact side-by-side agent-copy editor.
+The owner requested a place to see database records in a table and edit them.
+The Archive is now one explicit owner workflow: find or browse immutable original
+messages in a searchable, paginated semantic table, select **View / edit**, review
+the source evidence, and edit the separate guarded copy used by agents. The table
+shows message text, type, scope, received time, and agent-copy readiness. Its edit
+action remains sticky in the horizontally scrollable phone layout.
 
-All 16 dashboard checks, the standalone dashboard build, `git diff --check`, and the pinned Node 24 full Docker build pass. The AST-only Graphify refresh covers 511 files with 3,473 nodes and 13,050 edges and zero model calls. The isolated synthetic preview on port 18947 verifies browse, selection, deep linking, search and clearing, read-only original evidence, agent-copy controls, light and dark themes, desktop, 390px, 375px, and phone-landscape layouts. The preview has Telegram and all external execution authorities disabled; no production activation or provider action was performed.
+Inert single-page pagination is omitted; multi-page browsing uses the shared
+balanced pager and clears stale detail selection when its page changes. Selection
+is deep-linked, the original precedes the compact revision-checked agent-copy
+editor, and technical fields are progressively disclosed. Raw database rows and
+original evidence remain read-only. The optional pgweb guide directs ordinary
+editing to the owner dashboard.
+
+All 16 dashboard checks, `git diff --check`, and the clean pinned Node 24 full
+Docker build pass on the merged main tree. The AST-only Graphify refresh covers
+514 files with 3,589 nodes and 13,227 edges and zero model calls. The isolated
+synthetic preview on port 18933 verifies the full-width desktop table, deep-linked
+selection, the original-to-agent-copy editing flow, and the sticky edit action at
+390px. Telegram and all external execution authorities are disabled. The host
+standalone dashboard build was not counted because its pre-existing `node_modules`
+does not include the current lockfile's React Flow and ELK dependencies; the clean
+container build installs that lockfile and passes.
 
 #### Unified Memory relationship and access map — 2026-09-21
 
