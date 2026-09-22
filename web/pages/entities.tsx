@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {Alert,Badge,Button,EmptyState,Sheet,Tabs,TabsContent,TabsList,TabsTrigger} from '../components/ui/primitives';
+import {Alert,Badge,Button,EmptyState,Sheet} from '../components/ui/primitives';
 import {CursorButtons,EvidenceLinks,Provenance,ResourceState,useOwnerCommand} from '../lib/owner-controls';
 import {useResource} from '../lib/resource';
 
@@ -48,14 +48,14 @@ function SuggestionRow({item}:{item:Suggestion}){
  return <article><div className="list-heading"><h3>{item.name}</h3><Badge>{item.kind}</Badge></div><p>{item.reason}</p>{item.kind==='binding'&&<label>Confirmed person ID<input value={target} onChange={event=>setTarget(event.target.value)} pattern="[a-f0-9]{64}" required/></label>}
   <EvidenceLinks sources={[item.source_reference]}/>{command.error&&<Alert>{command.error}</Alert>}<div className="n-actions"><Button variant="default" disabled={command.busy||item.kind==='binding'&&!target} onClick={()=>void decide('confirm')}>Confirm</Button><Button disabled={command.busy} onClick={()=>void decide('reject')}>Reject</Button></div></article>;
 }
-export function Entities(){
- const [kind,setKind]=useState<'person'|'project'>('person'),[query,setQuery]=useState(''),[pages,setPages]=useState(['']),[selected,setSelected]=useState<Entity|null>(null),[trigger,setTrigger]=useState<HTMLElement|null>(null);
+export function EntityMemory({kind}:{kind:'person'|'project'}){
+ const [query,setQuery]=useState(''),[pages,setPages]=useState(['']),[selected,setSelected]=useState<Entity|null>(null),[trigger,setTrigger]=useState<HTMLElement|null>(null);
  const params=new URLSearchParams({kind,q:query,after:pages.at(-1)!,state:'all'}),data=useResource<{entities:Entity[];next:string|null}>('/entities?'+params);
- return <><Tabs value={kind} onValueChange={value=>{setKind(value as typeof kind);setPages(['']);}}><TabsList><TabsTrigger value="person">People</TabsTrigger><TabsTrigger value="project">Project memory</TabsTrigger></TabsList>
-  <TabsContent value={kind}><section className="n-panel"><div className="list-heading"><div><h2>{kind==='person'?'People':'Projects in memory'}</h2><p className="n-muted">Evidence-backed memory, relationships, uncertainty, and corrections. A relationship never grants access.</p></div><Badge>{data.data?.entities.length??0} on this page</Badge></div>
+ return <><section className="n-panel"><div className="list-heading"><div><h2>{kind==='person'?'People':'Project memory'}</h2><p className="n-muted">Evidence-backed memory, relationships, uncertainty, and corrections. A relationship never grants access.</p></div><Badge>{data.data?.entities.length??0} on this page</Badge></div>
    <label>Search this memory type<input type="search" value={query} onChange={event=>{setQuery(event.target.value);setPages(['']);}} placeholder={kind==='person'?'Person name':'Project name'}/></label>
    <ResourceState {...data} hasData={!!data.data}/>{data.data&&!data.data.entities.length&&<EmptyState title={'No '+(kind==='person'?'people':'projects')+' found'}>Confirmed entities appear after permitted evidence or owner review.</EmptyState>}
    <div className="owner-records">{data.data?.entities.map(entity=><article key={entity.id}><div className="list-heading"><h3>{entity.name}</h3><Badge>{entity.state}</Badge></div><p className="n-muted">{entity.kind==='project'?'Project understanding and connected evidence':'Stable identity across permitted conversations'}</p><Button onClick={event=>{setTrigger(event.currentTarget);setSelected(entity);}}>Inspect memory</Button></article>)}</div>
-   <CursorButtons pages={pages} next={data.data?.next} onChange={setPages}/></section></TabsContent></Tabs><Suggestions/>
+   <CursorButtons pages={pages} next={data.data?.next} onChange={setPages}/></section>
   <Sheet open={!!selected} onOpenChange={open=>{if(!open)setSelected(null);}} title={selected?.name??'Entity memory'} description="Claims remain tied to their original speaker and evidence." returnFocus={trigger}>{selected&&<EntityDetail id={selected.id}/>}</Sheet></>;
 }
+export function Entities(){return <><EntityMemory kind="person"/><Suggestions/></>;}

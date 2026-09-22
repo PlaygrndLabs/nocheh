@@ -1,7 +1,8 @@
 import {useState} from 'react';
-import {Badge,Button,Alert,EmptyState,Sheet} from '../components/ui/primitives';
+import {Badge,Button,Alert,EmptyState,Sheet,Tabs,TabsContent,TabsList,TabsTrigger} from '../components/ui/primitives';
 import {useResource} from '../lib/resource';
 import {CursorButtons,Provenance,ResourceState,useOwnerCommand} from '../lib/owner-controls';
+import {EntityMemory} from './entities';
 
 type Project={id:string;name:string;description:string;state:'active'|'archived';revision:number};
 type Assignment={space_id:string;project_id:string|null;mode:string;revision:number};
@@ -33,19 +34,21 @@ function AssignmentForm({space,projects,current,onSaved}:{space:string;projects:
  {command.error&&<Alert>{command.error}</Alert>}<Button type="submit" variant="default" disabled={command.busy||mode==='assigned'&&!project}>{command.busy?'Saving…':'Save assignment'}</Button></form>;
 }
 export function Projects(){
- const [pages,setPages]=useState(['']),[assignmentPages,setAssignmentPages]=useState(['']),[editor,setEditor]=useState<Project|'new'|null>(null),[trigger,setTrigger]=useState<HTMLElement|null>(null),[draftSpace,setDraftSpace]=useState(''),[space,setSpace]=useState('');
+ const [workspace,setWorkspace]=useState('projects'),[pages,setPages]=useState(['']),[assignmentPages,setAssignmentPages]=useState(['']),[editor,setEditor]=useState<Project|'new'|null>(null),[trigger,setTrigger]=useState<HTMLElement|null>(null),[draftSpace,setDraftSpace]=useState(''),[space,setSpace]=useState('');
  const projects=useResource<{projects:Project[];next:string|null}>('/projects?after='+pages.at(-1)),assignments=useResource<{assignments:Assignment[];next:string|null}>('/projects/assignments?after='+assignmentPages.at(-1));
  const scopes=useResource<{scopes:{scope:string}[]}>('/scopes');
- return <><section className="n-panel"><div className="list-heading"><div><h2>Your projects</h2><p className="n-muted">Organize conversations and interpretation conventions. Project membership does not share chat content.</p></div><Button variant="default" onClick={e=>{setTrigger(e.currentTarget);setEditor('new');}}>New project</Button></div>
+ return <><Tabs value={workspace} onValueChange={setWorkspace}><TabsList aria-label="Project workspace"><TabsTrigger value="projects">Projects & assignments</TabsTrigger><TabsTrigger value="memory">Project memory</TabsTrigger></TabsList>
+ <TabsContent value="projects"><section className="n-panel"><div className="list-heading"><div><h2>Your projects</h2><p className="n-muted">Organize conversations and interpretation conventions. Project membership does not share chat content.</p></div><Button variant="default" onClick={e=>{setTrigger(e.currentTarget);setEditor('new');}}>New project</Button></div>
  <ResourceState {...projects} hasData={!!projects.data}/>{projects.data&&!projects.data.projects.length&&<EmptyState title="No projects yet">Create a project, then assign its conversations below.</EmptyState>}
  <div className="owner-records">{projects.data?.projects.map(project=><article key={project.id}><div className="list-heading"><h3>{project.name}</h3><Badge>{project.state==='active'?'Active':'Archived'}</Badge></div><p>{project.description||'No description'}</p>
- <div className="n-actions"><Button onClick={e=>{setTrigger(e.currentTarget);setEditor(project);}}>Edit project</Button><a href={'#learned?project='+project.id}>Learned project conventions</a></div><Provenance value={project.id} label="Project identifier"/></article>)}</div>
+ <div className="n-actions"><Button onClick={e=>{setTrigger(e.currentTarget);setEditor(project);}}>Edit project</Button><a href={'#memory?view=learned&project='+project.id}>Learned project conventions</a></div><Provenance value={project.id} label="Project identifier"/></article>)}</div>
  <CursorButtons pages={pages} next={projects.data?.next} onChange={setPages}/></section>
  <section className="n-panel"><h2>Conversation assignments</h2><p className="n-muted">Each chat or topic has one effective project. Topics inherit their group’s assignment unless you choose another project or no project.</p>
  <form className="search-toolbar" onSubmit={e=>{e.preventDefault();setSpace(draftSpace.trim());}}><label className="n-grow">Chat or topic<input value={draftSpace} onChange={e=>setDraftSpace(e.target.value)} list="project-conversations" placeholder="Chat ID or chat ID/topic/topic ID" required/></label><Button type="submit">Manage assignment</Button></form>
  <datalist id="project-conversations">{scopes.data?.scopes.map(s=><option key={s.scope} value={s.scope}/>)}</datalist>
  {space&&<div className="owner-assignment"><h3>Assignment for <span className="owner-identifier">{space}</span></h3><AssignmentEditor key={space} space={space} projects={projects.data?.projects??[]} onSaved={()=>{}}/></div>}
  <ResourceState {...assignments} hasData={!!assignments.data}/><div className="owner-records">{assignments.data?.assignments.map(assignment=><article key={assignment.space_id} className="owner-assignment-row"><div><strong className="owner-identifier">{assignment.space_id}</strong><p>{assignment.mode==='assigned'?projects.data?.projects.find(p=>p.id===assignment.project_id)?.name??'Assigned project':assignment.mode==='none'?'No project':'Inherit from group'}</p></div><Button onClick={()=>{setDraftSpace(assignment.space_id);setSpace(assignment.space_id);}}>Manage</Button></article>)}</div>
- <CursorButtons pages={assignmentPages} next={assignments.data?.next} onChange={setAssignmentPages}/></section>
+ <CursorButtons pages={assignmentPages} next={assignments.data?.next} onChange={setAssignmentPages}/></section></TabsContent>
+ <TabsContent value="memory">{workspace==='memory'&&<EntityMemory kind="project"/>}</TabsContent></Tabs>
  <Sheet open={editor!==null} onOpenChange={open=>{if(!open)setEditor(null);}} title={editor==='new'?'Create project':'Edit project'} returnFocus={trigger}>{editor&&<ProjectEditor key={editor==='new'?'new':editor.id} project={editor==='new'?null:editor} onSaved={()=>setEditor(null)}/>}</Sheet></>;
 }
