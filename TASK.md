@@ -1,5 +1,38 @@
 # Nocheh implementation status
 
+<live_mvp_acceptance>
+
+#### Live MVP acceptance in progress — 2026-09-22
+
+The owner requested a real test after the isolated fresh Docker gate. The saved
+legacy-layout installation was restarted without erasing its retained database or
+bind-mounted state. All 17 required Compose services reached healthy, including
+Telegram, the shared provider, Inngest, and Honcho. Diagnostics report no workflow,
+worker, tool, scheduler, or subscription-login execution holds; Hermes reports
+Telegram connected with the shared provider as the sole refresh owner. The live
+subscription gate passed refresh, exact chat, literal detection, and Ogg/Opus
+transcription. The content-free result is in
+`compatibility/results/2026-09-22-live-mvp-startup.json`.
+
+A read-only reset preflight after startup found 17 installation containers, three
+mounted volumes, 53 state paths, and zero ownership blockers. It is not an
+executable reset authorization. The saved storage layout is still `legacy`; the
+controlled original-only transition, fresh backlog boundary, empty-baseline proof,
+post-boundary row-linked acceptance, and separate Honcho production checks remain
+pending. No new owner Telegram update had arrived at the last diagnostic check.
+Owner DM text and voice, a designated group with a non-owner human reply/reaction,
+intentional silence, private/group isolation, exact approval, and restart receipt
+recovery await real owner/human traffic. The live test has not established MVP
+readiness.
+
+The live inspection exposed a Honcho CLI default-root error. The one-level path
+fix and focused regression check passed, and `honcho doctor` now reports the
+running service and shared login without an environment override. This fix was
+integrated into local `main` as `c522e48`. The push to `origin/main` remains blocked
+by unavailable HTTPS username credentials.
+
+</live_mvp_acceptance>
+
 <mvp_cleanup_recheck>
 
 #### Worktree and Docker cleanup with isolated MVP recheck — 2026-09-22
