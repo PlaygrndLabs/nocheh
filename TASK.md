@@ -69,6 +69,24 @@ were not exercised by this visual pass.
 
 </dashboard_page_design_review>
 
+<sidebar_toggle_layout>
+
+#### Sidebar toggle placement — 2026-09-22
+
+The owner asked to remove the collapse button from the bottom of the desktop
+sidebar and show it at the top as an icon button. The toggle now sits beside the
+Nocheh brand when expanded and beneath the brand mark when collapsed, keeping
+the existing labeled expand/collapse action and saved sidebar state. The mobile
+navigation drawer has no redundant collapse control.
+
+The dashboard build and all 19 dashboard checks pass. The isolated synthetic
+preview verifies both desktop sidebar states and the control's accessible label.
+The pinned Node 24 preview image builds. The AST-only Graphify refresh covers
+518 files, 3,516 nodes, and 13,162 edges with zero model calls. No live runtime
+service or Telegram behavior was changed.
+
+</sidebar_toggle_layout>
+
 <honcho_attachment_controls>
 
 #### Honcho attachment option layout — 2026-09-22
