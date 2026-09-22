@@ -15,7 +15,7 @@ SELECT w.id,w.family,w.job_id,w.version,w.generation,w.state AS registry_state,w
    r.file_reference#>>'{event,id}',CASE WHEN w.family IN ('telegram','preparation') AND w.job_id ~ '^[a-f0-9]{64}$' THEN w.job_id
    WHEN w.family IN ('memory_review','honcho') AND w.job_id ~ '^source:[a-f0-9]{64}$' THEN substring(w.job_id FROM 8) END) AS source_event_id,
  CASE WHEN w.state IN ('completed','failed','skipped','cancelled','ambiguous','denied') THEN w.state
- WHEN d.event_id IS NOT NULL THEN CASE d.state WHEN 'done' THEN 'completed' WHEN 'suppressed' THEN 'skipped' WHEN 'pending' THEN w.state ELSE d.state END
+WHEN d.event_id IS NOT NULL THEN CASE d.state WHEN 'done' THEN 'completed' WHEN 'suppressed' THEN 'skipped' WHEN 'failed' THEN 'retryable_failed' WHEN 'pending' THEN w.state ELSE d.state END
  WHEN a.id IS NOT NULL THEN CASE a.state WHEN 'done' THEN 'completed' WHEN 'rejected' THEN 'denied' WHEN 'proposed' THEN 'waiting' WHEN 'approved' THEN w.state ELSE a.state END
  WHEN t.id IS NOT NULL THEN CASE t.state WHEN 'done' THEN 'completed' WHEN 'rejected' THEN 'denied' WHEN 'proposed' THEN 'waiting' WHEN 'approved' THEN w.state ELSE t.state END
  WHEN i.id IS NOT NULL THEN CASE WHEN i.state='queued' THEN w.state ELSE i.state END
@@ -72,6 +72,7 @@ export async function controlStorageWorkflow(pool:pg.Pool,principal:Reader,id:st
         throw new HttpError(409,'workflow_receipt_closed');
       const job=row.job_id;
       if(action==='retry') {
+        if(row.family==='telegram')await db.query("UPDATE dispatches SET next_attempt=now(),revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='failed'",[job]);
         if(row.family==='preparation'&&!job.startsWith('reprocess:'))await db.query("UPDATE attachment_retrievals SET next_attempt=now() WHERE event_id=$1 AND state='failed' AND error_code IS DISTINCT FROM 'import_bytes_pending'",[job]);
         if(row.family==='honcho'&&job.startsWith('receipt:'))await db.query("UPDATE memory_ingestion_receipts SET next_attempt=now() WHERE id=$1 AND state='pending'",[job.slice(8)]);
         if(row.family==='memory_review'&&job.startsWith('native:'))await db.query("UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1 AND state='pending' AND NOT paused",[job.slice(7)]);

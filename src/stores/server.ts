@@ -237,8 +237,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       if(path==='/v1/data') {
         const after=url.searchParams.get('after')??'';if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
-        const rows=(await s.stores.archive.query('SELECT id,channel,scope,source_id,revision,kind,origin,occurred_at,received_at,original_text FROM events WHERE id>$1 ORDER BY id LIMIT 51',[after])).rows;
-        return json(res,200,{records:rows.slice(0,50).map(row=>({...row,original_text:undefined,text:row.original_text?.toString()??null})),next:rows.length>50?rows[49].id:null});
+        const rows=(await s.stores.archive.query("SELECT id,channel,scope,source_id,revision,kind,origin,occurred_at,received_at,original_text FROM events WHERE id>$1 AND origin<>'generated' AND kind<>'telegram_wire' ORDER BY id LIMIT 51",[after])).rows;
+        const states=rows.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
+          error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[rows.map(row=>row.id)])).rows:[];
+        return json(res,200,{records:rows.slice(0,50).map(row=>({...row,...states.find(state=>state.event_id===row.id),original_text:undefined,text:row.original_text?.toString()??null})),next:rows.length>50?rows[49].id:null});
       }
       if(path==='/v1/status') {
         const [guard,archive,services]=await Promise.all([s.guards.state(),s.sources.status(principal),

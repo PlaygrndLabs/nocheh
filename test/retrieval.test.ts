@@ -46,7 +46,9 @@ test('real PostgreSQL: scoped reads and export/reimport preserve originals, file
     const privateId=(await ingest(source,{...base,key:'private:1',scope:'100'})).id;
     await ingest(source,{...base,key:'group:2',scope:'-200'});
     assert.equal((await search(source,group,'Friday')).length,2);
-    assert.equal((await search(source,owner,'Friday')).length,4);
+    const ownerResults=await search(source,owner,'Friday');
+    assert.equal(ownerResults.length,3);
+    assert.ok(ownerResults.every(result=>result.origin!=='derived'),'owner archive search returns source records only');
     assert.equal((await search(source,group,'متن'))[0]?.origin,'derived');
     await assert.rejects(readEvent(source,group,privateId),{code:'source_not_found'});
     await assert.rejects(readArtifact(source,group,root,digest(`${privateId}:f1`)),{code:'source_not_found'});

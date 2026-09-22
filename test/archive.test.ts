@@ -9,7 +9,8 @@ import { initialize } from '../src/database.js';
 import { settings } from '../src/config.js';
 import { drainSpool, fetchAttachments, immutableFile } from '../src/storage.js';
 import {runInput} from '../src/run-source.js';
-import {readEvent, importRecord} from '../src/retrieval.js';
+import {readEvent, importRecord,search} from '../src/retrieval.js';
+import {browseData} from '../src/guarded.js';
 
 test('immutable file storage detects collisions and preserves bytes',async()=>{
   const root=await mkdtemp(join(tmpdir(),'nocheh-files-'));
@@ -76,6 +77,13 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     }
     assert.equal((await ingest(pool,{...value,channel:'telegram'})).duplicate,true,'explicit default channel preserves legacy identity');
     await pool.query("UPDATE dispatches SET state='failed',error_code='model_unavailable',attempts=2 WHERE event_id=$1",[digest(value.key)]);
+    await ingest(pool,{...value,key:'generated:outbound',origin:'generated',kind:'outbound_result',text:'operational marker',payload:{state:'delivered'}});
+    await ingest(pool,{...value,key:'telegram:fixture:wire:1',origin:'live',kind:'telegram_wire',text:null,payload:{update_ids:[100]}});
+    const browse=await browseData(pool,{admin:true,scope:null});
+    assert.ok(browse.records.every(row=>row.kind!=='outbound_result'&&row.kind!=='telegram_wire'),'default archive browse contains source evidence only');
+    const originalRow=browse.records.find(row=>row.id===digest(value.key));
+    assert.equal(originalRow?.assistant_state,'failed');assert.equal(originalRow?.assistant_attempts,2);
+    assert.equal((await search(pool,{admin:true,scope:null},'operational marker')).length,0,'owner archive search excludes operational records');
     const monitoring=await archiveStatus(pool);
     assert.equal(monitoring.workflows.length,2,'imports and browser/scheduler records are excluded from Telegram workflows');
     const failed=monitoring.workflows.find(row=>row.event_id===digest(value.key));

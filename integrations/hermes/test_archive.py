@@ -9,7 +9,7 @@ from . import archive_tools
 
 
 class ArchiveTests(unittest.TestCase):
-    def test_slow_honcho_read_can_finish_without_extending_normal_archive_reads(self):
+    def test_slow_context_and_honcho_reads_can_finish_without_extending_normal_archive_reads(self):
         def slow_read(request,timeout):
             if timeout < 30: raise TimeoutError()
             return io.BytesIO(b'{"sources":[{"kind":"memory_inference"}]}')
@@ -19,6 +19,8 @@ class ArchiveTests(unittest.TestCase):
                 result=archive_tools.request('/v1/memory/honcho/recall',{'query':'Synthetic recall'})
                 self.assertEqual(result['sources'][0]['kind'],'memory_inference')
                 self.assertGreater(network.call_args.kwargs['timeout'],600)
+                archive_tools.request('/v1/context/prepare',{'text':'Synthetic context'})
+                self.assertEqual(network.call_args.kwargs['timeout'],60)
                 with self.assertRaises(TimeoutError): archive_tools.request('/v1/search?q=synthetic')
                 self.assertEqual(network.call_args.kwargs['timeout'],15)
         finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)

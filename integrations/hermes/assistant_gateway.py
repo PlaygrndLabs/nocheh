@@ -98,6 +98,10 @@ def committed_adapter_class():
             turn=TURN.get()
             if turn is None:raise RuntimeError('uncommitted_message')
             response=await self._message_handler(event)
+            # A failed assistant turn is not intentional silence. Keep the
+            # pre-delivery failure visible to the dispatcher so it can retry
+            # under a fresh attempt identity without sending anything here.
+            if turn.get('agent_result',{}).get('state') not in (None,'done'):return
             if not response:turn['delivery_success']=True;turn['delivery_skipped']=True;return
             if turn.get('cancelled') and turn['cancelled'].is_set():
                 turn['agent_result']={'state':'cancelled'};return
@@ -108,6 +112,7 @@ def committed_adapter_class():
             if turn.get('progress'):turn['progress']('delivery')
             # Use native Telegram formatting/splitting and the durable
             # outbound journal, without implicit MEDIA/file/TTS delivery.
+            turn['delivery_started']=True
             delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=_thread_metadata_for_event(event))
             turn['delivery_success']=bool(delivered.success)
     return CommittedAdapter
@@ -193,7 +198,7 @@ class AssistantGateway:
                 result={'state':'done','text':turn['body']['control_reply'],'session_id':'owner-control'} if turn['body'].get('control_reply') is not None else await native_turn(self.root,turn['scope'],turn['body'],self.model,await asyncio.to_thread(self.credentials),cancelled=turn.get('cancelled'))
                 turn['agent_result']=result
                 if result['state']=='cancelled':return None
-                if result['state']!='done':raise RuntimeError('assistant_turn_failed')
+                if result['state']!='done':return None
                 await asyncio.to_thread(self.adapter.capture.enqueue,self.adapter.capture.event('assistant:'+turn['body']['event_id']+':'+str(turn['body']['attempt']),
                     'assistant_result',{'event_id':turn['body']['event_id'],'session_id':result['session_id']},turn['scope'].chat_id,result['text']))
                 return result['text']
@@ -240,7 +245,12 @@ class AssistantGateway:
                 elif turn.get('delivery_skipped'):result={'state':'suppressed','error_code':'intentional_silence'}
                 elif turn.get('delivery_success'):result={'state':'done'}
                 else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
-            except Exception:result={'state':'ambiguous','error_code':'dispatch_interrupted'}
+            except Exception:
+                # Before native delivery starts, another attempt cannot
+                # duplicate a Telegram effect. Once sending has started, only
+                # reconciliation is safe because the remote outcome is unknown.
+                result={'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') else \
+                    {'state':'failed','error_code':'assistant_runtime_unavailable'}
             finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
             from .timing import safe
             timings=safe(turn.get('agent_result',{}).get('timings'))

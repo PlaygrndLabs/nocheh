@@ -42,13 +42,15 @@ export async function search(pool:pg.Pool,principal:Reader,query:string,count=20
   const {rows}=await pool.query<EventRow & {derived_id:string|null}>(`WITH hits AS (
     SELECT id,scope,source_id,revision,origin,kind,occurred_at,received_at,original_text,NULL::text AS derived_id,
       ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) AS rank
-    FROM events WHERE ($2::text IS NULL OR (scope=$2 AND origin<>'generated')) AND ($4::text IS NULL OR id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
+    FROM events WHERE origin<>'generated' AND kind<>'telegram_wire' AND ($2::text IS NULL OR scope=$2)
+      AND ($4::text IS NULL OR id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
     UNION ALL
     SELECT e.id,e.scope,e.source_id,e.revision,'derived',d.kind,e.occurred_at,e.received_at,d.content,d.id,
       ts_rank(to_tsvector('simple',d.search_text),plainto_tsquery('simple',$1)) AS rank
     FROM derived_artifacts d JOIN events e ON e.id=d.event_id
-    WHERE ($2::text IS NULL OR (e.scope=$2 AND e.origin<>'generated')) AND ($4::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND ($5::text IS NULL OR d.kind<>'runtime_context' OR d.provenance->>'audience'=$5) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
-  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count,principal.scope===null?null:principal.space??null,principal.scope===null?null:contextAudience(principal)]);
+    WHERE NOT $6::boolean AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2::text IS NULL OR e.scope=$2)
+      AND ($4::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND ($5::text IS NULL OR d.kind<>'runtime_context' OR d.provenance->>'audience'=$5) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
+  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count,principal.scope===null?null:principal.space??null,principal.scope===null?null:contextAudience(principal),principal.admin]);
   await assertAudience(pool,principal);
   return rows.map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
     kind:row.kind,origin:row.origin,derived_id:row.derived_id,occurred_at:row.occurred_at,text:row.original_text?.toString().slice(0,2000) ?? null,
