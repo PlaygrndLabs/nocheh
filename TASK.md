@@ -19,8 +19,10 @@ mounted volumes, 53 state paths, and zero ownership blockers. It is not an
 executable reset authorization. The saved storage layout is still `legacy`; the
 controlled original-only transition, fresh backlog boundary, empty-baseline proof,
 post-boundary row-linked acceptance, and separate Honcho production checks remain
-pending. No new owner Telegram update had arrived at the last diagnostic check.
-Owner DM text and voice, a designated group with a non-owner human reply/reaction,
+pending. The requested fresh owner DM subsequently arrived and completed one
+Telegram workflow attempt with one done delivery receipt. Its content-free
+evidence is in `compatibility/results/2026-09-23-live-owner-dm.json`.
+Owner DM voice, a designated group with a non-owner human reply/reaction,
 intentional silence, private/group isolation, exact approval, and restart receipt
 recovery await real owner/human traffic. The live test has not established MVP
 readiness.
