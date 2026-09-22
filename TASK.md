@@ -46,6 +46,24 @@ guarded verification events are the first content in the new archive; they produ
 no Telegram deliveries or actions. The owner dashboard responds on
 `http://127.0.0.1:8783/`.
 
+#### Evidence graph node identity labels — 2026-09-22
+
+The owner found that distinct historical Hermes profiles and textless system
+observations appeared to be duplicate graph nodes because their visible labels
+were identical. The graph keeps every underlying identity and relationship, but
+now labels configured profiles as current, historical profiles with guard epoch
+plus a stable profile fragment, and textless observations with their
+event kind plus a stable short event ID. The profile registry exposes the bounded
+guard-epoch metadata already present in each profile marker; no source or
+memory record is merged, deleted, or rewritten.
+
+The pinned Node 24 image builds successfully. Eleven focused graph/dashboard
+checks, all 17 dashboard checks, three legacy graph-enrichment tests, and the
+focused historical-profile registry test pass. The host-only combined Python
+module run was not counted because this host lacks PyYAML and an unrelated restore
+test's fixed port was already occupied; the focused Python checks pass in the
+pinned Hermes container.
+
 #### Archive owner table and editing flow — 2026-09-22
 
 The owner requested a place to see database records in a table and edit them.

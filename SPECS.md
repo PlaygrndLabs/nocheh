@@ -258,6 +258,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - The product graph is a deterministic, scoped view of original identities, authorship, replies, revisions, files, derived provenance, and explicit native-note citations. It does not invent source support for notes or store layout positions as facts. Nodes and edges enforce the same audience boundaries.
 - A locally bundled, lazy-loaded Three.js view supports orbit, pan, zoom, focus, search, source inspection, pagination, and optional full screen. It renders on demand, limits rendering resolution, disposes resources, and never auto-rotates.
 - A keyboard-accessible node browser and evidence inspector are available without WebGL. Observed and generated/citation links are distinct. Graph JSON and original-source exports preserve the underlying records. The graph requires neither model calls nor an additional graph database.
+- Distinct graph nodes do not appear as indistinguishable duplicates. Native profiles identify current versus historical identities, and observations without display text identify their event kind and a stable short event ID while preserving the underlying records unchanged.
 
 </area>
 </area>
