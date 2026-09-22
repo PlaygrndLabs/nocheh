@@ -31,6 +31,8 @@ Contract/schema commit `97c028d`, access-workflow commit `1c87685`, API/UI commi
 
 #### Connected memory for people and projects — 2026-09-20
 
+On 2026-09-22, shared owner-list pagination was refined after the People & projects view exposed an inert single-page control row. Single-page lists now omit pagination entirely. Multi-page lists use a semantic, centered pager with equal previous and next columns and a vertically aligned current-page label. All 15 dashboard checks, the standalone dashboard build, and the pinned Node 24 full build pass. The isolated preview verifies the corrected People and Identity suggestions sections at desktop and 390px.
+
 Implementation is complete in the separated-store runtime. Control storage owns stable person/project identities, exact and confirmed bindings, suggestions, reversible link history, and versioned Honcho peer mappings. Derived storage owns revisioned entity claims and relationships with direct, reported, or inferred attribution and source evidence. The original archive remains unchanged.
 
 The Honcho writer uses actual speaker peers, persistent conversation sessions, and separate typed entity-evidence sessions for projects and mentioned people. Connected recall starts from a permitted entity, follows bounded evidence-backed paths with cycle detection and deduplication, labels why related memory was included, and retains the 20,000-character context ceiling with partial-result status. The first version-4 write retires the corresponding generic-peer generation in place. No production Honcho activation or live installation resume is authorized by this change.
