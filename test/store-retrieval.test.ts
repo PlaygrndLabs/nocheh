@@ -62,15 +62,19 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     await assert.rejects(sources.read(scoped,topic.id),{code:'source_not_found'});
     assert.equal((await sources.read(await principal('-321','-321/topic/77'),topic.id)).event.text,'Topic quillmarsh');
     const graph=await sources.graph(owner,'*','',1,reply.id);
-    assert.ok(graph.nodes.some(n=>n.id==='event:'+target.id),'old target resolves outside the graph page');
-    assert.ok(graph.edges.some(e=>e.from==='event:'+reply.id&&e.to==='event:'+target.id&&e.kind==='reply_to_source'));
-    assert.ok(graph.nodes.some(n=>n.kind==='author'));
-    assert.ok(!graph.nodes.some(n=>n.kind==='derived'||n.label==='runtime_context'));assert.equal(graph.bounds.derived,0);
+    assert.ok(graph.nodes.some(n=>n.id==='message:'+target.id),'old target resolves outside the graph page');
+    assert.ok(graph.edges.some(e=>e.from==='message:'+reply.id&&e.to==='message:'+target.id&&e.kind==='reply_to_source'));
+    assert.ok(graph.nodes.some(n=>n.kind==='user'));
+    assert.deepEqual([...new Set(graph.nodes.map(n=>n.kind))].sort(),['group','message','user']);
+    assert.ok(!graph.nodes.some(n=>n.label==='runtime_context'));
     await assert.rejects(sources.graph(scoped,'-321'),{code:'owner_required'});
 
     const projects=new ProjectRepository(stores.control),project=await projects.save(owner,{name:key,state:'active',expected_revision:0,operation_id:key+':project'});
     for(const space of ['-321','-654'])await projects.assign(owner,{space_id:space,mode:'assigned',project_id:project.id,
       expected_revision:(await stores.control.query('SELECT revision FROM project_assignments WHERE space_id=$1',[space])).rows[0]?.revision??0,operation_id:key+space});
+    const projectGraph=await sources.graph(owner,'-321','',1,reply.id);
+    assert.ok(projectGraph.nodes.some(n=>n.id==='project:'+project.id&&n.kind==='project'));
+    assert.ok(projectGraph.edges.some(e=>e.from==='project:'+project.id&&e.to==='group:-321'&&e.kind==='project_context'));
     await assert.rejects(sources.read(await principal('-321'),foreign.id),{code:'source_not_found'},'project membership creates no raw read grant');
     await assert.rejects(sources.read(scoped,target.id),{code:'audience_context_changed'});
     const current=await principal('-321');

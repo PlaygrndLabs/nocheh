@@ -1,6 +1,10 @@
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 import {Source} from './source.js';
-  const graphKinds = {scope:'Scope',profile:'Profile',event:'Observation',message:'Message',author:'Author',attachment:'File',memory:'Memory',derived:'Derived'};
+  const graphKinds = {user:'User',project:'Project',group:'Group',message:'Message'};
+  const contextGraph = value=>{
+    const nodes=(value?.nodes||[]).filter(node=>Object.hasOwn(graphKinds,node.kind)),ids=new Set(nodes.map(node=>node.id));
+    return {...value,nodes,edges:(value?.edges||[]).filter(edge=>ids.has(edge.from)&&ids.has(edge.to))};
+  };
 function GraphSpace({data, selectedId, matchingIds, choose}) {
     const host=useRef(null), scene=useRef(null), onChoose=useRef(choose);
     const [problem,setProblem]=useState(''),[ready,setReady]=useState(false),[retry,setRetry]=useState(0),[labels,setLabels]=useState(true),[expanded,setExpanded]=useState(false),[expandError,setExpandError]=useState('');
@@ -36,11 +40,11 @@ export function Graph({notify}) {
     useEffect(()=>{if(scopes?.scopes){setScopeList(old=>[...new Map([...old,...scopes.scopes].map(s=>[s.scope,s])).values()]);if(!scope&&scopes.scopes.length)setScope(scopes.scopes[0].scope);}},[scopes]);
     useEffect(()=>{
       if(!scope)return;let alive=true;const controller=new AbortController();selection.current++;sourceRequest.current?.abort();setBusy(true);setProblem('');setData(null);setRecord(null);setSelected(null);setSourceError('');setSourceBusy(false);setQuery('');setKind('');
-      call('/graph?scope='+encodeURIComponent(scope)+'&after='+encodeURIComponent(after),undefined,{signal:controller.signal}).then(value=>{if(alive)setData(value);}).catch(e=>{if(alive)setProblem(errorText(e));}).finally(()=>{if(alive)setBusy(false);});
+      call('/graph?scope='+encodeURIComponent(scope)+'&after='+encodeURIComponent(after),undefined,{signal:controller.signal}).then(value=>{if(alive)setData(contextGraph(value));}).catch(e=>{if(alive)setProblem(errorText(e));}).finally(()=>{if(alive)setBusy(false);});
       return()=>{alive=false;controller.abort();sourceRequest.current?.abort();selection.current++;};
     },[scope,after,retry]);
     useEffect(()=>{let alive=true,controller;
-      const refresh=()=>{controller?.abort();controller=new AbortController();setBusy(true);call('/graph?scope='+encodeURIComponent(scope)+'&after='+encodeURIComponent(after),undefined,{signal:controller.signal}).then(value=>{if(alive){setData(value);setProblem('');}}).catch(e=>{if(alive&&e.name!=='AbortError')setProblem(errorText(e));}).finally(()=>{if(alive)setBusy(false);});};
+      const refresh=()=>{controller?.abort();controller=new AbortController();setBusy(true);call('/graph?scope='+encodeURIComponent(scope)+'&after='+encodeURIComponent(after),undefined,{signal:controller.signal}).then(value=>{if(alive){setData(contextGraph(value));setProblem('');}}).catch(e=>{if(alive&&e.name!=='AbortError')setProblem(errorText(e));}).finally(()=>{if(alive)setBusy(false);});};
       window.addEventListener('nocheh:refresh',refresh);return()=>{alive=false;controller?.abort();window.removeEventListener('nocheh:refresh',refresh);};
     },[scope,after]);
     const choose=async node=>{
@@ -52,7 +56,7 @@ export function Graph({notify}) {
     const matchingIds=useMemo(()=>kind||query.trim()?new Set(filtered.map(node=>node.id)):null,[filtered,kind,query]);
     const connections=(data?.edges||[]).filter(edge=>edge.from===selected?.id||edge.to===selected?.id);
     return h('div',{className:'n-graph-page'},
-      h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Follow the evidence'),h('p',{className:'n-muted'},'Explore original observations, people and files in three dimensions. Select a node to follow its source.')),
+      h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Explore your context'),h('p',{className:'n-muted'},'Explore users, projects, groups, and messages in three dimensions. Actions and runtime events stay out of the graph.')),
         h('label',{className:'n-graph-scope'},'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},h('option',{value:'*'},'All private knowledge'),...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),
         scopes?.next&&button('Load more scopes',()=>setScopeAfter(scopes.next))),
       scopeError&&h('p',{role:'alert'},scopeError),!scopes&&!scopeError&&h('p',{role:'status'},'Loading archive scopes…'),
@@ -60,7 +64,6 @@ export function Graph({notify}) {
       busy&&h('div',{className:'n-graph-loading',role:'status'},'Loading source relationships…'),
       problem&&h(Panel,{title:'Graph unavailable'},h('p',{role:'alert'},problem),button('Try again',()=>setRetry(v=>v+1))),
       data&&h('div',null,
-        data.native_profiles_truncated&&h('p',{role:'status'},'Showing notes from the first 20 native profiles. Select an archive scope or use Hermes memory to inspect further profiles.'),
         h('div',{className:'n-graph-workspace'},h(GraphSpace,{data,selectedId:selected?.id,matchingIds,choose}),
           h('aside',{className:'n-graph-inspector','aria-label':'Graph inspector'},
             h('div',{className:'n-node-browser'},h('h3',null,'Node browser'),
@@ -76,16 +79,16 @@ export function Graph({notify}) {
                 selected.unresolved_citations>0&&h('p',{className:'n-muted'},selected.unresolved_citations+' citations are outside this page or scope.'),
                 sourceBusy&&h('p',{role:'status'},'Loading original source…'),sourceError&&h('div',null,h('p',{role:'alert'},sourceError),button('Retry source',()=>choose(selected))),
                 record&&button('View original source',()=>source.current?.scrollIntoView({block:'start'}),false,'n-primary'),
-                !selected.event_id&&h('p',{className:'n-muted'},'Follow a connection to inspect an original message.'),
+                !selected.event_id&&h('p',{className:'n-muted'},'Follow a connection to a message to inspect its original source.'),
                 h('details',{open:true},h('summary',null,connections.length+' direct connections'),...connections.map((edge,i)=>{
                   const target=byId.get(edge.from===selected.id?edge.to:edge.from);if(!target)return null;
                   return h('button',{type:'button',key:i,className:'n-connection',onClick:()=>choose(target)},h('small',null,(edge.from===selected.id?'Outgoing · ':'Incoming · ')+edge.kind.replaceAll('_',' ')),h('span',{dir:'auto'},target.label));
                 }))) : h('div',null,h('h3',null,'Inspect a connection'),h('p',{className:'n-muted'},'Select a node in the space or the list. Its direct connections will light up here.'),h('p',{className:'n-muted'},'Positions help you navigate. Only the links represent recorded relationships.'))))),
-        h('div',{className:'n-graph-legend','aria-label':'Node legend'},...Object.entries(graphKinds).filter(([key])=>data.nodes.some(n=>n.kind===key)).map(([key,label])=>h('span',{key},h('i',{className:'n-kind-dot n-kind-'+key,'aria-hidden':true}),label)),h('span',null,h('i',{className:'n-reference-line','aria-hidden':true}),'Dashed: citation / derived')),
-        h('div',{className:'n-graph-pagination'},h('p',{className:'n-muted'},'Page '+(history.length+1)+' · '+data.nodes.filter(n=>['message','event'].includes(n.kind)).length+' observations · '+data.unresolved_replies+' reply references outside this page'),
-          h('div',{className:'n-space-actions'},button('Previous observations',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));},!history.length),button('Next observations',()=>{setHistory([...history,after]);setAfter(data.next);},!data.next),button('Export graph JSON',()=>exportJSON(data,'nocheh-graph.json')))),
-        data.bounds.truncated&&h('p',{role:'status'},'Attachment or derived-node limit reached. Open source records for the complete details.'),
-        !data.nodes.some(n=>['message','event'].includes(n.kind))&&h('p',{className:'n-muted'},'No observations on this page. Choose another scope or return to the previous page.'),
-        h('p',{className:'n-muted'},'Recorded source relationships. This view makes no model calls.'),
+        h('div',{className:'n-graph-legend','aria-label':'Node legend'},...Object.entries(graphKinds).filter(([key])=>data.nodes.some(n=>n.kind===key)).map(([key,label])=>h('span',{key},h('i',{className:'n-kind-dot n-kind-'+key,'aria-hidden':true}),label))),
+        h('div',{className:'n-graph-pagination'},h('p',{className:'n-muted'},'Page '+(history.length+1)+' · '+data.nodes.filter(n=>n.kind==='message').length+' messages · '+data.unresolved_replies+' reply references outside this page'),
+          h('div',{className:'n-space-actions'},button('Previous messages',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));},!history.length),button('Next messages',()=>{setHistory([...history,after]);setAfter(data.next);},!data.next),button('Export graph JSON',()=>exportJSON(data,'nocheh-graph.json')))),
+        data.bounds.truncated&&h('p',{role:'status'},'The context-entity limit was reached. Choose a narrower archive scope to inspect more.'),
+        !data.nodes.some(n=>n.kind==='message')&&h('p',{className:'n-muted'},'No messages on this page. Choose another scope or return to the previous page.'),
+        h('p',{className:'n-muted'},'Recorded context relationships only. Actions and events are excluded, and this view makes no model calls.'),
         record&&h('div',{ref:source,id:'n-graph-source'},h(Source,{record,notify}))));
   }
