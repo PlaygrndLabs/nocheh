@@ -20,12 +20,12 @@ export const memoryMapLayoutOptions={
 } as const;
 
 /** Calculate presentation-only positions. Stable input ordering keeps Reset layout predictable. */
-export async function layoutMemoryMap<N extends LayoutNode,E extends LayoutEdge>(nodes:N[],edges:E[]):Promise<N[]>{
+export async function layoutMemoryMap<N extends LayoutNode,E extends LayoutEdge>(nodes:N[],edges:E[],direction:'RIGHT'|'DOWN'='RIGHT'):Promise<N[]>{
   if(!nodes.length)return [];
   const orderedNodes=[...nodes].sort((a,b)=>a.id.localeCompare(b.id));
   const graph=await elk.layout({
     id:'memory-map',
-    layoutOptions:memoryMapLayoutOptions,
+    layoutOptions:{...memoryMapLayoutOptions,'elk.direction':direction},
     children:orderedNodes.map(node=>({
       id:node.id,
       width:node.measured?.width??node.width??224,
