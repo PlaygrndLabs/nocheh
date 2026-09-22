@@ -7,6 +7,12 @@ runs, not tests repeated by the documentation migration.
 
 <original_only_archive>
 
+#### Archive owner flow — 2026-09-22
+
+The Archive is now one explicit owner workflow: find or browse an original message, select the record itself, review immutable evidence, and inspect or edit the separate copy agents use when guarding is on. Redundant **Inspect source** controls and inert single-page pagination are removed; multi-page browsing uses the shared balanced pager and clears stale detail selection when its page changes. Record selection is deep-linked, metadata and readiness are legible at a glance, technical fields are progressively disclosed, and the original precedes the compact side-by-side agent-copy editor.
+
+All 16 dashboard checks, the standalone dashboard build, `git diff --check`, and the pinned Node 24 full Docker build pass. The AST-only Graphify refresh covers 511 files with 3,473 nodes and 13,050 edges and zero model calls. The isolated synthetic preview on port 18947 verifies browse, selection, deep linking, search and clearing, read-only original evidence, agent-copy controls, light and dark themes, desktop, 390px, 375px, and phone-landscape layouts. The preview has Telegram and all external execution authorities disabled; no production activation or provider action was performed.
+
 #### Unified Memory relationship and access map — 2026-09-21
 
 On 2026-09-22, the owner requested smaller Memory map nodes. The graph uses compact label-first cards with narrower width, reduced padding and visual weight, and no repeated action helper line inside every node. ELK fallback dimensions match the rendered card footprint so initial and reset layouts remain stable; automatic fit is capped below 1× so the canvas does not enlarge compact cards back to their old visual footprint, while manual zoom remains available. Connection handles retain their existing interaction size. All 15 dashboard checks, the standalone dashboard build, and the pinned Node 24 full build pass. The isolated preview verifies the compact cards at desktop and 390px, including a shortened mobile reset label with the full accessible name preserved.
