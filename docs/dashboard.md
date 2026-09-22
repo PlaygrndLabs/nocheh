@@ -173,7 +173,10 @@ same-source revisions, and explicit group-to-project assignments. Actions, event
 runtime context, files, generated artifacts, Hermes profiles, and memory notes are
 excluded from both the visual graph and its JSON export. Messages without display
 text use their source kind and a stable short message ID instead of sharing an
-indistinguishable placeholder.
+indistinguishable placeholder. Telegram users use their recorded `@username` or
+display name, groups use their recorded chat title, and private conversations are
+labeled `Private chat · @username` (or the recorded display name). The numeric
+Telegram ID remains the fallback when the original observation contains no name.
 Original chat identity remains part of an imported message's identity even when
 multiple Desktop exports are mapped into one scope. Group-scoped API credentials
 cannot request a different scope. Citations outside the current page or scope do

@@ -36,7 +36,8 @@ for(const [index,scope,text,voice,user] of [
  [5,'-10042','Beacon is blocked while Alex checks the telescope.',false,456]
 ] as const){
  const event:Envelope={version:1,key:'original-ui-fixture:'+index,origin:'live',bot_id:'fixture',kind:'telegram_update',scope,source_id:String(index),revision:'1',occurred_at:null,text,
-  payload:{message:{message_id:index,date:1700000000,chat:{id:Number(scope),type:scope==='123'?'private':'group'},from:{id:user},text,...(voice?{voice:{file_id:'synthetic-voice'}}:{})}}};
+  payload:{message:{message_id:index,date:1700000000,chat:{id:Number(scope),type:scope==='123'?'private':'group',...(scope==='123'?{first_name:'Mira',username:'mira_sky'}:{title:scope==='-10042'?'Observatory team':'Field reports'})},
+   from:{id:user,...(user===123?{first_name:'Mira',username:'mira_sky'}:{first_name:'Alex',username:'alex_scope'})},text,...(voice?{voice:{file_id:'synthetic-voice'}}:{})}}};
  const source=(await services.capture.capture(event)).source;await services.guards.prepare(source.reference,'ui-fixture',services.detect);originals.push(source);
 }
 const file=await services.attachments.commit(originals[0]!.artifact_ids[0]!,Buffer.from('Synthetic original audio bytes'));await services.guards.prepare(file,'ui-fixture',services.detect);

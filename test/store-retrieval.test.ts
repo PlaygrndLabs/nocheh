@@ -36,7 +36,7 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     await guards.reconcile();await selections.reconcile();await guards.setMode('on');
     const target=(await archive.capture(event(':target','-321',{message_id:sequence+1,chat:{id:-321,type:'group'},text:'Original quillmarsh'}))).source.reference;
     const foreign=(await archive.capture(event(':foreign','-654',{message_id:sequence+2,chat:{id:-654,type:'group'},text:'Foreign hazelwharf'}))).source.reference;
-    const reply=(await archive.capture(event(':reply','-321',{message_id:sequence+3,chat:{id:-321,type:'group'},text:'A reply quillmarsh',from:{id:44},
+    const reply=(await archive.capture(event(':reply','-321',{message_id:sequence+3,chat:{id:-321,type:'group',title:'Quillmarsh team'},text:'A reply quillmarsh',from:{id:44,username:'alex_quill'},
       reply_to_message:{message_id:sequence+1,chat:{id:-321,type:'group'},text:'embeddedsecret'},external_reply:{message_id:sequence+2,chat:{id:-654},text:'foreignsecret'}}))).source.reference;
     const unknown=(await archive.capture(event(':unknown','-321',{message_id:sequence+4,chat:{id:-321,type:'supergroup',is_forum:true},text:'Unknown membership'}))).source.reference;
     const topic=(await archive.capture(event(':topic','-321',{message_id:sequence+5,chat:{id:-321,type:'supergroup',is_forum:true},message_thread_id:77,text:'Topic quillmarsh'}))).source.reference;
@@ -65,6 +65,8 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     assert.ok(graph.nodes.some(n=>n.id==='message:'+target.id),'old target resolves outside the graph page');
     assert.ok(graph.edges.some(e=>e.from==='message:'+reply.id&&e.to==='message:'+target.id&&e.kind==='reply_to_source'));
     assert.ok(graph.nodes.some(n=>n.kind==='user'));
+    assert.ok(graph.nodes.some(n=>n.kind==='group'&&n.label==='Quillmarsh team'));
+    assert.ok(graph.nodes.some(n=>n.kind==='user'&&n.label==='@alex_quill'));
     assert.deepEqual([...new Set(graph.nodes.map(n=>n.kind))].sort(),['group','message','user']);
     assert.ok(!graph.nodes.some(n=>n.label==='runtime_context'));
     await assert.rejects(sources.graph(scoped,'-321'),{code:'owner_required'});
