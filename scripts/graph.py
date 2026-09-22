@@ -21,7 +21,7 @@ def context_entities(graph):
     graph['bounds']={kind+'s':sum(node['kind']==kind for node in nodes) for kind in CONTEXT_KINDS}
     graph['bounds']['truncated']=bool(previous.get('truncated',False))
     graph.pop('native_profiles_truncated',None)
-    graph['note']='Context entities only: users, projects, groups, and original messages. Actions, events, files, runtime context, and generated artifacts are excluded.'
+    graph['note']='Context entities only: users, projects, groups or private chats, and original messages. Actions, events, files, runtime context, and generated artifacts are excluded.'
     return graph
 
 

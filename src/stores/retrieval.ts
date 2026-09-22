@@ -9,7 +9,7 @@ import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
 import type {SourceReference} from './archive.js';
 import type {GuardBinding} from './guards.js';
-import {evidenceNodeLabel,graphGroupLabel,graphUserLabel} from '../graph-labels.js';
+import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel} from '../graph-labels.js';
 import {ProjectRepository} from './projects.js';
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
@@ -123,7 +123,10 @@ export class SourceRepository {
       JOIN source_objects o ON o.id=r.object_id
       WHERE o.kind='message' AND e.origin<>'generated' AND e.id>$1 AND ($2='' OR e.id=$2) ORDER BY e.id LIMIT 201`,[after,focus])).rows;
     const nodes:any[]=[{id:'group:'+scope,kind:'group',label:scope==='*'?'All private knowledge':scope}],edges:any[]=[],selected:string[]=[],spaces=new Set<string>(),payloads=new Map<string,unknown>();
-    const add=(node:any,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;};
+    const add=(node:any,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else {
+      if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;
+      if(node.chat_type&&!current.chat_type)current.chat_type=node.chat_type;
+    }};
     const link=(from:string,to:string,kind:string)=>{if(!edges.some(e=>e.from===from&&e.to===to&&e.kind===kind))edges.push({from,to,kind});};
     const allowed=async(id:string)=>scope==='*'||await this.access.space((await this.access.archive.captured(id)).reference)===scope;
     const addEvent=async(id:string)=>{
@@ -131,8 +134,8 @@ export class SourceRepository {
         JOIN source_observations s ON s.event_id=e.id JOIN source_revisions r ON r.id=s.revision_id
         JOIN source_objects o ON o.id=r.object_id WHERE e.id=$1`,[id])).rows[0];
       if(!row||row.object_kind!=='message'||row.origin==='generated')return false;
-      const space=await this.access.space((await this.access.archive.captured(id)).reference)??row.scope;
-      payloads.set(id,row.payload);spaces.add(space);add({id:'group:'+space,kind:'group',label:graphGroupLabel(row.payload,space)??space},space);if(scope==='*')link('group:*','group:'+space,'contains');
+      const space=await this.access.space((await this.access.archive.captured(id)).reference)??row.scope,chatType=graphChatType(row.payload,space);
+      payloads.set(id,row.payload);spaces.add(space);add({id:'group:'+space,kind:'group',label:graphGroupLabel(row.payload,space)??space,...(chatType?{chat_type:chatType}:{})},space);if(scope==='*')link('group:*','group:'+space,'contains');
       add({id:'message:'+id,kind:'message',label:evidenceNodeLabel(row.search_text.slice(0,160),row.kind,id),event_id:id,source_id:row.source_id});
       link('group:'+space,'message:'+id,'contains');return true;
     };
@@ -169,6 +172,6 @@ export class SourceRepository {
     return {format:'nocheh-context-graph-v1',scope,nodes,edges,next:hasMore?cursor:null,
       bounds:{messages:count,groups:spaces.size,users:nodes.filter(node=>node.kind==='user').length,
         projects:nodes.filter(node=>node.kind==='project').length,truncated},unresolved_replies:unresolved,
-      note:'Context entities only: users, projects, groups, and original messages. Actions, events, files, runtime context, and generated artifacts are excluded.'};
+      note:'Context entities only: users, projects, groups or private chats, and original messages. Actions, events, files, runtime context, and generated artifacts are excluded.'};
   }
 }
