@@ -60,5 +60,5 @@ authorization for those actions. Group members cannot approve or change policy.
 Before cutover, all checks must pass and restored pending work must be reconciled
 against the source installation. Verified Git integration follows
 [AGENTS.md](../AGENTS.md) independently under ADRs 0039–0040; it does not complete
-these checks or activate the runtime. The optional Honcho comparison remains
-independent and does not block this production gate.
+these checks or activate the runtime. Honcho activation follows its separate
+production acceptance gate.

@@ -1,4 +1,4 @@
-"""Pinned official CLI with a read-only transport for the isolated experiment."""
+"""Pinned official CLI with a read-only transport for the production installation."""
 import contextlib
 import io
 import json
@@ -25,7 +25,7 @@ def validate(args):
 
 
 def read_request(original, client, method, path, **kwargs):
-    if client.base_url!='http://honcho:8000': raise ValueError('honcho_endpoint_denied')
+    if client.base_url!='http://honcho-api:8000': raise ValueError('honcho_endpoint_denied')
     body=kwargs.get('body') or {}; query=kwargs.get('query') or {}
     if method=='POST' and re.fullmatch(COLLECTION,path):
         if set(body)!={'id'} or not re.fullmatch(ID,body['id']): raise ValueError('honcho_write_denied')
@@ -49,7 +49,7 @@ def main(args=None):
         for key in list(os.environ):
             if key.startswith('HONCHO_'): del os.environ[key]
         os.environ.update(HONCHO_CONFIG_DIR=config,HONCHO_API_KEY=Path('/state/internal_token').read_text().strip(),
-                          HONCHO_BASE_URL='http://honcho:8000',HONCHO_NO_UPDATE_CHECK='1',HONCHO_JSON='1')
+                          HONCHO_BASE_URL='http://honcho-api:8000',HONCHO_NO_UPDATE_CHECK='1',HONCHO_JSON='1')
         from honcho.http.client import HonchoHTTPClient
         original=HonchoHTTPClient.request
         pages=[]

@@ -2,8 +2,8 @@
 
 The accepted target below is defined in [SPECS.md](../SPECS.md), with rationale in
 ADR-0033 and ADR-0035. Actual activation and acceptance are recorded in
-[TASK.md](../TASK.md); the diagram is not a claim of active shared-provider routing
-or attached Honcho. Honcho stays detached until its live gates pass.
+[TASK.md](../TASK.md); the diagram describes system design, not the current
+connection state.
 
 ```mermaid
 flowchart TD
@@ -30,10 +30,9 @@ flowchart TD
     I --> J
 ```
 
-The shared route stays inactive until `./scripts/nocheh provider cutover` passes
-the live checks recorded in `TASK.md`. The native Hermes route stays active
-during that gate and becomes an inactive rollback only after shared cutover. Honcho
-memory attachment still requires its separate embedding and recall acceptance.
+A fresh installation must pass the shared-provider cutover and Honcho's separate
+embedding and recall acceptance before attachment. [TASK.md](../TASK.md) records
+the active installation's completed checks and remaining pilot work.
 
 1. Import `Database password: mango123`. The original is archived unchanged.
 2. Preparation saves `Database password: ***`. You can inspect both versions.
@@ -117,37 +116,31 @@ vectors cannot mix. The small model reserves $0.01 per bounded request; the larg
 model reserves $0.02. The total spending caps stay unchanged (ADR-0034).
 `NOCHEH_MODEL` is the separate Hermes subscription reasoning model.
 The old `NOCHEH_EMBEDDING_API_KEY` is a migration alias; explicit `OPENAI_API_KEY`
-wins, including an empty value. Only the isolated meter receives the paid key.
+wins, including an empty value. Only the Honcho provider gateway receives the paid key.
 Settings displays credential presence, never its value. Edit these fields in `.env`
-and restart the Honcho stack (`up` while isolated, `runtime-up` when attached).
+and restart the production Honcho services through the installation CLI.
 
 `./scripts/nocheh provider login` starts the one shared CLIProxyAPI device login.
-The isolated stack uses pinned revisions and cannot bypass the spending gateway.
-After saving the dedicated embedding key and completing the shared login, run these in
-order, keeping failures pending:
+Production Honcho uses pinned revisions and the installation Compose project.
+The retained state directory and ledger have historical names for data compatibility;
+they are production state and must not be reset to tidy their names. For a fresh
+installation, prepare the source and credentials, then start the production profile:
 
 ```sh
-./scripts/honcho-experiment up # Build pinned images and start the isolated stack.
-./scripts/honcho-experiment verify-memory
-./scripts/honcho-experiment accept-memory
-./scripts/honcho-experiment runtime-init
+./scripts/nocheh honcho init
+./scripts/nocheh honcho runtime-init
 ./scripts/nocheh up
-./scripts/honcho-experiment runtime-up
-./scripts/nocheh memory honcho attach
+./scripts/nocheh honcho runtime-up
 ```
 
-`verify-memory` uses synthetic content and records actual ingestion, retrieval,
-reasoning, embedding canary, restart and provider-failure results. `accept-memory`
-rejects incomplete reports. `runtime-init` installs the private gateway credential;
-the runtime overlay binds model attempts to current Nocheh audiences. A scoped
-Nocheh ingestion/recall and opted-in history pilot still needs verification after
-attachment. These commands do not grant import-learning consent.
+Run the [Honcho acceptance procedure](guarded-memory-plan.md) before attaching
+memory. The production acceptance evidence for the active installation is in
+[TASK.md](../TASK.md). Starting containers, configuring a paid key, or passing a
+synthetic fixture does not mark the memory connection verified. Attachment remains
+an explicit owner operation. The optional Hermes-versus-Honcho comparison harness
+has been retired; it was not a production acceptance gate.
 
-For verification only, stop after `accept-memory` and run
-`./scripts/honcho-experiment down`. It preserves the database volume and spending
-ledger. The later commands explicitly prepare and attach production memory.
-
-The total pilot cap stays at $5. After the pilot, `./scripts/honcho-experiment monthly`
+The total pilot cap stays at $5. After the pilot, `./scripts/nocheh honcho monthly`
 enables the agreed $5 per UTC calendar month cap; it requires accepted, attached
 memory and preserves all pilot reservations. Repeating it cannot reset spending.
 

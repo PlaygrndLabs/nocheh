@@ -1,4 +1,4 @@
-"""Pinned Honcho context binding; the isolated meter is the only inference egress."""
+"""Pinned Honcho context binding; the production gateway is the only inference egress."""
 import contextvars
 import functools
 import re

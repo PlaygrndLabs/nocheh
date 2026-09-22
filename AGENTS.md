@@ -40,7 +40,7 @@ Telegram is an adapter; owned source data, useful memory, and reasoning are the 
 - Retain existing tests and acceptance gates. No TDD mandate applies. Add focused behavior tests, including failure paths, for consequential changes to data preservation, privacy, provider handling, approvals, or recovery. Avoid low-value tests that mirror implementation or cover only reversible cosmetic edits.
 - Run checks appropriate to the change. Documentation-only changes need link, structure, consistency, and coverage checks, not new automated tests or runtime startup.
 - A phase is complete only when its documented acceptance criteria pass. Report skipped checks, missing credentials, and unrun live checks as pending, never as passes. Historical evidence is not a newly repeated check.
-- Subscription transcription is a release requirement. If it fails, retain evidence and stop dependent release work while continuing independent work. The optional Honcho comparison does not block release; production Honcho activation has its own gates.
+- Subscription transcription is a release requirement. If it fails, retain evidence and stop dependent release work while continuing independent work. Production Honcho activation has its own gates.
 - Use local Docker Compose for runtime acceptance. Git integration does not authorize deployment, provider cutover, memory activation, release, or VPS work.
 
 </verification>

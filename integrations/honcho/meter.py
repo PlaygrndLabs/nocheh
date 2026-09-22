@@ -1,4 +1,4 @@
-"""Experiment-only egress: subscription reasoning and strictly budgeted embeddings."""
+"""Production Honcho egress: subscription reasoning and strictly budgeted embeddings."""
 import hashlib
 import hmac
 import json
@@ -71,7 +71,7 @@ class Ledger:
             start,mode=self.window(db)
             total, count = db.execute('SELECT coalesce(sum(reserved),0),count(*) FROM calls WHERE started>=?',(start,)).fetchone()
             if total + amount > LIMIT_MICRODOLLARS or count >= 1500:
-                raise Rejected('experiment_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
+                raise Rejected('pilot_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
             audit={'owner_wording':b'Database credentials are in my password manager.' in body,
                    'synthetic_raw_canary':b'mango123' in body}
             return db.execute('INSERT INTO calls(route,digest,reserved,started,audit) VALUES(?,?,?,?,?)',
@@ -173,10 +173,10 @@ class Egress:
             return status,kind,content
         except urllib.error.HTTPError as error:
             status=error.code
-            return status,'application/json',json.dumps({'error':{'message':'experiment_upstream_rejected','code':status}}).encode()
+            return status,'application/json',json.dumps({'error':{'message':'honcho_upstream_rejected','code':status}}).encode()
         except Exception:
             status=502
-            return 502,'application/json',b'{"error":{"message":"experiment_upstream_unavailable"}}'
+            return 502,'application/json',b'{"error":{"message":"honcho_upstream_unavailable"}}'
         finally:
             self.ledger.finish(call,status,time.monotonic()-start,usage)
 

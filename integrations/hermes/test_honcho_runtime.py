@@ -41,7 +41,7 @@ class HonchoRuntimeTests(unittest.TestCase):
             state=Path(folder);values=initialize(state)
             values.update(NOCHEH_HONCHO_ENABLED='true',NOCHEH_HONCHO_DATABASE_VOLUME='synthetic-preserved-db',NOCHEH_HONCHO_REDIS_VOLUME='synthetic-preserved-cache')
             write_env(env_path(state),values)
-            raw=subprocess.check_output(['docker','compose','--env-file',str(env_path(state)),'-f',str(ROOT/'docker-compose.yml'),'config','--format','json'],env=compose_environment(state),text=True,stderr=subprocess.PIPE,timeout=30)
+            raw=subprocess.check_output(['docker','compose','--env-file',str(env_path(state)),'-f',str(ROOT/'docker-compose.yml'),'--profile','honcho','--profile','honcho-tools','config','--format','json'],env=compose_environment(state),text=True,stderr=subprocess.PIPE,timeout=30)
             config=json.loads(raw);services=config['services']
             self.assertTrue(config['volumes']['honcho_database']['external'])
             self.assertEqual(config['volumes']['honcho_database']['name'],'synthetic-preserved-db')
@@ -51,6 +51,11 @@ class HonchoRuntimeTests(unittest.TestCase):
             self.assertEqual(set(services['honcho-postgres']['networks']),{'honcho-isolated'})
             self.assertNotIn('ports',services['honcho-api'])
             self.assertIn('honcho-memory',services['honcho-api']['networks']['memory']['aliases'])
+            self.assertEqual(services['honcho-api']['image'],'nocheh-honcho:be543555')
+            self.assertIn('/nocheh/meter.py',services['honcho-provider-gateway']['command'])
+            self.assertTrue(any(mount['source'].endswith('/integrations/honcho/meter.py')
+                                for mount in services['honcho-provider-gateway']['volumes']))
+            self.assertTrue(services['honcho-cli']['build']['context'].endswith('/integrations/honcho/cli'))
             self.assertTrue(config['volumes']['honcho_redis']['external'])
             self.assertEqual(services['honcho-redis']['volumes'][0]['source'],'honcho_redis')
             for name in ('honcho-postgres','honcho-redis','honcho-api','honcho-deriver','honcho-provider-gateway'):

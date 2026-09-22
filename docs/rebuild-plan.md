@@ -4,7 +4,8 @@
 actual completion and activation. Follow [AGENTS.md](../AGENTS.md) for verified
 increments and Git integration. ADR-0018 began this sequence; ADR-0019 selects
 local Compose, ADR-0033 replaces the original guard/memory design, and ADR-0039
-separates integration into main from release. Historical ADRs retain the rationale.
+separates integration into main from release. ADR-0061 retires the optional
+Honcho comparison. Historical ADRs retain the rationale.
 
 ## Phase checkpoints
 
@@ -17,7 +18,6 @@ separates integration into main from release. Historical ADRs retain the rationa
 | 4 — Retrieval and portability | Test Desktop import with supplied/missing media, scoped search/read/download, export/reimport, and silent replay. Verify identities and original bytes round-trip. |
 | 5 — Guarding | The original checkpoint is superseded by the [guarded-projection sequence](guarded-memory-plan.md). Verify on/off selection, exact local masking, authoritative owner edits, and per-attempt failure closure. |
 | 6 — Assistant | Verify native memory, group/topic audience policy, owner recall, transcript persistence/retry, useful conversation and intentional silence, and owner-controlled actions. Run actual Telegram checks. |
-| 7 — Optional comparison | Run the isolated synthetic Hermes/Honcho comparison when its dedicated credentials and budget permit. Retain measured quality, provenance, latency, usage, and failures; missing comparison evidence does not block release. |
 | 8 — Operations and release | Rehearse fresh install, backup/inactive restore, quota/backlog/guard recovery, then complete [remaining live release acceptance](release-acceptance.md). Record cutover separately from Git integration. |
 
 ## Verification procedure

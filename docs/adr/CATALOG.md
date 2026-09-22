@@ -69,3 +69,4 @@ records current implementation and activation.
 | [0058](0058-semantic-react-flow-memory-map-editing.md) | React Flow Memory map with semantic revision-checked editing | Current Memory map interaction model |
 | [0059](0059-elk-layered-memory-map-layout.md) | ELK layered positioning for the Memory map | Current Memory map layout |
 | [0060](0060-context-entity-evidence-graph.md) | Limit the 3D evidence graph to users, projects, groups, and messages | Supersedes ADR-0026's broad node taxonomy and unchanged-export clause |
+| [0061](0061-retire-isolated-honcho-comparison.md) | Retire optional Honcho comparison; keep production support and legacy data identities | Current Honcho repository boundary; supersedes 0045 experiment retention |

@@ -21,7 +21,7 @@ def enabled(state):
     return load(state).get('NOCHEH_HONCHO_ENABLED')=='true'
 
 
-def ensure_inactive_experiment():
+def ensure_inactive_legacy_project():
     running=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.project=nocheh-honcho-experiment'],text=True,timeout=20)
     if running.strip():raise ValueError('honcho_legacy_project_requires_quiesced_migration')
 
@@ -29,7 +29,7 @@ def ensure_inactive_experiment():
 def enable(state,honcho_state):
     state=Path(state);honcho_state=Path(honcho_state).resolve()
     if (state/'spool/.restore-inactive').exists():raise ValueError('inactive_restore')
-    ensure_inactive_experiment()
+    ensure_inactive_legacy_project()
     values=load(state)
     token=(honcho_state/'internal_token').read_text().strip()
     if values.get('NOCHEH_MEMORY_TOKEN')!=token:raise ValueError('honcho_runtime_init_required')
@@ -56,7 +56,7 @@ def operate(state,action):
     command,env=compose(state)
     if action=='up':
         if (Path(state)/'spool/.restore-inactive').exists():raise ValueError('inactive_restore')
-        ensure_inactive_experiment()
+        ensure_inactive_legacy_project()
         normalize_endpoints(env['NOCHEH_HONCHO_STATE_DIR'])
         arguments=['up','-d','--no-build','--wait','--wait-timeout','240',*SERVICES]
     elif action=='down':arguments=['stop',*reversed(SERVICES)]

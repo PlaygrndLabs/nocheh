@@ -5,6 +5,37 @@ how agents work. Plans below provide execution order and acceptance procedures;
 this file records actual status. Historical counts are evidence from their recorded
 runs, not tests repeated by the documentation migration.
 
+<honcho_comparison_retirement>
+
+#### Retire the optional Honcho comparison — 2026-09-22
+
+The owner asked to remove `experiments/honcho` and similar obsolete experiment
+surface. The synthetic Hermes-versus-Honcho fixture, its separate Compose stack,
+baseline runner, live-comparison command, and pending task entry are removed.
+Production Honcho's source pin, metered gateway, read-only CLI, and focused
+security/budget tests now live with the installed integration. The management
+image no longer copies an experiments directory. The owner-facing Honcho view
+describes production services, and ADR-0061 records the decision while preserving
+the accepted historical ADRs.
+
+The active installation's `data/honcho-experiment` state path, database identity,
+external volumes, and spending ledger retain their names and contents. Legacy
+project/volume checks remain to prevent competing writers or accidental new
+empty memory. No production services, provider login, memory attachment, monthly
+budget policy, or stored data were changed by this code cleanup.
+
+Verification: 22 focused Python tests pass for metering, configuration, CLI
+selection, runtime volume isolation, and portability; three pinned CLI/SDK and
+workspace-boundary tests pass in a separate image with no network or state mount.
+The dashboard build and all 19 dashboard checks pass. A Node 24 synthetic
+preview on port 18954 shows the Honcho Memory view with production labels and
+the expected connection status; its project, network, volume, image, and
+credentials are separate from the installation. The AST-only Graphify refresh
+covers 514 files, 3,498 nodes, and 13,128 edges with zero model calls. Live
+production image recreation and runtime migration were not part of this check.
+
+</honcho_comparison_retirement>
+
 <fresh_mvp_test_baseline>
 
 #### Fresh local data baseline and MVP test — 2026-09-22
@@ -2624,7 +2655,6 @@ from its normal pinned recipe. Both candidate image digests are recorded.
 - **Shared provider:** the owner explicitly approved the switch after the earlier testing-only rejection. S5 passed and the shared route is active; the old native login is privately retired. No provider cutover blocker remains. The refresh check verifies authority delegation, not a newly forced token-expiration event.
 - **Honcho:** attached and verified; scoped production ingestion/recall, native-tool access, isolation, outage and restart acceptance pass. The opted-in history pilot and monthly budget cutover remain pending. Preserve the durable pilot ledger and explicit learning consent. See the production acceptance evidence above.
 - **Space memory:** native-note/transcript filtering is not implemented; its provider-payload/destination extension was blocked by an earlier automatic approval review. Live native-review/filter quality and the browser policy-save check also remain pending. See [recorded boundaries](docs/space-memory-plan.md).
-- **Optional comparison:** the isolated Honcho comparison remains pending and does not block release; production Honcho activation has separate gates.
 - **Remote synchronization:** each verified increment was merged locally under the shared Git lock; fetch and push repeatedly confirmed that local GitHub HTTPS authentication is unavailable. Local integration and remote push outcomes must be reported separately; do not infer synchronization from a local merge.
 
 ## Development follow-ups and proposals
@@ -2870,10 +2900,9 @@ serial assistant dispatch, and non-streamed responses remain latency limitations
 The trusted ChatGPT route bypasses guard detection under `auto`.
 This diagnosis does not claim a performance fix or a completed release gate.
 
-The optional [Honcho experiment](experiments/honcho/README.md) uses the shared
-reasoning login and an explicitly supplied dedicated embedding key. Live embedding,
-derivation and recall comparison remain pending. Its $5 budget has one $0.01
-conservative reservation from the rejected embedding canary.
+The optional Honcho experiment used the shared reasoning login and an explicitly
+supplied dedicated embedding key. Its live comparison was not completed; the
+historical decision is preserved in [ADR-0022](docs/adr/0022-isolated-metered-honcho-experiment.md).
 
 ##### Owner dashboard D3 — native memory and isolated Honcho CLI
 
@@ -2885,7 +2914,7 @@ conservative reservation from the rejected embedding canary.
   honest unavailable dashboard state. Read lookups cannot create records.
 - [x] Compose regression: 16 TypeScript tests and 41 Hermes integration tests;
   two CLI boundary tests and one real upstream CLI/SDK fixture test pass.
-- [ ] Optional live Honcho compatibility remains pending separate credentials.
+- [x] Production Honcho live compatibility and attachment are recorded above; the historical optional comparison was retired.
 
 ##### Owner dashboard D4 — evidence graph and operations
 
