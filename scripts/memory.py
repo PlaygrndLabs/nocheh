@@ -1,6 +1,7 @@
 """Owner memory policies and native-learning controls; JSON output for scripting."""
 import argparse
 import json
+import uuid
 from pathlib import Path
 from urllib.parse import urlencode
 from .archive import API
@@ -28,7 +29,13 @@ def main(arguments):
         if position+1<len(arguments) and arguments[position+1].startswith('-') and not arguments[position+1].startswith('--'):
             arguments[position:position+2]=['--space='+arguments[position+1]]
     args=parser.parse_args(arguments);api=API();prefix='/v1/memory/'
-    if args.action=='honcho':result=api.call(prefix+'honcho',None if args.mode=='status' else {'attached':args.mode=='attach','include_history':args.include_history,'catch_up':args.catch_up})
+    if args.action=='honcho':
+        if args.mode=='status':result=api.call(prefix+'honcho')
+        else:
+            status=api.call(prefix+'honcho')
+            result=api.call(prefix+'honcho',{'attached':args.mode=='attach','include_history':args.include_history,
+                'catch_up':args.catch_up,'expected_revision':status['connection']['revision'],
+                'operation_id':str(uuid.uuid4())})
     elif args.action=='spaces':result=api.call(prefix+'spaces?'+urlencode({'after':args.after}))
     elif args.action=='policy':
         if args.set:
