@@ -43,7 +43,7 @@ class NativeMemoryExport:
 
     def export(self,directory):
         directory=Path(directory);directory.mkdir(parents=True,exist_ok=False,mode=0o700)
-        pin=json.loads((Path(__file__).resolve().parents[1]/'experiments/honcho/upstreams.lock.json').read_text())['honcho']['revision']
+        pin=json.loads((Path(__file__).resolve().parents[1]/'integrations/honcho/upstreams.lock.json').read_text())['honcho']['revision']
         result={'format':'nocheh-honcho-memory-v1','producer_revision':pin,'automatic_activation':False,'tables':{},'complete':False}
         metadata=directory/'manifest.json';metadata.write_text(json.dumps(result,indent=2)+'\n');metadata.chmod(0o600)
         with self.snapshot() as (snapshot,process):
@@ -79,7 +79,7 @@ class NativeMemoryExport:
         from the package; column types must match the installed pinned schema.
         """
         directory=Path(directory);manifest=validate_honcho(directory)
-        pin=json.loads((Path(__file__).resolve().parents[1]/'experiments/honcho/upstreams.lock.json').read_text())['honcho']['revision']
+        pin=json.loads((Path(__file__).resolve().parents[1]/'integrations/honcho/upstreams.lock.json').read_text())['honcho']['revision']
         if manifest['producer_revision']!=pin:raise ValueError('native_memory_schema_version_mismatch')
         schema=manifest['schema'];relations={table:'"'+schema+'"."'+table+'"' for table in TABLES}
         process=subprocess.Popen(self.prefix,env=self.environment,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)

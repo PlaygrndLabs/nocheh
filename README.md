@@ -62,7 +62,6 @@ See [operations and configuration](docs/deploy.md),
 [Telegram setup and scoped assistant](docs/telegram.md),
 [guarded memory system and operating instructions](docs/guarded-memory-system.md),
 [shared provider and monitoring](docs/provider.md),
-[isolated Honcho acceptance](experiments/honcho/README.md),
 [rebuild execution checkpoints](docs/rebuild-plan.md), and
 [subscription evidence](compatibility/findings.md). VPS setup is deferred; local
 Compose is the current development and acceptance target (ADR-0019).

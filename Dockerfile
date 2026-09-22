@@ -52,7 +52,6 @@ COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
 COPY scripts ./scripts
 COPY integrations ./integrations
-COPY experiments ./experiments
 COPY compatibility ./compatibility
 COPY deploy ./deploy
 COPY --from=development /app/web/dist ./web/dist

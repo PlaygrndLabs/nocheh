@@ -40,7 +40,7 @@ x-service: &service
     start_period: 10s
 
 x-honcho-runtime: &honcho-runtime
-  image: nocheh-honcho-experiment:be543555
+  image: nocheh-honcho:be543555
   build:
     context: ./data/compat/upstreams/honcho
     dockerfile: ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/honcho.Dockerfile
@@ -159,12 +159,12 @@ services:
     profiles: [honcho]
     restart: unless-stopped
     image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
-    command: [python, /experiment/meter.py]
+    command: [python, /nocheh/meter.py]
     env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/meter.env", required: false}]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     volumes:
-      - ./experiments/honcho/meter.py:/experiment/meter.py:ro
-      - ./scripts/embedding_config.py:/experiment/embedding_config.py:ro
+      - ./integrations/honcho/meter.py:/nocheh/meter.py:ro
+      - ./scripts/embedding_config.py:/nocheh/embedding_config.py:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/ledger:/ledger
       - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/honcho.key:/run/secrets/cliproxy_honcho_key:ro
@@ -176,7 +176,7 @@ services:
       retries: 15
   honcho-cli:
     image: nocheh-honcho-cli:0.1.4
-    build: {context: ./experiments/honcho, dockerfile: cli.Dockerfile}
+    build: {context: ./integrations/honcho/cli, dockerfile: Dockerfile}
     profiles: [honcho-tools]
     read_only: true
     tmpfs: [/tmp]

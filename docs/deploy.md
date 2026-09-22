@@ -212,7 +212,7 @@ Release evidence is tracked in [TASK.md](../TASK.md). The container tests cover
 database recovery, duplicate delivery, quota pauses, guard failure, scoped reads,
 replay suppression and approval boundaries. Actual Telegram DM/group/voice,
 intentional silence, approved delivery and reconnect checks remain required before
-release. Git integration has its own verification gates. The Honcho live comparison is an optional separate experiment.
+release. Git integration has its own verification gates.
 
 ## Later VPS deployment
 

@@ -145,8 +145,8 @@ truncation. A note's presence does not establish source provenance.
 ./scripts/nocheh honcho session view SESSION_ID -w WORKSPACE_ID --all > transcript.json
 ```
 
-Honcho lifecycle (`init`, `up`, `down`, `status`, `login`) delegates to the existing
-experiment. Initialize it before `honcho install`. Inspection uses official
+Honcho lifecycle (`init`, `up`, `down`, `status`, `login`) targets the installation
+Compose project. Initialize its pinned source before starting Honcho. Inspection uses official
 `honcho-cli==0.1.4` / `honcho-ai==2.4.0`, pinned dependencies and an internal-only
 Compose runner with a fresh CLI config directory. Ambient Honcho accounts are
 ignored. A narrow transport changes SDK get-or-create lookups into exact-ID list
@@ -158,8 +158,8 @@ incomplete collection. `complete` refers to the requested command/limit, with
 server pagination metadata retained. Inspect is a summary, not a full export.
 
 The dashboard shows live-gate status, attachment, current memory generations and
-receipts alongside workspace/peer/session lists. Attach remains disabled while
-provider acceptance is pending. After acceptance, owner attach/detach controls
+receipts alongside workspace/peer/session lists. Attach remains disabled until
+provider acceptance passes. After acceptance, owner attach/detach controls
 offer optional consented history and catch-up. The CLI provides deeper stored-data
 inspection. See [the current memory system](guarded-memory-system.md) for activation
 and budget instructions; fixture tests do not certify live provider behavior.

@@ -20,9 +20,9 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         try:
             async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req:requests.append(req) or httpx.Response(200,json={}))) as client:
                 with self.assertRaisesRegex(RuntimeError,'honcho_workspace_required'):
-                    await client.post('http://meter:8790/v1/embeddings',json={})
+                    await client.post('http://honcho-provider-gateway:8790/v1/embeddings',json={})
                 token=WORKSPACE.set('current')
-                try: await client.post('http://meter:8790/v1/embeddings',json={})
+                try: await client.post('http://honcho-provider-gateway:8790/v1/embeddings',json={})
                 finally: WORKSPACE.reset(token)
             self.assertEqual(len(requests),1)
             self.assertEqual(requests[0].headers['X-Nocheh-Workspace'],'current')

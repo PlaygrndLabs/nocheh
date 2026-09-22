@@ -110,6 +110,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 <area name="Honcho and native memory">
 
 - Honcho is the primary long-term memory, with subscription reasoning through CLIProxyAPI and dedicated capped embeddings. Hermes keeps small native `MEMORY.md` and `USER.md` notes alongside Honcho and retains its native sessions.
+- Honcho production support and read-only inspection are part of the installed memory integration. No separate Hermes-versus-Honcho comparison runtime or experiment workflow is shipped.
 - People and projects are the entity types used for connected memory. Exact platform identities are reused automatically. Different people with the same name remain separate; ambiguous name-based or cross-platform matches remain suggestions until the owner confirms them. Registered projects are reused, and newly discovered or uncertain project identities require owner confirmation.
 - An unambiguous reference to a confirmed project attributes that statement to the referenced project instead of the conversation's default project. It does not reassign the conversation or change access permissions.
 - Contextual mentions, participation, responsibility, dependencies, and explicit associations are distinct relationship types. Mentioning one project in another project's conversation establishes only a contextual connection unless stronger evidence establishes another relationship.
@@ -274,7 +275,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Recovery cutover reconciles snapshot-era pending work with source evidence and shuts down source authorities before activation. Rollback uses the matching code/images and a verified inactive snapshot, never an older runtime against a newer live database.
 - Candidate compatibility checks build pinned runtime/native assets in isolation without live state, credentials, or test network. They do not activate candidates or change saved pins. Upgrade acceptance covers capture, guards, audience access, approvals, native memory, restore, and single-authority operation.
 - Release acceptance includes real subscription chat, literal detection, Ogg/Opus transcription, refresh/quota/failure handling, and local Compose recovery. Real Telegram acceptance covers owner replies, selected-group behavior and intentional silence, private/group isolation, original voice bytes and derived transcripts, exact owner approval, and reconnect/restart without duplicate effects.
-- Missing credentials, unrun checks, or healthy containers do not establish acceptance. Provider cutover, Honcho activation, and release have separate gates; Git integration is not activation. The isolated synthetic Honcho comparison is optional and does not block production release. Its explicitly configured embedding requests have a durable $5 total experiment cap across runs.
+- Missing credentials, unrun checks, or healthy containers do not establish acceptance. Provider cutover, Honcho activation, and release have separate gates; Git integration is not activation.
 - Validation evidence excludes real conversations and credentials. Measurements distinguish deterministic preservation/enforcement from finite observations of detection, privacy filtering, memory quality, and latency.
 
 </area>

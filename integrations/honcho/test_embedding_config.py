@@ -8,7 +8,7 @@ from unittest.mock import patch
 from scripts.configuration import write_env,read_env,initialize,env_path,load
 from scripts.embedding_config import embeddings
 from scripts.settings import view
-from . import control
+from scripts import honcho_setup as control
 from .meter import Egress,Ledger,Rejected
 from .test_meter import Transport
 
@@ -34,7 +34,7 @@ class EmbeddingConfigTests(unittest.TestCase):
             root=Path(folder);state=root/'state'
             values={'NOCHEH_EMBEDDING_PROVIDER':'openai','NOCHEH_EMBEDDING_MODEL':'text-embedding-3-large','OPENAI_API_KEY':'synthetic-dedicated-key'}
             write_env(root/'.env',values)
-            with patch.object(control,'ROOT',root),patch.object(control,'STATE',state),patch.dict(os.environ,{'OPENAI_API_KEY':'unrelated-shell-key'}):
+            with patch.object(control,'ROOT',root),patch.object(control,'STATE',state),patch.object(control,'PROVIDER_STATE',root),patch.dict(os.environ,{'OPENAI_API_KEY':'unrelated-shell-key'}):
                 control.initialize()
                 self.assertEqual((state/'temporary_embedding_key').read_text(),'synthetic-dedicated-key')
                 self.assertEqual((state/'temporary_embedding_key').stat().st_mode&0o777,0o600)
@@ -43,7 +43,7 @@ class EmbeddingConfigTests(unittest.TestCase):
                 self.assertEqual(honcho['EMBEDDING_VECTOR_DIMENSIONS'],'1536')
                 self.assertEqual(meter['NOCHEH_EMBEDDING_MODEL'],values['NOCHEH_EMBEDDING_MODEL'])
                 self.assertEqual(honcho['DERIVER_MODEL_CONFIG__MODEL'],'gpt-5.6-sol')
-                for name in ('compose.env','honcho.env','meter.env'):
+                for name in ('honcho.env','meter.env'):
                     self.assertNotIn(values['OPENAI_API_KEY'],(state/name).read_text())
                     self.assertNotIn('unrelated-shell-key',(state/name).read_text())
                 values['OPENAI_API_KEY']='';values['NOCHEH_EMBEDDING_API_KEY']='old-key';write_env(root/'.env',values)

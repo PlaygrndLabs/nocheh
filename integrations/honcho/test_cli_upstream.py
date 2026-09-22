@@ -6,14 +6,14 @@ import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from .cli_runner import main
+from .cli.cli_runner import main
 
 class UpstreamCliTests(unittest.TestCase):
     def test_official_cli_pagination_and_credential_isolation(self):
         from honcho.http.client import HonchoHTTPClient
         calls=[]
         def response(client,method,path,**kwargs):
-            self.assertEqual(client.base_url,'http://honcho:8000');self.assertEqual(client.api_key,'synthetic-experiment-token')
+            self.assertEqual(client.base_url,'http://honcho-api:8000');self.assertEqual(client.api_key,'synthetic-experiment-token')
             self.assertEqual(method,'POST');self.assertTrue(path.endswith('/list'));calls.append((path,kwargs))
             query=kwargs.get('query') or {};body=kwargs.get('body') or {};page=query.get('page',1)
             selected=body.get('filters',{}).get('id')

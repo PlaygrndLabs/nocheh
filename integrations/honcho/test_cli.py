@@ -2,14 +2,14 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-from .cli_runner import validate,read_request
+from .cli.cli_runner import validate,read_request
 
 class CliTests(unittest.TestCase):
     def test_read_lookup_never_creates_and_missing_is_error(self):
         calls=[]
         def original(client,method,path,**kwargs):
             calls.append((method,path,kwargs));return {'items':[{'id':'existing','metadata':{}}]}
-        client=SimpleNamespace(base_url='http://honcho:8000')
+        client=SimpleNamespace(base_url='http://honcho-api:8000')
         result=read_request(original,client,'POST','/v3/workspaces/w/peers',body={'id':'existing'})
         self.assertEqual(result['id'],'existing');self.assertEqual(calls[0][1],'/v3/workspaces/w/peers/list')
         with self.assertRaises(ValueError):read_request(original,client,'POST','/v3/workspaces/w/peers',body={'id':'missing'})
@@ -22,7 +22,15 @@ class CliTests(unittest.TestCase):
         for args in (['init'],['peer','chat','p'],['workspace','list','--base-url=https://remote'],['peer','representation','p','--search-query','cost']):
             with self.assertRaises(ValueError):validate(args)
         validate(['session','view','s','-w','w','--page','2','--size','50'])
-        with self.assertRaises(ValueError):read_request(None,SimpleNamespace(base_url='http://honcho:8000'),'POST','/v3/workspaces/list',query={'page':101})
+        with self.assertRaises(ValueError):read_request(None,SimpleNamespace(base_url='http://honcho-api:8000'),'POST','/v3/workspaces/list',query={'page':101})
         from scripts.honcho import read
         with patch('scripts.honcho.status',return_value={'running':False}),patch('subprocess.run') as run:
-            self.assertEqual(read(['workspace','list'])['error'],'honcho_experiment_not_running');run.assert_not_called()
+            self.assertEqual(read(['workspace','list'])['error'],'honcho_not_running');run.assert_not_called()
+        with patch('scripts.honcho.status',return_value={'running':True}), \
+             patch('scripts.honcho.compose',return_value=(['docker','compose'],{})), \
+             patch('scripts.honcho.subprocess.run',return_value=SimpleNamespace(stdout='{"complete":true,"data":[]}',returncode=0)) as run:
+            self.assertTrue(read(['workspace','list'])['complete'])
+            command=run.call_args.args[0]
+            self.assertIn('honcho-cli',command)
+            self.assertIn('honcho-tools',command)
+            self.assertNotIn('experiments',str(command))

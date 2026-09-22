@@ -21,12 +21,13 @@ class HonchoStatusTests(unittest.TestCase):
             credential = {'type': 'codex', 'access_token': 'private-access',
                           'refresh_token': 'private-refresh'}
             with patch.object(honcho, 'STATE', experiment), \
-                 patch.object(honcho, 'PROVIDER_STATE', provider):
+                 patch.object(honcho, 'PROVIDER_STATE', provider), \
+                 patch.object(honcho, 'enabled', return_value=False):
                 self.assertFalse(honcho.status()['subscription_login'])
                 (auth / 'one.json').write_text(json.dumps(credential))
                 result = honcho.status()
                 self.assertTrue(result['subscription_login'])
-                self.assertEqual(result['live_compatibility'], 'pending live memory checks')
+                self.assertIn('running', result)
                 self.assertNotIn('private', json.dumps(result))
                 (auth / 'two.json').write_text(json.dumps(credential))
                 self.assertFalse(honcho.status()['subscription_login'])

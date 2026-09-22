@@ -2,8 +2,7 @@
 
 > Historical pre-rebuild research. These commands and privacy rules describe the
 > legacy implementation preserved on `codex/legacy-nocheh`; they are not active
-> runtime instructions. The current optional comparison is
-> [the isolated Honcho harness](../../experiments/honcho/README.md).
+> runtime instructions. The optional comparison harness has been retired.
 
 Phase 0 compares memory behaviour; it does not alter production memory. The harness uses one
 provider-neutral contract for Nocheh and Honcho and keeps retrieval scoring separate from the
