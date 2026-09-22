@@ -29,7 +29,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-')),base=Date.now(),key='dispatch:'+base,group='-'+base,token=digest(key);
-  const policy={enabled:true,owner_id:'123',group_ids:[group]},calls:{operation:string;input:any}[]=[],native=new Map<string,any>();
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},calls:{operation:string;input:any}[]=[],native=new Map<string,any>(),journals=new Map<string,any[]>();
   let serial=base,mode='done',lostControl=false;const query=stores.control.query.bind(stores.control);
   const control=new Proxy(stores.control,{get(target,name){
     if(name==='query')return (sql:any,...args:any[])=>{
@@ -39,8 +39,9 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   }});
   const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:String(input.text).includes('fixture-secret')?['fixture-secret']:[]};
-    calls.push({operation,input});assert.ok(['run.start','run.resume','run.cancel'].includes(operation));
+    calls.push({operation,input});assert.ok(['run.start','run.resume','run.events','run.cancel'].includes(operation));
     const id=String(input.event_id);
+    if(operation==='run.events')return {events:journals.get(id)??[]};
     if(operation==='run.resume'){assert.equal(input.observe_only,true);return native.get(id)??{state:'not_found'};}
     if(operation==='run.cancel'){native.set(id,{state:'cancelled'});return {state:'cancelled'};}
     await services.turns.binding(reader({headers:{authorization:'Bearer '+String(input.archive_credential)}} as any,token));
@@ -115,6 +116,40 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     await due(failed.reference.id);mode='done';assert.equal((await run(failed.reference.id)).state,'completed');
     const retried=calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start');
     assert.deepEqual(retried.map(c=>c.input.attempt),[1,2]);
+    const recoverable=await capture('Legacy pre-delivery interruption');await prepare(recoverable.reference.id);mode='ambiguous';
+    assert.equal((await advance(recoverable.reference.id)).state,'ambiguous');
+    await stores.control.query("UPDATE dispatches SET error_code='dispatch_interrupted' WHERE event_id=$1",[recoverable.reference.id]);
+    journals.set(recoverable.reference.id,[
+      {sequence:1,state:'queued',stage:'admission',at:base+1},
+      {sequence:2,state:'running',stage:'assistant',at:base+2},
+      {sequence:3,state:'ambiguous',stage:'assistant',at:base+3},
+    ]);
+    assert.equal(await services.telegram.reconcileInterrupted(),1);
+    const recovered=(await stores.control.query(`SELECT d.state AS dispatch_state,d.error_code,w.id,w.state AS workflow_state,w.dispatch,
+      r.state AS receipt_state FROM dispatches d JOIN workflow_registry w ON w.family='telegram' AND w.job_id=d.event_id
+      JOIN workflow_receipts r ON r.workflow_id=w.id AND r.step='telegram' AND r.attempt=d.attempts WHERE d.event_id=$1`,[recoverable.reference.id])).rows[0];
+    assert.equal(recovered.dispatch_state,'failed');assert.equal(recovered.error_code,'assistant_runtime_unavailable');
+    assert.equal(recovered.workflow_state,'retryable_failed');assert.equal(recovered.receipt_state,'failed');assert.equal(recovered.dispatch,2);
+    assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM workflow_outbox WHERE workflow_id=$1 AND dispatch=2',[recovered.id])).rows[0].n,1);
+    native.delete(recoverable.reference.id);mode='done';
+    assert.equal((await advanceWorkflow(stores.control,recovered.id,2,'telegram','fixture-'+(++serial),operations.telegram!)).state,'completed');
+    assert.deepEqual(calls.filter(c=>c.input.event_id===recoverable.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    const uncertain=await capture('Legacy post-delivery interruption');await prepare(uncertain.reference.id);mode='ambiguous';
+    assert.equal((await advance(uncertain.reference.id)).state,'ambiguous');
+    await stores.control.query("UPDATE dispatches SET error_code='dispatch_interrupted' WHERE event_id=$1",[uncertain.reference.id]);
+    journals.set(uncertain.reference.id,[
+      {sequence:1,state:'queued',stage:'admission',at:base+1},
+      {sequence:2,state:'running',stage:'assistant',at:base+2},
+      {sequence:3,state:'running',stage:'delivery',at:base+3},
+      {sequence:4,state:'ambiguous',stage:'assistant',at:base+4},
+    ]);
+    assert.equal(await services.telegram.reconcileInterrupted(),0);
+    const held=(await stores.control.query(`SELECT d.state,d.reconciliation_checked_at,w.state AS workflow_state FROM dispatches d
+      JOIN workflow_registry w ON w.family='telegram' AND w.job_id=d.event_id WHERE d.event_id=$1`,[uncertain.reference.id])).rows[0];
+    assert.equal(held.state,'ambiguous');assert.equal(held.workflow_state,'ambiguous');assert.ok(held.reconciliation_checked_at);
+    const eventCalls=calls.filter(c=>c.operation==='run.events'&&c.input.event_id===uncertain.reference.id).length;
+    assert.equal(await services.telegram.reconcileInterrupted(),0);
+    assert.equal(calls.filter(c=>c.operation==='run.events'&&c.input.event_id===uncertain.reference.id).length,eventCalls,'checked uncertain sends are not polled forever');
     const reaction={...envelope(''),payload:{update_id:++serial,message_reaction:{chat:{id:Number(group)},message_id:1,date:1700000000,user:{id:9},old_reaction:[],new_reaction:[]}}};
     const reactionSource=(await services.capture.capture(reaction)).source.reference;assert.equal((await advance(reactionSource.id)).state,'skipped');
     const imported=await capture('Historical message');await stores.control.query("UPDATE source_intakes SET transport='import' WHERE event_id=$1",[imported.reference.id]);

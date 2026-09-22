@@ -24,7 +24,9 @@ export function startStorageWorkflows(s:StorageServices,config:Settings,call:Run
     const client=workflowClient('pipeline');
     return connectWorkflows('pipeline',client,workflowFunctions(client,s.stores.control,operations));
   },async()=>{
-    await registerWorker(s.stores.control,'pipeline',Object.keys(operations) as WorkflowFamily[]);await storageHeartbeat(s.stores,'workflow-pipeline');
+    await registerWorker(s.stores.control,'pipeline',Object.keys(operations) as WorkflowFamily[]);
+    await storageHeartbeat(s.stores,'workflow-pipeline');
+    await s.telegram.reconcileInterrupted();
   });
   return {state:service.state,async close(){stopping=true;await service.close();}};
 }

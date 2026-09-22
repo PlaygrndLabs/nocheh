@@ -6,7 +6,7 @@ import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
-import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
+import {enterFamily,hash,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
 import type {ArchiveRepository,SourceReference} from './archive.js';
 import type {SourceRepository} from './retrieval.js';
 import type {SourceAccessRepository} from './access.js';
@@ -24,8 +24,10 @@ CREATE TABLE IF NOT EXISTS dispatches (
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed','ambiguous','suppressed','cancelled')),
  attempts integer NOT NULL DEFAULT 0,revision integer NOT NULL DEFAULT 1,
  runtime_stage text NOT NULL DEFAULT 'admission',error_code text,next_attempt timestamptz NOT NULL DEFAULT now(),
+ reconciliation_checked_at timestamptz,
  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS reconciliation_checked_at timestamptz;
 `;
 const protocol='telegram-dispatch-v2';
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
@@ -33,6 +35,25 @@ const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
   'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence']);
 type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
+type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
+
+/** A complete journal without a delivery-stage event proves Telegram send was never entered. */
+export function interruptedJournalDisposition(value:unknown):JournalDisposition {
+  if(!value||typeof value!=='object'||!Array.isArray((value as any).events))return 'invalid';
+  const events=(value as any).events;if(events.length<3||events.length>100)return 'invalid';
+  let assistant=false,delivery=false;
+  for(let index=0;index<events.length;index++) {
+    const event=events[index];
+    if(!event||typeof event!=='object'||event.sequence!==index+1||!Number.isSafeInteger(event.at)||
+      !['queued','running','done','failed','ambiguous','suppressed','cancelled'].includes(event.state)||
+      !['admission','assistant','delivery'].includes(event.stage))return 'invalid';
+    if(event.state==='running'&&event.stage==='assistant')assistant=true;
+    if(event.stage==='delivery')delivery=true;
+  }
+  const last=events.at(-1);
+  if(last.state!=='ambiguous'||last.stage!=='assistant'||!assistant)return 'invalid';
+  return delivery?'uncertain':'pre_delivery';
+}
 
 /** Keep routing identifiers independent of editable guarded representations. */
 export function dispatchPayload(original:any,representation:any,text:string|null) {
@@ -132,6 +153,60 @@ export class TelegramDispatchRepository {
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
     return {reference,input};
+  }
+  /**
+   * Reopen only legacy ambiguous interruptions whose complete native journal
+   * proves delivery was never entered. Missing or delivery-stage evidence stays
+   * terminal so reconciliation cannot duplicate a Telegram send.
+   */
+  async reconcileInterrupted(limit=1):Promise<number> {
+    const candidates=(await this.control.query(`SELECT event_id,attempts FROM dispatches
+      WHERE state='ambiguous' AND error_code='dispatch_interrupted' AND attempts>0 AND reconciliation_checked_at IS NULL
+      ORDER BY updated_at,event_id LIMIT $1`,[limit])).rows;
+    let reopened=0;
+    for(const candidate of candidates) {
+      let journal:Record<string,unknown>;
+      try {journal=await this.call('run.events',{channel:'telegram',event_id:candidate.event_id,attempt:candidate.attempts,after:0},10000);}
+      catch {continue;}
+      const disposition=interruptedJournalDisposition(journal);
+      if(disposition!=='pre_delivery') {
+        await this.control.query(`UPDATE dispatches SET reconciliation_checked_at=now(),revision=revision+1,updated_at=now()
+          WHERE event_id=$1 AND attempts=$2 AND state='ambiguous' AND error_code='dispatch_interrupted' AND reconciliation_checked_at IS NULL`,
+          [candidate.event_id,candidate.attempts]);
+        continue;
+      }
+      const db=await this.control.connect();
+      try {
+        await db.query('BEGIN');
+        const locked=(await db.query(`SELECT pg_try_advisory_xact_lock(
+          hashtextextended(current_schema()||':workflow:'||$1,803321)) AS locked`,['telegram'])).rows[0]?.locked;
+        if(!locked){await db.query('ROLLBACK');continue;}
+        const dispatch=(await db.query(`SELECT attempts FROM dispatches WHERE event_id=$1 AND attempts=$2 AND state='ambiguous'
+          AND error_code='dispatch_interrupted' AND reconciliation_checked_at IS NULL FOR UPDATE`,[candidate.event_id,candidate.attempts])).rows;
+        const workflows=(await db.query(`SELECT id,dispatch FROM workflow_registry WHERE family='telegram' AND job_id=$1
+          AND state='ambiguous' FOR UPDATE`,[candidate.event_id])).rows;
+        if(dispatch.length!==1||workflows.length!==1){await db.query('ROLLBACK');continue;}
+        const workflow=workflows[0];
+        const receipt=(await db.query(`SELECT state FROM workflow_receipts WHERE workflow_id=$1 AND step='telegram' AND attempt=$2 FOR UPDATE`,
+          [workflow.id,candidate.attempts])).rows;
+        if(receipt.length!==1||receipt[0].state!=='ambiguous'){await db.query('ROLLBACK');continue;}
+        const changed=await db.query(`UPDATE dispatches SET state='failed',error_code='assistant_runtime_unavailable',next_attempt=now(),
+          reconciliation_checked_at=now(),revision=revision+1,updated_at=now()
+          WHERE event_id=$1 AND attempts=$2 AND state='ambiguous' AND error_code='dispatch_interrupted' RETURNING event_id`,
+          [candidate.event_id,candidate.attempts]);
+        if(!changed.rowCount){await db.query('ROLLBACK');continue;}
+        await db.query(`UPDATE workflow_receipts SET state='failed',updated_at=now()
+          WHERE workflow_id=$1 AND step='telegram' AND attempt=$2 AND state='ambiguous'`,[workflow.id,candidate.attempts]);
+        const next=Number(workflow.dispatch)+1;
+        await db.query(`UPDATE workflow_registry SET state='retryable_failed',stage='assistant',next_attempt=now(),
+          waiting_reason='runtime_unavailable',dispatch=$2,lease_token=NULL,lease_until=NULL,revision=revision+1,updated_at=now()
+          WHERE id=$1 AND state='ambiguous'`,[workflow.id,next]);
+        await db.query(`INSERT INTO workflow_outbox(id,workflow_id,dispatch) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
+          [hash(workflow.id+':'+next),workflow.id,next]);
+        await db.query('COMMIT');reopened++;
+      } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
+    }
+    return reopened;
   }
   async run(id:string,authority:ExecutionAuthority):Promise<Observation> {
     if(!/^[a-f0-9]{64}$/.test(id))return observation('failed','admission');
