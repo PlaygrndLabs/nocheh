@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {evidenceNodeLabel,graphGroupLabel,graphUserLabel} from '../src/graph-labels.js';
+import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel} from '../src/graph-labels.js';
 
 test('textless evidence labels expose kind and a stable identity',()=>{
   const first='2a36c7ad35b8cffcc4225dcdb1ffd50011d978478e0037da147a14f35e3f5c3f';
@@ -19,5 +19,9 @@ test('Telegram graph labels prefer recorded usernames and chat names without cha
   assert.equal(graphGroupLabel(update,'-10043'),undefined,'a title from another conversation is never borrowed');
   assert.equal(graphUserLabel({message:{from:{id:123,first_name:'Mira',last_name:'Chen'}}},'123'),'Mira Chen');
   assert.equal(graphGroupLabel({message:{chat:{id:123,type:'private',username:'mira'}}},'123'),'Private chat · @mira');
+  assert.equal(graphGroupLabel({message:{chat:{id:123,type:'private'}}},'123'),'Private chat · 123');
+  assert.equal(graphChatType(update,'-10042'),'supergroup');
+  assert.equal(graphChatType({message:{chat:{id:123,type:'private'}}},'123'),'private');
+  assert.equal(graphChatType(update,'-10043'),undefined,'a chat type from another identity is never borrowed');
   assert.equal(graphUserLabel(Buffer.from('{not json'),'123'),undefined);
 });

@@ -1,6 +1,19 @@
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 import {Source} from './source.js';
   const graphKinds = {user:'User',project:'Project',group:'Group',message:'Message'};
+  const nodeKindLabel = node=>node.kind==='group'&&node.chat_type==='private'?'Private chat':graphKinds[node.kind]||node.kind;
+  const kindFilterLabel = (kind,nodes)=>{
+    if(kind!=='group')return graphKinds[kind]||kind;
+    const conversations=nodes.filter(node=>node.kind==='group'),hasPrivate=conversations.some(node=>node.chat_type==='private'),hasGroup=conversations.some(node=>node.chat_type!=='private');
+    return hasPrivate&&hasGroup?'Groups / private chats':hasPrivate?'Private chats':'Groups';
+  };
+  const graphLegend = nodes=>Object.keys(graphKinds).flatMap(kind=>{
+    if(kind!=='group')return nodes.some(node=>node.kind===kind)?[{key:kind,kind,label:graphKinds[kind]}]:[];
+    const entries=[];
+    if(nodes.some(node=>node.kind==='group'&&node.chat_type==='private'))entries.push({key:'private-chat',kind:'group',label:'Private chat'});
+    if(nodes.some(node=>node.kind==='group'&&node.chat_type!=='private'))entries.push({key:'group',kind:'group',label:'Group'});
+    return entries;
+  });
   const contextGraph = value=>{
     const nodes=(value?.nodes||[]).filter(node=>Object.hasOwn(graphKinds,node.kind)),ids=new Set(nodes.map(node=>node.id));
     return {...value,nodes,edges:(value?.edges||[]).filter(edge=>ids.has(edge.from)&&ids.has(edge.to))};
@@ -52,11 +65,11 @@ export function Graph({notify}) {
       if(node.event_id)try{const value=await call('/events/'+encodeURIComponent(node.event_id),undefined,{signal:controller.signal});if(selection.current===request)setRecord(value);}catch(e){if(selection.current===request)setSourceError(errorText(e));}finally{if(selection.current===request)setSourceBusy(false);}
     };
     const byId=useMemo(()=>new Map((data?.nodes||[]).map(node=>[node.id,node])),[data]);
-    const filtered=useMemo(()=>(data?.nodes||[]).filter(node=>(!kind||node.kind===kind)&&(!query.trim()||(node.label+' '+node.kind+' '+node.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))),[data,kind,query]);
+    const filtered=useMemo(()=>(data?.nodes||[]).filter(node=>(!kind||node.kind===kind)&&(!query.trim()||(node.label+' '+node.kind+' '+nodeKindLabel(node)+' '+node.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))),[data,kind,query]);
     const matchingIds=useMemo(()=>kind||query.trim()?new Set(filtered.map(node=>node.id)):null,[filtered,kind,query]);
     const connections=(data?.edges||[]).filter(edge=>edge.from===selected?.id||edge.to===selected?.id);
     return h('div',{className:'n-graph-page'},
-      h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Explore your context'),h('p',{className:'n-muted'},'Explore users, projects, groups, and messages in three dimensions. Actions and runtime events stay out of the graph.')),
+      h('div',{className:'n-graph-intro'},h('div',null,h('h2',null,'Explore your context'),h('p',{className:'n-muted'},'Explore users, projects, groups, private chats, and messages in three dimensions. Actions and runtime events stay out of the graph.')),
         h('label',{className:'n-graph-scope'},'Archive scope',h('select',{value:scope,onChange:e=>{setScope(e.target.value);setAfter('');setHistory([]);}},h('option',{value:'*'},'All private knowledge'),...scopeList.map(s=>h('option',{key:s.scope,value:s.scope},s.scope+' · '+s.events+' events')))),
         scopes?.next&&button('Load more scopes',()=>setScopeAfter(scopes.next))),
       scopeError&&h('p',{role:'alert'},scopeError),!scopes&&!scopeError&&h('p',{role:'status'},'Loading archive scopes…'),
@@ -68,12 +81,12 @@ export function Graph({notify}) {
           h('aside',{className:'n-graph-inspector','aria-label':'Graph inspector'},
             h('div',{className:'n-node-browser'},h('h3',null,'Node browser'),
               h('label',{htmlFor:'n-node-search'},'Find on this page'),h('input',{id:'n-node-search',type:'search',placeholder:'Search nodes…',value:query,onChange:e=>setQuery(e.target.value)}),
-              h('label',{className:'n-sr-only',htmlFor:'n-node-kind'},'Node type'),h('select',{id:'n-node-kind',value:kind,onChange:e=>setKind(e.target.value)},h('option',{value:''},'All types'),...Object.entries(graphKinds).filter(([key])=>data.nodes.some(n=>n.kind===key)).map(([key,label])=>h('option',{key,value:key},label))),
+              h('label',{className:'n-sr-only',htmlFor:'n-node-kind'},'Node type'),h('select',{id:'n-node-kind',value:kind,onChange:e=>setKind(e.target.value)},h('option',{value:''},'All types'),...Object.keys(graphKinds).filter(key=>data.nodes.some(n=>n.kind===key)).map(key=>h('option',{key,value:key},kindFilterLabel(key,data.nodes)))),
               h('small',{role:'status'},filtered.length+' of '+data.nodes.length+' nodes'),
-              h('div',{className:'n-node-list'},...filtered.map(node=>h('button',{type:'button',key:node.id,className:'n-node-option','aria-pressed':selected?.id===node.id,onClick:()=>choose(node),title:node.kind+': '+node.label},h('span',{className:'n-kind-dot n-kind-'+node.kind,'aria-hidden':true}),h('span',null,h('small',null,graphKinds[node.kind]||node.kind),h('span',{dir:'auto'},node.label))))),
+              h('div',{className:'n-node-list'},...filtered.map(node=>h('button',{type:'button',key:node.id,className:'n-node-option','aria-pressed':selected?.id===node.id,onClick:()=>choose(node),title:nodeKindLabel(node).toLocaleLowerCase()+': '+node.label},h('span',{className:'n-kind-dot n-kind-'+node.kind,'aria-hidden':true}),h('span',null,h('small',null,nodeKindLabel(node)),h('span',{dir:'auto'},node.label))))),
               !filtered.length&&h('p',{className:'n-muted'},'No nodes match. Clear your search or choose another type.')),
             h('div',{className:'n-node-detail'},
-              selected?h('div',null,h('div',{className:'n-selection-heading'},h('h3',null,graphKinds[selected.kind]||selected.kind),button('Clear',()=>{sourceRequest.current?.abort();selection.current++;setSelected(null);setRecord(null);setSourceError('');setSourceBusy(false);})),
+              selected?h('div',null,h('div',{className:'n-selection-heading'},h('h3',null,nodeKindLabel(selected)),button('Clear',()=>{sourceRequest.current?.abort();selection.current++;setSelected(null);setRecord(null);setSourceError('');setSourceBusy(false);})),
                 h('p',{className:'n-node-title',dir:'auto'},selected.label),selected.state&&h(StatusBadge,{state:selected.state}),
                 selected.text&&h(Data,{value:selected.text}),selected.provenance&&h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:selected.provenance})),
                 selected.unresolved_citations>0&&h('p',{className:'n-muted'},selected.unresolved_citations+' citations are outside this page or scope.'),
@@ -84,7 +97,7 @@ export function Graph({notify}) {
                   const target=byId.get(edge.from===selected.id?edge.to:edge.from);if(!target)return null;
                   return h('button',{type:'button',key:i,className:'n-connection',onClick:()=>choose(target)},h('small',null,(edge.from===selected.id?'Outgoing · ':'Incoming · ')+edge.kind.replaceAll('_',' ')),h('span',{dir:'auto'},target.label));
                 }))) : h('div',null,h('h3',null,'Inspect a connection'),h('p',{className:'n-muted'},'Select a node in the space or the list. Its direct connections will light up here.'),h('p',{className:'n-muted'},'Positions help you navigate. Only the links represent recorded relationships.'))))),
-        h('div',{className:'n-graph-legend','aria-label':'Node legend'},...Object.entries(graphKinds).filter(([key])=>data.nodes.some(n=>n.kind===key)).map(([key,label])=>h('span',{key},h('i',{className:'n-kind-dot n-kind-'+key,'aria-hidden':true}),label))),
+        h('div',{className:'n-graph-legend','aria-label':'Node legend'},...graphLegend(data.nodes).map(entry=>h('span',{key:entry.key},h('i',{className:'n-kind-dot n-kind-'+entry.kind,'aria-hidden':true}),entry.label))),
         h('div',{className:'n-graph-pagination'},h('p',{className:'n-muted'},'Page '+(history.length+1)+' · '+data.nodes.filter(n=>n.kind==='message').length+' messages · '+data.unresolved_replies+' reply references outside this page'),
           h('div',{className:'n-space-actions'},button('Previous messages',()=>{setAfter(history.at(-1));setHistory(history.slice(0,-1));},!history.length),button('Next messages',()=>{setHistory([...history,after]);setAfter(data.next);},!data.next),button('Export graph JSON',()=>exportJSON(data,'nocheh-graph.json')))),
         data.bounds.truncated&&h('p',{role:'status'},'The context-entity limit was reached. Choose a narrower archive scope to inspect more.'),

@@ -152,6 +152,29 @@ dashboard checks pass. Fetch and push remain blocked because the HTTPS GitHub
 remote has no available username credential; local `main` is therefore ahead of
 `origin/main` at `9c13606` and remote synchronization is pending.
 
+#### Private Telegram conversations are not groups — 2026-09-22
+
+The owner clarified that the apparent group sharing a Telegram ID with a user was
+actually the user's direct conversation with the bot and directed that it be
+fixed. Telegram private-chat IDs may equal the participant's user ID, but the two
+namespaced graph identities remain distinct. Conversation nodes now retain their
+stable `group` entity kind for the four-kind graph contract while exposing the
+recorded Telegram `chat_type` as presentation metadata. A private conversation is
+shown as type `Private chat` in the node browser, search, filter, legend, accessible
+title, and inspector; a real Telegram group remains type `Group`. An unnamed direct
+conversation is labeled `Private chat · <numeric ID>` instead of a bare numeric ID.
+
+The pinned Node 24 image builds successfully. All 14 focused graph checks, all 19
+dashboard checks, and both the legacy and separated-store PostgreSQL graph
+regressions pass against an isolated synthetic PostgreSQL cluster. `git diff
+--check` passes. The AST-only Graphify refresh covers 517 files with 3,511 nodes
+and 13,154 edges and zero model calls. The isolated synthetic preview on port
+18935 visibly distinguishes `PRIVATE CHAT · Private chat · @mira_sky` from `USER ·
+@mira_sky`; searching `private chat` returns one node, and the selected-node
+inspector says `Private chat`. The preview has no live credentials, provider,
+poller, scheduler, credential refresh, or external-effect authority. Production
+services were not rebuilt or activated.
+
 #### Worktree consolidation and clean real-test baseline — 2026-09-22
 
 The owner directed that all session worktrees be closed, their work merged into

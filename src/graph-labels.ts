@@ -20,6 +20,8 @@ const message=(value:unknown):Record<string,any>=>{
 const username=(value:unknown):string=>{const name=clean(value).replace(/^@+/, '');return name?'@'+name:'';};
 const personName=(value:Record<string,any>):string=>username(value.username)||[clean(value.first_name),clean(value.last_name)].filter(Boolean).join(' ');
 const chatName=(value:Record<string,any>):string=>clean(value.title)||username(value.username)||[clean(value.first_name),clean(value.last_name)].filter(Boolean).join(' ');
+export type GraphChatType='private'|'group'|'supergroup'|'channel';
+const chat=(value:unknown):Record<string,any>=>{const body=payload(value),item=message(body);return record(body.chat??item.chat);};
 
 /** Labels are presentation metadata from the same original Telegram observation; IDs remain authoritative. */
 export function graphUserLabel(value:unknown,externalId:string):string|undefined {
@@ -31,7 +33,15 @@ export function graphUserLabel(value:unknown,externalId:string):string|undefined
 }
 
 export function graphGroupLabel(value:unknown,externalId:string):string|undefined {
-  const body=payload(value),item=message(body),chat=record(body.chat??item.chat);
-  if(external(chat.id)!==externalId)return undefined;
-  const name=chatName(chat);return name?(chat.type==='private'?'Private chat · '+name:name):undefined;
+  const item=chat(value);if(external(item.id)!==externalId)return undefined;
+  const name=chatName(item);
+  if(item.type==='private')return 'Private chat · '+(name||externalId);
+  return name||undefined;
+}
+
+/** Telegram's chat subtype is presentation metadata; the graph entity remains a stable conversation node. */
+export function graphChatType(value:unknown,externalId:string):GraphChatType|undefined {
+  const item=chat(value);if(external(item.id)!==externalId)return undefined;
+  const type=clean(item.type);
+  return ['private','group','supergroup','channel'].includes(type)?type as GraphChatType:undefined;
 }
