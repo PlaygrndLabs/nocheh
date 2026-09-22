@@ -201,6 +201,9 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .owner-records>article{min-width:0;border:1px solid var(--n-line);border-radius:10px;padding:20px;background:var(--n-panel)}
 .owner-records h3{margin:0;font-size:17px}
 .owner-records .n-actions{margin-top:16px}
+.owner-pagination{display:grid;grid-template-columns:minmax(104px,1fr) auto minmax(104px,1fr);align-items:center;justify-content:center;gap:8px;width:min(100%,330px);margin:20px auto 0}
+.owner-pagination .ui-button{width:100%}
+.owner-pagination-current{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding-inline:4px;color:var(--n-muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .owner-identifier{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .owner-conflict{border-inline-start:3px solid var(--n-accent);padding-inline-start:12px;font-weight:600}
 .owner-history,.owner-guard{border-top:1px solid var(--n-line);padding-block:20px;margin-block:12px}
