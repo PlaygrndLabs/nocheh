@@ -90,7 +90,8 @@ class FakeDocker:
             value = {'event': 'reset_setup_restored', 'generation': request['generation'],
                      'binding': {'generation': request['generation'], 'epoch': 1, 'mode': 'on'},
                      'configuration_records': 4, 'projects': 0, 'assignments': 0,
-                     'sharing_rules': 0, 'profiles': len(request['profile_commands']),
+                     'sharing_rules': 0, 'memory_access_settings': 1,
+                     'profiles': len(request['profile_commands']),
                      'source_content_copied': False, 'history_copied': False}
             return json.dumps(value) + '\n'
         if 'run' in arguments and arguments[-1] == 'nocheh-reset-baseline':
@@ -141,7 +142,11 @@ class ResetInitializationTests(unittest.TestCase):
             'security_policy': [{'document': {'version': 1, 'rules': []}}],
             'installation_generation': [{'generation': str(uuid.uuid4())}], 'guard_mode': [{'mode': 'on'}],
             'runtime_configuration': [{'name': 'assistant', 'document': self.policy}], 'projects': [],
-            'project_assignments': [], 'sharing_rules': [], 'runtime_profiles': []}}
+            'project_assignments': [], 'sharing_rules': [],
+            'memory_access_settings': [{'destination': '*', 'suggestions': 'related', 'notify_owner': True,
+                                        'auto_followup': True, 'request_ttl_seconds': 86400,
+                                        'default_grant_mode': 'one_time'}],
+            'runtime_profiles': []}}
         preferences = preference_transfer.capture(self.state / 'hermes',
                                                   SimpleNamespace(owner='42', groups=[]), [])
         self.artifacts = {'receipt': {'format': 'fixture'},
