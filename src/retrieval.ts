@@ -8,6 +8,7 @@ import { HttpError, object, string } from './http.js';
 import { storeBytes } from './storage.js';
 import {guardState,guardedValue,exportGuarded,restoreGuarded} from './guarded.js';
 import {contextAudience,allowPrepared} from './prepared-context.js';
+import {legacyArchiveReplyPreviews} from './stores/archive-reply-links.js';
 
 export function limit(value:unknown,fallback=20,max=50):number {
   const n=value===null || value===undefined ? fallback : Number(value);
@@ -52,9 +53,15 @@ export async function search(pool:pg.Pool,principal:Reader,query:string,count=20
       AND ($4::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND ($5::text IS NULL OR d.kind<>'runtime_context' OR d.provenance->>'audience'=$5) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
   ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count,principal.scope===null?null:principal.space??null,principal.scope===null?null:contextAudience(principal),principal.admin]);
   await assertAudience(pool,principal);
-  return rows.map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
+  const hits=rows.map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
     kind:row.kind,origin:row.origin,derived_id:row.derived_id,occurred_at:row.occurred_at,text:row.original_text?.toString().slice(0,2000) ?? null,
     truncated:(row.original_text?.toString().length ?? 0)>2000}));
+  if(!principal.admin)return hits;
+  const replies=await legacyArchiveReplyPreviews(pool,hits);
+  const states=hits.length?(await pool.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
+    error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[hits.map(hit=>hit.id)])).rows:[];
+  const byId=new Map(states.map(row=>[row.event_id,row]));
+  return hits.map(hit=>({...hit,...byId.get(hit.id),reply_messages:replies.get(hit.id)??[]}));
 }
 export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
   await assertAudience(pool,principal);
