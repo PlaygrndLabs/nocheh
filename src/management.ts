@@ -229,6 +229,7 @@ export async function startManagement() {
         json(res, 200, {ok: true}); setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100); return;
       }
       if (req.method === 'GET' && route === '/scopes') return json(res,200,await archive('/v1/scopes?after='+encodeURIComponent(url.searchParams.get('after')??'')));
+      if (req.method === 'GET' && route === '/telegram/identities') return json(res,200,await python({operation:'telegram.directory'}));
       if (req.method === 'GET' && route === '/graph') return json(res,200,await python({operation:'graph.read',scope:url.searchParams.get('scope')??'',after:url.searchParams.get('after')??'',focus:url.searchParams.get('focus')??''}));
       const artifact=route.match(/^\/artifacts\/([a-f0-9]{64})\/download$/);
       if(req.method==='GET' && artifact?.[1]) {

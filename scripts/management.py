@@ -130,6 +130,9 @@ def dispatch(body):
         if operation == 'settings.view': return view(state)
         if operation == 'settings.save': return save(state, body['changes'], body['revision'])
         if operation == 'settings.apply': return apply(state)
+    if operation == 'telegram.directory':
+        from .telegram_directory import directory
+        return directory(state)
     if operation.startswith('import.'):
         from .import_job import inspect
         import re
