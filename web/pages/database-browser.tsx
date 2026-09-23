@@ -1,6 +1,6 @@
 import {useState,type FormEvent} from 'react';
 import {ArrowDown,ArrowUp,Search} from 'lucide-react';
-import {useResource} from '../lib/resource';
+import {useLiveResources,useResource} from '../lib/resource';
 import {Alert,Badge,Button,EmptyState,Skeleton,Table} from '../components/ui/primitives';
 
 type DatabaseEntry={id:string;name:string;engine:'postgres'|'sqlite'};
@@ -27,6 +27,7 @@ export function DatabaseBrowser(){
  const rowPath=current&&selected?path({action:'rows',database:current.id,schema:selected.schema,table:selected.name,
   ...(sort?{sort,direction}:{}),...(filter&&filterColumn?{filter_column:filterColumn,filter}:{}),offset:String(offset)}):null;
  const page=useResource<Page>(rowPath);
+ const live=useLiveResources([path({action:'databases'}),path({action:'status'}),current?path({action:'tables',database:current.id}):null,rowPath]);
  const matchingTables=allTables.filter(item=>(item.schema+'.'+item.name).toLowerCase().includes(tableSearch.toLowerCase()));
  const tableOptions=selected&&!matchingTables.some(item=>item.schema===selected.schema&&item.name===selected.name)?[selected,...matchingTables]:matchingTables;
  const selectedIndex=selected?allTables.findIndex(item=>item.schema===selected.schema&&item.name===selected.name):-1;
@@ -60,7 +61,7 @@ export function DatabaseBrowser(){
      {currentStatus?.detail&&<p className="db-browser-detail-error">{currentStatus.detail}</p>}
     </section>}
     <section className="n-panel db-browser-rows" aria-labelledby="db-browser-title">
-     <div className="db-browser-heading"><div><p className="archive-kicker">Table rows</p><h2 id="db-browser-title">{selected?selected.schema+'.'+selected.name:'Choose a table'}</h2></div>{page.data&&<Badge>{page.data.rows.length} rows on this page</Badge>}</div>
+     <div className="db-browser-heading"><div><p className="archive-kicker">Table rows</p><h2 id="db-browser-title">{selected?selected.schema+'.'+selected.name:'Choose a table'}</h2></div><div className="n-live-label"><Badge>{live==='live'?'Live':live==='connecting'?'Connecting…':'Reconnecting…'}</Badge>{page.data&&<Badge>{page.data.rows.length} rows on this page</Badge>}</div></div>
      {selected&&<form className="db-browser-filter" onSubmit={applyFilter}><label>Filter column<select value={filterColumn} onChange={event=>{setFilterColumn(event.target.value);setOffset(0);if(!event.target.value){setFilter('');setDraftFilter('');}}}><option value="">Choose a column</option>{page.data?.columns.map(column=><option key={column.name} value={column.name}>{column.name}</option>)}</select></label><label>Contains<input type="search" value={draftFilter} onChange={event=>setDraftFilter(event.target.value)} disabled={!filterColumn} placeholder="Text in column…"/></label><Button type="submit" disabled={!filterColumn}><Search size={14} aria-hidden="true"/>Filter</Button>{!!filter&&<Button onClick={()=>{setFilter('');setDraftFilter('');setOffset(0);}}>Clear</Button>}</form>}
      {page.error&&<Alert>Rows are unavailable. Try another table or refresh.</Alert>}
      {!page.data&&page.loading&&<Skeleton className="chart-skeleton"/>}
