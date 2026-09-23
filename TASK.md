@@ -17,7 +17,7 @@ the legacy PostgreSQL graph test and the separated-store retrieval test against
 separate isolated synthetic databases. An isolated preview on port 18947 visibly
 shows `COLLECTION · All private knowledge`; its private-chat filter shows only
 the actual direct conversation. The worktree's AST-only Graphify refresh covers
-525 files, 3,578 nodes, and 13,340 edges with zero model calls. The active
+526 files, 3,579 nodes, and 13,348 edges with zero model calls. The active
 installation was not rebuilt or activated; its dashboard will show the old type
 until a separately authorized local rebuild.
 
@@ -113,7 +113,38 @@ or Honcho MVP release gates.
 [Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
 
 </mvp_readiness_recheck>
+<archive_browse_order>
+
+#### Newest source records first — 2026-09-23
+
+The owner asked for new items to appear at the top of the Archive table. Both
+legacy and separated-store browse routes now order source records by received
+time descending, then record ID descending to break ties. Cursor pagination
+uses the same order so pages do not skip older records or repeat rows. An
+isolated PostgreSQL test with 52 synthetic records, including equal timestamps,
+passed on both routes. The dashboard build and 22 dashboard tests passed. The
+AST-only Graphify refresh covered 526 files, 3,579 nodes, and 13,348 edges
+with zero model calls. The active installation was not rebuilt or restarted;
+visual verification there remains pending.
+
+</archive_browse_order>
 <owner_database_browser>
+
+#### Top database and table selectors — 2026-09-23
+
+The owner asked for database and table selectors at the top of the Databases
+page. One status-labeled database selector and one table selector now sit above
+the full-width details and rows at desktop and phone widths. Table-name search
+filters the selector's options while retaining the current selection, and a
+database change clears the prior table search and row filters. The unavailable
+database state remains selectable and explains why its tables cannot load.
+
+The dashboard build and 22 dashboard tests pass. An isolated synthetic browser
+preview verified desktop and 390 px layouts, table switching, table-name search,
+database switching, and the unavailable state; the phone page had no document
+overflow. The AST-only Graphify refresh covered 525 files, 3,578 nodes, and
+13,340 edges with zero model calls. The active installation was not rebuilt or
+restarted, so this change has not been checked against its live databases.
 
 #### Database selector visibility fix — 2026-09-23
 
