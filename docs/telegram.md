@@ -24,8 +24,12 @@ are examples; use the discovered values. The ignored `.env`
 holds the policy. To disable the assistant, set `TELEGRAM_ENABLED=false` and run `up`.
 
 Only the owner may address Nocheh in a selected group by default. The owner can
-manage individual participant IDs in **Settings → Nocheh settings → Who may address
-Nocheh in groups**, then Save and Apply. The same controls are available in the CLI:
+manage individual participant IDs in **Settings → Nocheh settings → Telegram access →
+Who may address Nocheh in groups**, then Save and Apply. Selected group titles,
+visible administrators, and observed senders appear by name and numeric ID;
+choosing one fills its ID. The Bot API does not list every group member, so enter
+an ID manually when a person has not appeared in those sources.
+The same controls are available in the CLI:
 
 ```sh
 ./scripts/nocheh group-access list

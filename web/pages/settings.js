@@ -19,6 +19,7 @@ export function Settings({notify}) {
   }
   function NochehSettings({notify}) {
     const [refresh,setRefresh]=useState(0),[data,error]=useLoad('/settings',refresh);
+    const [identityDirectory,identityError]=useLoad('/telegram/identities');
     const [changes,setChanges,editRevision]=useRevisionDraft(data?.revision),[busy,setBusy]=useState(false),[review,setReview]=useState(false);
     const [accessGroup,setAccessGroup]=useState(''),[accessUser,setAccessUser]=useState('');
     const save=async()=>{setBusy(true);try{await call('/settings',{revision:editRevision,changes});setChanges({});setReview(false);setRefresh(v=>v+1);notify('Nocheh settings saved. Apply saved settings when you are ready to update running services.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
@@ -32,13 +33,26 @@ export function Settings({notify}) {
       const options=f.key==='NOCHEH_GUARD_MODE'?[['on','On · use guarded copies'],['off','Off · use originals']]:[['false','Disabled'],['true','Enabled']];
       return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]||f.key,f.secret&&h('span',{className:'n-secret-status'},f.configured?'Configured':'Missing')),
         f.key==='NOCHEH_GUARD_MODE'||f.key==='TELEGRAM_ENABLED'?h('select',attrs,...options.map(([value,label])=>h('option',{key:value,value},label))):h('input',attrs),
-        h('small',{id:f.key+'-help'},hints[f.key],f.key==='TELEGRAM_GROUP_IDS'&&!value?' No groups selected; owner private messages can still work.':'',f.secret?' '+(f.configured?(f.editable?'**** is a placeholder, not the saved value. Leave blank to keep it; enter a replacement to change it.':'Configured and managed internally.'):'Not configured.'):!f.editable?' Managed automatically.':''));
+        h('small',{id:f.key+'-help'},hints[f.key],f.key==='TELEGRAM_GROUP_IDS'&&!value?' No groups selected; owner private messages can still work.':'',f.secret?' '+(f.configured?(f.editable?'**** is a placeholder, not the saved value. Leave blank to keep it; enter a replacement to change it.':'Configured and managed internally.'):'Not configured.'):!f.editable?' Managed automatically.':''),
+        f.key==='TELEGRAM_GROUP_IDS'&&groups.length&&h('small',null,'Selected: '+groups.map(groupLabel).join('; ')),
+        f.key==='TELEGRAM_OWNER_ID'&&observedUsers.has(value)&&h('small',null,participantLabel(value)));
     };
-    const group=(title,note,keys)=>{const id='settings-'+keys[0].toLowerCase();return h('section',{className:'n-settings-group','aria-labelledby':id},h('h3',{id},title),h('p',{className:'n-muted'},note),h('div',{className:'n-form'},...data.fields.filter(f=>keys.includes(f.key)).map(field)));};
+    const group=(title,note,keys,extra=null)=>{const id='settings-'+keys[0].toLowerCase();return h('section',{className:'n-settings-group','aria-labelledby':id},h('h3',{id},title),h('p',{className:'n-muted'},note),h('div',{className:'n-form'},...data.fields.filter(f=>keys.includes(f.key)).map(field)),extra);};
     const saved=key=>data.fields.find(f=>f.key===key)?.value||'';
     const groups=(changes.TELEGRAM_GROUP_IDS??saved('TELEGRAM_GROUP_IDS')).split(',').map(value=>value.trim()).filter(Boolean);
     const owner=changes.TELEGRAM_OWNER_ID??saved('TELEGRAM_OWNER_ID');
+    const observed=identityDirectory?.groups||[],observedById=new Map(observed.map(group=>[group.id,group]));
+    const observedUsers=new Map(observed.flatMap(group=>group.users||[]).map(user=>[user.id,user]));
+    const groupLabel=id=>{const name=observedById.get(id)?.name;return name?name+' · ID '+id:'Group ID '+id;};
+    const participantLabel=id=>{
+      const found=observedUsers.get(id);
+      if(!found)return 'User ID '+id;
+      const name=[found.name,found.username&&found.username!==found.name?'('+found.username+')':null].filter(Boolean).join(' ');
+      return name?name+' · ID '+id:'User ID '+id;
+    };
+    const addObservedGroup=id=>{if(!id||groups.includes(id))return;setChanges({...changes,TELEGRAM_GROUP_IDS:[...groups,id].join(',')});setAccessGroup(id);setReview(false);};
     const chosen=groups.includes(accessGroup)?accessGroup:groups[0];
+    const candidates=(observedById.get(chosen)?.users||[]).filter(user=>user.id!==owner);
     let access={};try{access=JSON.parse(changes.TELEGRAM_GROUP_ACCESS??saved('TELEGRAM_GROUP_ACCESS')??'{}');}catch{access={};}
     const rule=access[chosen]||{granted:[],denied:[]};
     const changeAccess=(decision,user)=>{
@@ -49,31 +63,46 @@ export function Settings({notify}) {
       if(granted.length||denied.length)next[chosen]={granted:granted.sort(),denied:denied.sort()};else delete next[chosen];
       setChanges({...changes,TELEGRAM_GROUP_ACCESS:JSON.stringify(next)});setAccessUser('');setReview(false);
     };
-    const accessEditor=h('section',{className:'n-settings-group','aria-labelledby':'group-access-title'},
-      h('h3',{id:'group-access-title'},'Who may address Nocheh in groups'),
-      h('p',{className:'n-muted'},'Only you may start a bot reply by default. Grant or deny individual Telegram user IDs per selected group. A deny wins over a grant. Save and Apply for changes to take effect.'),
+    const accessEditor=h('div',{className:'n-settings-access','aria-labelledby':'group-access-title'},
+      h('h4',{id:'group-access-title'},'Who may address Nocheh in groups'),
+      h('p',{className:'n-muted'},'Only you may start a bot reply by default. Choose a known person to fill their ID, or enter an ID manually. Telegram supplies group administrators; other people appear after Nocheh observes them. A deny wins over a grant. Save and Apply for changes to take effect.'),
+      !identityDirectory&&!identityError&&h('p',{role:'status'},'Looking up Telegram group names and visible people…'),
+      identityError&&h('p',{role:'status'},'Observed Telegram names are unavailable. You can still enter numeric IDs.'),
+      observed.some(group=>!groups.includes(group.id))&&h('div',{className:'n-field'},h('label',{htmlFor:'observed-group'},'Add an observed group'),
+        h('select',{id:'observed-group',value:'',disabled:busy,onChange:e=>addObservedGroup(e.target.value)},h('option',{value:''},'Choose a group…'),
+          ...observed.filter(group=>!groups.includes(group.id)).map(group=>h('option',{value:group.id,key:group.id},groupLabel(group.id))))),
       groups.length?h('div',{className:'n-form'},
-        h('div',{className:'n-field'},h('label',{htmlFor:'access-group'},'Selected group'),h('select',{id:'access-group',value:chosen,disabled:busy,onChange:e=>setAccessGroup(e.target.value)},...groups.map(id=>h('option',{value:id,key:id},id)))),
-        h('div',{className:'n-field'},h('label',{htmlFor:'access-user'},'Participant user ID'),h('input',{id:'access-user',inputMode:'numeric',value:accessUser,disabled:busy,placeholder:'Telegram numeric user ID',onChange:e=>setAccessUser(e.target.value)})),
+        h('div',{className:'n-field'},h('label',{htmlFor:'access-group'},'Selected group'),h('select',{id:'access-group',value:chosen,disabled:busy,onChange:e=>setAccessGroup(e.target.value)},...groups.map(id=>h('option',{value:id,key:id},groupLabel(id))))),
+        h('div',{className:'n-field'},h('label',{htmlFor:'observed-user'},'Known participant'),
+          h('select',{id:'observed-user',value:'',disabled:busy||!candidates.length,onChange:e=>setAccessUser(e.target.value)},h('option',{value:''},candidates.length?'Choose a person to fill their ID…':'No known participants in this group'),
+            ...candidates.map(user=>h('option',{value:user.id,key:user.id},participantLabel(user.id))))),
+        h('div',{className:'n-field'},h('label',{htmlFor:'access-user'},'Participant user ID'),h('input',{id:'access-user',inputMode:'numeric',value:accessUser,disabled:busy,placeholder:'Telegram numeric user ID',onChange:e=>setAccessUser(e.target.value)}),
+          accessUser&&h('small',null,participantLabel(accessUser))),
         h('div',{className:'n-actions'},button('Grant access',()=>changeAccess('grant',accessUser),busy||!accessUser),button('Deny access',()=>changeAccess('deny',accessUser),busy||!accessUser)),
-        h('div',{className:'n-field'},h('b',null,'Participant decisions'),
+        h('div',{className:'n-field n-settings-decisions'},h('b',null,'Participant decisions'),
           !rule.granted.length&&!rule.denied.length?h('p',{className:'n-muted'},'No participant access granted. Only you may address Nocheh here.'):
           h('div',{className:'n-list'},
-            ...rule.granted.map(id=>h('div',{className:'n-row',key:'grant-'+id},h('span',null,id+' · granted'),button('Revoke',()=>changeAccess('revoke',id),busy))),
-            ...rule.denied.map(id=>h('div',{className:'n-row',key:'deny-'+id},h('span',null,id+' · denied'),button('Revoke',()=>changeAccess('revoke',id),busy))))),
+            ...rule.granted.map(id=>h('div',{className:'n-row',key:'grant-'+id},h('span',null,participantLabel(id)+' · granted'),button('Revoke',()=>changeAccess('revoke',id),busy))),
+            ...rule.denied.map(id=>h('div',{className:'n-row',key:'deny-'+id},h('span',null,participantLabel(id)+' · denied'),button('Revoke',()=>changeAccess('revoke',id),busy))))),
         Object.keys(access).some(id=>!groups.includes(id))&&h('p',{role:'alert'},'A removed group still has access decisions. Restore its group ID or revoke its decisions before saving.')):
         h('p',{className:'n-muted'},'Add a selected group above to manage participant access.'));
+    const reviewValue=(key,value)=>{
+      if(key==='TELEGRAM_GROUP_IDS')return value.split(',').filter(Boolean).map(groupLabel).join(', ')||'(empty)';
+      if(key==='TELEGRAM_OWNER_ID')return participantLabel(value);
+      if(key==='TELEGRAM_GROUP_ACCESS')try{return Object.entries(JSON.parse(value)).map(([id,decision])=>
+        groupLabel(id)+': '+[...(decision.granted||[]).map(user=>participantLabel(user)+' granted'),...(decision.denied||[]).map(user=>participantLabel(user)+' denied')].join(', ')).join('; ')||'Owner only';}catch{return 'Invalid group access configuration';}
+      return value||'(empty)';
+    };
     return h(Panel,{title:'Nocheh settings',note:'Telegram access, model routing and privacy for the whole installation. Stored in Nocheh’s .env file.'},
       error&&h(Alert,null,'Saved settings may be stale. Edits are retained.'),
       editRevision!==data.revision&&h(Alert,null,'These settings changed elsewhere. Your edits are retained against the original revision. Discard edits to load the new values, or attempt Save to see the conflict.'),
       h(StatusBadge,{state:data.apply_state,label:({current:'Saved settings match the last successful apply',pending:'Saved changes are waiting to be applied',unverified:'Running settings have not been verified by this dashboard'})[data.apply_state]||data.apply_state}),
       h('form',{onSubmit:e=>{e.preventDefault();setReview(true);}},
-        group('Telegram access','Choose who can use the assistant and which groups it can participate in.',['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_BOT_TOKEN']),
-        accessEditor,
+        group('Telegram access','Choose who can use the assistant and which groups it can participate in.',['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_BOT_TOKEN'],accessEditor),
         group('Model and privacy','These rules apply to outgoing model requests. Hermes profile preferences are in the other settings section.',['NOCHEH_MODEL','NOCHEH_GUARD_MODE']),
         h('details',{className:'n-advanced'},h('summary',null,'Advanced · destinations, connections and internal credentials'),h('div',{className:'n-form'},...data.fields.filter(f=>!['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_GROUP_ACCESS','TELEGRAM_BOT_TOKEN','NOCHEH_MODEL','NOCHEH_GUARD_MODE'].includes(f.key)).map(field))),
         h('div',{className:'n-actions'},h('button',{disabled:busy||!Object.keys(changes).length},'Review changes'),button('Discard edits',()=>{setChanges({});setReview(false);},busy||!Object.keys(changes).length))),
-      review&&h('div',{className:'n-review'},h('h3',null,'Review before saving'),h('p',null,'Saving changes the configuration file. Running services update only after Apply.'),...Object.entries(changes).map(([k,v])=>h('p',{key:k},(labels[k]||k)+': '+(data.fields.find(f=>f.key===k)?.secret?'Replace stored credential':v||'(empty)'))),button('Save changes',save,busy,'n-primary')),
+      review&&h('div',{className:'n-review'},h('h3',null,'Review before saving'),h('p',null,'Saving changes the configuration file. Running services update only after Apply.'),...Object.entries(changes).map(([k,v])=>h('p',{key:k},(labels[k]||k)+': '+(data.fields.find(f=>f.key===k)?.secret?'Replace stored credential':reviewValue(k,v)))),button('Save changes',save,busy,'n-primary')),
       h('div',{className:'n-apply'},h('h3',null,'Apply saved settings'),h('p',{className:'n-muted'},'Updates the running services and may briefly interrupt Telegram replies. Save or discard your current edits first.'),button('Apply saved settings',apply,busy||!!Object.keys(changes).length),h(RouteLink,{page:'operations'},'View apply results →')));
   }
   function HermesPreferences({notify,defaultsRevision}) {

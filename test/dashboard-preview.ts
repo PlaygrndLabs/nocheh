@@ -75,6 +75,10 @@ const server=createServer((req,res)=>{void(async()=>{
   if(/^\/workflows\/[a-f0-9]{64}$/.test(route))return json(res,200,await workflowDetail(pool,route.split('/')[2]!));
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'}]},guard_mode:'on',services:[]});
   if(route==='/settings')return json(res,200,{revision:settingsRevision,apply_state:'current',fields:fields.map(f=>({...f,value:settingsChanges[f.key]??f.value}))});
+  if(route==='/telegram/identities')return json(res,200,{groups:[
+    {id:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
+    {id:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
+  ],truncated:false});
   if(route==='/jobs')return json(res,200,jobs);
   if(route==='/operations')return json(res,200,{backups:[{id:'synthetic-backup',created_at:'2026-09-16T12:00:00Z',files:28}]});
   if(route==='/scopes')return json(res,200,{scopes:[{scope:'42',events:180},{scope:'-10042',events:32}],next:null});
