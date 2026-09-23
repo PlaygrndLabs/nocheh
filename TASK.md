@@ -33,6 +33,15 @@ provider cutover, or Honcho activation was performed in this recheck.
 </mvp_readiness_recheck>
 <owner_database_browser>
 
+#### Database selector visibility fix — 2026-09-23
+
+The owner found the phone picker visible beside the desktop database list. A
+general `.nocheh-app label` rule overrode the picker's `display: none` rule at
+desktop width. The database picker rules now win that cascade. The isolated
+synthetic preview shows only the status list at 1286 px and only the picker at
+390 px; the phone page has no horizontal overflow. The dashboard build passes.
+The active installation was not rebuilt or restarted for this check.
+
 #### Database explorer layout — 2026-09-23
 
 The owner asked to improve the database viewer's UI/UX and layout after showing
