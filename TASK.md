@@ -1,5 +1,28 @@
 # Nocheh implementation status
 
+<evidence_graph_collection>
+
+#### Private knowledge graph root type — 2026-09-23
+
+The owner noticed that the `All private knowledge` node was shown as `Group`.
+Both graph endpoints had created the aggregate `*` root with a `group` kind,
+causing the dashboard's browser, inspector, legend, and type filter to treat a
+navigation container as a Telegram group. The aggregate root is now a distinct
+`Collection` node with ID `collection:*`; scoped conversations keep their
+existing group identities and private-chat presentation. The CLI graph adapter
+also normalizes older `scope:*` and `group:*` roots to this collection type.
+
+The pinned Node 24 Docker build passed. All 23 dashboard checks passed, as did
+the legacy PostgreSQL graph test and the separated-store retrieval test against
+separate isolated synthetic databases. An isolated preview on port 18947 visibly
+shows `COLLECTION · All private knowledge`; its private-chat filter shows only
+the actual direct conversation. The worktree's AST-only Graphify refresh covers
+526 files, 3,579 nodes, and 13,348 edges with zero model calls. The active
+installation was not rebuilt or activated; its dashboard will show the old type
+until a separately authorized local rebuild.
+
+</evidence_graph_collection>
+
 <mvp_readiness_recheck>
 
 #### Fresh local MVP readiness test — 2026-09-23
@@ -90,6 +113,21 @@ or Honcho MVP release gates.
 [Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
 
 </mvp_readiness_recheck>
+<archive_browse_order>
+
+#### Newest source records first — 2026-09-23
+
+The owner asked for new items to appear at the top of the Archive table. Both
+legacy and separated-store browse routes now order source records by received
+time descending, then record ID descending to break ties. Cursor pagination
+uses the same order so pages do not skip older records or repeat rows. An
+isolated PostgreSQL test with 52 synthetic records, including equal timestamps,
+passed on both routes. The dashboard build and 22 dashboard tests passed. The
+AST-only Graphify refresh covered 526 files, 3,579 nodes, and 13,348 edges
+with zero model calls. The active installation was not rebuilt or restarted;
+visual verification there remains pending.
+
+</archive_browse_order>
 <owner_database_browser>
 
 #### Top database and table selectors — 2026-09-23
@@ -642,13 +680,14 @@ explicit click-to-load previews for supported audio, video, and image files.
 Preview failures leave the original download available. The immutable original
 and guarded agent copy remain separate.
 
-The pinned Node 24 development image build, 22 dashboard tests, focused content
-classification test, and three focused synthetic PostgreSQL archive tests pass.
+The pinned Node 24 development image build, 23 dashboard tests, and four focused
+synthetic PostgreSQL checks pass, including content classification and browse
+pagination in both storage layouts after merging the concurrent main changes.
 An isolated Compose preview on localhost port 18968 uses its own database,
 network, image, and project; visual inspection confirmed the voice row, detail,
 and audio control. No installation service, provider, poller, scheduler, or
-credential was used. The AST-only Graphify refresh covers 527 files, 3,589
-nodes, and 13,368 edges with zero model calls. Live installation verification
+credential was used. The AST-only Graphify refresh covers 530 files, 3,590
+nodes, and 13,376 edges with zero model calls. Live installation verification
 and production activation were not performed.
 
 #### Archive status, filters, and message-detail clarity — 2026-09-22

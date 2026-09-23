@@ -39,6 +39,10 @@ test('real PostgreSQL: graph contains only scoped context entities and recorded 
     assert.equal(mapped.edges.filter(e=>e.kind==='same_source_revision').length,1,'mapped exports from different original chats never share a source identity');
     const focus=await evidenceGraph(pool,{scope:null,admin:true},'-20','',20,digest('private'));assert.equal(focus.nodes.length,1);
     const all=await evidenceGraph(pool,{scope:null,admin:true},'*');
+    assert.ok(all.nodes.some(n=>n.id==='collection:*'&&n.kind==='collection'&&n.label==='All private knowledge'));
+    assert.ok(!all.nodes.some(n=>n.id==='group:*'));
+    assert.ok(all.edges.some(e=>e.from==='collection:*'&&e.to==='group:42'&&e.kind==='contains'));
+    assert.equal(all.bounds.groups,all.nodes.filter(n=>n.kind==='group').length);
     assert.ok(all.nodes.some(n=>n.id==='message:'+digest('private')));
     assert.ok(all.nodes.some(n=>n.id==='group:42'&&n.chat_type==='private'&&n.label==='Private chat · 42'));
     assert.equal(all.edges.filter(e=>e.kind==='reply_to_source').length,2,'cross-chat source numbers do not create false reply links');
