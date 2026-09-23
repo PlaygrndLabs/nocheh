@@ -54,6 +54,26 @@ receipt checks, and post-reset Honcho production acceptance remain pending.
 No installation reset, test message, approval, or external delivery occurred in
 this follow-up. [Content-free results](compatibility/results/2026-09-23-mvp-real-test-current-revision.json).
 
+#### Fresh live probe and reset inventory — 2026-09-23
+
+At `ba83a99`, a read-only diagnostic again found all 17 required local Compose
+services running, Telegram connected, one shared-provider login, guard mode on,
+and no execution holds. A fresh synthetic live probe passed refresh, exact chat,
+literal detection, and Ogg/Opus transcription. The source code is unchanged
+since the isolated suite at `e441630`; only this status record and its evidence
+file followed that tested revision. The earlier 129-second chat timeout remains
+a separate reliability observation.
+
+A fresh read-only reset inventory found the legacy layout, 17 owned containers,
+three volumes, 55 classified paths, zero ownership blockers, and ten pending
+phases. Five external archive review roots now contain 16 immediate items; their
+exact ownership has not been classified. The preflight is not executable and no
+installation reset was performed. The current dashboard/database-browser source
+has not been activated in the local installation. Post-reset Telegram, group and
+human, exact approval, restart receipt, and Honcho production acceptance remain
+pending. MVP release acceptance is **not established**.
+[Content-free results](compatibility/results/2026-09-23-mvp-readiness-live-probe.json).
+
 </mvp_readiness_recheck>
 <owner_database_browser>
 
