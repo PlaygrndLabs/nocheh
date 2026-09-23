@@ -27,8 +27,9 @@ Only the owner may address Nocheh in a selected group by default. The owner can
 manage individual participant IDs in **Settings → Nocheh settings → Telegram access →
 Who may address Nocheh in groups**, then Save and Apply. Selected group titles,
 visible administrators, and observed senders appear by name and numeric ID;
-each listed person has No rule, Grant, and Deny choices. No rule returns that
-person to the owner-only default. The Bot API does not list every group member,
+each listed person has Default deny, Grant, and Explicit deny choices. Default
+deny removes an individual decision while still blocking that person. Explicit
+deny stores a block. The Bot API does not list every group member,
 so add an ID manually when a person has not appeared in those sources.
 The same controls are available in the CLI:
 

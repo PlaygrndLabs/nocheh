@@ -329,7 +329,7 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
  .settings-page .n-settings-group .n-form{gap:20px}
  .settings-page .n-access-person{align-items:stretch;flex-direction:column;gap:10px}
  .settings-page .n-access-choice{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
- .settings-page .n-access-choice button{padding-inline:4px}
+ .settings-page .n-access-choice button{padding-inline:4px;white-space:normal;line-height:1.2}
  .settings-page .n-access-manual-fields{grid-template-columns:1fr}
  .settings-page .n-access-manual-fields button{margin-bottom:0}
 }
