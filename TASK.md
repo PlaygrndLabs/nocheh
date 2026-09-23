@@ -1,5 +1,31 @@
 # Nocheh implementation status
 
+<local_worktree_rerun>
+
+#### MVP worktree consolidation and local rerun — 2026-09-23
+
+Seven clean non-MVP worktree checkouts were removed while retaining their Git
+branches. The main installation checkout and the MVP worktree remain. Four
+host previews and two isolated synthetic Compose preview projects tied to the
+removed worktrees were stopped; the active `nocheh` installation was preserved.
+
+The first `./scripts/nocheh up` from local `main` failed because the Hermes
+dashboard image did not copy `src/source-content.ts`, which its Archive and
+Sharing pages import. Commit `a718427` adds that source file to the dashboard
+build stage. The isolated dashboard stage then built successfully, and the
+AST-only Graphify refresh covered 533 files, 3,622 nodes, and 13,477 edges with
+zero model calls. After local integration, a full `./scripts/nocheh up` passed.
+All 17 required services are healthy, the app and dashboard local endpoints
+return HTTP 200, Telegram is connected, CLIProxy remains the refresh owner,
+and no execution holds are present. The isolated test suite and fresh MVP
+release acceptance were not rerun in this operational restart.
+
+The code fix is integrated into local `main`. A remote push was rejected by
+automatic approval review because ownership and trust of `origin/main` were
+not established for that operation; remote synchronization remains pending.
+
+</local_worktree_rerun>
+
 <archive_action_approval_clarity>
 
 #### Archive reply and action approval clarity — 2026-09-23
