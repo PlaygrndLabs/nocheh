@@ -33,6 +33,21 @@ provider cutover, or Honcho activation was performed in this recheck.
 </mvp_readiness_recheck>
 <owner_database_browser>
 
+#### Database status and details — 2026-09-23
+
+The owner asked to show database status and details too. The Databases page now
+shows an availability card for every configured database, including a registered
+Hermes profile whose database file is not yet created. Selecting a card shows its
+engine, database or file identity, service, table count, size, and version when
+available, with an explicit missing or unreachable reason otherwise. The status
+query is read-only and bounded; database paths and credentials stay out of browser
+responses. Four focused Python tests, 22 dashboard tests, the dashboard build,
+and an isolated PostgreSQL status query passed. The synthetic localhost preview
+showed both available and unavailable cards and the selected database details.
+The AST-only Graphify refresh covered 525 files, 3,578 nodes, and 13,340 edges
+with zero model calls. The active installation was not restarted or used for this
+UI check.
+
 #### Read-only installation database browser — 2026-09-23
 
 The owner requested a raw source database view with sortable and filterable table
