@@ -144,10 +144,45 @@ It cited the group's own question using an internal event ID, which the owner
 found unclear. Group capture-to-delivery took about 125 seconds, a live latency
 concern for the MVP's fast-answer goal.
 
+The exact owner approval test produced one proposal with the requested owner-DM
+destination and exact synthetic text. The owner approved it in Activity; the
+action completed and one matching Telegram delivery was recorded about 22
+seconds after approval. The owner observed one delivery. The test prompt named
+the internal action tool, which the owner rejected as a user-facing requirement.
+Executor replay idempotence remains pending.
+
+The owner then used an ordinary-language request with no internal tool name.
+Nocheh proposed the exact requested text to the owner DM, the owner approved it,
+and one matching Telegram delivery completed. Archive-only replay of that input
+reported zero new Telegram replies; the exact delivery count remained one and
+the action stayed done. That replay mode does not exercise executor replay.
+The requested natural-language path passed in this pre-reset test. The
+reusable requirement is in
+[SPECS.md](SPECS.md), and the [release procedure](docs/release-acceptance.md)
+now uses that form of request.
+
+For restart recovery, the owner sent a fresh synthetic DM. Its dispatch
+completed on the first attempt with one Telegram delivery before the supervised
+Hermes container restarted. The verified container then restarted in place,
+returned healthy, and reported Telegram connected. This demonstrates
+completed-receipt preservation, but the pending-receipt recovery case remains
+unverified because delivery preceded the
+restart. The owner observed a generic acknowledgment with the limited-memory
+notice. The supervised bot was restarted by the trusted local test operator,
+not by Nocheh's conversational agent. The live memory status reports Honcho
+unattached and unverified with zero ready generations, explaining the notice.
+The owner also rejected prefixed test messages as unnatural; the
+[release procedure](docs/release-acceptance.md) now uses ordinary messages and
+correlates their event IDs and timestamps internally.
+An attempt to arm a second host-level restart for the still-pending reply case
+was rejected by automatic approval review because the owner had deferred that
+step while asking about its scope. No second restart occurred; explicit
+authorization for that exact interruption is pending.
+
 These are **pre-reset** observations on the `legacy` layout. Private/group
-isolation passed as observed, while exact owner approval, restart receipt recovery, the
-post-reset human group reply/reaction, and post-reset Honcho production acceptance
-remain pending. MVP release acceptance is **not established**.
+isolation and exact owner-approved delivery passed as observed. Pending receipt
+recovery, the post-reset human group reply/reaction, and post-reset Honcho
+production acceptance remain pending. MVP release acceptance is **not established**.
 [Content-free result](compatibility/results/2026-09-23-post-rebuild-live-test.json).
 
 </mvp_readiness_recheck>
