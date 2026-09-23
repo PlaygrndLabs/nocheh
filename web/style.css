@@ -384,3 +384,4 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .db-browser-pagination>div{display:flex;gap:8px}
 @media(max-width:900px){.db-browser-selection{grid-template-columns:repeat(2,minmax(0,1fr))}.db-browser-selection label:last-of-type{grid-column:1/-1}}
 @media(max-width:600px){.db-browser-selection{grid-template-columns:minmax(0,1fr)}.db-browser-selection label:last-of-type{grid-column:auto}.db-browser-detail dl{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.source-transcript-text{margin:0;padding:14px 16px;border:1px solid var(--n-line);border-radius:7px;background:var(--n-subtle);font-size:14px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.source-transcript-empty{margin:0!important}.source-transcript-provenance{margin-top:12px}.source-transcript-provenance summary{font-size:12px;color:var(--n-muted);cursor:pointer}
