@@ -22,6 +22,7 @@ import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkf
 import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
+import {archiveReplyPreviews} from './archive-reply-links.js';
 import {telegramDirectory} from './telegram-directory.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
@@ -248,7 +249,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const states=candidates.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
           error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[candidates.map(row=>row.id)])).rows:[];
         const stateById=new Map(states.map(state=>[state.event_id,state])),matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters));
-        const records=matched.slice(0,50).map(row=>({...row,...stateById.get(row.id),original_text:undefined,text:row.original_text?.toString()??null}));
+        const page=matched.slice(0,50),replyPreviews=await archiveReplyPreviews(s.stores.archive,s.stores.control,page);
+        const records=page.map(row=>({...row,...stateById.get(row.id),original_text:undefined,text:row.original_text?.toString()??null,
+          reply_messages:replyPreviews.get(row.id)??[]}));
         const next=matched.length>50?matched[49].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
         return json(res,200,{records,next});
       }
