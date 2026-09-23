@@ -33,6 +33,20 @@ provider cutover, or Honcho activation was performed in this recheck.
 </mvp_readiness_recheck>
 <owner_database_browser>
 
+#### Database explorer layout — 2026-09-23
+
+The owner asked to improve the database viewer's UI/UX and layout after showing
+the status cards, detail strip, and table. The explorer now uses one database
+list with status and one table list in a left rail, with selected database
+details and rows in the right pane. The duplicate database dropdown and tall
+intro panel were removed. At phone width, one status-labeled picker replaces
+the database list and the detail fields reflow into two columns. The data table
+keeps its own horizontal scroll. The dashboard build and 22 dashboard tests pass;
+an isolated synthetic preview verified the desktop layout and mobile database
+switching. The AST-only Graphify refresh covered 525 files, 3,578 nodes, and
+13,340 edges with zero model calls. The active installation was not rebuilt or
+restarted.
+
 #### Database status and details — 2026-09-23
 
 The owner asked to show database status and details too. The Databases page now
