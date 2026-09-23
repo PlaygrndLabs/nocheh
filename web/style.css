@@ -351,7 +351,7 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .db-browser-side-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:16px 18px 9px}
 .db-browser-side-heading h3{margin:0;font-size:13px;line-height:1.4}
 .db-browser-side-heading>span{color:var(--n-muted);font-size:12px;font-variant-numeric:tabular-nums}
-.db-browser-mobile-picker{display:none}
+.nocheh-app .db-browser-mobile-picker{display:none}
 .db-browser-database-list{display:grid;gap:2px;padding:0 8px 12px}
 .db-browser-database{display:grid;gap:4px;width:100%;min-height:58px;padding:9px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--n-text);text-align:left;cursor:pointer}
 .db-browser-database:hover,.db-browser-database.selected{background:var(--n-subtle)}
@@ -395,4 +395,4 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .db-browser-pagination{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:14px;color:var(--n-muted);font-size:13px}
 .db-browser-pagination>div{display:flex;gap:8px}
 @media(max-width:900px){.db-browser-workspace{grid-template-columns:1fr}.db-browser-database-list{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.db-browser-table-list{max-height:220px}}
-@media(max-width:600px){.db-browser-detail dl{grid-template-columns:repeat(2,minmax(0,1fr))}.db-browser-database-list{display:none}.db-browser-mobile-picker{display:grid;gap:7px;margin:0 18px 14px;color:var(--n-muted);font-size:12px;font-weight:650}.db-browser-mobile-picker select{width:100%;min-height:44px;padding:9px 11px;border:1px solid var(--n-line);border-radius:7px;background:var(--n-subtle);color:var(--n-text);font:inherit}}
+@media(max-width:600px){.db-browser-detail dl{grid-template-columns:repeat(2,minmax(0,1fr))}.db-browser-database-list{display:none}.nocheh-app .db-browser-mobile-picker{display:grid;gap:7px;margin:0 18px 14px;color:var(--n-muted);font-size:12px;font-weight:650}.db-browser-mobile-picker select{width:100%;min-height:44px;padding:9px 11px;border:1px solid var(--n-line);border-radius:7px;background:var(--n-subtle);color:var(--n-text);font:inherit}}
