@@ -193,6 +193,14 @@ The local build, 19 dashboard checks, and AST-only graph refresh passed. The
 isolated preview on port 18849 showed all three states, pending grant count,
 pending deny count, manual ID entry, and a return to No rule that disabled Review
 changes again. Real group message acceptance remains pending.
+The redesign was integrated into local `main` at `5efd9c9`, then only the local
+dashboard image and container were updated. A fresh owner dashboard session
+loaded the selected group's name and one known participant with direct access
+choices. All 17 installation services, including Hermes and the dashboard, were
+healthy afterward. No live access decision or running Telegram policy changed.
+The remote push remains blocked by the previously rejected publication of local
+activation metadata to an unverified remote; GitHub HTTPS credentials are also
+unavailable.
 
 </telegram_group_access_list>
 
