@@ -15,7 +15,12 @@ test('archive presents one accessible table-to-agent-copy workflow',async()=>{
   assert.doesNotMatch(archive,/Previous records|Next records|Inspect source/);
   assert.match(controls,/if\(pages\.length===1&&!next\)return null/);
   assert.match(archive,/<Table aria-label="Archive records">/);
-  assert.match(archive,/>Record<\/th><th>Type<\/th><th>Scope<\/th><th>Received<\/th><th>Reply \/ action<\/th><th>Agent copy<\/th>/);
+  assert.match(archive,/>Message<\/th><th>Status<\/th><th>Received<\/th>/);
+  assert.match(archive,/Agent copy \{ready\?/);
+  assert.match(archive,/archive-linked-reply/);
+  assert.match(archive,/Assistant replied/);
+  assert.match(archive,/In response to:/);
+  assert.match(archive,/label:'Delivered'/);
   assert.match(archive,/Operational attempts and receipts stay in Monitoring/);
   assert.match(archive,/All source records/);
   assert.match(archive,/Conversation<select/);

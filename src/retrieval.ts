@@ -10,6 +10,7 @@ import {matchesArchiveFilters,type ArchiveFilters} from './archive-filters.js';
 import { storeBytes } from './storage.js';
 import {guardState,guardedValue,exportGuarded,restoreGuarded} from './guarded.js';
 import {contextAudience,allowPrepared} from './prepared-context.js';
+import {legacyArchiveReplyPreviews} from './stores/archive-reply-links.js';
 
 export function limit(value:unknown,fallback=20,max=50):number {
   const n=value===null || value===undefined ? fallback : Number(value);
@@ -55,12 +56,17 @@ export async function search(pool:pg.Pool,principal:Reader,query:string,count=20
   ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,principal.admin?200:count,principal.scope===null?null:principal.space??null,principal.scope===null?null:contextAudience(principal),principal.admin]);
   await assertAudience(pool,principal);
   const ids=rows.map(row=>row.id);
-  const states=principal.admin&&ids.length?new Map((await pool.query<{event_id:string;state:string}>('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[ids])).rows.map(row=>[row.event_id,row.state])):new Map<string,string>();
+  const stateRows=principal.admin&&ids.length?(await pool.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
+    error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[ids])).rows:[];
+  const states=new Map(stateRows.map(row=>[row.event_id,row]));
   const reviews=principal.admin?await actionReviews(pool,ids,'legacy'):new Map();
-  return rows.filter(row=>matchesArchiveFilters(row,states.get(row.id),filters,reviews.get(row.id)?.state)).slice(0,count).map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
-    ...(states.has(row.id)?{assistant_state:states.get(row.id)}:{}),...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
+  const hits=rows.filter(row=>matchesArchiveFilters(row,states.get(row.id)?.assistant_state,filters,reviews.get(row.id)?.state)).slice(0,count).map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
+    ...states.get(row.id),...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
     kind:row.kind,origin:row.origin,derived_id:row.derived_id,occurred_at:row.occurred_at,text:row.original_text?.toString().slice(0,2000) ?? null,
     truncated:(row.original_text?.toString().length ?? 0)>2000}));
+  if(!principal.admin)return hits;
+  const replies=await legacyArchiveReplyPreviews(pool,hits);
+  return hits.map(hit=>({...hit,reply_messages:replies.get(hit.id)??[]}));
 }
 export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
   await assertAudience(pool,principal);

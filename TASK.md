@@ -20,17 +20,40 @@ Archive link opens the specific review directly, including an older action that
 has fallen outside the 100-item activity queue; legacy decisions can address
 that action by ID. Exact decision checks and delivery authority remain unchanged.
 
-The local Node/TypeScript build passed; all 23 dashboard checks and seven focused
-action-summary/archive-filter checks passed. `git diff --check` passed. A
+The reconciled Node/TypeScript build passed; all 24 dashboard checks and ten
+focused action-summary/archive-filter/reply-link checks passed. `git diff --check` passed. A
 synthetic preview on port 18972 (terminal `19686`) visibly confirmed the
 pending/unsent and reply-sent labels, exact-card content, and Archive-to-review
 link. It has no Compose project, provider credentials, poller, scheduler, or
-external action executor. The AST-only Graphify refresh covered 530 files,
-3,604 nodes, and 13,419 edges with zero model calls. Live installation and
+external action executor. The AST-only Graphify refresh covered 545 files,
+3,622 nodes, and 13,430 edges with zero model calls. Live installation and
 database-backed acceptance of this change remain unrun; no Telegram action was
 approved or sent during verification.
 
 </archive_action_approval_clarity>
+<database_selection_followup>
+
+#### Separate database selection — 2026-09-23
+
+The owner clarified that Archive, Derived, and Control must each be selectable as
+separate databases. The catalog and dashboard selector already implement that
+behavior for `original-only-v1`. The isolated database-browser preview now starts
+with those three distinct physical database identities and table inventories;
+`NOCHEH_PREVIEW_STORAGE_LAYOUT=legacy` retains a combined-layout fixture. Browser
+inspection selected Derived and Control and showed their distinct database names,
+tables, and rows. This is synthetic UI evidence, not an installation cutover.
+Five focused database-browser checks pass, including a physical-database routing
+check for all three selectors; the preview script passes Node syntax checking.
+The AST-only code graph refresh covers 531 files, 3,608 nodes, and 13,434 edges.
+
+A fresh read-only installation preflight found 17 owned containers, three volumes,
+55 classified paths, and zero current ownership blockers. PostgreSQL still contains
+only `nocheh` and `nocheh_inngest`, and the saved layout remains `legacy`. The
+documented controlled reset, including exact review of external archive items,
+preservation, empty-baseline proof, and fresh live acceptance, is still pending.
+The running installation has not been reset or switched to separate databases.
+
+</database_selection_followup>
 
 <evidence_graph_collection>
 
@@ -176,13 +199,115 @@ It cited the group's own question using an internal event ID, which the owner
 found unclear. Group capture-to-delivery took about 125 seconds, a live latency
 concern for the MVP's fast-answer goal.
 
+The exact owner approval test produced one proposal with the requested owner-DM
+destination and exact synthetic text. The owner approved it in Activity; the
+action completed and one matching Telegram delivery was recorded about 22
+seconds after approval. The owner observed one delivery. The test prompt named
+the internal action tool, which the owner rejected as a user-facing requirement.
+Executor replay idempotence remains pending.
+
+The owner then used an ordinary-language request with no internal tool name.
+Nocheh proposed the exact requested text to the owner DM, the owner approved it,
+and one matching Telegram delivery completed. Archive-only replay of that input
+reported zero new Telegram replies; the exact delivery count remained one and
+the action stayed done. That replay mode does not exercise executor replay.
+The requested natural-language path passed in this pre-reset test. The
+reusable requirement is in
+[SPECS.md](SPECS.md), and the [release procedure](docs/release-acceptance.md)
+now uses that form of request.
+
+For restart recovery, the owner sent a fresh synthetic DM. Its dispatch
+completed on the first attempt with one Telegram delivery before the supervised
+Hermes container restarted. The verified container then restarted in place,
+returned healthy, and reported Telegram connected. This demonstrates
+completed-receipt preservation, but the pending-receipt recovery case remains
+unverified because delivery preceded the
+restart. The owner observed a generic acknowledgment with the limited-memory
+notice. The supervised bot was restarted by the trusted local test operator,
+not by Nocheh's conversational agent. The live memory status reports Honcho
+unattached and unverified with zero ready generations, explaining the notice.
+The owner also rejected prefixed test messages as unnatural; the
+[release procedure](docs/release-acceptance.md) now uses ordinary messages and
+correlates their event IDs and timestamps internally.
+An attempt to arm a second host-level restart for the still-pending reply case
+was rejected by automatic approval review because the owner had deferred that
+step while asking about its scope. No second restart occurred; explicit
+authorization for that exact interruption was subsequently given.
+
+With that authorization, the owner sent an ordinary-language DM. The watcher
+captured it while its dispatch was `pending` with zero attempts, then restarted
+only the supervised Hermes container once. The same container returned healthy
+with Telegram connected. Its dispatch completed on one attempt after restart,
+linked an assistant result to the captured input, and produced one confirmed
+`sendMessage` delivery in the same scope. The owner saw exactly one appropriate
+reply. This verifies recovery of a queued message across the restart. Dispatch
+had not begun at the interruption, so recovery of an in-flight send or uncertain
+delivery receipt remains unverified. No further restart was attempted.
+
 These are **pre-reset** observations on the `legacy` layout. Private/group
-isolation passed as observed, while exact owner approval, restart receipt recovery, the
-post-reset human group reply/reaction, and post-reset Honcho production acceptance
-remain pending. MVP release acceptance is **not established**.
+isolation and exact owner-approved delivery passed as observed. Queued dispatch
+recovery passed; in-flight receipt recovery, the post-reset human group
+reply/reaction, and post-reset Honcho
+production acceptance remain pending. MVP release acceptance is **not established**.
 [Content-free result](compatibility/results/2026-09-23-post-rebuild-live-test.json).
 
 </mvp_readiness_recheck>
+<archive_database_live_updates>
+
+#### Archive and Databases live views — 2026-09-23
+
+The owner requested a stream so Archive and Databases changes appear live. The
+owner dashboard now exposes a session-authenticated server-sent invalidation
+stream. Open Archive and Databases pages refresh only their visible bounded reads
+on stream ticks, retain active filters and pagination, and show connection state.
+A reconnect or return to the tab refreshes missed changes. The browser falls back
+to a slower refresh cadence during stream failures. The stream carries no row
+content; the existing read-only endpoints remain the source of data.
+
+The dashboard build and 29 focused dashboard/auth/maintenance/archive tests pass
+after merging concurrent Archive table work. A synthetic HTTP test covers unauthenticated-stream rejection and proves that
+backup closes the stream before its request drain. An isolated loopback preview
+on port 18974 visibly updated an open Databases row and an open Archive record
+without reloading. The AST-only Graphify refresh covers 531 files, 3,606 nodes,
+and 13,432 edges with zero model calls. The full `npm test` run reached 176 tests
+but failed five checks because the fresh worktree has no service token or
+PostgreSQL test credentials; a focused worker rerun passed with synthetic
+tokens. Database-backed acceptance and active installation verification remain
+pending. Local integration into `main` succeeded. The push to `origin/main`
+failed because GitHub HTTPS credentials are unavailable on this host, and the
+existing SSH identity was rejected. Remote synchronization remains pending.
+
+</archive_database_live_updates>
+<archive_reply_table>
+
+#### Connected archive replies — 2026-09-23
+
+The owner asked for clearer Archive columns, a status instead of the ambiguous
+Reply column, and the actual assistant message visibly connected to its incoming
+message. The table now keeps type, conversation, and agent-copy readiness with
+the message; the status column shows incoming reply processing or confirmed
+outgoing delivery. A confirmed delivered message appears beneath its incoming
+message and opens its own immutable source. When both records are on the page,
+the outgoing row also links back to the incoming message. The default browse
+order and source-record count are unchanged.
+
+Both storage layouts now resolve links from durable delivery evidence: legacy
+outbound result captures and separated-store delivery receipts. Unconfirmed
+drafts and uncertain sends do not become reply previews. The pinned Node 24
+build, three focused link checks, and all 22 dashboard checks pass. The legacy
+PostgreSQL integration case was extended to assert the link, but was skipped in
+this session because no isolated PostgreSQL fixture was assigned. An isolated
+synthetic browser preview on port 18958 verified the table layout and opening a
+reply preview; it does not prove the active installation's stored links. The
+active installation was not rebuilt or restarted, so live visual verification
+remains pending.
+
+Integration with concurrent Archive media work preserves content-type labels for
+voice and other non-text messages in both the table and linked reply preview.
+The reconciled Node 24 build and focused regression set pass 28 checks with one
+PostgreSQL fixture skip; `git diff --check` passes.
+
+</archive_reply_table>
 <archive_browse_order>
 
 #### Newest source records first — 2026-09-23
@@ -199,6 +324,30 @@ visual verification there remains pending.
 
 </archive_browse_order>
 <owner_database_browser>
+
+#### Legacy combined database label and transition review — 2026-09-23
+
+The owner observed operational tables under the database browser's archive
+selection and asked to fix the source-only archive mismatch. The legacy catalog
+now labels the physical `nocheh` database **Legacy combined**, matching its mixed
+source, derived, and control tables. The browser still exposes the raw tables; the
+separate `nocheh_archive` layout remains the actual source-only storage target.
+Four focused browser tests, the dashboard build, documentation link and diff checks,
+an isolated browser preview of the corrected selector and heading, and the AST-only
+Graphify refresh pass. The refresh covered 528 files, 3,590 nodes, and 13,376
+edges with zero model calls. The active dashboard was not rebuilt for this label.
+
+A fresh read-only reset preflight recorded 18 owned containers, three volumes,
+55 classified installation paths, and one blocker: a running transient Hermes
+turn container whose Compose origin does not match the fixed installation plan.
+Five external archive review roots contain 16 immediate directories requiring
+individual ownership decisions. Fourteen match the exact device/inode identities
+of a prior review; two do not. The current legacy database has 51 tables and
+aggregate counts of 99 events, two artifacts, 376 derived artifacts, 99 dispatches,
+and two action requests. No source content was read or copied, no service was
+stopped, and no reset phase was executed. The supported clean transition would
+erase installation content; whether to use that transition or preserve current
+content through a new migration path needs the owner's choice.
 
 #### Top database and table selectors — 2026-09-23
 
@@ -759,6 +908,27 @@ and audio control. No installation service, provider, poller, scheduler, or
 credential was used. The AST-only Graphify refresh covers 530 files, 3,590
 nodes, and 13,376 edges with zero model calls. Live installation verification
 and production activation were not performed.
+
+#### Voice playback and visible transcript — 2026-09-23
+
+The owner clarified that the voice message should play and its transcription
+should be visible. The Archive detail now starts a loaded voice preview on the
+first Play action when the browser permits it, with native controls available
+afterward. It shows the active generated transcript beside the original audio,
+labels that text as generated, and states when no active transcript is available.
+Transcription provenance remains inspectable without treating the transcript
+as original evidence.
+
+The pinned Node 24 image built and all 23 dashboard tests passed. In the
+isolated Compose preview on port 18968, the synthetic voice detail visibly
+showed its active transcript; one click on Play produced an audio element with
+`paused: false`, a progressing play time, and a 3-second duration. The preview
+uses no installation credentials or external execution authority. The AST-only
+Graphify refresh covered 528 files, 3,590 nodes, and 13,376 edges with zero
+model calls. After reconciling the concurrent Archive live-refresh work, the
+combined Node 24 image built, all 24 dashboard tests passed, and Graphify
+covered 531 files, 3,606 nodes, and 13,432 edges with zero model calls. The
+live installation and real Telegram voice were not retested.
 
 #### Archive status, filters, and message-detail clarity — 2026-09-22
 
