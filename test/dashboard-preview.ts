@@ -24,6 +24,11 @@ const client=await pool.connect();try{
 }finally{client.release();}
 const id='a'.repeat(64),profile='fixture-owner';
 const source={id,event:{text:'A synthetic conversation about the northern lights.',payload:{text:'A synthetic conversation about the northern lights.'},scope:'42',source_id:'fixture',channel:'telegram',received_at:new Date().toISOString()},artifacts:[],derived:[]};
+const voiceId='b'.repeat(64),voiceFileId='c'.repeat(64);
+const voice={id:voiceId,event:{kind:'telegram_update',text:null,payload:{message:{message_id:2,voice:{file_id:'synthetic-voice',duration:1,mime_type:'audio/wav'}}},scope:'42',source_id:'fixture-voice',channel:'telegram',received_at:new Date().toISOString()},
+ artifacts:[{id:voiceFileId,kind:'voice',metadata:{duration:1,mime_type:'audio/wav'},state:'ready'}],derived:[]};
+const voiceBytes=Buffer.alloc(44+800,128);
+voiceBytes.write('RIFF',0);voiceBytes.writeUInt32LE(voiceBytes.length-8,4);voiceBytes.write('WAVEfmt ',8);voiceBytes.writeUInt32LE(16,16);voiceBytes.writeUInt16LE(1,20);voiceBytes.writeUInt16LE(1,22);voiceBytes.writeUInt32LE(8000,24);voiceBytes.writeUInt32LE(8000,28);voiceBytes.writeUInt16LE(1,32);voiceBytes.writeUInt16LE(8,34);voiceBytes.write('data',36);voiceBytes.writeUInt32LE(800,40);
 let modeRevision=false;
 let revision=1,guarded='A synthetic conversation about the northern lights.',settingsRevision='fixture-1';
 let settingsChanges:Record<string,unknown>={};
@@ -82,10 +87,13 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/jobs')return json(res,200,jobs);
   if(route==='/operations')return json(res,200,{backups:[{id:'synthetic-backup',created_at:'2026-09-16T12:00:00Z',files:28}]});
   if(route==='/scopes')return json(res,200,{scopes:[{scope:'42',events:180},{scope:'-10042',events:32}],next:null});
-  if(route==='/data')return json(res,200,{records:[{...source.event,id,ready:1,total:1}],next:null});
+  if(route==='/data')return json(res,200,{records:[{...voice.event,id:voiceId,content_types:['voice'],ready:2,total:2},{...source.event,id,ready:1,total:1}],next:null});
   if(route==='/search')return json(res,200,[{...source.event,id}]);
   if(route==='/events')return json(res,200,{events:[source.event?{...source.event,id,text:source.event.text}:source],results:[{...source.event,id}],next:null});
   if(route==='/events/'+id)return json(res,200,source);
+  if(route==='/events/'+voiceId)return json(res,200,voice);
+  if(route==='/artifacts/'+voiceFileId+'/download'){res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store'});res.end(voiceBytes);return;}
+  if(route==='/data/'+voiceId+'/guarded')return json(res,200,{projections:[]});
   if(route==='/data/'+id+'/guarded')return json(res,200,{projections:[{id:'b'.repeat(64),source_id:id,kind:'events',state:'ready',active_revision:revision,author:revision>1?'owner':'automatic',content:{text:guarded,payload:{text:guarded}}}]});
   if(route==='/data/'+id+'/guarded/history')return json(res,200,url.searchParams.has('revision')?{revision:1,content:{text:source.event.text}}:{revisions:[{revision:1,author:'automatic',created_at:new Date().toISOString()}],next:null});
   if(route==='/memory/profiles')return json(res,200,{profiles:[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}]});

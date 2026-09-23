@@ -630,6 +630,27 @@ behavior was not rerun.
 
 <original_only_archive>
 
+#### Non-text source content in Archive — 2026-09-23
+
+The owner identified a textless Telegram voice message shown as `(No message
+text)` and requested UI support for other non-text content. Archive browse and
+search results now carry original content-type hints, and the table and Sharing
+source picker name voice and other media or structured messages while retaining
+message text when it exists. Original details show the content type, useful
+structured fields, attachment readiness and duration, a download action, and
+explicit click-to-load previews for supported audio, video, and image files.
+Preview failures leave the original download available. The immutable original
+and guarded agent copy remain separate.
+
+The pinned Node 24 development image build, 22 dashboard tests, focused content
+classification test, and three focused synthetic PostgreSQL archive tests pass.
+An isolated Compose preview on localhost port 18968 uses its own database,
+network, image, and project; visual inspection confirmed the voice row, detail,
+and audio control. No installation service, provider, poller, scheduler, or
+credential was used. The AST-only Graphify refresh covers 527 files, 3,589
+nodes, and 13,368 edges with zero model calls. Live installation verification
+and production activation were not performed.
+
 #### Archive status, filters, and message-detail clarity — 2026-09-22
 
 The owner clarified that `Needs review` looked like an approval request even
