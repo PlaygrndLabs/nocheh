@@ -112,6 +112,44 @@ dashboard code locally but does not establish the pending reset, fresh Telegram,
 or Honcho MVP release gates.
 [Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
 
+#### Live post-rebuild Telegram test — 2026-09-23
+
+The owner sent one synthetic DM and confirmed exactly one appropriate Telegram
+reply. The active local installation captured it once, finished dispatch on its
+first attempt, recorded one delivered `sendMessage`, and displayed the reply in
+the rebuilt dashboard Archive. Capture-to-delivery was about 30 seconds.
+
+The owner also sent a synthetic voice note. The captured audio file exists and
+matches its stored byte count and SHA-256. Subscription transcription completed
+on its first attempt with matching input provenance. The transcript recognized
+the synthetic acceptance phrase, though it rendered the bot name differently.
+The assistant result links to the voice event, dispatch completed on its first
+attempt, and one `sendMessage` delivery was recorded about 46 seconds after
+capture. The owner reported a reply, but its harmless synthetic marker was
+replaced by `***`. The original transcript retains the marker while its automatic
+guarded projection masks it. This is a live answer-quality finding; the voice
+answer is not a clean semantic pass.
+
+The selected group's exact synthetic logging-only message was captured once and
+suppressed after one attempt with `intentional_silence`. No outbound intent,
+result, or delivered message appeared in that group's test window. The owner
+confirmed no Telegram-visible reply.
+
+For private/group isolation, the owner's private marker and group question were
+captured in separate scopes and in order. The group policy has no access to the
+private DM source, no active share grants it, and neither the group's prepared
+context nor its derived inputs contained the marker. The delivered group reply
+did not contain the marker; the owner observed a refusal to access the DM.
+It cited the group's own question using an internal event ID, which the owner
+found unclear. Group capture-to-delivery took about 125 seconds, a live latency
+concern for the MVP's fast-answer goal.
+
+These are **pre-reset** observations on the `legacy` layout. Private/group
+isolation passed as observed, while exact owner approval, restart receipt recovery, the
+post-reset human group reply/reaction, and post-reset Honcho production acceptance
+remain pending. MVP release acceptance is **not established**.
+[Content-free result](compatibility/results/2026-09-23-post-rebuild-live-test.json).
+
 </mvp_readiness_recheck>
 <archive_database_live_updates>
 
@@ -125,18 +163,49 @@ A reconnect or return to the tab refreshes missed changes. The browser falls bac
 to a slower refresh cadence during stream failures. The stream carries no row
 content; the existing read-only endpoints remain the source of data.
 
-The dashboard build and 26 focused dashboard/auth/maintenance tests pass. A
+The dashboard build and 29 focused dashboard/auth/maintenance/archive tests pass
+after merging concurrent Archive table work. A
 synthetic HTTP test covers unauthenticated-stream rejection and proves that
 backup closes the stream before its request drain. An isolated loopback preview
 on port 18974 visibly updated an open Databases row and an open Archive record
-without reloading. The AST-only Graphify refresh covers 529 files, 3,596 nodes,
-and 13,389 edges with zero model calls. The full `npm test` run reached 176 tests
+without reloading. The AST-only Graphify refresh covers 531 files, 3,606 nodes,
+and 13,432 edges with zero model calls. The full `npm test` run reached 176 tests
 but failed five checks because the fresh worktree has no service token or
 PostgreSQL test credentials; a focused worker rerun passed with synthetic
 tokens. Database-backed acceptance and active installation verification remain
 pending. Git integration outcome follows the commit and push attempt.
 
 </archive_database_live_updates>
+<archive_reply_table>
+
+#### Connected archive replies — 2026-09-23
+
+The owner asked for clearer Archive columns, a status instead of the ambiguous
+Reply column, and the actual assistant message visibly connected to its incoming
+message. The table now keeps type, conversation, and agent-copy readiness with
+the message; the status column shows incoming reply processing or confirmed
+outgoing delivery. A confirmed delivered message appears beneath its incoming
+message and opens its own immutable source. When both records are on the page,
+the outgoing row also links back to the incoming message. The default browse
+order and source-record count are unchanged.
+
+Both storage layouts now resolve links from durable delivery evidence: legacy
+outbound result captures and separated-store delivery receipts. Unconfirmed
+drafts and uncertain sends do not become reply previews. The pinned Node 24
+build, three focused link checks, and all 22 dashboard checks pass. The legacy
+PostgreSQL integration case was extended to assert the link, but was skipped in
+this session because no isolated PostgreSQL fixture was assigned. An isolated
+synthetic browser preview on port 18958 verified the table layout and opening a
+reply preview; it does not prove the active installation's stored links. The
+active installation was not rebuilt or restarted, so live visual verification
+remains pending.
+
+Integration with concurrent Archive media work preserves content-type labels for
+voice and other non-text messages in both the table and linked reply preview.
+The reconciled Node 24 build and focused regression set pass 28 checks with one
+PostgreSQL fixture skip; `git diff --check` passes.
+
+</archive_reply_table>
 <archive_browse_order>
 
 #### Newest source records first — 2026-09-23

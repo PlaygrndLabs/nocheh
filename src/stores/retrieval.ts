@@ -12,6 +12,7 @@ import type {SourceReference} from './archive.js';
 import type {GuardBinding} from './guards.js';
 import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel} from '../graph-labels.js';
 import {ProjectRepository} from './projects.js';
+import {archiveReplyPreviews} from './archive-reply-links.js';
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
 export function scopedObservation(value:unknown):any {
@@ -92,7 +93,7 @@ export class SourceRepository {
       this.stores.archive.query(`SELECT id FROM events WHERE to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
         ORDER BY ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) DESC,id LIMIT 200`,[query]));
     const stateRows=principal.admin&&rows.rows.length?(await this.stores.control.query('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[rows.rows.map(row=>row.id)])).rows:[];
-    const states=new Map(stateRows.map(row=>[row.event_id,row.state])),hits=[];
+    const states=new Map(stateRows.map(row=>[row.event_id,row.state])),hits:any[]=[];
     for(const candidate of rows.rows) {
       const reference=(await this.access.archive.captured(candidate.id)).reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
@@ -110,7 +111,12 @@ export class SourceRepository {
         content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds)});
       if(hits.length===count)break;
     }
-    if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}await this.allowPrepared(principal,hits);return hits;
+    if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
+    if(principal.admin){
+      const replies=await archiveReplyPreviews(this.stores.archive,this.stores.control,hits);
+      for(const hit of hits)hit.reply_messages=replies.get(hit.id)??[];
+    }
+    await this.allowPrepared(principal,hits);return hits;
   }
   async bytes(principal:Reader,id:string):Promise<Buffer> {
     const binding=principal.admin?null:await this.audience.assert(principal);
