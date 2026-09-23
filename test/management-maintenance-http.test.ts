@@ -32,6 +32,12 @@ print(json.dumps({'result':result}),flush=True)
   async function until(check:()=>Promise<boolean>){for(let i=0;i<300;i++){if(await check())return;await new Promise(r=>setTimeout(r,20));}throw Error('maintenance fixture timeout');}
   try{
     await until(async()=>{try{return (await request('/health')).ok;}catch{return false;}});
+    assert.equal((await fetch(base+'/api/nocheh/changes')).status,401);
+    const liveRequest=httpRequest(base+'/api/nocheh/changes',{headers});liveRequest.end();
+    const [liveResponse]=await once(liveRequest,'response');
+    assert.equal(liveResponse.statusCode,200);
+    assert.match(String(liveResponse.headers['content-type']),/text\/event-stream/);
+    const liveEnded=once(liveResponse,'end');liveResponse.resume();
     const imported=await(await request('/jobs',{})).json() as any;
     const upload=httpRequest(base+'/api/nocheh/jobs/'+imported.id+'/upload?name=original.txt',{method:'PUT',headers});
     upload.write('partial original');const uploaded=once(upload,'response').then(async([res])=>{res.resume();await once(res,'end');return res.statusCode;});
@@ -39,6 +45,7 @@ print(json.dumps({'result':result}),flush=True)
     await until(async()=>{try{return (await import('node:fs/promises')).readdir(join(state,'admin/jobs',imported.id,'upload')).then(paths=>paths.some(p=>p.endsWith('.part')));}catch{return false;}});
     const backup=request('/operations',{action:'backup'});let returned=false;void backup.then(()=>{returned=true;});
     await until(async()=>{const status=await(await request('/maintenance')).json() as any;return !!status.token;});
+    await liveEnded; // A stream must not hold the backup drain open.
     assert.equal(returned,false);assert.equal((await(await request('/maintenance')).json() as any).ready,false);
     assert.equal((await request('/jobs',{})).status,503);
     upload.end(' complete');assert.equal(await uploaded,200);

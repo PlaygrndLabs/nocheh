@@ -15,6 +15,7 @@ import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
 import {ManagementMaintenance} from './management-maintenance.js';
+import {DashboardLiveUpdates} from './dashboard-live.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -175,6 +176,7 @@ export async function startManagement() {
   const archiveConnection=object(await python({operation:'archive.connection'}));
   const providerOAuth=new ProviderOAuth(MONITOR,monitorKey,PORT,1455,MONITOR_HOST,CONTAINER?'0.0.0.0':'127.0.0.1');
   const sockets=new Set<Duplex>();
+  const live=new DashboardLiveUpdates();
   for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
   }
@@ -213,6 +215,7 @@ export async function startManagement() {
       }
       if(ownerStoragePath('/v1'+route)&&['GET','POST'].includes(req.method??''))return json(res,200,await python({operation:'knowledge.api',path:'/v1'+route+url.search,
         ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
+      if (req.method === 'GET' && route === '/changes')return live.open(res);
       if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
       if(req.method==='GET'&&route==='/database-browser')return json(res,200,await python({operation:'database.browser',
         request:Object.fromEntries(url.searchParams)}));
@@ -254,7 +257,9 @@ export async function startManagement() {
         let coordinator:string|undefined;
         try {const job=await newJob('operations.'+action);job.state='running';await putJob(job);
           if(action==='backup'){
-            coordinator=await maintenance.begin(job.id,tracked.id);
+            const draining=maintenance.begin(job.id,tracked.id);
+            live.closeAll();
+            coordinator=await draining;
             for(const socket of sockets)socket.destroy();await providerOAuth.quiesce();maintenance.ready(coordinator);
           }
           launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}},coordinator);return json(res,202,job);
@@ -399,6 +404,7 @@ export async function startManagement() {
   let stopping=false;
   const stop = () => {
     if(stopping)return;stopping=true;
+    live.closeAll();
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
     providerOAuth.close();
