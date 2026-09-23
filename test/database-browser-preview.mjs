@@ -22,7 +22,14 @@ createServer(async(request,response)=>{
   if(url.pathname==='/api/nocheh/database-browser'){
    const query=url.searchParams,action=query.get('action');
    if(action==='databases')return json(response,{databases});
+   if(action==='status')return json(response,{databases:databases.map((item,index)=>({
+    ...item,identifier:item.engine==='postgres'?['nocheh','nocheh_inngest','honcho_experiment'][index]:item.id==='provider-usage'?'usage.sqlite':'state.db',
+    service:item.engine==='postgres'?index===2?'honcho-postgres':'nocheh-db':null,
+    state:index===2?'unavailable':'available',
+    ...(index===2?{detail:'Database could not be reached'}:{table_count:(tables[item.id]||[]).length,size_bytes:1024*1024*(index+1),version:item.engine==='sqlite'?'3.49.1':'17.7'}),
+   }))});
    const database=query.get('database')||'archive';
+   if(database==='honcho')return json(response,{error:'database_unavailable'},503);
    if(action==='tables')return json(response,{tables:tables[database]||[]});
    if(action==='rows'){
     const columns=[{name:'id',type:'integer'},{name:'message',type:'text'},{name:'scope',type:'text'}];
