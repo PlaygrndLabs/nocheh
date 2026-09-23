@@ -1,6 +1,6 @@
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 import {Source} from './source.js';
-  const graphKinds = {user:'User',project:'Project',group:'Group',message:'Message'};
+  const graphKinds = {collection:'Collection',user:'User',project:'Project',group:'Group',message:'Message'};
   const nodeKindLabel = node=>node.kind==='group'&&node.chat_type==='private'?'Private chat':graphKinds[node.kind]||node.kind;
   const kindFilterLabel = (kind,nodes)=>{
     if(kind!=='group')return graphKinds[kind]||kind;

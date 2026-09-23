@@ -6,15 +6,15 @@ import {layoutGraph, neighborhood, isReference, nodeStyle} from '../integrations
 const fixture = () => ({
   scope: 'fixture',
   nodes: [
-    {id:'group:*', kind:'group', label:'All private knowledge'},
+    {id:'collection:*', kind:'collection', label:'All private knowledge'},
     {id:'user:a', kind:'user', label:'User'},
     ...Array.from({length:20}, (_,i)=>({id:'message:'+i,kind:'message',label:'Original متن  '+i,event_id:'source:'+i})),
     {id:'project:a',kind:'project',label:'Nocheh'},
   ],
   edges: [
-    ...Array.from({length:20},(_,i)=>({from:'group:*',to:'message:'+i,kind:'contains'})),
+    ...Array.from({length:20},(_,i)=>({from:'collection:*',to:'message:'+i,kind:'contains'})),
     {from:'user:a',to:'message:0',kind:'authored'},
-    {from:'project:a',to:'group:*',kind:'project_context'},
+    {from:'project:a',to:'collection:*',kind:'project_context'},
   ],
 });
 
@@ -25,11 +25,11 @@ test('management adapter normalizes legacy context entities and removes dangling
     edges:[{from:'scope:*',to:'event:m',kind:'contains'},{from:'event:x',to:'derived:x',kind:'derived_from'}],bounds:{messages:20,derived:200,truncated:true}};
   const code='import json,sys;from scripts.graph import context_entities;print(json.dumps(context_entities(json.loads(sys.argv[1]))))';
   const data=JSON.parse(execFileSync('python3',['-c',code,JSON.stringify(legacy)],{encoding:'utf8'}));
-  assert.deepEqual(data.nodes.map(node=>node.kind),['group','user','message','project']);
-  assert.deepEqual(data.nodes.map(node=>node.id),['group:*','user:a','message:m','project:p']);
-  assert.equal(data.nodes[0].chat_type,'private');
-  assert.deepEqual(data.edges,[{from:'group:*',to:'message:m',kind:'contains'}]);
-  assert.deepEqual(data.bounds,{users:1,projects:1,groups:1,messages:1,truncated:true});
+  assert.deepEqual(data.nodes.map(node=>node.kind),['collection','user','message','project']);
+  assert.deepEqual(data.nodes.map(node=>node.id),['collection:*','user:a','message:m','project:p']);
+  assert.equal(data.nodes[0].chat_type,undefined);
+  assert.deepEqual(data.edges,[{from:'collection:*',to:'message:m',kind:'contains'}]);
+  assert.deepEqual(data.bounds,{collections:1,users:1,projects:1,groups:0,messages:1,truncated:true});
 });
 
 test('3D layout preserves originals and edges without mutating the source graph',()=>{
@@ -52,7 +52,7 @@ test('layout is repeatable across input ordering and occupies all three dimensio
     const values=first.nodes.map(node=>node[axis]);
     assert.ok(Math.max(...values)-Math.min(...values)>40,axis+' has real depth');
   }
-  const origin=first.nodes.find(node=>node.id==='group:*');
+  const origin=first.nodes.find(node=>node.id==='collection:*');
   assert.deepEqual([origin.x,origin.y,origin.z],[0,0,0]);
 });
 
@@ -67,7 +67,7 @@ test('empty, single-node and missing-endpoint graphs stay renderable',()=>{
 test('highlighting follows only direct recorded connections in either direction',()=>{
   const data=fixture();
   assert.deepEqual([...neighborhood(data,'user:a')].sort(),['message:0','user:a']);
-  assert.deepEqual([...neighborhood(data,'project:a')].sort(),['group:*','project:a']);
+  assert.deepEqual([...neighborhood(data,'project:a')].sort(),['collection:*','project:a']);
   assert.equal(neighborhood(data,null).size,0);
   assert.ok(!neighborhood(data,'project:a').has('message:0'),'a second hop is not a direct connection');
 });
@@ -82,7 +82,7 @@ test('a full bounded page including 400 messages retains every node with finite 
   const data=fixture();
   for(let i=0;i<400;i++) {
     data.nodes.push({id:'extra-message:'+i,kind:'message',label:'Message '+i});
-    data.edges.push({from:'group:*',to:'extra-message:'+i,kind:'contains'});
+    data.edges.push({from:'collection:*',to:'extra-message:'+i,kind:'contains'});
   }
   const graph=layoutGraph(data);
   assert.equal(graph.nodes.length,423);
@@ -157,7 +157,7 @@ test('graph request failure exposes a retry instead of an empty successful scene
 });
 
 
-test('only users, projects, groups and messages reach the browser',async()=>{
+test('only collection and source-backed context nodes reach the browser',async()=>{
   const original=page('a','Original');
   original.nodes.push({id:'derived:a',kind:'derived',label:'runtime_context'},{id:'event:a',kind:'event',label:'action'});
   original.edges.push({from:'event:a',to:'event:a',kind:'workflow'});
@@ -182,5 +182,23 @@ test('private conversations are named as private chats across browser, search, f
   assert.ok(view.elements().some(node=>node.children.includes('1 of 2 nodes')),'the semantic subtype is searchable');
   view.elements().find(node=>node.props.title==='private chat: Private chat · 123').props.onClick();await view.flush();
   assert.ok(view.elements().some(node=>node.type==='h3'&&node.children.includes('Private chat')),'the inspector keeps the subtype');
+  view.unmount();
+});
+
+test('all private knowledge is a collection and does not appear in the group filter',async()=>{
+  const graph={...page('*','Original'),nodes:[
+    {id:'collection:*',kind:'collection',label:'All private knowledge'},
+    {id:'group:123',kind:'group',chat_type:'private',label:'Private chat · 123'},
+    {id:'group:-100',kind:'group',chat_type:'group',label:'Team'},
+    {id:'message:one',kind:'message',label:'Original'},
+  ],edges:[{from:'collection:*',to:'group:123',kind:'contains'},{from:'collection:*',to:'group:-100',kind:'contains'}]};
+  const view=componentDriver(()=>Promise.resolve(graph));await view.flush();
+  assert.ok(view.elements().some(node=>node.props.title==='collection: All private knowledge'));
+  assert.ok(view.elements().some(node=>node.type==='option'&&node.props.value==='collection'&&node.children.includes('Collection')));
+  view.elements().find(node=>node.props.title==='collection: All private knowledge').props.onClick();await view.flush();
+  assert.ok(view.elements().some(node=>node.type==='h3'&&node.children.includes('Collection')));
+  view.elements().find(node=>node.props.id==='n-node-kind').props.onChange({target:{value:'group'}});await view.flush();
+  assert.ok(view.elements().some(node=>node.children.includes('2 of 4 nodes')));
+  assert.ok(!view.elements().some(node=>node.props.title==='collection: All private knowledge'));
   view.unmount();
 });
