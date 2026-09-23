@@ -90,6 +90,21 @@ or Honcho MVP release gates.
 [Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
 
 </mvp_readiness_recheck>
+<archive_browse_order>
+
+#### Newest source records first — 2026-09-23
+
+The owner asked for new items to appear at the top of the Archive table. Both
+legacy and separated-store browse routes now order source records by received
+time descending, then record ID descending to break ties. Cursor pagination
+uses the same order so pages do not skip older records or repeat rows. An
+isolated PostgreSQL test with 52 synthetic records, including equal timestamps,
+passed on both routes. The dashboard build and 22 dashboard tests passed. The
+AST-only Graphify refresh covered 526 files, 3,579 nodes, and 13,348 edges
+with zero model calls. The active installation was not rebuilt or restarted;
+visual verification there remains pending.
+
+</archive_browse_order>
 <owner_database_browser>
 
 #### Database selector visibility fix — 2026-09-23

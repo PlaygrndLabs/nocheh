@@ -248,9 +248,10 @@ export async function browseData(pool:pg.Pool,principal:Reader,after='',filters:
     (SELECT count(*)::integer FROM guard_sources s WHERE s.event_id=e.id) AS total,
     d.state AS assistant_state,d.runtime_stage AS assistant_stage,d.error_code AS assistant_error,d.attempts AS assistant_attempts
     FROM events e LEFT JOIN dispatches d ON d.event_id=e.id
-    WHERE e.id>$1 AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2)
+    WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1))
+      AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2)
       AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message')
-    ORDER BY e.id LIMIT $4`,[string(after,64),filters.scope,filters.kind,filters.reply?201:51]);
+    ORDER BY e.received_at DESC,e.id DESC LIMIT $4`,[string(after,64),filters.scope,filters.kind,filters.reply?201:51]);
   const filtered=rows.filter(row=>matchesArchiveFilters(row,row.assistant_state,filters));
   return {records:filtered.slice(0,50).map(({original_text,...row})=>({...row,text:original_text?.toString().slice(0,500)??null})),next:filtered.length>50?filtered[49].id:filters.reply&&rows.length===201?rows.at(-1)?.id:null};
 }
