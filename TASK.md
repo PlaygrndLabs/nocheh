@@ -74,6 +74,21 @@ human, exact approval, restart receipt, and Honcho production acceptance remain
 pending. MVP release acceptance is **not established**.
 [Content-free results](compatibility/results/2026-09-23-mvp-readiness-live-probe.json).
 
+#### Local app and dashboard rebuild — 2026-09-23
+
+The owner requested a rebuild of the app. From clean local `main` at `049ba39`,
+the active installation's `nocheh-app` and `nocheh-dashboard` images were rebuilt
+and only those two containers were recreated. Compose ownership inspection found
+the expected `nocheh` project, exact installation root and state anchors, and
+zero foreign-writer blockers before the rebuild. Both recreated containers run
+their new image IDs and report healthy. All 17 required services remain running;
+the app and dashboard local endpoints return HTTP 200, Hermes reports Telegram
+connected, and no execution holds are present. No database, provider, Honcho,
+executor, or Hermes container was recreated. This activates the current app and
+dashboard code locally but does not establish the pending reset, fresh Telegram,
+or Honcho MVP release gates.
+[Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
+
 </mvp_readiness_recheck>
 <owner_database_browser>
 
