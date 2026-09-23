@@ -151,6 +151,25 @@ integration is not yet pushed to `origin/main`.
 
 </telegram_group_identity_controls>
 
+<telegram_group_access_list>
+
+#### Telegram participant list controls — 2026-09-23
+
+The owner requested a clearer grant/deny UI: show people in a list and switch
+each person's access there. The Telegram section now lists each known person and
+every saved decision for the selected group with name and ID, a direct No rule /
+Grant / Deny choice, and a fixed always-allowed owner row. An unknown person's
+numeric ID can be added through a separate manual rule form. Returning a rule to
+its saved state removes the pending draft, and Save/Apply remain required before
+any running access policy changes. No live grant or denial was applied.
+
+The local build, 19 dashboard checks, and AST-only graph refresh passed. The
+isolated preview on port 18849 showed all three states, pending grant count,
+pending deny count, manual ID entry, and a return to No rule that disabled Review
+changes again. Real group message acceptance remains pending.
+
+</telegram_group_access_list>
+
 <mvp_cleanup_recheck>
 
 #### Worktree and Docker cleanup with isolated MVP recheck — 2026-09-22
