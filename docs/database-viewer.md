@@ -5,11 +5,11 @@ For the ordinary owner workflow, run `./scripts/nocheh dashboard`, open
 immutable original beside its editable guarded version. Saves create a new
 revision and never rewrite the source evidence.
 
-For raw table inspection, open **Databases** in the owner dashboard. The database
-list shows availability (a picker on narrow screens); selecting one shows its
-engine, service or file identity,
-table count, size, and version beside the table list. Choose a table, click a
-column heading to sort,
+For raw table inspection, open **Databases** in the owner dashboard. Use the
+database and table selectors at the top of the page. The database selector shows
+availability; selecting one shows its engine, service or file identity, table
+count, size, and version below. Filter table names beside the selectors when the
+table list is long. Click a column heading to sort,
 or select a column and enter text to filter its rows. Pages contain up to 50 rows;
 visible cell text is limited to 500 characters. The browser is read-only and does
 not accept SQL or arbitrary

@@ -343,36 +343,21 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .sidebar-collapsed .n-sidebar-head{flex-direction:column;gap:8px}
 .sidebar-collapsed .n-sidebar-head .n-brand{flex:0 0 auto;padding:0}
 
-/* Database explorer: a single selection rail and a readable data pane. */
+/* Database explorer: selection above a full-width data pane. */
 .archive-database-link{display:inline-block;margin-top:10px;color:var(--n-accent);font-size:13px;font-weight:650}
 .db-browser{display:grid;gap:16px}
-.db-browser-workspace{display:grid;grid-template-columns:minmax(246px,274px) minmax(0,1fr);gap:16px;align-items:start}
-.db-browser-sidebar,.db-browser-main{min-width:0}
-.db-browser-sidebar{padding:0!important;overflow:hidden}
-.db-browser-side-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:16px 18px 9px}
-.db-browser-side-heading h3{margin:0;font-size:13px;line-height:1.4}
-.db-browser-side-heading>span{color:var(--n-muted);font-size:12px;font-variant-numeric:tabular-nums}
-.nocheh-app .db-browser-mobile-picker{display:none}
-.db-browser-database-list{display:grid;gap:2px;padding:0 8px 12px}
-.db-browser-database{display:grid;gap:4px;width:100%;min-height:58px;padding:9px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--n-text);text-align:left;cursor:pointer}
-.db-browser-database:hover,.db-browser-database.selected{background:var(--n-subtle)}
-.db-browser-database.selected{border-color:var(--n-line);box-shadow:inset 3px 0 var(--n-accent)}
-.db-browser-database-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.db-browser-database-top strong{min-width:0;font-size:13px;line-height:1.35;overflow-wrap:anywhere}
+.db-browser-workspace,.db-browser-main{display:grid;gap:16px;min-width:0}
+.db-browser-workspace .n-panel{margin-bottom:0}
+.db-browser-selection{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.3fr) minmax(180px,.8fr);align-items:end;gap:12px}
+.db-browser-selection label{min-width:0;color:var(--n-muted);font-size:12px;font-weight:650}
+.db-browser-selection select,.db-browser-selection input{width:100%;min-width:0;min-height:44px;margin:7px 0 0;padding:9px 11px;border:1px solid var(--n-line);border-radius:7px;background:var(--n-subtle);color:var(--n-text);font:inherit}
+.db-browser-selection select:disabled,.db-browser-selection input:disabled{opacity:.6}
+.db-browser-selection .ui-alert,.db-browser-selection-note{grid-column:1/-1;margin:0}
+.db-browser-selection-note{color:var(--n-muted);font-size:12px}
 .db-browser-state{flex:0 0 auto;color:var(--n-muted);font-size:11px;font-weight:700;white-space:nowrap}
 .db-browser-state.available{color:var(--n-accent)}
 .db-browser-state.unavailable,.db-browser-state.missing{color:var(--n-warning)}
-.db-browser-database-meta{color:var(--n-muted);font-size:12px}
-.db-browser-table-section{border-top:1px solid var(--n-line);padding-bottom:10px}
-.db-browser-label{display:grid;gap:7px;margin:0 18px 12px;color:var(--n-muted);font-size:12px;font-weight:650}
-.db-browser-label input,.db-browser-filter input,.db-browser-filter select{width:100%;min-width:0;min-height:42px;padding:9px 11px;border:1px solid var(--n-line);border-radius:7px;background:var(--n-subtle);color:var(--n-text);font:inherit}
-.db-browser-table-list{max-height:42vh;overflow:auto;margin:0 8px}
-.db-browser-table-list button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;padding:9px 10px;border:0;border-radius:7px;background:transparent;color:var(--n-text);text-align:left;cursor:pointer}
-.db-browser-table-list button:hover,.db-browser-table-list button.selected{background:var(--n-subtle)}
-.db-browser-table-list button.selected{box-shadow:inset 3px 0 var(--n-accent);font-weight:650}
-.db-browser-table-list button span{min-width:0;overflow-wrap:anywhere}
-.db-browser-table-list button small{color:var(--n-muted);white-space:nowrap}
-.db-browser-main{display:grid;gap:16px}
+.db-browser-filter input,.db-browser-filter select{width:100%;min-width:0;min-height:42px;padding:9px 11px;border:1px solid var(--n-line);border-radius:7px;background:var(--n-subtle);color:var(--n-text);font:inherit}
 .db-browser-detail{display:grid;gap:16px}
 .db-browser-detail-heading{display:flex;align-items:start;justify-content:space-between;gap:12px}
 .db-browser-detail-flags{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
@@ -395,5 +380,5 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .db-browser-null{color:var(--n-muted);font-style:italic}
 .db-browser-pagination{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:14px;color:var(--n-muted);font-size:13px}
 .db-browser-pagination>div{display:flex;gap:8px}
-@media(max-width:900px){.db-browser-workspace{grid-template-columns:1fr}.db-browser-database-list{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.db-browser-table-list{max-height:220px}}
-@media(max-width:600px){.db-browser-detail dl{grid-template-columns:repeat(2,minmax(0,1fr))}.db-browser-database-list{display:none}.nocheh-app .db-browser-mobile-picker{display:grid;gap:7px;margin:0 18px 14px;color:var(--n-muted);font-size:12px;font-weight:650}.db-browser-mobile-picker select{width:100%;min-height:44px;padding:9px 11px;border:1px solid var(--n-line);border-radius:7px;background:var(--n-subtle);color:var(--n-text);font:inherit}}
+@media(max-width:900px){.db-browser-selection{grid-template-columns:repeat(2,minmax(0,1fr))}.db-browser-selection label:last-of-type{grid-column:1/-1}}
+@media(max-width:600px){.db-browser-selection{grid-template-columns:minmax(0,1fr)}.db-browser-selection label:last-of-type{grid-column:auto}.db-browser-detail dl{grid-template-columns:repeat(2,minmax(0,1fr))}}
