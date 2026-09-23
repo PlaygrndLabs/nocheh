@@ -25,10 +25,10 @@ const client=await pool.connect();try{
 const id='a'.repeat(64),profile='fixture-owner';
 const source={id,event:{text:'A synthetic conversation about the northern lights.',payload:{text:'A synthetic conversation about the northern lights.'},scope:'42',source_id:'fixture',channel:'telegram',received_at:new Date().toISOString()},artifacts:[],derived:[]};
 const voiceId='b'.repeat(64),voiceFileId='c'.repeat(64);
-const voice={id:voiceId,event:{kind:'telegram_update',text:null,payload:{message:{message_id:2,voice:{file_id:'synthetic-voice',duration:1,mime_type:'audio/wav'}}},scope:'42',source_id:'fixture-voice',channel:'telegram',received_at:new Date().toISOString()},
- artifacts:[{id:voiceFileId,kind:'voice',metadata:{duration:1,mime_type:'audio/wav'},state:'ready'}],derived:[]};
-const voiceBytes=Buffer.alloc(44+800,128);
-voiceBytes.write('RIFF',0);voiceBytes.writeUInt32LE(voiceBytes.length-8,4);voiceBytes.write('WAVEfmt ',8);voiceBytes.writeUInt32LE(16,16);voiceBytes.writeUInt16LE(1,20);voiceBytes.writeUInt16LE(1,22);voiceBytes.writeUInt32LE(8000,24);voiceBytes.writeUInt32LE(8000,28);voiceBytes.writeUInt16LE(1,32);voiceBytes.writeUInt16LE(8,34);voiceBytes.write('data',36);voiceBytes.writeUInt32LE(800,40);
+const voice={id:voiceId,event:{kind:'telegram_update',text:null,payload:{message:{message_id:2,voice:{file_id:'synthetic-voice',duration:3,mime_type:'audio/wav'}}},scope:'42',source_id:'fixture-voice',channel:'telegram',received_at:new Date().toISOString()},
+ artifacts:[{id:voiceFileId,kind:'voice',metadata:{duration:3,mime_type:'audio/wav'},state:'ready'}],derived:[{id:'d'.repeat(64),artifact_id:voiceFileId,kind:'transcript',content_base64:Buffer.from('Synthetic voice transcript for preview verification.').toString('base64'),provenance:{producer:'synthetic-preview'}}]};
+const voiceBytes=Buffer.alloc(44+24000,128);
+voiceBytes.write('RIFF',0);voiceBytes.writeUInt32LE(voiceBytes.length-8,4);voiceBytes.write('WAVEfmt ',8);voiceBytes.writeUInt32LE(16,16);voiceBytes.writeUInt16LE(1,20);voiceBytes.writeUInt16LE(1,22);voiceBytes.writeUInt32LE(8000,24);voiceBytes.writeUInt32LE(8000,28);voiceBytes.writeUInt16LE(1,32);voiceBytes.writeUInt16LE(8,34);voiceBytes.write('data',36);voiceBytes.writeUInt32LE(24000,40);
 let modeRevision=false;
 let revision=1,guarded='A synthetic conversation about the northern lights.',settingsRevision='fixture-1';
 let settingsChanges:Record<string,unknown>={};

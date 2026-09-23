@@ -22,5 +22,6 @@ export function createResourceStore(fetcher:(path:string,options:{signal:AbortSi
   queueMicrotask(()=>{if(!value.listeners.size&&entries.get(value.path)===value){clearTimeout(value.timer);value.sequence++;value.controller?.abort();value.controller=undefined;entries.delete(value.path);}});
  };}
  function observe(value:Entry,interval:number){const id=Symbol();value.intervals.set(id,interval);void update(value);return()=>{value.intervals.delete(id);schedule(value);};}
- return {get,subscribe,observe,update,refresh:()=>Promise.allSettled([...entries.values()].filter(value=>value.listeners.size).map(update))};
+ return {get,subscribe,observe,update,refresh:()=>Promise.allSettled([...entries.values()].filter(value=>value.listeners.size).map(update)),
+  refreshPaths:(paths:(string|null)[],prefixes:string[]=[])=>{const exact=new Set(paths.filter((path):path is string=>!!path));return Promise.allSettled([...entries.values()].filter(value=>value.listeners.size>0&&(exact.has(value.path)||prefixes.some(prefix=>value.path.startsWith(prefix)))).map(update));}};
 }

@@ -48,6 +48,17 @@ class DatabaseBrowserTests(unittest.TestCase):
         tables = database_browser.view(self.state, {'action': 'tables', 'database': 'hermes:research'})
         self.assertIn({'schema': 'main', 'name': 'messages', 'estimated_rows': None}, tables['tables'])
 
+    def test_each_nocheh_selector_queries_only_its_physical_database(self):
+        requested = []
+        def tables_for_database(state, db):
+            requested.append(db['database'])
+            return [{'schema': 'public', 'name': db['database'], 'estimated_rows': 0}]
+        with patch.object(database_browser, '_pg_tables', side_effect=tables_for_database):
+            for name in ('archive', 'derived', 'control'):
+                result = database_browser.view(self.state, {'action': 'tables', 'database': name})
+                self.assertEqual(result['tables'][0]['name'], 'nocheh_' + name)
+        self.assertEqual(requested, ['nocheh_archive', 'nocheh_derived', 'nocheh_control'])
+
     def test_sqlite_rows_sort_filter_and_reject_unknown_columns(self):
         selected = {'action': 'rows', 'database': 'hermes:research', 'schema': 'main', 'table': 'messages'}
         result = database_browser.view(self.state, {**selected, 'sort': 'id', 'direction': 'desc',

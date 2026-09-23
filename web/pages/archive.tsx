@@ -1,20 +1,23 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
-import {Check,Eye,Paperclip,Search,X} from 'lucide-react';
+import {CornerDownRight,Eye,Paperclip,Search,X} from 'lucide-react';
 import {sourceContentLabel} from '../../src/source-content.js';
-import {useResource} from '../lib/resource';
+import {useLiveResources,useResource} from '../lib/resource';
 import {CursorButtons} from '../lib/owner-controls';
 import {Button,Badge,EmptyState,Alert,Skeleton,Table} from '../components/ui/primitives';
 import {StatusBadge} from '../components/status';
 import {Source} from './source.js';
 
-type RecordRow={id?:string;event_id?:string;derived_id?:string;scope:string;text?:string;snippet?:string;preview?:string;content_types?:string[];total?:number;ready?:number;channel?:string;kind?:string;received_at?:string;assistant_state?:string;assistant_stage?:string;assistant_error?:string;assistant_attempts?:number;action_review?:{id:string;state:string;count:number}};
+type ReplyMessage={id:string;text:string|null;received_at:string;content_types?:string[]};
+type RecordRow={id?:string;event_id?:string;derived_id?:string;scope:string;text?:string;snippet?:string;preview?:string;content_types?:string[];total?:number;ready?:number;channel?:string;kind?:string;received_at?:string;assistant_state?:string;assistant_stage?:string;assistant_error?:string;assistant_attempts?:number;reply_messages?:ReplyMessage[];action_review?:{id:string;state:string;count:number}};
 type Records={records?:RecordRow[];results?:RecordRow[];items?:RecordRow[];next?:string}|RecordRow[];
 type Scopes={scopes?:{scope:string;events:number}[]};
 
 const sourceFromHash=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('source');
 const recordText=(row:RecordRow)=>[row.text,row.snippet,row.preview].find(value=>value?.trim())?.trim()||row.content_types?.map(sourceContentLabel).join(' · ')||'Message without text';
+const replyMessageText=(message:ReplyMessage)=>message.text?.trim()||message.content_types?.map(sourceContentLabel).join(' · ')||'Assistant message';
 const recordType=(row:RecordRow)=>row.kind==='telegram_update'?'Incoming Telegram':row.kind==='browser_input'?'Browser message':row.kind?.endsWith('_delivered_message')?'Assistant reply':row.kind?.replaceAll('_',' ')||row.channel?.replaceAll('_',' ')||'Source record';
-const replyState=(row:RecordRow)=>{
+const replyState=(row:RecordRow):{label:string;state:string;note?:string}|null=>{
+ if(row.kind?.endsWith('_delivered_message'))return {label:'Delivered',state:'ready'};
  if(row.kind!=='telegram_update')return null;
  const values:Record<string,{label:string;state:string;note?:string}>={done:{label:'Reply sent',state:'ready'},running:{label:'Processing',state:'running'},pending:{label:'Waiting',state:'queued'},failed:{label:'Retry scheduled',state:'retryable_failed',note:'Inngest will retry'},ambiguous:{label:'Delivery uncertain',state:'ambiguous',note:'Not auto-retried'},suppressed:{label:'No reply needed',state:'skipped'},cancelled:{label:'Cancelled',state:'cancelled'}};
  return values[row.assistant_state||'']||{label:'Not queued',state:'unknown'};
@@ -29,7 +32,10 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
  const after=pages.at(-1)||'',parameters=new URLSearchParams({...(query?{q:query}:{}),...(after&&!query?{after}:{}),...(direction!=='all'?{kind:direction}:{}),...(scope?{scope}:{}),...(replyFilter?{reply:replyFilter}:{})});
  const path=(query?'/search':'/data')+(parameters.size?'?'+parameters:'');
  const {data,error,loading}=useResource<Records>(path),source=useResource<any>(selected?'/events/'+selected:null),scopes=useResource<Scopes>('/scopes');
+ const live=useLiveResources([path,selected?'/events/'+selected:null,'/scopes'],selected?['/data/'+selected+'/guarded','/sources/'+selected+'/derivatives','/guards/events/'+selected,...(source.data?.artifacts||[]).map((item:{id:string})=>'/guards/artifacts/'+item.id),'/derivatives/','/guards/derived_artifacts/']:[]);
  const rows=Array.isArray(data)?data:data?.records||data?.results||data?.items||[],visible=rows.filter(row=>!row.derived_id);
+ const parentByReply=new Map<string,{id:string;text:string}>();
+ for(const row of visible){const id=row.event_id||row.id;if(id)for(const message of row.reply_messages||[])parentByReply.set(message.id,{id,text:recordText(row)});}
  const next=!Array.isArray(data)?data?.next:null;
  const filtersActive=direction!=='all'||!!scope||!!replyFilter;
  const choose=(id:string|null,scroll=false)=>{
@@ -61,14 +67,17 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
   </section>
   <div className={'archive-workspace archive-table-workspace'+(selected?' has-selection':'')}>
    <section className="n-panel archive-list" aria-labelledby="archive-results-title">
-    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Source records</h2><p className="archive-table-help">Original messages and other captured source evidence. Use the filters above to narrow this view.</p></div>{data&&<Badge>{visible.length} {visible.length===1?'record':'records'}</Badge>}</div>
+    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Source records</h2><p className="archive-table-help">Original messages and other captured source evidence. Use the filters above to narrow this view.</p></div><div className="n-live-label"><Badge>{live==='live'?'Live':live==='connecting'?'Connecting…':'Reconnecting…'}</Badge>{data&&<Badge>{visible.length} {visible.length===1?'record':'records'}</Badge>}</div></div>
     {query&&<p className="archive-query-summary">Matching “{query}”</p>}
     {error&&<Alert>{data?'Results may be stale.':'Archive results are unavailable.'}</Alert>}
     {!data&&loading&&<Skeleton className="chart-skeleton"/>}
     {data&&!visible.length&&<EmptyState title={filtersActive?'No messages match these filters':query?'No matching messages':'No archived messages'}>{filtersActive?'Clear or change a filter to see more source messages.':query?'Try fewer words or show all messages.':'Original messages will appear here after they are captured.'}</EmptyState>}
-    {!!visible.length&&<Table aria-label="Archive records"><thead><tr><th>Record</th><th>Type</th><th>Scope</th><th>Received</th><th>Reply / action</th><th>Agent copy</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+    {!!visible.length&&<Table aria-label="Archive records"><thead><tr><th>Message</th><th>Status</th><th>Received</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
      {visible.map((row,index)=>{const id=row.event_id||row.id,isSelected=selected===id,ready=row.total!==undefined&&row.total>0&&row.ready===row.total,reply=replyState(row);return <tr key={id||index} className={isSelected?'selected':undefined}>
-      <td><div className="archive-record-content"><span className="archive-record-text" dir="auto" title={recordText(row)}>{recordText(row)}</span>{!!row.content_types?.length&&!![row.text,row.snippet,row.preview].find(value=>value?.trim())&&<span className="archive-content-types"><Paperclip size={13} aria-hidden="true"/>{row.content_types.map(sourceContentLabel).join(' · ')}</span>}</div></td><td>{recordType(row)}</td><td><code>{row.scope}</code></td><td>{row.received_at?<time dateTime={row.received_at}>{new Date(row.received_at).toLocaleString()}</time>:'—'}</td><td title={[row.assistant_stage,row.assistant_error,row.assistant_attempts?`attempt ${row.assistant_attempts}`:''].filter(Boolean).join(' · ')||undefined}>{reply||row.action_review?<span className="archive-reply-state">{row.action_review&&<><a href={'#activity?action='+encodeURIComponent(row.action_review.id)} className="archive-action-link"><StatusBadge state={row.action_review.state} label={actionLabels[row.action_review.state]||row.action_review.state}/></a>{row.action_review.state==='proposed'&&<small>Requested action not sent</small>}{row.action_review.count>1&&<small>{row.action_review.count} actions from this message</small>}</>}{reply&&<><StatusBadge state={reply.state} label={reply.label}/>{reply.note&&<small>{reply.note}</small>}</>}</span>:'—'}</td><td>{ready?<span className="archive-ready"><Check size={13} aria-hidden="true"/>Ready</span>:row.total!==undefined?<span>{row.ready} / {row.total} ready</span>:'—'}</td><td><Button size="sm" onClick={()=>id&&choose(id,true)} disabled={!id} aria-pressed={isSelected} aria-label={'Open message '+(id||index)}><Eye size={13} aria-hidden="true"/>Open</Button></td>
+      <td><div className="archive-message-cell"><div className="archive-message-meta"><span>{recordType(row)}</span><code>{row.scope}</code>{row.total!==undefined&&<span className="archive-copy-state">Agent copy {ready?'ready':`${row.ready} / ${row.total} ready`}</span>}</div><div className="archive-record-content"><span className="archive-record-text" dir="auto" title={recordText(row)}>{recordText(row)}</span>{!!row.content_types?.length&&!![row.text,row.snippet,row.preview].find(value=>value?.trim())&&<span className="archive-content-types"><Paperclip size={13} aria-hidden="true"/>{row.content_types.map(sourceContentLabel).join(' · ')}</span>}</div>{id&&parentByReply.has(id)&&<button className="archive-parent-link" type="button" onClick={()=>choose(parentByReply.get(id)!.id,true)}>In response to: <span dir="auto">{parentByReply.get(id)!.text}</span></button>}{!!row.reply_messages?.length&&<div className="archive-linked-replies" aria-label="Delivered replies">{row.reply_messages.map(message=><button key={message.id} type="button" className="archive-linked-reply" onClick={()=>choose(message.id,true)} aria-label={'Open delivered reply: '+replyMessageText(message)}><CornerDownRight size={14} aria-hidden="true"/><span><strong>Assistant replied</strong><span dir="auto">{replyMessageText(message)}</span></span></button>)}</div>}</div></td>
+      <td title={[row.assistant_stage,row.assistant_error,row.assistant_attempts?`attempt ${row.assistant_attempts}`:''].filter(Boolean).join(' · ')||undefined}>{reply||row.action_review?<span className="archive-reply-state">{row.action_review&&<><a href={'#activity?action='+encodeURIComponent(row.action_review.id)} className="archive-action-link"><StatusBadge state={row.action_review.state} label={actionLabels[row.action_review.state]||row.action_review.state}/></a>{row.action_review.state==='proposed'&&<small>Requested action not sent</small>}{row.action_review.count>1&&<small>{row.action_review.count} actions from this message</small>}</>}{reply&&<><StatusBadge state={reply.state} label={reply.label}/>{reply.note&&<small>{reply.note}</small>}</>}</span>:'—'}</td>
+      <td>{row.received_at?<time dateTime={row.received_at}>{new Date(row.received_at).toLocaleString()}</time>:'—'}</td>
+      <td><Button size="sm" onClick={()=>id&&choose(id,true)} disabled={!id} aria-pressed={isSelected} aria-label={'Open message '+(id||index)}><Eye size={13} aria-hidden="true"/>Open</Button></td>
      </tr>;})}
     </tbody></Table>}
     {!query&&<CursorButtons pages={pages} next={next} onChange={changePage}/>}

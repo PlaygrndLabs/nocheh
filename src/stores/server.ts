@@ -24,6 +24,7 @@ import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkf
 import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
+import {archiveReplyPreviews} from './archive-reply-links.js';
 import {telegramDirectory} from './telegram-directory.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
@@ -252,7 +253,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const stateById=new Map(states.map(state=>[state.event_id,state]));
         const reviews=await actionReviews(s.stores.control,candidates.filter(row=>row.kind==='telegram_update').map(row=>row.id),'separated');
         const matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters,reviews.get(row.id)?.state));
-        const records=matched.slice(0,50).map(({payload,artifact_kinds,original_text,...row})=>({...row,...stateById.get(row.id),...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[])}));
+        const page=matched.slice(0,50),replyPreviews=await archiveReplyPreviews(s.stores.archive,s.stores.control,page);
+        const records=page.map(({payload,artifact_kinds,original_text,...row})=>({...row,...stateById.get(row.id),
+          ...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
+          text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[]),
+          reply_messages:replyPreviews.get(row.id)??[]}));
         const next=matched.length>50?matched[49].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
         return json(res,200,{records,next});
       }
