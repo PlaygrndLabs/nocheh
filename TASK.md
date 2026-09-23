@@ -164,8 +164,7 @@ to a slower refresh cadence during stream failures. The stream carries no row
 content; the existing read-only endpoints remain the source of data.
 
 The dashboard build and 29 focused dashboard/auth/maintenance/archive tests pass
-after merging concurrent Archive table work. A
-synthetic HTTP test covers unauthenticated-stream rejection and proves that
+after merging concurrent Archive table work. A synthetic HTTP test covers unauthenticated-stream rejection and proves that
 backup closes the stream before its request drain. An isolated loopback preview
 on port 18974 visibly updated an open Databases row and an open Archive record
 without reloading. The AST-only Graphify refresh covers 531 files, 3,606 nodes,
@@ -173,7 +172,9 @@ and 13,432 edges with zero model calls. The full `npm test` run reached 176 test
 but failed five checks because the fresh worktree has no service token or
 PostgreSQL test credentials; a focused worker rerun passed with synthetic
 tokens. Database-backed acceptance and active installation verification remain
-pending. Git integration outcome follows the commit and push attempt.
+pending. Local integration into `main` succeeded. The push to `origin/main`
+failed because GitHub HTTPS credentials are unavailable on this host, and the
+existing SSH identity was rejected. Remote synchronization remains pending.
 
 </archive_database_live_updates>
 <archive_reply_table>
