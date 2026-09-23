@@ -1,5 +1,37 @@
 # Nocheh implementation status
 
+<mvp_readiness_recheck>
+
+#### Fresh local MVP readiness test — 2026-09-23
+
+The owner requested a real test of MVP readiness. Read-only diagnostics of the
+running local installation found all 17 required services healthy and no workflow,
+worker, tool, scheduler, or subscription-login execution holds. A fresh reset
+preflight found 17 owned containers, three mounted volumes, 55 classified paths,
+zero ownership blockers, and ten pending reset phases. The saved storage layout
+remains `legacy`; this preflight neither authorized nor executed a reset.
+
+The live shared-subscription probe passed refresh, literal detection, and Ogg/Opus
+transcription. Its exact-chat probe timed out after 129 seconds, so that complete
+run failed. One focused exact-chat retry then passed in 8.4 seconds. Both outcomes
+are retained; the retry does not erase the timeout. The isolated
+`./scripts/nocheh test` gate passed on the pinned images: 126 Node/dashboard
+checks passed with 46 fixture skips, the separate database-loss recovery check
+passed, and 353 native Hermes tests passed with three skips. Its temporary
+Compose containers, networks, and database volume were removed. The active
+installation still had all 17 required services healthy afterward.
+
+MVP release acceptance remains **not established**. The controlled
+legacy-to-original-only transition, fresh backlog boundary and empty-baseline
+proof, row-linked post-boundary Telegram checks (owner voice, designated group
+with a non-owner human reply and reaction, intentional silence, private/group
+isolation, exact approval, and restart receipt recovery), and separate Honcho
+production acceptance are pending. No reset, live Telegram test send, approval,
+provider cutover, or Honcho activation was performed in this recheck.
+[Content-free results](compatibility/results/2026-09-23-mvp-readiness-recheck.json).
+
+</mvp_readiness_recheck>
+
 <archive_assistant_replies>
 
 #### Legacy delivered replies missing from Archive — 2026-09-23
