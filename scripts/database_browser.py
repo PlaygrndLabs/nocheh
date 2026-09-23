@@ -1,12 +1,13 @@
 """Read-only, bounded table browsing for the owner dashboard.
 
 PostgreSQL queries run inside the installation's database containers. SQLite
-sessions are opened in read-only mode from registered Hermes profiles only.
+sessions are opened in read-only mode from configured installation paths.
 No caller-supplied SQL, database path, or identifier reaches a query.
 """
 import json
 import sqlite3
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 
@@ -54,17 +55,17 @@ def _catalog(state):
         raise ValueError('database_path_denied')
     for profile in registered_profiles(root):
         path = database_path(profile)
-        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
             continue
         databases.append({'id': 'hermes:' + profile.name, 'name': 'Hermes · ' + profile.name,
                           'engine': 'sqlite', 'path': path})
     provider = Path(state) / 'provider/monitor/usage.sqlite'
-    if provider.is_file() and not provider.is_symlink():
+    if not provider.is_symlink():
         databases.append({'id': 'provider-usage', 'name': 'Provider usage',
                           'engine': 'sqlite', 'path': provider})
     honcho_state = Path(config.get('NOCHEH_HONCHO_STATE_DIR') or Path(state) / 'honcho')
     ledger = honcho_state / 'ledger/budget.sqlite'
-    if config.get('NOCHEH_HONCHO_ENABLED') == 'true' and ledger.is_file() and not ledger.is_symlink():
+    if config.get('NOCHEH_HONCHO_ENABLED') == 'true' and not ledger.is_symlink():
         databases.append({'id': 'honcho-ledger', 'name': 'Honcho budget ledger',
                           'engine': 'sqlite', 'path': ledger})
     return databases
@@ -140,6 +141,30 @@ def _sqlite_columns(connection, table):
             connection.execute('PRAGMA table_info(' + _identifier(table) + ')')][:150]
 
 
+def _status(state, db):
+    public = {'id': db['id'], 'name': db['name'], 'engine': db['engine'],
+              'identifier': db['database'] if db['engine'] == 'postgres' else db['path'].name,
+              'service': db.get('service')}
+    if db['engine'] == 'sqlite' and not db['path'].is_file():
+        return {**public, 'state': 'missing', 'detail': 'Database file has not been created'}
+    try:
+        if db['engine'] == 'postgres':
+            details = _pg(state, db, """SELECT json_build_object(
+              'size_bytes',pg_database_size(current_database()),
+              'table_count',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE c.relkind IN ('r','p') AND n.nspname NOT IN ('pg_catalog','information_schema')
+                AND n.nspname NOT LIKE 'pg_toast%'),
+              'version',current_setting('server_version'))""")[0]
+        else:
+            with closing(_sqlite(state, db)) as connection:
+                details = {'size_bytes': db['path'].stat().st_size,
+                           'table_count': connection.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0],
+                           'version': connection.execute('SELECT sqlite_version()').fetchone()[0]}
+        return {**public, 'state': 'available', **details}
+    except (ValueError, IndexError, OSError, sqlite3.Error):
+        return {**public, 'state': 'unavailable', 'detail': 'Database could not be reached'}
+
+
 def _rows_pg(state, db, schema, table, columns, sort, direction, filter_column, filter_text, offset):
     names = {column['name'] for column in columns}
     if sort and sort not in names or filter_column and filter_column not in names:
@@ -176,6 +201,10 @@ def _rows_sqlite(state, db, table, columns, sort, direction, filter_column, filt
 
 def view(state, request):
     action = request.get('action', 'databases')
+    if action == 'status':
+        databases = _catalog(state)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            return {'databases': list(executor.map(lambda db: _status(state, db), databases))}
     if action == 'databases':
         return {'databases': [{key: value for key, value in db.items() if key not in ('service', 'database', 'user', 'path')}
                               for db in _catalog(state)]}

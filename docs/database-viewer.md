@@ -5,13 +5,15 @@ For the ordinary owner workflow, run `./scripts/nocheh dashboard`, open
 immutable original beside its editable guarded version. Saves create a new
 revision and never rewrite the source evidence.
 
-For raw table inspection, open **Databases** in the owner dashboard. Choose a
-database and table, click a column heading to sort, or select a column and enter
-text to filter its rows. Pages contain up to 50 rows; visible cell text is limited
-to 500 characters. The browser is read-only and does not accept SQL or arbitrary
+For raw table inspection, open **Databases** in the owner dashboard. The database
+cards show availability; selecting one shows its engine, service or file identity,
+table count, size, and version. Choose a table, click a column heading to sort,
+or select a column and enter text to filter its rows. Pages contain up to 50 rows;
+visible cell text is limited to 500 characters. The browser is read-only and does
+not accept SQL or arbitrary
 file paths. It includes the configured Nocheh PostgreSQL databases, Inngest
 workflow PostgreSQL, enabled Honcho PostgreSQL, registered Hermes profile SQLite,
-and existing provider usage and Honcho budget SQLite databases. Unavailable
+provider usage SQLite, and enabled Honcho budget SQLite databases. Unavailable
 database services or files show an error state. Redis holds
 operational keys rather than tables; Monitoring shows its service health, not
 raw keys.

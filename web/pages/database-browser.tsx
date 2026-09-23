@@ -4,18 +4,22 @@ import {useResource} from '../lib/resource';
 import {Alert,Badge,Button,EmptyState,Skeleton,Table} from '../components/ui/primitives';
 
 type DatabaseEntry={id:string;name:string;engine:'postgres'|'sqlite'};
+type DatabaseStatus=DatabaseEntry&{identifier:string;service:string|null;state:'available'|'unavailable'|'missing';detail?:string;size_bytes?:number;table_count?:number;version?:string};
 type TableEntry={schema:string;name:string;estimated_rows:number|null};
 type Column={name:string;type:string};
 type Page={columns:Column[];rows:Record<string,string|null>[];next_offset:number|null;offset:number;cell_limit:number};
 
 function path(parameters:Record<string,string>){return '/database-browser?'+new URLSearchParams(parameters);}
+function formatBytes(value:number){return new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(value/1024/1024)+' MiB';}
 
 export function DatabaseBrowser(){
  const [database,setDatabase]=useState('archive'),[chosen,setChosen]=useState<TableEntry|null>(null),[tableSearch,setTableSearch]=useState('');
  const [sort,setSort]=useState(''),[direction,setDirection]=useState<'asc'|'desc'>('asc');
  const [filterColumn,setFilterColumn]=useState(''),[draftFilter,setDraftFilter]=useState(''),[filter,setFilter]=useState(''),[offset,setOffset]=useState(0);
  const catalog=useResource<{databases:DatabaseEntry[]}>(path({action:'databases'}));
+ const status=useResource<{databases:DatabaseStatus[]}>(path({action:'status'}));
  const databases=catalog.data?.databases||[],current=databases.find(item=>item.id===database)||databases[0];
+ const currentStatus=status.data?.databases.find(item=>item.id===current?.id);
  const tables=useResource<{tables:TableEntry[]}>(current?path({action:'tables',database:current.id}):null);
  const allTables=tables.data?.tables||[];
  const selected=chosen&&allTables.some(item=>item.schema===chosen.schema&&item.name===chosen.name)?chosen:
@@ -32,6 +36,18 @@ export function DatabaseBrowser(){
   <section className="n-panel db-browser-intro"><div><p className="archive-kicker">Read only</p><h2>Browse database tables</h2><p>Select a database and table to inspect stored rows. Sort a column or filter its text. Changes to data use the regular owner controls.</p></div><Database size={28} aria-hidden="true"/></section>
   {catalog.error&&<Alert>Database list is unavailable. Refresh to try again.</Alert>}
   {!catalog.data&&catalog.loading&&<Skeleton className="chart-skeleton"/>}
+  {status.error&&<Alert>Database status could not be checked. Refresh to try again.</Alert>}
+  {!!databases.length&&<section className="db-browser-overview" aria-label="Database status">{databases.map(item=>{
+   const itemStatus=status.data?.databases.find(entry=>entry.id===item.id);
+   return <button key={item.id} type="button" className={'db-browser-database'+(current?.id===item.id?' selected':'')} aria-current={current?.id===item.id?'true':undefined} onClick={()=>chooseDatabase(item.id)}>
+    <span className="db-browser-database-top"><strong>{item.name}</strong><span className={'db-browser-state '+(itemStatus?.state||'checking')}>{itemStatus?.state==='available'?'Available':itemStatus?.state==='missing'?'Not created':itemStatus?.state==='unavailable'?'Unavailable':'Checking…'}</span></span>
+    <span className="db-browser-database-meta">{item.engine==='sqlite'?'SQLite':'PostgreSQL'}{itemStatus?.table_count!==undefined?' · '+itemStatus.table_count+(itemStatus.table_count===1?' table':' tables'):''}</span>
+   </button>;
+  })}</section>}
+  {current&&<section className="n-panel db-browser-detail" aria-label="Selected database details"><div><p className="archive-kicker">Database details</p><h2>{current.name}</h2></div>
+   <dl><div><dt>Status</dt><dd>{currentStatus?.state==='available'?'Available':currentStatus?.state==='missing'?'Not created':currentStatus?.state==='unavailable'?'Unavailable':'Checking…'}</dd></div><div><dt>Engine</dt><dd>{current.engine==='sqlite'?'SQLite':'PostgreSQL'}</dd></div><div><dt>Database</dt><dd>{currentStatus?.identifier||'—'}</dd></div><div><dt>Service</dt><dd>{currentStatus?.service||'Local file'}</dd></div><div><dt>Tables</dt><dd>{currentStatus?.table_count??'—'}</dd></div><div><dt>{current.engine==='sqlite'?'File size':'Database size'}</dt><dd>{currentStatus?.size_bytes===undefined?'—':formatBytes(currentStatus.size_bytes)}</dd></div><div><dt>Version</dt><dd>{currentStatus?.version||'—'}</dd></div></dl>
+   {currentStatus?.detail&&<p className="db-browser-detail-error">{currentStatus.detail}</p>}
+  </section>}
   {!!databases.length&&<div className="db-browser-workspace">
    <aside className="n-panel db-browser-sidebar" aria-label="Database tables">
     <label className="db-browser-label">Database<select value={current?.id} onChange={event=>chooseDatabase(event.target.value)}>{databases.map(item=><option key={item.id} value={item.id}>{item.name} · {item.engine==='sqlite'?'SQLite':'PostgreSQL'}</option>)}</select></label>

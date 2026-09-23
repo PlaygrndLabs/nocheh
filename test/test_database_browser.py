@@ -71,6 +71,20 @@ class DatabaseBrowserTests(unittest.TestCase):
                 database_browser._rows_pg(self.state, {}, 'public', 'events', [{'name': 'text'}],
                                           'missing', 'asc', '', '', 0)
 
+    def test_status_includes_details_and_keeps_unavailable_stores_visible(self):
+        with patch.object(database_browser, '_pg', side_effect=ValueError('database_unavailable')):
+            result = database_browser.view(self.state, {'action': 'status'})['databases']
+        by_id = {item['id']: item for item in result}
+        self.assertEqual(by_id['archive']['state'], 'unavailable')
+        self.assertEqual(by_id['hermes:research']['state'], 'available')
+        self.assertEqual(by_id['hermes:research']['table_count'], 1)
+        self.assertEqual(by_id['hermes:research']['identifier'], 'state.db')
+        self.assertNotIn(str(self.state), str(result))
+        self.sqlite.unlink()
+        with patch.object(database_browser, '_pg', side_effect=ValueError('database_unavailable')):
+            missing = database_browser.view(self.state, {'action': 'status'})['databases']
+        self.assertEqual(next(item for item in missing if item['id'] == 'hermes:research')['state'], 'missing')
+
 
 if __name__ == '__main__':
     unittest.main()
