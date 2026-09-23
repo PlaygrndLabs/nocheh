@@ -30,6 +30,30 @@ production acceptance are pending. No reset, live Telegram test send, approval,
 provider cutover, or Honcho activation was performed in this recheck.
 [Content-free results](compatibility/results/2026-09-23-mvp-readiness-recheck.json).
 
+#### Current-revision follow-up — 2026-09-23
+
+At `e441630`, a second read-only local diagnostic found all 17 required services
+running and healthy, no execution holds, Telegram connected, guard mode on, and
+CLIProxy as the shared provider's sole refresh owner. A new live synthetic
+subscription run passed refresh (8 ms), exact chat (7.1 s), literal detection
+(3.2 s), and Ogg/Opus transcription (4.6 s). The earlier 129-second exact-chat
+timeout remains recorded above as a separate reliability observation.
+
+The current-revision isolated `./scripts/nocheh test` gate passed 126
+Node/dashboard checks with 46 fixture skips, the database-loss recovery check,
+and 353 native Hermes tests with three skips. Its temporary Compose project and
+volume were removed; the active installation remained 17/17 healthy. A fresh
+read-only reset preflight found the `legacy` layout, 17 containers, three volumes,
+55 classified paths, zero ownership blockers, and ten pending phases. The
+five external archive review roots contain no immediate items. This inventory
+did not authorize or execute a reset.
+
+MVP release acceptance is **not established**. The controlled reset, fresh
+post-boundary Telegram and group/human evidence, exact owner approval and restart
+receipt checks, and post-reset Honcho production acceptance remain pending.
+No installation reset, test message, approval, or external delivery occurred in
+this follow-up. [Content-free results](compatibility/results/2026-09-23-mvp-real-test-current-revision.json).
+
 </mvp_readiness_recheck>
 <owner_database_browser>
 
