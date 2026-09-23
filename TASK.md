@@ -224,6 +224,25 @@ selected for the known participant and the separate Explicit deny choice. All
 
 </telegram_default_deny_label>
 
+<telegram_binary_access_ui>
+
+#### Two-state Telegram group access UI — 2026-09-23
+
+The owner rejected the three-option participant control. Settings now presents
+only Denied and Allowed for each visible person and for manual ID entry. Denied
+is the effective default; the saved policy can still represent an explicit deny
+without exposing it as a third choice. Switching back to the original effective
+state restores the saved rule instead of leaving a draft. The owner remains
+always allowed, and Save/Apply remain required for any runtime policy change.
+
+The local build and 22 dashboard tests pass, including focused tests for default,
+saved grant, and explicit deny transitions. The AST-only code graph was refreshed.
+The isolated preview on port 18849 verified exactly two choices, default Denied,
+Allowed/Denied switching, the cleared draft on return, and a two-choice manual
+form. No live access decision was saved or applied.
+
+</telegram_binary_access_ui>
+
 <mvp_cleanup_recheck>
 
 #### Worktree and Docker cleanup with isolated MVP recheck — 2026-09-22
