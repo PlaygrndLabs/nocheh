@@ -151,6 +151,62 @@ remain pending. MVP release acceptance is **not established**.
 [Content-free result](compatibility/results/2026-09-23-post-rebuild-live-test.json).
 
 </mvp_readiness_recheck>
+<archive_database_live_updates>
+
+#### Archive and Databases live views — 2026-09-23
+
+The owner requested a stream so Archive and Databases changes appear live. The
+owner dashboard now exposes a session-authenticated server-sent invalidation
+stream. Open Archive and Databases pages refresh only their visible bounded reads
+on stream ticks, retain active filters and pagination, and show connection state.
+A reconnect or return to the tab refreshes missed changes. The browser falls back
+to a slower refresh cadence during stream failures. The stream carries no row
+content; the existing read-only endpoints remain the source of data.
+
+The dashboard build and 29 focused dashboard/auth/maintenance/archive tests pass
+after merging concurrent Archive table work. A synthetic HTTP test covers unauthenticated-stream rejection and proves that
+backup closes the stream before its request drain. An isolated loopback preview
+on port 18974 visibly updated an open Databases row and an open Archive record
+without reloading. The AST-only Graphify refresh covers 531 files, 3,606 nodes,
+and 13,432 edges with zero model calls. The full `npm test` run reached 176 tests
+but failed five checks because the fresh worktree has no service token or
+PostgreSQL test credentials; a focused worker rerun passed with synthetic
+tokens. Database-backed acceptance and active installation verification remain
+pending. Local integration into `main` succeeded. The push to `origin/main`
+failed because GitHub HTTPS credentials are unavailable on this host, and the
+existing SSH identity was rejected. Remote synchronization remains pending.
+
+</archive_database_live_updates>
+<archive_reply_table>
+
+#### Connected archive replies — 2026-09-23
+
+The owner asked for clearer Archive columns, a status instead of the ambiguous
+Reply column, and the actual assistant message visibly connected to its incoming
+message. The table now keeps type, conversation, and agent-copy readiness with
+the message; the status column shows incoming reply processing or confirmed
+outgoing delivery. A confirmed delivered message appears beneath its incoming
+message and opens its own immutable source. When both records are on the page,
+the outgoing row also links back to the incoming message. The default browse
+order and source-record count are unchanged.
+
+Both storage layouts now resolve links from durable delivery evidence: legacy
+outbound result captures and separated-store delivery receipts. Unconfirmed
+drafts and uncertain sends do not become reply previews. The pinned Node 24
+build, three focused link checks, and all 22 dashboard checks pass. The legacy
+PostgreSQL integration case was extended to assert the link, but was skipped in
+this session because no isolated PostgreSQL fixture was assigned. An isolated
+synthetic browser preview on port 18958 verified the table layout and opening a
+reply preview; it does not prove the active installation's stored links. The
+active installation was not rebuilt or restarted, so live visual verification
+remains pending.
+
+Integration with concurrent Archive media work preserves content-type labels for
+voice and other non-text messages in both the table and linked reply preview.
+The reconciled Node 24 build and focused regression set pass 28 checks with one
+PostgreSQL fixture skip; `git diff --check` passes.
+
+</archive_reply_table>
 <archive_browse_order>
 
 #### Newest source records first — 2026-09-23
@@ -167,6 +223,30 @@ visual verification there remains pending.
 
 </archive_browse_order>
 <owner_database_browser>
+
+#### Legacy combined database label and transition review — 2026-09-23
+
+The owner observed operational tables under the database browser's archive
+selection and asked to fix the source-only archive mismatch. The legacy catalog
+now labels the physical `nocheh` database **Legacy combined**, matching its mixed
+source, derived, and control tables. The browser still exposes the raw tables; the
+separate `nocheh_archive` layout remains the actual source-only storage target.
+Four focused browser tests, the dashboard build, documentation link and diff checks,
+an isolated browser preview of the corrected selector and heading, and the AST-only
+Graphify refresh pass. The refresh covered 528 files, 3,590 nodes, and 13,376
+edges with zero model calls. The active dashboard was not rebuilt for this label.
+
+A fresh read-only reset preflight recorded 18 owned containers, three volumes,
+55 classified installation paths, and one blocker: a running transient Hermes
+turn container whose Compose origin does not match the fixed installation plan.
+Five external archive review roots contain 16 immediate directories requiring
+individual ownership decisions. Fourteen match the exact device/inode identities
+of a prior review; two do not. The current legacy database has 51 tables and
+aggregate counts of 99 events, two artifacts, 376 derived artifacts, 99 dispatches,
+and two action requests. No source content was read or copied, no service was
+stopped, and no reset phase was executed. The supported clean transition would
+erase installation content; whether to use that transition or preserve current
+content through a new migration path needs the owner's choice.
 
 #### Top database and table selectors — 2026-09-23
 
@@ -744,7 +824,10 @@ showed its active transcript; one click on Play produced an audio element with
 `paused: false`, a progressing play time, and a 3-second duration. The preview
 uses no installation credentials or external execution authority. The AST-only
 Graphify refresh covered 528 files, 3,590 nodes, and 13,376 edges with zero
-model calls. The live installation and real Telegram voice were not retested.
+model calls. After reconciling the concurrent Archive live-refresh work, the
+combined Node 24 image built, all 24 dashboard tests passed, and Graphify
+covered 531 files, 3,606 nodes, and 13,432 edges with zero model calls. The
+live installation and real Telegram voice were not retested.
 
 #### Archive status, filters, and message-detail clarity — 2026-09-22
 

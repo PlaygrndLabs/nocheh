@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useSyncExternalStore} from 'react';
+import {useCallback,useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {fetchJSON} from '../client.js';
 import {createResourceStore,type Snapshot} from './resource-store';
 export type {Snapshot} from './resource-store';
@@ -13,3 +13,27 @@ export function useResource<T=any>(path:string|null,interval=0,revision=0):Snaps
  return snapshot;
 }
 export function useLoad(path:string|null,revision=0):[any,string]{const {data,error}=useResource(path,0,revision);return [data,error];}
+
+/** Refreshes only the resources visible on this page when the owner stream ticks. */
+export function useLiveResources(paths:(string|null)[],prefixes:string[]=[]):'connecting'|'live'|'reconnecting'{
+ const current=useRef({paths,prefixes});current.current={paths,prefixes};
+ const [state,setState]=useState<'connecting'|'live'|'reconnecting'>('connecting');
+ useEffect(()=>{
+  let stream:EventSource|undefined,fallback:ReturnType<typeof setInterval>|undefined;
+  const refresh=()=>{void store.refreshPaths(current.current.paths,current.current.prefixes);};
+  const startFallback=()=>{if(!fallback)fallback=setInterval(()=>{if(document.visibilityState==='visible')refresh();},10000);};
+  const stopFallback=()=>{if(fallback)clearInterval(fallback);fallback=undefined;};
+  const connect=()=>{
+   if(document.visibilityState==='hidden')return;
+   if(typeof EventSource==='undefined'){setState('reconnecting');startFallback();return;}
+   stream=new EventSource('/api/nocheh/changes');
+   stream.addEventListener('refresh',refresh);
+   stream.onopen=()=>{setState('live');stopFallback();refresh();};
+   stream.onerror=()=>{setState('reconnecting');startFallback();};
+  };
+  const visibility=()=>{if(document.visibilityState==='hidden'){stream?.close();stream=undefined;stopFallback();setState('connecting');}else{connect();refresh();}};
+  document.addEventListener('visibilitychange',visibility);connect();
+  return()=>{document.removeEventListener('visibilitychange',visibility);stream?.close();stopFallback();};
+ },[]);
+ return state;
+}
