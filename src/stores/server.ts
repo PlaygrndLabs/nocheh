@@ -239,7 +239,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(file){const bytes=await s.sources.bytes(principal,file[1]!);res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store','content-length':bytes.length});return res.end(bytes);}
       admin(principal);
       if(path==='/v1/scopes') {
-        const rows=(await s.stores.archive.query('SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 GROUP BY scope ORDER BY scope LIMIT 101',[url.searchParams.get('after')??''])).rows;
+        const rows=(await s.stores.archive.query("SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 AND origin<>'generated' AND kind<>'telegram_wire' GROUP BY scope ORDER BY scope LIMIT 101",[url.searchParams.get('after')??''])).rows;
         return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99].scope:null});
       }
       if(path==='/v1/data') {
