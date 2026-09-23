@@ -3,6 +3,7 @@ import { dirname,join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { digest, envelope, ingest } from './archive.js';
+import {captureEvidence} from './stores/generated-capture.js';
 import { HttpError } from './http.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
@@ -29,6 +30,27 @@ export async function storeBytes(root:string,bytes:Buffer):Promise<string> {
   const hash=digest(bytes); await immutableFile(join(root,'files'),hash,bytes); return hash;
 }
 const spoolCursors = new Map<string,string>();
+const deliveryCursors = new Map<string,{after:string;complete:boolean}>();
+
+/** Recover delivered source messages from receipts committed before legacy capture
+ * learned to project them. A bounded pass runs alongside ordinary spool draining. */
+export async function reconcileLegacyDeliveries(pool:pg.Pool,root:string):Promise<void> {
+  const cursor=deliveryCursors.get(root)??{after:'',complete:false};
+  if(cursor.complete)return;
+  const rows=(await pool.query(`SELECT id,source_key,channel,bot_id,scope,source_id,revision,occurred_at,
+    original_text,payload FROM events WHERE id>$1 AND origin='generated' AND kind='outbound_result'
+    ORDER BY id LIMIT 100`,[cursor.after])).rows;
+  for(const row of rows) {
+    const value=envelope({version:1,key:row.source_key,channel:row.channel,origin:'generated',
+      bot_id:row.bot_id,kind:'outbound_result',scope:row.scope,source_id:row.source_id,
+      revision:row.revision,occurred_at:row.occurred_at,text:row.original_text?.toString()??null,
+      payload:JSON.parse(row.payload.toString())});
+    for(const original of captureEvidence(value).originals)await ingest(pool,original,false);
+    cursor.after=row.id;
+  }
+  cursor.complete=rows.length<100;
+  deliveryCursors.set(root,cursor);
+}
 export async function drainSpool(pool:pg.Pool,root:string):Promise<void> {
   const directory=join(root,'spool','pending'); await mkdir(directory,{recursive:true,mode:0o700});
   const names=(await readdir(directory)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).sort();
@@ -42,6 +64,8 @@ export async function drainSpool(pool:pg.Pool,root:string):Promise<void> {
       const value=envelope(JSON.parse(bytes.toString('utf8')));
       if (`${digest(value.key)}.json` !== name) throw new HttpError(400,'spool_identity_mismatch');
       await ingest(pool,value);
+      if(value.origin==='generated')for(const original of captureEvidence(value).originals)
+        await ingest(pool,original,false);
       await unlink(join(directory,name)); await syncDirectory(directory);
       await pool.query('DELETE FROM spool_failures WHERE file_name=$1',[name]);
     } catch(error) {
@@ -52,6 +76,7 @@ export async function drainSpool(pool:pg.Pool,root:string):Promise<void> {
       catch { return; }
     }
   }
+  await reconcileLegacyDeliveries(pool,root);
 }
 
 export async function fetchAttachments(pool:pg.Pool, root:string, fetchFile:(ref:string)=>Promise<Buffer>,eventId:string|null=null,authority:ExecutionAuthority):Promise<void> {
