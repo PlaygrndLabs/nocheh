@@ -80,7 +80,7 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     await ingest(pool,{...value,key:'generated:outbound',origin:'generated',kind:'outbound_result',text:'operational marker',payload:{state:'delivered'}});
     const deliveredText='Hello from the assistant';
     const delivered={message_id:77,date:1700000001,chat:{id:-20,type:'group'},from:{id:999,is_bot:true},text:deliveredText};
-    const receipt:Envelope={...value,key:'outbound:fixture:reply:result',origin:'generated',kind:'outbound_result',
+    const receipt:Envelope={...value,key:'outbound:fixture:telegram:fixture:update:100:sendMessage:hash:result',origin:'generated',kind:'outbound_result',
       text:null,payload:{method:'sendMessage',state:'delivered',status:200,
         wire_base64:Buffer.from(canonical({ok:true,result:delivered})).toString('base64')}};
     // This receipt has already left the spool, as on installations running the
@@ -104,6 +104,11 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     assert.ok(browse.records.every(row=>row.kind!=='outbound_result'&&row.kind!=='telegram_wire'),'default archive browse contains source evidence only');
     const originalRow=browse.records.find(row=>row.id===digest(value.key));
     assert.equal(originalRow?.assistant_state,'failed');assert.equal(originalRow?.assistant_attempts,2);
+    assert.deepEqual(originalRow?.reply_messages?.map((reply:{text:string|null})=>reply.text),[deliveredText],
+      'the observed assistant message remains linked to its incoming source even when dispatch state later changes');
+    const ownerHit=(await search(pool,{admin:true,scope:null},'Hey Mak')).find(row=>row.id===digest(value.key));
+    assert.equal(ownerHit?.assistant_state,'failed','owner search retains the incoming reply status');
+    assert.deepEqual(ownerHit?.reply_messages?.map((reply:{text:string|null})=>reply.text),[deliveredText]);
     assert.deepEqual(originalRow?.content_types,['voice'],'browse identifies the original attachment alongside message text');
     assert.equal((await search(pool,{admin:true,scope:null},'operational marker')).length,0,'owner archive search excludes operational records');
     const monitoring=await archiveStatus(pool);

@@ -20,6 +20,11 @@ database services or files show an error state. Redis holds
 operational keys rather than tables; Monitoring shows its service health, not
 raw keys.
 
+On a legacy installation, **Legacy combined** is the old shared PostgreSQL
+database. Its raw table list includes source, derived, and control data. The
+source-only `nocheh_archive` database appears after the controlled transition to
+the separate-store layout.
+
 Use the optional pgweb browser below when raw SQL queries or exports of the owned
 archive are needed. It is read-only; product records must be changed through their
 dashboard, API, or CLI commands so revision, authorization, invalidation, and
