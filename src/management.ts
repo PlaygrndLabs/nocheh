@@ -214,6 +214,8 @@ export async function startManagement() {
       if(ownerStoragePath('/v1'+route)&&['GET','POST'].includes(req.method??''))return json(res,200,await python({operation:'knowledge.api',path:'/v1'+route+url.search,
         ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
       if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
+      if(req.method==='GET'&&route==='/database-browser')return json(res,200,await python({operation:'database.browser',
+        request:Object.fromEntries(url.searchParams)}));
       if(req.method==='GET'&&/^\/workflows(?:\/(?:health|metrics|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
       if(req.method==='POST'&&/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route,body:await readJson(req)}));
       if(route==='/tools/actions' && req.method==='GET')return json(res,200,await python({operation:'tools.manage'}));
