@@ -112,6 +112,44 @@ dashboard code locally but does not establish the pending reset, fresh Telegram,
 or Honcho MVP release gates.
 [Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
 
+#### Live post-rebuild Telegram test — 2026-09-23
+
+The owner sent one synthetic DM and confirmed exactly one appropriate Telegram
+reply. The active local installation captured it once, finished dispatch on its
+first attempt, recorded one delivered `sendMessage`, and displayed the reply in
+the rebuilt dashboard Archive. Capture-to-delivery was about 30 seconds.
+
+The owner also sent a synthetic voice note. The captured audio file exists and
+matches its stored byte count and SHA-256. Subscription transcription completed
+on its first attempt with matching input provenance. The transcript recognized
+the synthetic acceptance phrase, though it rendered the bot name differently.
+The assistant result links to the voice event, dispatch completed on its first
+attempt, and one `sendMessage` delivery was recorded about 46 seconds after
+capture. The owner reported a reply, but its harmless synthetic marker was
+replaced by `***`. The original transcript retains the marker while its automatic
+guarded projection masks it. This is a live answer-quality finding; the voice
+answer is not a clean semantic pass.
+
+The selected group's exact synthetic logging-only message was captured once and
+suppressed after one attempt with `intentional_silence`. No outbound intent,
+result, or delivered message appeared in that group's test window. The owner
+confirmed no Telegram-visible reply.
+
+For private/group isolation, the owner's private marker and group question were
+captured in separate scopes and in order. The group policy has no access to the
+private DM source, no active share grants it, and neither the group's prepared
+context nor its derived inputs contained the marker. The delivered group reply
+did not contain the marker; the owner observed a refusal to access the DM.
+It cited the group's own question using an internal event ID, which the owner
+found unclear. Group capture-to-delivery took about 125 seconds, a live latency
+concern for the MVP's fast-answer goal.
+
+These are **pre-reset** observations on the `legacy` layout. Private/group
+isolation passed as observed, while exact owner approval, restart receipt recovery, the
+post-reset human group reply/reaction, and post-reset Honcho production acceptance
+remain pending. MVP release acceptance is **not established**.
+[Content-free result](compatibility/results/2026-09-23-post-rebuild-live-test.json).
+
 </mvp_readiness_recheck>
 <archive_browse_order>
 
