@@ -104,6 +104,7 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     assert.ok(browse.records.every(row=>row.kind!=='outbound_result'&&row.kind!=='telegram_wire'),'default archive browse contains source evidence only');
     const originalRow=browse.records.find(row=>row.id===digest(value.key));
     assert.equal(originalRow?.assistant_state,'failed');assert.equal(originalRow?.assistant_attempts,2);
+    assert.deepEqual(originalRow?.content_types,['voice'],'browse identifies the original attachment alongside message text');
     assert.equal((await search(pool,{admin:true,scope:null},'operational marker')).length,0,'owner archive search excludes operational records');
     const monitoring=await archiveStatus(pool);
     assert.equal(monitoring.workflows.length,2,'imports and browser/scheduler records are excluded from Telegram workflows');

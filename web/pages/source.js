@@ -1,14 +1,59 @@
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 import {GuardedEditor} from '../guarded-editor.js';
 import {SourceVersions} from './source-versions';
+import {sourceContentLabel,sourceContentTypes} from '../../src/source-content.js';
+
+function MediaPreview({file}){
+ const [url,setUrl]=useState(null),[loading,setLoading]=useState(false),[problem,setProblem]=useState('');
+ const pending=useRef(null);
+ useEffect(()=>()=>pending.current?.abort(),[]);
+ useEffect(()=>()=>{if(url)URL.revokeObjectURL(url);},[url]);
+ const kind=file.kind,media=kind==='voice'||kind==='audio'?'audio':kind==='video'||kind==='video_note'?'video':kind==='photo'||kind==='image'?'image':null;
+ if(!media||file.state!=='ready')return null;
+ const fallback={voice:'audio/ogg',audio:'audio/mpeg',video:'video/mp4',video_note:'video/mp4',photo:'image/jpeg',image:'image/jpeg'}[kind];
+ const supplied=file.metadata?.mime_type;
+ const safeTypes={audio:['audio/ogg','audio/mpeg','audio/mp4','audio/wav','audio/webm'],video:['video/mp4','video/webm','video/ogg'],image:['image/jpeg','image/png','image/webp','image/gif']};
+ const mime=safeTypes[media].includes(supplied)?supplied:fallback;
+ async function load(){
+  const controller=new AbortController();pending.current=controller;setLoading(true);setProblem('');
+  try{
+   const response=await fetch(base+'/artifacts/'+file.id+'/download',{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('preview_unavailable');
+   const bytes=await response.arrayBuffer();
+   if(!controller.signal.aborted)setUrl(URL.createObjectURL(new Blob([bytes],{type:mime})));
+  }catch{if(!controller.signal.aborted)setProblem('Preview unavailable. Download the original file instead.');}
+  finally{if(!controller.signal.aborted){pending.current=null;setLoading(false);}}
+ }
+ return h('div',{className:'source-media-preview'},
+  !url&&h('button',{type:'button',onClick:load,disabled:loading},loading?'Loading preview…':media==='image'?'View image':'Play '+sourceContentLabel(kind).toLowerCase()),
+  url&&media==='audio'&&h('audio',{controls:true,preload:'none',src:url,'aria-label':sourceContentLabel(kind)}),
+  url&&media==='video'&&h('video',{controls:true,preload:'none',src:url,'aria-label':sourceContentLabel(kind)}),
+  url&&media==='image'&&h('img',{src:url,alt:'Original '+sourceContentLabel(kind).toLowerCase()}),
+  problem&&h('p',{role:'status'},problem));
+}
 
 export function Source({record,notify}){
  const files=record.artifacts||[],generated=record.derived||[];
+ const originalText=record.event?.text,types=sourceContentTypes(record.event?.kind,record.event?.payload,files.map(file=>file.kind));
+ const payload=record.event?.payload||{},message=payload.message||payload.edited_message||payload.channel_post||payload.edited_channel_post||{};
+ const structured=message.contact?[message.contact.first_name,message.contact.last_name,message.contact.phone_number].filter(Boolean).join(' · '):
+  message.venue?[message.venue.title,message.venue.address].filter(Boolean).join(' · '):
+  message.location?[message.location.latitude,message.location.longitude].filter(value=>value!==undefined).join(', '):
+  message.poll?message.poll.question:message.dice?[message.dice.emoji,message.dice.value].join(' · '):message.game?.title||null;
  const original=h('section',{className:'n-panel n-original-evidence'},
   h('div',{className:'source-section-heading'},h('div',null,h('p',{className:'archive-kicker'},'Original message'),h('h2',null,'What was received')),h(Badge,null,'Permanent · read only')),
   h('p',{className:'n-muted'},'This is the source of truth and cannot be edited.'),
-  h('div',{className:'n-original-message',dir:'auto'},record.event?.text||'(No message text)'),
-  files.length>0&&h('section',{className:'source-files'},h('h3',null,files.length===1?'Original file':'Original files'),...files.map(file=>h('div',{className:'n-row',key:file.id},h('span',null,file.metadata?.relative_path||file.metadata?.file_name||file.kind),h(StatusBadge,{state:file.state}),button('Download file',()=>download('/artifacts/'+file.id+'/download',file.metadata?.relative_path?.split('/').pop()||file.metadata?.file_name||file.id,notify),file.state!=='ready')))),
+  types.length>0&&originalText?.trim()&&h('div',{className:'source-content-types','aria-label':'Message content'},...types.map(type=>h('span',{className:'source-content-type',key:type},sourceContentLabel(type)))),
+  originalText?.trim()?h('div',{className:'n-original-message',dir:'auto'},originalText):
+   h('div',{className:'n-original-message source-no-text'},types.length?types.map(sourceContentLabel).join(' · '):'Message without text',
+    structured&&h('small',{dir:'auto'},structured),
+    files.length>0&&h('small',null,'The original attachment is below.')),
+  files.length>0&&h('section',{className:'source-files'},h('h3',null,files.length===1?'Original attachment':'Original attachments'),...files.map(file=>{
+   const name=file.metadata?.relative_path?.split('/').pop()||file.metadata?.file_name;
+   const duration=Number(file.metadata?.duration);
+   return h('div',{className:'source-file',key:file.id},h('div',{className:'source-file-main'},h('strong',null,sourceContentLabel(file.kind)),name&&h('span',{dir:'auto'},name),Number.isFinite(duration)&&duration>0&&h('small',null,Math.floor(duration/60)+':'+String(Math.floor(duration%60)).padStart(2,'0'))),
+    h('div',{className:'source-file-actions'},h(StatusBadge,{state:file.state}),button('Download original',()=>download('/artifacts/'+file.id+'/download',name||file.id,notify),file.state!=='ready')),
+    h(MediaPreview,{file}));})),
   h('details',{className:'source-technical'},h('summary',null,'Advanced details and export'),
     h('p',{className:'n-muted'},'Generated items, provenance, source identity, and the complete source export.'),
     generated.length>0&&h('section',{className:'source-generated'},h('h3',null,generated.length+' generated '+(generated.length===1?'item':'items')),...generated.map(item=>h('article',{key:item.id},h(Badge,null,'Generated'),h('h3',null,item.kind==='browser_result'?'Assistant result':item.kind==='transcript'?'Voice transcript':'Generated '+item.kind.replaceAll('_',' ')),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(item.content_base64),character=>character.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:item.provenance}))))),
