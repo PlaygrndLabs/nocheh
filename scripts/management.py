@@ -44,6 +44,9 @@ def dispatch(body):
     if operation == 'monitoring.status':
         from .monitoring import status
         return status(state)
+    if operation == 'database.browser':
+        from .database_browser import view
+        return view(state, body['request'])
     if operation == 'tools.manage':
         from .archive import API
         from urllib.error import HTTPError
