@@ -24,7 +24,7 @@ import {prepareContext,allowPrepared} from './prepared-context.js';
 import {archiveFilters} from './archive-filters.js';
 import {browseData,inspectGuarded,editGuarded,guardedHistory,inspectRevision,setGuardMode,guardState} from './guarded.js';
 import {requestPreparation} from './workflows/preparation-request.js';
-import { requestAction,telegramActions,decideTelegram } from './actions.js';
+import { requestAction,telegramActions,telegramAction,decideTelegram } from './actions.js';
 import {proposeControlled,controlledAction,controlledList,decideControlled,grantPermission,revokePermission,claimControlled,startControlled,finishControlled} from './controlled-actions.js';
 import { reader, admin,assertAudience,turnToken } from './access.js';
 import {listShares,shareKnowledge,revokeShare,sharedContext,readShared} from './sharing.js';
@@ -214,10 +214,14 @@ const server = createServer((req, res) => { void (async () => {
   }
   if(servesArchive && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
   if(servesArchive && path==='/v1/tools/propose' && req.method==='POST')return json(res,200,await proposeControlled(pool,principal,await readJson(req)));
-  if(servesArchive && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path))return agentResult(await controlledAction(pool,principal,path.split('/').at(-1)));
+  if(servesArchive && req.method==='GET' && /^\/v1\/tools\/actions\/[a-f0-9]{64}$/.test(path)){
+    const id=path.split('/').at(-1)!;
+    const controlled=!principal.admin||(await pool.query('SELECT 1 FROM controlled_actions WHERE id=$1',[id])).rowCount;
+    return agentResult(controlled?await controlledAction(pool,principal,id):await telegramAction(pool,principal,id));
+  }
   if (servesArchive && req.method === 'GET') {
     if (path==='/v1/graph') {admin(principal);return json(res,200,await evidenceGraph(pool,principal,url.searchParams.get('scope') ?? '',url.searchParams.get('after') ?? '',limit(url.searchParams.get('limit')),url.searchParams.get('focus') ?? ''));}
-    if (path==='/v1/search') return agentResult(await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit'))),true);
+    if (path==='/v1/search') return agentResult(await search(pool,principal,url.searchParams.get('q') ?? '',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
     const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
     if (event?.[1]) return agentResult(await readEvent(pool,principal,event[1]),true);
     const artifact=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);

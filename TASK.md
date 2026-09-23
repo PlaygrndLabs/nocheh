@@ -1,5 +1,37 @@
 # Nocheh implementation status
 
+<archive_action_approval_clarity>
+
+#### Archive reply and action approval clarity — 2026-09-23
+
+The owner showed an incoming Telegram Archive row labeled `Replied` while its
+separate Telegram action was still proposed, and found the Approvals page too
+generic to review usefully. Archive browse and search in both storage layouts
+now join action state to the originating message without treating a completed
+conversation reply as an approved or delivered action. Rows show `Approval pending` and
+`Requested action not sent` beside `Reply sent`, link to the exact action review,
+and offer an `Approval pending` filter. The same status slot distinguishes
+approved, running, uncertain, sent, denied, and cancelled actions.
+
+Activity now leads with pending approval cards that show exact Telegram text,
+destination, and request time. The review panel presents those fields before
+approve/deny, and prior decisions sit in a separate history disclosure. An
+Archive link opens the specific review directly, including an older action that
+has fallen outside the 100-item activity queue; legacy decisions can address
+that action by ID. Exact decision checks and delivery authority remain unchanged.
+
+The local Node/TypeScript build passed; all 23 dashboard checks and seven focused
+action-summary/archive-filter checks passed. `git diff --check` passed. A
+synthetic preview on port 18972 (terminal `19686`) visibly confirmed the
+pending/unsent and reply-sent labels, exact-card content, and Archive-to-review
+link. It has no Compose project, provider credentials, poller, scheduler, or
+external action executor. The AST-only Graphify refresh covered 530 files,
+3,604 nodes, and 13,419 edges with zero model calls. Live installation and
+database-backed acceptance of this change remain unrun; no Telegram action was
+approved or sent during verification.
+
+</archive_action_approval_clarity>
+
 <evidence_graph_collection>
 
 #### Private knowledge graph root type — 2026-09-23
