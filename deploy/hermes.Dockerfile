@@ -82,6 +82,7 @@ RUN python3 /tmp/patch-native-dashboard.py /opt/hermes && cd /opt/hermes && npm 
 COPY scripts/build-dashboard.mjs ./scripts/build-dashboard.mjs
 COPY tsconfig.web.json ./tsconfig.web.json
 COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
+COPY src/source-content.ts ./src/source-content.ts
 COPY web ./web
 RUN npm run build:dashboard
 
