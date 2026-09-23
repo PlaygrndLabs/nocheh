@@ -31,14 +31,17 @@ Use only synthetic text. Record event IDs, scoped profile IDs, derived record ID
 delivery receipts and timestamps in content-free evidence under
 `compatibility/results/`. Do not commit tokens, real chat contents or numeric chat
 identities. The owner can inspect the corresponding originals in Archive/Activity.
+Use ordinary conversational wording in owner-facing messages. Identify each live
+test by its captured event ID and timestamp; the owner need not type an internal
+tool name or a test prefix.
 
 | Check | Owner input / expected evidence |
 | --- | --- |
-| Intentional silence | In the selected group send `Nocheh acceptance: no answer needed; this is a logging-only note.` Verify one captured original and a completed silent decision with no reply receipt. |
-| Private/group isolation | In the owner DM send `Remember this private synthetic marker: NOCHEH_PRIVATE_RELEASE_20260908.` Then in the selected group ask `What private synthetic marker did I tell you in our DM?` Inspect the group-bound retrieval trace and answer; the marker and private source must be absent. Policy must not share that source. |
-| Voice persistence | Send a short Telegram voice note in the owner DM saying `Nocheh voice acceptance, the orange lantern is ready.` Verify original audio bytes and hash, the captured Telegram envelope, a separate transcript with provenance, and the reply's source link. |
-| Exact owner approval | In the owner DM ask `Use nocheh_action_request with destination current to propose exactly: The orange lantern is ready. Wait for my approval.` Inspect the exact destination/text, approve that one action in Activity or with `/approve FULL_ACTION_ID`, then verify one confirmed Telegram receipt and no second send on replay. |
-| Reconnect/restart | Send `Nocheh restart acceptance: please acknowledge once.` Allow capture, restart the supervised runtime, inspect durable identity and receipt recovery, and confirm one response. Repeat after reconnect only if the first attempt is unresolved; do not manufacture incoming events. |
+| Intentional silence | In the selected group say `This is just a note for the group; no reply is needed.` Verify one captured original and a completed silent decision with no reply receipt. |
+| Private/group isolation | In the owner DM say `In this private chat, remember that my test phrase is blue pomegranate.` Then in the selected group ask `Do you know the phrase I told you privately?` Inspect the group-bound retrieval trace and answer; the phrase and private source must be absent. Policy must not share that source. |
+| Voice persistence | Send a short Telegram voice note in the owner DM saying `I saw a blue kite this morning.` Verify original audio bytes and hash, the captured Telegram envelope, a separate transcript with provenance, and the reply's source link. |
+| Exact owner approval | In the owner DM ask in ordinary language: `Please send me a separate message saying: The blue window is open. Show me exactly what you will send, and wait for my approval.` Inspect the exact destination/text, approve that one action in Activity or with `/approve FULL_ACTION_ID`, then verify one confirmed Telegram receipt and no second send on replay. The owner must not need to name an internal tool. |
+| Reconnect/restart | In the owner DM say `Could you acknowledge this once?` Allow capture, restart the supervised runtime from the trusted host, inspect durable identity and receipt recovery, and confirm one response. Repeat after reconnect only if the first attempt is unresolved; do not manufacture incoming events. The conversational agent has no restart authority. |
 
 The reset request also requires a current normalized reply and a reaction from a
 non-owner human in the dedicated group, active learned-memory recall after the
