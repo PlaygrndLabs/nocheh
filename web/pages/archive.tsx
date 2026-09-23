@@ -43,7 +43,7 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
  const clearFilters=()=>{setDirection('all');setScope('');setReplyFilter('');setPages(['']);resetSelection();};
  return <div>
   <section className="n-panel archive-search" aria-labelledby="archive-search-title">
-   <div className="archive-search-copy"><h2 id="archive-search-title">Find a message</h2><p>Search the exact words you remember, or browse every original below.</p></div>
+   <div className="archive-search-copy"><h2 id="archive-search-title">Find a message</h2><p>Search the exact words you remember, or browse every original below.</p><a className="archive-database-link" href="#databases">Browse raw database tables</a></div>
    <form className="search-toolbar" onSubmit={submit}>
     <label className="n-grow"><span className="n-sr-only">Search original messages</span><div className="search-input"><Search size={16} aria-hidden="true"/><input type="search" placeholder="Search original message text…" value={draft} onChange={event=>setDraft(event.target.value)}/></div></label>
     <Button type="submit" disabled={loading} variant="default">Search</Button>

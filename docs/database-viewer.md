@@ -1,14 +1,25 @@
-# Browse the owned archive
+# Browse installation databases
 
 For the ordinary owner workflow, run `./scripts/nocheh dashboard`, open
 **Archive**, and use the records table. Selecting **View / edit** opens the
 immutable original beside its editable guarded version. Saves create a new
 revision and never rewrite the source evidence.
 
-Use the pgweb browser below only for raw table inspection, SQL queries, and
-exports. It is intentionally read-only; product records must be changed through
-their dashboard, API, or CLI commands so revision, authorization, invalidation,
-and provenance rules still apply.
+For raw table inspection, open **Databases** in the owner dashboard. Choose a
+database and table, click a column heading to sort, or select a column and enter
+text to filter its rows. Pages contain up to 50 rows; visible cell text is limited
+to 500 characters. The browser is read-only and does not accept SQL or arbitrary
+file paths. It includes the configured Nocheh PostgreSQL databases, Inngest
+workflow PostgreSQL, enabled Honcho PostgreSQL, registered Hermes profile SQLite,
+and existing provider usage and Honcho budget SQLite databases. Unavailable
+database services or files show an error state. Redis holds
+operational keys rather than tables; Monitoring shows its service health, not
+raw keys.
+
+Use the optional pgweb browser below when raw SQL queries or exports of the owned
+archive are needed. It is read-only; product records must be changed through their
+dashboard, API, or CLI commands so revision, authorization, invalidation, and
+provenance rules still apply.
 
 Run `./scripts/nocheh db`, then open <http://127.0.0.1:8782>.
 This starts the pinned pgweb image from the optional Compose `tools` profile.
@@ -51,8 +62,7 @@ bytes and provenance across stacks.
 
 Attachment bytes live in the file store, not PostgreSQL. Hermes's native memory
 and session SQLite databases remain in its isolated profile directories and are
-not shown by this PostgreSQL viewer. This is a database browser, not an assistant
-settings or monitoring dashboard.
+visible through the owner dashboard's Databases page, but not through pgweb.
 
 The read role uses PostgreSQL's built-in `pg_read_all_data` role, so archive dumps
 do not acquire references to a custom grantee on each table. After restoring into
