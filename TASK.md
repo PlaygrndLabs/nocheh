@@ -168,6 +168,30 @@ visual verification there remains pending.
 </archive_browse_order>
 <owner_database_browser>
 
+#### Legacy combined database label and transition review — 2026-09-23
+
+The owner observed operational tables under the database browser's archive
+selection and asked to fix the source-only archive mismatch. The legacy catalog
+now labels the physical `nocheh` database **Legacy combined**, matching its mixed
+source, derived, and control tables. The browser still exposes the raw tables; the
+separate `nocheh_archive` layout remains the actual source-only storage target.
+Four focused browser tests, the dashboard build, documentation link and diff checks,
+an isolated browser preview of the corrected selector and heading, and the AST-only
+Graphify refresh pass. The refresh covered 528 files, 3,590 nodes, and 13,376
+edges with zero model calls. The active dashboard was not rebuilt for this label.
+
+A fresh read-only reset preflight recorded 18 owned containers, three volumes,
+55 classified installation paths, and one blocker: a running transient Hermes
+turn container whose Compose origin does not match the fixed installation plan.
+Five external archive review roots contain 16 immediate directories requiring
+individual ownership decisions. Fourteen match the exact device/inode identities
+of a prior review; two do not. The current legacy database has 51 tables and
+aggregate counts of 99 events, two artifacts, 376 derived artifacts, 99 dispatches,
+and two action requests. No source content was read or copied, no service was
+stopped, and no reset phase was executed. The supported clean transition would
+erase installation content; whether to use that transition or preserve current
+content through a new migration path needs the owner's choice.
+
 #### Top database and table selectors — 2026-09-23
 
 The owner asked for database and table selectors at the top of the Databases
