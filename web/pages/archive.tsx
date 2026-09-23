@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {Check,Eye,Paperclip,Search,X} from 'lucide-react';
 import {sourceContentLabel} from '../../src/source-content.js';
-import {useResource} from '../lib/resource';
+import {useLiveResources,useResource} from '../lib/resource';
 import {CursorButtons} from '../lib/owner-controls';
 import {Button,Badge,EmptyState,Alert,Skeleton,Table} from '../components/ui/primitives';
 import {StatusBadge} from '../components/status';
@@ -28,6 +28,7 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
  const after=pages.at(-1)||'',parameters=new URLSearchParams({...(query?{q:query}:{}),...(after&&!query?{after}:{}),...(direction!=='all'?{kind:direction}:{}),...(scope?{scope}:{}),...(replyFilter?{reply:replyFilter}:{})});
  const path=(query?'/search':'/data')+(parameters.size?'?'+parameters:'');
  const {data,error,loading}=useResource<Records>(path),source=useResource<any>(selected?'/events/'+selected:null),scopes=useResource<Scopes>('/scopes');
+ const live=useLiveResources([path,selected?'/events/'+selected:null,'/scopes'],selected?['/data/'+selected+'/guarded','/sources/'+selected+'/derivatives','/guards/events/'+selected,...(source.data?.artifacts||[]).map((item:{id:string})=>'/guards/artifacts/'+item.id),'/derivatives/','/guards/derived_artifacts/']:[]);
  const rows=Array.isArray(data)?data:data?.records||data?.results||data?.items||[],visible=rows.filter(row=>!row.derived_id);
  const next=!Array.isArray(data)?data?.next:null;
  const filtersActive=direction!=='all'||!!scope||!!replyFilter;
@@ -60,7 +61,7 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
   </section>
   <div className={'archive-workspace archive-table-workspace'+(selected?' has-selection':'')}>
    <section className="n-panel archive-list" aria-labelledby="archive-results-title">
-    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Source records</h2><p className="archive-table-help">Original messages and other captured source evidence. Use the filters above to narrow this view.</p></div>{data&&<Badge>{visible.length} {visible.length===1?'record':'records'}</Badge>}</div>
+    <div className="list-heading"><div><p className="archive-kicker">{query?'Search results':'Browse archive'}</p><h2 id="archive-results-title">Source records</h2><p className="archive-table-help">Original messages and other captured source evidence. Use the filters above to narrow this view.</p></div><div className="n-live-label"><Badge>{live==='live'?'Live':live==='connecting'?'Connecting…':'Reconnecting…'}</Badge>{data&&<Badge>{visible.length} {visible.length===1?'record':'records'}</Badge>}</div></div>
     {query&&<p className="archive-query-summary">Matching “{query}”</p>}
     {error&&<Alert>{data?'Results may be stale.':'Archive results are unavailable.'}</Alert>}
     {!data&&loading&&<Skeleton className="chart-skeleton"/>}
