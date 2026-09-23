@@ -62,13 +62,15 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     await assert.rejects(sources.read(scoped,topic.id),{code:'source_not_found'});
     assert.equal((await sources.read(await principal('-321','-321/topic/77'),topic.id)).event.text,'Topic quillmarsh');
     const graph=await sources.graph(owner,'*','',1,reply.id);
+    assert.ok(graph.nodes.some(n=>n.id==='collection:*'&&n.kind==='collection'&&n.label==='All private knowledge'));
+    assert.ok(graph.edges.some(e=>e.from==='collection:*'&&e.to==='group:-321'&&e.kind==='contains'));
     assert.ok(graph.nodes.some(n=>n.id==='message:'+target.id),'old target resolves outside the graph page');
     assert.ok(graph.edges.some(e=>e.from==='message:'+reply.id&&e.to==='message:'+target.id&&e.kind==='reply_to_source'));
     assert.ok(graph.nodes.some(n=>n.kind==='user'));
     assert.ok(graph.nodes.some(n=>n.kind==='group'&&n.label==='Quillmarsh team'));
     assert.ok(graph.nodes.some(n=>n.kind==='group'&&n.chat_type==='group'));
     assert.ok(graph.nodes.some(n=>n.kind==='user'&&n.label==='@alex_quill'));
-    assert.deepEqual([...new Set(graph.nodes.map(n=>n.kind))].sort(),['group','message','user']);
+    assert.deepEqual([...new Set(graph.nodes.map(n=>n.kind))].sort(),['collection','group','message','user']);
     assert.ok(!graph.nodes.some(n=>n.label==='runtime_context'));
     await assert.rejects(sources.graph(scoped,'-321'),{code:'owner_required'});
 
