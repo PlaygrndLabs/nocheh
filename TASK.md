@@ -90,6 +90,31 @@ or Honcho MVP release gates.
 [Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
 
 </mvp_readiness_recheck>
+<archive_reply_table>
+
+#### Connected archive replies — 2026-09-23
+
+The owner asked for clearer Archive columns, a status instead of the ambiguous
+Reply column, and the actual assistant message visibly connected to its incoming
+message. The table now keeps type, conversation, and agent-copy readiness with
+the message; the status column shows incoming reply processing or confirmed
+outgoing delivery. A confirmed delivered message appears beneath its incoming
+message and opens its own immutable source. When both records are on the page,
+the outgoing row also links back to the incoming message. The default browse
+order and source-record count are unchanged.
+
+Both storage layouts now resolve links from durable delivery evidence: legacy
+outbound result captures and separated-store delivery receipts. Unconfirmed
+drafts and uncertain sends do not become reply previews. The pinned Node 24
+build, three focused link checks, and all 22 dashboard checks pass. The legacy
+PostgreSQL integration case was extended to assert the link, but was skipped in
+this session because no isolated PostgreSQL fixture was assigned. An isolated
+synthetic browser preview on port 18958 verified the table layout and opening a
+reply preview; it does not prove the active installation's stored links. The
+active installation was not rebuilt or restarted, so live visual verification
+remains pending.
+
+</archive_reply_table>
 <archive_browse_order>
 
 #### Newest source records first — 2026-09-23
