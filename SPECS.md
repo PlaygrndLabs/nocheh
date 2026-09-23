@@ -273,6 +273,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - A locally bundled, lazy-loaded Three.js view supports orbit, pan, zoom, focus, search, source inspection, pagination, and optional full screen. It renders on demand, limits rendering resolution, disposes resources, and never auto-rotates.
 - A keyboard-accessible node browser and evidence inspector are available without WebGL. Recorded context relationships are explicit. Graph JSON uses the same context-entity filter as the visual view, while original-source exports preserve the underlying records. The graph requires neither model calls nor an additional graph database.
 - Distinct graph nodes do not appear as indistinguishable duplicates. Users, projects, groups, and messages have stable identities, and messages without display text identify their source kind and a stable short message ID while preserving the underlying records unchanged. Telegram user labels prefer the recorded `@username`, then the recorded display name; group labels prefer the recorded chat title. A private conversation is presented as type `Private chat`, never `Group`, and is labeled `Private chat ·` plus its recorded username, display name, or numeric ID when no name was recorded. Numeric IDs remain visible-label fallbacks and never replace the stable node identity.
+- The `All private knowledge` graph root is presented as a `Collection`, never as a `Group`. It is a navigation container for scoped conversations and does not count as a Telegram group.
 
 </area>
 </area>
