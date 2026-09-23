@@ -114,6 +114,29 @@ still blocked by missing GitHub HTTPS username credentials.
 
 </telegram_group_participant_access>
 
+<telegram_group_identity_controls>
+
+#### Telegram group identity controls — 2026-09-23
+
+The owner requested that “Who may address Nocheh in groups” sit under Telegram
+settings, auto-fill IDs, and show group and user names beside IDs. The owner-only
+directory combines captured live Telegram identities with read-only Bot API
+lookups for selected group titles, administrators, and already identified members;
+it returns no message content or token. Settings offers group and participant
+pickers, keeps manual ID entry for people Telegram has not exposed, and labels
+decisions and reviewed changes with names plus numeric IDs when available.
+The read-only live lookup returned a group title and visible people. The
+owner-only access policy and Save/Apply boundary remain in force. Live group
+message acceptance is still pending.
+The isolated `./scripts/nocheh test` passed: the TypeScript/dashboard suite
+passed and Python ran 353 tests with 3 skips. The synthetic dashboard preview
+on port 18849 verified the nested Telegram placement, name-and-ID labels,
+known-person ID fill, group selection, and staged Grant action. SQL directory
+queries passed read-only parsing against the live archive; that archive has no
+captured group updates yet. No live grant or Telegram message was sent.
+
+</telegram_group_identity_controls>
+
 <mvp_cleanup_recheck>
 
 #### Worktree and Docker cleanup with isolated MVP recheck — 2026-09-22

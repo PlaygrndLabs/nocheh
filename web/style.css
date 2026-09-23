@@ -291,6 +291,12 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .settings-page .n-settings-group>p{margin:0;max-width:70ch}
 .settings-page .n-settings-group .n-form{gap:20px 24px;margin-top:20px}
 .settings-page .n-settings-group .n-field{margin:0}
+.settings-page .n-settings-access{margin-top:24px;padding-top:20px;border-top:1px solid var(--n-line)}
+.settings-page .n-settings-access h4{font-size:15px;font-weight:650;margin:0 0 6px}
+.settings-page .n-settings-access>p{max-width:70ch;line-height:1.5}
+.settings-page .n-settings-access .n-actions,.settings-page .n-settings-decisions{grid-column:1/-1}
+.settings-page .n-settings-access .n-actions{margin-top:0}
+.settings-page .n-settings-access .n-row span{overflow-wrap:anywhere}
 .settings-page .n-field small{line-height:1.5}
 .settings-page .n-advanced{margin-top:22px}
 .settings-page .n-review,.settings-page .n-apply{margin-top:20px;padding:18px 20px;border:1px solid var(--n-line);border-radius:9px;background:var(--n-subtle)}
