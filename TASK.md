@@ -217,6 +217,10 @@ underlying access policy is unchanged; no live participant decision was made.
 The local build and AST-only graph refresh passed. The isolated dashboard
 preview showed the default-deny label and separate explicit-deny count; switching
 to Explicit deny and back restored the saved default with no pending edit.
+The wording fix was locally integrated as `43c593f` and activated by replacing
+only the dashboard container. A fresh live Settings page showed Default deny
+selected for the known participant and the separate Explicit deny choice. All
+17 installation services remained healthy; no access decision was saved.
 
 </telegram_default_deny_label>
 
