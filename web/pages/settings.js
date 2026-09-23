@@ -1,4 +1,5 @@
 import {useRevisionDraft} from '../lib/draft';
+import {participantAllowed,switchDecision} from '../lib/group-access.js';
 import {RotateCcw} from 'lucide-react';
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 export function Settings({notify}) {
@@ -21,7 +22,7 @@ export function Settings({notify}) {
     const [refresh,setRefresh]=useState(0),[data,error]=useLoad('/settings',refresh);
     const [identityDirectory,identityError]=useLoad('/telegram/identities');
     const [changes,setChanges,editRevision]=useRevisionDraft(data?.revision),[busy,setBusy]=useState(false),[review,setReview]=useState(false);
-    const [accessGroup,setAccessGroup]=useState(''),[accessUser,setAccessUser]=useState(''),[manualDecision,setManualDecision]=useState('');
+    const [accessGroup,setAccessGroup]=useState(''),[accessUser,setAccessUser]=useState(''),[manualDecision,setManualDecision]=useState('deny');
     const save=async()=>{setBusy(true);try{await call('/settings',{revision:editRevision,changes});setChanges({});setReview(false);setRefresh(v=>v+1);notify('Nocheh settings saved. Apply saved settings when you are ready to update running services.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     const apply=async()=>{setBusy(true);try{await call('/settings/apply',{});notify('Applying saved settings. Follow the result in Maintenance.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     if(error&&!data)return h(Alert,null,'Settings are unavailable.');
@@ -56,6 +57,8 @@ export function Settings({notify}) {
     const chosen=groups.includes(accessGroup)?accessGroup:groups[0];
     let access={};try{access=JSON.parse(changes.TELEGRAM_GROUP_ACCESS??saved('TELEGRAM_GROUP_ACCESS')??'{}');}catch{access={};}
     const rule=access[chosen]||{granted:[],denied:[]};
+    let savedAccess={};try{savedAccess=JSON.parse(saved('TELEGRAM_GROUP_ACCESS')||'{}');}catch{}
+    const savedRule=savedAccess[chosen]||{granted:[],denied:[]};
     const participantIds=[...new Set([...(observedById.get(chosen)?.users||[]).map(user=>user.id),...rule.granted,...rule.denied])].filter(id=>id!==owner).sort((a,b)=>participantName(a).localeCompare(participantName(b))||a.localeCompare(b));
     const accessState=id=>rule.denied.includes(id)?'deny':rule.granted.includes(id)?'grant':'default';
     const changeAccess=(decision,user)=>{
@@ -70,15 +73,16 @@ export function Settings({notify}) {
       if(value===original)delete updated.TELEGRAM_GROUP_ACCESS;else updated.TELEGRAM_GROUP_ACCESS=value;
       setChanges(updated);setReview(false);
     };
-    const accessChoices=[['default','Default deny'],['grant','Grant'],['deny','Explicit deny']];
+    const accessChoices=[['deny','Denied'],['grant','Allowed']];
+    const setParticipantAccess=(allow,id)=>{const decision=switchDecision(savedRule,rule,id,allow);if(decision)changeAccess(decision,id);};
     const personRow=id=>h('li',{className:'n-access-person',key:id},
       h('div',{className:'n-access-person-name'},h('strong',null,participantName(id)),h('small',null,participantMeta(id))),
       h('div',{className:'n-access-choice','role':'group','aria-label':'Group access for '+participantLabel(id)},
-        ...accessChoices.map(([state,label])=>h('button',{type:'button',key:state,disabled:busy,'aria-pressed':accessState(id)===state,onClick:()=>changeAccess(state,id)},label))));
-    const addManualRule=()=>{changeAccess(manualDecision,accessUser.trim());setAccessUser('');setManualDecision('');};
+        ...accessChoices.map(([state,label])=>h('button',{type:'button',key:state,disabled:busy,'aria-pressed':participantAllowed(rule,id)===(state==='grant'),onClick:()=>setParticipantAccess(state==='grant',id)},label))));
+    const addManualRule=()=>{changeAccess(manualDecision,accessUser.trim());setAccessUser('');setManualDecision('deny');};
     const accessEditor=h('div',{className:'n-settings-access','aria-labelledby':'group-access-title'},
       h('h4',{id:'group-access-title'},'Who may address Nocheh in groups'),
-      h('p',{className:'n-muted'},'Everyone except you is denied by default. Grant allows a person to address Nocheh; Explicit deny saves a block. Default deny clears an individual decision and still blocks them. Telegram supplies group administrators; other people appear after Nocheh observes them. Save and Apply for changes to take effect.'),
+      h('p',{className:'n-muted'},'Everyone except you is denied by default. Switch a person to Allowed to let them address Nocheh; Denied blocks them. Telegram supplies group administrators; other people appear after Nocheh observes them. Save and Apply for changes to take effect.'),
       !identityDirectory&&!identityError&&h('p',{role:'status'},'Looking up Telegram group names and visible people…'),
       identityError&&h('p',{role:'status'},'Observed Telegram names are unavailable. You can still enter numeric IDs.'),
       observed.some(group=>!groups.includes(group.id))&&h('div',{className:'n-field'},h('label',{htmlFor:'observed-group'},'Add an observed group'),
@@ -87,7 +91,7 @@ export function Settings({notify}) {
       groups.length?h('div',{className:'n-form'},
         h('div',{className:'n-field'},h('label',{htmlFor:'access-group'},'Selected group'),h('select',{id:'access-group',value:chosen,disabled:busy,onChange:e=>setAccessGroup(e.target.value)},...groups.map(id=>h('option',{value:id,key:id},groupLabel(id))))),
         h('div',{className:'n-access-directory'},
-          h('div',{className:'n-access-directory-head'},h('b',null,'Known people in this group'),h('small',null,rule.granted.length+' granted · '+rule.denied.length+' explicitly denied')),
+          h('div',{className:'n-access-directory-head'},h('b',null,'Known people in this group'),h('small',null,participantIds.filter(id=>participantAllowed(rule,id)).length+' allowed · '+participantIds.filter(id=>!participantAllowed(rule,id)).length+' denied')),
           h('ul',{className:'n-access-people'},
             owner&&h('li',{className:'n-access-person n-access-owner',key:'owner'},h('div',{className:'n-access-person-name'},h('strong',null,participantName(owner)),h('small',null,participantMeta(owner))),h('span',{className:'n-access-owner-badge'},'Owner · always allowed')),
             ...participantIds.map(personRow)),
@@ -95,8 +99,8 @@ export function Settings({notify}) {
         h('details',{className:'n-access-manual'},h('summary',null,'Add someone by user ID'),
           h('div',{className:'n-access-manual-fields'},
             h('div',{className:'n-field'},h('label',{htmlFor:'access-user'},'Telegram user ID'),h('input',{id:'access-user',inputMode:'numeric',value:accessUser,disabled:busy,placeholder:'Numeric user ID',onChange:e=>setAccessUser(e.target.value)})),
-            h('div',{className:'n-field'},h('label',{htmlFor:'manual-decision'},'Access'),h('select',{id:'manual-decision',value:manualDecision,disabled:busy,onChange:e=>setManualDecision(e.target.value)},h('option',{value:''},'Choose access…'),h('option',{value:'grant'},'Grant'),h('option',{value:'deny'},'Explicit deny'))),
-            button('Add rule',addManualRule,busy||!manualDecision||!/^[1-9]\d{0,18}$/.test(accessUser.trim())||accessUser.trim()===owner))),
+            h('div',{className:'n-field'},h('label',{htmlFor:'manual-decision'},'Access'),h('select',{id:'manual-decision',value:manualDecision,disabled:busy,onChange:e=>setManualDecision(e.target.value)},h('option',{value:'deny'},'Denied'),h('option',{value:'grant'},'Allowed'))),
+            button('Add person',addManualRule,busy||!/^[1-9]\d{0,18}$/.test(accessUser.trim())||accessUser.trim()===owner))),
         Object.keys(access).some(id=>!groups.includes(id))&&h('p',{role:'alert'},'A removed group still has access decisions. Restore its group ID or revoke its decisions before saving.')):
         h('p',{className:'n-muted'},'Add a selected group above to manage participant access.'));
     const reviewValue=(key,value)=>{
