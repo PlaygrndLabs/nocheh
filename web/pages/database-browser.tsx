@@ -28,6 +28,8 @@ export function DatabaseBrowser(){
   ...(sort?{sort,direction}:{}),...(filter&&filterColumn?{filter_column:filterColumn,filter}:{}),offset:String(offset)}):null;
  const page=useResource<Page>(rowPath);
  const matchingTables=allTables.filter(item=>(item.schema+'.'+item.name).toLowerCase().includes(tableSearch.toLowerCase()));
+ const tableOptions=selected&&!matchingTables.some(item=>item.schema===selected.schema&&item.name===selected.name)?[selected,...matchingTables]:matchingTables;
+ const selectedIndex=selected?allTables.findIndex(item=>item.schema===selected.schema&&item.name===selected.name):-1;
  const chooseDatabase=(id:string)=>{setDatabase(id);setChosen(null);setTableSearch('');setSort('');setFilterColumn('');setDraftFilter('');setFilter('');setOffset(0);};
  const chooseTable=(table:TableEntry)=>{setChosen(table);setSort('');setFilterColumn('');setDraftFilter('');setFilter('');setOffset(0);};
  const sortBy=(column:string)=>{setDirection(sort===column&&direction==='asc'?'desc':'asc');setSort(column);setOffset(0);};
@@ -38,27 +40,20 @@ export function DatabaseBrowser(){
   {!catalog.data&&catalog.loading&&<Skeleton className="chart-skeleton"/>}
   {status.error&&<Alert>Database status could not be checked. Refresh to try again.</Alert>}
   {!!databases.length&&<div className="db-browser-workspace">
-   <aside className="n-panel db-browser-sidebar" aria-label="Database and table selection">
-    <div className="db-browser-side-heading"><h3>Databases</h3><span>{databases.length}</span></div>
-    <label className="db-browser-mobile-picker">Choose a database<select value={current?.id} onChange={event=>chooseDatabase(event.target.value)}>{databases.map(item=>{
+   <section className="n-panel db-browser-selection" aria-label="Database and table selection">
+    <label>Database<select value={current?.id||''} onChange={event=>chooseDatabase(event.target.value)}>{databases.map(item=>{
      const itemStatus=status.data?.databases.find(entry=>entry.id===item.id);
      return <option key={item.id} value={item.id}>{item.name} · {statusLabel(itemStatus)}</option>;
     })}</select></label>
-    <div className="db-browser-database-list" aria-label="Databases">{databases.map(item=>{
-     const itemStatus=status.data?.databases.find(entry=>entry.id===item.id);
-     return <button key={item.id} type="button" className={'db-browser-database'+(current?.id===item.id?' selected':'')} aria-current={current?.id===item.id?'true':undefined} onClick={()=>chooseDatabase(item.id)}>
-      <span className="db-browser-database-top"><strong>{item.name}</strong><span className={'db-browser-state '+(itemStatus?.state||'checking')}>{statusLabel(itemStatus)}</span></span>
-      <span className="db-browser-database-meta">{item.engine==='sqlite'?'SQLite':'PostgreSQL'}{itemStatus?.table_count!==undefined?' · '+itemStatus.table_count+(itemStatus.table_count===1?' table':' tables'):''}</span>
-     </button>;
-    })}</div>
-    <div className="db-browser-table-section"><div className="db-browser-side-heading"><h3>Tables</h3>{tables.data&&<span>{allTables.length}</span>}</div>
-     <label className="db-browser-label">Find a table<input type="search" value={tableSearch} onChange={event=>setTableSearch(event.target.value)} placeholder="Filter table names…"/></label>
-     {tables.error&&<Alert>Tables are unavailable. This database may be stopped.</Alert>}
-     {!tables.data&&tables.loading&&<Skeleton className="chart-skeleton"/>}
-     {tables.data&&!matchingTables.length&&<EmptyState title={allTables.length?'No matching tables':'No tables'}>{allTables.length?'Try another table name.':'This database has no tables yet.'}</EmptyState>}
-     {!!matchingTables.length&&<div className="db-browser-table-list">{matchingTables.map(item=><button key={item.schema+'.'+item.name} type="button" className={selected?.schema===item.schema&&selected.name===item.name?'selected':undefined} aria-current={selected?.schema===item.schema&&selected.name===item.name?'true':undefined} onClick={()=>chooseTable(item)}><span>{item.schema}.{item.name}</span>{item.estimated_rows!==null&&<small>~{item.estimated_rows}</small>}</button>)}</div>}
-    </div>
-   </aside>
+    <label>Table<select value={selectedIndex<0?'':String(selectedIndex)} disabled={!allTables.length} onChange={event=>chooseTable(allTables[Number(event.target.value)])}>
+     {!allTables.length&&<option value="">{tables.loading?'Loading tables…':'No tables available'}</option>}
+     {tableOptions.map(item=>{const index=allTables.findIndex(entry=>entry.schema===item.schema&&entry.name===item.name);return <option key={item.schema+'.'+item.name} value={index}>{item.schema}.{item.name}{item.estimated_rows!==null?' · ~'+item.estimated_rows+' rows':''}</option>;})}
+    </select></label>
+    <label>Find a table<input type="search" value={tableSearch} onChange={event=>setTableSearch(event.target.value)} disabled={!allTables.length} placeholder="Filter table names…"/></label>
+    {tables.error&&<Alert>Tables are unavailable. This database may be stopped.</Alert>}
+    {tables.data&&!allTables.length&&<p className="db-browser-selection-note">This database has no tables yet.</p>}
+    {tables.data&&!!allTables.length&&!matchingTables.length&&<p className="db-browser-selection-note" role="status">No matching tables. Clear the search to see all tables.</p>}
+   </section>
    <div className="db-browser-main">
     {current&&<section className="n-panel db-browser-detail" aria-label="Selected database details"><div className="db-browser-detail-heading"><div><p className="archive-kicker">Database</p><h2>{current.name}</h2></div><div className="db-browser-detail-flags"><span className={'db-browser-state '+(currentStatus?.state||'checking')}>{statusLabel(currentStatus)}</span><Badge>Read only</Badge></div></div>
      <dl><div><dt>Engine</dt><dd>{current.engine==='sqlite'?'SQLite':'PostgreSQL'}</dd></div><div><dt>Database</dt><dd>{currentStatus?.identifier||'—'}</dd></div><div><dt>Service</dt><dd>{currentStatus?.service||'Local file'}</dd></div><div><dt>Tables</dt><dd>{currentStatus?.table_count??'—'}</dd></div><div><dt>{current.engine==='sqlite'?'File size':'Database size'}</dt><dd>{currentStatus?.size_bytes===undefined?'—':formatBytes(currentStatus.size_bytes)}</dd></div><div><dt>Version</dt><dd>{currentStatus?.version||'—'}</dd></div></dl>

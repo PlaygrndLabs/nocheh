@@ -92,6 +92,22 @@ or Honcho MVP release gates.
 </mvp_readiness_recheck>
 <owner_database_browser>
 
+#### Top database and table selectors — 2026-09-23
+
+The owner asked for database and table selectors at the top of the Databases
+page. One status-labeled database selector and one table selector now sit above
+the full-width details and rows at desktop and phone widths. Table-name search
+filters the selector's options while retaining the current selection, and a
+database change clears the prior table search and row filters. The unavailable
+database state remains selectable and explains why its tables cannot load.
+
+The dashboard build and 22 dashboard tests pass. An isolated synthetic browser
+preview verified desktop and 390 px layouts, table switching, table-name search,
+database switching, and the unavailable state; the phone page had no document
+overflow. The AST-only Graphify refresh covered 525 files, 3,578 nodes, and
+13,340 edges with zero model calls. The active installation was not rebuilt or
+restarted, so this change has not been checked against its live databases.
+
 #### Database selector visibility fix — 2026-09-23
 
 The owner found the phone picker visible beside the desktop database list. A
