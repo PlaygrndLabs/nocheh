@@ -1,6 +1,7 @@
 import {admin,type Reader} from '../access.js';
 import {HttpError,string} from '../http.js';
 import {matchesArchiveFilters,type ArchiveFilters} from '../archive-filters.js';
+import {sourceContentTypes} from '../source-content.js';
 import {limit} from '../retrieval.js';
 import {type Envelope} from '../archive.js';
 import {SourceAccessRepository} from './access.js';
@@ -96,15 +97,18 @@ export class SourceRepository {
     for(const candidate of rows.rows) {
       const reference=(await this.access.archive.captured(candidate.id)).reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
-      const original=(await this.stores.archive.query('SELECT scope,source_id,revision,kind,origin,occurred_at,original_text FROM events WHERE id=$1',[reference.id])).rows[0];
+      const original=(await this.stores.archive.query('SELECT scope,source_id,revision,kind,origin,occurred_at,original_text,payload FROM events WHERE id=$1',[reference.id])).rows[0];
       if(!matchesArchiveFilters(original,states.get(reference.id),filters))continue;
       const value=binding?.mode==='on'?scopedObservation((await this.access.guards.read('events:'+reference.id,binding)).value):{text:original.original_text?.toString()??''};
       // The lexical index includes payload metadata, but a scoped hit must also
       // match the independent message text, never a stripped reply snapshot.
       const text=String(value.text??'');
       if(binding&&!(await this.stores.derived.query("SELECT to_tsvector('simple',$1) @@ plainto_tsquery('simple',$2) AS matches",[text,query])).rows[0].matches)continue;
-      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...original,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
-        derived_id:null,text:text.slice(0,2000),truncated:text.length>2000});
+      const artifactKinds=principal.admin?(await this.stores.archive.query('SELECT kind FROM artifacts WHERE event_id=$1 ORDER BY id',[reference.id])).rows.map(row=>row.kind as string):[];
+      const {payload,...fields}=original;
+      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
+        derived_id:null,text:text.slice(0,2000),truncated:text.length>2000,
+        content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds)});
       if(hits.length===count)break;
     }
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
@@ -128,7 +132,7 @@ export class SourceRepository {
       JOIN source_observations s ON s.event_id=e.id JOIN source_revisions r ON r.id=s.revision_id
       JOIN source_objects o ON o.id=r.object_id
       WHERE o.kind='message' AND e.origin<>'generated' AND e.id>$1 AND ($2='' OR e.id=$2) ORDER BY e.id LIMIT 201`,[after,focus])).rows;
-    const nodes:any[]=[{id:'group:'+scope,kind:'group',label:scope==='*'?'All private knowledge':scope}],edges:any[]=[],selected:string[]=[],spaces=new Set<string>(),payloads=new Map<string,unknown>();
+    const nodes:any[]=scope==='*'?[{id:'collection:*',kind:'collection',label:'All private knowledge'}]:[{id:'group:'+scope,kind:'group',label:scope}],edges:any[]=[],selected:string[]=[],spaces=new Set<string>(),payloads=new Map<string,unknown>();
     const add=(node:any,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else {
       if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;
       if(node.chat_type&&!current.chat_type)current.chat_type=node.chat_type;
@@ -141,7 +145,7 @@ export class SourceRepository {
         JOIN source_objects o ON o.id=r.object_id WHERE e.id=$1`,[id])).rows[0];
       if(!row||row.object_kind!=='message'||row.origin==='generated')return false;
       const space=await this.access.space((await this.access.archive.captured(id)).reference)??row.scope,chatType=graphChatType(row.payload,space);
-      payloads.set(id,row.payload);spaces.add(space);add({id:'group:'+space,kind:'group',label:graphGroupLabel(row.payload,space)??space,...(chatType?{chat_type:chatType}:{})},space);if(scope==='*')link('group:*','group:'+space,'contains');
+      payloads.set(id,row.payload);spaces.add(space);add({id:'group:'+space,kind:'group',label:graphGroupLabel(row.payload,space)??space,...(chatType?{chat_type:chatType}:{})},space);if(scope==='*')link('collection:*','group:'+space,'contains');
       add({id:'message:'+id,kind:'message',label:evidenceNodeLabel(row.search_text.slice(0,160),row.kind,id),event_id:id,source_id:row.source_id});
       link('group:'+space,'message:'+id,'contains');return true;
     };

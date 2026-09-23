@@ -1,18 +1,20 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
-import {CornerDownRight,Eye,Search,X} from 'lucide-react';
+import {CornerDownRight,Eye,Paperclip,Search,X} from 'lucide-react';
+import {sourceContentLabel} from '../../src/source-content.js';
 import {useResource} from '../lib/resource';
 import {CursorButtons} from '../lib/owner-controls';
 import {Button,Badge,EmptyState,Alert,Skeleton,Table} from '../components/ui/primitives';
 import {StatusBadge} from '../components/status';
 import {Source} from './source.js';
 
-type ReplyMessage={id:string;text:string|null;received_at:string};
-type RecordRow={id?:string;event_id?:string;derived_id?:string;scope:string;text?:string;snippet?:string;preview?:string;total?:number;ready?:number;channel?:string;kind?:string;received_at?:string;assistant_state?:string;assistant_stage?:string;assistant_error?:string;assistant_attempts?:number;reply_messages?:ReplyMessage[]};
+type ReplyMessage={id:string;text:string|null;received_at:string;content_types?:string[]};
+type RecordRow={id?:string;event_id?:string;derived_id?:string;scope:string;text?:string;snippet?:string;preview?:string;content_types?:string[];total?:number;ready?:number;channel?:string;kind?:string;received_at?:string;assistant_state?:string;assistant_stage?:string;assistant_error?:string;assistant_attempts?:number;reply_messages?:ReplyMessage[]};
 type Records={records?:RecordRow[];results?:RecordRow[];items?:RecordRow[];next?:string}|RecordRow[];
 type Scopes={scopes?:{scope:string;events:number}[]};
 
 const sourceFromHash=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('source');
-const recordText=(row:RecordRow)=>row.text||row.snippet||row.preview||'(No message text)';
+const recordText=(row:RecordRow)=>[row.text,row.snippet,row.preview].find(value=>value?.trim())?.trim()||row.content_types?.map(sourceContentLabel).join(' · ')||'Message without text';
+const replyMessageText=(message:ReplyMessage)=>message.text?.trim()||message.content_types?.map(sourceContentLabel).join(' · ')||'Assistant message';
 const recordType=(row:RecordRow)=>row.kind==='telegram_update'?'Incoming Telegram':row.kind==='browser_input'?'Browser message':row.kind?.endsWith('_delivered_message')?'Assistant reply':row.kind?.replaceAll('_',' ')||row.channel?.replaceAll('_',' ')||'Source record';
 const replyState=(row:RecordRow):{label:string;state:string;note?:string}|null=>{
  if(row.kind?.endsWith('_delivered_message'))return {label:'Delivered',state:'ready'};
@@ -70,7 +72,7 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
     {data&&!visible.length&&<EmptyState title={filtersActive?'No messages match these filters':query?'No matching messages':'No archived messages'}>{filtersActive?'Clear or change a filter to see more source messages.':query?'Try fewer words or show all messages.':'Original messages will appear here after they are captured.'}</EmptyState>}
     {!!visible.length&&<Table aria-label="Archive records"><thead><tr><th>Message</th><th>Status</th><th>Received</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
      {visible.map((row,index)=>{const id=row.event_id||row.id,isSelected=selected===id,ready=row.total!==undefined&&row.total>0&&row.ready===row.total,reply=replyState(row);return <tr key={id||index} className={isSelected?'selected':undefined}>
-      <td><div className="archive-message-cell"><div className="archive-message-meta"><span>{recordType(row)}</span><code>{row.scope}</code>{row.total!==undefined&&<span className="archive-copy-state">Agent copy {ready?'ready':`${row.ready} / ${row.total} ready`}</span>}</div><span className="archive-record-text" dir="auto" title={recordText(row)}>{recordText(row)}</span>{id&&parentByReply.has(id)&&<button className="archive-parent-link" type="button" onClick={()=>choose(parentByReply.get(id)!.id,true)}>In response to: <span dir="auto">{parentByReply.get(id)!.text}</span></button>}{!!row.reply_messages?.length&&<div className="archive-linked-replies" aria-label="Delivered replies">{row.reply_messages.map(message=><button key={message.id} type="button" className="archive-linked-reply" onClick={()=>choose(message.id,true)} aria-label={'Open delivered reply: '+(message.text||'No message text')}><CornerDownRight size={14} aria-hidden="true"/><span><strong>Assistant replied</strong><span dir="auto">{message.text||'(No message text)'}</span></span></button>)}</div>}</div></td>
+      <td><div className="archive-message-cell"><div className="archive-message-meta"><span>{recordType(row)}</span><code>{row.scope}</code>{row.total!==undefined&&<span className="archive-copy-state">Agent copy {ready?'ready':`${row.ready} / ${row.total} ready`}</span>}</div><div className="archive-record-content"><span className="archive-record-text" dir="auto" title={recordText(row)}>{recordText(row)}</span>{!!row.content_types?.length&&!![row.text,row.snippet,row.preview].find(value=>value?.trim())&&<span className="archive-content-types"><Paperclip size={13} aria-hidden="true"/>{row.content_types.map(sourceContentLabel).join(' · ')}</span>}</div>{id&&parentByReply.has(id)&&<button className="archive-parent-link" type="button" onClick={()=>choose(parentByReply.get(id)!.id,true)}>In response to: <span dir="auto">{parentByReply.get(id)!.text}</span></button>}{!!row.reply_messages?.length&&<div className="archive-linked-replies" aria-label="Delivered replies">{row.reply_messages.map(message=><button key={message.id} type="button" className="archive-linked-reply" onClick={()=>choose(message.id,true)} aria-label={'Open delivered reply: '+replyMessageText(message)}><CornerDownRight size={14} aria-hidden="true"/><span><strong>Assistant replied</strong><span dir="auto">{replyMessageText(message)}</span></span></button>)}</div>}</div></td>
       <td title={[row.assistant_stage,row.assistant_error,row.assistant_attempts?`attempt ${row.assistant_attempts}`:''].filter(Boolean).join(' · ')||undefined}>{reply?<span className="archive-reply-state"><StatusBadge state={reply.state} label={reply.label}/>{reply.note&&<small>{reply.note}</small>}</span>:'—'}</td>
       <td>{row.received_at?<time dateTime={row.received_at}>{new Date(row.received_at).toLocaleString()}</time>:'—'}</td>
       <td><Button size="sm" onClick={()=>id&&choose(id,true)} disabled={!id} aria-pressed={isSelected} aria-label={'Open message '+(id||index)}><Eye size={13} aria-hidden="true"/>Open</Button></td>

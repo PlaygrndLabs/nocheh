@@ -2,12 +2,14 @@ import {useRef,useState} from 'react';
 import {Badge,Button,Alert,EmptyState,Sheet,Tabs,TabsList,TabsTrigger,TabsContent} from '../components/ui/primitives';
 import {useResource} from '../lib/resource';
 import {CursorButtons,EvidenceLinks,Provenance,ResourceState,useOwnerCommand} from '../lib/owner-controls';
+import {sourceContentLabel} from '../../src/source-content.js';
 
 type Rule={id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;revision:number};
 type Preview={id:string;rule_id:string;rule_revision:number;state:string;created_at:string;text?:string;current?:boolean;guard_revision?:number|null;text_hash?:string;
  input?:{rule:Rule;sources:{id:string}[]};output_provenance?:unknown};
 type Release={id:string;preview_id:string;rule_id:string;state:string;mode:string;revision:number;expires_at:string|null;created_at:string};
 const values=(text:string)=>[...new Set(text.split(/[\n,]/).map(v=>v.trim()).filter(Boolean))];
+const sourceLabel=(row:{text?:string;preview?:string;content_types?:string[]})=>row.text?.trim()||row.preview?.trim()||row.content_types?.map(sourceContentLabel).join(' · ')||'Message without text';
 function RuleEditor({rule,onSaved}:{rule:Rule|null;onSaved:()=>void}){
  const [name,setName]=useState(rule?.name||''),[sources,setSources]=useState(rule?.sources.join('\n')||''),[destination,setDestination]=useState(rule?.destination||''),[enabled,setEnabled]=useState(rule?.enabled??false),[mode,setMode]=useState(rule?.mode??'approved'),[instructions,setInstructions]=useState(rule?.instructions||''),command=useOwnerCommand();
  return <form className="owner-form" onSubmit={e=>{e.preventDefault();void command.run('/sharing/rules',{...(rule?{id:rule.id}:{}),name,sources:values(sources),destination,enabled,mode,instructions,expected_revision:rule?.revision??0}).then(result=>{if(result)onSaved();});}}>
@@ -31,7 +33,7 @@ function PreviewForm({rule,onPreview}:{rule:Rule;onPreview:(id:string,trigger:HT
  <form className="search-toolbar" onSubmit={e=>{e.preventDefault();setQuery(draft.trim());}}><label className="n-grow">Find original evidence<input type="search" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Search original messages…"/></label><Button type="submit">Find sources</Button></form>
  <ResourceState {...originals} hasData={!!originals.data}/><div className="source-picker" role="group" aria-label="Select original evidence">{rows.slice(0,40).map((row:any)=>{
   const id=row.event_id||row.id,checked=chosen.some(c=>c.id===id);return <label key={id} className="owner-check"><input type="checkbox" checked={checked} disabled={command.busy||!checked&&chosen.length>=10}
-   onChange={e=>setChosen(current=>e.target.checked?[...current,{id,text:row.text||row.preview||'Original without message text'}]:current.filter(c=>c.id!==id))}/><span>{row.text||row.preview||'(No message text)'}<small>Conversation {row.space||row.scope}</small></span></label>;
+   onChange={e=>setChosen(current=>e.target.checked?[...current,{id,text:sourceLabel(row)}]:current.filter(c=>c.id!==id))}/><span>{sourceLabel(row)}<small>Conversation {row.space||row.scope}</small></span></label>;
  })}</div>{originals.data&&!rows.length&&<EmptyState title="No originals found">Try different source text. Select sources from the conversations allowed by this rule.</EmptyState>}
  <div className="n-actions"><Badge>{chosen.length} of 10 selected</Badge>{chosen.length>0&&<Button size="sm" onClick={()=>setChosen([])}>Clear selection</Button>}</div>
  {chosen.length>0&&<details><summary>Selected evidence</summary><ul>{chosen.map(c=><li key={c.id}><span>{c.text}</span> <Button size="sm" onClick={()=>setChosen(v=>v.filter(s=>s.id!==c.id))}>Remove</Button></li>)}</ul></details>}

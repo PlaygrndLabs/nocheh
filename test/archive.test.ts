@@ -109,6 +109,7 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     const ownerHit=(await search(pool,{admin:true,scope:null},'Hey Mak')).find(row=>row.id===digest(value.key));
     assert.equal(ownerHit?.assistant_state,'failed','owner search retains the incoming reply status');
     assert.deepEqual(ownerHit?.reply_messages?.map((reply:{text:string|null})=>reply.text),[deliveredText]);
+    assert.deepEqual(originalRow?.content_types,['voice'],'browse identifies the original attachment alongside message text');
     assert.equal((await search(pool,{admin:true,scope:null},'operational marker')).length,0,'owner archive search excludes operational records');
     const monitoring=await archiveStatus(pool);
     assert.equal(monitoring.workflows.length,2,'imports and browser/scheduler records are excluded from Telegram workflows');
