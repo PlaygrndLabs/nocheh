@@ -22,13 +22,16 @@ that action by ID. Exact decision checks and delivery authority remain unchanged
 
 The reconciled Node/TypeScript build passed; all 24 dashboard checks and ten
 focused action-summary/archive-filter/reply-link checks passed. `git diff --check` passed. A
-synthetic preview on port 18972 (terminal `19686`) visibly confirmed the
+synthetic preview on port 18972 (terminal `60509`) visibly confirmed the
 pending/unsent and reply-sent labels, exact-card content, and Archive-to-review
 link. It has no Compose project, provider credentials, poller, scheduler, or
 external action executor. The AST-only Graphify refresh covered 545 files,
 3,622 nodes, and 13,430 edges with zero model calls. Live installation and
 database-backed acceptance of this change remain unrun; no Telegram action was
-approved or sent during verification.
+approved or sent during verification. The verified change was integrated
+into local `main` at `d690a1a`; HTTPS push to `origin/main` remains blocked
+because this checkout has no usable GitHub credentials (`gh auth status` is
+not logged in).
 
 </archive_action_approval_clarity>
 <database_selection_followup>
