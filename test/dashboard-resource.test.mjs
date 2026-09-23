@@ -28,3 +28,13 @@ test('obsolete requests are aborted and late results cannot enter a replacement 
  assert.equal(signal.aborted,true);const next=store.get('/source/a');resolveRequest({private:'old'});await request;
  assert.equal(next.snapshot.data,null);assert.equal(old.snapshot.data,null);
 });
+
+test('live invalidation refreshes only visible selected resources and keeps their current path',async()=>{
+ const calls=[],store=createResourceStore(async path=>{calls.push(path);return {path,version:calls.length};});
+ const archive=store.get('/data?scope=one'),rows=store.get('/database-browser?action=rows&offset=50'),guard=store.get('/guards/events/source'),hidden=store.get('/monitoring');
+ const stopArchive=store.subscribe(archive,()=>{}),stopRows=store.subscribe(rows,()=>{}),stopGuard=store.subscribe(guard,()=>{});
+ await store.refreshPaths(['/data?scope=one','/database-browser?action=rows&offset=50','/data?scope=one',null,'/monitoring'],['/guards/events/source']);
+ assert.deepEqual(calls,['/data?scope=one','/database-browser?action=rows&offset=50','/guards/events/source']);
+ assert.equal(archive.snapshot.data.path,'/data?scope=one');assert.equal(rows.snapshot.data.path,'/database-browser?action=rows&offset=50');
+ assert.equal(hidden.snapshot.data,null);stopArchive();stopRows();stopGuard();
+});

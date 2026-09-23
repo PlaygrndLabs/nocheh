@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
 const port=Number(process.env.NOCHEH_DASHBOARD_PORT||18963);
+let changes=0;
 const rows=Array.from({length:63},(_,index)=>({id:String(index+1),message:index===0?'Owner greeting':'Synthetic archived row '+String(index+1),scope:'555000111'}));
 const databases=[
  {id:'archive',name:'Archive · legacy',engine:'postgres'},
@@ -19,6 +20,21 @@ const json=(response,body,status=200)=>{response.writeHead(status,{'content-type
 createServer(async(request,response)=>{
  try{
   const url=new URL(request.url||'/',`http://127.0.0.1:${port}`);
+  if(url.pathname==='/__fixture/change'&&request.method==='POST'){
+   changes++;rows[0].message='Updated row '+changes;return json(response,{changes});
+  }
+  if(url.pathname==='/api/nocheh/changes'){
+   response.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-store'});
+   response.write(': connected\n\n');
+   const timer=setInterval(()=>response.write('event: refresh\ndata: {}\n\n'),1000);
+   response.on('close',()=>clearInterval(timer));return;
+  }
+  if(url.pathname==='/api/nocheh/scopes')return json(response,{scopes:[{scope:'owner',events:changes?2:1}]});
+  if(url.pathname==='/api/nocheh/data'||url.pathname==='/api/nocheh/search'){
+   const records=[{id:'a'.repeat(64),scope:'owner',kind:'telegram_update',text:'Original archived message',received_at:'2026-09-23T12:00:00.000Z'}];
+   if(changes)records.unshift({id:'b'.repeat(64),scope:'owner',kind:'telegram_update',text:'New live message '+changes,received_at:'2026-09-23T12:01:00.000Z'});
+   return json(response,{records,next:null});
+  }
   if(url.pathname==='/api/nocheh/database-browser'){
    const query=url.searchParams,action=query.get('action');
    if(action==='databases')return json(response,{databases});
