@@ -70,7 +70,7 @@ export function Settings({notify}) {
       if(value===original)delete updated.TELEGRAM_GROUP_ACCESS;else updated.TELEGRAM_GROUP_ACCESS=value;
       setChanges(updated);setReview(false);
     };
-    const accessChoices=[['default','No rule'],['grant','Grant'],['deny','Deny']];
+    const accessChoices=[['default','Default deny'],['grant','Grant'],['deny','Explicit deny']];
     const personRow=id=>h('li',{className:'n-access-person',key:id},
       h('div',{className:'n-access-person-name'},h('strong',null,participantName(id)),h('small',null,participantMeta(id))),
       h('div',{className:'n-access-choice','role':'group','aria-label':'Group access for '+participantLabel(id)},
@@ -78,7 +78,7 @@ export function Settings({notify}) {
     const addManualRule=()=>{changeAccess(manualDecision,accessUser.trim());setAccessUser('');setManualDecision('');};
     const accessEditor=h('div',{className:'n-settings-access','aria-labelledby':'group-access-title'},
       h('h4',{id:'group-access-title'},'Who may address Nocheh in groups'),
-      h('p',{className:'n-muted'},'Only you may start a bot reply by default. Set a person to Grant or Deny; No rule returns them to the owner-only default. Telegram supplies group administrators; other people appear after Nocheh observes them. Save and Apply for changes to take effect.'),
+      h('p',{className:'n-muted'},'Everyone except you is denied by default. Grant allows a person to address Nocheh; Explicit deny saves a block. Default deny clears an individual decision and still blocks them. Telegram supplies group administrators; other people appear after Nocheh observes them. Save and Apply for changes to take effect.'),
       !identityDirectory&&!identityError&&h('p',{role:'status'},'Looking up Telegram group names and visible people…'),
       identityError&&h('p',{role:'status'},'Observed Telegram names are unavailable. You can still enter numeric IDs.'),
       observed.some(group=>!groups.includes(group.id))&&h('div',{className:'n-field'},h('label',{htmlFor:'observed-group'},'Add an observed group'),
@@ -87,7 +87,7 @@ export function Settings({notify}) {
       groups.length?h('div',{className:'n-form'},
         h('div',{className:'n-field'},h('label',{htmlFor:'access-group'},'Selected group'),h('select',{id:'access-group',value:chosen,disabled:busy,onChange:e=>setAccessGroup(e.target.value)},...groups.map(id=>h('option',{value:id,key:id},groupLabel(id))))),
         h('div',{className:'n-access-directory'},
-          h('div',{className:'n-access-directory-head'},h('b',null,'Known people in this group'),h('small',null,rule.granted.length+' granted · '+rule.denied.length+' denied')),
+          h('div',{className:'n-access-directory-head'},h('b',null,'Known people in this group'),h('small',null,rule.granted.length+' granted · '+rule.denied.length+' explicitly denied')),
           h('ul',{className:'n-access-people'},
             owner&&h('li',{className:'n-access-person n-access-owner',key:'owner'},h('div',{className:'n-access-person-name'},h('strong',null,participantName(owner)),h('small',null,participantMeta(owner))),h('span',{className:'n-access-owner-badge'},'Owner · always allowed')),
             ...participantIds.map(personRow)),
@@ -95,7 +95,7 @@ export function Settings({notify}) {
         h('details',{className:'n-access-manual'},h('summary',null,'Add someone by user ID'),
           h('div',{className:'n-access-manual-fields'},
             h('div',{className:'n-field'},h('label',{htmlFor:'access-user'},'Telegram user ID'),h('input',{id:'access-user',inputMode:'numeric',value:accessUser,disabled:busy,placeholder:'Numeric user ID',onChange:e=>setAccessUser(e.target.value)})),
-            h('div',{className:'n-field'},h('label',{htmlFor:'manual-decision'},'Access'),h('select',{id:'manual-decision',value:manualDecision,disabled:busy,onChange:e=>setManualDecision(e.target.value)},h('option',{value:''},'Choose access…'),h('option',{value:'grant'},'Grant'),h('option',{value:'deny'},'Deny'))),
+            h('div',{className:'n-field'},h('label',{htmlFor:'manual-decision'},'Access'),h('select',{id:'manual-decision',value:manualDecision,disabled:busy,onChange:e=>setManualDecision(e.target.value)},h('option',{value:''},'Choose access…'),h('option',{value:'grant'},'Grant'),h('option',{value:'deny'},'Explicit deny'))),
             button('Add rule',addManualRule,busy||!manualDecision||!/^[1-9]\d{0,18}$/.test(accessUser.trim())||accessUser.trim()===owner))),
         Object.keys(access).some(id=>!groups.includes(id))&&h('p',{role:'alert'},'A removed group still has access decisions. Restore its group ID or revoke its decisions before saving.')):
         h('p',{className:'n-muted'},'Add a selected group above to manage participant access.'));

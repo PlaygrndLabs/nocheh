@@ -204,6 +204,22 @@ unavailable.
 
 </telegram_group_access_list>
 
+<telegram_default_deny_label>
+
+#### Telegram default-deny wording — 2026-09-23
+
+The owner clarified that the group default is deny. The former “No rule”
+control meant no individual decision and therefore effective denial under the
+owner-only policy, but its label obscured that outcome. Settings now calls the
+states Default deny, Grant, and Explicit deny, and explains that Default deny
+removes an individual decision while both deny states block the person. The
+underlying access policy is unchanged; no live participant decision was made.
+The local build and AST-only graph refresh passed. The isolated dashboard
+preview showed the default-deny label and separate explicit-deny count; switching
+to Explicit deny and back restored the saved default with no pending edit.
+
+</telegram_default_deny_label>
+
 <mvp_cleanup_recheck>
 
 #### Worktree and Docker cleanup with isolated MVP recheck — 2026-09-22
