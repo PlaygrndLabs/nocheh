@@ -7,7 +7,7 @@ import pg from 'pg';
 import { canonical, digest, ingest, archiveStatus, type Envelope } from '../src/archive.js';
 import { initialize } from '../src/database.js';
 import { settings } from '../src/config.js';
-import { drainSpool, fetchAttachments, immutableFile } from '../src/storage.js';
+import { drainSpool, fetchAttachments, immutableFile, reconcileLegacyDeliveries } from '../src/storage.js';
 import {runInput} from '../src/run-source.js';
 import {readEvent, importRecord,search} from '../src/retrieval.js';
 import {browseData} from '../src/guarded.js';
@@ -78,6 +78,27 @@ test('real PostgreSQL: durable duplicate capture, revisions, outage recovery, at
     assert.equal((await ingest(pool,{...value,channel:'telegram'})).duplicate,true,'explicit default channel preserves legacy identity');
     await pool.query("UPDATE dispatches SET state='failed',error_code='model_unavailable',attempts=2 WHERE event_id=$1",[digest(value.key)]);
     await ingest(pool,{...value,key:'generated:outbound',origin:'generated',kind:'outbound_result',text:'operational marker',payload:{state:'delivered'}});
+    const deliveredText='Hello from the assistant';
+    const delivered={message_id:77,date:1700000001,chat:{id:-20,type:'group'},from:{id:999,is_bot:true},text:deliveredText};
+    const receipt:Envelope={...value,key:'outbound:fixture:reply:result',origin:'generated',kind:'outbound_result',
+      text:null,payload:{method:'sendMessage',state:'delivered',status:200,
+        wire_base64:Buffer.from(canonical({ok:true,result:delivered})).toString('base64')}};
+    // This receipt has already left the spool, as on installations running the
+    // older legacy capture code. Reconciliation must expose its observed reply.
+    await ingest(pool,receipt);
+    await reconcileLegacyDeliveries(pool,root+'/historical-deliveries');
+    const replyRows=await browseData(pool,{admin:true,scope:null},'',{kind:'assistant',scope:'-20',reply:''});
+    assert.equal(replyRows.records.length,1);
+    assert.equal(replyRows.records[0]?.text,deliveredText);
+    await reconcileLegacyDeliveries(pool,root+'/historical-deliveries');
+    assert.equal((await pool.query("SELECT count(*) FROM events WHERE kind='telegram_delivered_message'")).rows[0].count,'1');
+    const freshReceipt={...receipt,key:'outbound:fixture:next:result',payload:{...receipt.payload,
+      wire_base64:Buffer.from(canonical({ok:true,result:{...delivered,message_id:78,text:'Second reply'}})).toString('base64')}};
+    await immutableFile(spool,digest(freshReceipt.key)+'.json',Buffer.from(canonical(freshReceipt)));
+    await drainSpool(unavailable,root);
+    assert.ok((await readdir(spool)).includes(digest(freshReceipt.key)+'.json'),'a database outage retains the reply receipt for replay');
+    await drainSpool(pool,root);
+    assert.equal((await browseData(pool,{admin:true,scope:null},'',{kind:'assistant',scope:'-20',reply:''})).records.length,2);
     await ingest(pool,{...value,key:'telegram:fixture:wire:1',origin:'live',kind:'telegram_wire',text:null,payload:{update_ids:[100]}});
     const browse=await browseData(pool,{admin:true,scope:null});
     assert.ok(browse.records.every(row=>row.kind!=='outbound_result'&&row.kind!=='telegram_wire'),'default archive browse contains source evidence only');

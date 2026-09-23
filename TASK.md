@@ -1,5 +1,31 @@
 # Nocheh implementation status
 
+<archive_assistant_replies>
+
+#### Legacy delivered replies missing from Archive — 2026-09-23
+
+The owner reported that a fresh incoming Telegram row showed `Replied`, while the
+Archive's `Assistant replies` filter returned no rows. The active installation
+still uses the legacy layout. In that path, the spool committed Telegram
+`outbound_result` receipts as generated events without projecting a confirmed
+Telegram Message response into an original assistant source record. The
+separated-store capture path already performed that projection.
+
+Legacy spool draining now captures confirmed delivered messages as source records
+and retries an incomplete projection without duplicating the receipt. A bounded
+startup sweep recovers delivered messages from retained legacy receipts. Archive
+conversation counts now exclude generated operational events and wire captures.
+The pinned Node 24 build and PostgreSQL archive check pass in a session-owned
+synthetic Compose project, including recovery of an older retained receipt,
+idempotent replay, and a database-outage retry. Five focused non-database checks
+and all 19 dashboard checks pass. The synthetic project and volume were removed
+after verification. The AST-only Graphify refresh covers 519 files, 3,534 nodes,
+13,234 edges, and zero model calls. The live installation was not restarted or
+inspected with its credentials, so the screenshot's reply is not yet verified
+as visible there. Integration status is recorded with the final commit evidence.
+
+</archive_assistant_replies>
+
 <live_mvp_acceptance>
 
 #### Live MVP acceptance in progress — 2026-09-22
