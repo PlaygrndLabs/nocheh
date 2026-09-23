@@ -1,6 +1,7 @@
 import {admin,type Reader} from '../access.js';
 import {HttpError,string} from '../http.js';
 import {matchesArchiveFilters,type ArchiveFilters} from '../archive-filters.js';
+import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {limit} from '../retrieval.js';
 import {type Envelope} from '../archive.js';
@@ -92,12 +93,14 @@ export class SourceRepository {
       this.stores.archive.query(`SELECT id FROM events WHERE to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
         ORDER BY ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) DESC,id LIMIT 200`,[query]));
     const stateRows=principal.admin&&rows.rows.length?(await this.stores.control.query('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[rows.rows.map(row=>row.id)])).rows:[];
-    const states=new Map(stateRows.map(row=>[row.event_id,row.state])),hits=[];
+    const states=new Map(stateRows.map(row=>[row.event_id,row.state]));
+    const reviews=principal.admin?await actionReviews(this.stores.control,rows.rows.map(row=>row.id),'separated'):new Map();
+    const hits=[];
     for(const candidate of rows.rows) {
       const reference=(await this.access.archive.captured(candidate.id)).reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
       const original=(await this.stores.archive.query('SELECT scope,source_id,revision,kind,origin,occurred_at,original_text,payload FROM events WHERE id=$1',[reference.id])).rows[0];
-      if(!matchesArchiveFilters(original,states.get(reference.id),filters))continue;
+      if(!matchesArchiveFilters(original,states.get(reference.id),filters,reviews.get(reference.id)?.state))continue;
       const value=binding?.mode==='on'?scopedObservation((await this.access.guards.read('events:'+reference.id,binding)).value):{text:original.original_text?.toString()??''};
       // The lexical index includes payload metadata, but a scoped hit must also
       // match the independent message text, never a stripped reply snapshot.
@@ -105,7 +108,7 @@ export class SourceRepository {
       if(binding&&!(await this.stores.derived.query("SELECT to_tsvector('simple',$1) @@ plainto_tsquery('simple',$2) AS matches",[text,query])).rows[0].matches)continue;
       const artifactKinds=principal.admin?(await this.stores.archive.query('SELECT kind FROM artifacts WHERE event_id=$1 ORDER BY id',[reference.id])).rows.map(row=>row.kind as string):[];
       const {payload,...fields}=original;
-      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
+      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),...(reviews.has(reference.id)?{action_review:reviews.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000,
         content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds)});
       if(hits.length===count)break;

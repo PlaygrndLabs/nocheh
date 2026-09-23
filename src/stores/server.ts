@@ -6,6 +6,7 @@ import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
 import {archiveFilters,matchesArchiveFilters} from '../archive-filters.js';
+import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
@@ -248,8 +249,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const candidates=(await s.stores.archive.query("SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') ORDER BY e.received_at DESC,e.id DESC LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51])).rows;
         const states=candidates.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
           error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[candidates.map(row=>row.id)])).rows:[];
-        const stateById=new Map(states.map(state=>[state.event_id,state])),matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters));
-        const records=matched.slice(0,50).map(({payload,artifact_kinds,original_text,...row})=>({...row,...stateById.get(row.id),text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[])}));
+        const stateById=new Map(states.map(state=>[state.event_id,state]));
+        const reviews=await actionReviews(s.stores.control,candidates.filter(row=>row.kind==='telegram_update').map(row=>row.id),'separated');
+        const matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters,reviews.get(row.id)?.state));
+        const records=matched.slice(0,50).map(({payload,artifact_kinds,original_text,...row})=>({...row,...stateById.get(row.id),...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[])}));
         const next=matched.length>50?matched[49].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
         return json(res,200,{records,next});
       }

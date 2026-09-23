@@ -5,6 +5,8 @@ import type { Reader } from './access.js';
 import {assertAudience} from './access.js';
 import { type Envelope, digest, envelope, ingest, canonical } from './archive.js';
 import { HttpError, object, string } from './http.js';
+import {actionReviews} from './action-review-summary.js';
+import {matchesArchiveFilters,type ArchiveFilters} from './archive-filters.js';
 import { storeBytes } from './storage.js';
 import {guardState,guardedValue,exportGuarded,restoreGuarded} from './guarded.js';
 import {contextAudience,allowPrepared} from './prepared-context.js';
@@ -21,7 +23,7 @@ const toEnvelope=(row:EventRow):Envelope=>({version:1,key:row.source_key,bot_id:
   ...(row.source_descriptor ? {source:JSON.parse(row.source_descriptor.toString())} : {}),
   origin:row.origin,kind:row.kind,occurred_at:row.occurred_at,payload:JSON.parse(row.payload.toString()),text:row.original_text?.toString() ?? null,
   ...(row.wire ? {wire_base64:row.wire.toString('base64')} : {})});
-export async function search(pool:pg.Pool,principal:Reader,query:string,count=20) {
+export async function search(pool:pg.Pool,principal:Reader,query:string,count=20,filters:ArchiveFilters={kind:'',scope:'',reply:''}) {
   await assertAudience(pool,principal);
   string(query,2000); limit(count);
   if (!query.trim()) throw new HttpError(400,'empty_query');
@@ -50,9 +52,13 @@ export async function search(pool:pg.Pool,principal:Reader,query:string,count=20
     FROM derived_artifacts d JOIN events e ON e.id=d.event_id
     WHERE NOT $6::boolean AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2::text IS NULL OR e.scope=$2)
       AND ($4::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$4)) AND ($5::text IS NULL OR d.kind<>'runtime_context' OR d.provenance->>'audience'=$5) AND to_tsvector('simple',d.search_text) @@ plainto_tsquery('simple',$1)
-  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,count,principal.scope===null?null:principal.space??null,principal.scope===null?null:contextAudience(principal),principal.admin]);
+  ) SELECT * FROM hits ORDER BY rank DESC,received_at DESC,id LIMIT $3`,[query,principal.scope,principal.admin?200:count,principal.scope===null?null:principal.space??null,principal.scope===null?null:contextAudience(principal),principal.admin]);
   await assertAudience(pool,principal);
-  return rows.map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
+  const ids=rows.map(row=>row.id);
+  const states=principal.admin&&ids.length?new Map((await pool.query<{event_id:string;state:string}>('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[ids])).rows.map(row=>[row.event_id,row.state])):new Map<string,string>();
+  const reviews=principal.admin?await actionReviews(pool,ids,'legacy'):new Map();
+  return rows.filter(row=>matchesArchiveFilters(row,states.get(row.id),filters,reviews.get(row.id)?.state)).slice(0,count).map(row=>({id:row.id,source:`nocheh:event:${row.id}`,scope:row.scope,source_id:row.source_id,revision:row.revision,
+    ...(states.has(row.id)?{assistant_state:states.get(row.id)}:{}),...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
     kind:row.kind,origin:row.origin,derived_id:row.derived_id,occurred_at:row.occurred_at,text:row.original_text?.toString().slice(0,2000) ?? null,
     truncated:(row.original_text?.toString().length ?? 0)>2000}));
 }

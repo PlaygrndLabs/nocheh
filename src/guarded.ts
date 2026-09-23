@@ -5,6 +5,7 @@ import {HttpError,object,string} from './http.js';
 import {admin,type Reader} from './access.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 import {matchesArchiveFilters,type ArchiveFilters} from './archive-filters.js';
+import {actionReviews} from './action-review-summary.js';
 import {sourceContentTypes} from './source-content.js';
 
 // The archive is evidence. These independently versioned projections are disposable
@@ -254,8 +255,9 @@ export async function browseData(pool:pg.Pool,principal:Reader,after='',filters:
       AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2)
       AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message')
     ORDER BY e.received_at DESC,e.id DESC LIMIT $4`,[string(after,64),filters.scope,filters.kind,filters.reply?201:51]);
-  const filtered=rows.filter(row=>matchesArchiveFilters(row,row.assistant_state,filters));
-  return {records:filtered.slice(0,50).map(({original_text,payload,artifact_kinds,...row})=>({...row,text:original_text?.toString().slice(0,500)??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[])})),next:filtered.length>50?filtered[49].id:filters.reply&&rows.length===201?rows.at(-1)?.id:null};
+  const reviews=await actionReviews(pool,rows.filter(row=>row.kind==='telegram_update').map(row=>row.id),'legacy');
+  const filtered=rows.filter(row=>matchesArchiveFilters(row,row.assistant_state,filters,reviews.get(row.id)?.state));
+  return {records:filtered.slice(0,50).map(({original_text,payload,artifact_kinds,...row})=>({...row,...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),text:original_text?.toString().slice(0,500)??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[])})),next:filtered.length>50?filtered[49].id:filters.reply&&rows.length===201?rows.at(-1)?.id:null};
 }
 
 export async function exportGuarded(pool:pg.Pool,eventId:string) {

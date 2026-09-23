@@ -12,16 +12,21 @@ import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
 import {controlledAction,controlledList,decideControlled,revokePermission} from './controlled-actions.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
-export async function telegramActions(pool:pg.Pool,principal:Reader) {
-  admin(principal);
-  return (await pool.query('SELECT id,event_id,scope,destination,original_text,state,error_code,created_at FROM action_requests ORDER BY created_at DESC LIMIT 100')).rows.map(row=>{
+const telegramView=(row:any)=>{
     const args={destination:row.destination,text:row.original_text.toString()};
     return {id:row.id,event_id:row.event_id,scope:row.scope,kind:'telegram_message',arguments:args,fingerprint:digest(canonical(args)),state:row.state,error_code:row.error_code,created_at:row.created_at};
-  });
+};
+export async function telegramActions(pool:pg.Pool,principal:Reader) {
+  admin(principal);
+  return (await pool.query('SELECT id,event_id,scope,destination,original_text,state,error_code,created_at FROM action_requests ORDER BY created_at DESC LIMIT 100')).rows.map(telegramView);
+}
+export async function telegramAction(pool:pg.Pool,principal:Reader,id:string) {
+  admin(principal);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');
+  const row=(await pool.query('SELECT id,event_id,scope,destination,original_text,state,error_code,created_at FROM action_requests WHERE id=$1',[id])).rows[0];
+  if(!row)throw new HttpError(404,'action_not_found');return telegramView(row);
 }
 export async function decideTelegram(pool:pg.Pool,principal:Reader,value:unknown) {
-  admin(principal);const input=object(value),rows=await telegramActions(pool,principal),row=rows.find(r=>r.id===input.id);
-  if(!row)throw new HttpError(404,'action_not_found');
+  admin(principal);const input=object(value),row=await telegramAction(pool,principal,string(input.id,64));
   if(input.fingerprint!==row.fingerprint)throw new HttpError(409,'action_changed');
   if(!['approve','deny'].includes(String(input.decision)))throw new HttpError(400,'invalid_decision');
   const evidence=await ingest(pool,{version:1,key:'owner-telegram-action:'+randomUUID(),channel:'browser',origin:'live',kind:'owner_action_decision',bot_id:'nocheh',scope:row.scope,
