@@ -341,3 +341,35 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .n-sidebar-head .sidebar-toggle{flex:0 0 40px;width:40px;min-height:40px!important;height:40px;padding:8px!important}
 .sidebar-collapsed .n-sidebar-head{flex-direction:column;gap:8px}
 .sidebar-collapsed .n-sidebar-head .n-brand{flex:0 0 auto;padding:0}
+
+/* Read-only database browser. The row table scrolls within its panel on phones. */
+.archive-database-link{display:inline-block;margin-top:10px;color:var(--n-accent);font-size:13px;font-weight:650}
+.db-browser-intro{display:flex;align-items:center;justify-content:space-between;gap:18px}
+.db-browser-intro h2{margin:4px 0 6px}
+.db-browser-intro p:last-child{max-width:70ch;color:var(--n-muted);line-height:1.5;margin:0}
+.db-browser-intro>svg{flex:0 0 auto;color:var(--n-accent)}
+.db-browser-workspace{display:grid;grid-template-columns:minmax(240px,280px) minmax(0,1fr);gap:20px;align-items:start}
+.db-browser-workspace>.n-panel{min-width:0}
+.db-browser-label{display:grid;gap:7px;margin-bottom:16px;color:var(--n-muted);font-size:13px;font-weight:650}
+.db-browser-label input,.db-browser-label select,.db-browser-filter input,.db-browser-filter select{width:100%;min-width:0;min-height:44px;padding:9px 11px;border:1px solid var(--n-line);border-radius:8px;background:var(--n-subtle);color:var(--n-text);font:inherit}
+.db-browser-table-list{max-height:70vh;overflow:auto;border:1px solid var(--n-line);border-radius:8px}
+.db-browser-table-list button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;padding:9px 11px;border:0;border-bottom:1px solid var(--n-line);background:transparent;color:var(--n-text);text-align:left;cursor:pointer}
+.db-browser-table-list button:last-child{border-bottom:0}
+.db-browser-table-list button:hover,.db-browser-table-list button.selected{background:var(--n-subtle)}
+.db-browser-table-list button.selected{box-shadow:inset 3px 0 var(--n-accent);font-weight:650}
+.db-browser-table-list button span{min-width:0;overflow-wrap:anywhere}
+.db-browser-table-list button small{color:var(--n-muted);white-space:nowrap}
+.db-browser-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.db-browser-heading h2{margin:4px 0 0;overflow-wrap:anywhere}
+.db-browser-filter{display:flex;align-items:end;flex-wrap:wrap;gap:10px;margin-bottom:18px}
+.db-browser-filter label{display:grid;gap:6px;flex:1 1 170px;color:var(--n-muted);font-size:13px;font-weight:650}
+.db-browser-filter button{min-height:44px}
+.db-browser-data{width:max-content;min-width:100%;font-variant-numeric:tabular-nums}
+.db-browser-data th{vertical-align:top;white-space:nowrap}
+.db-browser-data th button{display:flex;align-items:center;gap:5px;width:100%;border:0;padding:0;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer;text-align:left}
+.db-browser-data th small{display:block;margin-top:3px;font-weight:400;color:var(--n-muted)}
+.db-browser-data td{min-width:120px;max-width:360px;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}
+.db-browser-null{color:var(--n-muted);font-style:italic}
+.db-browser-pagination{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:14px;color:var(--n-muted);font-size:13px}
+.db-browser-pagination>div{display:flex;gap:8px}
+@media(max-width:850px){.db-browser-workspace{grid-template-columns:1fr}.db-browser-table-list{max-height:240px}}

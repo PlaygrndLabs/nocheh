@@ -31,6 +31,31 @@ provider cutover, or Honcho activation was performed in this recheck.
 [Content-free results](compatibility/results/2026-09-23-mvp-readiness-recheck.json).
 
 </mvp_readiness_recheck>
+<owner_database_browser>
+
+#### Read-only installation database browser — 2026-09-23
+
+The owner requested a raw source database view with sortable and filterable table
+rows, extended to all installation databases. The dashboard now has a Databases
+page that discovers the configured Nocheh and Inngest PostgreSQL databases,
+enabled Honcho PostgreSQL, registered Hermes SQLite profiles, and existing
+provider usage and Honcho budget SQLite stores. The legacy installation's
+combined PostgreSQL database appears as Archive · legacy. This browser reads
+bounded pages and cell previews; it cannot edit rows or accept SQL or a path from
+the browser. Redis queues and caches have keys rather than relational tables;
+Monitoring shows their service health, not raw keys.
+
+The dashboard build, 22 dashboard tests, and three focused Python browser
+tests passed. An isolated PostgreSQL fixture returned the expected discovered
+table, columns, sorted row, and column-filter result; its Compose project and
+volume were removed afterward. A synthetic localhost dashboard preview verified
+the visible table, one-row filter, descending sort, and switch to a Hermes SQLite
+table. The AST-only Graphify refresh covered 525 files, 3,574 nodes, and 13,331
+edges with zero model calls. The active installation was not rebuilt or restarted,
+so live database browsing remains unverified there. Integration status follows
+from the commit and push attempt.
+
+</owner_database_browser>
 
 <archive_assistant_replies>
 
