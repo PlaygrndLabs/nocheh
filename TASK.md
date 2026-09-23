@@ -142,6 +142,12 @@ on port 18849 verified the nested Telegram placement, name-and-ID labels,
 known-person ID fill, group selection, and staged Grant action. SQL directory
 queries passed read-only parsing against the live archive; that archive has no
 captured group updates yet. No live grant or Telegram message was sent.
+The feature was locally integrated as `667b86c` and activated by rebuilding and
+recreating only `nocheh-app` and `nocheh-dashboard`. All 17 installation services
+were running and healthy afterward. The owner-only live dashboard endpoint
+returned one named selected group and two named visible people, without a live
+grant or group message. GitHub HTTPS credentials were unavailable, so this
+integration is not yet pushed to `origin/main`.
 
 </telegram_group_identity_controls>
 
