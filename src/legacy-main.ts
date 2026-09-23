@@ -209,7 +209,7 @@ const server = createServer((req, res) => { void (async () => {
   }
   if(servesArchive && req.method==='GET' && path==='/v1/scopes') {
     admin(principal);
-    const {rows}=await pool.query('SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 GROUP BY scope ORDER BY scope LIMIT 101',[url.searchParams.get('after') ?? '']);
+    const {rows}=await pool.query("SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 AND origin<>'generated' AND kind<>'telegram_wire' GROUP BY scope ORDER BY scope LIMIT 101",[url.searchParams.get('after') ?? '']);
     return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99]?.scope:null});
   }
   if(servesArchive && req.method==='POST' && path==='/v1/action-requests')return json(res,200,await requestAction(pool,principal,await readJson(req)));
