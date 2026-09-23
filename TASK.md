@@ -1,5 +1,26 @@
 # Nocheh implementation status
 
+<archive_transcript_row>
+
+#### Active transcript preview in Archive rows — 2026-09-23
+
+The owner asked to show the transcription first in the pictured voice-message
+row. Browse and owner search now include a bounded preview of the first active
+transcript under the original message content and before a linked assistant
+reply. The preview is labeled `Transcript · generated`; the original voice
+content type remains visible. Search matching still uses original source text,
+and scoped search does not receive the unguarded transcript preview.
+
+The pinned Node 24 fixture image built, all 24 dashboard checks passed, and two
+focused synthetic PostgreSQL checks passed on a fresh isolated fixture database.
+The owner preview on localhost port 18981 visibly showed the transcript in its
+Archive search row. The active installation and a real owner voice message were
+not retested; no provider, poller, scheduler, or Telegram delivery was used.
+The AST-only Graphify refresh covered 534 files, 3,624 nodes, and 13,483 edges
+with zero model calls.
+
+</archive_transcript_row>
+
 <local_worktree_rerun>
 
 #### MVP worktree consolidation and local rerun — 2026-09-23
