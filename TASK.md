@@ -177,11 +177,22 @@ correlates their event IDs and timestamps internally.
 An attempt to arm a second host-level restart for the still-pending reply case
 was rejected by automatic approval review because the owner had deferred that
 step while asking about its scope. No second restart occurred; explicit
-authorization for that exact interruption is pending.
+authorization for that exact interruption was subsequently given.
+
+With that authorization, the owner sent an ordinary-language DM. The watcher
+captured it while its dispatch was `pending` with zero attempts, then restarted
+only the supervised Hermes container once. The same container returned healthy
+with Telegram connected. Its dispatch completed on one attempt after restart,
+linked an assistant result to the captured input, and produced one confirmed
+`sendMessage` delivery in the same scope. The owner saw exactly one appropriate
+reply. This verifies recovery of a queued message across the restart. Dispatch
+had not begun at the interruption, so recovery of an in-flight send or uncertain
+delivery receipt remains unverified. No further restart was attempted.
 
 These are **pre-reset** observations on the `legacy` layout. Private/group
-isolation and exact owner-approved delivery passed as observed. Pending receipt
-recovery, the post-reset human group reply/reaction, and post-reset Honcho
+isolation and exact owner-approved delivery passed as observed. Queued dispatch
+recovery passed; in-flight receipt recovery, the post-reset human group
+reply/reaction, and post-reset Honcho
 production acceptance remain pending. MVP release acceptance is **not established**.
 [Content-free result](compatibility/results/2026-09-23-post-rebuild-live-test.json).
 
