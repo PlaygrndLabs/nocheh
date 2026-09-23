@@ -14,6 +14,7 @@ import type {GuardBinding} from './guards.js';
 import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel} from '../graph-labels.js';
 import {ProjectRepository} from './projects.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
+import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
 export function scopedObservation(value:unknown):any {
@@ -116,8 +117,9 @@ export class SourceRepository {
     }
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
     if(principal.admin){
-      const replies=await archiveReplyPreviews(this.stores.archive,this.stores.control,hits);
-      for(const hit of hits)hit.reply_messages=replies.get(hit.id)??[];
+      const [replies,transcripts]=await Promise.all([
+        archiveReplyPreviews(this.stores.archive,this.stores.control,hits),archiveTranscriptPreviews(this.stores.derived,hits)]);
+      for(const hit of hits){hit.reply_messages=replies.get(hit.id)??[];hit.transcript_preview=transcripts.get(hit.id)??null;}
     }
     await this.allowPrepared(principal,hits);return hits;
   }

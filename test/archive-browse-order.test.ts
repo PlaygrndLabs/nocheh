@@ -42,7 +42,7 @@ test('archive browse orders received records across cursor pages in both storage
 
     const token='browse-order-fixture-token';
     const server=storageServer(
-      {stores:{archive:pool,control:pool}} as unknown as Parameters<typeof storageServer>[0],
+      {stores:{archive:pool,control:{query:async()=>({rows:[]})},derived:{query:async()=>({rows:[]})}}} as unknown as Parameters<typeof storageServer>[0],
       {token,dataDir:root} as Parameters<typeof storageServer>[1],
       (async()=>({})) as Parameters<typeof storageServer>[2]);
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
