@@ -6,7 +6,7 @@ import {join} from 'node:path';
 const port=Number(process.env.NOCHEH_DASHBOARD_PORT||18963);
 const rows=Array.from({length:63},(_,index)=>({id:String(index+1),message:index===0?'Owner greeting':'Synthetic archived row '+String(index+1),scope:'555000111'}));
 const databases=[
- {id:'archive',name:'Archive · legacy',engine:'postgres'},
+ {id:'archive',name:'Legacy combined',engine:'postgres'},
  {id:'workflow',name:'Workflow · Inngest',engine:'postgres'},
  {id:'honcho',name:'Honcho memory',engine:'postgres'},
  {id:'hermes:owner',name:'Hermes · owner',engine:'sqlite'},

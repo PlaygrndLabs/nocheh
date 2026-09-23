@@ -37,7 +37,7 @@ def _catalog(state):
     layout = config.get('NOCHEH_STORAGE_LAYOUT', 'legacy')
     databases = []
     if layout == 'legacy':
-        databases.append({'id': 'archive', 'name': 'Archive · legacy', 'engine': 'postgres',
+        databases.append({'id': 'archive', 'name': 'Legacy combined', 'engine': 'postgres',
                           'service': 'nocheh-db', 'database': 'nocheh', 'user': 'nocheh'})
     else:
         for name in ('archive', 'derived', 'control'):
