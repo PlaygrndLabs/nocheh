@@ -168,9 +168,11 @@ and budget instructions; fixture tests do not certify live provider behavior.
 ## Evidence graph and local operations
 
 Graph defaults to all private knowledge; you can select one archive scope. It pages
-through 20 messages at a time. The only node types are users, projects, groups,
-and messages. It includes recorded authorship, replies to original source IDs,
-same-source revisions, and explicit group-to-project assignments. Actions, events,
+through 20 messages at a time. The aggregate `All private knowledge` root is a
+`Collection` navigation node, separate from conversation groups and their counts.
+The source-backed node types are users, projects, groups, and messages. It includes
+recorded authorship, replies to original source IDs, same-source revisions, and
+explicit group-to-project assignments. Actions, events,
 runtime context, files, generated artifacts, Hermes profiles, and memory notes are
 excluded from both the visual graph and its JSON export. Messages without display
 text use their source kind and a stable short message ID instead of sharing an

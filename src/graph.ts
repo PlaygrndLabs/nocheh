@@ -6,7 +6,7 @@ import { HttpError, string } from './http.js';
 import { limit } from './retrieval.js';
 import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel,type GraphChatType} from './graph-labels.js';
 
-type Node = {id:string; kind:'group'|'user'|'message'; label:string; chat_type?:GraphChatType; event_id?:string; source_id?:string};
+type Node = {id:string; kind:'collection'|'group'|'user'|'message'; label:string; chat_type?:GraphChatType; event_id?:string; source_id?:string};
 type Edge = {from:string; to:string; kind:string};
 export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string, after='', count=20, focus='') {
   await assertAudience(pool,principal);
@@ -20,7 +20,7 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
      WHERE o.kind='message' AND ($1='*' OR e.scope=$1) AND e.origin<>'generated' AND e.id>$2 AND ($3='' OR e.id=$3)
      AND ($5::text IS NULL OR e.id IN(SELECT event_id FROM event_spaces WHERE space_id=$5)) ORDER BY e.id LIMIT $4`,[parentSpace(scope)??scope,after,focus,count+1,principal.space??(parentSpace(scope)?scope:null)]);
   const events=rows.slice(0,count),ids=events.map(e=>e.id);
-  const nodes:Node[]=[{id:'group:'+scope,kind:'group',label:scope==='*'?'All private knowledge':scope}],edges:Edge[]=[];
+  const nodes:Node[]=scope==='*'?[{id:'collection:*',kind:'collection',label:'All private knowledge'}]:[{id:'group:'+scope,kind:'group',label:scope}],edges:Edge[]=[];
   const add=(node:Node,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else {
     if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;
     if(node.chat_type&&!current.chat_type)current.chat_type=node.chat_type;
@@ -34,7 +34,7 @@ export async function evidenceGraph(pool:pg.Pool, principal:Reader, scope:string
   for(const event of events){
     const ownScope=scope==='*'?event.space_id:scope,chatType=graphChatType(event.payload,ownScope);
     add({id:'group:'+ownScope,kind:'group',label:graphGroupLabel(event.payload,ownScope)??ownScope,...(chatType?{chat_type:chatType}:{})},ownScope);
-    if(scope==='*')link('group:*','group:'+ownScope,'contains');
+    if(scope==='*')link('collection:*','group:'+ownScope,'contains');
     const id='message:'+event.id;
     add({id,kind:'message',label:evidenceNodeLabel(event.text,event.event_kind,event.id),event_id:event.id,source_id:event.source_id});link('group:'+ownScope,id,'contains');
     for(const relation of relations.rows.filter(r=>r.event_id===event.id)) {
