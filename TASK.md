@@ -1,5 +1,29 @@
 # Nocheh implementation status
 
+<database_selection_followup>
+
+#### Separate database selection — 2026-09-23
+
+The owner clarified that Archive, Derived, and Control must each be selectable as
+separate databases. The catalog and dashboard selector already implement that
+behavior for `original-only-v1`. The isolated database-browser preview now starts
+with those three distinct physical database identities and table inventories;
+`NOCHEH_PREVIEW_STORAGE_LAYOUT=legacy` retains a combined-layout fixture. Browser
+inspection selected Derived and Control and showed their distinct database names,
+tables, and rows. This is synthetic UI evidence, not an installation cutover.
+Five focused database-browser checks pass, including a physical-database routing
+check for all three selectors; the preview script passes Node syntax checking.
+The AST-only code graph refresh covers 531 files, 3,608 nodes, and 13,434 edges.
+
+A fresh read-only installation preflight found 17 owned containers, three volumes,
+55 classified paths, and zero current ownership blockers. PostgreSQL still contains
+only `nocheh` and `nocheh_inngest`, and the saved layout remains `legacy`. The
+documented controlled reset, including exact review of external archive items,
+preservation, empty-baseline proof, and fresh live acceptance, is still pending.
+The running installation has not been reset or switched to separate databases.
+
+</database_selection_followup>
+
 <evidence_graph_collection>
 
 #### Private knowledge graph root type — 2026-09-23
