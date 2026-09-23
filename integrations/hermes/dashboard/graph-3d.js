@@ -22,6 +22,7 @@ export function createGraphScene(host, data, {onSelect, onError}) {
   scene.add(ambient, light);
   const graph = layoutGraph(data);
   const geometries = {
+    collection: new THREE.DodecahedronGeometry(1),
     message: new THREE.SphereGeometry(1, 16, 12),
     author: new THREE.OctahedronGeometry(1),
     scope: new THREE.IcosahedronGeometry(1, 1),

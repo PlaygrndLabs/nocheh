@@ -1,5 +1,6 @@
 // Coordinates are a navigation aid, never a semantic claim or a source fact.
 export const NODE_STYLES = {
+  collection: {color: '#f0ca80', label: 'Collection', size: 7},
   group: {color: '#80d6c0', label: 'Group', size: 7},
   project: {color: '#c1aff5', label: 'Project', size: 5.5},
   user: {color: '#edac90', label: 'User', size: 5.5},
@@ -27,7 +28,7 @@ export function layoutGraph(data) {
       z: radius * ring * Math.sin(angle), vx: 0, vy: 0, vz: 0};
   });
   const byId = new Map(nodes.map(node => [node.id, node]));
-  const rootId = byId.has('group:*') ? 'group:*' : nodes.find(node => node.kind === 'group')?.id;
+  const rootId = byId.has('collection:*') ? 'collection:*' : nodes.find(node => node.kind === 'group')?.id;
   const edges = data.edges.filter(edge => byId.has(edge.from) && byId.has(edge.to));
   // A bounded deterministic spring layout. It settles before display; no idle motion.
   for (let step = 0; step < 100; step++) {

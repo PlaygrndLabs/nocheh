@@ -122,7 +122,7 @@ export class SourceRepository {
       JOIN source_observations s ON s.event_id=e.id JOIN source_revisions r ON r.id=s.revision_id
       JOIN source_objects o ON o.id=r.object_id
       WHERE o.kind='message' AND e.origin<>'generated' AND e.id>$1 AND ($2='' OR e.id=$2) ORDER BY e.id LIMIT 201`,[after,focus])).rows;
-    const nodes:any[]=[{id:'group:'+scope,kind:'group',label:scope==='*'?'All private knowledge':scope}],edges:any[]=[],selected:string[]=[],spaces=new Set<string>(),payloads=new Map<string,unknown>();
+    const nodes:any[]=scope==='*'?[{id:'collection:*',kind:'collection',label:'All private knowledge'}]:[{id:'group:'+scope,kind:'group',label:scope}],edges:any[]=[],selected:string[]=[],spaces=new Set<string>(),payloads=new Map<string,unknown>();
     const add=(node:any,fallback?:string)=>{const current=nodes.find(n=>n.id===node.id);if(!current)nodes.push(node);else {
       if(fallback&&current.label===fallback&&node.label!==fallback)current.label=node.label;
       if(node.chat_type&&!current.chat_type)current.chat_type=node.chat_type;
@@ -135,7 +135,7 @@ export class SourceRepository {
         JOIN source_objects o ON o.id=r.object_id WHERE e.id=$1`,[id])).rows[0];
       if(!row||row.object_kind!=='message'||row.origin==='generated')return false;
       const space=await this.access.space((await this.access.archive.captured(id)).reference)??row.scope,chatType=graphChatType(row.payload,space);
-      payloads.set(id,row.payload);spaces.add(space);add({id:'group:'+space,kind:'group',label:graphGroupLabel(row.payload,space)??space,...(chatType?{chat_type:chatType}:{})},space);if(scope==='*')link('group:*','group:'+space,'contains');
+      payloads.set(id,row.payload);spaces.add(space);add({id:'group:'+space,kind:'group',label:graphGroupLabel(row.payload,space)??space,...(chatType?{chat_type:chatType}:{})},space);if(scope==='*')link('collection:*','group:'+space,'contains');
       add({id:'message:'+id,kind:'message',label:evidenceNodeLabel(row.search_text.slice(0,160),row.kind,id),event_id:id,source_id:row.source_id});
       link('group:'+space,'message:'+id,'contains');return true;
     };
