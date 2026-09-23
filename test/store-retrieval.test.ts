@@ -49,9 +49,10 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     await selections.activate(transcript,null,digest(key+':activate'),'automatic');
     assert.equal((await sources.search(owner,'silverrush')).length,0);
     assert.equal((await sources.search(await principal('-321'),'silverrush')).length,0);
-    assert.ok((await sources.search(owner,'quillmarsh')).some(row=>row.id===target.id));
+    assert.equal((await sources.search(owner,'quillmarsh')).find(row=>row.id===target.id)?.transcript_preview,'Derivative silverrush');
     const scoped=await principal('-321'),hits=await sources.search(scoped,'quillmarsh');
     assert.ok(hits.some(row=>row.id===target.id));assert.ok(!hits.some(row=>row.id===topic.id));
+    assert.ok(!('transcript_preview' in hits.find(row=>row.id===target.id)!),'scoped search does not expose an unguarded transcript');
     for(const word of ['foreignsecret','embeddedsecret','hazelwharf'])assert.deepEqual(await sources.search(scoped,word),[]);
     const read=await sources.read(scoped,reply.id);
     assert.ok(!JSON.stringify(read).includes('foreignsecret'));assert.ok(!JSON.stringify(read).includes('embeddedsecret'));

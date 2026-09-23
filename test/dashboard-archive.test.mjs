@@ -19,6 +19,8 @@ test('archive presents one accessible table-to-agent-copy workflow',async()=>{
   assert.match(archive,/Agent copy \{ready\?/);
   assert.match(archive,/archive-linked-reply/);
   assert.match(archive,/Assistant replied/);
+  assert.match(archive,/Transcript · generated/);
+  assert.ok(archive.indexOf('archive-transcript-preview')<archive.indexOf('archive-linked-replies" aria-label="Delivered replies"'));
   assert.match(archive,/In response to:/);
   assert.match(archive,/label:'Delivered'/);
   assert.match(archive,/Operational attempts and receipts stay in Monitoring/);
