@@ -1,5 +1,28 @@
 # Nocheh implementation status
 
+<evidence_graph_collection>
+
+#### Private knowledge graph root type — 2026-09-23
+
+The owner noticed that the `All private knowledge` node was shown as `Group`.
+Both graph endpoints had created the aggregate `*` root with a `group` kind,
+causing the dashboard's browser, inspector, legend, and type filter to treat a
+navigation container as a Telegram group. The aggregate root is now a distinct
+`Collection` node with ID `collection:*`; scoped conversations keep their
+existing group identities and private-chat presentation. The CLI graph adapter
+also normalizes older `scope:*` and `group:*` roots to this collection type.
+
+The pinned Node 24 Docker build passed. All 23 dashboard checks passed, as did
+the legacy PostgreSQL graph test and the separated-store retrieval test against
+separate isolated synthetic databases. An isolated preview on port 18947 visibly
+shows `COLLECTION · All private knowledge`; its private-chat filter shows only
+the actual direct conversation. The worktree's AST-only Graphify refresh covers
+526 files, 3,579 nodes, and 13,348 edges with zero model calls. The active
+installation was not rebuilt or activated; its dashboard will show the old type
+until a separately authorized local rebuild.
+
+</evidence_graph_collection>
+
 <mvp_readiness_recheck>
 
 #### Fresh local MVP readiness test — 2026-09-23
@@ -89,6 +112,44 @@ dashboard code locally but does not establish the pending reset, fresh Telegram,
 or Honcho MVP release gates.
 [Content-free result](compatibility/results/2026-09-23-app-dashboard-rebuild.json).
 
+#### Live post-rebuild Telegram test — 2026-09-23
+
+The owner sent one synthetic DM and confirmed exactly one appropriate Telegram
+reply. The active local installation captured it once, finished dispatch on its
+first attempt, recorded one delivered `sendMessage`, and displayed the reply in
+the rebuilt dashboard Archive. Capture-to-delivery was about 30 seconds.
+
+The owner also sent a synthetic voice note. The captured audio file exists and
+matches its stored byte count and SHA-256. Subscription transcription completed
+on its first attempt with matching input provenance. The transcript recognized
+the synthetic acceptance phrase, though it rendered the bot name differently.
+The assistant result links to the voice event, dispatch completed on its first
+attempt, and one `sendMessage` delivery was recorded about 46 seconds after
+capture. The owner reported a reply, but its harmless synthetic marker was
+replaced by `***`. The original transcript retains the marker while its automatic
+guarded projection masks it. This is a live answer-quality finding; the voice
+answer is not a clean semantic pass.
+
+The selected group's exact synthetic logging-only message was captured once and
+suppressed after one attempt with `intentional_silence`. No outbound intent,
+result, or delivered message appeared in that group's test window. The owner
+confirmed no Telegram-visible reply.
+
+For private/group isolation, the owner's private marker and group question were
+captured in separate scopes and in order. The group policy has no access to the
+private DM source, no active share grants it, and neither the group's prepared
+context nor its derived inputs contained the marker. The delivered group reply
+did not contain the marker; the owner observed a refusal to access the DM.
+It cited the group's own question using an internal event ID, which the owner
+found unclear. Group capture-to-delivery took about 125 seconds, a live latency
+concern for the MVP's fast-answer goal.
+
+These are **pre-reset** observations on the `legacy` layout. Private/group
+isolation passed as observed, while exact owner approval, restart receipt recovery, the
+post-reset human group reply/reaction, and post-reset Honcho production acceptance
+remain pending. MVP release acceptance is **not established**.
+[Content-free result](compatibility/results/2026-09-23-post-rebuild-live-test.json).
+
 </mvp_readiness_recheck>
 <archive_reply_table>
 
@@ -113,6 +174,11 @@ synthetic browser preview on port 18958 verified the table layout and opening a
 reply preview; it does not prove the active installation's stored links. The
 active installation was not rebuilt or restarted, so live visual verification
 remains pending.
+
+Integration with concurrent Archive media work preserves content-type labels for
+voice and other non-text messages in both the table and linked reply preview.
+The reconciled Node 24 build and focused regression set pass 28 checks with one
+PostgreSQL fixture skip; `git diff --check` passes.
 
 </archive_reply_table>
 <archive_browse_order>
@@ -669,6 +735,28 @@ behavior was not rerun.
 </native_dashboard_shortcuts>
 
 <original_only_archive>
+
+#### Non-text source content in Archive — 2026-09-23
+
+The owner identified a textless Telegram voice message shown as `(No message
+text)` and requested UI support for other non-text content. Archive browse and
+search results now carry original content-type hints, and the table and Sharing
+source picker name voice and other media or structured messages while retaining
+message text when it exists. Original details show the content type, useful
+structured fields, attachment readiness and duration, a download action, and
+explicit click-to-load previews for supported audio, video, and image files.
+Preview failures leave the original download available. The immutable original
+and guarded agent copy remain separate.
+
+The pinned Node 24 development image build, 23 dashboard tests, and four focused
+synthetic PostgreSQL checks pass, including content classification and browse
+pagination in both storage layouts after merging the concurrent main changes.
+An isolated Compose preview on localhost port 18968 uses its own database,
+network, image, and project; visual inspection confirmed the voice row, detail,
+and audio control. No installation service, provider, poller, scheduler, or
+credential was used. The AST-only Graphify refresh covers 530 files, 3,590
+nodes, and 13,376 edges with zero model calls. Live installation verification
+and production activation were not performed.
 
 #### Archive status, filters, and message-detail clarity — 2026-09-22
 

@@ -18,7 +18,7 @@ test('archive shows only confirmed replies belonging to the incoming turn and sc
     {operation_key:'outbound:123:telegram:123:update:420:sendMessage:hash',sources:[{id:unrelated}]},
   ]})} as unknown as pg.Pool;
   const previews=await archiveReplyPreviews(archive,control,[{id:input,kind:'telegram_update',scope:'42'}]);
-  assert.deepEqual(previews.get(input),[{id:reply,text:'Confirmed answer',received_at:'2026-09-23T10:00:00.000Z'}]);
+  assert.deepEqual(previews.get(input),[{id:reply,text:'Confirmed answer',received_at:'2026-09-23T10:00:00.000Z',content_types:[]}]);
   assert.equal(previews.size,1);
 });
 
@@ -40,5 +40,5 @@ test('legacy archive links only observed messages reconstructed from a confirmed
         revision:receipt.revision,occurred_at:null,original_text:null,payload:Buffer.from(canonical(receipt.payload))}]:
       [{id:reply,scope:'42',kind:'telegram_delivered_message',original_text:Buffer.from('Confirmed answer'),received_at:new Date('2026-09-23T10:00:00Z')}]})} as unknown as pg.Pool;
   assert.deepEqual((await legacyArchiveReplyPreviews(pool,[{id:input,kind:'telegram_update',scope:'42'}])).get(input),
-    [{id:reply,text:'Confirmed answer',received_at:'2026-09-23T10:00:00.000Z'}]);
+    [{id:reply,text:'Confirmed answer',received_at:'2026-09-23T10:00:00.000Z',content_types:[]}]);
 });

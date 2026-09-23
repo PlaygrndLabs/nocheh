@@ -1,9 +1,10 @@
 import type pg from 'pg';
 import {digest,envelope} from '../archive.js';
 import {captureEvidence} from './generated-capture.js';
+import {sourceContentTypes} from '../source-content.js';
 
 type RecordRow={id:string;kind:string;scope:string};
-export type ReplyPreview={id:string;text:string|null;received_at:string};
+export type ReplyPreview={id:string;text:string|null;received_at:string;content_types:string[]};
 
 async function sourcePrefixes(archive:pg.Pool,records:RecordRow[]){
   const incoming=records.filter(row=>row.kind==='telegram_update');
@@ -18,7 +19,8 @@ async function sourcePrefixes(archive:pg.Pool,records:RecordRow[]){
 async function previewRows(archive:pg.Pool,records:RecordRow[],candidate:Map<string,Set<string>>):Promise<Map<string,ReplyPreview[]>> {
   const ids=[...new Set([...candidate.values()].flatMap(values=>[...values]))];
   if(!ids.length)return new Map();
-  const replies=(await archive.query(`SELECT id,scope,kind,original_text,received_at FROM events
+  const replies=(await archive.query(`SELECT id,scope,kind,original_text,received_at,payload,
+    (SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=events.id) AS artifact_kinds FROM events
     WHERE id=ANY($1::text[]) AND kind='telegram_delivered_message'`,[ids])).rows;
   const byId=new Map(replies.map(row=>[row.id,row]));
   const scopeById=new Map(records.map(row=>[row.id,row.scope]));
@@ -26,7 +28,8 @@ async function previewRows(archive:pg.Pool,records:RecordRow[],candidate:Map<str
   for(const [parent,children] of candidate) {
     const previews=[...children].map(id=>byId.get(id)).filter(row=>row&&row.kind==='telegram_delivered_message'&&row.scope===scopeById.get(parent))
       .sort((a,b)=>b.received_at.getTime()-a.received_at.getTime()||b.id.localeCompare(a.id)).slice(0,3)
-      .map(row=>({id:row.id,text:row.original_text?.toString().slice(0,500)??null,received_at:row.received_at.toISOString()}));
+      .map(row=>({id:row.id,text:row.original_text?.toString().slice(0,500)??null,received_at:row.received_at.toISOString(),
+        content_types:sourceContentTypes(row.kind,row.payload?JSON.parse(row.payload.toString()):{},row.artifact_kinds??[])}));
     if(previews.length)linked.set(parent,previews);
   }
   return linked;

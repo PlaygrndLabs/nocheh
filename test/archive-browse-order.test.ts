@@ -22,17 +22,21 @@ test('archive browse orders received records across cursor pages in both storage
       id:digest(`browse-order:${index}`),
       received_at:new Date(Date.UTC(2099,0,1,0,0,Math.floor(index/2))).toISOString(),
     }));
-    for(const [index,row] of source.entries())await pool.query(`INSERT INTO events
+    for(const [index,row] of source.entries()){
+      const payload=index===0?JSON.stringify({message:{message_id:index,voice:{file_id:'fixture-voice'}}}):'{}';
+      await pool.query(`INSERT INTO events
       (id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,received_at,payload,payload_hash,original_text)
       VALUES($1,$2,'telegram','fixture','browse-order',$3,'1','live','telegram_update',$4,$5,$6,$7)`,
-      [row.id,`browse-order:${index}`,String(index),row.received_at,Buffer.from('{}'),digest('{}'),Buffer.from(`Record ${index}`)]);
+      [row.id,`browse-order:${index}`,String(index),row.received_at,Buffer.from(payload),digest(payload),Buffer.from(`Record ${index}`)]);
+    }
     const expected=source.sort((a,b)=>b.received_at.localeCompare(a.received_at)||b.id.localeCompare(a.id)).map(row=>row.id);
     const filters={kind:'',scope:'browse-order',reply:''} as const;
-    const check=async(load:(after:string)=>Promise<{records:{id:string}[];next:string|null}>)=>{
+    const check=async(load:(after:string)=>Promise<{records:{id:string;content_types?:string[]}[];next:string|null}>)=>{
       const first=await load('');assert.deepEqual(first.records.map(row=>row.id),expected.slice(0,50));
       assert.equal(first.next,expected[49]);
       const second=await load(first.next!);assert.deepEqual(second.records.map(row=>row.id),expected.slice(50));
       assert.equal(second.next,null);
+      assert.deepEqual([...first.records,...second.records].find(row=>row.id===digest('browse-order:0'))?.content_types,['voice']);
     };
     await check(after=>browseData(pool,{admin:true,scope:null},after,filters));
 
