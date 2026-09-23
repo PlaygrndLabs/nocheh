@@ -240,6 +240,12 @@ saved grant, and explicit deny transitions. The AST-only code graph was refreshe
 The isolated preview on port 18849 verified exactly two choices, default Denied,
 Allowed/Denied switching, the cleared draft on return, and a two-choice manual
 form. No live access decision was saved or applied.
+The feature was integrated into local `main` as `0843bad`, then only the local
+dashboard image and container were replaced. A fresh live Settings page showed
+one known non-owner participant as Denied with exactly two choices. All 17
+installation services remained healthy. The remote push remains blocked by the
+previously rejected publication of private activation metadata to an unverified
+remote and unavailable GitHub HTTPS credentials.
 
 </telegram_binary_access_ui>
 
