@@ -5,10 +5,14 @@ import {sourceContentLabel,sourceContentTypes} from '../../src/source-content.js
 
 function MediaPreview({file}){
  const [url,setUrl]=useState(null),[loading,setLoading]=useState(false),[problem,setProblem]=useState('');
- const pending=useRef(null);
+ const pending=useRef(null),player=useRef(null);
  useEffect(()=>()=>pending.current?.abort(),[]);
  useEffect(()=>()=>{if(url)URL.revokeObjectURL(url);},[url]);
  const kind=file.kind,media=kind==='voice'||kind==='audio'?'audio':kind==='video'||kind==='video_note'?'video':kind==='photo'||kind==='image'?'image':null;
+ useEffect(()=>{
+  if(media!=='audio'||!url||!player.current)return;
+  player.current.play().catch(error=>setProblem(error?.name==='NotAllowedError'?'Use the audio controls to start playback.':'Audio preview could not play. Download the original file instead.'));
+ },[media,url]);
  if(!media||file.state!=='ready')return null;
  const fallback={voice:'audio/ogg',audio:'audio/mpeg',video:'video/mp4',video_note:'video/mp4',photo:'image/jpeg',image:'image/jpeg'}[kind];
  const supplied=file.metadata?.mime_type;
@@ -26,7 +30,7 @@ function MediaPreview({file}){
  }
  return h('div',{className:'source-media-preview'},
   !url&&h('button',{type:'button',onClick:load,disabled:loading},loading?'Loading preview…':media==='image'?'View image':'Play '+sourceContentLabel(kind).toLowerCase()),
-  url&&media==='audio'&&h('audio',{controls:true,preload:'none',src:url,'aria-label':sourceContentLabel(kind)}),
+  url&&media==='audio'&&h('audio',{ref:player,controls:true,preload:'auto',src:url,'aria-label':sourceContentLabel(kind)}),
   url&&media==='video'&&h('video',{controls:true,preload:'none',src:url,'aria-label':sourceContentLabel(kind)}),
   url&&media==='image'&&h('img',{src:url,alt:'Original '+sourceContentLabel(kind).toLowerCase()}),
   problem&&h('p',{role:'status'},problem));
@@ -34,7 +38,9 @@ function MediaPreview({file}){
 
 export function Source({record,notify}){
  const files=record.artifacts||[],generated=record.derived||[];
+ const transcripts=generated.filter(item=>item.kind==='transcript'),otherGenerated=generated.filter(item=>item.kind!=='transcript');
  const originalText=record.event?.text,types=sourceContentTypes(record.event?.kind,record.event?.payload,files.map(file=>file.kind));
+ const hasSpeech=types.some(type=>type==='voice'||type==='audio'||type==='video_note');
  const payload=record.event?.payload||{},message=payload.message||payload.edited_message||payload.channel_post||payload.edited_channel_post||{};
  const structured=message.contact?[message.contact.first_name,message.contact.last_name,message.contact.phone_number].filter(Boolean).join(' · '):
   message.venue?[message.venue.title,message.venue.address].filter(Boolean).join(' · '):
@@ -56,11 +62,15 @@ export function Source({record,notify}){
     h(MediaPreview,{file}));})),
   h('details',{className:'source-technical'},h('summary',null,'Advanced details and export'),
     h('p',{className:'n-muted'},'Generated items, provenance, source identity, and the complete source export.'),
-    generated.length>0&&h('section',{className:'source-generated'},h('h3',null,generated.length+' generated '+(generated.length===1?'item':'items')),...generated.map(item=>h('article',{key:item.id},h(Badge,null,'Generated'),h('h3',null,item.kind==='browser_result'?'Assistant result':item.kind==='transcript'?'Voice transcript':'Generated '+item.kind.replaceAll('_',' ')),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(item.content_base64),character=>character.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:item.provenance}))))),
+    otherGenerated.length>0&&h('section',{className:'source-generated'},h('h3',null,otherGenerated.length+' generated '+(otherGenerated.length===1?'item':'items')),...otherGenerated.map(item=>h('article',{key:item.id},h(Badge,null,'Generated'),h('h3',null,item.kind==='browser_result'?'Assistant result':'Generated '+item.kind.replaceAll('_',' ')),h(Data,{value:new TextDecoder().decode(Uint8Array.from(atob(item.content_base64),character=>character.charCodeAt(0)))}),h('details',null,h('summary',null,'Generation provenance'),h(Data,{value:item.provenance}))))),
     h('details',null,h('summary',null,'Source identity and technical metadata'),h(Data,{value:record})),
     h('div',{className:'source-utility-actions'},button('Download source JSON',()=>exportJSON({id:record.id,reference:record.reference,event:record.event,artifacts:files},'nocheh-source-'+record.id+'.json')))));
  return h('div',{className:'source-stack'},
   original,
+  (hasSpeech||transcripts.length>0)&&h('section',{className:'n-panel source-transcript'},
+   h('div',{className:'source-section-heading'},h('div',null,h('p',{className:'archive-kicker'},'Generated from audio'),h('h2',null,'Transcript')),h(Badge,null,transcripts.length?'Active version':'Unavailable')),
+   transcripts.length?transcripts.map(item=>h('div',{key:item.id},transcripts.length>1&&h('h3',null,files.find(file=>file.id===item.artifact_id)?.metadata?.file_name||'Audio attachment'),h('p',{className:'source-transcript-text',dir:'auto'},new TextDecoder().decode(Uint8Array.from(atob(item.content_base64),character=>character.charCodeAt(0)))||'The active transcript is empty.'),h('details',{className:'source-transcript-provenance'},h('summary',null,'Transcription provenance'),h(Data,{value:item.provenance})))):
+    h('p',{className:'n-muted source-transcript-empty'},'No active transcript is available for this message.')),
   !record.derivative_versions&&h(GuardedEditor,{key:record.id,record,call,notify}),
   record.derivative_versions&&h(SourceVersions,{key:record.id,record}));
 }
