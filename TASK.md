@@ -728,6 +728,24 @@ credential was used. The AST-only Graphify refresh covers 530 files, 3,590
 nodes, and 13,376 edges with zero model calls. Live installation verification
 and production activation were not performed.
 
+#### Voice playback and visible transcript — 2026-09-23
+
+The owner clarified that the voice message should play and its transcription
+should be visible. The Archive detail now starts a loaded voice preview on the
+first Play action when the browser permits it, with native controls available
+afterward. It shows the active generated transcript beside the original audio,
+labels that text as generated, and states when no active transcript is available.
+Transcription provenance remains inspectable without treating the transcript
+as original evidence.
+
+The pinned Node 24 image built and all 23 dashboard tests passed. In the
+isolated Compose preview on port 18968, the synthetic voice detail visibly
+showed its active transcript; one click on Play produced an audio element with
+`paused: false`, a progressing play time, and a 3-second duration. The preview
+uses no installation credentials or external execution authority. The AST-only
+Graphify refresh covered 528 files, 3,590 nodes, and 13,376 edges with zero
+model calls. The live installation and real Telegram voice were not retested.
+
 #### Archive status, filters, and message-detail clarity — 2026-09-22
 
 The owner clarified that `Needs review` looked like an approval request even
