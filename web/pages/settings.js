@@ -21,7 +21,7 @@ export function Settings({notify}) {
     const [refresh,setRefresh]=useState(0),[data,error]=useLoad('/settings',refresh);
     const [identityDirectory,identityError]=useLoad('/telegram/identities');
     const [changes,setChanges,editRevision]=useRevisionDraft(data?.revision),[busy,setBusy]=useState(false),[review,setReview]=useState(false);
-    const [accessGroup,setAccessGroup]=useState(''),[accessUser,setAccessUser]=useState('');
+    const [accessGroup,setAccessGroup]=useState(''),[accessUser,setAccessUser]=useState(''),[manualDecision,setManualDecision]=useState('');
     const save=async()=>{setBusy(true);try{await call('/settings',{revision:editRevision,changes});setChanges({});setReview(false);setRefresh(v=>v+1);notify('Nocheh settings saved. Apply saved settings when you are ready to update running services.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     const apply=async()=>{setBusy(true);try{await call('/settings/apply',{});notify('Applying saved settings. Follow the result in Maintenance.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     if(error&&!data)return h(Alert,null,'Settings are unavailable.');
@@ -50,22 +50,35 @@ export function Settings({notify}) {
       const name=[found.name,found.username&&found.username!==found.name?'('+found.username+')':null].filter(Boolean).join(' ');
       return name?name+' · ID '+id:'User ID '+id;
     };
+    const participantName=id=>observedUsers.get(id)?.name||observedUsers.get(id)?.username||'Unknown person';
+    const participantMeta=id=>{const found=observedUsers.get(id);return [found?.name&&found.username!==found.name?found.username:null,'ID '+id].filter(Boolean).join(' · ');};
     const addObservedGroup=id=>{if(!id||groups.includes(id))return;setChanges({...changes,TELEGRAM_GROUP_IDS:[...groups,id].join(',')});setAccessGroup(id);setReview(false);};
     const chosen=groups.includes(accessGroup)?accessGroup:groups[0];
-    const candidates=(observedById.get(chosen)?.users||[]).filter(user=>user.id!==owner);
     let access={};try{access=JSON.parse(changes.TELEGRAM_GROUP_ACCESS??saved('TELEGRAM_GROUP_ACCESS')??'{}');}catch{access={};}
     const rule=access[chosen]||{granted:[],denied:[]};
+    const participantIds=[...new Set([...(observedById.get(chosen)?.users||[]).map(user=>user.id),...rule.granted,...rule.denied])].filter(id=>id!==owner).sort((a,b)=>participantName(a).localeCompare(participantName(b))||a.localeCompare(b));
+    const accessState=id=>rule.denied.includes(id)?'deny':rule.granted.includes(id)?'grant':'default';
     const changeAccess=(decision,user)=>{
       if(!/^[1-9]\d{0,18}$/.test(user)||user===owner){notify('Enter a valid participant user ID other than the owner.',true);return;}
+      if(accessState(user)===decision)return;
       const next={...access},current=next[chosen]||{granted:[],denied:[]};
       const granted=current.granted.filter(id=>id!==user),denied=current.denied.filter(id=>id!==user);
       if(decision==='grant')granted.push(user);if(decision==='deny')denied.push(user);
       if(granted.length||denied.length)next[chosen]={granted:granted.sort(),denied:denied.sort()};else delete next[chosen];
-      setChanges({...changes,TELEGRAM_GROUP_ACCESS:JSON.stringify(next)});setAccessUser('');setReview(false);
+      const updated={...changes},value=JSON.stringify(next);
+      let original=saved('TELEGRAM_GROUP_ACCESS')||'{}';try{original=JSON.stringify(JSON.parse(original));}catch{}
+      if(value===original)delete updated.TELEGRAM_GROUP_ACCESS;else updated.TELEGRAM_GROUP_ACCESS=value;
+      setChanges(updated);setReview(false);
     };
+    const accessChoices=[['default','No rule'],['grant','Grant'],['deny','Deny']];
+    const personRow=id=>h('li',{className:'n-access-person',key:id},
+      h('div',{className:'n-access-person-name'},h('strong',null,participantName(id)),h('small',null,participantMeta(id))),
+      h('div',{className:'n-access-choice','role':'group','aria-label':'Group access for '+participantLabel(id)},
+        ...accessChoices.map(([state,label])=>h('button',{type:'button',key:state,disabled:busy,'aria-pressed':accessState(id)===state,onClick:()=>changeAccess(state,id)},label))));
+    const addManualRule=()=>{changeAccess(manualDecision,accessUser.trim());setAccessUser('');setManualDecision('');};
     const accessEditor=h('div',{className:'n-settings-access','aria-labelledby':'group-access-title'},
       h('h4',{id:'group-access-title'},'Who may address Nocheh in groups'),
-      h('p',{className:'n-muted'},'Only you may start a bot reply by default. Choose a known person to fill their ID, or enter an ID manually. Telegram supplies group administrators; other people appear after Nocheh observes them. A deny wins over a grant. Save and Apply for changes to take effect.'),
+      h('p',{className:'n-muted'},'Only you may start a bot reply by default. Set a person to Grant or Deny; No rule returns them to the owner-only default. Telegram supplies group administrators; other people appear after Nocheh observes them. Save and Apply for changes to take effect.'),
       !identityDirectory&&!identityError&&h('p',{role:'status'},'Looking up Telegram group names and visible people…'),
       identityError&&h('p',{role:'status'},'Observed Telegram names are unavailable. You can still enter numeric IDs.'),
       observed.some(group=>!groups.includes(group.id))&&h('div',{className:'n-field'},h('label',{htmlFor:'observed-group'},'Add an observed group'),
@@ -73,17 +86,17 @@ export function Settings({notify}) {
           ...observed.filter(group=>!groups.includes(group.id)).map(group=>h('option',{value:group.id,key:group.id},groupLabel(group.id))))),
       groups.length?h('div',{className:'n-form'},
         h('div',{className:'n-field'},h('label',{htmlFor:'access-group'},'Selected group'),h('select',{id:'access-group',value:chosen,disabled:busy,onChange:e=>setAccessGroup(e.target.value)},...groups.map(id=>h('option',{value:id,key:id},groupLabel(id))))),
-        h('div',{className:'n-field'},h('label',{htmlFor:'observed-user'},'Known participant'),
-          h('select',{id:'observed-user',value:'',disabled:busy||!candidates.length,onChange:e=>setAccessUser(e.target.value)},h('option',{value:''},candidates.length?'Choose a person to fill their ID…':'No known participants in this group'),
-            ...candidates.map(user=>h('option',{value:user.id,key:user.id},participantLabel(user.id))))),
-        h('div',{className:'n-field'},h('label',{htmlFor:'access-user'},'Participant user ID'),h('input',{id:'access-user',inputMode:'numeric',value:accessUser,disabled:busy,placeholder:'Telegram numeric user ID',onChange:e=>setAccessUser(e.target.value)}),
-          accessUser&&h('small',null,participantLabel(accessUser))),
-        h('div',{className:'n-actions'},button('Grant access',()=>changeAccess('grant',accessUser),busy||!accessUser),button('Deny access',()=>changeAccess('deny',accessUser),busy||!accessUser)),
-        h('div',{className:'n-field n-settings-decisions'},h('b',null,'Participant decisions'),
-          !rule.granted.length&&!rule.denied.length?h('p',{className:'n-muted'},'No participant access granted. Only you may address Nocheh here.'):
-          h('div',{className:'n-list'},
-            ...rule.granted.map(id=>h('div',{className:'n-row',key:'grant-'+id},h('span',null,participantLabel(id)+' · granted'),button('Revoke',()=>changeAccess('revoke',id),busy))),
-            ...rule.denied.map(id=>h('div',{className:'n-row',key:'deny-'+id},h('span',null,participantLabel(id)+' · denied'),button('Revoke',()=>changeAccess('revoke',id),busy))))),
+        h('div',{className:'n-access-directory'},
+          h('div',{className:'n-access-directory-head'},h('b',null,'Known people in this group'),h('small',null,rule.granted.length+' granted · '+rule.denied.length+' denied')),
+          h('ul',{className:'n-access-people'},
+            owner&&h('li',{className:'n-access-person n-access-owner',key:'owner'},h('div',{className:'n-access-person-name'},h('strong',null,participantName(owner)),h('small',null,participantMeta(owner))),h('span',{className:'n-access-owner-badge'},'Owner · always allowed')),
+            ...participantIds.map(personRow)),
+          !participantIds.length&&h('p',{className:'n-muted n-access-empty'},'No other people are known yet. You can add someone by ID below.')),
+        h('details',{className:'n-access-manual'},h('summary',null,'Add someone by user ID'),
+          h('div',{className:'n-access-manual-fields'},
+            h('div',{className:'n-field'},h('label',{htmlFor:'access-user'},'Telegram user ID'),h('input',{id:'access-user',inputMode:'numeric',value:accessUser,disabled:busy,placeholder:'Numeric user ID',onChange:e=>setAccessUser(e.target.value)})),
+            h('div',{className:'n-field'},h('label',{htmlFor:'manual-decision'},'Access'),h('select',{id:'manual-decision',value:manualDecision,disabled:busy,onChange:e=>setManualDecision(e.target.value)},h('option',{value:''},'Choose access…'),h('option',{value:'grant'},'Grant'),h('option',{value:'deny'},'Deny'))),
+            button('Add rule',addManualRule,busy||!manualDecision||!/^[1-9]\d{0,18}$/.test(accessUser.trim())||accessUser.trim()===owner))),
         Object.keys(access).some(id=>!groups.includes(id))&&h('p',{role:'alert'},'A removed group still has access decisions. Restore its group ID or revoke its decisions before saving.')):
         h('p',{className:'n-muted'},'Add a selected group above to manage participant access.'));
     const reviewValue=(key,value)=>{
