@@ -62,6 +62,31 @@ def _immutable(path, value):
         raise ValueError('reset_preservation_artifact_changed')
 
 
+def _frozen_files(journal, preflight, inspect, current):
+    """Keep the frozen manifest while a stopped Redis AOF changes size/time."""
+    path = journal.directory / 'files.json'
+    if not (path.exists() or path.is_symlink()):
+        _immutable(path, current)
+        return current
+    saved = _private_read(path)
+    if saved == current:
+        return saved
+    erasure = journal.directory / 'erasure.json'
+    if (len(journal.value['steps']) != 4 or
+            erasure.exists() and reset_protocol.read(erasure).get('stage') != 'prepared'):
+        raise ValueError('reset_preservation_artifact_changed')
+    observed = inspect()
+    reset_quiescence.verify_quiescent(journal, preflight, observed)
+    redis = [row for row in observed['containers'] if row['service'] == 'inngest-redis']
+    if (len(redis) != 1 or redis[0]['state'] not in ('exited', 'created') or
+            {key: value for key, value in saved.items() if key not in ('manifest', 'manifest_sha256')} !=
+            {key: value for key, value in current.items() if key not in ('manifest', 'manifest_sha256')} or
+            saved.get('manifest_sha256') != reset_protocol.fingerprint(saved.get('manifest')) or
+            not reset_files.equivalent_after_redis_stop(saved['manifest'], current['manifest'])):
+        raise ValueError('reset_preservation_artifact_changed')
+    return saved
+
+
 def _kind(value):
     if stat.S_ISDIR(value.st_mode):
         return 'directory'
@@ -466,7 +491,7 @@ def freeze(journal, preflight, recovery, ownership_review, *, inspect,
                      'preflight_sha256': journal.value['preflight_sha256'],
                      'ownership_sha256': reviewed['review_sha256'],
                      'manifest_sha256': reset_protocol.fingerprint(file_manifest), 'manifest': file_manifest}
-    _immutable(journal.directory / 'files.json', files_receipt)
+    files_receipt = _frozen_files(journal, preflight, inspect, files_receipt)
 
     held()
     if reset_ownership.validate(preflight, ownership_review) != reviewed:
@@ -476,8 +501,11 @@ def freeze(journal, preflight, recovery, ownership_review, *, inspect,
     preference_transfer.verify_source(journal.state / 'hermes', preferences['snapshot'])
     if _snapshot_preserved(preflight, reviewed, accounting_path) != preserved:
         raise ValueError('reset_preserved_files_changed')
-    if reset_files.freeze(preflight, protected, ownership_review,
-                          rebound=_post_shutdown_rebound(journal, preflight)) != file_manifest:
+    latest_manifest = reset_files.freeze(preflight, protected, ownership_review,
+                                         rebound=_post_shutdown_rebound(journal, preflight))
+    if _frozen_files(journal, preflight, inspect,
+                     {**files_receipt, 'manifest': latest_manifest,
+                      'manifest_sha256': reset_protocol.fingerprint(latest_manifest)}) != files_receipt:
         raise ValueError('reset_file_manifest_changed')
     held()
 

@@ -142,5 +142,34 @@ class ResetFilesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'identity_changed'):
             reset_files.freeze(self.preflight,[self.fence],rebound=rebound)
 
+    def test_stopped_workflow_redis_aof_allows_only_in_place_metadata_drift(self):
+        redis=self.state/'workflows/redis/appendonlydir';redis.mkdir(parents=True)
+        aof=redis/'appendonly.aof.23.incr.aof';aof.write_bytes(b'old cache')
+        self.preflight['paths'].append(reset_inventory.entry(self.state/'workflows','erase','cache'))
+        frozen=self.freeze()
+        aof.write_bytes(b'new cache content after stop')
+        current=self.freeze()
+        self.assertTrue(reset_files.equivalent_after_redis_stop(frozen,current))
+        with self.assertRaisesRegex(ValueError,'identity_changed'):
+            reset_files.erase(frozen,lambda:None)
+        self.assertTrue(aof.exists())
+        reset_files.erase(frozen,lambda:None,allow_stopped_redis_aof_drift=True)
+        self.assertFalse(aof.exists())
+
+    def test_redis_aof_replacement_and_new_entries_still_block(self):
+        redis=self.state/'workflows/redis/appendonlydir';redis.mkdir(parents=True)
+        aof=redis/'appendonly.aof.23.incr.aof';aof.write_bytes(b'old cache')
+        self.preflight['paths'].append(reset_inventory.entry(self.state/'workflows','erase','cache'))
+        frozen=self.freeze()
+        old=self.root/'old-aof';aof.rename(old);aof.write_bytes(b'replacement')
+        self.assertFalse(reset_files.equivalent_after_redis_stop(frozen,self.freeze()))
+        with self.assertRaisesRegex(ValueError,'identity_changed'):
+            reset_files.erase(frozen,lambda:None,allow_stopped_redis_aof_drift=True)
+        aof.unlink();old.rename(aof)
+        (redis/'unexpected').write_bytes(b'late cache')
+        self.assertFalse(reset_files.equivalent_after_redis_stop(frozen,self.freeze()))
+        with self.assertRaisesRegex(ValueError,'unreviewed_entry'):
+            reset_files.erase(frozen,lambda:None,allow_stopped_redis_aof_drift=True)
+
 
 if __name__=='__main__':unittest.main()

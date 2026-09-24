@@ -1,10 +1,12 @@
 import copy
 import hashlib
 import json
+import copy
 import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from scripts import (configuration, reset_inventory, reset_ownership,
@@ -146,6 +148,31 @@ class ResetPreservationTests(unittest.TestCase):
             replaced=self.root/'replaced-status';status.rename(replaced);status.write_text('later status')
             with self.assertRaisesRegex(ValueError,'artifact_changed|manifest_changed'):
                 self.freeze(journal)
+
+    def test_frozen_manifest_accepts_only_stopped_redis_aof_metadata_drift(self):
+        redis=self.state/'workflows/redis/appendonlydir';redis.mkdir(parents=True)
+        aof=redis/'appendonly.aof.23.incr.aof';aof.write_bytes(b'old cache')
+        frozen=reset_preservation.reset_files.freeze(self.preflight,[])
+        receipt={'format':'nocheh-reset-files-receipt-v1','reset_id':'fixture',
+                 'preflight_sha256':'a'*64,'ownership_sha256':'b'*64,
+                 'manifest_sha256':reset_protocol.fingerprint(frozen),'manifest':frozen}
+        journal=SimpleNamespace(directory=self.state/'admin/reset',
+                                value={'steps':[{}]*4})
+        reset_protocol.atomic(journal.directory/'files.json',receipt,create=True)
+        aof.write_bytes(b'new cache content after stop')
+        current=reset_preservation.reset_files.freeze(self.preflight,[])
+        updated={**receipt,'manifest_sha256':reset_protocol.fingerprint(current),'manifest':current}
+        stopped=lambda:{'containers':[{'service':'inngest-redis','state':'exited'}]}
+        with patch.object(reset_quiescence,'verify_quiescent'):
+            self.assertEqual(reset_preservation._frozen_files(journal,self.preflight,stopped,updated),receipt)
+            running=lambda:{'containers':[{'service':'inngest-redis','state':'running'}]}
+            with self.assertRaisesRegex(ValueError,'artifact_changed'):
+                reset_preservation._frozen_files(journal,self.preflight,running,updated)
+            replaced=copy.deepcopy(updated)
+            replaced['manifest']['targets'][-1]['tree']['metadata']['inode'] += 1
+            replaced['manifest_sha256']=reset_protocol.fingerprint(replaced['manifest'])
+            with self.assertRaisesRegex(ValueError,'artifact_changed'):
+                reset_preservation._frozen_files(journal,self.preflight,stopped,replaced)
 
     def test_interruption_before_phase_record_reuses_sanitized_accounting(self):
         with reset_protocol.locked(self.state) as journal:
