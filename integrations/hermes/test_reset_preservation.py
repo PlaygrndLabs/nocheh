@@ -134,6 +134,19 @@ class ResetPreservationTests(unittest.TestCase):
                 self.freeze(journal)
             self.assertEqual(self.sanitize_calls, 1)
 
+    def test_native_status_replaced_during_shutdown_is_rebound_once(self):
+        status=self.state/'hermes/gateway_state.json';status.write_text('running status')
+        self.preflight['paths'].append(reset_inventory.entry(status,'erase','native status'))
+        with reset_protocol.locked(self.state) as journal:
+            self.ready(journal)
+            old=self.root/'old-status';status.rename(old);status.write_text('stopped status')
+            result=self.freeze(journal)
+            self.assertEqual(result['phase'],'preservation_frozen')
+            self.assertEqual(self.freeze(journal),result)
+            replaced=self.root/'replaced-status';status.rename(replaced);status.write_text('later status')
+            with self.assertRaisesRegex(ValueError,'artifact_changed|manifest_changed'):
+                self.freeze(journal)
+
     def test_interruption_before_phase_record_reuses_sanitized_accounting(self):
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal); complete = journal.complete

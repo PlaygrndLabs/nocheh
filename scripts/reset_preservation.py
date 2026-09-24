@@ -176,6 +176,27 @@ def _snapshot_preserved(preflight, reviewed, accounting_path=None):
     return result
 
 
+def _post_shutdown_rebound(journal, preflight):
+    """Bind only native status files replaced during a verified shutdown."""
+    rows = {row['path']: row for row in preflight['paths']}
+    rebound = {}
+    for relative in reset_files.POST_SHUTDOWN_STATUS:
+        path = journal.state / relative
+        row = rows.get(str(path))
+        if row is None:
+            continue
+        if row['action'] != 'erase' or not row['exists'] or row.get('kind') != 'file':
+            raise ValueError('reset_status_identity_changed')
+        with reset_files.parent(path) as (fd, name, _):
+            observed = reset_files.inspect_at(fd, name)
+        if (observed is None or observed['kind'] != 'file' or
+                observed['device'] != row['device']):
+            raise ValueError('reset_status_identity_changed')
+        if observed['inode'] != row['inode']:
+            rebound[str(path)] = {key: observed[key] for key in reset_files.FIELDS}
+    return rebound
+
+
 def _policy(values, snapshot):
     configuration.validate(values)
     groups = sorted(set(value.strip() for value in values['TELEGRAM_GROUP_IDS'].split(',') if value.strip()))
@@ -439,7 +460,8 @@ def freeze(journal, preflight, recovery, ownership_review, *, inspect,
     preserved = _snapshot_preserved(preflight, reviewed, accounting_path)
     _immutable(journal.directory / 'preserved.json', preserved)
     protected = [journal.state / relative for relative in reset_quiescence.FENCES]
-    file_manifest = reset_files.freeze(preflight, protected, ownership_review)
+    rebound = _post_shutdown_rebound(journal, preflight)
+    file_manifest = reset_files.freeze(preflight, protected, ownership_review, rebound=rebound)
     files_receipt = {'format': 'nocheh-reset-files-receipt-v1', 'reset_id': journal.value['reset_id'],
                      'preflight_sha256': journal.value['preflight_sha256'],
                      'ownership_sha256': reviewed['review_sha256'],
@@ -454,7 +476,8 @@ def freeze(journal, preflight, recovery, ownership_review, *, inspect,
     preference_transfer.verify_source(journal.state / 'hermes', preferences['snapshot'])
     if _snapshot_preserved(preflight, reviewed, accounting_path) != preserved:
         raise ValueError('reset_preserved_files_changed')
-    if reset_files.freeze(preflight, protected, ownership_review) != file_manifest:
+    if reset_files.freeze(preflight, protected, ownership_review,
+                          rebound=_post_shutdown_rebound(journal, preflight)) != file_manifest:
         raise ValueError('reset_file_manifest_changed')
     held()
 
