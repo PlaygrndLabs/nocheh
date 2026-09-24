@@ -120,5 +120,27 @@ class ResetFilesTests(unittest.TestCase):
         self.assertEqual((self.nested/'derived').read_text(),'generated content')
         self.assertFalse((self.files/'original').exists())
 
+    def test_explicit_post_shutdown_file_rebind_freezes_only_current_file_identity(self):
+        native=self.state/'hermes';native.mkdir()
+        status=native/'gateway_state.json';status.write_text('old status')
+        self.preflight['paths'].append(reset_inventory.entry(status,'erase','native status'))
+        prior=self.root/'old-status';status.rename(prior);status.write_text('stopped status')
+        with self.assertRaisesRegex(ValueError,'identity_changed'):self.freeze()
+        observed=reset_files.metadata(status.lstat())
+        rebound={str(status):{key:observed[key] for key in reset_files.FIELDS}}
+        plan=reset_files.freeze(self.preflight,[self.fence],rebound=rebound)
+        self.assertEqual(plan['targets'][-1]['tree']['metadata']['inode'],status.stat().st_ino)
+        with self.assertRaisesRegex(ValueError,'rebound_invalid'):
+            reset_files.freeze(self.preflight,[self.fence],rebound={str(self.config):rebound[str(status)]})
+        arbitrary=self.state/'arbitrary';arbitrary.write_text('not native status')
+        self.preflight['paths'].append(reset_inventory.entry(arbitrary,'erase','content'))
+        identity=reset_files.metadata(arbitrary.lstat())
+        with self.assertRaisesRegex(ValueError,'rebound_invalid'):
+            reset_files.freeze(self.preflight,[self.fence],rebound={str(arbitrary):
+                {key:identity[key] for key in reset_files.FIELDS}})
+        status.unlink();status.symlink_to(self.foreign/'sentinel')
+        with self.assertRaisesRegex(ValueError,'identity_changed'):
+            reset_files.freeze(self.preflight,[self.fence],rebound=rebound)
+
 
 if __name__=='__main__':unittest.main()

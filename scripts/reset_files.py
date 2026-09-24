@@ -15,6 +15,7 @@ from . import reset_ownership
 FORMAT = 'nocheh-reset-file-manifest-v1'
 MAX_ENTRIES = 100000
 FIELDS = ('device', 'inode', 'kind')
+POST_SHUTDOWN_STATUS = ('hermes/gateway_state.json', 'hermes/scheduler-status.json')
 
 
 def metadata(value):
@@ -66,7 +67,7 @@ def inspect_at(fd, name):
         return None
 
 
-def freeze(preflight, protected, ownership_review=None):
+def freeze(preflight, protected, ownership_review=None, *, rebound=None):
     """Return only metadata for reviewed installation-local content targets.
 
     External backups/restores require separate per-item ownership review; this
@@ -115,6 +116,16 @@ def freeze(preflight, protected, ownership_review=None):
         return record
 
     ordinary = {id(row) for row in preflight['paths'] if row['action'] in ('erase', 'snapshot_preferences_then_erase')}
+    rebound = rebound or {}
+    ordinary_paths = {row['path']: row for row in preflight['paths'] if id(row) in ordinary}
+    rebound_allowed = {str(Path(installation['state']) / relative)
+                       for relative in POST_SHUTDOWN_STATUS}
+    if any(path not in rebound_allowed or path not in ordinary_paths or
+           not isinstance(identity, dict) or set(identity) != set(FIELDS) or
+           ordinary_paths[path].get('kind') != 'file' or identity['kind'] != 'file' or
+           identity['device'] != ordinary_paths[path]['device']
+           for path, identity in rebound.items()):
+        raise ValueError('reset_file_rebound_invalid')
     for row in selected:
         path = absolute(row['path'])
         in_installation = any(path.is_relative_to(root) and path != root for root in roots)
@@ -130,7 +141,7 @@ def freeze(preflight, protected, ownership_review=None):
             if row['exists'] != (observed is not None):
                 raise ValueError('reset_file_identity_changed')
             if observed is not None:
-                same(observed, {key: row[key] for key in FIELDS})
+                same(observed, rebound.get(str(path), {key: row[key] for key in FIELDS}))
                 tree = scan(fd, name, path)
             else:
                 tree = None
