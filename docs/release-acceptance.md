@@ -51,9 +51,10 @@ and provider-failure recovery within the existing spending cap; its verified
 connection, ready workspace, context snapshot and ingestion receipt must all be
 newer than the reset backlog boundary.
 
-Use a plain sentence for the exact-delivery test. The privacy guard can mask
-identifier-like synthetic markers before the assistant sees them. If it does,
-retain that evidence and choose a new harmless phrase; do not disable guarding.
+Use a plain sentence for the exact-delivery test. If the privacy guard masks a
+harmless phrase before the assistant sees it, retain that evidence, correct the
+guarded projection or detector, and rerun the affected check before calling it a
+pass. Keep guarding enabled.
 Send approval commands without Markdown backticks or trailing punctuation.
 
 The assistant may inspect results and prepare the checks. Sending test messages or
