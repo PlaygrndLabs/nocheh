@@ -106,6 +106,20 @@ class ResetInventoryTests(unittest.TestCase):
         self.assertIn('unclassified_state_path', codes)
         self.assertIn('external_volume_driver_requires_review', codes)
 
+    def test_cached_artifact_download_is_erased_but_unknown_admin_path_blocks(self):
+        downloads = self.state / 'admin/downloads'
+        downloads.mkdir()
+        (downloads / ('a' * 64)).write_bytes(b'SYNTHETIC_PRIVATE_AUDIO')
+        manifest = self.inspect()
+        self.assertEqual(manifest['blockers'], [])
+        self.assertEqual(next(item['action'] for item in manifest['paths']
+                              if item['path'] == str(downloads)), 'erase')
+        self.assertNotIn('SYNTHETIC_PRIVATE_AUDIO', json.dumps(manifest))
+        (self.state / 'admin/unexpected-cache').mkdir()
+        self.assertIn({'code': 'unclassified_state_path',
+                       'path': str(self.state / 'admin/unexpected-cache')},
+                      self.inspect()['blockers'])
+
     def test_symlink_anchors_and_overlapping_memory_roots_are_rejected(self):
         linked = self.root / 'linked-state'; linked.symlink_to(self.state, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, 'state_symlink'):
