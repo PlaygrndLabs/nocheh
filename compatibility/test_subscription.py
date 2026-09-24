@@ -93,7 +93,10 @@ class SubscriptionContracts(unittest.TestCase):
         for output in ({"text": " "}, {"text": 4}, [], {"result": "speech"}):
             with self.subTest(output=output):
                 provider, _ = self.provider(output=output)
-                self.assertFalse(provider.transcribe(self.audio)["success"])
+                result=provider.transcribe(self.audio)
+                self.assertFalse(result["success"])
+                self.assertEqual(result["error"],"invalid_transcription_response")
+                self.assertFalse(result["retryable"])
 
     def test_missing_audio_makes_zero_requests(self):
         provider, runner = self.provider(output={"text": "speech"})

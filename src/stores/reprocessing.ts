@@ -29,7 +29,10 @@ export function subscriptionTranscription(call:RuntimeCall):DerivationEngine {
     if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_transcription_configuration');
     const match=typeof file.metadata.file_name==='string'?file.metadata.file_name.match(/\.(ogg|oga|mp3|wav|m4a|mp4|flac)$/i):null;
     const result=await call('perception.transcribe',{audio_base64:bytes.toString('base64'),suffix:file.kind==='video_note'?'.mp4':match?'.'+match[1]!.toLowerCase():'.ogg'});
-    if(result.success!==true||typeof result.transcript!=='string')throw new HttpError(503,result.error==='quota_paused'?'quota_paused':'transcription_unavailable');
+    if(result.success!==true||typeof result.transcript!=='string'||!result.transcript.trim()) {
+      const terminal=result.success===true||result.error==='invalid_transcription_response'&&result.retryable===false;
+      throw new HttpError(terminal?422:503,terminal?'invalid_transcription_response':result.error==='quota_paused'?'quota_paused':'transcription_unavailable');
+    }
     return result.transcript;
   }};
 }
@@ -74,6 +77,7 @@ export class ReprocessingRepository {
       if(!locked)return null;
       const job=(await client.query('SELECT * FROM reprocess_jobs WHERE id=$1',[id])).rows[0];
       if(!job)throw new HttpError(404,'reprocess_job_missing');
+      if(job.state==='failed'&&job.error_code==='invalid_transcription_response')return null;
       const file=job.file_reference as FileReference;
       await this.archive.verify(file.event);
       const previous=await this.derived.checkpoint('reprocess:'+id);

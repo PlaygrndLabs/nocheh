@@ -45,7 +45,7 @@ export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eve
     if(!fenced)return null;
     try {
     await client.query('INSERT INTO transcription_jobs(artifact_id) VALUES($1) ON CONFLICT DO NOTHING',[artifact.id]);
-    const due=await client.query("UPDATE transcription_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes' WHERE artifact_id=$1 AND next_attempt<=now() RETURNING artifact_id",[artifact.id]);
+    const due=await client.query("UPDATE transcription_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes' WHERE artifact_id=$1 AND next_attempt<=now() AND error_code IS DISTINCT FROM 'invalid_transcription_response' RETURNING artifact_id",[artifact.id]);
     if (!due.rowCount)return null;
     try {
       if (!/^[a-f0-9]{64}$/.test(artifact.file_hash))throw new HttpError(503,'audio_hash_invalid');
@@ -53,7 +53,10 @@ export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eve
       if (digest(raw)!==artifact.file_hash)throw new HttpError(503,'audio_hash_mismatch');
       const match=artifact.metadata.file_name?.match(/\.(ogg|oga|mp3|wav|m4a|mp4|flac)$/i);
       const result=await call('perception.transcribe',{audio_base64:raw.toString('base64'),suffix:artifact.kind==='video_note'?'.mp4':match?'.'+match[1]!.toLowerCase():'.ogg'});
-      if (result.success!==true || typeof result.transcript!=='string')throw new HttpError(503,result.error==='quota_paused'?'quota_paused':'transcription_unavailable');
+      if (result.success!==true || typeof result.transcript!=='string' || !result.transcript.trim()) {
+        const terminal=result.success===true||result.error==='invalid_transcription_response'&&result.retryable===false;
+        throw new HttpError(terminal?422:503,terminal?'invalid_transcription_response':result.error==='quota_paused'?'quota_paused':'transcription_unavailable');
+      }
       await client.query('BEGIN');
       await client.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,search_text,provenance) VALUES($1,$2,$3,'transcript',$4,$5,$6) ON CONFLICT DO NOTHING`,
         [id,eventId,artifact.id,Buffer.from(result.transcript),result.transcript.replaceAll('\0',''),JSON.stringify({provider:'nocheh-subscription',version:TRANSCRIPTION_VERSION,input_sha256:artifact.file_hash})]);

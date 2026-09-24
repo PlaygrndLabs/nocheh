@@ -14,6 +14,7 @@ import {ReprocessingRepository,utf8Extraction,type DerivationEngine} from '../sr
 import {AttachmentRepository} from '../src/stores/attachments.js';
 import {PreparationRepository} from '../src/stores/preparation.js';
 import {CaptureCoordinator} from '../src/stores/capture.js';
+import {HttpError} from '../src/http.js';
 
 test('preparation keeps manifests immutable and download state in control, with versioned guarded file output',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -25,8 +26,8 @@ test('preparation keeps manifests immutable and download state in control, with 
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),capture=new CaptureCoordinator(archive,stores.control);
   const root=await mkdtemp(join(tmpdir(),'nocheh-preparation-')),attachments=new AttachmentRepository(stores,archive,root),key='preparation:'+Date.now();
-  let stt=0,downloads=0;
-  const transcription:DerivationEngine={name:'fixture-asr',version:'1',outputKind:'transcript',async run(bytes){stt++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Voice result';}};
+  let stt=0,downloads=0,quietFailure=false;
+  const transcription:DerivationEngine={name:'fixture-asr',version:'1',outputKind:'transcript',async run(bytes){stt++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));if(quietFailure)throw new HttpError(422,'invalid_transcription_response');return 'Voice result';}};
   const extraction=utf8Extraction(),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[transcription,extraction]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction),authority={owner:'inngest' as const,epoch:1};
   const event=(suffix:string,payload:Record<string,unknown>,origin:'live'|'import'='live'):Envelope=>({version:1,key:key+suffix,origin,bot_id:'fixture',
@@ -51,6 +52,19 @@ test('preparation keeps manifests immutable and download state in control, with 
     await preparation.run(voice.reference.id,fetch,'fixture',async()=>[],authority);
     assert.equal(((await selections.current(file.event.id,file.id,'transcript',await guards.state())).value as any).text,'Owner edited voice');
     assert.equal(stt,1);
+
+    const quiet=(await capture.capture(event(':quiet',{voice:{file_id:'quiet'}}))).source;
+    quietFailure=true;
+    await assert.rejects(preparation.run(quiet.reference.id,fetch,'fixture',async()=>[],authority),{code:'invalid_transcription_response'});
+    const quietStatus=await preparation.status(quiet.reference.id);
+    assert.equal(quietStatus.state,'failed');assert.equal(quietStatus.stage,'transcription');
+    assert.equal((await stores.control.query("SELECT error_code FROM reprocess_jobs WHERE producer='fixture-asr' AND state='failed'")).rows[0].error_code,'invalid_transcription_response');
+    const attempts=stt;
+    assert.equal((await preparation.run(quiet.reference.id,async()=>{throw Error('original must not be fetched again');},'fixture',async()=>[],authority)).state,'failed');
+    assert.equal(stt,attempts);
+    assert.equal((await stores.derived.query('SELECT count(*)::int AS count FROM derived_artifacts WHERE event_id=$1',[quiet.reference.id])).rows[0].count,0);
+    const quietFile=await attachments.file(quiet.artifact_ids[0]!);
+    assert.deepEqual(await attachments.bytes(quietFile),Buffer.from([79,103,103,0,255]));
 
     const document=(await capture.capture(event(':text',{document:{file_id:'text'}}))).source;
     assert.equal((await preparation.run(document.reference.id,async()=>Buffer.from('Exact UTF-8 \r\n متن'),'fixture',async()=>[],authority)).state,'completed');

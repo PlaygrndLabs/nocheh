@@ -11,7 +11,16 @@ import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {SelectionRepository} from '../src/stores/selections.js';
-import {ReprocessingRepository,type DerivationEngine} from '../src/stores/reprocessing.js';
+import {ReprocessingRepository,subscriptionTranscription,type DerivationEngine} from '../src/stores/reprocessing.js';
+
+test('subscription transcription stops on unusable text but preserves transient provider failures',async()=>{
+  const audio=Buffer.from('synthetic Ogg bytes'),file={kind:'voice',metadata:{}};
+  const run=(result:Record<string,unknown>)=>subscriptionTranscription(async()=>result).run(audio,file,{});
+  await assert.rejects(run({success:false,error:'invalid_transcription_response',retryable:false}),{code:'invalid_transcription_response'});
+  await assert.rejects(run({success:true,transcript:'  '}),{code:'invalid_transcription_response'});
+  await assert.rejects(run({success:false,error:'invalid_transcription_response',retryable:true}),{code:'transcription_unavailable'});
+  await assert.rejects(run({success:false,error:'quota_paused',retryable:true}),{code:'quota_paused'});
+});
 
 test('original-byte reprocessing preserves both versions, owner guards, selection fences and completion recovery',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
