@@ -67,10 +67,38 @@ export function Source({record,notify}){
     h('div',{className:'source-utility-actions'},button('Download source JSON',()=>exportJSON({id:record.id,reference:record.reference,event:record.event,artifacts:files},'nocheh-source-'+record.id+'.json')))));
  return h('div',{className:'source-stack'},
   original,
+  record.derivative_versions&&record.event?.channel==='telegram'&&!!(payload.message||payload.edited_message||payload.channel_post||payload.edited_channel_post)&&
+   h(SourceRetirement,{key:record.id,eventId:record.id,notify}),
   (hasSpeech||transcripts.length>0)&&h('section',{className:'n-panel source-transcript'},
    h('div',{className:'source-section-heading'},h('div',null,h('p',{className:'archive-kicker'},'Generated from audio'),h('h2',null,'Transcript')),h(Badge,null,transcripts.length?'Active version':'Unavailable')),
    transcripts.length?transcripts.map(item=>h('div',{key:item.id},transcripts.length>1&&h('h3',null,files.find(file=>file.id===item.artifact_id)?.metadata?.file_name||'Audio attachment'),h('p',{className:'source-transcript-text',dir:'auto'},new TextDecoder().decode(Uint8Array.from(atob(item.content_base64),character=>character.charCodeAt(0)))||'The active transcript is empty.'),h('details',{className:'source-transcript-provenance'},h('summary',null,'Transcription provenance'),h(Data,{value:item.provenance})))):
     h('p',{className:'n-muted source-transcript-empty'},'No active transcript is available for this message.')),
   !record.derivative_versions&&h(GuardedEditor,{key:record.id,record,call,notify}),
   record.derivative_versions&&h(SourceVersions,{key:record.id,record}));
+}
+
+function SourceRetirement({eventId,notify}){
+ const path='/sources/'+eventId+'/retirement',resource=useResource(path);
+ const [confirm,setConfirm]=useState(false),[busy,setBusy]=useState(false);
+ const state=resource.data;
+ async function change(){
+  if(!state||busy)return;
+  setBusy(true);
+  try{
+   await call(path,{retired:!state.retired,expected_revision:state.revision,operation_id:crypto.randomUUID()});
+   setConfirm(false);notify(state.retired?'Message restored for future use.':'Message retired from future use.');
+   await refreshResources();
+  }catch(error){notify(errorText(error),true);}finally{setBusy(false);}
+ }
+ if(resource.error?.includes('telegram_message_not_found'))return null;
+ return h('section',{className:'n-panel source-retirement','aria-label':'Nocheh use of this message'},
+  h('div',{className:'source-section-heading'},h('div',null,h('p',{className:'archive-kicker'},'Nocheh use'),h('h2',null,'Message retirement')),
+   h(Badge,null,state?state.retired?'Retired':'Active':'Checking…')),
+  h('p',{className:'n-muted'},!state?'Checking whether Nocheh can use this message.':state.retired?'Nocheh will not use this message or its revisions in future replies or learning. Original evidence remains here.':'Retire this exact Telegram message and all its observed edits from future replies and learning. This does not delete it from Telegram or retract a sent reply.'),
+  resource.error&&h(Alert,null,'Retirement status is unavailable. Refresh and try again.'),
+  state&&button(state.retired?'Undo retirement':'Retire from Nocheh',()=>setConfirm(true),busy),
+  state?.history?.length>0&&h('details',null,h('summary',null,'Owner action history'),h(Data,{value:state.history})),
+  h(Modal,{open:confirm,onOpenChange:setConfirm,title:state?.retired?'Restore this message for Nocheh?':'Retire this message from Nocheh?'},
+   h('p',null,state?.retired?'Future agent use and learning may resume. The original and action history remain in Archive.':'Future agent use and learning will stop for this message and every observed edit. A reply already sent through Telegram cannot be recalled.'),
+   button(state?.retired?'Undo retirement':'Confirm retirement',change,busy,'n-primary')));
 }
