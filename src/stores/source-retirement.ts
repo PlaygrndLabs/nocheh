@@ -8,13 +8,18 @@ import {OwnerCommands} from './owner-commands.js';
 export const sourceRetirementSchema=`
 CREATE TABLE IF NOT EXISTS source_retirements (
  object_id text PRIMARY KEY,retired boolean NOT NULL,revision integer NOT NULL CHECK(revision>0),
- event_id text NOT NULL,updated_at timestamptz NOT NULL DEFAULT now()
+ event_id text NOT NULL,decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner'),
+ updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS source_retirement_history (
  object_id text NOT NULL,revision integer NOT NULL,retired boolean NOT NULL,
- event_id text NOT NULL,operation_id text NOT NULL UNIQUE,created_at timestamptz NOT NULL DEFAULT now(),
+ event_id text NOT NULL,operation_id text NOT NULL UNIQUE,
+ decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner'),
+ created_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(object_id,revision)
 );
+ALTER TABLE source_retirements ADD COLUMN IF NOT EXISTS decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner');
+ALTER TABLE source_retirement_history ADD COLUMN IF NOT EXISTS decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner');
 `;
 
 /** A retirement is an owner control decision, never an observed Telegram deletion. */
@@ -52,10 +57,10 @@ export class SourceRetirementRepository {
   }
   async get(principal:Reader,eventId:string) {
     admin(principal);const id=await this.identity(eventId);
-    const state=(await this.stores.control.query('SELECT retired,revision,event_id,updated_at FROM source_retirements WHERE object_id=$1',[id])).rows[0];
-    const history=(await this.stores.control.query('SELECT revision,retired,event_id,created_at FROM source_retirement_history WHERE object_id=$1 ORDER BY revision DESC',[id])).rows;
+    const state=(await this.stores.control.query('SELECT retired,revision,event_id,decision_authority,updated_at FROM source_retirements WHERE object_id=$1',[id])).rows[0];
+    const history=(await this.stores.control.query('SELECT revision,retired,event_id,decision_authority,created_at FROM source_retirement_history WHERE object_id=$1 ORDER BY revision DESC',[id])).rows;
     return {event_id:eventId,source_object_id:id,retired:state?.retired??false,revision:state?.revision??0,
-      authority:'owner',observation:'not_observed',updated_at:state?.updated_at??null,history};
+      authority:state?.decision_authority??'owner',observation:'not_observed',updated_at:state?.updated_at??null,history};
   }
   async set(principal:Reader,eventId:string,input:unknown) {
     admin(principal);const body=object(input);
