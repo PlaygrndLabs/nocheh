@@ -1,5 +1,63 @@
 # Nocheh implementation status
 
+<mvp_live_findings_followup>
+
+#### MVP live findings, isolated replay recovery, and reset inventory — 2026-09-24
+
+The post-rebuild live test found one harmless voice marker masked in its automatic
+guarded transcript and one group reply that exposed an internal event citation.
+The trusted detector prompt now distinguishes ordinary test markers from explicit
+secrets, with a new detector version. Telegram reply rendering removes raw internal
+event IDs, and the shared-space instruction asks for a direct access-boundary
+answer when private DM material is not shared. Storage and delivery audience
+checks remain in place. The updated behavior has isolated tests but has not been
+activated or repeated against the owner voice or selected group.
+
+The group's retained receipt shows 125.4 seconds from archive receipt to Telegram
+send result. The native turn took 74.6 seconds: history preparation took 22.8
+seconds, conversation took 46.6 seconds, and three context preparations totaled
+30.5 seconds within those phases. The group profile held eight messages totaling
+1,795 content characters, so a large native history does not explain the delay.
+The Telegram path prepared the same native profile twice; it now prepares it once.
+An isolated 20-call benchmark measured the removed warm call at a 5.431 ms median
+and 18.519 ms p95. This is a small measured improvement, not a resolution of the
+125-second latency. Fresh end-to-end timing on the updated code remains pending.
+
+An isolated gateway replay test confirms a completed exact action produces one
+send across gateway recreation. Cancellation after its durable send intent leaves
+the recovered action ambiguous and does not start another send. The existing
+store test also passed lost-acknowledgment, lost-completion, and uncertain
+reconciliation paths. After those isolated checks, a completed action in the
+active legacy installation was replayed through the executor with a fake runtime
+callback. It made zero runtime calls, stayed done, and retained the same two
+outbound intent/result observations. Active in-flight send recovery remains
+pending. This task did not restart the active bot.
+
+The final isolated gate passed 137 Node/dashboard checks with 46 fixture skips,
+database-loss recovery, and 358 native Hermes tests with three skips. An initial
+run exposed one stale graph assertion missing the existing Collection count; the
+assertion was corrected before the complete rerun. The temporary Compose fixture
+was removed. The AST-only Graphify refresh covered 535 files, 3,634 nodes, and
+13,514 edges with zero model calls.
+
+A read-only reset preflight found the `legacy` layout, 17 owned containers, three
+volumes, 56 classified paths, zero ownership blockers, and 16 undecided immediate
+items across five external review roots. A private exact path/effect review was
+prepared. No reset step ran. The controlled transition, empty-baseline proof,
+fresh owner and human-group acceptance, and post-reset Honcho production gate are
+pending. A read-only pre-reset Honcho check found its service running, the
+embedding credential and subscription login present, and the existing $5 cap;
+service health does not attach memory or satisfy production acceptance. MVP
+release acceptance is **not established**.
+The verified code and test increments are `cf33979`, `d3f5ef0`, and `2abc54b`;
+each was merged into local `main` under the shared lock. Fetch from `origin/main`
+succeeded before each merge. HTTPS pushes were attempted and failed because Git
+could not read a GitHub username with terminal prompts disabled. Remote sync is
+pending; local integration is distinct from runtime activation.
+[Content-free results](compatibility/results/2026-09-24-mvp-live-findings-followup.json).
+
+</mvp_live_findings_followup>
+
 <archive_transcript_row>
 
 #### Active transcript preview in Archive rows — 2026-09-23
