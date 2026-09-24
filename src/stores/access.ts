@@ -8,15 +8,22 @@ import {ArchiveRepository,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
 import {RelationshipRepository} from './relationships.js';
 import {OwnerCommands} from './owner-commands.js';
+import type {SourceRetirementRepository} from './source-retirement.js';
+import type {ReactionStateRepository} from './reaction-state.js';
 
 /** Source access is independent of project membership and sharing configuration. */
 export class SourceAccessRepository {
   readonly relationships:RelationshipRepository;
-  constructor(readonly stores:StorePools,readonly archive:ArchiveRepository,readonly guards:GuardRepository,readonly policy:()=>AssistantPolicy) {
+  constructor(readonly stores:StorePools,readonly archive:ArchiveRepository,readonly guards:GuardRepository,readonly policy:()=>AssistantPolicy,
+    readonly retirements?:SourceRetirementRepository,readonly reactions?:ReactionStateRepository) {
     this.relationships=new RelationshipRepository(archive);
   }
   async canRead(principal:Reader,reference:SourceReference,binding:GuardBinding):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
+    if(!principal.admin&&source.channel==='telegram'){
+      if(await this.retirements?.isRetired(reference))return false;
+      if(this.reactions&&!await this.reactions.isCurrent(reference))return false;
+    }
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
     if(!['telegram','browser'].includes(source.channel)||source.scope!==principal.scope)return false;
     const observed=(await this.relationships.describe(reference)).audience,space=principal.space??principal.scope;
@@ -26,6 +33,10 @@ export class SourceAccessRepository {
   }
   async canLearn(reference:SourceReference,binding:GuardBinding):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
+    if(source.channel==='telegram'){
+      if(await this.retirements?.isRetired(reference))return false;
+      if(this.reactions&&!await this.reactions.isCurrent(reference))return false;
+    }
     const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[reference.id])).rows[0];
     if(intake?.state==='pending')return false;
     const consent=(await this.stores.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];

@@ -73,6 +73,23 @@ a second voice note creates a separate request; it does not cancel the first.
 The Bot API's `deleted_business_messages` update applies to connected business
 accounts, not ordinary bot chats.
 
+In an original-only Archive, open the exact captured message and choose **Retire
+from Nocheh** to stop future agent use and learning. This works for text, voice,
+media, edits, and assistant replies; all observed edits of one Telegram message
+share the decision. **Undo retirement** restores future use. The original,
+attachments, transcripts, and owner action history remain inspectable. A reply
+already sent cannot be retracted, and an uncertain send remains uncertain until
+its delivery receipt is resolved. The Archive action records an owner decision,
+not a Telegram deletion observation.
+
+The pinned native adapter explicitly requests all Telegram update types, which
+include `message_reaction` and `message_reaction_count`; Nocheh checks that
+contract on polling startup. A group bot needs admin rights to receive these
+updates, and Telegram may delay anonymous count updates. Individual reactions
+are tracked by target and actor; anonymous counts are separate. Changes and
+removals invalidate stale inferred meaning without sending a new reply to an old
+message. If no update is delivered, Nocheh cannot infer a reaction change.
+
 ## External action approval
 
 The assistant may propose an external Telegram message. It cannot approve one.
