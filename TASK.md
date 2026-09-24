@@ -52,6 +52,7 @@ These are implementation checkpoints, not substitutes for the release decision a
 
 ## Development follow-ups
 
+- **Deleted Telegram voice notes:** The Bot API supplies no deletion update for ordinary bot chats. The 2026-09-24 owner report showed a deleted first voice note still Waiting and a second note Processing; those screenshot states do not establish their final outcomes. Clarify whether the desired interaction is an explicit cancel/replace action or a short-window replacement rule before changing reply semantics. Verify the chosen behavior with two real owner notes and saved event IDs; preserve the first captured source as evidence. [Telegram Bot API Update fields](https://core.telegram.org/bots/api#update).
 - **Space-memory filters:** native-note/transcript filtering, its provider-payload/destination extension, and live native-review/filter quality and browser policy-save checks remain pending. [Boundaries](docs/space-memory-plan.md).
 - **Per-session previews:** explicit isolation for Compose projects, networks, images, ports, state, and credentials remains unimplemented. A worktree alone does not isolate the running installation.
 - **`make dev`:** declared phony without a recipe. `./scripts/nocheh dev` targets the local installation's Compose Watch workflow. An isolated fresh-worktree setup and visible persistent preview are follow-up tooling work.
