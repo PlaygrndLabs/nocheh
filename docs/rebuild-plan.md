@@ -25,4 +25,4 @@ Honcho comparison. Historical ADRs retain the rationale.
 - Subscription transcription is a feasibility/release gate: retain failures and stop dependent release work; continue independent implementation. Missing credentials and unrun checks stay pending.
 - Include Unicode, repeated/overlapping secrets, malformed detector output, auxiliary calls, complete history, provider switches, retries, tool results, transcripts, and image-derived text in boundary checks.
 - Check audience isolation through native memory, sessions, filesystem/tools, source citations, and delivery. Test approval changes and uncertain delivery reconciliation without blind resend.
-- Use local Compose; VPS verification remains deferred. [TASK.md](../TASK.md) links the recorded evidence and preserves original phase commit hashes.
+- Use local Compose; VPS verification remains deferred. [TASK.md](../TASK.md) links current evidence; the previous full ledger (`git show ab643dc:TASK.md`) preserves original phase commit hashes.

@@ -22,4 +22,4 @@ the D1–D4 execution checkpoints, not the superseded pre-implementation design.
 - [Shared provider](shared-provider-plan.md) and [guarded memory](guarded-memory-plan.md): production connection gates, separate from data inspection.
 
 Follow [AGENTS.md](../AGENTS.md) for commits and previews. D1–D4 are implemented;
-the older D3/D4 pending rows in TASK.md's historical snapshots are not current status.
+older D3/D4 pending rows in the previous full ledger (`git show ab643dc:TASK.md`) are historical; [TASK.md](../TASK.md) has current status.

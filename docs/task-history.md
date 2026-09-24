@@ -1,0 +1,39 @@
+# Task history through 2026-09-24
+
+This is a compact index of earlier implementation reports. [TASK.md](../TASK.md)
+is the current status and release ledger. Earlier passes describe their recorded
+installation, code revision, and test environment; they do not establish the
+current post-reset release gates. For every original dated note, count, caveat,
+and commit hash, run `git show ab643dc:TASK.md` in this repository. That Git
+revision is the complete ledger before this summary replaced it.
+
+## Foundation and local consolidation, 2026-09-07–16
+
+- The Hermes-owned source rebuild, independent Nocheh dashboard and CLI, guarded projections, native browser turns, controlled tools, schedules, and recovery tooling reached their recorded P1–P7 and D1–D4 checkpoints. [Runtime plan](runtime-platform-plan.md), [rebuild plan](rebuild-plan.md), [P7 evidence](../compatibility/results/2026-09-08-runtime-platform-operations.json).
+- Guarded-copy owner editing and scoped recall passed local checks. Security-broker isolation and approval enforcement passed their recorded checks. [Guarded acceptance](../compatibility/results/2026-09-09-guarded-memory-acceptance.json), [security activation](../compatibility/results/security-service-activation.json).
+- The refactor was consolidated into local `main` while release and activation remained separate. [Integration evidence](../compatibility/results/2026-09-11-main-consolidation.json), [ADR-0039](adr/0039-main-refactor-consolidation.md).
+- CPA became the shared subscription route with one refresh owner. Nine Inngest families completed local cutover at epoch 2. Earlier real Telegram text, voice, silence, isolation, exact approval, and restart checks passed on that installation. [Provider evidence](../compatibility/results/2026-09-14-shared-provider-cutover.json), [consolidated acceptance](../compatibility/results/2026-09-16-consolidated-services.json).
+- Honcho's metered pilot, scoped production ingestion/recall, native tool, isolation, outage, and restart passed on that earlier installation without history backfill. Its monthly-cap and opted-in history phases were separate. [Production evidence](../compatibility/results/2026-09-15-honcho-production-acceptance.json).
+- One real Telegram turn took 128.1 seconds; its follow-up was delayed and closed as ambiguous. Admission and receipt handling changed afterward, and later local acceptance was recorded. [Latency diagnosis](../compatibility/results/2026-09-15-telegram-latency-diagnosis.json).
+
+## Original-only archive candidate, 2026-09-17–21
+
+- The accepted target became an archive of original evidence, separate derivative and control stores, platform-independent identities, owned files, versioned provenance, contextual learning, projects, and explicit sharing. [Plan and acceptance sequence](original-only-archive-plan.md), [ADR-0053](adr/0053-original-only-archive.md).
+- Three-store repositories, role separation, recoverable capture handoff, guarding, reprocessing, owner correction, import/export, backup/inactive restore, and reset/empty-baseline controls passed isolated fixtures and combined synthetic rehearsals. These did not cut over the saved legacy installation. The detailed incremental results and their failure paths remain in the Git ledger above.
+- Dashboard component, theme, responsive layout, monitoring, and entity-memory work passed their recorded builds, focused tests, and isolated visual reviews. [Entity-memory evidence](../compatibility/results/2026-09-20-connected-entity-memory.json), [dashboard guide](dashboard.md).
+- The accepted core service names became `nocheh-app`, `nocheh-security`, `hermes`, `hermes-agent-sb`, `nocheh-db`, and `nocheh-executor`; PostgreSQL provisioning moved inside the database service. [Service-name evidence](../compatibility/results/2026-09-20-core-service-renames.json), [bootstrap evidence](../compatibility/results/2026-09-20-postgres-owned-bootstrap.json).
+
+## MVP preparation and owner UI, 2026-09-22–23
+
+- The optional Honcho comparison was retired from the codebase while production state and the spending ledger were preserved. [ADR-0061](adr/0061-retire-isolated-honcho-comparison.md).
+- Worktree and Docker cleanup, fresh synthetic fixtures, reset preflights, and shared-subscription probes were recorded. A previous cleanup could not discard the legacy database without exact authority; the controlled three-store reset remained pending. [Readiness recheck](../compatibility/results/2026-09-23-mvp-readiness-recheck.json), [current-revision probe](../compatibility/results/2026-09-23-mvp-real-test-current-revision.json).
+- The owner requested and reviewed Archive source-only rows, delivered-reply links, statuses, filters, live refresh, voice playback and transcript display, approval clarity, and a read-only database browser. Sharing gained owner-managed Telegram participant controls. The private knowledge graph root became a distinct Collection. These changes have individual build, fixture, or preview evidence in the original Git ledger; several were not rebuilt into the active installation at recording time.
+- People and Projects gained connected entity memory, reviewable relationships, and an interactive ELK-laid-out Memory map. Separated-store behavior had isolated acceptance; post-reset Honcho and live Telegram gates remained pending. [Entity-memory evidence](../compatibility/results/2026-09-20-connected-entity-memory.json).
+- A local app/dashboard rebuild showed 17 healthy services. The owner then sent real pre-reset text, voice, group, approval, and restart messages. Source capture, silence, private/group isolation, ordinary-language exact approval, and queued-message recovery had recorded observations. A harmless voice marker was masked, a group answer cited an internal event ID, the group turn took about 125 seconds, and in-flight send recovery was not shown. [Rebuild evidence](../compatibility/results/2026-09-23-app-dashboard-rebuild.json), [live observations](../compatibility/results/2026-09-23-post-rebuild-live-test.json).
+
+## Latest pre-reset code gate, 2026-09-24
+
+- The detector prompt, Telegram reply rendering, and shared-space answer instruction were adjusted for those live findings. Duplicate native-profile preparation was removed. The saved 125.4-second turn was diagnosed, but the measured warm-call saving was small and fresh end-to-end latency remains pending.
+- Isolated completed-action replay and ambiguous interrupted-send handling passed; a completed action replayed through the active legacy installation made no second runtime call. Active in-flight recovery remains pending.
+- The isolated gate passed 137 Node/dashboard checks with 46 fixture skips, database-loss recovery, and 358 native Hermes tests with three skips. The three code increments were merged into local `main`. Fetch succeeded; HTTPS push failed without a usable GitHub username.
+- A read-only reset preflight found the legacy layout, 17 owned containers, three volumes, 56 classified paths, zero ownership blockers, and 16 undecided external items. No reset or post-reset release gate ran. [Latest content-free evidence](../compatibility/results/2026-09-24-mvp-live-findings-followup.json).
