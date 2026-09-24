@@ -145,6 +145,18 @@ class ResetInventoryTests(unittest.TestCase):
         self.values['NOCHEH_HONCHO_ENABLED'] = 'false'
         self.assertEqual(len(self.inspect()['volumes']), 4)
 
+    def test_reset_fence_keeps_enabled_honcho_in_read_only_inventory(self):
+        (self.state / 'spool/.restore-inactive').write_text('fixture reset fence')
+        observed = []
+        def runner(arguments, environment):
+            if arguments == self.command + ['config', '--format', 'json']:
+                observed.append(environment.get('COMPOSE_PROFILES', ''))
+            return self.runner(arguments, environment)
+        manifest = inventory.inspect(self.state, root=self.root, runner=runner)
+        self.assertEqual(manifest['blockers'], [])
+        self.assertEqual(len(manifest['volumes']), 4)
+        self.assertEqual(observed, ['honcho'])
+
     def test_docker_mount_order_does_not_change_container_identity(self):
         self.containers[0]['mounts'].append({
             'Type': 'bind', 'Source': str(self.state / 'files'),

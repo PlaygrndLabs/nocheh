@@ -140,6 +140,13 @@ def inspect(state, *, root=INSTALLATION_ROOT, runner=run):
         raise ValueError('reset_state_symlink')
     state, root = supplied.resolve(), Path(root).resolve()
     values = load(state); environment = compose_environment(state)
+    # The reset fence suppresses Honcho from ordinary Compose operations. An
+    # inventory is read-only and must still render its saved, enabled services
+    # so their pre-reset identities and volumes remain visible after quiescence.
+    if values['NOCHEH_HONCHO_ENABLED'] == 'true':
+        profiles = [item for item in environment.get('COMPOSE_PROFILES', '').split(',') if item]
+        if 'honcho' not in profiles:
+            environment = {**environment, 'COMPOSE_PROFILES': ','.join([*profiles, 'honcho'])}
     memory = Path(environment['NOCHEH_HONCHO_STATE_DIR'])
     if memory.is_symlink() or memory.resolve() == state or state.is_relative_to(memory.resolve()):
         raise ValueError('reset_memory_state_overlap')
