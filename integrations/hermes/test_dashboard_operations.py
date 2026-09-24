@@ -46,7 +46,7 @@ class DashboardOperationsTests(unittest.TestCase):
                          [('group:123','group'),('user:alice','user'),('project:work','project')])
         self.assertEqual([(edge['from'],edge['to']) for edge in graph['edges']],
                          [('user:alice','group:123'),('project:work','group:123')])
-        self.assertEqual(graph['bounds'],{'users':1,'projects':1,'groups':1,'messages':0,'truncated':True})
+        self.assertEqual(graph['bounds'],{'collections':0,'users':1,'projects':1,'groups':1,'messages':0,'truncated':True})
 
     def test_operations_fixed_destinations_and_inactive_restore(self):
         job='11111111-1111-4111-8111-111111111111';backup='22222222-2222-4222-8222-222222222222'
