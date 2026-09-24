@@ -44,6 +44,8 @@ import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {EntityRepository} from './entities.js';
 import {MemoryAccessRepository} from './memory-access.js';
 import {MemoryMapRepository} from './memory-map.js';
+import {SourceRetirementRepository} from './source-retirement.js';
+import {ReactionStateRepository} from './reaction-state.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -53,7 +55,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const transcription=options.transcription??subscriptionTranscription(options.runtime),extraction=utf8Extraction();
   const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction);
-  const access=new SourceAccessRepository(stores,archive,guards,options.policy);
+  const retirements=new SourceRetirementRepository(stores,archive);
+  const reactions=new ReactionStateRepository(archive,stores.control);
+  const access=new SourceAccessRepository(stores,archive,guards,options.policy,retirements,reactions);
   const prepared=new PreparedContextRepository(derived,guards,async(principal,binding)=>{
     try {
       const source=(await archive.captured(principal.turnEvent!)).reference;
@@ -78,7 +82,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
-  return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

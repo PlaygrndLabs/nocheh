@@ -8,7 +8,7 @@ import {portableDerivativeTypes} from './derivative-portability.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -86,9 +86,15 @@ export class OwnerStorageApi {
         return {id:memory[1],active_revision:entry?.active_revision,entry:entry?{...entry,text:entry.content.toString(),content:undefined}:null,...result};
       }
     }
-    const source=path.match(/^\/v1\/sources\/([a-f0-9]{64})\/(derivatives|reprocess|prepare|learning-consent)$/);
+    const source=path.match(/^\/v1\/sources\/([a-f0-9]{64})\/(derivatives|reprocess|prepare|learning-consent|retirement)$/);
     if(source) {
       const captured=await s.archive.captured(source[1]!);
+      if(source[2]==='retirement'){
+        if(method==='GET')return s.retirements.get(principal,captured.reference.id);
+        const result=await s.retirements.set(principal,captured.reference.id,input);
+        if(result.retired)await s.telegram.cancelRetired(await s.retirements.events(captured.reference.id));
+        return result;
+      }
       if(source[2]==='learning-consent')return method==='GET'?s.access.consent(principal,captured.reference):s.access.setConsent(principal,captured.reference,input);
       if(method==='GET'&&source[2]==='derivatives')return s.selections.versions(source[1]!,q.get('after')??'',limit(q.get('limit'),50,100),q.get('view')??'all');
       if(method==='POST'&&source[2]==='prepare') {

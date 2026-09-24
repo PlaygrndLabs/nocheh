@@ -95,9 +95,11 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(TelegramAdapter,'_start_polling_resilient',new_callable=AsyncMock) as native:
             await adapter._start_polling_resilient(drop_pending_updates=True,error_callback=None)
             self.assertFalse(native.call_args.kwargs['drop_pending_updates'])
+            self.assertNotIn('allowed_updates',native.call_args.kwargs)
         with patch.object(TelegramAdapter,'_start_polling_once',new_callable=AsyncMock) as native:
             await adapter._start_polling_once(None,drop_pending_updates=True,error_callback=None)
             self.assertFalse(native.call_args.kwargs['drop_pending_updates'])
+            self.assertNotIn('allowed_updates',native.call_args.kwargs)
         with self.assertRaises(RuntimeError): await adapter._start_webhook_mode('https://unused')
         app=SimpleNamespace(add_handler=lambda handler,group=0: handlers.append((handler,group)))
         handlers=[]
