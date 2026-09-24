@@ -6,6 +6,7 @@ import {initializeStoreDatabases,connectStores} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {SourceRetirementRepository} from '../src/stores/source-retirement.js';
+import {ArchiveRepository} from '../src/stores/archive.js';
 
 test('owner retirement covers every message revision, preserves evidence and delivery, and can be undone',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -34,7 +35,7 @@ test('owner retirement covers every message revision, preserves evidence and del
       const manifests=(await s.archive.captured(ref.id)).artifact_ids;
       const result=await s.retirements.set(owner,ref.id,{retired:true,expected_revision:0,operation_id:prefix+':retire:'+ref.id});
       assert.equal(result.retired,true);assert.equal(await s.retirements.isRetired(ref),true);
-      assert.equal(await new SourceRetirementRepository(stores,s.archive).isRetired(ref),true,'control decision survives repository restart');
+      assert.equal((await s.retirements.get(owner,ref.id)).history[0]?.decision_authority,'owner');
       assert.equal(await s.access.canRead({admin:false,scope:null,space:group},ref,await s.guards.state()),false);
       assert.equal(await s.access.canLearn(ref,await s.guards.state()),false);
       assert.deepEqual((await stores.archive.query('SELECT payload FROM events WHERE id=$1',[ref.id])).rows[0].payload,before);
@@ -72,6 +73,12 @@ test('owner retirement covers every message revision, preserves evidence and del
     assert.equal(rows.find(row=>row.event_id===pending.id)?.state,'cancelled');
     assert.equal(rows.find(row=>row.event_id===done.id)?.state,'done');
     assert.equal(rows.find(row=>row.event_id===uncertain.id)?.state,'ambiguous');
+    const restarted=connectStores(config,passwords);
+    try{
+      const recovered=new SourceRetirementRepository(restarted,new ArchiveRepository(restarted.archive));
+      assert.equal(await recovered.isRetired(pending),true,'retirement survives fresh store pools');
+      assert.equal((await recovered.get(owner,pending.id)).authority,'owner');
+    }finally{await restarted.close();}
   }finally{await stores.close();}
 });
 
