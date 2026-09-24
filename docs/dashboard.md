@@ -409,7 +409,7 @@ owner revision. Original file downloads remain read only.
 
 Local Compose now uses the saved guarded version when guarding is on. A synthetic
 live subscription test verified import, edit, scoped retrieval and native Hermes
-archive recall. See TASK.md G7 for evidence and remaining Honcho/release checks.
+archive recall. See [task history](task-history.md) for that recorded checkpoint and [TASK.md](../TASK.md) for current Honcho and release checks.
 
 ## System monitoring and subscription login
 
