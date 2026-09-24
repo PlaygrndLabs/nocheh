@@ -6,6 +6,8 @@ rechecks journal, maintenance, owner exclusion, preservation and inactive fences
 No source bytes are read or copied. Database/container erasure is separate.
 """
 import os
+import copy
+import re
 import stat
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,10 +31,37 @@ def metadata(value):
             'ctime_ns': value.st_ctime_ns}
 
 
-def same(actual, expected):
-    keys = FIELDS if expected['kind'] == 'directory' else expected.keys()
+def same(actual, expected, *, mutable_metadata=False):
+    keys = FIELDS if expected['kind'] == 'directory' or mutable_metadata else expected.keys()
     if any(actual.get(key) != expected[key] for key in keys):
         raise ValueError('reset_file_identity_changed')
+
+
+def redis_aof(path, state):
+    path = Path(path)
+    return (path.parent == Path(state) / 'workflows/redis/appendonlydir' and
+            re.fullmatch(r'appendonly\.aof\.[0-9]+\.incr\.aof', path.name) is not None)
+
+
+def equivalent_after_redis_stop(saved, current):
+    """Allow only in-place size/time drift of a reviewed workflow Redis AOF."""
+    if saved.get('installation') != current.get('installation'):
+        return False
+    state = saved['installation']
+    def normalized(value):
+        value = copy.deepcopy(value)
+        def walk(node, path):
+            if node is None:
+                return
+            if redis_aof(path, state) and node['metadata']['kind'] == 'file':
+                for key in ('size', 'mtime_ns', 'ctime_ns'):
+                    node['metadata'].pop(key, None)
+            for child in node.get('children', []):
+                walk(child, path / child['name'])
+        for target in value['targets']:
+            walk(target['tree'], Path(target['path']))
+        return value
+    return normalized(saved) == normalized(current)
 
 
 def absolute(value):
@@ -150,7 +179,7 @@ def freeze(preflight, protected, ownership_review=None, *, rebound=None):
             'entries': count, 'targets': planned, 'content_copied': False}
 
 
-def erase(manifest, assert_barrier):
+def erase(manifest, assert_barrier, *, allow_stopped_redis_aof_drift=False):
     """Retry the same frozen manifest; missing entries are already removed.
 
     All remaining trees are checked before the first unlink. New or replaced
@@ -160,8 +189,9 @@ def erase(manifest, assert_barrier):
     if manifest.get('format') != FORMAT or manifest.get('content_copied') is not False:
         raise ValueError('reset_file_manifest_invalid')
     removed = 0
+    observed_aof = {}
 
-    def walk(fd, name, expected, deleting):
+    def walk(fd, name, expected, deleting, path):
         nonlocal removed
         observed = inspect_at(fd, name)
         if observed is None:
@@ -170,7 +200,12 @@ def erase(manifest, assert_barrier):
             return
         if expected is None:
             raise ValueError('reset_file_unreviewed_entry')
-        same(observed, expected['metadata'])
+        aof = allow_stopped_redis_aof_drift and redis_aof(path, manifest['installation'])
+        if aof and not deleting:
+            same(observed, expected['metadata'], mutable_metadata=True)
+            observed_aof[str(path)] = observed
+        else:
+            same(observed, observed_aof.get(str(path), expected['metadata']))
         if observed['kind'] == 'directory':
             child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             try:
@@ -179,12 +214,12 @@ def erase(manifest, assert_barrier):
                 if any(item not in children for item in os.listdir(child)):
                     raise ValueError('reset_file_unreviewed_entry')
                 for item, row in children.items():
-                    walk(child, item, row, deleting)
+                    walk(child, item, row, deleting, path / item)
             finally:
                 os.close(child)
         if deleting and not expected['keep']:
             assert_barrier()
-            same(inspect_at(fd, name) or {}, expected['metadata'])
+            same(inspect_at(fd, name) or {}, observed_aof.get(str(path), expected['metadata']))
             if observed['kind'] == 'directory':
                 os.rmdir(name, dir_fd=fd)
             else:
@@ -196,7 +231,7 @@ def erase(manifest, assert_barrier):
         for target in manifest['targets']:
             assert_barrier()
             with parent(absolute(target['path']), target['ancestors']) as (fd, name, _):
-                walk(fd, name, target['tree'], deleting)
+                walk(fd, name, target['tree'], deleting, Path(target['path']))
     assert_barrier()
     return {'removed_entries': removed, 'content_copied': False,
             'database_volumes_erased': False, 'inactive_markers_retained': True}

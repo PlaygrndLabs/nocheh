@@ -141,11 +141,18 @@ def erase(journal, preflight, recovery, ownership_review, *, inspect,
                 'containers_removed': len(value['containers']), 'volumes_removed': len(value['volumes']),
                 'preserved_setup_retained': True}
 
+    allow_aof_drift = False
+
     def before_database_stop():
         journal.assert_current(); recovery.assert_maintenance()
         if reset_protocol.read(path) != value:
             raise RuntimeError('reset_erasure_receipt_changed')
-        reset_quiescence.verify_quiescent(journal, preflight, inspect())
+        observed = inspect()
+        reset_quiescence.verify_quiescent(journal, preflight, observed)
+        if allow_aof_drift and any(row['service'] == 'inngest-redis' and
+                                   row['state'] not in ('exited', 'created')
+                                   for row in observed['containers']):
+            raise RuntimeError('reset_workflow_redis_restarted')
         reset_preservation.assert_frozen(journal, preflight)
         reset_quiescence.assert_fences(journal.state, journal.value['reset_id'])
         _docker(preflight, runner, environment, allow_running_databases=True)
@@ -167,7 +174,12 @@ def erase(journal, preflight, recovery, ownership_review, *, inspect,
         value = _advance(journal, path, value, 'file_erase_intent')
     if value['stage'] == 'file_erase_intent':
         artifacts = reset_preservation.assert_frozen(journal, preflight)
-        reset_files.erase(artifacts['files']['manifest'], before_database_stop)
+        observed = inspect()
+        reset_quiescence.verify_quiescent(journal, preflight, observed)
+        redis = [row for row in observed['containers'] if row['service'] == 'inngest-redis']
+        allow_aof_drift = len(redis) == 1 and redis[0]['state'] in ('exited', 'created')
+        reset_files.erase(artifacts['files']['manifest'], before_database_stop,
+                          allow_stopped_redis_aof_drift=allow_aof_drift)
         before_database_stop(); reset_preservation.verify_retained(journal, preflight)
         value = _advance(journal, path, value, 'files_erased')
     if value['stage'] == 'files_erased':
