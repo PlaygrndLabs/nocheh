@@ -8,9 +8,13 @@ import {ArchiveRepository,type CapturedSource} from './archive.js';
 import {captureEvidence,GeneratedCaptureRepository} from './generated-capture.js';
 import type {Envelope} from '../archive.js';
 import {requestWorkflow} from '../workflows/store.js';
+import {ReactionStateRepository} from './reaction-state.js';
 
 export class CaptureCoordinator {
-  constructor(readonly archive:ArchiveRepository,readonly control:pg.Pool,readonly generated?:GeneratedCaptureRepository){}
+  readonly reactions:ReactionStateRepository;
+  constructor(readonly archive:ArchiveRepository,readonly control:pg.Pool,readonly generated?:GeneratedCaptureRepository){
+    this.reactions=new ReactionStateRepository(archive,control);
+  }
 
   private async request(client:pg.PoolClient,source:CapturedSource):Promise<void> {
     await client.query(`INSERT INTO source_intakes(event_id,source_revision,input_hash,transport,state) VALUES($1,$2,$3,$4,'ready') ON CONFLICT DO NOTHING`,
@@ -26,6 +30,7 @@ export class CaptureCoordinator {
     const previous=(await client.query('SELECT source_revision,payload_hash FROM capture_handoffs WHERE event_id=$1',[source.reference.id])).rows[0];
     if(previous.source_revision!==source.reference.revision||previous.payload_hash!==source.reference.input_hash)
       throw new HttpError(409,'capture_handoff_conflict');
+    if(intake.transport==='capture'&&source.origin==='live')await this.reactions.capture(client,source.reference);
     await requestWorkflow(client,'preparation',source.reference.id);
     if(intake.transport==='capture'&&source.origin==='live'&&source.kind!=='telegram_wire') {
       await requestWorkflow(client,'memory_review','source:'+source.reference.id);

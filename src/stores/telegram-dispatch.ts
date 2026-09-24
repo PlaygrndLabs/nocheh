@@ -75,6 +75,14 @@ export class TelegramDispatchRepository {
     readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:ActionCommandRepository,
     readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
   private get control(){return this.access.stores.control;}
+  /** Native cancellation is best effort; the durable receipt remains authoritative. */
+  async cancelRetired(ids:string[]):Promise<void> {
+    if(!ids.length)return;
+    const rows=(await this.control.query("SELECT event_id,attempts FROM dispatches WHERE event_id=ANY($1::text[]) AND state='running' AND attempts>0",[ids])).rows;
+    for(const row of rows)try{
+      await this.call('run.cancel',{channel:'telegram',event_id:row.event_id,attempt:row.attempts},10000);
+    }catch{/* The running workflow retries observation and cancellation under the revoked guard epoch. */}
+  }
   private observation(row:any):Observation {
     const states:Record<string,Observation['state']>={pending:'waiting',running:'running',done:'completed',failed:'retryable_failed',ambiguous:'ambiguous',suppressed:'skipped',cancelled:'cancelled'};
     return observation(states[row.state]!,row.runtime_stage,row.attempts,row.next_attempt.getTime(),row.state==='running'?'receipt_pending':row.state==='failed'?'runtime_unavailable':row.state==='pending'?'prerequisite':null);
@@ -112,6 +120,8 @@ export class TelegramDispatchRepository {
   }
   private async current(input:Input) {
     await this.guards.assertCurrent(input.binding);await this.turns.binding(input.principal);
+    const source=(await this.archive.captured(input.principal.turnEvent!)).reference;
+    if(await this.access.retirements?.isRetired(source))throw new HttpError(403,'source_retired');
     const original=(await this.archive.pool.query('SELECT payload,scope FROM events WHERE id=$1',[input.principal.turnEvent])).rows[0];
     if(!original||!conversationScope(this.access.policy(),JSON.parse(original.payload.toString()),original.scope))throw new HttpError(403,'conversation_not_selected');
     await this.guards.assertCurrent(input.binding);
@@ -220,6 +230,10 @@ export class TelegramDispatchRepository {
         return observation('skipped','admission');
       await db.query('INSERT INTO dispatches(event_id,source_reference) VALUES($1,$2) ON CONFLICT DO NOTHING',[id,captured.reference]);
       let row=await this.row(id);if(terminal.has(row.state))return this.observation(row);
+      if(await this.access.retirements?.isRetired(captured.reference)&&row.state!=='running') {
+        await db.query("UPDATE dispatches SET state='cancelled',error_code='source_retired',revision=revision+1,updated_at=now() WHERE event_id=$1 AND state IN ('pending','failed')",[id]);
+        return this.observation(await this.row(id));
+      }
       if(row.state==='running'&&row.attempts) {
         const saved=await this.derived.checkpoint(`telegram-dispatch-result:${id}:${row.attempts}`);
         if(saved) {
@@ -236,7 +250,7 @@ export class TelegramDispatchRepository {
         if(closed.has(String(observed.state)))return await this.receive(row,observed);
         input=await this.input(row.input_reference);
         try{await this.current(input);}catch(error){
-          if(!(error instanceof HttpError)||!['guard_context_changed','audience_context_changed','conversation_not_selected','guard_transition_pending'].includes(error.code))throw error;
+          if(!(error instanceof HttpError)||!['guard_context_changed','audience_context_changed','conversation_not_selected','guard_transition_pending','source_retired'].includes(error.code))throw error;
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
           try{return await this.receive(row,await this.call('run.cancel',{channel:'telegram',event_id:id,attempt:row.attempts},10000));}
           catch{return await this.receive(row,{state:'running'});}

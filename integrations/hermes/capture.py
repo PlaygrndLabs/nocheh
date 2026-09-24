@@ -198,6 +198,10 @@ def captured_adapter_class():
     from telegram import Update
     from telegram.ext import ApplicationHandlerStop, TypeHandler
 
+    # The pinned native adapter passes Update.ALL_TYPES to start_polling. Fail
+    # startup if its Telegram library ever drops either required reaction type.
+    required_reactions = {'message_reaction', 'message_reaction_count'}
+
     class ArchivedTelegramAdapter(TelegramAdapter):
         def __init__(self, config):
             super().__init__(config)
@@ -208,11 +212,15 @@ def captured_adapter_class():
 
         async def _start_polling_resilient(self, **kwargs):
             kwargs['drop_pending_updates'] = False
+            if not required_reactions.issubset(Update.ALL_TYPES):
+                raise RuntimeError('Pinned Telegram adapter lacks reaction updates')
             return await super()._start_polling_resilient(**kwargs)
 
         async def _start_polling_once(self, app, **kwargs):
             # Native reconnect recovery also calls this method directly.
             kwargs['drop_pending_updates'] = False
+            if not required_reactions.issubset(Update.ALL_TYPES):
+                raise RuntimeError('Pinned Telegram adapter lacks reaction updates')
             return await super()._start_polling_once(app, **kwargs)
 
         async def _start_webhook_mode(self, *args, **kwargs):

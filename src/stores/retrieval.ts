@@ -117,6 +117,8 @@ export class SourceRepository {
     }
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
     if(principal.admin){
+      const retired=await this.access.retirements?.retiredEvents(hits.map(hit=>hit.id));
+      for(const hit of hits)hit.retired=retired?.has(hit.id)??false;
       const [replies,transcripts]=await Promise.all([
         archiveReplyPreviews(this.stores.archive,this.stores.control,hits),archiveTranscriptPreviews(this.stores.derived,hits)]);
       for(const hit of hits){hit.reply_messages=replies.get(hit.id)??[];hit.transcript_preview=transcripts.get(hit.id)??null;}
