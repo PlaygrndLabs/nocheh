@@ -14,7 +14,7 @@ export class PreparationRepository {
 
   async status(eventId:string):Promise<Observation> {
     const source=await this.attachments.archive.captured(eventId);
-    const manifests=(await this.stores.archive.query('SELECT id,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[eventId])).rows;
+    const manifests=(await this.stores.archive.query('SELECT id,kind,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[eventId])).rows;
     const missing=manifests.filter(m=>!m.file_hash);
     if(missing.length) {
       const jobs=(await this.stores.control.query('SELECT * FROM attachment_retrievals WHERE artifact_id=ANY($1::text[])',[missing.map(m=>m.id)])).rows;
@@ -25,7 +25,14 @@ export class PreparationRepository {
     const selected=(await this.stores.derived.query(`SELECT s.artifact_id,r.derived_id FROM derivative_selections s
       JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
       WHERE s.event_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status')`,[eventId])).rows;
-    if(manifests.some(m=>!selected.some(s=>s.artifact_id===m.id)))return observation('waiting','transcription',0,Date.now(),'prerequisite');
+    const pending=manifests.filter(m=>!selected.some(s=>s.artifact_id===m.id));
+    for(const manifest of pending) {
+      const engine=['voice','audio','video_note'].includes(manifest.kind)?this.transcription:this.extraction;
+      const id=digest('reprocess:initial:'+manifest.id+':'+digest(engine.name+':'+engine.version));
+      const job=(await this.stores.control.query('SELECT attempts,error_code FROM reprocess_jobs WHERE id=$1',[id])).rows[0];
+      if(job?.error_code==='invalid_transcription_response')return observation('failed','transcription',job.attempts);
+    }
+    if(pending.length)return observation('waiting','transcription',0,Date.now(),'prerequisite');
     const ids=['events:'+source.reference.id,...manifests.map(m=>'artifacts:'+m.id),...selected.map(s=>'derived_artifacts:'+s.derived_id)];
     const binding=await this.guards.state();
     const sources=(await this.stores.derived.query('SELECT id,state FROM guard_sources WHERE id=ANY($1::text[])',[ids])).rows;
@@ -45,6 +52,7 @@ export class PreparationRepository {
       locked=(await client.query('SELECT pg_try_advisory_lock(803357) AS locked')).rows[0].locked;
       if(!locked)return observation('waiting','preparation',0,Date.now()+2000,'receipt_pending');
       const source=(await this.attachments.archive.captured(eventId)).reference;
+      const before=await this.status(eventId);if(before.state==='failed')return before;
       await this.guards.register(source);
       await this.attachments.fetch(eventId,fetchFile,authority);
       const manifests=(await this.stores.archive.query('SELECT id,kind,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[eventId])).rows;

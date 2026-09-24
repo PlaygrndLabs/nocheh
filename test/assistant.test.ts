@@ -11,6 +11,7 @@ import {immutableFile} from '../src/storage.js';
 import {conversationScope,telegramDeliveryAllowed} from '../src/assistant-policy.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {dispatchCommitted} from '../src/assistant.js';
+import {preparationStatus,waitForPreparation} from '../src/workflows/preparation-status.js';
 import {requestAction,controlReply,executeApproved} from '../src/actions.js';
 
 const policy={enabled:true,owner_id:'123',group_ids:['-20','-30']};
@@ -136,5 +137,18 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     assert.equal((await pool.query('SELECT error_code FROM dispatches WHERE event_id=$1',[malformed.id])).rows[0].error_code,'invalid_source_message');
     await dispatchCommitted(pool,config,async()=>({state:'done'}),undefined,{owner:'inngest',epoch:1});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[later.id])).rows[0].state,'done');
+    const quiet=await ingest(pool,{...value,key:'telegram:fixture:quiet-voice',source_id:'quiet-voice',payload:{update_id:9,message:{message_id:9,chat:{id:-20,type:'group'},from:{id:123,is_bot:false},voice:{file_id:'quiet'}}}});
+    await pool.query("UPDATE artifacts SET state='ready',file_hash=$2,byte_size=$3 WHERE event_id=$1",[quiet.id,digest(audio),audio.length]);
+    let quietCalls=0;
+    await prepareArchiveFiles(pool,root,async()=>{quietCalls++;return {success:false,error:'invalid_transcription_response',retryable:false};},quiet.id,{owner:'inngest',epoch:1});
+    const failed=await preparationStatus(pool,quiet.id);
+    assert.equal(failed.state,'failed');assert.equal(failed.stage,'transcription');
+    assert.equal(waitForPreparation(failed).state,'failed');
+    assert.equal((await pool.query('SELECT t.error_code FROM transcription_jobs t JOIN artifacts a ON a.id=t.artifact_id WHERE a.event_id=$1',[quiet.id])).rows[0].error_code,'invalid_transcription_response');
+    await pool.query("UPDATE transcription_jobs SET next_attempt=now() WHERE artifact_id IN (SELECT id FROM artifacts WHERE event_id=$1)",[quiet.id]);
+    await prepareArchiveFiles(pool,root,async()=>{throw Error('nonretryable audio must not be sent again');},quiet.id,{owner:'inngest',epoch:1});
+    assert.equal(quietCalls,1);
+    assert.equal((await pool.query('SELECT count(*)::int AS count FROM derived_artifacts WHERE event_id=$1',[quiet.id])).rows[0].count,0);
+    await dispatchCommitted(pool,config,async()=>{throw Error('voice without transcript must not reach Hermes');},quiet.id,{owner:'inngest',epoch:1});
   } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });

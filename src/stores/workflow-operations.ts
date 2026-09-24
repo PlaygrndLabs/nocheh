@@ -66,7 +66,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     const source=await s.archive.captured(id),binding=await s.guards.state();
     if(!await s.access.space(source.reference))return waiting('review','prerequisite');
     if(!await s.access.canLearn(source.reference,binding))return observation('denied','review',0,Date.now(),'consent_required');
-    const ready=await s.preparation.status(id);if(ready.state!=='completed')return waiting(ready.stage,'prerequisite',Math.max(1000,ready.next_attempt-Date.now()));
+    const ready=await s.preparation.status(id);if(ready.state==='failed')return ready;
+    if(ready.state!=='completed')return waiting(ready.stage,'prerequisite',Math.max(1000,ready.next_attempt-Date.now()));
     return {source,binding};
   };
   const operations:Partial<Record<WorkflowFamily,WorkflowOperation>>={
@@ -78,11 +79,12 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       const match=/^reprocess:([a-f0-9]{64})$/.exec(job);
       if(match) {
         const result=await s.reprocessing.run(match[1]!,s.detectorVersion,s.detect,authority);
-        const row=(await control.query('SELECT state,attempts FROM reprocess_jobs WHERE id=$1',[match[1]])).rows[0];
-        return result?observation('completed','transcription',row.attempts):waiting('transcription','receipt_pending',2000);
+        const row=(await control.query('SELECT state,attempts,error_code FROM reprocess_jobs WHERE id=$1',[match[1]])).rows[0];
+        return result?observation('completed','transcription',row.attempts):row.error_code==='invalid_transcription_response'?
+          observation('failed','transcription',row.attempts):waiting('transcription','receipt_pending',2000);
       }
       if(!/^[a-f0-9]{64}$/.test(job))return observation('failed','admission');
-      const before=await s.preparation.status(job);if(before.state==='completed'||before.next_attempt>Date.now()+30000)return before;
+      const before=await s.preparation.status(job);if(before.state==='completed'||before.state==='failed'||before.next_attempt>Date.now()+30000)return before;
       return s.preparation.run(job,async ref=>Buffer.from(string((await call('source.file',{file_id:ref})).bytes_base64,70*1024*1024),'base64'),s.detectorVersion,s.detect,authority);
     },
     memory_review:async(job,authority)=>{

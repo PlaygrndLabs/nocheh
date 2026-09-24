@@ -16,7 +16,8 @@ export async function prepareArchiveFiles(pool:pg.Pool,root:string,call:RuntimeC
     locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),803310)) AS locked')).rows[0].locked;if(!locked)return;
     const {rows}=await client.query(`SELECT a.* FROM artifacts a LEFT JOIN transcription_jobs t ON t.artifact_id=a.id WHERE a.state='ready'
       AND NOT EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.artifact_id=a.id AND d.kind IN ('transcript','extracted_text','extraction_status'))
-      AND (t.artifact_id IS NULL OR t.next_attempt<=now()) AND ($1::text IS NULL OR a.event_id=$1) ORDER BY a.id LIMIT 10`,[eventId]);
+      AND (t.artifact_id IS NULL OR (t.next_attempt<=now() AND t.error_code IS DISTINCT FROM 'invalid_transcription_response'))
+      AND ($1::text IS NULL OR a.event_id=$1) ORDER BY a.id LIMIT 10`,[eventId]);
     for(const row of rows) {
       if(['voice','audio','video_note'].includes(row.kind)){await prepareTranscripts(client,root,row.event_id,call,authority);continue;}
       if(!/^[a-f0-9]{64}$/.test(row.file_hash))throw new HttpError(409,'archive_integrity_failed');

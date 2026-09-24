@@ -108,7 +108,7 @@ class SubscriptionTranscriptionProvider(TranscriptionProvider):
                     if len(raw)>1024*1024: return self._error("invalid_transcription_response",False)
                     body=json.loads(raw)
                 if body.get('success') is not True:
-                    allowed={'auth_required','access_denied','quota_paused','transcription_failed','transcription_timeout','transcription_dependency_or_auth_error'}
+                    allowed={'auth_required','access_denied','quota_paused','transcription_failed','transcription_timeout','transcription_dependency_or_auth_error','invalid_transcription_response'}
                     reason=body.get('error') if body.get('error') in allowed else 'transcription_failed'
                     return self._error(reason,body.get('retryable') is True)
             if self.direct():

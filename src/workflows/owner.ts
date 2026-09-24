@@ -119,7 +119,7 @@ export async function controlWorkflow(pool:pg.Pool,id:string,action:string,input
         if(row.family==='telegram')await client.query("UPDATE dispatches SET next_attempt=now(),updated_at=now() WHERE event_id=$1 AND state='failed'",[job]);
         if(row.family==='preparation'){
           await client.query("UPDATE artifacts SET next_attempt=now() WHERE event_id=$1 AND state='failed' AND error_code IS DISTINCT FROM 'import_bytes_pending'",[job]);
-          await client.query("UPDATE transcription_jobs SET next_attempt=now() WHERE artifact_id IN (SELECT id FROM artifacts WHERE event_id=$1) AND state='failed'",[job]);
+          await client.query("UPDATE transcription_jobs SET next_attempt=now() WHERE artifact_id IN (SELECT id FROM artifacts WHERE event_id=$1) AND state='failed' AND error_code IS DISTINCT FROM 'invalid_transcription_response'",[job]);
           await client.query("UPDATE guard_sources SET next_attempt=now() WHERE event_id=$1 AND state='failed'",[job]);
         }
         if(row.family==='memory_review'&&job.startsWith('review:'))await client.query("UPDATE memory_review_jobs SET next_attempt=now(),updated_at=now() WHERE id=$1 AND state='failed'",[job.slice(7)]);
