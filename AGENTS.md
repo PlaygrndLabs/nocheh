@@ -7,7 +7,7 @@
 Nocheh is a personal AI brain with Hermes as its first replaceable runtime.
 Telegram is an adapter; owned source data, useful memory, and reasoning are the product.
 
-- Read [SPECS.md](SPECS.md) for the authoritative product requirements and [TASK.md](TASK.md) for implementation status, blockers, and evidence. Specifications do not claim implementation or activation.
+- Read [SPECS.md](SPECS.md) for the authoritative product requirements and [TASK.md](TASK.md) for current implementation status, blockers, and evidence links. [Task history](docs/task-history.md) summarizes older records; the prior full ledger is in Git history. Specifications do not claim implementation or activation.
 - Read the applicable code before relying on implementation descriptions. Plans under `docs/` provide execution order and acceptance procedures; [ADRs](docs/adr/README.md) explain decisions and their supersession history.
 - Follow explicit user instructions. Record new durable requirements in `SPECS.md` and new working instructions here. Do not infer product changes from incidental code behavior or historical plans.
 
@@ -21,7 +21,7 @@ Telegram is an adapter; owned source data, useful memory, and reasoning are the 
 - Specs must be stateless and absolute: each spec defines the intended target independently of the implementation's current or previous state and remains meaningful as implementation changes.
 - Do not preserve relative statements such as “the current size is right,” “keep it as is,” or “it remains unchanged” as specs. Convert them to explicit absolute requirements only when the intended requirement is known. Otherwise omit the uncertain wording and record the clarification needed in `TASK.md`.
 - When adding or changing specs, audit related existing specs for state-dependent or ambiguous wording. Remove uncertain relative wording without silently removing an established requirement. Resolve ambiguity with the user; do not invent a replacement.
-- Keep dates, commit hashes, progress, temporary failures, migration steps, and proposals in `TASK.md`, execution plans, or ADRs. Do not promote a proposal into the product definition without acceptance.
+- Keep dates, commit hashes, progress, temporary failures, migration steps, and proposals in `TASK.md`, its linked task history, execution plans, or ADRs. Keep `TASK.md` focused on current status, blockers, next actions, and evidence links; summarize superseded dated reports in task history. Do not promote a proposal into the product definition without acceptance.
 - Update specs with the feature, not as a later cleanup. Avoid duplicating product rules here or in active plans. Record new architectural decisions in new ADRs; preserve accepted historical ADRs unchanged.
 
 </specification_maintenance>
