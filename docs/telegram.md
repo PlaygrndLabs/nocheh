@@ -66,6 +66,13 @@ by the archive worker; the assistant does not repeat native media downloads or
 run a shared sticker-description cache. Photos/documents remain available as
 archived files and captions; automatic visual interpretation is not enabled.
 
+In an ordinary bot chat, Telegram's Bot API does not report when a user deletes
+a message. A voice note that Nocheh already captured remains source evidence and
+may still be transcribed or answered after it disappears from Telegram. Sending
+a second voice note creates a separate request; it does not cancel the first.
+The Bot API's `deleted_business_messages` update applies to connected business
+accounts, not ordinary bot chats.
+
 ## External action approval
 
 The assistant may propose an external Telegram message. It cannot approve one.
