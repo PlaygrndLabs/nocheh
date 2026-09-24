@@ -6,6 +6,7 @@ import contextvars
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 from datetime import datetime, timezone
@@ -15,6 +16,13 @@ from .capture import Capture, DISPATCH_KEY, canonical, digest, immutable_file, c
 from .scopes import Scopes, verify_capability
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
+SOURCE_CITATION = re.compile(r'\s*【nocheh:event:[a-f0-9]{64}】')
+SOURCE_ID = re.compile(r'nocheh:event:[a-f0-9]{64}')
+
+
+def render_reply_citations(text):
+    """Keep internal archive identifiers out of Telegram-visible prose."""
+    return SOURCE_ID.sub('the Archive', SOURCE_CITATION.sub('', text))
 
 
 def prepare_profile(root,scope,model):
@@ -48,7 +56,7 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
     cursor=profile/('active-'+logical+'.json')
     session_id=json.loads(cursor.read_text())['session_id'] if cursor.exists() else 'nocheh-'+logical
     from .turn_process import run_process
-    result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled)
+    result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled,prepared_profile=profile)
     if result.get('state')=='done':
         def save_cursor():
             temporary=cursor.with_suffix('.tmp')
@@ -199,6 +207,7 @@ class AssistantGateway:
                 turn['agent_result']=result
                 if result['state']=='cancelled':return None
                 if result['state']!='done':return None
+                result['text']=render_reply_citations(result['text'])
                 await asyncio.to_thread(self.adapter.capture.enqueue,self.adapter.capture.event('assistant:'+turn['body']['event_id']+':'+str(turn['body']['attempt']),
                     'assistant_result',{'event_id':turn['body']['event_id'],'session_id':result['session_id']},turn['scope'].chat_id,result['text']))
                 return result['text']

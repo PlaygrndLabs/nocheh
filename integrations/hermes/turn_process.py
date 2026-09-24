@@ -18,13 +18,15 @@ def scheduled_preferences(profile,body):
     return values
 
 
-async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None):
+async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None, prepared_profile=None):
     from .assistant_gateway import prepare_profile
     from .scopes import Scopes
     import base64
     claims=json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'==='))
     scope=Scopes.apply_revision(scope,claims)
-    profile = await asyncio.to_thread(prepare_profile, root, scope, model)
+    if prepared_profile is not None and Path(prepared_profile).name != scope.profile:
+        raise ValueError('prepared_profile_scope_mismatch')
+    profile = prepared_profile if prepared_profile is not None else await asyncio.to_thread(prepare_profile, root, scope, model)
     await asyncio.to_thread((profile/'.foreground').touch)
     with (profile / '.turn.lock').open('a') as lock:
         # Wait before starting a child, keeping the same execution identity.

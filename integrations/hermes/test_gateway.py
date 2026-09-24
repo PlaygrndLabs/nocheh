@@ -14,7 +14,7 @@ from unittest.mock import patch
 from telegram.ext import Application,ExtBot
 from telegram.request import BaseRequest
 from gateway.config import PlatformConfig
-from .assistant_gateway import AssistantGateway,committed_adapter_class,TURN
+from .assistant_gateway import AssistantGateway,committed_adapter_class,render_reply_citations,TURN
 from .capture import canonical,digest,instrument_request
 from .scopes import Scopes
 
@@ -36,6 +36,38 @@ class BotFixtureRequest(BaseRequest):
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_raw_archive_citations_are_removed_from_telegram_prose(self):
+        source='a'*64
+        self.assertEqual(render_reply_citations('The answer is in this chat. 【nocheh:event:'+source+'】'),
+                         'The answer is in this chat.')
+        self.assertEqual(render_reply_citations('See nocheh:event:'+source+' for context.'),'See the Archive for context.')
+
+    async def test_action_executor_replay_and_interrupted_send_remain_single_effect(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);policy=Scopes({'enabled':True,'owner_id':'123','group_ids':[]})
+            calls=[];started=asyncio.Event()
+            async def send(destination,text,metadata=None):
+                calls.append((destination,text));return SimpleNamespace(success=True)
+            def gateway(sender):
+                value=AssistantGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
+                value.status='connected';value.adapter=SimpleNamespace(send=sender);value.action_lock=asyncio.Lock()
+                return value
+            first={'id':'d'*64,'destination':'123','text':'Exact approved fixture'}
+            self.assertEqual(await gateway(send).send_action(first),{'state':'done'})
+            self.assertEqual(await gateway(send).send_action(first),{'state':'done'})
+            self.assertEqual(len(calls),1,'executor replay after restart must use the durable result')
+            async def interrupted(destination,text,metadata=None):
+                calls.append((destination,text));started.set();await asyncio.Future()
+            second={'id':'e'*64,'destination':'123','text':'Interrupted fixture'}
+            task=asyncio.create_task(gateway(interrupted).send_action(second))
+            await asyncio.wait_for(started.wait(),1);task.cancel()
+            with self.assertRaises(asyncio.CancelledError):await task
+            recovered=gateway(send)
+            self.assertEqual(recovered.action({'id':second['id'],'observe_only':True})['state'],'ambiguous')
+            self.assertEqual((await recovered.send_action(second))['state'],'ambiguous')
+            self.assertEqual(len(calls),2,'an interrupted in-flight send cannot be repeated')
+
     async def test_native_ptb_batching_and_send_finish_before_durable_receipt_and_commands_cannot_enter_admin_handlers(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);secret='synthetic-service-token-123456789';(root/'token').write_text(secret)
