@@ -13,9 +13,28 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 from .turn_process import _run_process,run_process
-from .scopes import Scope
+from .scopes import Scope,Scopes
 
 class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prepared_telegram_profile_is_reused_and_scope_checked(self):
+        from .assistant_gateway import native_turn
+        scope=Scope('42','42',True,'owner','42')
+        body=self.review_body();body['payload']={'message':{}}
+        claims=json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'==='))
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder)/'profiles'/Scopes.apply_revision(scope,claims).profile
+            profile.mkdir(parents=True)
+            with patch('integrations.hermes.assistant_gateway.prepare_profile',return_value=profile) as prepare_profile,\
+                 patch('integrations.hermes.turn_process._run_process',new_callable=AsyncMock,return_value={'state':'failed'}) as child,\
+                 patch('integrations.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+                await native_turn(folder,scope,body,'model',None)
+                prepare_profile.assert_called_once()
+                self.assertEqual(child.await_count,1)
+            with patch('integrations.hermes.turn_process._run_process',new_callable=AsyncMock) as child:
+                with self.assertRaisesRegex(ValueError,'prepared_profile_scope_mismatch'):
+                    await run_process(folder,scope,body,'model',None,'session',prepared_profile=Path(folder)/'other-profile')
+                child.assert_not_awaited()
+
     def setUp(self):
         self.secret='synthetic-review-secret-not-a-real-credential'
         environment=patch.dict(os.environ,{'SERVICE_TOKEN':self.secret})
