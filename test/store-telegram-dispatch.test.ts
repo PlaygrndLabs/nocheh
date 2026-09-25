@@ -116,27 +116,29 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     await due(failed.reference.id);mode='done';assert.equal((await run(failed.reference.id)).state,'completed');
     const retried=calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start');
     assert.deepEqual(retried.map(c=>c.input.attempt),[1,2]);
-    const recoverable=await capture('Legacy pre-delivery interruption');await prepare(recoverable.reference.id);mode='ambiguous';
-    assert.equal((await advance(recoverable.reference.id)).state,'ambiguous');
-    await stores.control.query("UPDATE dispatches SET error_code='dispatch_interrupted' WHERE event_id=$1",[recoverable.reference.id]);
-    journals.set(recoverable.reference.id,[
-      {sequence:1,state:'queued',stage:'admission',at:base+1},
-      {sequence:2,state:'running',stage:'assistant',at:base+2},
-      {sequence:3,state:'ambiguous',stage:'assistant',at:base+3},
-    ]);
-    assert.equal(await services.telegram.reconcileInterrupted(),1);
-    const recovered=(await stores.control.query(`SELECT d.state AS dispatch_state,d.error_code,w.id,w.state AS workflow_state,w.dispatch,
-      r.state AS receipt_state FROM dispatches d JOIN workflow_registry w ON w.family='telegram' AND w.job_id=d.event_id
-      JOIN workflow_receipts r ON r.workflow_id=w.id AND r.step='telegram' AND r.attempt=d.attempts WHERE d.event_id=$1`,[recoverable.reference.id])).rows[0];
-    assert.equal(recovered.dispatch_state,'failed');assert.equal(recovered.error_code,'assistant_runtime_unavailable');
-    assert.equal(recovered.workflow_state,'retryable_failed');assert.equal(recovered.receipt_state,'failed');assert.equal(recovered.dispatch,2);
-    assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM workflow_outbox WHERE workflow_id=$1 AND dispatch=2',[recovered.id])).rows[0].n,1);
-    native.delete(recoverable.reference.id);mode='done';
-    assert.equal((await advanceWorkflow(stores.control,recovered.id,2,'telegram','fixture-'+(++serial),operations.telegram!)).state,'completed');
-    assert.deepEqual(calls.filter(c=>c.input.event_id===recoverable.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    for(const code of ['dispatch_interrupted','runtime_execution_interrupted','runtime_restart_during_dispatch']) {
+      const recoverable=await capture('Pre-delivery interruption '+code);await prepare(recoverable.reference.id);mode='ambiguous';
+      assert.equal((await advance(recoverable.reference.id)).state,'ambiguous');
+      await stores.control.query('UPDATE dispatches SET error_code=$2 WHERE event_id=$1',[recoverable.reference.id,code]);
+      journals.set(recoverable.reference.id,[
+        {sequence:1,state:'queued',stage:'admission',at:base+1},
+        {sequence:2,state:'running',stage:'assistant',at:base+2},
+        {sequence:3,state:'ambiguous',stage:'assistant',at:base+3},
+      ]);
+      assert.equal(await services.telegram.reconcileInterrupted(),1,code);
+      const recovered=(await stores.control.query(`SELECT d.state AS dispatch_state,d.error_code,w.id,w.state AS workflow_state,w.dispatch,
+        r.state AS receipt_state FROM dispatches d JOIN workflow_registry w ON w.family='telegram' AND w.job_id=d.event_id
+        JOIN workflow_receipts r ON r.workflow_id=w.id AND r.step='telegram' AND r.attempt=d.attempts WHERE d.event_id=$1`,[recoverable.reference.id])).rows[0];
+      assert.equal(recovered.dispatch_state,'failed');assert.equal(recovered.error_code,'assistant_runtime_unavailable');
+      assert.equal(recovered.workflow_state,'retryable_failed');assert.equal(recovered.receipt_state,'failed');assert.equal(recovered.dispatch,2);
+      assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM workflow_outbox WHERE workflow_id=$1 AND dispatch=2',[recovered.id])).rows[0].n,1);
+      native.delete(recoverable.reference.id);mode='done';
+      assert.equal((await advanceWorkflow(stores.control,recovered.id,2,'telegram','fixture-'+(++serial),operations.telegram!)).state,'completed');
+      assert.deepEqual(calls.filter(c=>c.input.event_id===recoverable.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    }
     const uncertain=await capture('Legacy post-delivery interruption');await prepare(uncertain.reference.id);mode='ambiguous';
     assert.equal((await advance(uncertain.reference.id)).state,'ambiguous');
-    await stores.control.query("UPDATE dispatches SET error_code='dispatch_interrupted' WHERE event_id=$1",[uncertain.reference.id]);
+    await stores.control.query("UPDATE dispatches SET error_code='runtime_execution_interrupted' WHERE event_id=$1",[uncertain.reference.id]);
     journals.set(uncertain.reference.id,[
       {sequence:1,state:'queued',stage:'admission',at:base+1},
       {sequence:2,state:'running',stage:'assistant',at:base+2},
