@@ -37,6 +37,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     if(req.url==='/v1/workflows/imports/cancel'){const job=imports.get(body.id);job.state='cancelled';result={owned:true,job};}
     if(req.method==='GET'&&req.url?.startsWith('/v1/workflows/imports/'))result={owned:true,owner:'inngest',job:imports.get(req.url.split('/').at(-1)!)};
     if(req.url==='/v1/import') {const duplicate=records.has(body.event.key);records.set(body.event.key,body);result={duplicate};}
+    else if(req.url?.endsWith('/retirement'))result={retired:body.retired??false,revision:body.expected_revision??0};
     else if(req.url==='/v1/memory/reviews') reviews.push(body);
     else if(req.url?.endsWith('/bytes')) uploads++;
     res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(result));
@@ -69,6 +70,9 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const health=await fetch(base+'/health',{headers});assert.match(health.headers.get('set-cookie')??'',/HttpOnly; SameSite=Strict/);
     assert.equal((await fetch(base+'/settings',{headers:{Cookie:'nocheh_download='+token}})).status,401,'download cookies cannot administer settings');
     const settings=await request('/settings');assert.ok(!JSON.stringify(settings).includes('test-owner-token'));
+    const retirement='/sources/'+'a'.repeat(64)+'/retirement';
+    assert.equal((await request(retirement)).retired,false);
+    assert.equal((await request(retirement,{retired:true,expected_revision:0,operation_id:'owner-test'})).retired,true);
     assert.equal((await fetch(base+'/workflows')).status,401);
     assert.equal((await fetch(base+'/workflows/metrics?range=7d&family=browser')).status,401);
     assert.equal((await fetch(base+'/workflows/metrics?range=7d',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);

@@ -10,7 +10,7 @@ from .archive import API
 def allowed_path(path):
     parsed=urlsplit(path)
     if parsed.scheme or parsed.netloc or parsed.fragment:return False
-    return bool(re.fullmatch(r'/v1/(?:projects(?:/assignments|/effective)?|sharing/(?:rules|preview|previews(?:/[a-f0-9]{64}(?:/approve)?)?|releases(?:/[a-f0-9]{64}/revoke)?)|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare|learning-consent)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
+    return bool(re.fullmatch(r'/v1/(?:projects(?:/assignments|/effective)?|sharing/(?:rules|preview|previews(?:/[a-f0-9]{64}(?:/approve)?)?|releases(?:/[a-f0-9]{64}/revoke)?)|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
 
 
 def parse(command,arguments):

@@ -49,6 +49,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.memory.prepareRequest(await readJson(req,1024*1024)));
     }
     const principal=reader(req,config.token);
+    if(req.method==='GET'&&path==='/v1/runtime') {
+      admin(principal);
+      const runtimeStatus=await call('status',{},5000).catch(()=>({ok:false,error:'runtime_unavailable'}));
+      return json(res,200,{id:'hermes',status:runtimeStatus});
+    }
     if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
       admin(principal);
       if(req.method!=='POST'||!(path==='/v1/import'||path==='/v1/memory/reviews'||/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)))throw new HttpError(403,'import_route_denied');
