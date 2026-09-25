@@ -8,6 +8,7 @@ import {HttpError,authorize,json,object,readJson,string} from '../http.js';
 import {archiveFilters,matchesArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
+import {reactionPreview} from '../reaction-preview.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
 import {immutableFile} from '../storage.js';
@@ -264,10 +265,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const retiredEvents=await s.retirements.retiredEvents(page.map(row=>row.id));
         const [replyPreviews,transcriptPreviews]=await Promise.all([
           archiveReplyPreviews(s.stores.archive,s.stores.control,page),archiveTranscriptPreviews(s.stores.derived,page)]);
-        const records=page.map(({payload,artifact_kinds,original_text,...row})=>({...row,...stateById.get(row.id),retired:retiredEvents.has(row.id),
+        const records=page.map(({payload,artifact_kinds,original_text,...row})=>{const original=JSON.parse(payload.toString());return {...row,...stateById.get(row.id),retired:retiredEvents.has(row.id),
           ...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
-          text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[]),
-          reply_messages:replyPreviews.get(row.id)??[],transcript_preview:transcriptPreviews.get(row.id)??null}));
+          text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,original,artifact_kinds??[]),
+          reaction_preview:reactionPreview(row.kind,original),
+          reply_messages:replyPreviews.get(row.id)??[],transcript_preview:transcriptPreviews.get(row.id)??null};});
         const next=matched.length>50?matched[49].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
         return json(res,200,{records,next});
       }
