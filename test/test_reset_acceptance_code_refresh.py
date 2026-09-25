@@ -67,6 +67,40 @@ class CodeRefreshTests(unittest.TestCase):
         self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], after)
         self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-hermes-code-refresh.json')['stage'], 'complete')
 
+    def test_second_hermes_refresh_requires_completed_first_and_rebinds_exactly_one_service(self):
+        first = [{**row, 'id': 'hermes-first'} if row['service'] == 'hermes' else row for row in self.before]
+        second = [{**row, 'id': 'hermes-second'} if row['service'] == 'hermes' else row for row in first]
+        with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
+              patch.object(refresh, '_image', return_value=self.old_image)):
+            refresh.prepare(self.journal, self.new_image, service='hermes', environment={})
+        first_activation = {**self.activation, 'containers': first}
+        with (patch.object(refresh, '_current', return_value=(self.activation, first, 'config')),
+              patch.object(refresh, '_image', return_value=self.new_image)):
+            refresh.finish(self.journal, service='hermes', environment={})
+        with (patch.object(refresh, '_current', return_value=(first_activation, first, 'config')),
+              patch.object(refresh, '_image', return_value=self.new_image)):
+            refresh.prepare(self.journal, 'sha256:' + 'c' * 64, service='hermes', sequence=2, environment={})
+        with (patch.object(refresh, '_current', return_value=(first_activation, second, 'config')),
+              patch.object(refresh, '_image', return_value='sha256:' + 'c' * 64)):
+            self.assertEqual(refresh.finish(self.journal, service='hermes', sequence=2, environment={})['stage'], 'complete')
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], second)
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-hermes-code-refresh-2.json')['stage'], 'complete')
+
+    def test_second_hermes_refresh_rejects_missing_or_changed_first_binding(self):
+        with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
+              patch.object(refresh, '_image', return_value=self.old_image)):
+            with self.assertRaises(FileNotFoundError):
+                refresh.prepare(self.journal, self.new_image, service='hermes', sequence=2, environment={})
+        reset_protocol.atomic(self.journal.directory / 'acceptance-hermes-code-refresh.json',
+                              {'stage': 'complete', 'service': 'hermes', 'reset_id': self.journal.value['reset_id'],
+                               'generation': self.journal.value['generation'],
+                               'containers_after': [{**self.before[0], 'id': 'other-hermes'}]}, create=True)
+        with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
+              patch.object(refresh, '_image', return_value=self.old_image)):
+            with self.assertRaisesRegex(ValueError, 'previous_incomplete_or_changed'):
+                refresh.prepare(self.journal, self.new_image, service='hermes', sequence=2, environment={})
+        self.assertFalse((self.journal.directory / 'acceptance-hermes-code-refresh-2.json').exists())
+
     def test_one_dashboard_replacement_rebinds_without_other_replacements(self):
         after = [{**row, 'id': 'nocheh-dashboard-new'} if row['service'] == refresh.DASHBOARD else row for row in self.before]
         with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
