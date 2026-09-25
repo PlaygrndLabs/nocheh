@@ -8,6 +8,7 @@ import {matchesArchiveFilters,type ArchiveFilters} from './archive-filters.js';
 import {actionReviews} from './action-review-summary.js';
 import {legacyArchiveReplyPreviews} from './stores/archive-reply-links.js';
 import {sourceContentTypes} from './source-content.js';
+import {reactionPreview} from './reaction-preview.js';
 
 // The archive is evidence. These independently versioned projections are disposable
 // except for owner revisions, which must be retained and never overwritten by jobs.
@@ -259,9 +260,9 @@ export async function browseData(pool:pg.Pool,principal:Reader,after='',filters:
   const reviews=await actionReviews(pool,rows.filter(row=>row.kind==='telegram_update').map(row=>row.id),'legacy');
   const filtered=rows.filter(row=>matchesArchiveFilters(row,row.assistant_state,filters,reviews.get(row.id)?.state));
   const page=filtered.slice(0,50),replies=await legacyArchiveReplyPreviews(pool,page);
-  return {records:page.map(({original_text,payload,artifact_kinds,...row})=>({...row,...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
-    text:original_text?.toString().slice(0,500)??null,content_types:sourceContentTypes(row.kind,JSON.parse(payload.toString()),artifact_kinds??[]),
-    reply_messages:replies.get(row.id)??[]})),next:filtered.length>50?filtered[49].id:filters.reply&&rows.length===201?rows.at(-1)?.id:null};
+  return {records:page.map(({original_text,payload,artifact_kinds,...row})=>{const original=JSON.parse(payload.toString());return {...row,...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
+    text:original_text?.toString().slice(0,500)??null,content_types:sourceContentTypes(row.kind,original,artifact_kinds??[]),
+    reaction_preview:reactionPreview(row.kind,original),reply_messages:replies.get(row.id)??[]};}),next:filtered.length>50?filtered[49].id:filters.reply&&rows.length===201?rows.at(-1)?.id:null};
 }
 
 export async function exportGuarded(pool:pg.Pool,eventId:string) {

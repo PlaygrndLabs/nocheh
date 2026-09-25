@@ -3,6 +3,7 @@ import {HttpError,string} from '../http.js';
 import {matchesArchiveFilters,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
+import {reactionPreview} from '../reaction-preview.js';
 import {limit} from '../retrieval.js';
 import {type Envelope} from '../archive.js';
 import {SourceAccessRepository} from './access.js';
@@ -112,7 +113,8 @@ export class SourceRepository {
       const {payload,...fields}=original;
       hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),...(reviews.has(reference.id)?{action_review:reviews.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000,
-        content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds)});
+        content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds),
+        ...(principal.admin?{reaction_preview:reactionPreview(original.kind,JSON.parse(payload.toString()))}:{})});
       if(hits.length===count)break;
     }
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
