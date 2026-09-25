@@ -79,26 +79,28 @@ export function Source({record,notify}){
 
 function SourceRetirement({eventId,notify}){
  const path='/sources/'+eventId+'/retirement',resource=useResource(path);
- const [confirm,setConfirm]=useState(false),[busy,setBusy]=useState(false);
- const state=resource.data;
+ const [saved,setSaved]=useState(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
+ const state=saved&&(!resource.data||saved.revision>resource.data.revision)?saved:resource.data;
  async function change(){
   if(!state||busy)return;
-  setBusy(true);
+  setBusy(true);setProblem('');
   try{
-   await call(path,{retired:!state.retired,expected_revision:state.revision,operation_id:crypto.randomUUID()});
-   setConfirm(false);notify(state.retired?'Message restored for future use.':'Message retired from future use.');
-   await refreshResources();
-  }catch(error){notify(errorText(error),true);}finally{setBusy(false);}
+   const result=await call(path,{retired:!state.retired,expected_revision:state.revision,operation_id:crypto.randomUUID()});
+   setSaved({...state,...result});
+   notify(result.retired?'Message retired from future use.':'Message restored for future use.');
+   void refreshResources();
+  }catch(error){setProblem(errorText(error));void refreshResources();}finally{setBusy(false);}
  }
  if(resource.error?.includes('telegram_message_not_found'))return null;
  return h('section',{className:'n-panel source-retirement','aria-label':'Nocheh use of this message'},
-  h('div',{className:'source-section-heading'},h('div',null,h('p',{className:'archive-kicker'},'Nocheh use'),h('h2',null,'Message retirement')),
-   h(Badge,null,state?state.retired?'Retired':'Active':'Checking…')),
-  h('p',{className:'n-muted'},!state?'Checking whether Nocheh can use this message.':state.retired?'Nocheh will not use this message or its revisions in future replies or learning. Original evidence remains here.':'Retire this exact Telegram message and all its observed edits from future replies and learning. This does not delete it from Telegram or retract a sent reply.'),
-  resource.error&&h(Alert,null,'Retirement status is unavailable. Refresh and try again.'),
-  state&&button(state.retired?'Undo retirement':'Retire from Nocheh',()=>setConfirm(true),busy),
-  state?.history?.length>0&&h('details',null,h('summary',null,'Owner action history'),h(Data,{value:state.history})),
-  h(Modal,{open:confirm,onOpenChange:setConfirm,title:state?.retired?'Restore this message for Nocheh?':'Retire this message from Nocheh?'},
-   h('p',null,state?.retired?'Future agent use and learning may resume. The original and action history remain in Archive.':'Future agent use and learning will stop for this message and every observed edit. A reply already sent through Telegram cannot be recalled.'),
-   button(state?.retired?'Undo retirement':'Confirm retirement',change,busy,'n-primary')));
+  h('p',{className:'archive-kicker'},'Nocheh use'),
+  h('h2',null,'Use of this message'),
+  h('div',{className:'source-retirement-state','data-retired':state?.retired?'true':'false',role:'status','aria-live':'polite'},
+   h('strong',null,!state?'Checking status…':state.retired?'Retired from Nocheh':'Available to Nocheh'),
+   h('span',null,!state?'Loading the saved owner decision.':state.retired?'Nocheh will not use this message or its edits in future replies or learning.':'Nocheh may use this message and its edits in future replies or learning.')),
+  h('p',{className:'n-muted source-retirement-note'},'The original stays in Archive. Retirement does not delete a Telegram message or recall a reply already sent.'),
+  resource.error&&!state&&h(Alert,null,'Retirement status is unavailable. Refresh and try again.'),
+  problem&&h('p',{className:'source-retirement-error',role:'alert'},'Change was not saved: '+problem+'. Check the current status and try again.'),
+  state&&button(busy?state.retired?'Restoring…':'Retiring…':state.retired?'Undo retirement':'Retire this message',change,busy,state.retired?'':'n-primary'),
+  state?.history?.length>0&&h('details',null,h('summary',null,'Owner action history'),h(Data,{value:state.history})));
 }

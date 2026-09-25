@@ -23,7 +23,7 @@ const client=await pool.connect();try{
  await client.query("INSERT INTO workflow_worker_registrations(family,version,app) SELECT family,1,CASE WHEN family IN ('tools','imports') THEN 'host' ELSE 'pipeline' END FROM workflow_owners ON CONFLICT(family) DO UPDATE SET seen_at=now()");
 }finally{client.release();}
 const id='a'.repeat(64),profile='fixture-owner';
-const source={id,event:{text:'A synthetic conversation about the northern lights.',payload:{text:'A synthetic conversation about the northern lights.'},scope:'42',source_id:'fixture',channel:'telegram',received_at:new Date().toISOString()},artifacts:[],derived:[]};
+const source={id,event:{text:'A synthetic conversation about the northern lights.',payload:{message:{message_id:1,text:'A synthetic conversation about the northern lights.'}},scope:'42',source_id:'fixture',channel:'telegram',received_at:new Date().toISOString()},artifacts:[],derived:[],derivative_versions:true};
 const voiceId='b'.repeat(64),voiceFileId='c'.repeat(64);
 const voice={id:voiceId,event:{kind:'telegram_update',text:null,payload:{message:{message_id:2,voice:{file_id:'synthetic-voice',duration:3,mime_type:'audio/wav'}}},scope:'42',source_id:'fixture-voice',channel:'telegram',received_at:new Date().toISOString()},
  artifacts:[{id:voiceFileId,kind:'voice',metadata:{duration:3,mime_type:'audio/wav'},state:'ready'}],derived:[{id:'d'.repeat(64),artifact_id:voiceFileId,kind:'transcript',content_base64:Buffer.from('Synthetic voice transcript for preview verification.').toString('base64'),provenance:{producer:'synthetic-preview'}}]};
@@ -31,6 +31,7 @@ const voiceBytes=Buffer.alloc(44+24000,128);
 voiceBytes.write('RIFF',0);voiceBytes.writeUInt32LE(voiceBytes.length-8,4);voiceBytes.write('WAVEfmt ',8);voiceBytes.writeUInt32LE(16,16);voiceBytes.writeUInt16LE(1,20);voiceBytes.writeUInt16LE(1,22);voiceBytes.writeUInt32LE(8000,24);voiceBytes.writeUInt32LE(8000,28);voiceBytes.writeUInt16LE(1,32);voiceBytes.writeUInt16LE(8,34);voiceBytes.write('data',36);voiceBytes.writeUInt32LE(24000,40);
 let modeRevision=false;
 let revision=1,guarded='A synthetic conversation about the northern lights.',settingsRevision='fixture-1';
+let retirementRevision=0,retired=false;const retirementHistory:any[]=[];
 let settingsChanges:Record<string,unknown>={};
 const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'NOCHEH_MODEL',value:'gpt-5.6-sol',editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true}];
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
@@ -91,6 +92,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/search')return json(res,200,[{...source.event,id}]);
   if(route==='/events')return json(res,200,{events:[source.event?{...source.event,id,text:source.event.text}:source],results:[{...source.event,id}],next:null});
   if(route==='/events/'+id)return json(res,200,source);
+  if(route==='/sources/'+id+'/retirement')return json(res,200,{event_id:id,retired,revision:retirementRevision,history:retirementHistory});
   if(route==='/events/'+voiceId)return json(res,200,voice);
   if(route==='/artifacts/'+voiceFileId+'/download'){res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store'});res.end(voiceBytes);return;}
   if(route==='/data/'+voiceId+'/guarded')return json(res,200,{projections:[]});
@@ -136,6 +138,11 @@ const server=createServer((req,res)=>{void(async()=>{
   if(importAction){const job=jobs.find(j=>j.id===importAction[1]);if(!job)throw new HttpError(404,'job_not_found');if(importAction[2]==='start'){if(job.state!=='ready'&&(JSON.stringify(body.mapping)!==JSON.stringify(job.mapping)||body.review_approved!==job.review_approved))throw new HttpError(409,'import_configuration_conflict');job.mapping=body.mapping;job.review_approved=body.review_approved;job.state='running';}else job.state='cancelled';return json(res,200,job);}
   if(route==='/settings'){if(body.revision!==settingsRevision)throw new HttpError(409,'configuration_conflict');settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';return json(res,200,{ok:true});}
   if(route==='/data/'+id+'/guarded'){if(body.expected_revision!==revision)throw new HttpError(409,'guard_revision_conflict');guarded=body.content?.text??source.event.text;revision++;return json(res,200,{ok:true});}
+  if(route==='/sources/'+id+'/retirement'){
+    if(body.expected_revision!==retirementRevision)throw new HttpError(409,'source_retirement_conflict');
+    retired=body.retired;retirementRevision++;retirementHistory.unshift({revision:retirementRevision,retired,created_at:new Date().toISOString()});
+    return json(res,200,{event_id:id,retired,revision:retirementRevision});
+  }
  }
  throw new HttpError(404,'fixture_capability_unavailable');
 })().catch(error=>json(res,error instanceof HttpError?error.status:500,{error:error instanceof HttpError?error.code:'fixture_request_failed'}));});
