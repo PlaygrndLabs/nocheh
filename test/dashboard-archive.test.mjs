@@ -37,6 +37,10 @@ test('archive presents one accessible table-to-agent-copy workflow',async()=>{
   assert.doesNotMatch(archive,/Needs review|Review and control|View \/ edit/);
   assert.match(source,/Permanent · read only/);
   assert.match(source,/Advanced details and export/);
+  assert.match(source,/Retire this message',change,busy/);
+  assert.doesNotMatch(source,/Confirm retirement|setConfirm/);
+  assert.match(source,/Change was not saved:/);
+  assert.match(source,/saved\.revision>resource\.data\.revision/);
   assert.match(guarded,/What agents can use/);
   assert.match(guarded,/Advanced agent-copy fields/);
   assert.match(archive,/aria-label=\{selected\?undefined:'Message details'\}/);
