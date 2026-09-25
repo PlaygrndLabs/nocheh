@@ -5,6 +5,7 @@ FORMAT = 'nocheh-reset-acceptance-code-refresh-v1'
 SERVICE = 'nocheh-app'
 NAME = 'acceptance-code-refresh.json'
 HERMES = 'hermes'
+DASHBOARD = 'nocheh-dashboard'
 
 
 def _name(service):
@@ -12,6 +13,8 @@ def _name(service):
         return NAME
     if service == HERMES:
         return 'acceptance-hermes-code-refresh.json'
+    if service == DASHBOARD:
+        return 'acceptance-dashboard-code-refresh.json'
     raise ValueError('reset_code_refresh_service_invalid')
 
 
