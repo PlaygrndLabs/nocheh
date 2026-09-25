@@ -56,6 +56,22 @@ class CodeRefreshTests(unittest.TestCase):
         self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], self.after)
         self.assertEqual(reset_protocol.read(self.journal.directory / refresh.NAME)['stage'], 'complete')
 
+    def test_one_hermes_replacement_rebinds_without_app_replacement(self):
+        after = [{**row, 'id': 'hermes-new'} if row['service'] == 'hermes' else row for row in self.before]
+        with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
+              patch.object(refresh, '_image', return_value=self.old_image)):
+            self.assertEqual(refresh.prepare(self.journal, self.new_image, service='hermes', environment={})['service'], 'hermes')
+        with (patch.object(refresh, '_current', return_value=(self.activation, after, 'config')),
+              patch.object(refresh, '_image', return_value=self.new_image)):
+            self.assertEqual(refresh.finish(self.journal, service='hermes', environment={})['stage'], 'complete')
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], after)
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-hermes-code-refresh.json')['stage'], 'complete')
+
+    def test_unknown_service_fails_before_intent(self):
+        with self.assertRaisesRegex(ValueError, 'service_invalid'):
+            refresh.prepare(self.journal, self.new_image, service='nocheh-db', environment={})
+        self.assertFalse((self.journal.directory / refresh.NAME).exists())
+
     def test_other_service_replacement_fails_closed(self):
         self._prepare()
         wrong = [{**row, 'id': row['service'] + '-new'} for row in self.before]
