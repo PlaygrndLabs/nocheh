@@ -8,11 +8,24 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
 ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
                'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall'}
+
+
+def exact_predecessor_question(text):
+    """Do not infer an exact predecessor from a history that can omit sources."""
+    if not isinstance(text,str):return False
+    normalized=' '.join(text.casefold().split())
+    asks_about_message=bool(re.search(r'\b(ask(?:ed)?|said|sent|message|question)\b',normalized))
+    asks_for_order=bool(re.search(r'\b(immediately|right|directly) before (?:this|my|the current) (?:message|question)\b',normalized))
+    return asks_about_message and asks_for_order
+
+
+PREDECESSOR_UNVERIFIED='I cannot verify which message you sent immediately before this one from the history available to me.'
 
 
 def restrict_session_search():
@@ -38,6 +51,8 @@ def sealed_dependencies():
 
 
 def run(body, emit=None):
+    if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
+        return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
     sealed_dependencies()
     from .timing import record
     from time import perf_counter
