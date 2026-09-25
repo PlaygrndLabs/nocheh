@@ -26,7 +26,7 @@ class CodeRefreshTests(unittest.TestCase):
         configuration.initialize(self.state)
         self.journal = Journal(self.state)
         self.before = [{'service': name, 'id': name + '-old'} for name in
-                       ('hermes', 'nocheh-app', 'nocheh-db')]
+                       ('hermes', 'nocheh-app', 'nocheh-dashboard', 'nocheh-db')]
         self.after = [{**row, 'id': row['service'] + '-new'} if row['service'] == refresh.SERVICE else row
                       for row in self.before]
         self.activation = {'format': reset_acceptance.FORMAT, 'stage': 'acceptance_running',
@@ -66,6 +66,28 @@ class CodeRefreshTests(unittest.TestCase):
             self.assertEqual(refresh.finish(self.journal, service='hermes', environment={})['stage'], 'complete')
         self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], after)
         self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-hermes-code-refresh.json')['stage'], 'complete')
+
+    def test_one_dashboard_replacement_rebinds_without_other_replacements(self):
+        after = [{**row, 'id': 'nocheh-dashboard-new'} if row['service'] == refresh.DASHBOARD else row for row in self.before]
+        with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
+              patch.object(refresh, '_image', return_value=self.old_image)):
+            self.assertEqual(refresh.prepare(self.journal, self.new_image, service=refresh.DASHBOARD, environment={})['service'], refresh.DASHBOARD)
+        with (patch.object(refresh, '_current', return_value=(self.activation, after, 'config')),
+              patch.object(refresh, '_image', return_value=self.new_image)):
+            self.assertEqual(refresh.finish(self.journal, service=refresh.DASHBOARD, environment={})['stage'], 'complete')
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], after)
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-dashboard-code-refresh.json')['stage'], 'complete')
+
+    def test_dashboard_refresh_rejects_another_service_replacement(self):
+        with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
+              patch.object(refresh, '_image', return_value=self.old_image)):
+            refresh.prepare(self.journal, self.new_image, service=refresh.DASHBOARD, environment={})
+        wrong = [{**row, 'id': row['service'] + '-new'} if row['service'] in (refresh.DASHBOARD, 'nocheh-app') else row for row in self.before]
+        with (patch.object(refresh, '_current', return_value=(self.activation, wrong, 'config')),
+              patch.object(refresh, '_image', return_value=self.new_image)):
+            with self.assertRaisesRegex(RuntimeError, 'unexpected_container_replacement'):
+                refresh.finish(self.journal, service=refresh.DASHBOARD, environment={})
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json'), self.activation)
 
     def test_unknown_service_fails_before_intent(self):
         with self.assertRaisesRegex(ValueError, 'service_invalid'):
