@@ -1,4 +1,4 @@
-# Task history through 2026-09-26
+# Task history through 2026-09-27
 
 This is a compact index of earlier implementation reports. [TASK.md](../TASK.md)
 is the current status and release ledger. Earlier passes describe their recorded
@@ -94,3 +94,7 @@ revision is the complete ledger before this summary replaced it.
 ## Fixed-name development stack, 2026-09-27
 
 - The owner asked for `nocheh-dev`, Honcho, normal ports, and no extra builder service. The builder moved into the existing app container; Honcho's five existing services joined the dev stack with separate state. The stopped hashed dev database was copied into the fixed-name volume while retaining the old volume. Seventeen services were healthy. TypeScript and Honcho Python timestamp edits reloaded their processes without replacing containers or images. [Evidence](../compatibility/results/2026-09-27-fixed-name-live-dev.json).
+
+## Operating data copied into one dev stack, 2026-09-27
+
+- The owner chose the stopped operating installation as the source for a one-time dev data copy. Its PostgreSQL and Honcho volumes and one owned original file were copied into `nocheh-dev`, with source storage and pre-copy dev rollback copies retained. Database roles were rotated to dev credentials. The archive held 92 events and two artifacts, and all 17 dev services were healthy. Current operating data had no Projects, memory generations, or Honcho messages; memory remained unattached. Provider and Hermes login files were excluded. [Evidence](../compatibility/results/2026-09-27-dev-operating-data-copy.json).
