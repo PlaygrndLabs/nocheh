@@ -28,6 +28,20 @@ def exact_predecessor_question(text):
 PREDECESSOR_UNVERIFIED='I cannot verify which message you sent immediately before this one from the history available to me.'
 
 
+def retired_content_question(text):
+    """A current question is never evidence of a retired message's contents."""
+    if not isinstance(text,str):return False
+    normalized=' '.join(text.casefold().split())
+    if not re.search(r'\bretir(?:e|ed|ing|ement)\b',normalized):return False
+    if not re.search(r'\b(?:message|question|text)\b',normalized):return False
+    if re.search(r'\b(?:how|where) (?:do|can|to) (?:i |we )?retir',normalized):return False
+    return bool(re.search(r'\b(?:what|which|summari[sz]e|describe|quote|repeat|recall|remind)\b',normalized)
+                and re.search(r'\b(?:about|said|say|contain|content|text|ask(?:ed)?|wrote|write|quote|repeat|summari[sz]e|describe)\b',normalized))
+
+
+RETIRED_CONTENT_UNAVAILABLE="I can't access the retired message's content, so I can't tell what it was about."
+
+
 def restrict_session_search():
     from tools import session_search_tool as search
     original_resolve=search._resolve_profile_db
@@ -53,6 +67,8 @@ def sealed_dependencies():
 def run(body, emit=None):
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
+    if body.get('review') is not True and retired_content_question(body.get('source_text',body.get('text',''))):
+        return {'state':'done','text':RETIRED_CONTENT_UNAVAILABLE,'session_id':body['session_id']}
     sealed_dependencies()
     from .timing import record
     from time import perf_counter
@@ -119,6 +135,7 @@ def run(body, emit=None):
             'The supplied Honcho context is bounded. Use nocheh_memory_recall when a question needs personal facts, preferences, prior decisions, or relationships missing from that context. '
             'Do not infer that a fact is absent from memory solely because it is absent from the supplied summary. '
             'Native conversation history and archive search may omit retired or unavailable messages. '
+            'If asked about a retired message, do not treat the current question or other accessible messages as that retired source; say when its content is unavailable. '
             'Do not claim that the latest message you can access was chronologically immediately before the current one. '
             'If asked about exact message order, distinguish the latest accessible message from an unverified immediate predecessor. '
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
