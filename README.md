@@ -23,7 +23,7 @@ npm ci                  # development/build dependencies; runtime tools are in D
 ./scripts/nocheh init     # create .env with generated internal credentials
 # Edit .env for Telegram, model and optional guarding settings.
 ./scripts/nocheh up       # build, start in the background, wait for health checks
-make dev                  # isolated full core stack with source watching
+make dev                  # one source-mounted full core development stack
 make dev-status           # inspect that checkout's preview
 make dev-stop             # stop it; retain its database and generated state
 ./scripts/nocheh status
@@ -35,15 +35,18 @@ make dev-stop             # stop it; retain its database and generated state
 ./scripts/nocheh down     # stop services; retain data
 ```
 
-Run `make dev` from a checkout for a separate Docker Compose Watch stack. It
-prints the dashboard URL, uses generated credentials under that checkout's ignored
-`data/dev/`, and rebuilds affected app, dashboard, security, executor, and Hermes
-services after source edits. It needs locally available pinned Hermes and provider
-images, checks their revisions, and gives them checkout-specific image tags. It
+Stop the operating Nocheh stack before `make dev`; the command refuses to start
+while another Nocheh project runs. `make dev` prints the dashboard URL and uses
+generated credentials under that checkout's ignored `data/dev/`. Its builder
+container automatically compiles changed source into shared volumes; the running
+app, dashboard, executor, security, and Python services reload without a Docker
+image rebuild or another `make dev`. Dependency and Dockerfile edits still need an
+image build. Pinned Hermes and provider images must be available locally; the
+command verifies their revisions and creates checkout-specific tags. Development
 does not import an installation login or enable Telegram polling. Optional Honcho
 and external model calls require separate development credentials. Run
-`make dev-stop` in that checkout when finished. Release acceptance still uses the
-operating installation's `up` workflow.
+`make dev-stop` when finished. Release acceptance uses the operating installation's
+`up` workflow.
 The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services are
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.

@@ -345,10 +345,15 @@ export async function startManagement() {
     if(req.method==='GET'&&(path==='/nocheh'||path==='/nocheh/')){res.writeHead(308,{location:'/'+url.search});res.end();return;}
     if(req.method==='GET'&&path==='/hermes'){res.writeHead(308,{location:'/hermes/'+url.search});res.end();return;}
     if(req.method==='GET'&&(path==='/providers'||path==='/providers/')){res.writeHead(308,{location:'/providers/management.html'+url.search});res.end();return;}
+    if(process.env.NOCHEH_DEV_WATCH==='1'&&req.method==='GET'&&path==='/__dev/revision') {
+      const revision=await readFile(join(ROOT,'web/dist/.dev-revision'),'utf8').catch(()=>'');
+      res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});res.end(revision);return;
+    }
     if(req.method==='GET'&&path==='/') {
       const session=sessions.page(req);
       res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
-      const html=(await readFile(join(ROOT,'web/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`);
+      const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision)location.reload();nochehRevision=next}catch{}},1000)</script>` : '';
+      const html=(await readFile(join(ROOT,'web/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
     }
     const asset=path.match(/^\/assets\/(app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/);

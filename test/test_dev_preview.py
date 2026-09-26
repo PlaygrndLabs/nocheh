@@ -68,9 +68,23 @@ class DevPreviewTests(unittest.TestCase):
         self.assertEqual(env['NOCHEH_PORT'], '23000')
 
     def test_full_core_services_are_selected(self):
-        self.assertTrue({'hermes', 'nocheh-security', 'nocheh-executor',
+        self.assertTrue({'nocheh-dev-builder', 'hermes', 'nocheh-security', 'nocheh-executor',
                          'inngest-server', 'cliproxy-api', 'chatgpt-speech'}
                         .issubset(dev_preview.SERVICES))
+
+    def test_refuses_second_running_nocheh_stack(self):
+        foreign = {'Config': {'Labels': {'com.docker.compose.project': 'nocheh',
+                                         'com.docker.compose.service': 'nocheh-app'}}}
+        with patch.object(dev_preview.subprocess, 'check_output', side_effect=['one\n', json.dumps([foreign])]):
+            with self.assertRaisesRegex(ValueError, 'Another Nocheh Compose stack'):
+                dev_preview.assert_single_running_stack({'PATH': '/usr/bin'})
+
+    def test_refuses_second_stack_with_only_honcho_running(self):
+        foreign = {'Config': {'Labels': {'com.docker.compose.project': 'nocheh',
+                                         'com.docker.compose.service': 'honcho-api'}}}
+        with patch.object(dev_preview.subprocess, 'check_output', side_effect=['one\n', json.dumps([foreign])]):
+            with self.assertRaisesRegex(ValueError, 'Another Nocheh Compose stack'):
+                dev_preview.assert_single_running_stack({'PATH': '/usr/bin'})
 
     def test_rejects_unpinned_runtime_base(self):
         result = type('Result', (), {'returncode': 0, 'stdout': 'wrong-revision\n'})()

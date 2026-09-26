@@ -1,4 +1,4 @@
-"""Isolated, source-watched local Docker preview for one checkout."""
+"""One source-mounted development Compose stack for the selected checkout."""
 
 import hashlib
 import json
@@ -10,7 +10,7 @@ from pathlib import Path
 from . import configuration
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
+SERVICES = ('nocheh-dev-builder', 'nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
             'nocheh-security', 'hermes-agent-sb', 'cliproxy-api',
             'cliproxy-monitor', 'inngest-redis', 'inngest-server',
             'chatgpt-speech', 'hermes')
@@ -123,6 +123,23 @@ def inspect_project(env):
     return containers
 
 
+def assert_single_running_stack(env):
+    ids = subprocess.check_output(
+        ['docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project'],
+        cwd=ROOT, env=env, text=True).split()
+    if not ids:
+        return
+    containers = json.loads(subprocess.check_output(['docker', 'inspect', *ids], cwd=ROOT, env=env, text=True))
+    for container in containers:
+        labels = container['Config']['Labels'] or {}
+        project = labels.get('com.docker.compose.project')
+        service = labels.get('com.docker.compose.service')
+        if (project != PROJECT and isinstance(service, str)
+                and (service in SERVICES or service.startswith(('honcho-', 'nocheh-reset-'))
+                     or service == 'pgweb-archive')):
+            raise ValueError(f'Another Nocheh Compose stack ({project}) is running; stop it before make dev')
+
+
 def assert_networks(env):
     for name in (PROJECT + '-agent', PROJECT + '-memory', PROJECT + '_default', PROJECT + '_workflows'):
         result = subprocess.run(['docker', 'network', 'inspect', name], cwd=ROOT, env=env,
@@ -145,6 +162,16 @@ def assert_ports(base, containers):
     for port in (base, base + 3, base + 5, base + 6, base + 7):
         if port not in owned and not port_available(port):
             raise ValueError(f'Local development port {port} is in use by another process')
+
+
+def prepare_source_mounts():
+    # Nested named volumes need existing mount points under read-only source
+    # binds. These ignored directories hold no generated output on the host.
+    for relative in ('web/dist', 'integrations/hermes/dashboard/dist'):
+        path = ROOT / relative
+        if path.is_symlink():
+            raise ValueError(f'Development source mount {relative} must not be a symlink')
+        path.mkdir(exist_ok=True)
 
 
 def prepare_runtime_images(env):
@@ -188,11 +215,13 @@ def main(action, rest):
         return subprocess.call(command + ['down'], cwd=ROOT, env=env)
     if action == 'dev-status':
         return subprocess.call(command + ['ps'], cwd=ROOT, env=env)
+    assert_single_running_stack(env)
     assert_ports(base, containers)
+    prepare_source_mounts()
     prepare_runtime_images(env)
     print(f'Development preview: http://127.0.0.1:{base + 3}/', flush=True)
     print(f'Checkout: {ROOT}\nCompose project: {PROJECT}\nState: {STATE}', flush=True)
     try:
-        return subprocess.call(command + ['up', '--build', '--watch', *SERVICES], cwd=ROOT, env=env)
+        return subprocess.call(command + ['up', '--build', *SERVICES], cwd=ROOT, env=env)
     except KeyboardInterrupt:
         return 130
