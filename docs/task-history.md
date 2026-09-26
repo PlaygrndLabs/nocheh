@@ -1,4 +1,4 @@
-# Task history through 2026-09-25
+# Task history through 2026-09-26
 
 This is a compact index of earlier implementation reports. [TASK.md](../TASK.md)
 is the current status and release ledger. Earlier passes describe their recorded
@@ -78,3 +78,7 @@ revision is the complete ledger before this summary replaced it.
 - The owner sent a fresh private follow-up after activation. The saved event completed in one attempt while the earlier source remained retired at revision 1. Its runtime context excluded the retired topic, and exactly one linked archived Telegram reply matched the conservative answer and excluded that topic. The owner confirmed exactly one visible reply with that wording. The future-recall answer check passed its observed live criteria; reaction/topic meaning and active learned-memory recall remain pending.
 - For the remaining topic-isolation check, the owner confirmed that no forum group is available and chose to keep the live forum-topic check as an MVP release gate. The existing human reaction changes remain valid live evidence for the non-forum group, but they do not establish forum-topic isolation. A read-only Honcho check found the production API running with credentials present while the current control connection remains unattached and unverified, with no ready generation, ingestion receipt, or context snapshot.
 - A content-free timing review of the post-reset owner voice turn found the transcript saved about 11 seconds after capture. Four failed dispatch runtime results occurred before the fifth-attempt delivery at 224.844 seconds; the final workflow record shows five Telegram attempts. A later read-only check of the saved Hermes dispatch journal identified `unexpected_profile_tool` on each of the four failures. The tool-name mismatch remains unresolved. The retained Honcho ledger reports $0.52 lifetime reservations under the $5 pilot cap and no provider calls since the reset date.
+
+## Owner Relations route fix, 2026-09-26
+
+- The Relations view's memory-map and access requests reached the dashboard owner proxy, but the Python knowledge allowlist rejected those paths before storage handling. The owner authorized the missing route fix. The allowlist now matches the existing owner storage path set for the Memory map, memory-access, and entity routes; focused tests cover accepted paths and malformed or neighboring paths. The running installation still needs a controlled refresh and live owner-session verification.
