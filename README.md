@@ -23,7 +23,9 @@ npm ci                  # development/build dependencies; runtime tools are in D
 ./scripts/nocheh init     # create .env with generated internal credentials
 # Edit .env for Telegram, model and optional guarding settings.
 ./scripts/nocheh up       # build, start in the background, wait for health checks
-./scripts/nocheh dev      # the same services with source watching and restart
+make dev                  # isolated full core stack with source watching
+make dev-status           # inspect that checkout's preview
+make dev-stop             # stop it; retain its database and generated state
 ./scripts/nocheh status
 ./scripts/nocheh diagnose # health, credentials presence, and archive job states
 ./scripts/nocheh db       # optional read-only pgweb browser at 127.0.0.1:8782
@@ -33,10 +35,15 @@ npm ci                  # development/build dependencies; runtime tools are in D
 ./scripts/nocheh down     # stop services; retain data
 ```
 
-`make up` and `make test` are working aliases. `make dev` has no recipe yet; use
-`./scripts/nocheh dev` for the explicitly assigned local installation. Per-session
-preview isolation is [follow-up work](TASK.md); a separate worktree alone does not
-isolate Compose services, ports, credentials, or runtime state.
+Run `make dev` from a checkout for a separate Docker Compose Watch stack. It
+prints the dashboard URL, uses generated credentials under that checkout's ignored
+`data/dev/`, and rebuilds affected app, dashboard, security, executor, and Hermes
+services after source edits. It needs locally available pinned Hermes and provider
+images, checks their revisions, and gives them checkout-specific image tags. It
+does not import an installation login or enable Telegram polling. Optional Honcho
+and external model calls require separate development credentials. Run
+`make dev-stop` in that checkout when finished. Release acceptance still uses the
+operating installation's `up` workflow.
 The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services are
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.

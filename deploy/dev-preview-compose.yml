@@ -1,0 +1,127 @@
+# Core services are selected by scripts/dev_preview.py. All locally built images
+# have checkout-specific tags; pinned provider images are retagged after revision
+# verification. External Honcho and maintenance profiles remain inactive.
+services:
+  nocheh-db:
+    image: ${NOCHEH_DEV_PROJECT:?}:db
+    build:
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    restart: "no"
+    develop:
+      watch:
+        - {action: rebuild, path: ./src/stores}
+        - {action: rebuild, path: ./deploy/store-postgres-entrypoint.sh}
+        - {action: rebuild, path: ./Dockerfile}
+  nocheh-app:
+    image: ${NOCHEH_DEV_PROJECT:?}:app
+    restart: "no"
+    command: [npm, start]
+    develop:
+      watch:
+        - {action: rebuild, path: ./src}
+        - {action: rebuild, path: ./web}
+        - {action: rebuild, path: ./scripts}
+        - {action: rebuild, path: ./integrations/hermes/dashboard}
+        - {action: rebuild, path: ./package.json}
+        - {action: rebuild, path: ./package-lock.json}
+        - {action: rebuild, path: ./tsconfig.json}
+        - {action: rebuild, path: ./tsconfig.web.json}
+        - {action: rebuild, path: ./Dockerfile}
+  nocheh-dashboard:
+    image: ${NOCHEH_DEV_PROJECT:?}:dashboard
+    build:
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    restart: "no"
+    develop:
+      watch:
+        - {action: rebuild, path: ./src}
+        - {action: rebuild, path: ./web}
+        - {action: rebuild, path: ./scripts}
+        - {action: rebuild, path: ./integrations/hermes/dashboard}
+        - {action: rebuild, path: ./package.json}
+        - {action: rebuild, path: ./package-lock.json}
+        - {action: rebuild, path: ./Dockerfile}
+  nocheh-executor:
+    image: ${NOCHEH_DEV_PROJECT:?}:executor
+    build:
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    restart: "no"
+    develop:
+      watch:
+        - {action: rebuild, path: ./src}
+        - {action: rebuild, path: ./scripts}
+        - {action: rebuild, path: ./package-lock.json}
+        - {action: rebuild, path: ./Dockerfile}
+  nocheh-security:
+    image: ${NOCHEH_DEV_PROJECT:?}:security
+    restart: "no"
+    develop:
+      watch:
+        - {action: rebuild, path: ./src}
+        - {action: rebuild, path: ./scripts}
+        - {action: rebuild, path: ./package-lock.json}
+        - {action: rebuild, path: ./Dockerfile}
+  hermes:
+    image: ${NOCHEH_DEV_PROJECT:?}:hermes
+    build: !override
+      context: .
+      dockerfile: deploy/dev-hermes.Dockerfile
+      args:
+        HERMES_BASE: ${NOCHEH_DEV_HERMES_BASE:?}
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    restart: "no"
+    develop:
+      watch:
+        - {action: rebuild, path: ./integrations/hermes}
+        - {action: rebuild, path: ./scripts}
+        - {action: rebuild, path: ./compatibility/fixtures}
+        - {action: rebuild, path: ./deploy/dev-hermes.Dockerfile}
+  chatgpt-speech:
+    image: ${NOCHEH_DEV_PROJECT:?}:speech
+    build:
+      context: .
+      dockerfile: deploy/dev-hermes.Dockerfile
+      args:
+        HERMES_BASE: ${NOCHEH_DEV_HERMES_BASE:?}
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    restart: "no"
+    develop:
+      watch:
+        - {action: rebuild, path: ./integrations/hermes}
+        - {action: rebuild, path: ./scripts}
+        - {action: rebuild, path: ./deploy/dev-hermes.Dockerfile}
+  hermes-agent-sb:
+    image: ${NOCHEH_DEV_PROJECT:?}:agent-sb
+    build:
+      context: .
+      dockerfile: deploy/dev-hermes.Dockerfile
+      args:
+        HERMES_BASE: ${NOCHEH_DEV_HERMES_BASE:?}
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    restart: "no"
+    develop:
+      watch:
+        - {action: rebuild, path: ./integrations/hermes}
+        - {action: rebuild, path: ./scripts}
+        - {action: rebuild, path: ./deploy/dev-hermes.Dockerfile}
+  cliproxy-api:
+    image: ${NOCHEH_DEV_PROJECT:?}:cliproxy
+    build: !reset null
+    restart: "no"
+  cliproxy-monitor:
+    image: ${NOCHEH_DEV_PROJECT:?}:monitor
+    build: !reset null
+    restart: "no"
+  inngest-redis:
+    restart: "no"
+  inngest-server:
+    restart: "no"
