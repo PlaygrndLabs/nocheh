@@ -1,8 +1,8 @@
 """One source-mounted development Compose stack for the selected checkout."""
 
-import hashlib
 import json
 import os
+import secrets
 import socket
 import subprocess
 from pathlib import Path
@@ -10,13 +10,15 @@ from pathlib import Path
 from . import configuration
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ('nocheh-dev-builder', 'nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
+SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
             'nocheh-security', 'hermes-agent-sb', 'cliproxy-api',
             'cliproxy-monitor', 'inngest-redis', 'inngest-server',
-            'chatgpt-speech', 'hermes')
+            'chatgpt-speech', 'hermes', 'honcho-postgres', 'honcho-redis',
+            'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
 STATE = ROOT / 'data/dev'
 MARKER = STATE / '.preview-owner'
-PROJECT = 'nocheh-dev-' + hashlib.sha256(str(ROOT).encode()).hexdigest()[:10]
+PROJECT = 'nocheh-dev'
+PORTS = (8780, 8783, 8785, 1455, 18317)
 
 
 def assert_private_state():
@@ -50,15 +52,6 @@ def port_available(port):
     return True
 
 
-def choose_ports():
-    start = 23000 + (int(hashlib.sha256(str(ROOT).encode()).hexdigest()[10:14], 16) % 1800) * 10
-    for offset in range(1800):
-        base = 23000 + ((start - 23000 + offset * 10) % 18000)
-        if all(port_available(base + delta) for delta in (0, 3, 5, 6, 7, 8)):
-            return base
-    raise ValueError('No free local development port block')
-
-
 def prepare_state():
     assert_private_state()
     if not MARKER.exists():
@@ -66,32 +59,33 @@ def prepare_state():
         MARKER.write_text(str(ROOT) + '\n')
         MARKER.chmod(0o600)
     values = configuration.initialize(STATE)
-    if values.get('NOCHEH_DEV_PORT_BASE'):
-        base = int(values['NOCHEH_DEV_PORT_BASE'])
-        if not 1024 <= base <= 65527:
-            raise ValueError('Invalid development port block')
-    else:
-        base = choose_ports()
-        values['NOCHEH_DEV_PORT_BASE'] = str(base)
-        values['NOCHEH_PORT'] = str(base)
-        values['NOCHEH_DASHBOARD_PORT'] = str(base + 3)
-        values['NOCHEH_WORKFLOW_UI_PORT'] = str(base + 8)
-        values['NOCHEH_STORAGE_LAYOUT'] = 'original-only-v1'
-        configuration.validate(values)
-        configuration.write_env(configuration.env_path(STATE), values)
-    for key in ('TELEGRAM_ENABLED', 'NOCHEH_HONCHO_ENABLED'):
-        if values.get(key) != 'false':
-            raise ValueError(f'Development preview requires {key}=false')
+    if values.get('TELEGRAM_ENABLED') != 'false':
+        raise ValueError('Development preview requires TELEGRAM_ENABLED=false')
     if values.get('TELEGRAM_BOT_TOKEN') or values.get('TELEGRAM_OWNER_ID') or values.get('NOCHEH_STORAGE_LAYOUT') != 'original-only-v1':
         raise ValueError('Development preview cannot use installation credentials or layout')
     if values.get('OPENAI_API_KEY') or any(next((STATE / path).glob('*.json'), None) for path in ('provider/auth', 'hermes/auth')):
         raise ValueError('Development preview cannot use provider or Hermes login credentials')
-    if values.get('NOCHEH_PORT') != str(base) or values.get('NOCHEH_DASHBOARD_PORT') != str(base + 3):
-        raise ValueError('Development preview ports do not match the reserved block')
-    return values, base
+    state_dir = STATE / 'honcho'
+    state_dir.mkdir(mode=0o700, exist_ok=True)
+    token_path = state_dir / 'internal_token'
+    if not token_path.exists():
+        token_path.write_text(secrets.token_hex(32))
+        token_path.chmod(0o600)
+    values.update(NOCHEH_PORT='8780', NOCHEH_DASHBOARD_PORT='8783',
+                  NOCHEH_WORKFLOW_UI_PORT='8288', NOCHEH_PROVIDER_MONITOR_PORT='18317',
+                  NOCHEH_STORAGE_LAYOUT='original-only-v1', NOCHEH_HONCHO_ENABLED='true',
+                  NOCHEH_HONCHO_STATE_DIR=str(state_dir),
+                  NOCHEH_MEMORY_TOKEN=token_path.read_text().strip())
+    values.pop('NOCHEH_DEV_PORT_BASE', None)
+    configuration.validate(values)
+    configuration.write_env(configuration.env_path(STATE), values)
+    subprocess.run(['python3', '-c', 'from scripts.honcho_setup import initialize; initialize()'],
+                   cwd=ROOT, env={**os.environ, 'NOCHEH_INSTALLATION_ROOT': str(ROOT),
+                                  'NOCHEH_STATE_DIR': str(STATE)}, check=True)
+    return values
 
 
-def docker_env(values, base):
+def docker_env(values):
     # Do not carry installation credentials, profiles, or ports from the shell.
     keep = ('PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'XDG_RUNTIME_DIR', 'SSL_CERT_FILE')
     env = {name: os.environ[name] for name in keep if name in os.environ}
@@ -99,12 +93,15 @@ def docker_env(values, base):
     env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_DEV_PROJECT=PROJECT,
                NOCHEH_DEV_HERMES_BASE=PROJECT + ':hermes-base',
                NOCHEH_INSTALLATION_ROOT=str(ROOT), NOCHEH_STATE_DIR=str(STATE),
-               NOCHEH_HONCHO_STATE_DIR=str(STATE / 'honcho'), COMPOSE_PROFILES='',
+               NOCHEH_HONCHO_STATE_DIR=str(STATE / 'honcho'), COMPOSE_PROFILES='honcho',
                COMPOSE_PROGRESS='plain',
+               NOCHEH_DEV_HONCHO_IMAGE=PROJECT + ':honcho',
+               NOCHEH_HONCHO_DATABASE_VOLUME=PROJECT + '_honcho_database',
+               NOCHEH_HONCHO_REDIS_VOLUME=PROJECT + '_honcho_redis',
                NOCHEH_AGENT_NETWORK=PROJECT + '-agent', NOCHEH_MEMORY_NETWORK=PROJECT + '-memory',
-               NOCHEH_PORT=str(base), NOCHEH_DASHBOARD_PORT=str(base + 3),
-               NOCHEH_NATIVE_ADMIN_PORT=str(base + 5), NOCHEH_OAUTH_PORT=str(base + 6),
-               NOCHEH_PROVIDER_MONITOR_PORT=str(base + 7), NOCHEH_WORKFLOW_UI_PORT=str(base + 8))
+               NOCHEH_PORT='8780', NOCHEH_DASHBOARD_PORT='8783',
+               NOCHEH_NATIVE_ADMIN_PORT='8785', NOCHEH_OAUTH_PORT='1455',
+               NOCHEH_PROVIDER_MONITOR_PORT='18317', NOCHEH_WORKFLOW_UI_PORT='8288')
     return env
 
 
@@ -141,7 +138,8 @@ def assert_single_running_stack(env):
 
 
 def assert_networks(env):
-    for name in (PROJECT + '-agent', PROJECT + '-memory', PROJECT + '_default', PROJECT + '_workflows'):
+    for name in (PROJECT + '-agent', PROJECT + '-memory', PROJECT + '_default', PROJECT + '_workflows',
+                 PROJECT + '_honcho-isolated', PROJECT + '_honcho-egress'):
         result = subprocess.run(['docker', 'network', 'inspect', name], cwd=ROOT, env=env,
                                 capture_output=True, text=True)
         if result.returncode:
@@ -151,7 +149,20 @@ def assert_networks(env):
                 raise ValueError(f'Development network {name} belongs to another project')
 
 
-def assert_ports(base, containers):
+def assert_volumes(env):
+    for suffix in ('postgres_data', 'dev_dist', 'dev_web_dist', 'dev_graph_dist',
+                   'honcho_database', 'honcho_redis'):
+        name = PROJECT + '_' + suffix
+        result = subprocess.run(['docker', 'volume', 'inspect', name], cwd=ROOT, env=env,
+                                capture_output=True, text=True)
+        if result.returncode:
+            continue
+        labels = (json.loads(result.stdout)[0].get('Labels') or {})
+        if labels.get('com.nocheh.dev.checkout') != str(ROOT):
+            raise ValueError(f'Development volume {name} belongs to another checkout')
+
+
+def assert_ports(containers):
     owned = set()
     for container in containers:
         if not container['State']['Running']:
@@ -159,7 +170,7 @@ def assert_ports(base, containers):
         for bindings in (container['NetworkSettings'].get('Ports') or {}).values():
             for binding in bindings or []:
                 owned.add(int(binding['HostPort']))
-    for port in (base, base + 3, base + 5, base + 6, base + 7):
+    for port in PORTS:
         if port not in owned and not port_available(port):
             raise ValueError(f'Local development port {port} is in use by another process')
 
@@ -197,6 +208,12 @@ def prepare_runtime_images(env):
             raise ValueError(f'Pinned runtime image {source} is unavailable or has the wrong revision; build the pinned local runtime images before starting the full development stack')
         subprocess.run(['docker', 'tag', source, destination], cwd=ROOT, env=env,
                        check=True, capture_output=True)
+    honcho_source = 'nocheh-honcho:' + json.loads((ROOT / 'integrations/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+    if subprocess.run(['docker', 'image', 'inspect', honcho_source], cwd=ROOT, env=env,
+                      capture_output=True).returncode:
+        raise ValueError(f'Pinned Honcho image {honcho_source} is unavailable')
+    subprocess.run(['docker', 'tag', honcho_source, PROJECT + ':honcho'], cwd=ROOT, env=env,
+                   check=True, capture_output=True)
 
 
 def main(action, rest):
@@ -206,20 +223,21 @@ def main(action, rest):
     if action != 'dev' and not MARKER.exists():
         print('No development preview exists for this checkout.')
         return 0
-    values, base = prepare_state()
-    env = docker_env(values, base)
+    values = prepare_state()
+    env = docker_env(values)
     containers = inspect_project(env)
     assert_networks(env)
+    assert_volumes(env)
     command = configuration.compose_command(STATE, PROJECT) + ['-f', str(ROOT / 'deploy/dev-preview-compose.yml')]
     if action == 'dev-stop':
         return subprocess.call(command + ['down'], cwd=ROOT, env=env)
     if action == 'dev-status':
         return subprocess.call(command + ['ps'], cwd=ROOT, env=env)
     assert_single_running_stack(env)
-    assert_ports(base, containers)
+    assert_ports(containers)
     prepare_source_mounts()
     prepare_runtime_images(env)
-    print(f'Development preview: http://127.0.0.1:{base + 3}/', flush=True)
+    print('Development preview: http://127.0.0.1:8783/', flush=True)
     print(f'Checkout: {ROOT}\nCompose project: {PROJECT}\nState: {STATE}', flush=True)
     try:
         return subprocess.call(command + ['up', '--build', *SERVICES], cwd=ROOT, env=env)

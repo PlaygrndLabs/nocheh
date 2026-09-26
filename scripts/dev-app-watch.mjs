@@ -1,5 +1,4 @@
-// Rebuild generated assets inside the development Compose project, without
-// rebuilding images or requiring a host Node installation.
+// Run the app and rebuild generated assets inside its existing Compose service.
 import {readdir, stat, writeFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 
@@ -7,6 +6,7 @@ const inputs = ['src', 'web', 'integrations/hermes/dashboard', 'scripts/build.mj
   'scripts/build-dashboard.mjs', 'tsconfig.json', 'tsconfig.web.json'];
 const excluded = new Set(['dist', '__pycache__', 'node_modules']);
 let stopping = false;
+let app;
 
 async function snapshot() {
   const files = [];
@@ -35,7 +35,10 @@ function build() {
   });
 }
 
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopping = true; });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+  stopping = true;
+  app?.kill(signal);
+});
 let previous = '';
 while (!stopping) {
   try {
@@ -47,6 +50,14 @@ while (!stopping) {
         await writeFile('web/dist/.dev-revision', revision);
         await writeFile('dist/.dev-ready', revision);
         console.log(`Development assets ready: ${revision.trim()}`);
+        if (!app) {
+          app = spawn('node', ['--watch', 'dist/src/main.js'], {stdio: 'inherit'});
+          app.on('error', error => { console.error(error); app = undefined; });
+          app.on('exit', (code, signal) => {
+            if (!stopping) console.error(`Development app exited (${signal || code}); waiting for a source change.`);
+            app = undefined;
+          });
+        }
       } else console.error('Development build failed; waiting for a source fix.');
     }
   } catch (error) { console.error('Development source scan failed:', error); }

@@ -25,18 +25,18 @@ service health. Services restart automatically while the Docker engine is runnin
 Docker must itself be configured to start at login/boot for unattended operation.
 
 Stop the operating Nocheh project before `make dev`; the command refuses to
-run a second Nocheh stack. `make dev` uses a checkout-specific project, image
-tags, networks, generated credentials, state directory, and localhost ports.
+run a second Nocheh stack. `make dev` uses the `nocheh-dev` project and normal
+localhost ports, with checkout-owned images, networks, credentials, and state.
 It starts PostgreSQL, app, dashboard, executor, security, Hermes, speech,
-provider, monitor, workflow services, and one builder container. The builder
+provider, monitor, workflow services, and Honcho. The existing app container
 mounts source read-only and compiles changed TypeScript, React, CSS, and plugin
 assets into shared volumes. Node watches generated code, the dashboard reloads
 when its asset revision changes, and Python processes restart automatically on
 mounted source edits. Ordinary source edits need no `make dev` rerun or Docker
 image rebuild; dependency and Dockerfile edits still need one. Locally available
 Hermes and provider base images must match the pinned revisions. Telegram stays
-disabled and no installation login is imported. Optional Honcho and external
-model calls require separate development credentials. `make dev-stop` stops only
+disabled and no installation login is imported. External model and embedding
+calls require separate development credentials. `make dev-stop` stops only
 the development project and retains its state. Release acceptance uses
 `./scripts/nocheh up` separately.
 See Docker's [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/)
