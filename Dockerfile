@@ -13,7 +13,7 @@ COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
 COPY web ./web
 COPY src ./src
 COPY test ./test
-RUN npm run build && chown -R ${LOCAL_UID}:${LOCAL_GID} /app
+RUN npm run build && chown ${LOCAL_UID}:${LOCAL_GID} /app /app/web /app/integrations/hermes/dashboard && chown -R ${LOCAL_UID}:${LOCAL_GID} /app/dist /app/web/dist /app/integrations/hermes/dashboard/dist
 USER node
 CMD ["npm", "run", "dev"]
 
@@ -45,11 +45,18 @@ CMD ["postgres"]
 FROM docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS docker-cli
 
 # Trusted installation administration; agent images never inherit this target.
-FROM runtime AS management
-USER root
+# Install management tools before copying application output so source edits do
+# not repeat apt-get on every watched dashboard rebuild.
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS management-base
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-yaml git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
+
+FROM management-base AS management
+WORKDIR /app
+COPY --from=build --chown=node:node /app/package.json ./
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
 COPY scripts ./scripts
 COPY integrations ./integrations
 COPY compatibility ./compatibility

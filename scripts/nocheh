@@ -69,8 +69,12 @@ def run_isolated_tests(rest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "reset"))
+    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "reset"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
+    if args.command in ('dev', 'dev-stop', 'dev-status'):
+        sys.path.insert(0, str(ROOT))
+        from scripts.dev_preview import main as dev_preview
+        return dev_preview(args.command, rest)
     if args.command == 'test':
         return run_isolated_tests(rest)
     if args.command=='reset':
@@ -208,8 +212,6 @@ def main():
         from compatibility.setup import checkout,LOCK
         checkout('hermes-agent',LOCK['hermes'])
     command = compose_command(STATE)
-    if args.command == "dev":
-        command += ["-f", str(INSTALLATION_ROOT / "docker-compose.dev.yml")]
     if args.command == 'db':
         from database_viewer import start
         return start(STATE, command, ROOT)
@@ -227,7 +229,7 @@ def main():
         stop_workflows(STATE,wait=True)
     actions = {
         "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
-        "dev": ["up", "--build", "--watch"], "down": ["down"], "status": ["ps"],
+        "down": ["down"], "status": ["ps"],
         "logs": ["logs", "--tail", "100", "-f"], "build": ["build"],
         "verify": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.verify", "--live"],
         "config": ["config", "--quiet"],

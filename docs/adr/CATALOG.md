@@ -72,3 +72,4 @@ records current implementation and activation.
 | [0061](0061-retire-isolated-honcho-comparison.md) | Retire optional Honcho comparison; keep production support and legacy data identities | Current Honcho repository boundary; supersedes 0045 experiment retention |
 | [0062](0062-owner-managed-telegram-group-participants.md) | Owner-only group replies by default with per-group participant grants and denies | Extends 0021 group scope and 0024 configuration; separate from memory sharing |
 | [0063](0063-owner-database-browser.md) | Read-only inspection of configured installation tables | Extends 0025 owner inspection and 0053 separate stores |
+| [0064](0064-isolated-source-watched-development-preview.md) | Checkout-scoped Compose Watch full core stack | Extends 0019 local development and 0024 configuration |

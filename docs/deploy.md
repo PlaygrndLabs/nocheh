@@ -15,20 +15,26 @@ Host services require Node 24.x; set `NOCHEH_NODE` when selecting a non-default 
 ./scripts/nocheh up
 ./scripts/nocheh status
 ./scripts/nocheh diagnose
-./scripts/nocheh dev
+make dev
+make dev-status
+make dev-stop
 ```
 
 `up` builds pinned images, starts PostgreSQL before its dependents, and waits for
 service health. Services restart automatically while the Docker engine is running.
 Docker must itself be configured to start at login/boot for unattended operation.
 
-`dev` overlays `docker-compose.dev.yml`. TypeScript source changes synchronize into
-the development images, rebuild and restart affected services. Python integration
-changes restart Hermes. Dependencies and Dockerfile changes rebuild images.
-Both modes use the same persistent database, files, spool and Hermes state. A new
-Git worktree does not isolate that installation. Per-session preview tooling and
-the missing `make dev` recipe are tracked in TASK.md; use this workflow only in an
-explicitly assigned environment.
+`make dev` uses a checkout-specific project, image tags, networks, generated
+credentials, state directory, and free localhost ports. It starts the full core
+Compose stack: PostgreSQL, app, dashboard, executor, security, Hermes, speech,
+provider, monitor, and workflow services. Locally available Hermes and provider
+base images must match the pinned revisions; the preview builds or tags separate
+checkout images from them. Compose Watch rebuilds affected source images and
+retains the preview database across rebuilds. Telegram stays disabled and no
+installation login is imported. Optional Honcho and external model calls require
+separate development credentials. `make dev-stop` stops only that checkout's
+project and retains its state. Release acceptance uses `./scripts/nocheh up`
+separately.
 See Docker's [Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/)
 and [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/) docs.
 
