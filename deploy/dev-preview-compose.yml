@@ -1,17 +1,20 @@
-# One development Compose project. Source is mounted read-only; the builder
-# compiles changed files into shared volumes and running services reload them.
+# Source is mounted read-only; the existing app service compiles changed files
+# into shared volumes and the running services reload them.
 services:
-  nocheh-dev-builder:
-    image: ${NOCHEH_DEV_PROJECT:?}:builder
+  nocheh-db:
+    image: ${NOCHEH_DEV_PROJECT:?}:db
     build:
-      context: .
-      target: development
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
-    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
-    command: [node, scripts/dev-build-watch.mjs]
     restart: "no"
+
+  nocheh-app:
+    image: ${NOCHEH_DEV_PROJECT:?}:app
+    build:
+      target: development
+    restart: "no"
+    command: [node, scripts/dev-app-watch.mjs]
     volumes:
       - ./src:/app/src:ro
       - ./web:/app/web:ro
@@ -22,32 +25,6 @@ services:
       - dev_dist:/app/dist
       - dev_web_dist:/app/web/dist
       - dev_graph_dist:/app/integrations/hermes/dashboard/dist
-    healthcheck:
-      test: [CMD, node, -e, "const f=require('fs');process.exit(f.existsSync('/app/dist/.dev-ready')&&f.existsSync('/app/web/dist/index.html')?0:1)"]
-      interval: 3s
-      timeout: 3s
-      retries: 40
-
-  nocheh-db:
-    image: ${NOCHEH_DEV_PROJECT:?}:db
-    build:
-      args:
-        LOCAL_UID: ${NOCHEH_UID:-1000}
-        LOCAL_GID: ${NOCHEH_GID:-1000}
-    restart: "no"
-    volumes:
-      - dev_dist:/app/dist:ro
-    depends_on:
-      nocheh-dev-builder: {condition: service_healthy}
-
-  nocheh-app:
-    image: ${NOCHEH_DEV_PROJECT:?}:app
-    restart: "no"
-    command: [node, --watch, dist/src/main.js]
-    volumes:
-      - dev_dist:/app/dist:ro
-    depends_on:
-      nocheh-dev-builder: {condition: service_healthy}
 
   nocheh-dashboard:
     image: ${NOCHEH_DEV_PROJECT:?}:dashboard
@@ -67,7 +44,7 @@ services:
       - dev_web_dist:/app/web/dist:ro
       - dev_graph_dist:/app/integrations/hermes/dashboard/dist:ro
     depends_on:
-      nocheh-dev-builder: {condition: service_healthy}
+      nocheh-app: {condition: service_healthy}
 
   nocheh-executor:
     image: ${NOCHEH_DEV_PROJECT:?}:executor
@@ -82,7 +59,7 @@ services:
       - ./scripts:/app/scripts:ro
       - dev_dist:/app/dist:ro
     depends_on:
-      nocheh-dev-builder: {condition: service_healthy}
+      nocheh-app: {condition: service_healthy}
 
   nocheh-security:
     image: ${NOCHEH_DEV_PROJECT:?}:security
@@ -91,7 +68,7 @@ services:
     volumes:
       - dev_dist:/app/dist:ro
     depends_on:
-      nocheh-dev-builder: {condition: service_healthy}
+      nocheh-app: {condition: service_healthy}
 
   hermes:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
@@ -138,7 +115,43 @@ services:
   inngest-server:
     restart: "no"
 
+  honcho-postgres:
+    restart: "no"
+  honcho-redis:
+    restart: "no"
+  honcho-provider-gateway:
+    restart: "no"
+    command: [python, /dev_reload.py, --watch, /nocheh, --, python, /nocheh/meter.py]
+    volumes:
+      - ./scripts/dev_reload.py:/dev_reload.py:ro
+  honcho-api:
+    image: ${NOCHEH_DEV_HONCHO_IMAGE:?}
+    build: !reset null
+    restart: "no"
+    entrypoint: [sh, -c, '/app/.venv/bin/python scripts/provision_db.py && exec /app/.venv/bin/python /dev_reload.py --watch /nocheh -- /app/.venv/bin/python /nocheh/run.py api']
+    volumes:
+      - ./scripts/dev_reload.py:/dev_reload.py:ro
+  honcho-deriver:
+    image: ${NOCHEH_DEV_HONCHO_IMAGE:?}
+    build: !reset null
+    restart: "no"
+    entrypoint: [/app/.venv/bin/python, /dev_reload.py]
+    command: [--watch, /nocheh, --, /app/.venv/bin/python, /nocheh/run.py, deriver]
+    volumes:
+      - ./scripts/dev_reload.py:/dev_reload.py:ro
+
 volumes:
   dev_dist:
+    labels: {com.nocheh.dev.checkout: "${NOCHEH_INSTALLATION_ROOT:?}"}
   dev_web_dist:
+    labels: {com.nocheh.dev.checkout: "${NOCHEH_INSTALLATION_ROOT:?}"}
   dev_graph_dist:
+    labels: {com.nocheh.dev.checkout: "${NOCHEH_INSTALLATION_ROOT:?}"}
+  postgres_data:
+    labels: {com.nocheh.dev.checkout: "${NOCHEH_INSTALLATION_ROOT:?}"}
+  honcho_database: !override
+    name: ${NOCHEH_HONCHO_DATABASE_VOLUME:?}
+    labels: {com.nocheh.dev.checkout: "${NOCHEH_INSTALLATION_ROOT:?}"}
+  honcho_redis: !override
+    name: ${NOCHEH_HONCHO_REDIS_VOLUME:?}
+    labels: {com.nocheh.dev.checkout: "${NOCHEH_INSTALLATION_ROOT:?}"}

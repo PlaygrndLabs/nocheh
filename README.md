@@ -37,14 +37,16 @@ make dev-stop             # stop it; retain its database and generated state
 
 Stop the operating Nocheh stack before `make dev`; the command refuses to start
 while another Nocheh project runs. `make dev` prints the dashboard URL and uses
-generated credentials under that checkout's ignored `data/dev/`. Its builder
-container automatically compiles changed source into shared volumes; the running
+generated credentials under that checkout's ignored `data/dev/`. The existing
+`nocheh-app` container compiles changed source into shared volumes; the running
 app, dashboard, executor, security, and Python services reload without a Docker
 image rebuild or another `make dev`. Dependency and Dockerfile edits still need an
 image build. Pinned Hermes and provider images must be available locally; the
-command verifies their revisions and creates checkout-specific tags. Development
-does not import an installation login or enable Telegram polling. Optional Honcho
-and external model calls require separate development credentials. Run
+command verifies their revisions and creates dev tags. The single Compose
+project is `nocheh-dev`, with the normal dashboard URL `http://127.0.0.1:8783/`.
+Honcho's five services run in that project with separate dev storage. Development
+does not import an installation login or enable Telegram polling. External model
+and embedding calls require separate development credentials. Run
 `make dev-stop` when finished. Release acceptance uses the operating installation's
 `up` workflow.
 The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services are

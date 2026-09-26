@@ -90,3 +90,7 @@ revision is the complete ledger before this summary replaced it.
 ## Single-stack hot development, 2026-09-27
 
 - The owner directed one running Nocheh group and source edits live without rerunning or rebuilding images. The operating project was stopped gracefully with state retained. The dev project gained a mounted-source builder, shared generated volumes, Node watch, Python process reload, dashboard asset revision reload, and a guard against a second running Nocheh project. CSS and TypeScript edits updated generated assets; Node app and Hermes Python processes restarted inside existing containers. All edits were reverted, and all 13 dev services were healthy. Browser visual inspection of this revision was blocked by the in-app browser URL policy. [Evidence](../compatibility/results/2026-09-27-single-stack-hot-dev.json).
+
+## Fixed-name development stack, 2026-09-27
+
+- The owner asked for `nocheh-dev`, Honcho, normal ports, and no extra builder service. The builder moved into the existing app container; Honcho's five existing services joined the dev stack with separate state. The stopped hashed dev database was copied into the fixed-name volume while retaining the old volume. Seventeen services were healthy. TypeScript and Honcho Python timestamp edits reloaded their processes without replacing containers or images. [Evidence](../compatibility/results/2026-09-27-fixed-name-live-dev.json).

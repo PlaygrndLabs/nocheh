@@ -48,9 +48,9 @@ class DevPreviewTests(unittest.TestCase):
                 dev_preview.inspect_project(env)
 
     def test_rejects_port_owned_by_other_process(self):
-        with patch.object(dev_preview, 'port_available', side_effect=lambda port: port != 23003):
-            with self.assertRaisesRegex(ValueError, '23003 is in use'):
-                dev_preview.assert_ports(23000, [])
+        with patch.object(dev_preview, 'port_available', side_effect=lambda port: port != 8783):
+            with self.assertRaisesRegex(ValueError, '8783 is in use'):
+                dev_preview.assert_ports([])
 
     def test_rejects_foreign_network(self):
         network = [{'Labels': {'com.docker.compose.project': 'other'}}]
@@ -61,16 +61,29 @@ class DevPreviewTests(unittest.TestCase):
 
     def test_shell_credentials_and_profiles_do_not_enter_compose(self):
         with patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'active-token', 'COMPOSE_PROFILES': 'honcho', 'NOCHEH_STATE_DIR': '/active', 'NOCHEH_PORT': '8780'}):
-            env = dev_preview.docker_env({'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': ''}, 23000)
+            env = dev_preview.docker_env({'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': ''})
         self.assertEqual(env['TELEGRAM_BOT_TOKEN'], '')
-        self.assertEqual(env['COMPOSE_PROFILES'], '')
+        self.assertEqual(env['COMPOSE_PROFILES'], 'honcho')
         self.assertEqual(env['NOCHEH_STATE_DIR'], str(dev_preview.STATE))
-        self.assertEqual(env['NOCHEH_PORT'], '23000')
+        self.assertEqual(env['NOCHEH_PORT'], '8780')
+        self.assertEqual(env['NOCHEH_DASHBOARD_PORT'], '8783')
+        self.assertEqual(env['NOCHEH_HONCHO_DATABASE_VOLUME'], 'nocheh-dev_honcho_database')
 
-    def test_full_core_services_are_selected(self):
-        self.assertTrue({'nocheh-dev-builder', 'hermes', 'nocheh-security', 'nocheh-executor',
-                         'inngest-server', 'cliproxy-api', 'chatgpt-speech'}
+    def test_normal_services_are_selected_without_builder(self):
+        self.assertEqual(dev_preview.PROJECT, 'nocheh-dev')
+        self.assertEqual(len(dev_preview.SERVICES), 17)
+        self.assertNotIn('nocheh-dev-builder', dev_preview.SERVICES)
+        self.assertTrue({'hermes', 'nocheh-security', 'nocheh-executor', 'inngest-server',
+                         'cliproxy-api', 'chatgpt-speech', 'honcho-api', 'honcho-deriver',
+                         'honcho-provider-gateway', 'honcho-postgres', 'honcho-redis'}
                         .issubset(dev_preview.SERVICES))
+
+    def test_rejects_foreign_fixed_name_volume(self):
+        volume = [{'Labels': {'com.nocheh.dev.checkout': '/elsewhere'}}]
+        result = type('Result', (), {'returncode': 0, 'stdout': json.dumps(volume)})()
+        with patch.object(dev_preview.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(ValueError, 'belongs to another checkout'):
+                dev_preview.assert_volumes({'PATH': '/usr/bin'})
 
     def test_refuses_second_running_nocheh_stack(self):
         foreign = {'Config': {'Labels': {'com.docker.compose.project': 'nocheh',
