@@ -24,7 +24,9 @@ def main(args):
         token=directory/'token'
         if not token.exists():
             with token.open('x') as file:token.chmod(0o600);file.write(secrets.token_urlsafe(48))
-        os.execvp('node',['node',str(ROOT/'dist/src/management.js')])
+        command=['node']
+        if os.environ.get('NOCHEH_DEV_WATCH')=='1':command.append('--watch')
+        os.execvp('node',command+[str(ROOT/'dist/src/management.js')])
     if args==['executor']:
         from .workflow_worker import serve
         return serve(state)

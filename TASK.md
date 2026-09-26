@@ -1,6 +1,6 @@
 # Nocheh implementation status
 
-This is the current status ledger, last reconciled on 2026-09-26. [SPECS.md](SPECS.md)
+This is the current status ledger, last reconciled on 2026-09-27. [SPECS.md](SPECS.md)
 defines the intended product; [AGENTS.md](AGENTS.md) defines working rules.
 [Status history](docs/task-history.md) summarizes completed and superseded work.
 The complete previous ledger remains in Git at `ab643dc:TASK.md` (`git show
@@ -15,8 +15,10 @@ of 19 historical admin files. The owner then directed removal of old archive and
 memory data while retaining auth/settings and rebuilding the app. Six runtime
 images rebuilt, the one-time Telegram backlog discard was confirmed, and all 17
 services started healthy in fresh acceptance mode with restart ownership off.
-The post-reset owner voice and intentional group-silence checks passed. The rest
-of fresh live acceptance and post-reset Honcho production acceptance have not passed.
+The post-reset owner voice and intentional group-silence checks passed. The
+operating project is stopped while the sole development stack runs; its state and
+volumes remain. The rest of fresh live acceptance and post-reset Honcho production
+acceptance have not passed.
 
 | Area | Last established state | Remaining gate |
 | --- | --- | --- |
@@ -59,7 +61,7 @@ These are implementation checkpoints, not substitutes for the release decision a
 | Provider and workflows | The shared CPA route and one-login refresh ownership were accepted locally. All nine Inngest workflow families were active at epoch 2 in the earlier consolidated installation. [Provider cutover](compatibility/results/2026-09-14-shared-provider-cutover.json), [workflow consolidation](compatibility/results/2026-09-16-consolidated-services.json) |
 | Owner UI and entity memory | Archive, Databases, Sharing, Activity, People/Projects, and the Memory map have isolated build, fixture, and preview evidence. The Relations knowledge-route allowlist matches the dashboard's owner storage paths, passes focused route tests, and is active: the owner view loaded its map, requests, and grants without route denial. Other live memory and release checks remain pending. [Relations refresh](compatibility/results/2026-09-26-relations-dashboard-refresh.json), [entity evidence](compatibility/results/2026-09-20-connected-entity-memory.json) |
 | Backup and recovery | Isolated format-6 backup/inactive restore, scoped reset, and fresh-acceptance validation passed synthetic rehearsals. The populated live post-reset run remains pending. [Storage plan](docs/original-only-archive-plan.md) |
-| Local development preview | `make dev` builds a checkout-scoped full core stack with Compose Watch: all 12 selected services reached healthy state. App and dashboard source edits replaced their containers; a Python integration edit replaced Hermes, speech, and its sandbox launcher while the database stayed in place. The full-stack Relations page loaded without route denial; the operating installation retained 17 healthy containers. Development state has no provider or Hermes login, Telegram is disabled, and optional Honcho is unconfigured. Release acceptance remains separate. [Preview evidence](compatibility/results/2026-09-27-dev-preview.json), [decision](docs/adr/0064-isolated-source-watched-development-preview.md) |
+| Local development | `make dev` refuses a second running Nocheh project. The operating project was gracefully stopped with its 17 containers, networks, volumes, and state retained; the sole dev project has 13 healthy services, including an automatic source builder. CSS and TypeScript edits reached the shared generated volumes; the Node app and Hermes Python processes restarted inside their existing containers. Test edits were reverted, and container/image IDs stayed fixed during the tests. The dev state has no provider or Hermes login, Telegram is disabled, and optional Honcho is unconfigured. Browser visual verification of this revision was blocked by the in-app browser URL policy. Release acceptance remains separate. [Hot dev evidence](compatibility/results/2026-09-27-single-stack-hot-dev.json), [decision](docs/adr/0065-single-stack-source-mounted-development.md) |
 
 ## Development follow-ups
 
