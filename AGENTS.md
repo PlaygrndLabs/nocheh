@@ -33,6 +33,7 @@ Telegram is an adapter; owned source data, useful memory, and reasoning are the 
 - Inspect the applicable specifications, current status, code, and acceptance procedure before editing. Use repository commands and pinned upstream dependencies; retain npm, TypeScript services, thin Python integration, React, and Docker Compose.
 - Complete authorized work and continue independent work when a dependency is blocked. Do not ask for repeated permission for already authorized phase work.
 - Keep credentials, source conversations, and runtime data out of commits and logs. A worktree does not isolate Compose resources or grant access to another installation's credentials or state.
+- In docs and commit messages, never point to the external example project by name or path. Remove any such references found in current files before committing.
 
 </repository_workflow>
 

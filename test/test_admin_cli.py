@@ -45,6 +45,27 @@ class AdminCliTests(unittest.TestCase):
         self.assertEqual(data["workflows"]["workflows"][0]["receipts"][0]["receipt_id"], "d" * 64)
         self.assertIn("event=" + EVENT, FakeAPI.calls[1][0])
 
+    def test_trace_latest_selects_newest_incoming_event_with_scope(self):
+        class LatestAPI(FakeAPI):
+            def call(self, path, timeout=30):
+                if path.startswith("/v1/data?"):
+                    self.calls.append((path, timeout))
+                    return {"records": [{"id": EVENT, "received_at": "2026-09-27T12:00:00Z"}], "next": None}
+                return super().call(path, timeout)
+
+        output = io.StringIO()
+        with patch.object(admin, "API", LatestAPI), contextlib.redirect_stdout(output):
+            self.assertEqual(admin.main(["trace", "latest", "--scope", "telegram:private:42", "--json"]), 0)
+        self.assertEqual(json.loads(output.getvalue())["event"]["id"], EVENT)
+        self.assertIn("scope=telegram%3Aprivate%3A42", FakeAPI.calls[0][0])
+        self.assertEqual(FakeAPI.calls[1][0], "/v1/events/" + EVENT)
+
+    def test_trace_latest_empty_scope_fails_closed(self):
+        error_output = io.StringIO()
+        with patch.object(admin, "API", FakeAPI), contextlib.redirect_stderr(error_output):
+            self.assertEqual(admin.main(["trace", "latest", "--json"]), 1)
+        self.assertIn("no captured incoming event", error_output.getvalue())
+
     def test_content_requires_explicit_flag(self):
         _, data = self.run_cli("--content", "event", EVENT, "--json")
         self.assertEqual(data["event"]["text"], "private phrase")

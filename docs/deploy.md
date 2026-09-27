@@ -3,8 +3,37 @@
 [SPECS.md](../SPECS.md) defines the product; [TASK.md](../TASK.md) records actual
 activation and pending acceptance. This guide describes operating procedures.
 
-Local Docker Compose is the current target. It is used for normal unattended
-operation, development and acceptance. No VPS is required.
+Local Docker Compose is used for normal unattended operation, development, and
+acceptance. An existing VPS checkout can receive the same app-service rollout;
+remote acceptance remains a separate observation.
+
+## Deploy an app revision
+
+Use the full commit ID from integrated `main`. The default command prints a
+read-only plan. `--apply` builds and replaces only `nocheh-app`, then waits for
+its health check. The local checkout must be clean, contain its installation
+`.env`, and own exactly one running app container.
+
+```bash
+./scripts/nocheh deploy local --revision FULL_COMMIT_ID
+./scripts/nocheh deploy local --revision FULL_COMMIT_ID --apply
+```
+
+For an existing VPS checkout, supply its SSH destination and absolute checkout
+path. The command requires a clean remote `main`, fetches `origin/main`, checks
+that the revision is on it, fast forwards to exactly that revision, then runs
+the same local app rollout there. It uses noninteractive SSH and does not copy
+credentials or state. The target requires Git, Docker Compose, access to its
+own `.env`, and a running Nocheh app in that checkout.
+
+```bash
+./scripts/nocheh deploy vps --host USER@HOST --root /absolute/nocheh --revision FULL_COMMIT_ID
+./scripts/nocheh deploy vps --host USER@HOST --root /absolute/nocheh --revision FULL_COMMIT_ID --apply
+```
+
+After either apply, inspect health and the relevant read-only admin command
+from that installation. Record the revision and evidence in `TASK.md`; service
+health does not complete live release gates. See [ADR-0067](adr/0067-exact-revision-app-rollout.md).
 
 See [service names, responsibilities, dashboards and workflow](services.md).
 Host services require Node 24.x; set `NOCHEH_NODE` when selecting a non-default executable.
