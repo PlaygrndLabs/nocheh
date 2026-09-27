@@ -76,3 +76,4 @@ records current implementation and activation.
 | [0065](0065-single-stack-source-mounted-development.md) | One running stack with source-mounted development | Supersedes 0064 concurrent-project and rebuild-on-edit behavior |
 | [0066](0066-fixed-name-standard-port-development.md) | Development uses one named stack and normal ports | Supersedes 0065 development name, ports, and builder details |
 | [0067](0067-exact-revision-app-rollout.md) | Exact-revision app rollout for local and VPS Compose installations | Extends 0019 with deployment tooling; local acceptance remains separate |
+| [0068](0068-detached-honcho-acceptance-workspace.md) | Time-bound guarded synthetic workspace for preattachment Honcho checks | Extends 0033 and 0034 without authorizing attachment |
