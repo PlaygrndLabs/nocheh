@@ -98,9 +98,11 @@ export async function readEvent(pool:pg.Pool,principal:Reader,id:string) {
   }
   const model=principal.admin?await pool.query('SELECT s.descriptor,s.revision_id,r.object_id FROM source_observations s JOIN source_revisions r ON r.id=s.revision_id WHERE s.event_id=$1',[id]):null;
   await assertAudience(pool,principal);
+  const replies=principal.admin?await legacyArchiveReplyPreviews(pool,[{id,kind:row.kind,scope:row.scope}]):new Map();
   return {id:row.id,source:`nocheh:event:${id}`,received_at:row.received_at.toISOString(),event:toEnvelope(row),artifacts:artifacts.rows,
     ...(model?.rows[0]?{source_model:{object_id:model.rows[0].object_id,revision_id:model.rows[0].revision_id,descriptor:JSON.parse(model.rows[0].descriptor.toString())}}:{}),
-    derived:derived.rows.map(d=>({...d,created_at:d.created_at.toISOString(),content_base64:d.content.toString('base64'),content:undefined}))};
+    derived:derived.rows.map(d=>({...d,created_at:d.created_at.toISOString(),content_base64:d.content.toString('base64'),content:undefined})),
+    ...(principal.admin?{reply_messages:replies.get(id)??[]}:{})};
 }
 export async function readArtifact(pool:pg.Pool,principal:Reader,root:string,id:string):Promise<Buffer> {
   await assertAudience(pool,principal);

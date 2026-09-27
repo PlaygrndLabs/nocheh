@@ -53,15 +53,16 @@ CREATE TABLE IF NOT EXISTS workflow_controls (
 `;
 const states=['queued','waiting','running','retryable_failed',...closedStates];
 function criteria(input:unknown){
-  const b=object(input),family=b.family===undefined||b.family===''?null:String(b.family),state=b.state===undefined||b.state===''?null:String(b.state);
+  const b=object(input),family=b.family===undefined||b.family===''?null:String(b.family),state=b.state===undefined||b.state===''?null:String(b.state),event=b.event===undefined||b.event===''?null:String(b.event);
   if(family&&!families.includes(family as WorkflowFamily)||state&&!states.includes(state as any))throw new HttpError(400,'invalid_workflow_filter');
+  if(event&&!/^[a-f0-9]{64}$/.test(event))throw new HttpError(400,'invalid_workflow_event');
   const limit=Number(b.limit??50);if(!Number.isSafeInteger(limit)||limit<1||limit>100)throw new HttpError(400,'invalid_workflow_limit');
   let after:{at:string;id:string}|null=null;
   if(b.after){
     try {if(String(b.after).length>512)throw Error();after=JSON.parse(Buffer.from(String(b.after),'base64url').toString());if(!after||typeof after.at!=='string'||after.at.length>64||!Number.isFinite(Date.parse(after.at)))throw Error();workflowIdentity(after.id);}
     catch{throw new HttpError(400,'invalid_workflow_cursor');}
   }
-  return {family,state,limit,after};
+  return {family,state,event,limit,after};
 }
 export function workflowView(row:Record<string,any>):Record<string,any>{
   const {created_cursor,...data}=row;
@@ -78,7 +79,8 @@ const view=workflowView;
 export async function listWorkflows(pool:pg.Pool,input:unknown={}){
   const c=criteria(input);
   const rows=(await pool.query(`SELECT * FROM workflow_observations WHERE ($1::text IS NULL OR family=$1) AND ($2::text IS NULL OR state=$2)
-    AND ($3::timestamptz IS NULL OR (created_at,id)<($3,$4)) ORDER BY created_at DESC,id DESC LIMIT $5`,[c.family,c.state,c.after?.at??null,c.after?.id??null,c.limit+1])).rows;
+    AND ($3::timestamptz IS NULL OR (created_at,id)<($3,$4)) AND ($6::text IS NULL OR source_event_id=$6)
+    ORDER BY created_at DESC,id DESC LIMIT $5`,[c.family,c.state,c.after?.at??null,c.after?.id??null,c.limit+1,c.event])).rows;
   const more=rows.length>c.limit,items=rows.slice(0,c.limit),last=items.at(-1);
   return {workflows:items.map(view),next:more?Buffer.from(JSON.stringify({at:last.created_cursor,id:last.id})).toString('base64url'):null,observed_at:new Date().toISOString()};
 }

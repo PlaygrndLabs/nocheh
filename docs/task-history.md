@@ -134,3 +134,7 @@ revision is the complete ledger before this summary replaced it.
 ## Honcho preattachment acceptance path, 2026-09-27
 
 - The current gateway sends each provider request through the Archive preparation endpoint. That endpoint requires a current memory generation, and its provenance check requires an attached, verified connection. The active connection has neither state, so the previously rejected unknown-workspace probe cannot be turned into a fresh paid canary. The earlier G4 isolated acceptance remains historical. A scoped synthetic acceptance path or isolated setup is needed before repeating the six live checks on this installation; no new provider call or verification was made. [Current gateway](../integrations/honcho/meter.py), [preparation check](../src/stores/native-memory.ts), [provenance check](../src/stores/honcho-provenance.ts).
+
+## Local admin inspection candidate, 2026-09-27
+
+- A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. The operating installation was not changed; live acceptance remains open. [CLI guide](../admin/README.md).
