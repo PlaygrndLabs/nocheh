@@ -126,3 +126,7 @@ revision is the complete ledger before this summary replaced it.
 ## Operating Honcho gateway denials, 2026-09-27
 
 - With production Honcho running, its dedicated embedding credential present, and one shared subscription login, synthetic embedding requests with an invalid credential, no workspace, and an unknown workspace were rejected with HTTP 401, 403, and 403. The pilot ledger stayed at one labeled historical carryover row and $0.52 reserved. Memory remains unattached and unverified with no ingestion receipt. Fresh guarded embedding, ingestion, retrieval, restart, provider-failure recovery, and the exact projection receipt remain release gates. [Evidence](../compatibility/results/2026-09-27-honcho-gateway-denials.json).
+
+## Fresh owner DM delivery and latency, 2026-09-27
+
+- An ordinary owner Telegram DM reached the restored operating stack. Its preparation and dispatch completed with one attempt and one linked delivered reply; the owner confirmed exactly one sensible visible response. The Archive dashboard linked the incoming event to that reply. Capture to completion took about 172 seconds. No unexpected profile tool was recorded on this turn, leaving the prior intermittent failure and response delay unresolved. [Content-free evidence](../compatibility/results/2026-09-27-owner-dm-dispatch-latency.json).
