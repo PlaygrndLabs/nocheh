@@ -10,6 +10,17 @@ export interface Interpretation {
 }
 export interface LearningEvidence {reference:SourceReference;text:string;space:string}
 
+/** A learned rule can guide a new conclusion but is not an original source ID. */
+export function triggeredInterpretations(input:unknown,trigger:string,ruleIds:string[]):unknown {
+  const result=object(input);
+  if(!Array.isArray(result.interpretations))return input;
+  const rules=new Set(ruleIds);
+  return {...result,interpretations:result.interpretations.filter(raw=>
+    raw&&typeof raw==='object'&&Array.isArray(raw.evidence_ids)&&raw.evidence_ids.includes(trigger)).map(raw=>({
+      ...raw,evidence_ids:raw.evidence_ids.filter((id:unknown)=>!rules.has(String(id)))
+    }))};
+}
+
 /** A model can propose interpretations, never administration or privacy policy. */
 export function parseInterpretations(input:unknown,evidence:LearningEvidence[],space:string,projects:{id:string;name:string}[],sessionId?:string):Interpretation[] {
   const result=object(input);
