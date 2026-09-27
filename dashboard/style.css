@@ -200,9 +200,13 @@ html,body,#root{background:var(--n-bg);color:var(--n-text)}body{font:14px/1.55 s
 .owner-records>article{min-width:0;border:1px solid var(--n-line);border-radius:10px;padding:20px;background:var(--n-panel)}
 .owner-records h3{margin:0;font-size:17px}
 .owner-records .n-actions{margin-top:16px}
-.learned-records .list-heading{align-items:flex-start}.learned-records .list-heading h3{min-width:0;overflow-wrap:anywhere}.learned-records .list-heading .ui-badge{flex:0 0 auto}
-.learned-card-status{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;margin-top:16px;padding-top:12px;border-top:1px solid var(--n-line);color:var(--n-muted);font-size:12px;font-weight:600}
-.learned-card-status span:first-child{color:var(--n-accent)}
+.learned-records .learned-card{display:flex;flex-direction:column;align-items:flex-start}
+.learned-card h3{width:100%;min-height:2.7em;line-height:1.35;overflow-wrap:anywhere}
+.learned-card-details{display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;width:100%;min-height:56px;margin-top:14px}
+.learned-card-details .ui-badge{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
+.learned-card-details .learned-revision-badge{background:color-mix(in srgb,var(--n-accent) 15%,var(--n-panel));color:var(--n-accent)}
+.learned-card .memory-prose{width:100%;margin:16px 0}
+.learned-card-action{width:100%;margin-top:auto;padding-top:14px;border-top:1px solid var(--n-line)}
 .learned-comparison{display:grid;gap:12px;margin-block:20px}.learned-version{min-width:0;padding:16px;border:1px solid var(--n-line);border-radius:9px;background:var(--n-panel)}.learned-version-current{border-inline-start:3px solid var(--n-accent)}.learned-version .list-heading{margin-bottom:8px}.learned-version h3{margin:0;font-size:14px}.learned-version .memory-prose{margin:0}.learned-status{margin:0 0 20px}.learned-save-status{padding:12px;border:1px solid var(--n-accent);border-radius:7px;color:var(--n-accent);font-size:13px}
 .owner-pagination{display:grid;grid-template-columns:minmax(104px,1fr) auto minmax(104px,1fr);align-items:center;justify-content:center;gap:8px;width:min(100%,330px);margin:20px auto 0}
 .owner-pagination .ui-button{width:100%}
