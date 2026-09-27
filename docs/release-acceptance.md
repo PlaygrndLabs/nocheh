@@ -59,6 +59,16 @@ and provider-failure recovery within the existing spending cap; its verified
 connection, ready workspace, context snapshot and ingestion receipt must all be
 newer than the reset backlog boundary.
 
+For the detached Honcho preflight, an owner-authenticated operator may issue a
+thirty-minute synthetic acceptance workspace at
+`POST /v1/memory/honcho/acceptance-session`. Use only synthetic content in that
+workspace. Its metered chat and embedding requests still pass through guarded
+preparation. Close it with
+`DELETE /v1/memory/honcho/acceptance-session/WORKSPACE_ID` after the six checks;
+the live acceptance report must name that closed workspace and retain its
+provider and budget evidence. This path cannot create an accepted production
+memory generation or satisfy owner learned-recall and reset validation by itself.
+
 Use a plain sentence for the exact-delivery test. If the privacy guard masks a
 harmless phrase before the assistant sees it, retain that evidence, correct the
 guarded projection or detector, and rerun the affected check before calling it a

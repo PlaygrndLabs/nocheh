@@ -28,6 +28,7 @@ import {drainSourceSpool} from './capture.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {telegramDirectory} from './telegram-directory.js';
+import {storageGuardService} from './guard-service.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -47,7 +48,13 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
       await assertGuardConfiguration(s.guards,config.guardMode);
       await s.configuration.assert(config.assistant);
-      return json(res,200,await s.memory.prepareRequest(await readJson(req,1024*1024)));
+      const body=await readJson(req,1024*1024);
+      if(await s.memory.acceptanceRequest(body)) {
+        const input=object(body),route=string(input.route,100);
+        const guarded=await storageGuardService(s)({admin:true,scope:null},{destination:'http://honcho-provider-gateway:8790'+route,payload:input.payload});
+        return json(res,200,{payload:guarded.payload});
+      }
+      return json(res,200,await s.memory.prepareRequest(body));
     }
     const principal=reader(req,config.token);
     if(req.method==='GET'&&path==='/v1/runtime') {
@@ -219,6 +226,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(req.method==='POST')return json(res,200,await s.memory.connection(principal,await readJson(req)));
     }
     if(path==='/v1/memory/honcho/verify'&&req.method==='POST'){admin(principal);return json(res,200,await s.memory.acceptVerification(principal,await readJson(req)));}
+    if(path==='/v1/memory/honcho/acceptance-session'&&req.method==='POST')return json(res,200,await s.memory.issueAcceptance(principal));
+    const acceptanceSession=path.match(/^\/v1\/memory\/honcho\/acceptance-session\/([a-f0-9]{64})$/);
+    if(acceptanceSession&&req.method==='DELETE')return json(res,200,await s.memory.closeAcceptance(principal,acceptanceSession[1]!));
     if(req.method==='POST'&&['/v1/memory/honcho/context','/v1/memory/honcho/recall'].includes(path)) {
       if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
       const body=object(await readJson(req));return result(path.endsWith('/context')?await s.memory.context(principal):await s.memory.recall(principal,string(body.query??'',2000)),true);

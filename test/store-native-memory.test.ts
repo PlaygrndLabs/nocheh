@@ -8,6 +8,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {storageGuardService} from '../src/stores/guard-service.js';
 
 test('native memory keeps content derived, reconciles uncertain writes and rebuilds corrected guarded generations',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -45,12 +46,28 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     await services.guards.reconcile();await services.guards.setMode('off');await services.guards.setMode('on');
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');
     let status=await services.memory.status();
+    const acceptance=await services.memory.issueAcceptance(owner);
+    assert.match(acceptance.workspace,/^[a-f0-9]{64}$/);
+    const synthetic={workspace:acceptance.workspace,route:'/v1/embeddings',payload:{model:'text-embedding-3-small',input:'Synthetic saffronpass'}};
+    assert.equal(await services.memory.acceptanceRequest(synthetic),true);
+    const syntheticPrepared=await storageGuardService(services)(owner,{destination:'http://honcho-provider-gateway:8790/v1/embeddings',payload:synthetic.payload});
+    assert.ok(!JSON.stringify(syntheticPrepared.payload).includes('saffronpass'),'synthetic provider input is guarded before egress');
+    await assert.rejects(services.memory.acceptanceRequest({...synthetic,route:'/v1/files'}),{code:'memory_route_denied'});
+    assert.equal(await services.memory.acceptanceRequest({...synthetic,workspace:'0'.repeat(64)}),false);
+    await services.memory.closeAcceptance(owner,acceptance.workspace);
+    assert.equal(await services.memory.acceptanceRequest(synthetic),false,'closed acceptance workspace cannot reach provider');
+    const allChecks={subscription_reasoning:'passed',ingestion:'passed',retrieval:'passed',embedding_guarded:'passed',restart:'passed',provider_failure:'passed'};
+    await assert.rejects(services.memory.acceptVerification(owner,{format:'nocheh-honcho-live-v1',status:'passed',synthetic_only:true,
+      checks:allChecks,ledger:{reserved_usd:0.53,limit_usd:5}}),{code:'honcho_live_acceptance_pending'});
+    await services.guards.setMode('off');await services.guards.setMode('on');
+    assert.equal(await services.memory.acceptanceRequest(synthetic),false,'a changed guard binding retires acceptance');
     const connect={attached:true,include_history:false,catch_up:false,expected_revision:status.connection.revision,operation_id:key+':attach'};
     await assert.rejects(services.memory.connection(owner,connect),{code:'honcho_live_acceptance_pending'});
     await assert.rejects(services.memory.acceptVerification(owner,{format:'not-a-live-report',checks:{},ledger:{}}),{code:'honcho_live_acceptance_pending'});
     // Synthetic fixture authority only; this does not create a live acceptance report.
     await stores.control.query('UPDATE memory_engine_connection SET verified=true WHERE singleton');
     status=await services.memory.connection(owner,connect);assert.equal(status.connection.attached,true);
+    await assert.rejects(services.memory.issueAcceptance(owner),{code:'honcho_acceptance_requires_detached_memory'});
     const project=await services.projects.save(owner,{name:'Atlas',description:'Connected memory fixture',state:'active',expected_revision:0,operation_id:key+':project'});
     await services.projects.assign(owner,{space_id:group,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':project-assignment'});
     const event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:key,revision:'1',occurred_at:null,
