@@ -198,3 +198,11 @@ revision is the complete ledger before this summary replaced it.
 ## Scoped owner-correction recall rollout, 2026-09-27
 
 - Local app revision `dedc2cd` and its rebuilt pinned Hermes image became active. All 17 services were healthy, the app reported workflows connected, and the running Hermes container contained the correction-precedence guidance. A fresh owner-DM recall was requested but had not yet been observed. The fresh reaction interpretation failed `unavailable_interpretation_evidence`: the preserved model result cited a learned-entry ID as though it were an original source ID. The same-topic conversational answer remained a separate pass, while derived reaction meaning stayed pending. [Evidence](../compatibility/results/2026-09-27-owner-correction-and-workflow-recovery.json).
+
+## Operating source mount transition, 2026-09-27
+
+- After explicit owner direction, recreated only the Honcho provider gateway, API, and deriver using the operating Compose project and existing pinned local images. Each reached healthy status with `services/honcho` or `tools/operations/provider` mounts; all 17 Compose services were healthy. No running container retained an old `integrations/`, `scripts/`, or `web/` mount. Removed the ignored old Honcho source copy, generated web output, bytecode caches, temporary source backup, and the local ignore rule. The old `integrations/`, `web/`, `scripts/`, and `admin/` directories were absent afterward. The app and Hermes services were not recreated. [Metadata-only evidence](../compatibility/results/2026-09-27-honcho-mount-transition.json).
+
+## Single agent support directory, 2026-09-27
+
+- On owner direction, moved the Graphify skill into `.agent/skills` beside the admin and deployment skills. Removed the tracked `.agents/` and `.codex/` support trees, the agent-specific hook config, and the root `CLAUDE.md` link. Root `AGENTS.md` remains the working-instructions file; no runtime services changed. [Decision](adr/0070-single-agent-support-root.md).

@@ -34,7 +34,7 @@ Telegram is an adapter; owned source data, useful memory, and reasoning are the 
 - Complete authorized work and continue independent work when a dependency is blocked. Do not ask for repeated permission for already authorized phase work.
 - Keep credentials, source conversations, and runtime data out of commits and logs. A worktree does not isolate Compose resources or grant access to another installation's credentials or state.
 - In docs and commit messages, never point to the external example project by name or path. Remove any such references found in current files before committing.
-- Keep project agent skills in `.agent/skills` so any AI agent can read the same instructions. Discover the admin and deployment skills there; compatibility skill paths resolve to those canonical files.
+- Keep project agent skills and supporting files only in `.agent/`. Discover the admin, deployment, and Graphify skills in `.agent/skills`. Do not add agent-specific support directories or compatibility skill links; `AGENTS.md` remains the root working-instructions file.
 - Use `./bin/nocheh` for owner operations. Keep command routing in `tools/cli`, operational code in `tools/operations`, runtime helpers in `tools/runtime`, acceptance tools in `tools/acceptance`, development helpers in `tools/development`, and build helpers in `tools/build`. Keep the dashboard in `dashboard` and the Hermes plugin and Honcho service in `services`. Use absolute `tools.*` and `services.*` Python imports and the shared repository-root resolver.
 
 </repository_workflow>
