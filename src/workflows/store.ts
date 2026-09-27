@@ -71,14 +71,14 @@ export async function requestWorkflow(client:pg.PoolClient,family:WorkflowFamily
   return id;
 }
 
-/** A touch may race a running source review: that review can return to waiting
+/** A touch may race a running source workflow: it can return to waiting
  * after the touch skipped all idle predecessors. Retire only idle predecessors;
  * never rewrite a leased execution or its durable effect receipt. */
-export async function retireSupersededSourceReviews(pool:pg.Pool,limit=100):Promise<number> {
+export async function retireSupersededSourceWorkflows(pool:pg.Pool,limit=100):Promise<number> {
   if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw new HttpError(400,'invalid_workflow_limit');
   const result=await pool.query(`WITH obsolete AS (
     SELECT older.id FROM workflow_registry older
-    WHERE older.family='memory_review' AND older.job_id LIKE 'source:%'
+    WHERE older.family IN ('memory_review','honcho') AND older.job_id LIKE 'source:%'
       AND older.state IN ('queued','waiting','retryable_failed') AND older.lease_token IS NULL
       AND EXISTS (SELECT 1 FROM workflow_registry newer WHERE newer.family=older.family
         AND newer.job_id=older.job_id AND newer.version=older.version AND newer.generation>older.generation)

@@ -11,7 +11,7 @@ export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,fam
   if(!row||row.family!==family||row.dispatch!==dispatch)return {...waiting(),state:'skipped',waiting_reason:null};
   if((closedStates as readonly string[]).includes(row.state))return {state:row.state,stage:row.stage,attempts:row.attempts,next_attempt:Date.now(),waiting_reason:null};
   if(row.owner!=='inngest'||!row.admission)return waiting();
-  if(family==='memory_review'&&row.job_id.startsWith('source:')) {
+  if((family==='memory_review'||family==='honcho')&&row.job_id.startsWith('source:')) {
     const stopped=await pool.query(`UPDATE workflow_registry old SET state='skipped',waiting_reason='superseded',
       next_attempt=NULL,revision=revision+1,updated_at=now() WHERE old.id=$1 AND old.dispatch=$2
       AND old.state IN ('queued','waiting','retryable_failed') AND old.lease_token IS NULL
@@ -29,7 +29,7 @@ export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,fam
     let result:Observation;
     try{result=await operation(row.job_id,{owner:'inngest',epoch:row.epoch});}
     catch(error){result=executionFailure(error,row.attempts);}
-    if(family==='memory_review'&&row.job_id.startsWith('source:')&&!(closedStates as readonly string[]).includes(result.state)) {
+    if((family==='memory_review'||family==='honcho')&&row.job_id.startsWith('source:')&&!(closedStates as readonly string[]).includes(result.state)) {
       const newer=await pool.query('SELECT 1 FROM workflow_registry WHERE family=$1 AND job_id=$2 AND version=$3 AND generation>$4 LIMIT 1',
         [family,row.job_id,row.version,row.generation]);
       if(newer.rowCount)result={...result,state:'skipped',next_attempt:Date.now(),waiting_reason:'superseded'};
