@@ -214,3 +214,7 @@ revision is the complete ledger before this summary replaced it.
 ## Corrected recall and forum learning, 2026-09-27
 
 - Scoped owner-correction recall and trigger-only reaction evidence reached the local operating app. A fresh owner DM produced one linked reply with the corrected meaning and no superseded wording. The same-topic forum question produced one linked answer explaining the older reaction as done. The separate reaction-derived interpretation failed its saved checkpoint's quote requirement. Read-only inspection found two active, same-scope forum conventions with equivalent meanings that the exact-text conflict check treated as conflicting. A conservative equivalence fix passed focused tests and replay against those entries; activation and a fresh guarded reaction interpretation remain pending. Private event details are retained only in ignored local state.
+
+## Equivalent-convention rollout, 2026-09-27
+
+- The app activated exact local main revision `9f95398` with the conservative equivalent-convention repair and reached healthy state. A new guarded generation began reprocessing the previously captured human reaction; its source review and Honcho synchronization were still waiting on production memory prerequisites at the latest observation. The distinct derived meaning remains pending. The build, two focused checks, and AST graph refresh passed; the isolated database fixture stayed skipped under the one-stack rule. Private identifiers and the detailed live report remain in ignored local state.
