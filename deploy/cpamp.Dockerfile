@@ -8,7 +8,7 @@ COPY package*.json ./
 COPY apps/web/package.json ./apps/web/package.json
 RUN npm ci
 COPY apps/web ./apps/web
-COPY --from=nocheh_source scripts/patch-cpamp.mjs /tmp/patch-cpamp.mjs
+COPY --from=nocheh_source tools/build/patch-cpamp.mjs /tmp/patch-cpamp.mjs
 RUN node /tmp/patch-cpamp.mjs /app
 WORKDIR /app/apps/web
 RUN VERSION=$VERSION npm run build

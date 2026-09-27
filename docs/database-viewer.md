@@ -1,6 +1,6 @@
 # Browse installation databases
 
-For the ordinary owner workflow, run `./scripts/nocheh dashboard`, open
+For the ordinary owner workflow, run `./bin/nocheh dashboard`, open
 **Archive**, and use the records table. Selecting **View / edit** opens the
 immutable original beside its editable guarded version. Saves create a new
 revision and never rewrite the source evidence.
@@ -30,10 +30,10 @@ archive are needed. It is read-only; product records must be changed through the
 dashboard, API, or CLI commands so revision, authorization, invalidation, and
 provenance rules still apply.
 
-Run `./scripts/nocheh db`, then open <http://127.0.0.1:8782>.
+Run `./bin/nocheh db`, then open <http://127.0.0.1:8782>.
 This starts the pinned pgweb image from the optional Compose `tools` profile.
 It reuses the current PostgreSQL archive and does not restart the assistant.
-`./scripts/nocheh down` also stops the viewer; run `db` to start it again.
+`./bin/nocheh down` also stops the viewer; run `db` to start it again.
 
 The owner can inspect all archive scopes here. The HTTP port is loopback-only;
 there is no separate web login. Do not publish this port. The dedicated

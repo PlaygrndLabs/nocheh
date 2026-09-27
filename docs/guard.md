@@ -1,7 +1,7 @@
 # Saved guarded copies
 
 Set `NOCHEH_GUARD_MODE=on` (default) or `off` in the ignored `.env`, then
-apply with `./scripts/nocheh up`. Existing `auto` values migrate to `on`.
+apply with `./bin/nocheh up`. Existing `auto` values migrate to `on`.
 Endpoint trust no longer changes this choice. ADR-0033 supersedes the older
 outgoing-only policy; historical ADRs and compatibility reports remain unchanged.
 
@@ -32,6 +32,6 @@ fresh MEMORY.md, USER.md and sessions; rebuilding memory is tracked in phase G6.
 Preparing an import does not grant learning consent. Honcho activation and its live
 provider checks are tracked separately in TASK.md.
 
-Run `./scripts/nocheh test` for behavior checks. Synthetic acceptance covers exact
+Run `./bin/nocheh test` for behavior checks. Synthetic acceptance covers exact
 original bytes, restart/duplicate preparation, authoritative edits, current-only
 retrieval, file restrictions, audience isolation and stale delivery rejection.

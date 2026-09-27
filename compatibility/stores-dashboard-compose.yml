@@ -15,7 +15,7 @@ services:
       TELEGRAM_ENABLED: "false"
     volumes:
       - ../dist:/app/dist:ro
-      - ../web/dist:/app/web/dist:ro
+      - ../dashboard/dist:/app/dashboard/dist:ro
     ports: ["127.0.0.1:${NOCHEH_STORES_UI_PORT:?Dedicated preview port required}:18859"]
     networks: [default, preview_http]
     depends_on:

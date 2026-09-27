@@ -9,8 +9,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from scripts import (configuration, reset_inventory, reset_ownership,
-                     reset_preservation, reset_protocol, reset_quiescence)
+from tools.operations.installation import configuration
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_ownership
+from tools.acceptance import reset_preservation
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
 
 
 class ResetPreservationTests(unittest.TestCase):

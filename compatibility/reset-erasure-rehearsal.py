@@ -10,9 +10,15 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import (configuration, reset_accounting, reset_erasure, reset_inventory,
-                     reset_ownership, reset_preservation, reset_protocol, reset_quiescence)
-from scripts.store_recovery import StoreRecovery
+from tools.operations.installation import configuration
+from tools.acceptance import reset_accounting
+from tools.acceptance import reset_erasure
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_ownership
+from tools.acceptance import reset_preservation
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
+from tools.operations.installation.store_recovery import StoreRecovery
 
 MARKER = 'SYNTHETIC_ERASURE_CONTENT_6c62520d'
 POSTGRES_PASSWORD = '1' * 64

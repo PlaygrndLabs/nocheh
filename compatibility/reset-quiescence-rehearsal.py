@@ -15,8 +15,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import configuration, reset_inventory, reset_protocol, reset_quiescence
-from scripts.store_recovery import StoreRecovery
+from tools.operations.installation import configuration
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
+from tools.operations.installation.store_recovery import StoreRecovery
 
 WRITER = '''import os,signal,time
 from pathlib import Path

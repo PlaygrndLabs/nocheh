@@ -5,7 +5,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from scripts import admin
+from tools.cli import admin
 
 
 EVENT = "a" * 64

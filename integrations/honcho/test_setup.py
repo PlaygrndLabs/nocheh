@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import honcho_setup
+from tools.operations.memory import honcho_setup
 
 
 class HonchoSetupTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class HonchoSetupTests(unittest.TestCase):
         environment = os.environ.copy()
         environment.pop('NOCHEH_INSTALLATION_ROOT', None)
         result = subprocess.check_output(
-            [sys.executable, '-c', 'from scripts.honcho_setup import ROOT; print(ROOT)'],
+            [sys.executable, '-c', 'from tools.operations.memory.honcho_setup import ROOT; print(ROOT)'],
             cwd=repository, env=environment, text=True,
         )
         self.assertEqual(Path(result.strip()), repository)
@@ -24,7 +24,7 @@ class HonchoSetupTests(unittest.TestCase):
     def test_monthly_cutover_requires_live_acceptance_and_attachment(self):
         with tempfile.TemporaryDirectory() as folder:
             ledger = Path(folder) / 'ledger/budget.sqlite'
-            with patch.object(honcho_setup, 'STATE', Path(folder)),                  patch('scripts.archive.API') as api,                  patch('integrations.honcho.meter.Ledger') as metered:
+            with patch.object(honcho_setup, 'STATE', Path(folder)),                  patch('tools.operations.archive.archive.API') as api,                  patch('integrations.honcho.meter.Ledger') as metered:
                 for connection in (
                     {'verified': False, 'attached': False},
                     {'verified': True, 'attached': False},

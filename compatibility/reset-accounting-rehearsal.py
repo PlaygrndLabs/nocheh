@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import reset_accounting as reset
+from tools.acceptance import reset_accounting as reset
 
 MARKER = 'SYNTHETIC_PRIVATE_CONVERSATION_c319e00c'
 

@@ -62,19 +62,19 @@ does not require another login or a paid transcription key.
 
 ## Operating the local system
 
-- Apply configuration with `./scripts/nocheh up`. `auto` migrates to `on`.
+- Apply configuration with `./bin/nocheh up`. `auto` migrates to `on`.
 - Dashboard → Archive → Browse → open a source to inspect/edit guarded copies,
   original file access, preparation status and revision history.
 - Dashboard → Honcho shows attachment, generations, receipts and live-gate status.
-- `./scripts/nocheh memory honcho status` provides the same connection state.
-- `./scripts/nocheh memory honcho attach --catch-up` includes consented sources
+- `./bin/nocheh memory honcho status` provides the same connection state.
+- `./bin/nocheh memory honcho attach --catch-up` includes consented sources
   received while detached. `--include-history` includes older consented sources.
-- `./scripts/nocheh memory honcho detach` stops memory use without deleting data.
-- `./scripts/nocheh backup` preserves originals, guarded histories, native state,
+- `./bin/nocheh memory honcho detach` stops memory use without deleting data.
+- `./bin/nocheh backup` preserves originals, guarded histories, native state,
   consent, receipts and a spending-ledger snapshot. Restores start inactive and
   detached on a separate memory network. Never replace a newer spending ledger
   with an older snapshot. Rebuild Honcho from the archive after reconciliation.
-- `python3 -m scripts.archive import DIRECTORY --restore-guarded` explicitly
+- `python3 -m tools.operations.archive.archive import DIRECTORY --restore-guarded` explicitly
   restores trusted guarded history from your own export. Ordinary imports prepare
   copies again and do not accept supplied guarded text as already trusted.
 
@@ -120,17 +120,17 @@ wins, including an empty value. Only the Honcho provider gateway receives the pa
 Settings displays credential presence, never its value. Edit these fields in `.env`
 and restart the production Honcho services through the installation CLI.
 
-`./scripts/nocheh provider login` starts the one shared CLIProxyAPI device login.
+`./bin/nocheh provider login` starts the one shared CLIProxyAPI device login.
 Production Honcho uses pinned revisions and the installation Compose project.
 The retained state directory and ledger have historical names for data compatibility;
 they are production state and must not be reset to tidy their names. For a fresh
 installation, prepare the source and credentials, then start the production profile:
 
 ```sh
-./scripts/nocheh honcho init
-./scripts/nocheh honcho runtime-init
-./scripts/nocheh up
-./scripts/nocheh honcho runtime-up
+./bin/nocheh honcho init
+./bin/nocheh honcho runtime-init
+./bin/nocheh up
+./bin/nocheh honcho runtime-up
 ```
 
 Run the [Honcho acceptance procedure](guarded-memory-plan.md) before attaching
@@ -140,7 +140,7 @@ synthetic fixture does not mark the memory connection verified. Attachment remai
 an explicit owner operation. The optional Hermes-versus-Honcho comparison harness
 has been retired; it was not a production acceptance gate.
 
-The total pilot cap stays at $5. After the pilot, `./scripts/nocheh honcho monthly`
+The total pilot cap stays at $5. After the pilot, `./bin/nocheh honcho monthly`
 enables the agreed $5 per UTC calendar month cap; it requires accepted, attached
 memory and preserves all pilot reservations. Repeating it cannot reset spending.
 

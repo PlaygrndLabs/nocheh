@@ -55,7 +55,7 @@ old Telegram messages to be answered or authorize an external action.
 </routes>
 
 <cli>
-`./scripts/nocheh sources --help`, `projects --help`, `learned --help`, and
+`./bin/nocheh sources --help`, `projects --help`, `learned --help`, and
 `sharing --help` describe the equivalent owner commands. They resolve the saved
 local API configuration without running setup or activating services.
 

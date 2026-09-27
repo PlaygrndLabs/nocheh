@@ -1,5 +1,5 @@
 import unittest
-from scripts.services import describe
+from tools.operations.installation.services import describe
 
 
 class ServiceCatalogTests(unittest.TestCase):

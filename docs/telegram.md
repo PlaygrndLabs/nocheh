@@ -6,17 +6,17 @@ selected groups. Owner-DM and selected-group replies have passed; the remaining
 disabled until a token, owner ID and explicit policy are configured. No VPS is needed.
 
 1. Create or select your bot in [BotFather](https://t.me/BotFather).
-2. Set `TELEGRAM_BOT_TOKEN` in `.env`, then run `./scripts/nocheh up`. Keep it out of chat,
+2. Set `TELEGRAM_BOT_TOKEN` in `.env`, then run `./bin/nocheh up`. Keep it out of chat,
    command-line arguments and Git.
 3. Open the bot's private chat and send a message. Add it to any group you want to
-   select. Run `./scripts/nocheh discover-telegram` to see numeric chat/sender IDs.
+   select. Run `./bin/nocheh discover-telegram` to see numeric chat/sender IDs.
    Discovery fsyncs observed updates and sends no messages. It runs only while
    assistant polling is disabled, so there is no competing poller.
 4. Configure the owner DM and selected groups, then apply the policy:
 
 ```sh
-./scripts/nocheh configure-telegram --owner-id 123456789 --group-id=-1001234567890
-./scripts/nocheh up
+./bin/nocheh configure-telegram --owner-id 123456789 --group-id=-1001234567890
+./bin/nocheh up
 ```
 
 Omit `--group-id` for DM only, or repeat it to select multiple groups. These IDs
@@ -34,14 +34,14 @@ so add an ID manually when a person has not appeared in those sources.
 The same controls are available in the CLI:
 
 ```sh
-./scripts/nocheh group-access list
-./scripts/nocheh group-access grant -1001234567890 987654321
-./scripts/nocheh group-access deny -1001234567890 987654321
-./scripts/nocheh group-access revoke -1001234567890 987654321
+./bin/nocheh group-access list
+./bin/nocheh group-access grant -1001234567890 987654321
+./bin/nocheh group-access deny -1001234567890 987654321
+./bin/nocheh group-access revoke -1001234567890 987654321
 ```
 
 Use discovered numeric user IDs. Each change applies to the running services;
-`--save-only` saves a batch for a later `./scripts/nocheh config apply`.
+`--save-only` saves a batch for a later `./bin/nocheh config apply`.
 Grant permits a participant to start a reply or tool-using turn in that group.
 Deny overrides grant. Revoke removes either decision and returns that participant
 to the owner-only default. Only the owner can administer these decisions.
@@ -103,7 +103,7 @@ In the owner's private DM:
 ```
 
 `/action` shows the destination and exact requested text. A live typed owner DM,
-the authenticated owner's Activity page or `./scripts/nocheh approvals` can approve.
+the authenticated owner's Activity page or `./bin/nocheh approvals` can approve.
 Group messages, imported history, callbacks and transcripts cannot approve or
 alter settings. Controlled shell, browser and public HTTPS MCP requests also use
 exact proposals and bounded revocable permissions; see ADR-0029. Uncertain
@@ -111,7 +111,7 @@ delivery remains ambiguous; it is not automatically resent.
 
 ## Validation
 
-`./scripts/nocheh test` exercises scope, native memory/session isolation, transcript
+`./bin/nocheh test` exercises scope, native memory/session isolation, transcript
 provenance and retry behavior, immutable action requests and owner-only approval.
 The synthetic native memory rehearsal sends no Telegram messages:
 

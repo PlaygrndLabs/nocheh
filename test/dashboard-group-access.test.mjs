@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {participantAllowed,switchDecision} from '../web/lib/group-access.js';
+import {participantAllowed,switchDecision} from '../dashboard/lib/group-access.js';
 
 test('default-denied people switch on and return to the saved default',()=>{
   const empty={granted:[],denied:[]},granted={granted:['73'],denied:[]};

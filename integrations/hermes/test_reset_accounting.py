@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import reset_accounting as reset
+from tools.acceptance import reset_accounting as reset
 
 ROOT = Path(__file__).resolve().parents[2]
 SENTINEL = 'ERASE_PRIVATE_CONVERSATION_5d481bbe'

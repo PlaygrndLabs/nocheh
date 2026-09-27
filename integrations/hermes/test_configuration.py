@@ -5,13 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.configuration import initialize, read_env, write_env, env_path, load, compose_environment
+from tools.operations.installation.configuration import initialize, read_env, write_env, env_path, load, compose_environment
 from integrations.hermes.environment import secret, telegram_policy
 
 
 class ConfigurationTests(unittest.TestCase):
     def test_auto_migrates_to_on_and_new_configuration_has_only_two_states(self):
-        from scripts.configuration import validate
+        from tools.operations.installation.configuration import validate
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state)
             self.assertEqual(values['NOCHEH_GUARD_MODE'],'on')
@@ -64,9 +64,9 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ValueError): secret('TELEGRAM_BOT_TOKEN')
 
     def test_group_access_grant_deny_revoke_and_invalid_setting(self):
-        from scripts.configuration import group_access, validate
-        from scripts.settings import save, view
-        from scripts.group_access import main
+        from tools.operations.installation.configuration import group_access, validate
+        from tools.operations.installation.settings import save, view
+        from tools.operations.security.group_access import main
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state)
             save(state,{'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':'-10'},view(state)['revision'])
@@ -90,8 +90,8 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(compose_environment(state)['NOCHEH_NATIVE_ADMIN_PORT'], '8800')
 
     def test_separate_storage_credentials_are_private_stable_and_explicitly_selected(self):
-        from scripts.configuration import compose_command,validate
-        from scripts.settings import view,save
+        from tools.operations.installation.configuration import compose_command,validate
+        from tools.operations.installation.settings import view,save
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state)
             names=['NOCHEH_'+name+'_PASSWORD' for name in ('ARCHIVE','DERIVED','CONTROL')]

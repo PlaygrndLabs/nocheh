@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import dev_preview
+from tools.development import dev_preview
 
 
 class DevPreviewTests(unittest.TestCase):

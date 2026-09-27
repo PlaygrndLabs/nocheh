@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.configuration import initialize,env_path,write_env,compose_environment,load
-from scripts.honcho_runtime import enable,operate
+from tools.operations.installation.configuration import initialize,env_path,write_env,compose_environment,load
+from tools.operations.memory.honcho_runtime import enable,operate
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -28,9 +28,9 @@ class HonchoRuntimeTests(unittest.TestCase):
             state=Path(folder);values=initialize(state);memory=state/'honcho';memory.mkdir()
             (memory/'internal_token').write_text('synthetic-memory-token')
             values['NOCHEH_MEMORY_TOKEN']='synthetic-memory-token';write_env(env_path(state),values)
-            with patch('scripts.honcho_runtime.subprocess.check_output',return_value='running-id\n'):
+            with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value='running-id\n'):
                 with self.assertRaisesRegex(ValueError,'quiesced_migration'):enable(state,memory)
-            with patch('scripts.honcho_runtime.subprocess.check_output',return_value=''),patch('scripts.honcho_runtime.subprocess.run',return_value=subprocess.CompletedProcess([],0)) as run:
+            with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value=''),patch('tools.operations.memory.honcho_runtime.subprocess.run',return_value=subprocess.CompletedProcess([],0)) as run:
                 with self.assertRaisesRegex(ValueError,'verified_adoption'):enable(state,memory)
                 self.assertEqual(run.call_count,1)
             self.assertEqual(load(state)['NOCHEH_HONCHO_ENABLED'],'false')

@@ -6,8 +6,9 @@ events, files, and separately recorded transcripts stay in an owned, portable ar
 [SPECS.md](SPECS.md) defines the product. [AGENTS.md](AGENTS.md) explains the coding
 workflow. [TASK.md](TASK.md) records implementation, activation, and outstanding
 acceptance; [ADRs](docs/adr/README.md) preserve the decision history.
-Agent skills for [admin inspection](.agent/skills/nocheh-admin/SKILL.md) and
+Agent skills for [admin inspection](.agent/skills/nocheh-admin-cli/SKILL.md) and
 [app deployment](.agent/skills/nocheh-deploy/SKILL.md) live in `.agent/skills`.
+
 
 The reviewed deployment combines application responsibilities and uses clear tool
 service names. See [the service map and workflow](docs/services.md).
@@ -22,19 +23,19 @@ Install Docker with Compose, Python 3 and Node 24.x, then run:
 
 ```bash
 npm ci                  # development/build dependencies; runtime tools are in Docker
-./scripts/nocheh init     # create .env with generated internal credentials
+./bin/nocheh init     # create .env with generated internal credentials
 # Edit .env for Telegram, model and optional guarding settings.
-./scripts/nocheh up       # build, start in the background, wait for health checks
+./bin/nocheh up       # build, start in the background, wait for health checks
 make dev                  # one source-mounted full core development stack
 make dev-status           # inspect that checkout's preview
 make dev-stop             # stop it; retain its database and generated state
-./scripts/nocheh status
-./scripts/nocheh diagnose # health, credentials presence, and archive job states
-./scripts/nocheh db       # optional read-only pgweb browser at 127.0.0.1:8782
-./scripts/nocheh test     # PostgreSQL, TypeScript and native Python integration tests
-./scripts/nocheh verify   # live synthetic subscription checks; consumes quota
-./scripts/nocheh provider status  # shared provider, login and monitor health
-./scripts/nocheh down     # stop services; retain data
+./bin/nocheh status
+./bin/nocheh diagnose # health, credentials presence, and archive job states
+./bin/nocheh db       # optional read-only pgweb browser at 127.0.0.1:8782
+./bin/nocheh test     # PostgreSQL, TypeScript and native Python integration tests
+./bin/nocheh verify   # live synthetic subscription checks; consumes quota
+./bin/nocheh provider status  # shared provider, login and monitor health
+./bin/nocheh down     # stop services; retain data
 ```
 
 Stop the operating Nocheh stack before `make dev`; the command refuses to start
@@ -55,7 +56,7 @@ The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services a
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.
 
-Run `./scripts/nocheh dashboard` for owner archive inspection, guarded editing,
+Run `./bin/nocheh dashboard` for owner archive inspection, guarded editing,
 memory and configuration. The optional database browser reuses pgweb for table
 browsing, SQL queries and CSV/JSON export. See
 [browsing the archive](docs/database-viewer.md) for readable message queries.
@@ -64,8 +65,8 @@ Configuration is in the ignored root `.env`; `.env.example` documents its fields
 Bootstrap generates missing internal passwords and creates writable state under
 ignored `data/local/`. CLIProxyAPI owns the shared refreshable OAuth login under
 `data/local/provider/auth/`; Hermes and Honcho use separate local client keys.
-For a new installation, start the services, run `./scripts/nocheh provider login`,
-then `./scripts/nocheh provider cutover`.
+For a new installation, start the services, run `./bin/nocheh provider login`,
+then `./bin/nocheh provider cutover`.
 Reasoning uses subscription authentication. Optional Honcho activation additionally
 requires a dedicated embeddings credential, capped at $5 for the pilot and then
 $5 per month. No unrelated provider credentials or local models are used.

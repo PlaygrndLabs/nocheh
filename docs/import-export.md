@@ -20,15 +20,15 @@ Slack and Discord export parsers are not implemented. The Telegram Desktop
 parser and generic portable archive import remain the available file importers.
 </platform_sources>
 
-Start Compose with `./scripts/nocheh up`. The CLI reads the ignored service token
+Start Compose with `./bin/nocheh up`. The CLI reads the ignored service token
 and generated local port configuration; credentials never appear in arguments.
 
 ```sh
-python3 scripts/archive.py import-telegram /absolute/export/result.json
-python3 scripts/archive.py import-telegram /absolute/export/result.json --scope=-1001234567890
-python3 scripts/archive.py export /absolute/new-export-directory
-python3 scripts/archive.py import /absolute/new-export-directory
-python3 scripts/archive.py replay EVENT_ID
+./bin/nocheh archive import-telegram /absolute/export/result.json
+./bin/nocheh archive import-telegram /absolute/export/result.json --scope=-1001234567890
+./bin/nocheh archive export /absolute/new-export-directory
+./bin/nocheh archive import /absolute/new-export-directory
+./bin/nocheh archive replay EVENT_ID
 ```
 
 Both a single-chat Telegram Desktop JSON file and `chats.list` exports are

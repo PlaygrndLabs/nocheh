@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.configuration import initialize, load, write_env, env_path
-from scripts.settings import view, save, apply
+from tools.operations.installation.configuration import initialize, load, write_env, env_path
+from tools.operations.installation.settings import view, save, apply
 
 
 class SettingsTests(unittest.TestCase):
@@ -28,11 +28,11 @@ class SettingsTests(unittest.TestCase):
             baseline = load(state)
             save(state, {'NOCHEH_MODEL': 'new'}, view(state)['revision'])
             save(state, {'NOCHEH_GUARD_MODE': 'off'}, view(state)['revision'])
-            with patch('scripts.settings.subprocess.run') as run:
+            with patch('tools.operations.installation.settings.subprocess.run') as run:
                 run.return_value.returncode = 1
                 self.assertEqual(apply(state), {'status': 'apply_failed', 'rolled_back': False})
             self.assertEqual(load(state), baseline)
-            with patch('scripts.settings.subprocess.run') as run:
+            with patch('tools.operations.installation.settings.subprocess.run') as run:
                 run.return_value.returncode = 0
                 result = apply(state)
                 self.assertEqual(result['apply_state'], 'current')
