@@ -85,8 +85,13 @@ latest observation. Their outbox events were published; Telegram and source
 review each received one run, but preparation had none and stayed queued.
 Telegram waited on the guard and source review waited on a receipt. The
 registered workers were connected; 562 older source review workflows were
-waiting. The prior violet job was skipped after the
-guard epoch advanced from 30 to 31, so it cannot establish learned publication.
+waiting. At the later diagnosis, 482 source workflows waited on a prerequisite
+across only 63 distinct sources; 61 sources had multiple waiting generations,
+with as many as 22 for one source. The fresh owner preparation still had no
+run or linked reply at 14:39Z, over 21 minutes after capture. This is an
+operating scheduler backlog and a release blocker. The prior violet job was
+skipped after the guard epoch advanced from 30 to 31, so it cannot establish
+learned publication.
 
 The owner also stated a local 👍 convention in the selected forum topic at
 2026-09-27T14:11:09Z. A non-owner human added 👍 to the earlier source message
