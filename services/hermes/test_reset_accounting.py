@@ -27,7 +27,7 @@ class ResetAccountingTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.path = self.root / 'usage.sqlite'
         with sqlite3.connect(self.path) as db:
-            db.executescript((ROOT / 'compatibility/fixtures/cpamp-reset-schema.sql').read_text())
+            db.executescript((ROOT / 'test/fixtures/acceptance/cpamp-reset-schema.sql').read_text())
             self.assertEqual(len(reset.schema(db)), 43)
             db.execute('PRAGMA journal_mode=WAL')
             insert(db, 'usage_events', id=-3, event_hash='negative-import', raw_json=json.dumps({'prompt': SENTINEL, 'usage': {'totalTokens': '700', 'cacheInputMode': 'separate_from_input'}}))

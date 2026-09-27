@@ -79,7 +79,7 @@ services:
     volumes:
       - ./services:/workspace/services:ro
       - ./tools:/workspace/tools:ro
-      - ./compatibility/fixtures:/workspace/compatibility/fixtures:ro
+      - ./test/fixtures/acceptance:/workspace/test/fixtures/acceptance:ro
       - dev_graph_dist:/workspace/services/hermes/dashboard/dist:ro
 
   chatgpt-speech:

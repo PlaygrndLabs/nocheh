@@ -188,7 +188,7 @@ def prepare_source_mounts():
 
 def prepare_runtime_images(env):
     """Reuse only revision-checked, credential-free pinned image contents."""
-    locks = json.loads((ROOT / 'compatibility/upstreams.lock.json').read_text())
+    locks = json.loads((ROOT / 'deploy/upstreams.lock.json').read_text())
     sources = (
         ('nocheh-hermes:local', locks['hermes']['revision'], PROJECT + ':hermes-base'),
         ('nocheh-cliproxy:c76dfd4e', locks['cliproxy']['revision'], PROJECT + ':cliproxy'),

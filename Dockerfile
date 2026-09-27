@@ -8,7 +8,7 @@ RUN npm ci
 COPY tsconfig.json tsconfig.dashboard.json ./
 COPY SPECS.md ./SPECS.md
 COPY tools ./tools
-COPY compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
+COPY deploy/upstreams.lock.json ./deploy/upstreams.lock.json
 COPY services/hermes/dashboard ./services/hermes/dashboard
 COPY dashboard ./dashboard
 COPY src ./src
@@ -59,7 +59,6 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY tools ./tools
 COPY services ./services
-COPY compatibility ./compatibility
 COPY deploy ./deploy
 COPY --from=development /app/dashboard/dist ./dashboard/dist
 ENV PYTHONDONTWRITEBYTECODE=1 NOCHEH_CONTAINER=1 HOME=/tmp

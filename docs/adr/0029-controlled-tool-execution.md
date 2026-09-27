@@ -28,4 +28,4 @@ decision evidence retain provenance alongside the unchanged source originals.
 
 MCP uses the [2025-11-25 transport contract](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports). JSON responses only are supported; server-sent events and interactive authentication remain unavailable.
 
-Verification: [content-free local acceptance](../../compatibility/results/2026-09-08-controlled-tools.json). Backup drains the executor and includes its pending receipts. Restored executors remain inactive.
+Verification: content-free local acceptance (report removed for privacy). Backup drains the executor and includes its pending receipts. Restored executors remain inactive.

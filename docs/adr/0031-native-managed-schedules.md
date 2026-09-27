@@ -38,4 +38,4 @@ The full native editor remains available for the supported schedule fields. Smal
 pinned-source patches add conflict revisions, request identities, run limits and
 explicit cancel/catch-up controls. CLI and dashboard call the same owner adapter.
 
-[Content-free acceptance evidence](../../compatibility/results/2026-09-08-native-schedules.json).
+Content-free acceptance evidence (report removed for privacy).
