@@ -41,6 +41,24 @@ and reset-specific gates remain pending.
 | Honcho | Earlier attached production ingestion, scoped recall, outage, and restart acceptance passed on the former installation. The restored Honcho database has zero messages; the new control connection remains unattached and unverified. Production Honcho is running with its dedicated embedding key and fresh shared subscription login. Shared-route reasoning passed provider cutover. The former $0.52 pilot reservation was missing from the retained dev ledger; a labeled conservative carryover restored that amount under the $5 cap before any new paid call. Detailed former call history is unavailable. Fresh operating gateway checks rejected invalid credentials (401), missing workspace (403), and unknown workspace (403) without changing the $0.52 reservation. The active gateway requires a current attached and verified workspace for provider preparation, so a direct preattachment canary cannot use a fabricated workspace. | Establish a scoped synthetic preattachment acceptance path or isolated acceptance setup before fresh guarded embedding, ingestion, retrieval, restart, and provider-failure recovery. Then verify a ready workspace and completed projection receipt before owner attachment can count as accepted memory. Opted-in history and monthly-cap activation remain separate. [Gateway denials](compatibility/results/2026-09-27-honcho-gateway-denials.json), [budget reconciliation](compatibility/results/2026-09-27-honcho-budget-carryover.json) |
 | Remote Git | Verified increments through the local development runner are integrated into local `main`. The current GitHub HTTPS push cannot authenticate because the host has no logged-in GitHub account; local commits remain ahead of `origin/main`. | Authenticate GitHub on the host, then push and verify `origin/main`. Report local and remote outcomes separately. |
 
+The detached Honcho acceptance workspace is a verified code candidate, not an
+active provider pass. It issues a time-bound synthetic workspace under the current
+guard generation, guards the two metered request routes, and rejects unknown,
+closed, and superseded workspaces. The TypeScript build and focused isolated
+PostgreSQL native-memory and storage-server checks passed. The running app image
+does not yet contain this path; no new paid call, Honcho verification, or memory
+attachment has occurred. [Decision](docs/adr/0068-detached-honcho-acceptance-workspace.md),
+[procedure](docs/release-acceptance.md).
+
+An owner synthetic convention DM was captured at 2026-09-27T12:37:07Z. Its first
+assistant attempt failed with `assistant_runtime_unavailable` at 12:43:53Z; a
+second attempt completed at 12:47:22Z with one linked reply. The Archive
+dashboard showed that reply acknowledging the convention and disclosing limited
+memory. Telegram visibility and learned interpretation remain pending. This
+delay is a current release investigation, separate from the prior
+`unexpected_profile_tool` error.
+[Content-free evidence](compatibility/results/2026-09-27-owner-convention-turn.json).
+
 ## Next actions
 
 The following live observations are historical because the operating

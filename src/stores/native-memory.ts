@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {randomBytes,randomUUID} from 'node:crypto';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
@@ -35,6 +35,45 @@ export class NativeMemoryRepository {
     return {connection,generations,receipts,guard:binding,primary:'honcho',native_notes:['MEMORY.md','USER.md'],syncing:generations.some(g=>g.state==='building'),
       limited_memory:!connection.attached||!connection.verified||!generations.length||generations.some(g=>!g.last_ready_at&&g.state!=='ready')};
   }
+  /** A short-lived synthetic workspace for live provider acceptance before memory attachment. */
+  async issueAcceptance(principal:Reader) {
+    admin(principal);
+    const binding=await this.guards.state();
+    const id=randomBytes(32).toString('hex');
+    const row=(await this.control.query(`UPDATE memory_engine_connection SET acceptance=jsonb_build_object('preflight',
+      jsonb_build_object('id',$1::text,'generation',$2::text,'epoch',$3::bigint,
+        'expires_at',now()+interval '30 minutes','closed_at',NULL))
+      WHERE singleton AND NOT attached AND NOT verified
+      AND (acceptance #>> '{preflight,id}' IS NULL
+        OR (acceptance #>> '{preflight,expires_at}')::timestamptz<=now()
+        OR acceptance #> '{preflight,closed_at}'<>'null'::jsonb)
+      RETURNING acceptance #>> '{preflight,expires_at}' AS expires_at`,
+      [id,binding.generation,binding.epoch])).rows[0];
+    if(!row)throw new HttpError(409,'honcho_acceptance_requires_detached_memory');
+    return {workspace:id,expires_at:row.expires_at};
+  }
+  async closeAcceptance(principal:Reader,id:string) {
+    admin(principal);
+    if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_acceptance_workspace');
+    const closed=await this.control.query(`UPDATE memory_engine_connection
+      SET acceptance=jsonb_set(acceptance,'{preflight,closed_at}',to_jsonb(now()))
+      WHERE singleton AND acceptance #>> '{preflight,id}'=$1 AND acceptance #> '{preflight,closed_at}'='null'::jsonb`,[id]);
+    if(!closed.rowCount)throw new HttpError(404,'acceptance_workspace_missing');
+    return {workspace:id,closed:true};
+  }
+  async acceptanceRequest(input:unknown):Promise<boolean> {
+    const body=object(input),id=body.workspace;
+    if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))return false;
+    const binding=await this.guards.state();
+    const found=await this.control.query(`SELECT 1 FROM memory_engine_connection WHERE singleton AND NOT attached
+      AND acceptance #>> '{preflight,id}'=$1 AND acceptance #>> '{preflight,generation}'=$2
+      AND (acceptance #>> '{preflight,epoch}')::bigint=$3 AND acceptance #> '{preflight,closed_at}'='null'::jsonb
+      AND (acceptance #>> '{preflight,expires_at}')::timestamptz>now()`,[id,binding.generation,binding.epoch]);
+    if(!found.rowCount)return false;
+    if(!['/v1/chat/completions','/v1/embeddings'].includes(String(body.route)))throw new HttpError(400,'memory_route_denied');
+    object(body.payload);
+    return true;
+  }
   async connection(principal:Reader,input:unknown) {
     admin(principal);const body=object(input);
     if(Object.keys(body).some(k=>!['attached','include_history','catch_up','expected_revision','operation_id'].includes(k))||
@@ -54,10 +93,19 @@ export class NativeMemoryRepository {
     admin(principal);const report=object(input),checks=object(report.checks),ledger=object(report.ledger);
     const required=['subscription_reasoning','ingestion','retrieval','embedding_guarded','restart','provider_failure'];
     if(report.format!=='nocheh-honcho-live-v1'||report.status!=='passed'||report.synthetic_only!==true||required.some(k=>checks[k]!=='passed')||
-      typeof ledger.reserved_usd!=='number'||!Number.isFinite(ledger.reserved_usd)||ledger.reserved_usd<=0||ledger.reserved_usd>5||ledger.limit_usd!==5)
+      typeof ledger.reserved_usd!=='number'||!Number.isFinite(ledger.reserved_usd)||ledger.reserved_usd<=0||ledger.reserved_usd>5||ledger.limit_usd!==5||
+      typeof report.acceptance_workspace!=='string'||!/^[a-f0-9]{64}$/.test(report.acceptance_workspace))
       throw new HttpError(409,'honcho_live_acceptance_pending');
+    const binding=await this.guards.state();
+    const session=(await this.control.query(`SELECT 1 FROM memory_engine_connection WHERE singleton AND NOT attached
+      AND acceptance #>> '{preflight,id}'=$1 AND acceptance #>> '{preflight,generation}'=$2
+      AND (acceptance #>> '{preflight,epoch}')::bigint=$3
+      AND (acceptance #>> '{preflight,closed_at}')::timestamptz<=(acceptance #>> '{preflight,expires_at}')::timestamptz`,
+      [report.acceptance_workspace,binding.generation,binding.epoch])).rows[0];
+    if(!session)throw new HttpError(409,'honcho_live_acceptance_pending');
     await this.control.query('UPDATE memory_engine_connection SET verified=true,acceptance=$1 WHERE singleton',
-      [{checks:Object.fromEntries(required.map(name=>[name,'passed'])),recorded_at:new Date().toISOString(),format:report.format}]);return this.status();
+      [{checks:Object.fromEntries(required.map(name=>[name,'passed'])),recorded_at:new Date().toISOString(),format:report.format,
+        acceptance_workspace:report.acceptance_workspace}]);return this.status();
   }
   private principal(row:any,binding:GuardBinding):Reader {
     return {admin:false,scope:row.audience==='owner'?null:parentSpace(row.audience)??row.audience,space:row.audience==='owner'?row.root_space:row.audience,
