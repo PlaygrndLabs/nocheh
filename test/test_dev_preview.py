@@ -7,9 +7,21 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.development import dev_preview
+from tools.operations.provider import provider  # Load pinned metadata before patching the temporary installation root.
 
 
 class DevPreviewTests(unittest.TestCase):
+    def test_fresh_checkout_state_uses_isolated_layout_without_provider_login(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            state = root / 'data/dev'
+            with patch.object(dev_preview, 'ROOT', root), patch.object(dev_preview, 'STATE', state), patch.object(dev_preview, 'MARKER', state / '.preview-owner'), patch.object(dev_preview.configuration, 'INSTALLATION_ROOT', root), patch.object(dev_preview.subprocess, 'run'):
+                values = dev_preview.prepare_state()
+                self.assertEqual(values['NOCHEH_STORAGE_LAYOUT'], 'original-only-v1')
+                self.assertEqual(values['TELEGRAM_ENABLED'], 'false')
+                self.assertEqual(values['OPENAI_API_KEY'], '')
+                self.assertEqual(dev_preview.configuration.read_env(state / '.env')['NOCHEH_STORAGE_LAYOUT'], 'original-only-v1')
+
     def test_rejects_unmarked_existing_state(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
