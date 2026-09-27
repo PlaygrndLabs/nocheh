@@ -139,6 +139,11 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const rebuiltReceipt=(await stores.control.query('SELECT prepared_id FROM memory_ingestion_receipts WHERE id=$1',[rebuilt[1]!.receipts[0]])).rows[0];
     assert.ok((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[rebuiltReceipt.prepared_id])).rows[0].content.toString().includes('Checkmark means reviewed, not done.'));
     const fresh=await actor(source.id);assert.equal((await services.memory.context(fresh)).limited_memory,true,'a new generation cannot reuse the old cache');
+    const correctedRecall=await services.memory.recall(fresh,'What does checkmark mean?');
+    assert.equal(correctedRecall.sources[0]?.kind,'owner_corrected_interpretation');
+    assert.match(correctedRecall.sources[0]!.text,/Checkmark means reviewed, not done\./);
+    assert.equal(JSON.stringify(await services.memory.recall(fresh,'What does another symbol mean?')).includes('owner_corrected_interpretation'),false,
+      'an unrelated question cannot receive the correction');
     status=await services.memory.status();await services.memory.connection(owner,{attached:false,include_history:false,catch_up:false,expected_revision:status.connection.revision,operation_id:key+':detach'});
     const beforeDetached=calls.length;assert.equal(await services.memory.reconcileReceipt(rebuilt[0]!.receipts[0]!),false);assert.equal(calls.length,beforeDetached);
   } finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await services.guards.setMode('off');await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
