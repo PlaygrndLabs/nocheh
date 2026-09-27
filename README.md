@@ -6,8 +6,9 @@ events, files, and separately recorded transcripts stay in an owned, portable ar
 [SPECS.md](SPECS.md) defines the product. [AGENTS.md](AGENTS.md) explains the coding
 workflow. [TASK.md](TASK.md) records implementation, activation, and outstanding
 acceptance; [ADRs](docs/adr/README.md) preserve the decision history.
-Agent skills for [admin inspection](.agent/skills/nocheh-admin-cli/SKILL.md) and
-[app deployment](.agent/skills/nocheh-deploy/SKILL.md) live in `.agent/skills`.
+Agent skills for [admin inspection](.agent/skills/nocheh-admin-cli/SKILL.md),
+[app deployment](.agent/skills/nocheh-deploy/SKILL.md), and
+[Graphify](.agent/skills/graphify/SKILL.md) live in the shared `.agent/skills` directory.
 
 `./bin/nocheh` is the owner command. `tools/` holds CLI routing and operational,
 runtime, acceptance, development, and build helpers. `services/hermes` is the

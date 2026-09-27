@@ -626,9 +626,9 @@ Neither is part of the default build. When the user runs `/graphify add <url>` t
 
 ---
 
-## For the commit hook and native CLAUDE.md integration
+## For the commit hook
 
-When the user asks to install the post-commit auto-rebuild hook or wire graphify into a project's CLAUDE.md, see `references/hooks.md`.
+When the user asks to install the post-commit auto-rebuild hook, see `references/hooks.md`. Repository-wide Graphify instructions live in `AGENTS.md`.
 
 ---
 
