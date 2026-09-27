@@ -15,8 +15,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from compatibility.probe import ROOT, configure_probe_home, docker_asr, report_exit_code, validate_audio
-from integrations.hermes.subscription import SubscriptionCredentials, detect_literals
-from integrations.hermes.transcription import SubscriptionTranscriptionProvider, process_environment
+from services.hermes.subscription import SubscriptionCredentials, detect_literals
+from services.hermes.transcription import SubscriptionTranscriptionProvider, process_environment
 
 
 class SubscriptionContracts(unittest.TestCase):
@@ -163,12 +163,12 @@ class SubscriptionContracts(unittest.TestCase):
         text = "Aws pass: abC123 سلام"
         for output in ({"literals": ["ABC123"]}, {"literals": [""]}, {"literals": [3]},
                        {"literals": "abC123"}, {"literals": [], "rewritten": text}, []):
-            with self.subTest(output=output), patch("integrations.hermes.subscription._call_subscription", return_value=self.response(output)):
+            with self.subTest(output=output), patch("services.hermes.subscription._call_subscription", return_value=self.response(output)):
                 with self.assertRaises(ValueError):
                     detect_literals(text, self.credentials(), "test-model")
 
     def test_detector_accepts_only_verbatim_candidates(self):
-        with patch("integrations.hermes.subscription._call_subscription", return_value=self.response({"literals": ["abC123"]})) as call:
+        with patch("services.hermes.subscription._call_subscription", return_value=self.response({"literals": ["abC123"]})) as call:
             self.assertEqual(detect_literals("Aws pass: abC123", self.credentials(), "test-model"), ["abC123"])
         self.assertEqual(call.call_args.args[1], "test-model")
 

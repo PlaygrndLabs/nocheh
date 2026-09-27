@@ -16,9 +16,9 @@ import time
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError
-from integrations.hermes.security_launcher import docker,container_spec,attach
-from integrations.hermes.isolated_profile import prepare
-from integrations.hermes.security_transport import scoped_transport
+from services.hermes.security_launcher import docker,container_spec,attach
+from services.hermes.isolated_profile import prepare
+from services.hermes.security_transport import scoped_transport
 from tools.operations.installation.configuration import ROOT,load
 
 def credentials():
@@ -95,7 +95,7 @@ def main():
                 for placement in ['legacy','evidence']:
                     for case,prompt,expected in prompts:
                         profiles=root/f'{placement}-{repetition}-{case}';profile=profiles/name;profile.mkdir(parents=True)
-                        from integrations.hermes.profile_config import resolved
+                        from services.hermes.profile_config import resolved
                         (profile/'config.yaml').write_text(json.dumps(resolved({},provider['model'])));prepare(profile)
                         (profile/'memories'/'MEMORY.md').write_text(native)
                         (profile/'memories'/'USER.md').write_text('The owner prefers concise answers with source citations.\n')
@@ -120,10 +120,10 @@ def main():
                         if result.get('state')!='done':raise RuntimeError('live_turn_failed')
             # Exercise the actual trusted launcher HTTP path, not just its container spec.
             profiles=root/'supervised';profile=profiles/name;profile.mkdir(parents=True)
-            from integrations.hermes.profile_config import resolved
+            from services.hermes.profile_config import resolved
             (profile/'config.yaml').write_text(json.dumps(resolved({},provider['model'])));prepare(profile)
             (profile/'memories'/'MEMORY.md').write_text(native)
-            spec={'Image':images['nocheh-hermes'],'User':'0:0','Cmd':['python','-m','integrations.hermes.security_launcher'],
+            spec={'Image':images['nocheh-hermes'],'User':'0:0','Cmd':['python','-m','services.hermes.security_launcher'],
               'Env':['SERVICE_TOKEN=synthetic-security-fixture-token','NOCHEH_AGENT_NETWORK='+internal,'NOCHEH_TURN_IMAGE=nocheh-hermes:security-candidate',
                      'NOCHEH_UID='+str(os.getuid()),'NOCHEH_GID='+str(os.getgid())],
               'ExposedPorts':{'8787/tcp':{}},

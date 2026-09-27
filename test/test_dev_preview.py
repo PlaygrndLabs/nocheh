@@ -26,14 +26,14 @@ class DevPreviewTests(unittest.TestCase):
             state = root / 'data/dev'
             state.mkdir(parents=True)
             (state / '.preview-owner').write_text(str(root) + '\n')
-            integration = root / 'integrations/hermes'
+            integration = root / 'services/hermes'
             integration.mkdir(parents=True)
             plugin = state / 'hermes/plugins'
             plugin.mkdir(parents=True)
             (plugin / 'nocheh').symlink_to(integration)
             dashboard = state / 'admin/dashboard/home/plugins'
             dashboard.mkdir(parents=True)
-            (dashboard / 'nocheh').symlink_to('/workspace/integrations/hermes')
+            (dashboard / 'nocheh').symlink_to('/workspace/services/hermes')
             with patch.object(dev_preview, 'ROOT', root), patch.object(dev_preview, 'STATE', state), patch.object(dev_preview, 'MARKER', state / '.preview-owner'), patch.object(dev_preview.configuration, 'INSTALLATION_ROOT', root):
                 dev_preview.assert_private_state()
                 (state / 'files').symlink_to(root.parent)

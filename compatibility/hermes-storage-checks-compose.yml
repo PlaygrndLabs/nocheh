@@ -15,6 +15,6 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       SERVICE_TOKEN: stores-fixture-token-not-a-real-credential
     volumes:
-      - ../integrations:/workspace/integrations:ro
+      - ../services:/workspace/services:ro
     entrypoint: [python, -m, unittest]
-    command: [integrations.hermes.test_prepared_context, integrations.hermes.test_native_memory, integrations.hermes.test_turn_process, integrations.hermes.test_scopes, integrations.hermes.test_workflow_observation]
+    command: [services.hermes.test_prepared_context, services.hermes.test_native_memory, services.hermes.test_turn_process, services.hermes.test_scopes, services.hermes.test_workflow_observation]

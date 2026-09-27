@@ -133,7 +133,7 @@ revision is the complete ledger before this summary replaced it.
 
 ## Honcho preattachment acceptance path, 2026-09-27
 
-- The current gateway sends each provider request through the Archive preparation endpoint. That endpoint requires a current memory generation, and its provenance check requires an attached, verified connection. The active connection has neither state, so the previously rejected unknown-workspace probe cannot be turned into a fresh paid canary. The earlier G4 isolated acceptance remains historical. A scoped synthetic acceptance path or isolated setup is needed before repeating the six live checks on this installation; no new provider call or verification was made. [Current gateway](../integrations/honcho/meter.py), [preparation check](../src/stores/native-memory.ts), [provenance check](../src/stores/honcho-provenance.ts).
+- The current gateway sends each provider request through the Archive preparation endpoint. That endpoint requires a current memory generation, and its provenance check requires an attached, verified connection. The active connection has neither state, so the previously rejected unknown-workspace probe cannot be turned into a fresh paid canary. The earlier G4 isolated acceptance remains historical. A scoped synthetic acceptance path or isolated setup is needed before repeating the six live checks on this installation; no new provider call or verification was made. [Current gateway](../services/honcho/meter.py), [preparation check](../src/stores/native-memory.ts), [provenance check](../src/stores/honcho-provenance.ts).
 
 ## Local admin inspection candidate, 2026-09-27
 
@@ -170,3 +170,7 @@ revision is the complete ledger before this summary replaced it.
 ## Tooling and dashboard layout, 2026-09-27
 
 - Moved the owner launcher, admin CLI, operations, runtime, acceptance, development, and build tools into role-based packages and renamed the dashboard source. Focused CLI and Python tests, TypeScript/dashboard builds, and Compose structure passed in the isolated worktree. Hermes and Honcho service moves were the next increment; operating installations were not redeployed.
+
+## Service and plugin layout, 2026-09-27
+
+- Moved the Nocheh Hermes plugin to `services/hermes`, Honcho code to `services/honcho`, and the sandbox entry point to `tools/runtime`. Updated image copies, Compose mounts, imports, watchers, tests, documentation, and the AST graph. Candidate app, management, tools, Honcho CLI, and Hermes images built; focused imports and tests passed. A cold isolated gateway and TUI test hit intermittent startup timeouts under host load; test-only deadlines were raised without changing production launch behavior, and all 371 isolated Hermes tests then passed (3 skipped). The operating installation was not redeployed.

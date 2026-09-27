@@ -9,6 +9,10 @@ acceptance; [ADRs](docs/adr/README.md) preserve the decision history.
 Agent skills for [admin inspection](.agent/skills/nocheh-admin-cli/SKILL.md) and
 [app deployment](.agent/skills/nocheh-deploy/SKILL.md) live in `.agent/skills`.
 
+`./bin/nocheh` is the owner command. `tools/` holds CLI routing and operational,
+runtime, acceptance, development, and build helpers. `services/hermes` is the
+Hermes plugin, `services/honcho` holds Honcho integration, `src/` holds TypeScript
+services, and `dashboard/` holds the owner UI. [Layout decision](docs/adr/0069-role-based-source-layout.md).
 
 The reviewed deployment combines application responsibilities and uses clear tool
 service names. See [the service map and workflow](docs/services.md).

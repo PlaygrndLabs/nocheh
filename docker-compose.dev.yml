@@ -20,5 +20,5 @@ services:
   hermes:
     develop:
       watch:
-        - {action: sync+restart, path: ./integrations, target: /workspace/integrations}
+        - {action: sync+restart, path: ./services, target: /workspace/services}
         - {action: rebuild, path: ./deploy/hermes.Dockerfile}
