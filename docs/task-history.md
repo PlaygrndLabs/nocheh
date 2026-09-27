@@ -234,3 +234,7 @@ revision is the complete ledger before this summary replaced it.
 ## Duplicate automatic publication, 2026-09-28
 
 - The newest learned revision had identical text, interpretation metadata, evidence, and dependencies to its predecessor but advanced the guard epoch and rebuilt Honcho memory. A focused source change skips automatic publication for that exact match while preserving revisions for changed meaning, evidence, or dependencies. Build, focused behavior checks, and AST graph refresh passed; the live installation was not replaced and its pilot cap remains exhausted.
+
+## Main-checkout development switch, 2026-09-28
+
+- At the owner's request, all secondary worktrees were closed while their Git branches remained available; separate ignored dev state and non-reproducible volumes were saved privately. The operating Compose stack stopped with its state retained. Fresh dev initialization required an explicit isolated storage layout, and the app watcher referenced a missing `web` directory; both source fixes passed focused checks. The source-mounted `nocheh-dev` project started from main with 17 healthy containers and an HTTP 200 dashboard. Telegram and external provider credentials are absent from the dev state. This is a development preview, not renewed operating release acceptance.

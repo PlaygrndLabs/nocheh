@@ -55,11 +55,14 @@ def port_available(port):
 
 def prepare_state():
     assert_private_state()
+    fresh = not configuration.env_path(STATE).exists()
     if not MARKER.exists():
         STATE.mkdir(parents=True, mode=0o700, exist_ok=True)
         MARKER.write_text(str(ROOT) + '\n')
         MARKER.chmod(0o600)
     values = configuration.initialize(STATE)
+    if fresh:
+        values['NOCHEH_STORAGE_LAYOUT'] = 'original-only-v1'
     if values.get('TELEGRAM_ENABLED') != 'false':
         raise ValueError('Development preview requires TELEGRAM_ENABLED=false')
     if values.get('TELEGRAM_BOT_TOKEN') or values.get('TELEGRAM_OWNER_ID') or values.get('NOCHEH_STORAGE_LAYOUT') != 'original-only-v1':
