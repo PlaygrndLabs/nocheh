@@ -37,7 +37,7 @@ def run_isolated_tests(rest):
         sys.path.insert(0, str(ROOT))
         from tools.operations.provider.provider import ensure_source, ensure_monitor_source
         ensure_source(); ensure_monitor_source()
-        from compatibility.setup import checkout, LOCK
+        from tools.acceptance.subscription.setup import checkout, LOCK
         checkout('hermes-agent', LOCK['hermes'])
         project = state.name
         command = compose_command(state, project) + ['-f', str(INSTALLATION_ROOT / 'docker-compose.dev.yml')]
@@ -227,7 +227,7 @@ def main():
         sys.path.insert(0,str(ROOT))
         from tools.operations.provider.provider import ensure_source,ensure_monitor_source
         ensure_source();ensure_monitor_source()
-        from compatibility.setup import checkout,LOCK
+        from tools.acceptance.subscription.setup import checkout,LOCK
         checkout('hermes-agent',LOCK['hermes'])
     command = compose_command(STATE)
     if args.command == 'db':

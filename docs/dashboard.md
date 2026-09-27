@@ -504,7 +504,7 @@ Maintenance reviews use focus-restoring dialogs before backup, restart or restor
 
 ## Isolated UI acceptance preview
 
-`compatibility/dashboard-preview-compose.yml` is a separate synthetic fixture,
+`deploy/acceptance/dashboard-preview-compose.yml` is a separate synthetic fixture,
 not an overlay for the installation Compose file. Assign a unique project/image,
 an unused localhost port, and new random credentials in a private environment file:
 `NOCHEH_FIXTURE_PROJECT`, `NOCHEH_FIXTURE_IMAGE`, `NOCHEH_DASHBOARD_PORT`,
@@ -516,8 +516,8 @@ scheduler, provider login, or external-effect executor.
 From the session worktree, with `FIXTURE_ENV` pointing to that private file:
 
 ```sh
-docker compose --env-file "$FIXTURE_ENV" -f compatibility/dashboard-preview-compose.yml build preview
-docker compose --env-file "$FIXTURE_ENV" -f compatibility/dashboard-preview-compose.yml up --no-build preview
+docker compose --env-file "$FIXTURE_ENV" -f deploy/acceptance/dashboard-preview-compose.yml build preview
+docker compose --env-file "$FIXTURE_ENV" -f deploy/acceptance/dashboard-preview-compose.yml up --no-build preview
 ```
 
 Keep the second command in the persistent preview terminal. The fixture uses real
@@ -528,7 +528,7 @@ container accepts `offline`, `unavailable`, `conflict`, or `no-graphics`; `norma
 restores normal behavior. Never apply these probes to installation containers.
 
 For the existing native inspection and database bootstrap tests, combine the
-preview file with `compatibility/dashboard-native-checks-compose.yml`, enable the
+preview file with `deploy/acceptance/dashboard-native-checks-compose.yml`, enable the
 `native-checks` profile, and assign fresh 64-character hexadecimal
 `INNGEST_POSTGRES_PASSWORD`, `INNGEST_EVENT_KEY`, and `INNGEST_SIGNING_KEY` values.
 It starts pinned Inngest and Redis only on the private fixture network, without

@@ -92,7 +92,7 @@ descriptors because their metadata has no prepared guarded representation.
 </storage>
 
 <acceptance>
-Use `compatibility/source-model-compose.yml` as a standalone Compose project with
+Use `deploy/acceptance/source-model-compose.yml` as a standalone Compose project with
 explicit `NOCHEH_SOURCE_FIXTURE_PROJECT`, `NOCHEH_SOURCE_FIXTURE_IMAGE`, and a
 synthetic `NOCHEH_SOURCE_FIXTURE_PASSWORD`. It has a private internal network,
 project-owned PostgreSQL volume, no published ports, and no runtime, poller,

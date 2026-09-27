@@ -40,7 +40,7 @@ def main():
         "refresh": refresh,
         "chat": lambda: call("/internal/chat", {"text": "Reply exactly NOCHEH_COMPAT_OK with no other text."})["text"].strip() == "NOCHEH_COMPAT_OK",
         "detector": lambda: call("/internal/detect", {"text": "Aws password: juniper-ONLY-7642. Friday is the deadline."})["literals"] == ["juniper-ONLY-7642"],
-        "transcription": lambda: "friday" in call("/internal/transcribe", {"audio_base64": base64.b64encode(Path("/workspace/compatibility/fixtures/subscription-speech.ogg").read_bytes()).decode()})["transcript"].lower(),
+        "transcription": lambda: "friday" in call("/internal/transcribe", {"audio_base64": base64.b64encode(Path("/workspace/test/fixtures/acceptance/subscription-speech.ogg").read_bytes()).decode()})["transcript"].lower(),
     }
     if args.check:
         cases = {name: cases[name] for name in args.check}

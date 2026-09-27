@@ -42,7 +42,7 @@ callbacks retain capacity while workers await external work. Ordinary Connect
 execution has four slots. Publication retries preserve the same event identity,
 prioritize requests not yet accepted, and back off only for consecutive transport
 failures; successful receipt probes do not enlarge a later outage's delay.
-The combined fixture runner is `compatibility/installation-rehearsal.py`. It uses
+The combined fixture runner is `tools/acceptance/rehearsals/installation-rehearsal.py`. It uses
 explicit immutable images, new synthetic state, internal networks, no live login,
 and deterministic provider transports. Its successful report records each gate;
 missing live gates remain pending even after this rehearsal passes.
@@ -202,8 +202,8 @@ maintenance exclusion, runtime role restrictions, and inactive-restore refusal.
 
 <owner_interface_rehearsal>
 
-Use `compatibility/stores-compose.yml` with
-`compatibility/stores-dashboard-compose.yml` and profile `owner-preview` for the
+Use `deploy/acceptance/stores-compose.yml` with
+`deploy/acceptance/stores-dashboard-compose.yml` and profile `owner-preview` for the
 candidate owner-interface fixture. Build the dashboard and TypeScript first. Set
 an explicit fixture image, a dedicated Compose project, and a free localhost port
 in a session-owned environment file (`NOCHEH_STORES_FIXTURE_IMAGE`,
@@ -310,7 +310,7 @@ Honcho uses one exported PostgreSQL repeatable-read snapshot across its eight
 pinned memory tables. The package stores data-only JSON, column/type metadata,
 and the producer source revision. A reader does not execute SQL supplied by the
 bundle. Verify exact native values and embeddings under a concurrent update with
-`python3 compatibility/honcho-portable-rehearsal.py --env-file FIXTURE_ENV`.
+`python3 tools/acceptance/rehearsals/honcho-portable-rehearsal.py --env-file FIXTURE_ENV`.
 This command requires the isolated PostgreSQL marker and creates/removes only a
 new randomly named synthetic database.
 
@@ -335,8 +335,8 @@ identity sequences advance past imported IDs. The standalone synthetic rehearsal
 checks those boundaries. The pinned-schema rehearsal additionally uses the actual
 Honcho Alembic migrations and ORM models on pgvector with 1,536-dimensional
 embeddings, citation ancestry, and soft-deleted history. Use the dedicated
-`compatibility/native-portability-compose.yml` with explicit fixture project and
-image variables, then run `python3 compatibility/native-portability-rehearsal.py
+`deploy/acceptance/native-portability-compose.yml` with explicit fixture project and
+image variables, then run `python3 tools/acceptance/rehearsals/native-portability-rehearsal.py
 --env-file FIXTURE_ENV`. It requires the native fixture cluster marker, creates
 random test databases, and removes only those databases afterward. The schema
 runner invokes no provider or deriver. Complete native service behavior and
@@ -383,7 +383,7 @@ installation only, with runtime database roles NOLOGIN, a revoked guard epoch,
 provider logins held inactive, and execution/scheduling disabled.
 
 Run `python3 -m tools.acceptance.store_fixture_recovery <fixture-env> <new-output-directory>`
-against a dedicated `compatibility/stores-compose.yml` installation to verify the
+against a dedicated `deploy/acceptance/stores-compose.yml` installation to verify the
 three-database portion without live data. The script checks the real cluster
 marker, refuses existing restore resources, tests blocked writes and interrupted
 barrier setup, restores exact data, and restarts only the restored database.
@@ -391,7 +391,7 @@ The complete rehearsal must additionally exercise the coordinated original-file,
 Hermes, Honcho, Inngest, Redis, and accounting snapshots through the final service
 composition. Database-only fixture evidence does not satisfy that complete gate.
 
-`compatibility/coordinated-recovery-rehearsal.py --directory NEW_DIRECTORY
+`tools/acceptance/rehearsals/coordinated-recovery-rehearsal.py --directory NEW_DIRECTORY
 --services-image CANDIDATE --management-image MANAGEMENT_CANDIDATE
 --postgres-image DATABASE_CANDIDATE
 --honcho-image PINNED_CANDIDATE` exercises production
@@ -444,7 +444,7 @@ maintenance ownership, and fence ownership. A recorded initially absent fence ca
 recover an interrupted write of this reset's own prefix. Existing inactive restores
 and another reset's markers require separate review.
 
-Verify with `python3 compatibility/reset-quiescence-rehearsal.py --directory
+Verify with `python3 tools/acceptance/rehearsals/reset-quiescence-rehearsal.py --directory
 NEW_DIRECTORY --management-image CANDIDATE`. It uses real Compose lifecycle and
 PostgreSQL advisory exclusion, synthetic heartbeat writers, a late foreign writer,
 and a separate sentinel. It verifies interruption/retry, preserved restart settings,
@@ -460,7 +460,7 @@ without domain evidence block progression. Never convert unknown results into
 successful execution or replay delivery during reset. Recheck the evidence before
 publishing the content-free settlement report and advancing the journal. The
 complete preservation coordinator must retain receipts until this gate passes.
-`compatibility/reset-effects-rehearsal.py --directory NEW_DIRECTORY
+`tools/acceptance/rehearsals/reset-effects-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` verifies both real schemas and native journal formats
 on an internal-only Compose network with synthetic responses and no provider calls.
 
@@ -557,7 +557,7 @@ resumption intent makes partial policy restoration retryable; unexpected policie
 replaced containers, changed plans or changed acceptance evidence fail closed.
 `resumed` is the final journal step.
 
-Run `python3 compatibility/reset-protocol-rehearsal.py --directory NEW_DIRECTORY
+Run `python3 tools/acceptance/rehearsals/reset-protocol-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE --native-image PINNED_CANDIDATE` to exercise journal
 failure paths and the pinned adapter's normal restart behavior in network-disabled
 Compose containers. This bounded rehearsal has no installation mounts, providers,
@@ -615,7 +615,7 @@ share text, owner-command receipts, or old configuration revisions. Recheck the
 same snapshot before publishing it. A changed or unknown configuration area stops
 the reset. Keep this private snapshot until fresh-store admission is verified, then
 retire its content-bearing copy and retain only its digest and record counts.
-`compatibility/reset-configuration-rehearsal.py` verifies both real database layouts
+`tools/acceptance/rehearsals/reset-configuration-rehearsal.py` verifies both real database layouts
 with seeded source/derivative canaries on an internal-only network. This component
 does not complete the preservation phase by itself.
 
@@ -628,7 +628,7 @@ compacts SQLite plus its WAL. The Honcho spending ledger remains separate and
 untouched. A compaction interruption requires a retry before service resumption;
 an unknown schema needs review before deletion. Erase old usage-import files
 through the scoped manifest as well. Verify with
-`python3 compatibility/reset-accounting-rehearsal.py --directory NEW_DIRECTORY
+`python3 tools/acceptance/rehearsals/reset-accounting-rehearsal.py --directory NEW_DIRECTORY
 --monitor-image PINNED_MONITOR --checks-image CANDIDATE_MANAGEMENT`.
 This fixture has no network, creates its own state, proves exclusion by the real
 monitor lock, and restarts the pinned monitor after cleanup. It does not authorize
@@ -647,7 +647,7 @@ Changed policy, files, source preferences, ownership, accounting, manifest scope
 maintenance ownership or inactive fences stop the phase. A retry reuses a verified
 accounting receipt; a crash before that receipt reruns the idempotent sanitizer while
 requiring the reviewed database identity. Run
-`python3 compatibility/reset-preservation-rehearsal.py --directory NEW_DIRECTORY
+`python3 tools/acceptance/rehearsals/reset-preservation-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` for a fresh internal-network rehearsal with real
 PostgreSQL configuration queries, the real SQLite sanitizer, and synthetic retained
 credentials, spending, original-file and source/derivative canaries.
@@ -683,7 +683,7 @@ Do not copy old configuration revisions, owner commands, sources, derivatives,
 learned state, approvals, schedules, effects, or workflow history. The new setup
 operations and refresh requests belong to the new generation and remain
 distinguishable from erased history. Verify this repository boundary with
-`python3 compatibility/reset-setup-rehearsal.py --directory NEW_DIRECTORY
+`python3 tools/acceptance/rehearsals/reset-setup-rehearsal.py --directory NEW_DIRECTORY
 --image CANDIDATE` on a fresh internal-only PostgreSQL fixture.
 
 After scoped erasure, call `tools.acceptance.reset_initialization.initialize` with the same
@@ -724,7 +724,7 @@ the hashes and sizes of the detailed private preservation, ownership, settlement
 file, configuration, preference, accounting, and setup artifacts before removing
 them. The retained baseline report contains counts and hashes rather than source or
 configuration content. Run
-`python3 compatibility/reset-fresh-baseline-rehearsal.py --directory NEW_DIRECTORY
+`python3 tools/acceptance/rehearsals/reset-fresh-baseline-rehearsal.py --directory NEW_DIRECTORY
 --services-image CANDIDATE` to exercise erasure through empty baseline from a real
 legacy schema with seeded original, generated context, space-sharing configuration,
 custom native profile, file, spool, workflow, Redis, Honcho, credential, login, and
@@ -732,7 +732,7 @@ spending fixtures on an internal-only network. It must finish on the three-store
 layout, retain only setup, leave runtime activation false, and make no provider
 calls.
 
-Run `python3 compatibility/reset-erasure-rehearsal.py --directory NEW_DIRECTORY
+Run `python3 tools/acceptance/rehearsals/reset-erasure-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` for a fresh internal-network fixture that uses real
 PostgreSQL stores, original/spool files, provider accounting, saved credentials,
 provider login, Honcho setup/spending, and an unrelated sentinel container and

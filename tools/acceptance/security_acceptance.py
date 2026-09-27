@@ -55,7 +55,8 @@ def quality_gate(results):
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--smoke-only',action='store_true');args=parser.parse_args()
     report={'synthetic_only':True,'status':'pending','checks':{},'quality':[],'active_runtime_changed':False}
-    output=ROOT/'compatibility/results'/('security-service-launcher-acceptance.json' if args.smoke_only else 'security-service-acceptance.json')
+    output=ROOT/'data/acceptance/results'/('security-service-launcher-acceptance.json' if args.smoke_only else 'security-service-acceptance.json')
+    output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     identifiers=[];networks=[]
     with tempfile.TemporaryDirectory(prefix='security-acceptance-',dir=ROOT/'data') as folder:
         root=Path(folder);os.chmod(root,0o700)
@@ -193,6 +194,7 @@ def main():
                 try:docker('DELETE','/networks/'+name)
                 except Exception:pass
             output.write_text(json.dumps(report,indent=2)+'\n')
+            output.chmod(0o600)
     print(json.dumps({'status':report['status'],'report':str(output),'error_code':report.get('error_code')}),flush=True)
     return 0 if report['status']=='passed' else 1
 

@@ -3,7 +3,7 @@
 [SPECS.md](../SPECS.md) defines release requirements; [TASK.md](../TASK.md) records
 actual implementation and acceptance. This file supplies the repeatable live procedure.
 The consolidated installation passed these gates on 2026-09-16; see the
-[recorded acceptance](../compatibility/results/2026-09-16-consolidated-services.json).
+recorded acceptance (report removed for privacy).
 These checks need actual incoming Telegram traffic; synthetic archive events and
 healthy containers cannot substitute for it. The operating installation needs
 its own Telegram and provider configuration. No VPS is required.
@@ -35,7 +35,7 @@ complete the gate.
 
 Use only synthetic text. Record event IDs, scoped profile IDs, derived record IDs,
 delivery receipts and timestamps in content-free evidence under
-`compatibility/results/`. Do not commit tokens, real chat contents or numeric chat
+`data/acceptance/results/`. Do not commit reports, tokens, real chat contents or numeric chat
 identities. The owner can inspect the corresponding originals in Archive/Activity.
 Use ordinary conversational wording in owner-facing messages. Identify each live
 test by its captured event ID and timestamp; the owner need not type an internal

@@ -66,7 +66,7 @@ session. Only parsed, allowlisted GraphQL queries reach its backend; mutations,
 event ingestion and debugger paths are denied. Its pinned route/client adapters
 and local read-only value renderer are covered by fixture and browser checks.
 See [ADR-0043](adr/0043-owner-workflow-inspection.md) and
-[monitoring evidence](../compatibility/results/2026-09-14-inngest-monitoring.json).
+monitoring evidence (report removed for privacy).
 
 The synthetic Monitoring preview uses an explicit fixture-only network, generated
 credentials, no runtime/executor, and dedicated loopback ports. This does not
@@ -118,13 +118,13 @@ supervisors resume after handoff while the family admission fence remains closed
 An explicitly resumed cancelled import gets a new generation; its original closed
 receipt remains permanent. Learning consent cannot change on resume. Independent
 host receipt recovery continues during Inngest outages. Historical migration and
-rollback evidence is retained in compatibility/results; see TASK.md for current
+rollback evidence is retained locally under ignored `data/acceptance/results/`; see TASK.md for current
 activation and release gates.
 
 <fault_rehearsal>
 
-Combine `compatibility/inngest-compose.yml` with
-`compatibility/inngest-fault-compose.yml`. Supply a fresh synthetic dotenv file
+Combine `deploy/acceptance/inngest-compose.yml` with
+`deploy/acceptance/inngest-fault-compose.yml`. Supply a fresh synthetic dotenv file
 with a unique `NOCHEH_FIXTURE_PROJECT` matching `nocheh-inngest-fault-HEX`,
 `NOCHEH_FAULT_SCHEMA=fault_HEX`, an absolute `NOCHEH_FAULT_STATE` under this
 worktree's `data/`, a separately tagged `NOCHEH_FIXTURE_IMAGE`, and independently
@@ -146,7 +146,7 @@ Inngest table fingerprints, protected file hashes, Redis AOF conversion and a
 database restart. Only restored PostgreSQL and Redis are started. Pending capture
 and inactive markers remain available for inspection; restored workers and event
 publication are not enabled. See
-[fault and recovery evidence](../compatibility/results/2026-09-14-inngest-fault-recovery.json).
+fault and recovery evidence (report removed for privacy).
 
 </fault_rehearsal>
 
@@ -175,7 +175,7 @@ approval and reconnect/restart checks from [release acceptance](release-acceptan
 before Telegram cutover completes. Missing inputs or credentials remain pending.
 Subscription transcription failure blocks dependent release/cutover work.
 Refresh the AST-only Graphify graph after code changes. Retain safe evidence in
-compatibility/results without source conversations or credentials.
+ignored `data/acceptance/results/` without source conversations or credentials. Do not commit live reports.
 
 </acceptance>
 

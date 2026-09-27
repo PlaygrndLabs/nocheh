@@ -13,8 +13,8 @@ Future memory engines and knowledge graphs should consume Nocheh's archive throu
 Building a second general agent framework or completing the custom graph first would delay
 the assistant the owner wants.
 
-The previous sessions reached different recommendations. The latest
-[benchmark](../evaluation/results/2026-09-06-private-memory-bakeoff.md) measured 67.65%
+The previous sessions reached different recommendations. A private benchmark summary, removed
+from Git with other generated results, measured 67.65%
 source recall for Honcho message search versus 47.30% for Nocheh structured retrieval.
 It did not measure answer quality or query Honcho's derived documents; Honcho cost was unknown.
 That supports a useful pilot, without proving that Honcho's conclusions are authoritative.
@@ -133,17 +133,17 @@ the clarified policy, trusted GPT can perform detection and supported media proc
 Local processing is an option if the owner later wants it, not a mandatory architecture rule.
 
 Nocheh already has useful deterministic masking in
-[`redactLiterals`](../../src/infrastructure/security/redaction-engine.ts), but three issues
+`redactLiterals` (historical source path unavailable), but three issues
 matter when adapting the existing pipeline to required-guard delivery:
 
-- [`LlmSecretDetector`](../../src/infrastructure/security/llm-secret-detector.ts) truncates
+- `LlmSecretDetector` (historical source path unavailable) truncates
   each segment before detection, then returns the full original text with any found matches
   masked. Content beyond the inspection limit is not checked by that model.
 - Its parser can accept omitted or invalid segment entries as having no findings. Strict
   response coverage is needed, including validation of reported literal matches.
-- [`MediaUnderstandingService`](../../src/application/services/media-understanding-service.ts)
+- `MediaUnderstandingService` (historical source path unavailable)
   saves derived text to its cache before
-  [`ProcessIncomingMessageUseCase`](../../src/application/use-cases/process-incoming-message.ts)
+  `ProcessIncomingMessageUseCase` (historical source path unavailable)
   runs the final window guard. Original caching is permissible under the revised retention
   model, but those cached values must still be inspected before an untrusted destination
   receives them.
