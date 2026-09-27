@@ -45,6 +45,10 @@ test('conventions are quoted evidence, general meanings stay contextual and expl
   assert.throws(()=>parseInterpretations({interpretations:[{...input,evidence_ids:[digest('missing')]}]},evidence,'-42',[]),{code:'unavailable_interpretation_evidence'});
   const first:InterpretationVersion={...local,id:digest('first'),revision:1,author:'participant',retired:false};
   const second={...first,id:digest('second'),text:'A check means done.'};
+  const duplicate={...first,id:digest('duplicate-convention'),text:'The check means that is reviewed.'};
+  assert.equal(applicableInterpretations([first,duplicate])[0]?.conflict,false,'minor grammar differences do not manufacture a convention conflict');
+  const opposite={...first,id:digest('opposite-convention'),text:'A check means not reviewed.'};
+  assert.equal(applicableInterpretations([first,opposite])[0]?.conflict,true,'negation remains meaningful');
   const inferred={...first,id:digest('inferred'),kind:'convention' as const,uncertainty:'supported' as const,author:'honcho' as const,text:'Likely done.'};
   const conflict=applicableInterpretations([first,second])[0]!;assert.equal(conflict.conflict,true);assert.equal(conflict.text,null);
   const corrected={...first,id:digest('owner'),author:'owner' as const,text:'For this project it means reviewed.'};

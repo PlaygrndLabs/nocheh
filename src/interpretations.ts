@@ -64,6 +64,8 @@ export function parseInterpretations(input:unknown,evidence:LearningEvidence[],s
 export interface InterpretationVersion extends Interpretation {
   id:string;revision:number;author:'honcho'|'participant'|'owner';retired:boolean;
 }
+const conventionWords=(text:string)=>(text.normalize('NFKC').toLocaleLowerCase().match(/[\p{L}\p{N}\p{Extended_Pictographic}]+/gu)??[])
+  .filter(word=>!['a','an','the','that','is','was'].includes(word)).join(' ');
 /** Explicit conflicts remain visible. Arrival order is never a tie-breaker. */
 export function applicableInterpretations(versions:InterpretationVersion[]) {
   const groups=new Map<string,InterpretationVersion[]>();
@@ -74,7 +76,9 @@ export function applicableInterpretations(versions:InterpretationVersion[]) {
   return [...groups.values()].map(group=>{
     const rank=(v:InterpretationVersion)=>v.author==='owner'?3:v.author==='participant'||v.kind==='convention'||v.uncertainty==='explicit'?2:1;
     const highest=Math.max(...group.map(rank)),selected=group.filter(v=>rank(v)===highest).sort((a,b)=>a.id.localeCompare(b.id));
-    const conflict=new Set(selected.map(v=>v.text)).size>1||selected.some(v=>v.conflicts.some(id=>selected.some(other=>other.id===id)));
+    const sameMeaning=selected.every(v=>v.kind==='convention')?
+      new Set(selected.map(v=>conventionWords(v.text))).size===1:new Set(selected.map(v=>v.text)).size===1;
+    const conflict=!sameMeaning||selected.some(v=>v.conflicts.some(id=>selected.some(other=>other.id===id)));
     return {scope:selected[0]!.scope,kind:selected[0]!.kind,subject:selected[0]!.subject,conflict,
       text:conflict?null:selected[0]!.text,selected:selected.map(v=>v.id),superseded:group.filter(v=>rank(v)<highest).map(v=>v.id).sort()};
   });
