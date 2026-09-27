@@ -74,3 +74,5 @@ records current implementation and activation.
 | [0063](0063-owner-database-browser.md) | Read-only inspection of configured installation tables | Extends 0025 owner inspection and 0053 separate stores |
 | [0064](0064-isolated-source-watched-development-preview.md) | Checkout-scoped Compose Watch full core stack | Extends 0019 local development and 0024 configuration |
 | [0065](0065-single-stack-source-mounted-development.md) | One running stack with source-mounted development | Supersedes 0064 concurrent-project and rebuild-on-edit behavior |
+| [0066](0066-fixed-name-standard-port-development.md) | Fixed `nocheh-dev` stack on normal ports with source watch in the app service | Supersedes 0065 builder, name, port, and Honcho boundaries |
+| [0067](0067-detached-honcho-acceptance-workspace.md) | Time-bound guarded synthetic workspace for preattachment Honcho checks | Extends 0033 and 0034 without authorizing attachment |
