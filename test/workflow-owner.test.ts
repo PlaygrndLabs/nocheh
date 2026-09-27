@@ -10,6 +10,16 @@ import {captureInput,claimRun,finishRun} from '../src/managed-runs.js';
 import {admitBrowser} from '../src/workflows/browser.js';
 import {controlReview} from '../src/learning.js';
 
+test('owner workflow event filter is validated and bound to the query',async()=>{
+  const event='a'.repeat(64),calls:{sql:string;values:unknown[]}[]=[];
+  const pool={query:async(sql:string,values:unknown[])=>{calls.push({sql,values});return {rows:[]};}} as unknown as pg.Pool;
+  await assert.rejects(listWorkflows(pool,{event:'invalid'}),/invalid_workflow_event/);
+  assert.equal(calls.length,0);
+  assert.deepEqual((await listWorkflows(pool,{event})).workflows,[]);
+  assert.match(calls[0]!.sql,/source_event_id=\$6/);
+  assert.equal(calls[0]!.values[5],event);
+});
+
 test('owner workflow metadata preserves cursor precision, domain truth and stale worker observations',{skip:!process.env.PGHOST},async()=>{
   const config=settings(),connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
   config.assistant={enabled:false,owner_id:'42',group_ids:[]};

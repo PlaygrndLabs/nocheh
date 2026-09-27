@@ -80,8 +80,10 @@ export class SourceRepository {
     const relationships=await this.access.relationships.context(reference,binding&&principal.scope!==null?{
       kind:'conversation',chat_id:principal.scope,topic_id:principal.space?.includes('/topic/')?principal.space.split('/topic/')[1]!:null}:{kind:'owner'},20);
     if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
+    const replies=principal.admin?await archiveReplyPreviews(this.stores.archive,this.stores.control,[{id,kind:row.kind,scope:row.scope}]):new Map();
     const result={id,source:'nocheh:event:'+id,reference,received_at:row.received_at.toISOString(),representation:binding?.mode==='on'?'guarded':'original',
-      guarded_revision:guardedRevision,event,artifacts,derived,relationships,derivative_versions:'/v1/sources/'+id+'/derivatives'};
+      guarded_revision:guardedRevision,event,artifacts,derived,relationships,derivative_versions:'/v1/sources/'+id+'/derivatives',
+      ...(principal.admin?{reply_messages:replies.get(id)??[]}:{})};
     await this.allowPrepared(principal,result);return result;
   }
 
