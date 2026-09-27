@@ -114,3 +114,7 @@ revision is the complete ledger before this summary replaced it.
 ## Operating login and forum readiness, 2026-09-27
 
 - A fresh device login created one shared provider credential. Atomic cutover passed subscription chat, speech, Honcho reasoning, monitor outage/recovery, and restart checks. The owner's new group had topics enabled, an owner topic message, and bot administrator status. It was added beside the retained group; Telegram connected and captured two topic messages. The restored archive and source comparison support carrying only the former installation's listed passed observations forward. Reset-specific post-boundary validation, new learning/reaction checks, and production Honcho acceptance remain pending. [Equivalence](../compatibility/results/2026-09-27-operating-live-equivalence.json).
+
+## Honcho pilot budget carried forward, 2026-09-27
+
+- The retained dev copy had an empty Honcho spending ledger, while the former operating ledger's last read-only observation recorded $0.52 lifetime reservations under the $5 pilot cap. An older retired ledger contained only $0.30 and could not recover the complete per-call history. With Honcho writers stopped and no new paid request made, a labeled $0.52 conservative carryover was inserted into the fresh operating ledger. Pilot mode stayed active; Honcho restarted with its subscription login, while memory remained unattached. Fresh production acceptance and the former detailed call history remain unresolved. [Budget evidence](../compatibility/results/2026-09-27-honcho-budget-carryover.json).
