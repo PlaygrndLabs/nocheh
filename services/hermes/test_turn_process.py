@@ -1,0 +1,139 @@
+import asyncio
+import os
+import sys
+import tempfile
+import threading
+import unittest
+import base64
+import json
+import hashlib
+import hmac
+import time
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch, AsyncMock
+from .turn_process import _run_process,run_process
+from .scopes import Scope,Scopes
+
+class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prepared_telegram_profile_is_reused_and_scope_checked(self):
+        from .assistant_gateway import native_turn
+        scope=Scope('42','42',True,'owner','42')
+        body=self.review_body();body['payload']={'message':{}}
+        claims=json.loads(base64.urlsafe_b64decode(body['archive_credential'].split('.')[1]+'==='))
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder)/'profiles'/Scopes.apply_revision(scope,claims).profile
+            profile.mkdir(parents=True)
+            with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile) as prepare_profile,\
+                 patch('services.hermes.turn_process._run_process',new_callable=AsyncMock,return_value={'state':'failed'}) as child,\
+                 patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+                await native_turn(folder,scope,body,'model',None)
+                prepare_profile.assert_called_once()
+                self.assertEqual(child.await_count,1)
+            with patch('services.hermes.turn_process._run_process',new_callable=AsyncMock) as child:
+                with self.assertRaisesRegex(ValueError,'prepared_profile_scope_mismatch'):
+                    await run_process(folder,scope,body,'model',None,'session',prepared_profile=Path(folder)/'other-profile')
+                child.assert_not_awaited()
+
+    def setUp(self):
+        self.secret='synthetic-review-secret-not-a-real-credential'
+        environment=patch.dict(os.environ,{'SERVICE_TOKEN':self.secret})
+        environment.start();self.addCleanup(environment.stop)
+
+    def review_body(self,purpose='memory-review'):
+        claims={'scope':None,'space':'42','revision':1,'guard_epoch':1,'generation':'11111111-1111-1111-1111-111111111111',
+                'purpose':purpose,'event_id':'b'*64,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant'}
+        encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+        signature=base64.urlsafe_b64encode(hmac.new(self.secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
+
+    async def execute(self,source,cancel=None):
+        with tempfile.TemporaryDirectory() as folder:
+            self.env=None;original=asyncio.create_subprocess_exec
+            async def spawn(*args,**kwargs):
+                self.env=kwargs['env']
+                return await original(sys.executable,'-c',source,**kwargs)
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+                events=[]
+                result=await _run_process(Path(folder),Scope('-10','42',False,'group'),
+                    {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser'},'model',
+                    SimpleNamespace(access_token='ephemeral'),'session',events.append,cancel)
+                self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
+                return result,events
+    async def test_stream_framing_and_failed_child(self):
+        result,events=await self.execute('import sys,json; body=json.load(sys.stdin); assert body["channel"]=="browser"; assert body["memory_query"]=="original"; assert "nocheh:event:event" in body["text"]; print(json.dumps({"event":"message.delta","text":"hello"})); print(json.dumps({"state":"done","text":"hello"}))')
+        self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
+        with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
+            await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
+    async def test_cancel_kills_child(self):
+        cancel=threading.Event()
+        async def stop(): await asyncio.sleep(.15);cancel.set()
+        task=asyncio.create_task(stop())
+        result,_=await self.execute('import sys,time; sys.stdin.read(); time.sleep(60)',cancel)
+        await task;self.assertEqual(result['state'],'cancelled')
+    async def test_profile_wait_preserves_identity_and_does_not_block_capture_loop(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder);body={'archive_credential':'turn.e30.signature'}
+            with (profile/'.turn.lock').open('a') as lock,patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),patch('services.hermes.turn_process._run_process',new_callable=AsyncMock,return_value={'state':'done'}) as child:
+                fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                task=asyncio.create_task(run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'same-session'))
+                await asyncio.sleep(.05)
+                self.assertFalse(task.done());child.assert_not_awaited()
+                fcntl.flock(lock,fcntl.LOCK_UN)
+                self.assertEqual((await asyncio.wait_for(task,2))['state'],'done')
+                self.assertIs(child.call_args.args[2],body)
+                self.assertEqual(child.call_args.args[5],'same-session')
+                self.assertTrue((profile/'.foreground').exists())
+
+    async def test_cancel_and_revocation_while_waiting_never_start_child(self):
+        import fcntl
+        for revoked in (False,True):
+            with tempfile.TemporaryDirectory() as folder:
+                profile=Path(folder);cancel=threading.Event();valid=True
+                with (profile/'.turn.lock').open('a') as lock,patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',side_effect=lambda _:valid),patch('services.hermes.turn_process._run_process',new_callable=AsyncMock) as child:
+                    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    task=asyncio.create_task(run_process(profile,Scope('42','42',True,'owner'),{'archive_credential':'turn.e30.signature'},'model',None,'session',cancelled=cancel))
+                    await asyncio.sleep(.05)
+                    if revoked:valid=False
+                    else:cancel.set()
+                    result=await asyncio.wait_for(task,2)
+                    self.assertEqual(result['state'],'failed' if revoked else 'cancelled')
+                    child.assert_not_awaited()
+
+    async def test_review_defers_before_execution_when_profile_is_busy(self):
+        import fcntl
+        from .review_worker import review
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder)
+            with (profile/'.turn.lock').open('a') as lock,patch('services.hermes.review_worker.prepare_profile',return_value=profile),patch('services.hermes.review_worker._review') as child:
+                fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                result=review(profile,SimpleNamespace(owner='42'),'model',None,self.review_body())
+                self.assertEqual(result,{'state':'waiting','error_code':'profile_busy'});child.assert_not_called()
+
+    async def test_review_requires_verified_review_capability_before_opening_profile(self):
+        from .review_worker import review
+        ordinary=self.review_body('assistant');forged=self.review_body();forged['archive_credential']+='invalid'
+        with patch('services.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):
+            for body in (ordinary,forged):
+                with self.assertRaises(ValueError):review(Path('/unused'),SimpleNamespace(owner='42'),'model',None,body)
+
+    async def test_already_cancelled_never_starts_a_child(self):
+        cancel=threading.Event();cancel.set()
+        with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',side_effect=AssertionError('must not spawn')):
+            result=await _run_process(Path('/unused'),None,{},None,None,'session',None,cancel)
+            self.assertEqual(result['state'],'cancelled')
+
+    async def test_review_waits_for_conversation_quiet_interval_without_losing_identity(self):
+        from .review_worker import review
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder);activity=profile/'.foreground';activity.touch()
+            body=self.review_body()
+            with patch('services.hermes.review_worker.prepare_profile',return_value=profile),patch('services.hermes.review_worker._review',return_value={'state':'done'}) as child:
+                now=activity.stat().st_mtime
+                with patch('services.hermes.review_worker.time.time',return_value=now+30):
+                    self.assertEqual(review(profile,SimpleNamespace(owner='42'),'model',None,body),{'state':'waiting','error_code':'profile_busy'})
+                    child.assert_not_called()
+                with patch('services.hermes.review_worker.time.time',return_value=now+61):
+                    self.assertEqual(review(profile,SimpleNamespace(owner='42'),'model',None,body),{'state':'done'})
+                    self.assertIs(child.call_args.args[-1],body)

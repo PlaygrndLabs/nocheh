@@ -9,11 +9,11 @@ COPY tsconfig.json tsconfig.dashboard.json ./
 COPY SPECS.md ./SPECS.md
 COPY tools ./tools
 COPY compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
-COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
+COPY services/hermes/dashboard ./services/hermes/dashboard
 COPY dashboard ./dashboard
 COPY src ./src
 COPY test ./test
-RUN npm run build && chown ${LOCAL_UID}:${LOCAL_GID} /app /app/dashboard /app/integrations/hermes/dashboard && chown -R ${LOCAL_UID}:${LOCAL_GID} /app/dist /app/dashboard/dist /app/integrations/hermes/dashboard/dist
+RUN npm run build && chown ${LOCAL_UID}:${LOCAL_GID} /app /app/dashboard /app/services/hermes/dashboard && chown -R ${LOCAL_UID}:${LOCAL_GID} /app/dist /app/dashboard/dist /app/services/hermes/dashboard/dist
 USER node
 CMD ["npm", "run", "dev"]
 
@@ -58,7 +58,7 @@ COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY tools ./tools
-COPY integrations ./integrations
+COPY services ./services
 COPY compatibility ./compatibility
 COPY deploy ./deploy
 COPY --from=development /app/dashboard/dist ./dashboard/dist

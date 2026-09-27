@@ -14,7 +14,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from integrations.hermes import preference_transfer
+from services.hermes import preference_transfer
 
 from tools.operations.installation import configuration
 from tools.acceptance import (reset_configuration, reset_erasure, reset_inventory,

@@ -127,7 +127,7 @@ services:
   honcho-api:
     <<: *honcho-runtime
     entrypoint: [sh, -c, '/app/.venv/bin/python scripts/provision_db.py && exec /app/.venv/bin/python /nocheh/run.py api']
-    volumes: [./integrations/honcho:/nocheh:ro]
+    volumes: [./services/honcho:/nocheh:ro]
     networks:
       honcho-isolated: {}
       memory: {aliases: [honcho-memory]}
@@ -151,7 +151,7 @@ services:
       retries: 12
       start_period: 30s
     entrypoint: [/app/.venv/bin/python, /nocheh/run.py, deriver]
-    volumes: [./integrations/honcho:/nocheh:ro]
+    volumes: [./services/honcho:/nocheh:ro]
     depends_on:
       honcho-api: {condition: service_healthy}
   honcho-provider-gateway:
@@ -164,7 +164,7 @@ services:
     env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/meter.env", required: false}]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     volumes:
-      - ./integrations/honcho/meter.py:/nocheh/meter.py:ro
+      - ./services/honcho/meter.py:/nocheh/meter.py:ro
       - ./tools/operations/provider/embedding_config.py:/nocheh/embedding_config.py:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/ledger:/ledger
@@ -177,7 +177,7 @@ services:
       retries: 15
   honcho-cli:
     image: nocheh-honcho-cli:0.1.4
-    build: {context: ./integrations/honcho/cli, dockerfile: Dockerfile}
+    build: {context: ./services/honcho/cli, dockerfile: Dockerfile}
     profiles: [honcho-tools]
     read_only: true
     tmpfs: [/tmp]
@@ -204,7 +204,7 @@ services:
 
   hermes-agent-sb:
     image: nocheh-hermes:local
-    command: [python, -m, integrations.hermes.security_launcher]
+    command: [python, -m, services.hermes.security_launcher]
     user: "0:0"
     init: true
     restart: unless-stopped
@@ -384,7 +384,7 @@ services:
 
   chatgpt-speech:
     image: nocheh-hermes:local
-    command: [python, -m, integrations.hermes.speech_gateway]
+    command: [python, -m, services.hermes.speech_gateway]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     init: true
     restart: unless-stopped

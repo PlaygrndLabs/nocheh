@@ -586,7 +586,7 @@ direct children of the exact preflight review roots, retains unrelated siblings,
 and removes a reviewed symlink as a link without following its target. Neither
 preparation nor validation infers ownership or deletes data.
 
-`integrations.hermes.preference_transfer` captures only the eight preferences
+`services.hermes.preference_transfer` captures only the eight preferences
 accepted by the managed native interface. Preserve global defaults and explicit
 profile overrides separately, including the absence of topic overrides. Legacy
 owner markers map to deterministic stable profile IDs; for an original-only

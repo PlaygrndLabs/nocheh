@@ -38,8 +38,8 @@ def export_database(database,destination,locked):
 
 
 def export_native(root,directory):
-    from integrations.hermes.native_memory import registered_profiles
-    from integrations.hermes.isolated_profile import database_path
+    from services.hermes.native_memory import registered_profiles
+    from services.hermes.isolated_profile import database_path
     profiles=[];directory.mkdir(parents=True,exist_ok=False,mode=0o700)
     for profile in registered_profiles(root):
         destination=directory/profile.name;destination.mkdir(mode=0o700)

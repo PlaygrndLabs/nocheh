@@ -61,7 +61,7 @@ def run_isolated_tests(rest):
                 result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
                     '--tmpfs', '/tmp:rw,exec,nosuid,nodev,mode=1777', '--entrypoint', 'python',
                     '-e', 'HERMES_HOME=/tmp/nocheh-tests', '-e', 'SERVICE_TOKEN=test-service-token',
-                    'nocheh-hermes:local', '-m', 'unittest', 'discover', '-s', 'integrations/hermes',
+                    'nocheh-hermes:local', '-m', 'unittest', 'discover', '-s', 'services/hermes',
                     '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
         finally:
             cleanup = subprocess.call(command + ['down', '--volumes', '--remove-orphans'], cwd=ROOT, env=env)
@@ -249,9 +249,9 @@ def main():
         "up": ["up", "-d", "--build", "--wait", "--wait-timeout", "180"],
         "down": ["down"], "status": ["ps"],
         "logs": ["logs", "--tail", "100", "-f"], "build": ["build"],
-        "verify": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.verify", "--live"],
+        "verify": ["exec", "-T", "hermes", "python", "-m", "services.hermes.verify", "--live"],
         "config": ["config", "--quiet"],
-        "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "integrations.hermes.discover_telegram"],
+        "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "services.hermes.discover_telegram"],
         "login": ["exec", "hermes", "python", "-c",
             "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
     }

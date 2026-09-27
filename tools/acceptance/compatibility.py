@@ -19,7 +19,7 @@ def pin_check(root=ROOT):
     checks={}
     for path in ('deploy/hermes.Dockerfile','src/managed-runs.ts'):
         checks[path]=pinned['revision'] in (root/path).read_text()
-    for path in ('integrations/hermes/native_admin.py','integrations/hermes/browser_gateway.py'):
+    for path in ('services/hermes/native_admin.py','services/hermes/browser_gateway.py'):
         checks[path]=pinned['version'] in (root/path).read_text()
     return {'revision':pinned['revision'],'version':pinned['version'],'consistent':all(checks.values()),'checks':checks}
 
@@ -47,9 +47,9 @@ def commands(revision):
         ('native_contract_tests',['docker','run','--rm','--network=none','--read-only','--tmpfs','/tmp:rw,exec,nosuid,nodev,mode=1777',
             '--cap-drop=ALL','--security-opt=no-new-privileges','-e','HERMES_HOME=/tmp/nocheh-candidate-tests',
             '-e','SERVICE_TOKEN='+'0'*64,
-            runtime,'python','-m','unittest','discover','-s','integrations/hermes','-t','.','-p','test_*.py','-q']),
+            runtime,'python','-m','unittest','discover','-s','services/hermes','-t','.','-p','test_*.py','-q']),
         ('dashboard_assets',['docker','run','--rm','--network=none','--read-only',runtime,'python','-c',
-            "from pathlib import Path; assert Path('/opt/hermes/hermes_cli/web_dist/index.html').is_file(); assert Path('/workspace/integrations/hermes/dashboard/dist/index.js').is_file()"]),
+            "from pathlib import Path; assert Path('/opt/hermes/hermes_cli/web_dist/index.html').is_file(); assert Path('/workspace/services/hermes/dashboard/dist/index.js').is_file()"]),
     ]
 
 
