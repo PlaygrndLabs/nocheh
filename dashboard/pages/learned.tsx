@@ -54,10 +54,11 @@ export function LearnedMemory(){
  <p className="n-muted">Meanings and states learned from permitted conversations. Learning does not send messages or perform actions.</p></section>
  <ResourceState {...entries} hasData={!!entries.data}/><section className="n-panel"><div className="list-heading"><h2>Learned interpretations</h2><Badge>{visible.length} on this page</Badge></div>
  {entries.data&&!visible.length&&<EmptyState title="No interpretations in this view">Choose another scope or filter. New learning appears after permitted evidence is processed.</EmptyState>}
- <div className="owner-records learned-records">{visible.map(entry=><article key={entry.id}><div className="list-heading"><h3>{entry.subject}</h3><Badge>{entry.retired?'Retired':entry.author==='owner'?'Owner corrected':entry.provenance.learning.uncertainty}</Badge></div>
-  <small>{entry.kind} · {entry.scope_kind} <span className="owner-identifier">{entry.scope_id}</span></small><div className="learned-card-status"><span>{entry.active_revision>1?'Revised interpretation':'Original interpretation'}</span><span>Revision {entry.active_revision}</span></div><p className="memory-prose">{entry.text}</p>
+ <div className="owner-records learned-records">{visible.map(entry=><article key={entry.id} className="learned-card"><h3>{entry.subject}</h3>
+  <div className="learned-card-details" aria-label="Interpretation details"><Badge>{entry.kind}</Badge><Badge>{entry.scope_kind} <span className="owner-identifier">{entry.scope_id}</span></Badge><Badge>{entry.retired?'Retired':entry.author==='owner'?'Owner corrected':entry.provenance.learning.uncertainty}</Badge><Badge className={entry.active_revision>1?'learned-revision-badge':undefined}>{entry.active_revision>1?'Revised':'Original'} · Revision {entry.active_revision}</Badge></div>
+  <p className="memory-prose">{entry.text}</p>
   {entry.provenance.learning.conflicts.length>0&&<p className="owner-conflict">Conflicting interpretations need review</p>}
-  <Button onClick={e=>{setTrigger(e.currentTarget);setSelected(entry.id);}}>Inspect and correct</Button></article>)}</div>
+  <div className="learned-card-action"><Button onClick={e=>{setTrigger(e.currentTarget);setSelected(entry.id);}}>Inspect and correct</Button></div></article>)}</div>
  <CursorButtons pages={pages} next={entries.data?.next} onChange={setPages}/></section>
  <Sheet open={!!selected} onOpenChange={open=>{if(!open){setSelected('');if(selection())history.replaceState(null,'','#memory?view=learned');}}} title={detail?.subject||'Learned interpretation'} returnFocus={trigger}>
   <ResourceState {...selectedData} hasData={!!detail}/>{detail&&<MemoryDetail key={selected} entry={detail}/>}</Sheet></>;
