@@ -15,7 +15,7 @@ test('owner workflow event filter is validated and bound to the query',async()=>
   const pool={query:async(sql:string,values:unknown[])=>{calls.push({sql,values});return {rows:[]};}} as unknown as pg.Pool;
   await assert.rejects(listWorkflows(pool,{event:'invalid'}),/invalid_workflow_event/);
   assert.equal(calls.length,0);
-  assert.deepEqual((await listWorkflows(pool,{event})).workflows,[]);
+  const page=await listWorkflows(pool,{event});assert.deepEqual(page.workflows,[]);assert.equal(page.event_filter,event);
   assert.match(calls[0]!.sql,/source_event_id=\$6/);
   assert.equal(calls[0]!.values[5],event);
 });

@@ -34,6 +34,11 @@ observed evidence; the CLI does not mark a live gate as passed or decide an
 ambiguous send. `workflow-health`, `honcho`, `learning`, `search`, and `event`
 provide focused inspection. Run `--help` for all options.
 
+The direct `event` and `trace` commands and the `workflows --event` filter
+require the matching app API revision. They fail explicitly when the running
+installation has not activated that revision, rather than returning an
+unfiltered workflow page or omitting linked replies.
+
 The CLI cannot fabricate owner or group Telegram traffic. Live acceptance
 still requires fresh owner input and saved event IDs and timestamps as described
 in [the release procedure](../docs/release-acceptance.md).

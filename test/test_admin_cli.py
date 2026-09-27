@@ -21,7 +21,7 @@ class FakeAPI:
             return {"id": EVENT, "received_at": "2026-09-27T12:00:00Z", "event": {"text": "private phrase", "scope": "telegram:private:42"},
                     "reply_messages": [{"id": "c" * 64, "text": "agent reply", "received_at": "2026-09-27T12:01:00Z"}]}
         if path.startswith("/v1/workflows?"):
-            return {"workflows": [{"id": WORKFLOW, "source_event_id": EVENT, "state": "completed", "receipts": [{"receipt_id": "d" * 64}]}], "next": None}
+            return {"workflows": [{"id": WORKFLOW, "source_event_id": EVENT, "state": "completed", "receipts": [{"receipt_id": "d" * 64}]}], "event_filter": EVENT, "next": None}
         return {"records": [], "next": None}
 
 
@@ -60,6 +60,19 @@ class AdminCliTests(unittest.TestCase):
     def test_workflow_filter_is_encoded(self):
         self.run_cli("workflows", "--event", EVENT, "--json")
         self.assertIn("event=" + EVENT, FakeAPI.calls[0][0])
+
+    def test_old_api_cannot_silently_return_unfiltered_workflows(self):
+        class OldAPI(FakeAPI):
+            def call(self, path, timeout=30):
+                value = super().call(path, timeout)
+                if path.startswith("/v1/workflows?"):
+                    value.pop("event_filter")
+                return value
+
+        error_output = io.StringIO()
+        with patch.object(admin, "API", OldAPI), contextlib.redirect_stderr(error_output), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(admin.main(["trace", EVENT, "--json"]), 1)
+        self.assertIn("lacks the event workflow filter", error_output.getvalue())
 
     def test_unknown_new_api_fields_are_redacted(self):
         value = {"id": EVENT, "agent_output": "private answer", "payload": {"id": "secret chat identity"},

@@ -16,6 +16,10 @@ from .archive import API
 ID = re.compile(r"[a-f0-9]{64}\Z")
 
 
+class RuntimeCompatibilityError(Exception):
+    pass
+
+
 def identity(parser, value):
     if not ID.fullmatch(value):
         parser.error("expected a 64-character lowercase hexadecimal ID")
@@ -96,7 +100,7 @@ def redact(value):
         "id", "event_id", "source_event_id", "workflow_id", "receipt_id", "operation_id", "action_id", "job_id", "generation",
         "kind", "family", "origin", "channel", "state", "status", "stage", "assistant_state", "assistant_stage",
         "assistant_error", "assistant_attempts", "error_code", "attempts", "waiting_reason", "control_reason",
-        "created_at", "updated_at", "received_at", "occurred_at", "delivered_at", "attached_at", "last_ready_at",
+        "created_at", "updated_at", "received_at", "occurred_at", "delivered_at", "attached_at", "last_ready_at", "event_filter",
         "next_attempt", "observed_at", "seen_at", "refreshed_at", "next", "revision", "active_revision", "guard_epoch",
         "policy_revision", "owner_epoch", "fingerprint", "content_hash", "file_hash", "byte_size", "count", "events",
         "total", "completed", "duplicates", "pending", "ready", "syncing", "limited_memory", "attached", "verified",
@@ -146,9 +150,15 @@ def main(arguments=None):
     try:
         api = API()
         value = api.call(path, timeout=30)
+        if args.command in ("event", "trace") and (not isinstance(value, dict) or not isinstance(value.get("reply_messages"), list)):
+            raise RuntimeCompatibilityError("running installation lacks linked event replies; activate the matching API before inspecting this event")
         if args.command == "trace":
             workflows = api.call("/v1/workflows?" + urlencode({"event": args.id, "limit": 100}), timeout=30)
+            if not isinstance(workflows, dict) or workflows.get("event_filter") != args.id:
+                raise RuntimeCompatibilityError("running installation lacks the event workflow filter; activate the matching API before tracing")
             value = {"event": value, "workflows": workflows}
+        elif args.command == "workflows" and args.event and (not isinstance(value, dict) or value.get("event_filter") != args.event):
+            raise RuntimeCompatibilityError("running installation lacks the event workflow filter; activate the matching API before using --event")
     except (FileNotFoundError, KeyError, ValueError):
         print("admin: installation configuration unavailable; initialize the selected installation", file=sys.stderr)
         return 2
@@ -159,6 +169,9 @@ def main(arguments=None):
         return 1
     except (urllib.error.URLError, TimeoutError):
         print("admin: installation API unavailable", file=sys.stderr)
+        return 1
+    except RuntimeCompatibilityError as error:
+        print("admin: " + str(error), file=sys.stderr)
         return 1
     if not args.content: value = redact(value)
     if args.json: print(json.dumps(value, ensure_ascii=False, indent=2, default=str))

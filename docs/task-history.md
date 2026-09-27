@@ -137,4 +137,4 @@ revision is the complete ledger before this summary replaced it.
 
 ## Local admin inspection candidate, 2026-09-27
 
-- A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. The operating installation was not changed; live acceptance remains open. [CLI guide](../admin/README.md).
+- A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. A follow-up check made event tracing reject an older running API that silently ignores the new filter. The operating installation was not changed; live acceptance remains open. [CLI guide](../admin/README.md).
