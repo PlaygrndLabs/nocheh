@@ -78,3 +78,4 @@ records current implementation and activation.
 | [0067](0067-exact-revision-app-rollout.md) | Exact-revision app rollout for local and VPS Compose installations | Extends 0019 with deployment tooling; local acceptance remains separate |
 | [0068](0068-detached-honcho-acceptance-workspace.md) | Time-bound guarded synthetic workspace for preattachment Honcho checks | Extends 0033 and 0034 without authorizing attachment |
 | [0069](0069-role-based-source-layout.md) | Role-based tooling, services, dashboard, and one owner launcher | Extends 0025 and 0067 on code ownership and launcher placement |
+| [0070](0070-single-agent-support-root.md) | One `.agent/` directory for project agent support | Extends 0069 on agent skill and support placement |
