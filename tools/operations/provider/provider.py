@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from tools.operations.installation.configuration import INSTALLATION_ROOT as ROOT
-LOCKS=json.loads((ROOT/'compatibility/upstreams.lock.json').read_text())
+LOCKS=json.loads((ROOT/'deploy/upstreams.lock.json').read_text())
 LOCK=LOCKS['cliproxy']
 MONITOR_LOCK=LOCKS['cpamp']
 CLIENTS=('hermes','honcho','preparation')

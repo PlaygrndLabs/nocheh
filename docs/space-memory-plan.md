@@ -29,7 +29,7 @@ STT preservation; UI/CLI round-trip; reproducible compatibility tests. Missing l
 credentials remain pending. Acceptance here does not activate providers or declare
 a release. Verified Git integration follows AGENTS.md independently.
 
-Final fixture evidence: [2026-09-08-space-memory.json](../compatibility/results/2026-09-08-space-memory.json).
+Final fixture evidence: 2026-09-08-space-memory.json (report removed for privacy).
 Release acceptance is incomplete. Live native review/filter quality, real Telegram
 acceptance, the blocked filtering extension and the browser policy-save check remain
 pending. The five checkpoints were integrated with the runtime-platform work and

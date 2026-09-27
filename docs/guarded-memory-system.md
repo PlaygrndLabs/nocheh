@@ -78,7 +78,7 @@ does not require another login or a paid transcription key.
   restores trusted guarded history from your own export. Ordinary imports prepare
   copies again and do not accept supplied guarded text as already trusted.
 
-Configure embeddings in the root `.env`. Use `/Users/owner/Develop/Personal/nocheh/.env` for the active local installation.
+Configure embeddings in the root `.env`. Use the root `.env` for the active local installation.
 The `OPENAI_API_KEY` value is the dedicated paid embedding credential. CPA's API
 Keys list contains local client credentials for subscription reasoning; adding the
 paid OpenAI key there does not configure Nocheh's embedding gateway.

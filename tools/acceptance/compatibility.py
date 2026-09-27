@@ -11,11 +11,11 @@ from pathlib import Path
 from tools.operations.installation.configuration import INSTALLATION_ROOT as ROOT
 
 
-def lock():return json.loads((ROOT/'compatibility/upstreams.lock.json').read_text())
+def lock():return json.loads((ROOT/'deploy/upstreams.lock.json').read_text())
 
 
 def pin_check(root=ROOT):
-    pinned=json.loads((root/'compatibility/upstreams.lock.json').read_text())['hermes']
+    pinned=json.loads((root/'deploy/upstreams.lock.json').read_text())['hermes']
     checks={}
     for path in ('deploy/hermes.Dockerfile','src/managed-runs.ts'):
         checks[path]=pinned['revision'] in (root/path).read_text()

@@ -9,6 +9,7 @@ acceptance; [ADRs](docs/adr/README.md) preserve the decision history.
 Agent skills for [admin inspection](.agent/skills/nocheh-admin-cli/SKILL.md),
 [app deployment](.agent/skills/nocheh-deploy/SKILL.md), and
 [Graphify](.agent/skills/graphify/SKILL.md) live in the shared `.agent/skills` directory.
+[Repository layout and ignored local state](docs/repository-layout.md) lists the role of every top-level directory.
 
 `./bin/nocheh` is the owner command. `tools/` holds CLI routing and operational,
 runtime, acceptance, development, and build helpers. `services/hermes` is the
@@ -83,6 +84,6 @@ See [operations and configuration](docs/deploy.md),
 [guarded memory system and operating instructions](docs/guarded-memory-system.md),
 [shared provider and monitoring](docs/provider.md),
 [rebuild execution checkpoints](docs/rebuild-plan.md), and
-[subscription evidence](compatibility/findings.md). VPS provisioning is deferred;
+[subscription evidence](docs/acceptance/subscription-findings.md). VPS provisioning is deferred;
 an existing VPS checkout can receive [app rollouts](docs/deploy.md). Local
 Compose is the development and acceptance target (ADR-0019).

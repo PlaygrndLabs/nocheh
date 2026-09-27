@@ -17,7 +17,7 @@ ROOT=REPO_ROOT
 def main(env_file,destination):
     source=read_env(env_file);project=source.get('NOCHEH_STORES_FIXTURE_PROJECT','')
     if not re.fullmatch(r'nocheh-stores-[a-z0-9-]+',project) or destination.exists():raise ValueError('fresh_synthetic_recovery_required')
-    command=['docker','compose','--env-file',str(env_file),'-f',str(ROOT/'compatibility/stores-compose.yml')]
+    command=['docker','compose','--env-file',str(env_file),'-f',str(ROOT/'deploy/acceptance/stores-compose.yml')]
     environment=dict(os.environ);recovery=StoreRecovery(command,environment,'database')
     if recovery.query(None,"SELECT current_setting('cluster_name')").strip()!='nocheh-stores-fixture':raise ValueError('synthetic_cluster_required')
     services=subprocess.check_output(command+['ps','--services','--status','running'],text=True).split()
@@ -27,7 +27,7 @@ def main(env_file,destination):
         raise ValueError('fresh_fixture_volume_required')
     destination.mkdir(mode=0o700);snapshot=destination/'snapshot';snapshot.mkdir(mode=0o700)
     target_file=destination/'target.env';target_file.write_text('\n'.join(k+'='+v for k,v in {**source,'NOCHEH_STORES_FIXTURE_PROJECT':target_project}.items())+'\n');target_file.chmod(0o600)
-    target=['docker','compose','--env-file',str(target_file),'-f',str(ROOT/'compatibility/stores-compose.yml')]
+    target=['docker','compose','--env-file',str(target_file),'-f',str(ROOT/'deploy/acceptance/stores-compose.yml')]
     with recovery.maintenance(),recovery.barrier():
         contender=StoreRecovery(command,environment,'database')
         try:

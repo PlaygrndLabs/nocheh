@@ -33,14 +33,14 @@ def main(env_file,destination):
     if not re.fullmatch('nocheh-inngest-fault-[a-f0-9]+',project) or not re.fullmatch('fault_[a-f0-9]+',schema):raise ValueError('synthetic_fault_fixture_required')
     if not state.is_relative_to(ROOT/'data') or state==(ROOT/'data/local') or not destination.is_relative_to(ROOT/'data') or destination.is_relative_to(state) or destination.exists():raise ValueError('fresh_fixture_destination_required')
     environment=dict(os.environ)
-    base=['docker','compose','--env-file',str(env_file.resolve()),'-f',str(ROOT/'compatibility/inngest-compose.yml')]
-    command=base+['-f',str(ROOT/'compatibility/inngest-fault-compose.yml')]
+    base=['docker','compose','--env-file',str(env_file.resolve()),'-f',str(ROOT/'deploy/acceptance/inngest-compose.yml')]
+    command=base+['-f',str(ROOT/'deploy/acceptance/inngest-fault-compose.yml')]
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=environment,text=True).split()
     writers=[name for name in ['fault-runtime','fault-worker','fault-publisher','inngest-server'] if name in running]
     destination.mkdir(mode=0o700);backup=destination/'snapshot';backup.mkdir(mode=0o700)
     target_state=destination/'state';target_env={**source,'NOCHEH_FIXTURE_PROJECT':project+'-recovery','NOCHEH_FAULT_STATE':str(target_state)}
     target_file=destination/'.env';target_file.write_text('\n'.join(k+'='+v for k,v in target_env.items())+'\n');target_file.chmod(0o600)
-    restored=['docker','compose','--env-file',str(target_file),'-f',str(ROOT/'compatibility/inngest-compose.yml'),'-f',str(ROOT/'compatibility/inngest-restore-compose.yml')]
+    restored=['docker','compose','--env-file',str(target_file),'-f',str(ROOT/'deploy/acceptance/inngest-compose.yml'),'-f',str(ROOT/'deploy/acceptance/inngest-restore-compose.yml')]
     try:
         if writers:subprocess.run(command+['stop',*writers],env=environment,check=True)
         metadata=snapshot(command,environment,backup,sha)

@@ -45,8 +45,8 @@ ARG LOCAL_GID=1000
 RUN /usr/sbin/useradd --uid ${LOCAL_UID} --create-home nocheh && mkdir -p /workspace /reports && chown ${LOCAL_UID}:${LOCAL_GID} /workspace /reports
 WORKDIR /workspace
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} services ./services
-COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/fixtures ./compatibility/fixtures
-COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
+COPY --chown=${LOCAL_UID}:${LOCAL_GID} test/fixtures/acceptance ./test/fixtures/acceptance
+COPY --chown=${LOCAL_UID}:${LOCAL_GID} deploy/upstreams.lock.json ./deploy/upstreams.lock.json
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} tools ./tools
 USER nocheh
 CMD ["python", "-m", "services.hermes.runtime"]
