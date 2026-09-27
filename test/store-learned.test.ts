@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
-import {parseInterpretations,applicableInterpretations,type Interpretation,type InterpretationVersion} from '../src/interpretations.js';
+import {parseInterpretations,triggeredInterpretations,applicableInterpretations,type Interpretation,type InterpretationVersion} from '../src/interpretations.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
@@ -10,6 +10,20 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {LearnedMemoryRepository,type PreparedDependency} from '../src/stores/learned.js';
 
 const owner={admin:true,scope:null};
+test('reaction learning ignores unrelated conclusions and keeps strict original-source validation',()=>{
+  const trigger=digest('reaction'),target=digest('older-message'),rule=digest('learned-rule'),unknown=digest('unknown');
+  const evidence=[trigger,target].map(id=>({reference:{store:'archive' as const,kind:'event' as const,id,revision:'1',input_hash:digest(id)},text:'Synthetic source.',space:'-42'}));
+  const base={kind:'state',subject:'older item',text:'The older item is done.',scope:{kind:'conversation',id:'-42'},
+    uncertainty:'supported',conflicts:[]};
+  const raw={interpretations:[{...base,subject:'unrelated',evidence_ids:[target]},
+    {...base,evidence_ids:[trigger,target,rule]}]};
+  const scoped=triggeredInterpretations(raw,trigger,[rule]);
+  const values=parseInterpretations(scoped,evidence,'-42',[]);
+  assert.equal(values.length,1);assert.deepEqual(values[0]!.evidence.map(item=>item.id),[trigger,target]);
+  assert.equal(raw.interpretations[1]!.evidence_ids.length,3,'the saved model result stays unchanged');
+  assert.throws(()=>parseInterpretations(triggeredInterpretations({interpretations:[{...base,evidence_ids:[trigger,unknown]}]},trigger,[rule]),
+    evidence,'-42',[]),{code:'unavailable_interpretation_evidence'});
+});
 test('conventions are quoted evidence, general meanings stay contextual and explicit conflicts remain visible',()=>{
   const reference={store:'archive' as const,kind:'event' as const,id:digest('evidence'),revision:'1',input_hash:digest('original')};
   const evidence=[{reference,text:'For project Atlas, a check means reviewed, not completed.',space:'-42'}];
