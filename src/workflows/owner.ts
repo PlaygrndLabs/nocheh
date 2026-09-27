@@ -82,7 +82,8 @@ export async function listWorkflows(pool:pg.Pool,input:unknown={}){
     AND ($3::timestamptz IS NULL OR (created_at,id)<($3,$4)) AND ($6::text IS NULL OR source_event_id=$6)
     ORDER BY created_at DESC,id DESC LIMIT $5`,[c.family,c.state,c.after?.at??null,c.after?.id??null,c.limit+1,c.event])).rows;
   const more=rows.length>c.limit,items=rows.slice(0,c.limit),last=items.at(-1);
-  return {workflows:items.map(view),next:more?Buffer.from(JSON.stringify({at:last.created_cursor,id:last.id})).toString('base64url'):null,observed_at:new Date().toISOString()};
+  return {workflows:items.map(view),next:more?Buffer.from(JSON.stringify({at:last.created_cursor,id:last.id})).toString('base64url'):null,
+    event_filter:c.event,observed_at:new Date().toISOString()};
 }
 export async function workflowDetail(pool:pg.Pool,id:string):Promise<Record<string,any>>{
   workflowIdentity(id);
