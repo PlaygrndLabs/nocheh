@@ -130,3 +130,7 @@ revision is the complete ledger before this summary replaced it.
 ## Fresh owner DM delivery and latency, 2026-09-27
 
 - An ordinary owner Telegram DM reached the restored operating stack. Its preparation and dispatch completed with one attempt and one linked delivered reply; the owner confirmed exactly one sensible visible response. The Archive dashboard linked the incoming event to that reply. Capture to completion took about 172 seconds. No unexpected profile tool was recorded on this turn, leaving the prior intermittent failure and response delay unresolved. [Content-free evidence](../compatibility/results/2026-09-27-owner-dm-dispatch-latency.json).
+
+## Honcho preattachment acceptance path, 2026-09-27
+
+- The current gateway sends each provider request through the Archive preparation endpoint. That endpoint requires a current memory generation, and its provenance check requires an attached, verified connection. The active connection has neither state, so the previously rejected unknown-workspace probe cannot be turned into a fresh paid canary. The earlier G4 isolated acceptance remains historical. A scoped synthetic acceptance path or isolated setup is needed before repeating the six live checks on this installation; no new provider call or verification was made. [Current gateway](../integrations/honcho/meter.py), [preparation check](../src/stores/native-memory.ts), [provenance check](../src/stores/honcho-provenance.ts).
