@@ -357,29 +357,59 @@ export class NativeMemoryRepository {
         limitations:['representation_has_no_exact_citations']}]:[],limited_memory:false,syncing:current.row.state==='building',context_refreshed_at:cache.refreshed_at.toISOString()};
     } catch(error){await this.prepared.audience.assert(principal);return limited;}
   }
+  private async relevantOwnerCorrections(principal:Reader,query:string,binding:GuardBinding) {
+    const space=principal.space??principal.scope;
+    if(!space)return [];
+    const rows=(await this.contexts.access.stores.derived.query(`SELECT e.id,e.subject FROM learned_entries e
+      JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
+      WHERE e.scope_kind='conversation' AND e.scope_id=$1 AND v.author='owner' AND NOT v.retired
+      ORDER BY e.id LIMIT 101`,[space])).rows;
+    if(rows.length>100)throw new HttpError(409,'owner_correction_limit');
+    const normalized=(text:string)=>text.toLocaleLowerCase().replace(/\s+/g,' ').trim();
+    const question=normalized(query),sources=[];
+    for(const row of rows) {
+      const subject=normalized(row.subject);
+      if(!subject||!question.includes(subject))continue;
+      try {
+        const version=await this.contexts.learned.read(principal,row.id,binding,async reference=>
+          this.contexts.access.canRead(principal,reference,binding));
+        const text=`Active owner correction for ${version.subject} in this conversation (revision ${version.revision}): ${version.text}`;
+        await this.prepared.allow(principal,text);
+        sources.push({source:`nocheh:learned:${row.id}:${version.revision}`,kind:'owner_corrected_interpretation',text,exact_citations:false});
+      } catch(error) {
+        if(error instanceof HttpError&&error.code==='learned_memory_not_found')continue;
+        throw error;
+      }
+    }
+    await this.guards.assertCurrent(binding);
+    return sources;
+  }
   async recall(principal:Reader,query:string) {
     string(query,2000);const id=await this.audienceGeneration(principal);if(!id)return limited;
+    let corrections:Awaited<ReturnType<NativeMemoryRepository['relevantOwnerCorrections']>>=[];
     try {
       const current=await this.current(id),actor=principal.admin?current.principal:principal;
+      corrections=await this.relevantOwnerCorrections(principal,query,current.binding);
       const question=await this.prepared.prepare(actor,query,this.detect),requestId=randomUUID();
       const root=await this.prepared.root(actor,current.binding);
       const input=await this.derived.record({operation_id:'native-recall-input:'+requestId,source:root,kind:'runtime_context',content:Buffer.from(String(question)),
         producer:'nocheh',producer_version:protocol,configuration:{workspace:id,reasoning_level:'low'},provenance:{binding:current.binding}});
       const connected=await this.connectedPeers(current,actor,String(question)),answers=[];
-      if(connected.clarification)return {sources:[],limited_memory:false,syncing:current.row.state==='building',clarification_required:true,note:connected.clarification};
+      if(connected.clarification)return {sources:corrections,limited_memory:false,syncing:current.row.state==='building',clarification_required:true,note:connected.clarification};
       for(const item of connected.items.slice(0,4)) {
         await this.current(id);const response=await this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',{query:question,reasoning_level:'low',stream:false});
         answers.push(`[related through ${item.path}]\n${string(response.content,20000)}`);
       }
-      if(!answers.length)return {...limited,note:'No authorized person or project memory matched this request.'};
+      if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing:current.row.state==='building'}:
+        {...limited,note:'No authorized person or project memory matched this request.'};
       const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(string(answers.join('\n\n'),20000)),
         producer:'honcho',producer_version:protocol,configuration:{workspace:id,reasoning_level:'low',peers:connected.items.slice(0,4)},provenance:{partial:connected.partial,limitations:['reasoning_response_has_no_exact_conclusion_citations']}});
       await this.current(id);await this.guards.prepareContext(output,protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
       await this.current(id);await this.prepared.audience.assert(principal);await this.prepared.allow(principal,value);
-      return {sources:[{source:'nocheh:honcho:'+id,kind:'memory_inference',text:value.text,exact_citations:false,
+      return {sources:[...corrections,{source:'nocheh:honcho:'+id,kind:'memory_inference',text:value.text,exact_citations:false,
         limitations:['reasoning_response_has_no_exact_conclusion_citations']}],partial:connected.partial,
         limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing:current.row.state==='building'};
-    } catch(error){await this.prepared.audience.assert(principal);return limited;}
+    } catch(error){await this.prepared.audience.assert(principal);return corrections.length?{...limited,sources:corrections}:limited;}
   }
 }
