@@ -180,13 +180,20 @@ responses, implying about $0.0036 at the reviewed $0.02/million-token rate.
 This matches the owner's selected-project usage screenshot of about $0.004.
 Only 253 request digests were distinct among 448 embedding attempts. Repeated
 guard-epoch memory rebuilds and Honcho representation jobs denied at the pilot
-cap are under investigation. A prior saved reaction reasoning result also
+cap are under investigation. The latest automatic learned revision duplicated
+the prior revision's text, interpretation metadata, evidence, and dependencies
+yet advanced the guard epoch. A focused candidate skips an automatic revision
+only when all of those fields match the active version; changed meaning,
+evidence, or dependencies still publish. Its TypeScript build and focused
+learning tests passed, with database fixtures skipped under the one-stack rule.
+A prior saved reaction reasoning result also
 failed on a malformed nine-character entity suggestion candidate ID despite
 containing trigger-citing interpretations. A narrow candidate keeps such
 suggestions unbound while still rejecting unknown canonical IDs. The TypeScript
 build, focused entity/learning checks, and AST graph refresh passed; the
-database fixture was skipped under the one-stack rule. The candidate is not
-active. Reaction-derived meaning and live recall remain pending.
+database fixture was skipped under the one-stack rule. Neither candidate is
+active in the operating installation. Reaction-derived meaning and live recall
+remain pending.
 
 ## Next actions
 

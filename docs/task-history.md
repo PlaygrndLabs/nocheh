@@ -230,3 +230,7 @@ revision is the complete ledger before this summary replaced it.
 ## Pilot budget boundary and reaction parser, 2026-09-28
 
 - A read-only operating check traced the stalled reaction workflow to repeated Honcho generation rebuilds and budget-denied representation jobs. The durable $5 pilot cap reflects conservative reservations, not provider billing: 448 embedding attempts reserved $4.48 plus $0.52 carried over, while 446 successful responses reported 177,882 input tokens. The owner-provided OpenAI usage screenshot showed about $0.004 for the selected project. A previous checkpointed reaction result had trigger-citing interpretations but failed because a model suggestion supplied a malformed candidate ID. A narrow source candidate keeps malformed suggestion IDs unbound and still rejects unknown canonical IDs; build, focused checks, and AST graph refresh passed. Live activation and reaction recall remain pending.
+
+## Duplicate automatic publication, 2026-09-28
+
+- The newest learned revision had identical text, interpretation metadata, evidence, and dependencies to its predecessor but advanced the guard epoch and rebuilt Honcho memory. A focused source change skips automatic publication for that exact match while preserving revisions for changed meaning, evidence, or dependencies. Build, focused behavior checks, and AST graph refresh passed; the live installation was not replaced and its pilot cap remains exhausted.
