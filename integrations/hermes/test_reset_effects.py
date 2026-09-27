@@ -8,7 +8,10 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 
 from integrations.hermes.capture import Capture
-from scripts import reset_effects as effects,reset_inventory,reset_protocol,reset_quiescence
+from tools.acceptance import reset_effects as effects
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
 
 
 class ResetEffectsTests(unittest.TestCase):
@@ -135,7 +138,7 @@ class ResetEffectsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'maintenance lost'):
                 effects.settle(journal,self.preflight,recovery,inspect=lambda:self.preflight)
             recovery.assert_maintenance.side_effect=None;self.deliver(None)
-            with patch('scripts.reset_effects.snapshot',return_value=self.observed):
+            with patch('tools.acceptance.reset_effects.snapshot',return_value=self.observed):
                 with self.assertRaisesRegex(RuntimeError,'external_effects_unresolved'):
                     effects.settle(journal,self.preflight,recovery,inspect=lambda:self.preflight)
             self.assertEqual(journal.value['steps'][-1]['step'],'quiesced')
@@ -146,11 +149,11 @@ class ResetEffectsTests(unittest.TestCase):
         recovery=Mock(spec=['assert_maintenance','query'])
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)
-            with patch('scripts.reset_effects.snapshot',return_value=self.observed),patch.object(journal,'complete',side_effect=RuntimeError('interrupted')):
+            with patch('tools.acceptance.reset_effects.snapshot',return_value=self.observed),patch.object(journal,'complete',side_effect=RuntimeError('interrupted')):
                 with self.assertRaisesRegex(RuntimeError,'interrupted'):
                     effects.settle(journal,self.preflight,recovery,inspect=lambda:self.preflight)
             original=(journal.directory/'settlement.json').read_bytes()
-            with patch('scripts.reset_effects.snapshot',return_value=self.observed):
+            with patch('tools.acceptance.reset_effects.snapshot',return_value=self.observed):
                 result=effects.settle(journal,self.preflight,recovery,inspect=lambda:self.preflight)
                 self.assertEqual(effects.settle(journal,self.preflight,recovery,inspect=lambda:self.preflight),result)
             self.assertTrue(result['settled']);self.assertEqual(journal.value['steps'][-1]['step'],'effects_settled')
@@ -160,7 +163,7 @@ class ResetEffectsTests(unittest.TestCase):
         recovery=Mock(spec=['assert_maintenance','query']);changed=copy.deepcopy(self.observed);changed['dispatches'][0]['state']='done'
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)
-            with patch('scripts.reset_effects.snapshot',side_effect=[self.observed,changed]):
+            with patch('tools.acceptance.reset_effects.snapshot',side_effect=[self.observed,changed]):
                 with self.assertRaisesRegex(RuntimeError,'evidence_changed'):
                     effects.settle(journal,self.preflight,recovery,inspect=lambda:self.preflight)
             self.assertFalse((journal.directory/'settlement.json').exists())

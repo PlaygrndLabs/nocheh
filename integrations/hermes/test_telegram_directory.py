@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import telegram_directory as directory
+from tools.operations.archive import telegram_directory as directory
 
 
 class TelegramDirectoryTests(unittest.TestCase):

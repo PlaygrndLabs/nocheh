@@ -4,12 +4,12 @@ import {readFile} from 'node:fs/promises';
 
 test('dashboard navigation has one task-oriented destination per responsibility',async()=>{
   const [app,overview,memory,honcho,projects,integrations]=await Promise.all([
-    readFile('web/app.tsx','utf8'),
-    readFile('web/pages/overview.tsx','utf8'),
-    readFile('web/pages/memory-workspace.tsx','utf8'),
-    readFile('web/pages/honcho.js','utf8'),
-    readFile('web/pages/projects.tsx','utf8'),
-    readFile('web/pages/integrations.js','utf8'),
+    readFile('dashboard/app.tsx','utf8'),
+    readFile('dashboard/pages/overview.tsx','utf8'),
+    readFile('dashboard/pages/memory-workspace.tsx','utf8'),
+    readFile('dashboard/pages/honcho.js','utf8'),
+    readFile('dashboard/pages/projects.tsx','utf8'),
+    readFile('dashboard/pages/integrations.js','utf8'),
   ]);
 
   assert.doesNotMatch(app,/\['spaces','Memory access'/);

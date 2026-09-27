@@ -3,7 +3,8 @@ import json
 import unittest
 from unittest.mock import patch
 
-from scripts import reset_erasure, reset_protocol
+from tools.acceptance import reset_erasure
+from tools.acceptance import reset_protocol
 from . import test_reset_preservation
 
 
@@ -99,7 +100,7 @@ class ResetErasureTests(unittest.TestCase):
                 if 'dir_fd' in options:
                     count += 1
                     if count == 1: raise RuntimeError('fixture file interruption')
-            with patch('scripts.reset_files.os.unlink', side_effect=interrupted):
+            with patch('tools.acceptance.reset_files.os.unlink', side_effect=interrupted):
                 with self.assertRaisesRegex(RuntimeError, 'file interruption'): self.erase(journal)
             self.assertEqual(reset_protocol.read(journal.directory / 'erasure.json')['stage'], 'file_erase_intent')
         with reset_protocol.locked(self.state) as journal:

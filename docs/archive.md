@@ -54,7 +54,7 @@ is not enabled in this release.
 
 ## Verification
 
-`./scripts/nocheh test` starts PostgreSQL, runs isolated-schema archive and
+`./bin/nocheh test` starts PostgreSQL, runs isolated-schema archive and
 HTTP tests inside the development image, and runs Python tests against the pinned
 native Telegram adapter. The suite covers duplicates, edits, original text,
 failed attachment downloads, historical suppression, capture disk failure,

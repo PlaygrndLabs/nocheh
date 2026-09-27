@@ -16,8 +16,8 @@ x-service: &service
     PGHOST: nocheh-db
     PGUSER: nocheh
     PGDATABASE: nocheh
-    PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
-    SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+    PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./bin/nocheh init}
+    SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
     HONCHO_URL: http://honcho-memory:8000
@@ -84,7 +84,7 @@ services:
       - "127.0.0.1:${NOCHEH_DASHBOARD_PORT:-8783}:${NOCHEH_DASHBOARD_PORT:-8783}"
       - "127.0.0.1:${NOCHEH_OAUTH_PORT:-1455}:1455"
     healthcheck:
-      test: [CMD, python3, -m, scripts.container_service, dashboard-health]
+      test: [CMD, python3, -m, tools.runtime.container_service, dashboard-health]
       interval: 10s
       timeout: 10s
       retries: 12
@@ -93,7 +93,7 @@ services:
     <<: *management
     command: [executor]
     healthcheck:
-      test: [CMD, python3, -m, scripts.container_service, executor-health]
+      test: [CMD, python3, -m, tools.runtime.container_service, executor-health]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -165,7 +165,7 @@ services:
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     volumes:
       - ./integrations/honcho/meter.py:/nocheh/meter.py:ro
-      - ./scripts/embedding_config.py:/nocheh/embedding_config.py:ro
+      - ./tools/operations/provider/embedding_config.py:/nocheh/embedding_config.py:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/ledger:/ledger
       - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/honcho.key:/run/secrets/cliproxy_honcho_key:ro
@@ -214,7 +214,7 @@ services:
     cap_add: [DAC_READ_SEARCH]
     security_opt: [no-new-privileges:true]
     environment:
-      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       NOCHEH_AGENT_NETWORK: ${NOCHEH_AGENT_NETWORK:-nocheh-agent}
       NOCHEH_UID: ${NOCHEH_UID:-1000}
       NOCHEH_GID: ${NOCHEH_GID:-1000}
@@ -322,7 +322,7 @@ services:
     environment:
       POSTGRES_USER: nocheh
       POSTGRES_DB: nocheh
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run ./scripts/nocheh init}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run ./bin/nocheh init}
     volumes: [postgres_data:/var/lib/postgresql/data]
     networks: [default, workflows]
     healthcheck:
@@ -393,7 +393,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
-      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       CLIPROXY_AUTH_DIR: /provider-auth
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/provider/auth:/provider-auth:ro
@@ -422,7 +422,7 @@ services:
     stop_grace_period: 120s
     ports: ["127.0.0.1:${NOCHEH_NATIVE_ADMIN_PORT:-8785}:8785"]
     environment:
-      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./scripts/nocheh init}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       NOCHEH_CAPTURE_ENABLED: '1'
       NOCHEH_DASHBOARD_HOME: /dashboard-state/home

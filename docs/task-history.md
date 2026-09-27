@@ -137,7 +137,7 @@ revision is the complete ledger before this summary replaced it.
 
 ## Local admin inspection candidate, 2026-09-27
 
-- A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. A follow-up check made event tracing reject an older running API that silently ignores the new filter. The operating installation was not changed; live acceptance remains open. [CLI guide](../admin/README.md).
+- A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. A follow-up check made event tracing reject an older running API that silently ignores the new filter. The operating installation was not changed; live acceptance remains open. [CLI guide](admin-cli.md).
 
 ## Admin and deployment tooling, 2026-09-27
 
@@ -162,3 +162,7 @@ revision is the complete ledger before this summary replaced it.
 ## First owner convention after Honcho attachment, 2026-09-27
 
 - An ordinary owner DM after attachment delivered one linked reply on the first attempt. Honcho ingested it and the reply, then reached a ready generation with a fresh context snapshot. The interpretation job failed because Honcho emitted its session ID as the conversation scope. A focused fix maps only the exact trusted current session ID to the evidence conversation and continues rejecting other IDs and cross-conversation evidence. The TypeScript build and focused parser checks passed; local app revision `4262cb7` was deployed with 17 healthy services. The saved result passed that parser and exposed a second error: its direct claim about the trusted speaker omitted the redundant speaker ID. A narrow repair candidate and focused tests passed; rollout, learned publication, correction, recall, and projection remained pending. [Evidence](../compatibility/results/2026-09-27-owner-violet-convention.json).
+
+## Tooling and dashboard layout, 2026-09-27
+
+- Moved the owner launcher, admin CLI, operations, runtime, acceptance, development, and build tools into role-based packages and renamed the dashboard source. Focused CLI and Python tests, TypeScript/dashboard builds, and Compose structure passed in the isolated worktree. Hermes and Honcho service moves were the next increment; operating installations were not redeployed.

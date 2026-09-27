@@ -1,6 +1,6 @@
 import base64,json,tempfile,unittest
 from pathlib import Path
-from scripts.archive import digest,export_archive,import_archive
+from tools.operations.archive.archive import digest,export_archive,import_archive
 
 
 class SourcePortabilityTests(unittest.TestCase):

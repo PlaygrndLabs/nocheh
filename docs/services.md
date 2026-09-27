@@ -36,7 +36,7 @@ Temporary isolated agent containers are additional.
 | `pgweb-archive` | Read-only database viewer | Docker / optional-stopped |
 | `honcho-cli` | One-shot memory inspection | Docker / optional-stopped |
 
-`./scripts/nocheh status` and Monitoring show each service's tool, purpose,
+`./bin/nocheh status` and Monitoring show each service's tool, purpose,
 location, observed state and expected state. The Honcho metrics probe establishes
 process availability; memory backlog and receipt observations establish progress.
 API, capture and Inngest connectivity are separate observations.
@@ -129,7 +129,7 @@ PostgreSQL derivation queue stay with their respective tools.
 
 <dashboards>
 
-- Owner dashboard: <http://localhost:8783/>. Start with `./scripts/nocheh dashboard`.
+- Owner dashboard: <http://localhost:8783/>. Start with `./bin/nocheh dashboard`.
   It is independent of application and Inngest availability; it requires Docker.
 - Hermes: <http://localhost:8783/hermes/nocheh>, through the owner session and the
   existing managed administration server. No separate frontend container or stock
@@ -137,7 +137,7 @@ PostgreSQL derivation queue stay with their respective tools.
   `data/local/admin/dashboard/home/`, separately from runtime profiles.
 - Inngest inspection: <http://localhost:8783/inngest/runs>.
 - Provider monitoring: <http://localhost:8783/providers/management.html>.
-- Optional pgweb: <http://localhost:8782/>, after `./scripts/nocheh db`.
+- Optional pgweb: <http://localhost:8782/>, after `./bin/nocheh db`.
 
 React, React DOM, Three.js, GraphQL, pg, TypeScript and esbuild are libraries or
 build tools, not additional production services. The management image contains Node 24.x, Python, and pinned Docker CLI tools.

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts import monitoring
+from tools.operations.provider import monitoring
 
 
 class MonitoringTests(unittest.TestCase):

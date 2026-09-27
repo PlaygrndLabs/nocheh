@@ -52,7 +52,7 @@ test('portable bundle transfers exact sources, two engine versions, durable owne
     await source!.selections.activate(outputs[0]!,null,root+':first');await source!.selections.activate(outputs[1]!,1,root+':second');
     const script=`import json,os,sqlite3,urllib.request
 from pathlib import Path
-from scripts.portable import export_all,import_all,validate_package
+from tools.operations.archive.portable import export_all,import_all,validate_package
 root=Path(os.environ['BUNDLE_ROOT']);home=root/'source/hermes/profiles'/('nocheh-'+'a'*24);(home/'memories').mkdir(parents=True)
 (home/'.memory.lock').touch();(home/'memories/USER.md').write_bytes(b'Exact native owner note\\r\\n')
 db=sqlite3.connect(home/'state.db');db.execute('CREATE TABLE messages(text text)');db.execute("INSERT INTO messages VALUES('Native history')");db.commit();db.close()

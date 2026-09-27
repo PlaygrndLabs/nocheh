@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 test('memory relations and access are an accessible Memory workspace view with explicit authority semantics',async()=>{
-  const [app,workspace,page,style,layout,preview]=await Promise.all([readFile('web/app.tsx','utf8'),readFile('web/pages/memory-workspace.tsx','utf8'),readFile('web/pages/memory-map.tsx','utf8'),readFile('web/style.css','utf8'),readFile('web/lib/memory-map-layout.ts','utf8'),readFile('test/dashboard-preview.ts','utf8')]);
+  const [app,workspace,page,style,layout,preview]=await Promise.all([readFile('dashboard/app.tsx','utf8'),readFile('dashboard/pages/memory-workspace.tsx','utf8'),readFile('dashboard/pages/memory-map.tsx','utf8'),readFile('dashboard/style.css','utf8'),readFile('dashboard/lib/memory-map-layout.ts','utf8'),readFile('test/dashboard-preview.ts','utf8')]);
   assert.match(app,/memory:MemoryWorkspace/);assert.doesNotMatch(app,/\['memoryMap','Memory map'/);assert.match(workspace,/Relations & access/);assert.match(workspace,/<MemoryMap\/>/);
   assert.match(page,/relationship and access graph/);assert.match(page,/Complete list fallback/);assert.match(page,/Reject once/);
   assert.match(page,/One-time \(default\)/);assert.match(page,/Persistent until revoked/);assert.match(page,/This connection grants access/);

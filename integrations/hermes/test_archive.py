@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.archive import desktop_records, media_path, message_text
+from tools.operations.archive.archive import desktop_records, media_path, message_text
 from . import archive_tools
 
 

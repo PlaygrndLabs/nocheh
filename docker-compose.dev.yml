@@ -9,7 +9,7 @@ services:
         - {action: sync+restart, path: ./test, target: /app/test}
         - {action: rebuild, path: ./package-lock.json}
         - {action: rebuild, path: ./tsconfig.json}
-        - {action: rebuild, path: ./scripts/build.mjs}
+        - {action: rebuild, path: ./tools/build/build.mjs}
   nocheh-security:
     image: nocheh-services:dev
     build: {target: development}

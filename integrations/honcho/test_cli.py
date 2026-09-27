@@ -23,12 +23,12 @@ class CliTests(unittest.TestCase):
             with self.assertRaises(ValueError):validate(args)
         validate(['session','view','s','-w','w','--page','2','--size','50'])
         with self.assertRaises(ValueError):read_request(None,SimpleNamespace(base_url='http://honcho-api:8000'),'POST','/v3/workspaces/list',query={'page':101})
-        from scripts.honcho import read
-        with patch('scripts.honcho.status',return_value={'running':False}),patch('subprocess.run') as run:
+        from tools.operations.memory.honcho import read
+        with patch('tools.operations.memory.honcho.status',return_value={'running':False}),patch('subprocess.run') as run:
             self.assertEqual(read(['workspace','list'])['error'],'honcho_not_running');run.assert_not_called()
-        with patch('scripts.honcho.status',return_value={'running':True}), \
-             patch('scripts.honcho.compose',return_value=(['docker','compose'],{})), \
-             patch('scripts.honcho.subprocess.run',return_value=SimpleNamespace(stdout='{"complete":true,"data":[]}',returncode=0)) as run:
+        with patch('tools.operations.memory.honcho.status',return_value={'running':True}), \
+             patch('tools.operations.memory.honcho.compose',return_value=(['docker','compose'],{})), \
+             patch('tools.operations.memory.honcho.subprocess.run',return_value=SimpleNamespace(stdout='{"complete":true,"data":[]}',returncode=0)) as run:
             self.assertTrue(read(['workspace','list'])['complete'])
             command=run.call_args.args[0]
             self.assertIn('honcho-cli',command)

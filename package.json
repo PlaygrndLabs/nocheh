@@ -7,15 +7,15 @@
     "node": "24.x"
   },
   "scripts": {
-    "build:dashboard": "node scripts/build-dashboard.mjs",
+    "build:dashboard": "node tools/build/build-dashboard.mjs",
     "test:dashboard": "node --test test/dashboard-*.test.mjs",
-    "build": "node scripts/build.mjs",
+    "build": "node tools/build/build.mjs",
     "start": "node dist/src/main.js",
     "dev": "npm run build && npm start",
     "test": "npm run build && node --test dist/test/*.test.js test/dashboard-*.test.mjs",
     "graphify:extract": "graphify extract . --no-cluster --out .",
     "graphify:report": "graphify cluster-only . --no-label",
-    "graphify:update": "python3 scripts/graphify_ast.py"
+    "graphify:update": "python3 -m tools.development.graphify_ast"
   },
   "dependencies": {
     "@xyflow/react": "12.11.3",

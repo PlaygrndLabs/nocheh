@@ -5,8 +5,11 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import (reset_acceptance, reset_initialization, reset_inventory,
-                     reset_protocol, reset_quiescence)
+from tools.acceptance import reset_acceptance
+from tools.acceptance import reset_initialization
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
 
 
 class FakeDocker:

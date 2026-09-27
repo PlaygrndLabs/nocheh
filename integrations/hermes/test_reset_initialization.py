@@ -8,8 +8,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from integrations.hermes import preference_transfer
-from scripts import (configuration, reset_baseline, reset_boundary, reset_initialization, reset_inventory,
-                     reset_protocol, reset_quiescence)
+from tools.operations.installation import configuration
+from tools.acceptance import reset_baseline
+from tools.acceptance import reset_boundary
+from tools.acceptance import reset_initialization
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
 
 
 class FakeDocker:

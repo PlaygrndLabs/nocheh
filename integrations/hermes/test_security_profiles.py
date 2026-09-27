@@ -2,7 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from scripts.security_profiles import convert
+from tools.operations.security.security_profiles import convert
 from .isolated_profile import database_path
 
 class SecurityProfileTests(unittest.TestCase):

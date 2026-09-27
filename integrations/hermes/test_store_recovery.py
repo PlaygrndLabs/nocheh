@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from scripts.operations import sha
-from scripts.store_recovery import STORES,StoreRecovery,validate,assert_no_state_writers
+from tools.operations.installation.operations import sha
+from tools.operations.installation.store_recovery import STORES,StoreRecovery,validate,assert_no_state_writers
 
 
 class StoreRecoveryTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class StoreRecoveryTests(unittest.TestCase):
 
     def test_snapshot_refuses_missing_or_lost_barrier(self):
         recovery=StoreRecovery(['fixture'],{})
-        with patch('scripts.store_recovery.subprocess.run') as command:
+        with patch('tools.operations.installation.store_recovery.subprocess.run') as command:
             with self.assertRaisesRegex(RuntimeError,'barrier'):recovery.snapshot(Path('/not-created'),sha)
             command.assert_not_called()
 
@@ -62,7 +62,7 @@ class StoreRecoveryTests(unittest.TestCase):
             root=Path(folder)/'owned'
             for source,rw,blocked in ((root/'hermes/profiles/fixture',True,True),(root.parent,True,True),
                                      (root,False,False),(Path(folder)/'unrelated',True,False)):
-                with self.subTest(source=source,rw=rw),patch('scripts.store_recovery.subprocess.check_output',
+                with self.subTest(source=source,rw=rw),patch('tools.operations.installation.store_recovery.subprocess.check_output',
                     side_effect=['database-id\n','database-id\nother-id\n',json.dumps([{'Type':'bind','Source':str(source),'RW':rw}])]) as read:
                     if blocked:
                         with self.assertRaisesRegex(RuntimeError,'writer_still_running'):assert_no_state_writers(root,{},['fixture'])
@@ -72,7 +72,7 @@ class StoreRecoveryTests(unittest.TestCase):
 
     def test_coordinated_backup_holds_stores_through_files_and_resumes_after_release(self):
         from contextlib import contextmanager
-        from scripts.operations import backup,validate_snapshot
+        from tools.operations.installation.operations import backup,validate_snapshot
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);state=root/'state';state.mkdir();(state/'.env').write_text('saved setup\n')
             for name in ('files','spool','hermes'):(state/name).mkdir()
@@ -94,11 +94,11 @@ class StoreRecoveryTests(unittest.TestCase):
                 if 'stop' in command:order.append('stop '+command[-1])
                 if 'up' in command:
                     test.assertIn('released',order);order.append('resumed')
-            with patch('scripts.operations.compose',return_value=['fixture']),\
-                 patch('scripts.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
-                 patch('scripts.operations.subprocess.check_output',side_effect=['hermes\nnocheh-app\nnocheh-dashboard\nnocheh-db\n','fixture-revision']),\
-                 patch('scripts.operations.subprocess.run',side_effect=run),patch('scripts.workflow_worker.running',return_value=False),\
-                 patch('scripts.store_recovery.StoreRecovery',Recovery),patch('scripts.store_recovery.assert_no_state_writers') as idle:
+            with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
+                 patch('tools.operations.installation.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
+                 patch('tools.operations.installation.operations.subprocess.check_output',side_effect=['hermes\nnocheh-app\nnocheh-dashboard\nnocheh-db\n','fixture-revision']),\
+                 patch('tools.operations.installation.operations.subprocess.run',side_effect=run),patch('tools.operations.workflows.workflow_worker.running',return_value=False),\
+                 patch('tools.operations.installation.store_recovery.StoreRecovery',Recovery),patch('tools.operations.installation.store_recovery.assert_no_state_writers') as idle:
                 backup(state,root/'backup');idle.assert_called_once()
             manifest=validate_snapshot(root/'backup');self.assertEqual(manifest['version'],6)
             self.assertEqual(set(manifest['stores']['databases']),set(STORES))
@@ -108,7 +108,7 @@ class StoreRecoveryTests(unittest.TestCase):
             self.assertEqual(order[-2:],["resumed","maintenance released"])
 
     def test_three_store_restore_starts_only_database_and_keeps_auth_inactive(self):
-        from scripts.operations import restore
+        from tools.operations.installation.operations import restore
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);snapshot=root/'snapshot';snapshot.mkdir();state=root/'state'
             stores=self.fixture(snapshot)
@@ -125,9 +125,9 @@ class StoreRecoveryTests(unittest.TestCase):
                     self.assertTrue((state/'spool/.restore-inactive').exists())
                     self.assertTrue((state/'hermes/auth.restore-pending.json').exists())
                 return SimpleNamespace(returncode=0)
-            with patch('scripts.operations.load',return_value={'TELEGRAM_ENABLED':'true','NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
-                 patch('scripts.operations.compose',return_value=['fixture']),patch('scripts.operations.environment',return_value={}),\
-                 patch('scripts.operations.subprocess.run',side_effect=run),patch('scripts.store_recovery.StoreRecovery') as recovery:
+            with patch('tools.operations.installation.operations.load',return_value={'TELEGRAM_ENABLED':'true','NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
+                 patch('tools.operations.installation.operations.compose',return_value=['fixture']),patch('tools.operations.installation.operations.environment',return_value={}),\
+                 patch('tools.operations.installation.operations.subprocess.run',side_effect=run),patch('tools.operations.installation.store_recovery.StoreRecovery') as recovery:
                 result=restore(snapshot,state,'nocheh-three-restore',18990)
                 recovery.return_value.restore_inactive.assert_called_once_with(snapshot,stores,sha)
             self.assertEqual(len(starts),1);self.assertEqual(starts[0][-1],'nocheh-db')
@@ -135,12 +135,12 @@ class StoreRecoveryTests(unittest.TestCase):
             self.assertFalse(result['subscription_login_activated'])
 
     def test_backup_cannot_create_output_inside_original_or_native_data(self):
-        from scripts.operations import backup
+        from tools.operations.installation.operations import backup
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder)
-            with patch('scripts.operations.compose',return_value=['fixture']),\
-                 patch('scripts.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
-                 patch('scripts.operations.subprocess.check_output') as external:
+            with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
+                 patch('tools.operations.installation.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
+                 patch('tools.operations.installation.operations.subprocess.check_output') as external:
                 for path in ('files/backup','hermes/backup','spool/backup'):
                     with self.assertRaisesRegex(ValueError,'own snapshot'):backup(state,state/path)
                     self.assertFalse((state/path).exists())
@@ -148,7 +148,7 @@ class StoreRecoveryTests(unittest.TestCase):
 
     def test_lost_maintenance_does_not_resume_writers(self):
         from contextlib import contextmanager
-        from scripts.operations import backup
+        from tools.operations.installation.operations import backup
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder)/'state';state.mkdir();calls=[]
             class Lost:
@@ -159,12 +159,12 @@ class StoreRecoveryTests(unittest.TestCase):
                 def barrier(self):yield
                 def snapshot(self,*_):raise RuntimeError('store_maintenance_lost')
                 def assert_maintenance(self):raise RuntimeError('store_maintenance_lost')
-            with patch('scripts.operations.compose',return_value=['fixture']),\
-                 patch('scripts.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
-                 patch('scripts.operations.subprocess.check_output',side_effect=['nocheh-app\nnocheh-db\n','fixture-revision']),\
-                 patch('scripts.operations.subprocess.run',side_effect=lambda args,**_:calls.append(args)),\
-                 patch('scripts.workflow_worker.running',return_value=False),\
-                 patch('scripts.store_recovery.StoreRecovery',Lost),patch('scripts.store_recovery.assert_no_state_writers'):
+            with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
+                 patch('tools.operations.installation.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\
+                 patch('tools.operations.installation.operations.subprocess.check_output',side_effect=['nocheh-app\nnocheh-db\n','fixture-revision']),\
+                 patch('tools.operations.installation.operations.subprocess.run',side_effect=lambda args,**_:calls.append(args)),\
+                 patch('tools.operations.workflows.workflow_worker.running',return_value=False),\
+                 patch('tools.operations.installation.store_recovery.StoreRecovery',Lost),patch('tools.operations.installation.store_recovery.assert_no_state_writers'):
                 with self.assertRaisesRegex(RuntimeError,'maintenance_lost'):backup(state,Path(folder)/'backup')
             self.assertEqual(calls,[['fixture','stop','nocheh-app']])
             self.assertFalse((Path(folder)/'backup').exists())

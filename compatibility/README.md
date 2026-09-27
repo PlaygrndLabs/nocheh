@@ -4,7 +4,7 @@ Phase 1 is **complete locally**. A fresh Hermes-owned login, live token refresh,
 chat, literal detection and Ogg/Opus transcription pass locally with the owner's
 ChatGPT subscription. ADR-0019 defers VPS verification and selects local Compose
 for development and acceptance. These paths also passed inside Compose. For the
-current runtime, use `./scripts/nocheh verify`; the commands below reproduce the
+current runtime, use `./bin/nocheh verify`; the commands below reproduce the
 original isolated Phase 1 investigation. See [current status](../TASK.md).
 
 See [Hermes-owned login results](results/2026-09-06-hermes-local.json),
@@ -112,4 +112,4 @@ blocks release; this harness never selects a paid API or local model as fallback
 The offline suite prevents socket connections. Its simulated failures and refresh
 tests are explicitly separate from live results. Retry queues, durable archive
 storage, complete-request guarding and group isolation have their own runtime
-acceptance tests under `./scripts/nocheh test`.
+acceptance tests under `./bin/nocheh test`.

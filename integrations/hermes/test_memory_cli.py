@@ -5,12 +5,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import memory
+from tools.operations.memory import memory
 
 
 class MemoryCliTests(unittest.TestCase):
     def invoke(self,args):
-        with patch('scripts.memory.API') as api,contextlib.redirect_stdout(io.StringIO()):
+        with patch('tools.operations.memory.memory.API') as api,contextlib.redirect_stdout(io.StringIO()):
             api.return_value.call.return_value={}
             self.assertEqual(memory.main(args),0)
             return api.return_value.call.call_args.args
@@ -36,7 +36,7 @@ class MemoryCliTests(unittest.TestCase):
             file=Path(folder)/'policy.json';file.write_text('{"mode":"isolated"}')
             self.assertEqual(self.invoke(['policy','--space','-20/topic/1','--set',str(file),'--revision','4']),
                              ('/v1/memory/spaces',{'id':'-20/topic/1','overrides':{'mode':'isolated'},'revision':4}))
-        with patch('scripts.memory.API') as api,contextlib.redirect_stderr(io.StringIO()):
+        with patch('tools.operations.memory.memory.API') as api,contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):memory.main(['review','a'*64])
             api.assert_not_called()
         self.assertEqual(self.invoke(['review','a'*64,'--approve'])[1]['approved'],True)

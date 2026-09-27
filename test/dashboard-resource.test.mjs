@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {transform} from 'esbuild';
-const {code}=await transform(await readFile(new URL('../web/lib/resource-store.ts',import.meta.url),'utf8'),{loader:'ts',format:'esm'});
+const {code}=await transform(await readFile(new URL('../dashboard/lib/resource-store.ts',import.meta.url),'utf8'),{loader:'ts',format:'esm'});
 const {createResourceStore}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 const flush=()=>new Promise(resolve=>queueMicrotask(resolve));
 test('route handoff retains one shared observation and does not abort its request',async()=>{

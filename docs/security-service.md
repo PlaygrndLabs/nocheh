@@ -9,11 +9,11 @@ See [phase status and acceptance evidence](security-service-plan.md).
 From the repository root:
 
 ```sh
-python3 -m scripts.security show
-python3 -m scripts.security plugin
-python3 -m scripts.security preview ACTION_ID --policy /absolute/path/policy.json
-python3 -m scripts.security apply /absolute/path/policy.json --expected-revision 1
-python3 -m scripts.security effects --effect ACTION_ID
+python3 -m tools.operations.security.security show
+python3 -m tools.operations.security.security plugin
+python3 -m tools.operations.security.security preview ACTION_ID --policy /absolute/path/policy.json
+python3 -m tools.operations.security.security apply /absolute/path/policy.json --expected-revision 1
+python3 -m tools.operations.security.security effects --effect ACTION_ID
 ```
 
 The policy document is strict and versioned. Global rules omit selectors; scope,
@@ -35,8 +35,8 @@ Use the exact fingerprint returned by Activity or a policy preview to grant a
 repeated operation. The owner explicitly chooses both limits; no hidden grants:
 
 ```sh
-python3 -m scripts.security grant ACTION_ID --fingerprint FINGERPRINT --uses 100 --minutes 10080
-python3 -m scripts.security revoke PERMISSION_ID
+python3 -m tools.operations.security.security grant ACTION_ID --fingerprint FINGERPRINT --uses 100 --minutes 10080
+python3 -m tools.operations.security.security revoke PERMISSION_ID
 ```
 
 Grants bind exact arguments, scope and profile. A scheduled operation also binds
@@ -82,7 +82,7 @@ defaults until their own acceptance and profile conversion are complete.
 
 
 For an existing installation, stop Hermes and its native writers before running
-`python3 -m scripts.security_profiles /absolute/path/to/hermes --hermes-stopped`.
+`python3 -m tools.operations.security.security_profiles /absolute/path/to/hermes --hermes-stopped`.
 The converter checkpoints SQLite, validates integrity, moves the same database
 bytes into `native-state`, and reports their hash. It never replaces history with
 a model output. Browser history, native recall and portable export use the same

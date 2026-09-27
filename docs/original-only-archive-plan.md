@@ -192,7 +192,7 @@ committed control versions. Completed results close their runtime capability. A
 trusted result-specific path stages exact approval proposals without reopening it;
 uncertain executions never authorize delivery or a replacement run.
 
-Run `NOCHEH_STORES_FIXTURE=1 python3 -m scripts.store_wiring_check` to render the
+Run `NOCHEH_STORES_FIXTURE=1 python3 -m tools.acceptance.store_wiring_check` to render the
 combined Compose configuration with temporary synthetic credentials, inspect
 credential separation/dependencies, and start no services. The real database
 bootstrap fixture additionally checks repeat setup, retained owner history,
@@ -235,8 +235,8 @@ are the default source-version view; all internal derivatives remain inspectable
 
 The candidate source-only API is `GET /v1/exports/sources`,
 `POST /v1/imports/sources`, and owner-only original-file byte transfers at
-`/v1/original-files/:id/bytes`. `./scripts/nocheh export --sources-only --output DIR`
-writes `nocheh-sources-v1`; `./scripts/nocheh import sources DIR` reads it.
+`/v1/original-files/:id/bytes`. `./bin/nocheh export --sources-only --output DIR`
+writes `nocheh-sources-v1`; `./bin/nocheh import sources DIR` reads it.
 It contains original observations, capture timestamps, stable source references,
 file manifests, and exact bytes, without derivative or guarded content. The CLI
 checks record-file checksums, counts, and all original files before import.
@@ -269,7 +269,7 @@ The candidate derivative transfer API enumerates its fixed record types at
 `GET /v1/exports/derivative-history`. Owner-only
 `POST /v1/imports/derivatives` accepts record batches;
 `POST /v1/imports/derivatives/verify` checks completed references and heads.
-The Python `scripts.derivative_transfer` library checks the package before
+The Python `tools.operations.archive.derivative_transfer` library checks the package before
 transfer, indexes record offsets on disk, imports parents before children,
 detects missing/cyclic ancestry, and verifies every declaration afterward.
 
@@ -297,7 +297,7 @@ leaves a missing parent/revision fails the candidate export explicitly.
 
 <complete_portable_rehearsal>
 
-For original-only installations, `./scripts/nocheh export --output DIRECTORY`
+For original-only installations, `./bin/nocheh export --output DIRECTORY`
 creates `nocheh-portable-v2`: original observations/files, immutable derivatives
 and guarded history, Hermes native notes/SQLite sessions, and configured Honcho
 memory rows/embeddings. Dashboard archive-only downloads use the source-only API;
@@ -314,7 +314,7 @@ bundle. Verify exact native values and embeddings under a concurrent update with
 This command requires the isolated PostgreSQL marker and creates/removes only a
 new randomly named synthetic database.
 
-`./scripts/nocheh import --portable DIRECTORY --native-output SEPARATE_DIRECTORY`
+`./bin/nocheh import --portable DIRECTORY --native-output SEPARATE_DIRECTORY`
 validates the whole package before API mutations, then imports originals through
 the archive repository and derivative history through its dedicated repository.
 It stages native history in a separate inactive directory, preserves the package
@@ -323,7 +323,7 @@ refuses to overwrite changed native files. Imported guards, selections, learned
 projections, caches, and native state cannot authorize execution or attachment.
 An owner must adopt representations through the normal guarded/revisioned paths.
 Restore staged Honcho rows with
-`./scripts/nocheh import --honcho-memory DIRECTORY/honcho --inactive-state STATE`.
+`./bin/nocheh import --honcho-memory DIRECTORY/honcho --inactive-state STATE`.
 The target must have a restored-inactive marker and an empty, initialized native
 database whose column types match the pinned package. The coordinator rejects
 running writers and orphan writable state mounts. It starts no service and changes
@@ -382,7 +382,7 @@ positions, guarded owner edits, and original file hashes. Restore into a fresh
 installation only, with runtime database roles NOLOGIN, a revoked guard epoch,
 provider logins held inactive, and execution/scheduling disabled.
 
-Run `python3 -m scripts.store_fixture_recovery <fixture-env> <new-output-directory>`
+Run `python3 -m tools.acceptance.store_fixture_recovery <fixture-env> <new-output-directory>`
 against a dedicated `compatibility/stores-compose.yml` installation to verify the
 three-database portion without live data. The script checks the real cluster
 marker, refuses existing restore resources, tests blocked writes and interrupted
@@ -422,7 +422,7 @@ The full running application/native/UI rehearsal remains separate.
 
 <reset>
 
-`scripts.reset_protocol` records ordered evidence from isolated acceptance through
+`tools.acceptance.reset_protocol` records ordered evidence from isolated acceptance through
 quiescence, effect settlement, preservation, erasure, initialization, empty baseline,
 the Telegram boundary, fresh acceptance, and resumption. Bind it to the reviewed
 preflight and a new installation generation. The caller must verify each phase;
@@ -431,7 +431,7 @@ maintenance lock as well as the local journal lock while the old database exists
 macOS and Docker do not share advisory-lock visibility. Keep the reset journal and
 its exclusive attempt reservation outside all content-erasure paths.
 
-After complete isolated acceptance, call `scripts.reset_quiescence.quiesce` while
+After complete isolated acceptance, call `tools.acceptance.reset_quiescence.quiesce` while
 holding the journal and the PostgreSQL maintenance lock. Supply the exact reviewed
 preflight, including container restart policies. The coordinator records prior
 running states and policies before changes, establishes all four inactive fences,
@@ -451,7 +451,7 @@ and a separate sentinel. It verifies interruption/retry, preserved restart setti
 durable inactivity, database access for reconciliation, and unrelated-owner isolation.
 Its synthetic lifecycle evidence does not satisfy full native/provider acceptance.
 
-After quiescence, `scripts.reset_effects.settle` reads the current database layout
+After quiescence, `tools.acceptance.reset_effects.settle` reads the current database layout
 and native journals while maintenance remains held. Original source identity reads
 use archive storage separately from control receipts. Confirmed transport records
 are distinguished from no recorded send and stopped local results with unknown
@@ -464,7 +464,7 @@ complete preservation coordinator must retain receipts until this gate passes.
 --management-image CANDIDATE` verifies both real schemas and native journal formats
 on an internal-only Compose network with synthetic responses and no provider calls.
 
-The internal `scripts.reset_files` primitive freezes the reviewed post-quiescence
+The internal `tools.acceptance.reset_files` primitive freezes the reviewed post-quiescence
 installation-local paths into a metadata-only manifest. Bind its exact hash into
 the coordinator's durable preservation evidence before calling `erase`. Its barrier
 callback must recheck phase/journal ownership, writer exclusion, preservation and
@@ -489,7 +489,7 @@ an empty current queue alone cannot prove the earlier operation's outcome.
 Normal polling retains `drop_pending_updates=false` and never invokes this reset
 primitive. No public CLI discard operation is exposed by this library.
 
-Use `scripts.reset_boundary.discard_backlog` for that transition. It invokes the
+Use `tools.acceptance.reset_boundary.discard_backlog` for that transition. It invokes the
 reset-only store-state service before and after transport confirmation. The service
 derives its table inventory from all three compiled schemas and fingerprints every
 row and sequence without returning their contents. The wrapper also reruns the
@@ -501,7 +501,7 @@ blocks phase completion while retaining that confirmation. Retrying a confirmed
 operation uses the journal and makes no request. An attempted operation without a
 durable confirmation remains uncertain and cannot be retried automatically.
 
-After a confirmed boundary, use `scripts.reset_acceptance.activate` to enter the
+After a confirmed boundary, use `tools.acceptance.reset_acceptance.activate` to enter the
 fresh live acceptance window. It derives the enabled services and their saved
 restart policies only from the immutable pre-reset quiescence receipt, expands the
 current Compose dependency graph, and records that plan before creating anything.
@@ -532,7 +532,7 @@ private/group isolation, exact delivery and restart recovery. The request has a
 closed schema and must say `mode: live`; fixture, synthetic or historical labels
 are rejected.
 
-Call `scripts.reset_acceptance.verify_fresh` while every acceptance container still
+Call `tools.acceptance.reset_acceptance.verify_fresh` while every acceptance container still
 has restart policy `no`. Its reset-only service reads the current three databases
 and requires every referenced Telegram event to have `origin=live` and a receive
 time no earlier than the confirmed backlog boundary. It verifies owner/group
@@ -548,7 +548,7 @@ only hashes, counts and pass labels. It cannot accept healthy services, historic
 reports, fixtures, or unanchored checklist claims as live evidence.
 
 Only after that validator advances `fresh_acceptance` may
-`scripts.reset_acceptance.resume` restore service ownership. It recomputes the
+`tools.acceptance.reset_acceptance.resume` restore service ownership. It recomputes the
 current Compose plan, checks every recorded fresh container identity and running
 dependency, requires all reset fences to remain absent, and restores the exact
 pre-reset restart policy only for services recorded as running in the quiescence
@@ -563,7 +563,7 @@ failure paths and the pinned adapter's normal restart behavior in network-disabl
 Compose containers. This bounded rehearsal has no installation mounts, providers,
 or live Telegram requests; full reset and live acceptance remain separate gates.
 
-Run `./scripts/nocheh reset plan --output NEW_FILE` with the saved installation
+Run `./bin/nocheh reset plan --output NEW_FILE` with the saved installation
 root/state to create a private read-only preflight. It inventories exact container
 IDs and Compose origins, current database/cache mount identities, and explicit
 path dispositions. Both running and stopped foreign containers can block shared
@@ -575,13 +575,13 @@ execute deletion. Revalidate and freeze it under maintenance exclusion after the
 complete isolated acceptance gates; the executor must not treat this preflight
 or its configuration fingerprint as an execution authorization.
 
-Use `scripts.reset_ownership.prepare` to create the private review artifact for
+Use `tools.acceptance.reset_ownership.prepare` to create the private review artifact for
 every immediate item under a restore or external archive review root. Assign each
 exact device/inode identity either `erase-installation-owned` or
 `preserve-unrelated`; an absent disposition, new item, replaced item, unknown file
 type, changed root, or incomplete root list stops validation. Only
-`scripts.reset_ownership.validate` may turn those decisions into scoped rows for
-`scripts.reset_files.freeze`. The file manifest accepts reviewed items only as
+`tools.acceptance.reset_ownership.validate` may turn those decisions into scoped rows for
+`tools.acceptance.reset_files.freeze`. The file manifest accepts reviewed items only as
 direct children of the exact preflight review roots, retains unrelated siblings,
 and removes a reviewed symlink as a link without following its target. Neither
 preparation nor validation infers ownership or deletes data.
@@ -604,7 +604,7 @@ write. Job preferences disappear with schedules. This library neither quiesces
 services nor deletes data; those operations still require the complete scoped
 coordinator and isolated reset rehearsal.
 
-Use `scripts.reset_configuration.freeze` after effect settlement to capture only
+Use `tools.acceptance.reset_configuration.freeze` after effect settlement to capture only
 the current setup rows. Legacy storage contributes the current security policy and
 explicit conversation overrides. Original-only storage contributes the current
 security policy, guard mode, admitted assistant configuration, projects and
@@ -620,7 +620,7 @@ with seeded source/derivative canaries on an internal-only network. This compone
 does not complete the preservation phase by itself.
 
 The provider monitor contains both accounting and content-bearing diagnostics.
-After stopping its writer, use `scripts.reset_accounting.sanitize` on the exact
+After stopping its writer, use `tools.acceptance.reset_accounting.sanitize` on the exact
 owned usage database. It requires the pinned schema and native manager lock,
 preserves retained accounting/configuration fingerprints and cache-accounting
 hints, erases raw response/error/log content, rebuilds full-text search, and
@@ -634,7 +634,7 @@ This fixture has no network, creates its own state, proves exclusion by the real
 monitor lock, and restarts the pinned monitor after cleanup. It does not authorize
 or execute an installation reset.
 
-`scripts.reset_preservation.freeze` is the complete pre-erasure gate. While the
+`tools.acceptance.reset_preservation.freeze` is the complete pre-erasure gate. While the
 journal and PostgreSQL maintenance exclusion remain held, it requires the exact
 ownership review, freezes and independently rechecks the current database setup,
 matches the saved environment policy, captures and verifies native preferences,
@@ -652,7 +652,7 @@ requiring the reviewed database identity. Run
 PostgreSQL configuration queries, the real SQLite sanitizer, and synthetic retained
 credentials, spending, original-file and source/derivative canaries.
 
-After `preservation_frozen`, call `scripts.reset_erasure.erase` with the same
+After `preservation_frozen`, call `tools.acceptance.reset_erasure.erase` with the same
 reviewed preflight and ownership artifact. Its immutable receipt binds the
 preservation digest, exact anchored file manifest, full reviewed container
 identities, and raw volume identities. It fsyncs a separate intent before file
@@ -686,7 +686,7 @@ distinguishable from erased history. Verify this repository boundary with
 `python3 compatibility/reset-setup-rehearsal.py --directory NEW_DIRECTORY
 --image CANDIDATE` on a fresh internal-only PostgreSQL fixture.
 
-After scoped erasure, call `scripts.reset_initialization.initialize` with the same
+After scoped erasure, call `tools.acceptance.reset_initialization.initialize` with the same
 reviewed preflight while the reset journal and inactive fences remain current. It
 accepts a frozen source layout of either `legacy` or `original-only-v1`, but always
 creates `original-only-v1`. For a legacy source it converts only setup: current
@@ -712,7 +712,7 @@ learning, provider refresh, and agent services remain stopped throughout. Every
 interruption resumes from the recorded identities; replacement resources, old
 identities, changed configuration, or missing fences fail closed.
 
-Next call `scripts.reset_baseline.verify`. Its reset-only repository service derives
+Next call `tools.acceptance.reset_baseline.verify`. Its reset-only repository service derives
 the complete table inventory from the three store schemas, requires archive and
 derivative row counts to be zero, and permits only the exact current setup plus the
 deterministic new-generation profile refresh requests in control. Independent host
