@@ -218,3 +218,7 @@ revision is the complete ledger before this summary replaced it.
 ## Equivalent-convention rollout, 2026-09-27
 
 - The app activated exact local main revision `9f95398` with the conservative equivalent-convention repair and reached healthy state. A new guarded generation began reprocessing the previously captured human reaction; its source review and Honcho synchronization were still waiting on production memory prerequisites at the latest observation. The distinct derived meaning remains pending. The build, two focused checks, and AST graph refresh passed; the isolated database fixture stayed skipped under the one-stack rule. Private identifiers and the detailed live report remain in ignored local state.
+
+## Fresh human reaction after rollout, 2026-09-27
+
+- The same non-owner participant removed and restored 👍 on the same older forum message. Both original updates were captured with no linked replies, and the restored individual reaction is current. The new guard epoch correctly invalidated an interpretation that was running for the earlier event. The current event passed guarded preparation; forum-scoped Honcho ingestion completed and derivation was still running. Derived meaning and its active recall remain pending. Detailed identifiers are stored only in ignored local evidence.
