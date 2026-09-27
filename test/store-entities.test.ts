@@ -8,7 +8,17 @@ import {ArchiveRepository} from '../src/stores/archive.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {ProjectRepository} from '../src/stores/projects.js';
-import {EntityRepository} from '../src/stores/entities.js';
+import {EntityRepository,attributedSpeaker} from '../src/stores/entities.js';
+
+test('direct entity claims can omit the trusted speaker ID without weakening attribution',()=>{
+  const trusted=digest('trusted-speaker'),other=digest('other-speaker');
+  assert.equal(attributedSpeaker('direct',trusted,undefined,trusted),trusted);
+  assert.equal(attributedSpeaker('direct',trusted,trusted,trusted),trusted);
+  assert.throws(()=>attributedSpeaker('direct',trusted,other,trusted),{code:'entity_attribution_mismatch'});
+  assert.throws(()=>attributedSpeaker('direct',other,undefined,trusted),{code:'entity_attribution_mismatch'});
+  assert.throws(()=>attributedSpeaker('reported',other,undefined,trusted),{code:'entity_attribution_mismatch'});
+  assert.equal(attributedSpeaker('reported',other,trusted,trusted),trusted);
+});
 
 test('people and projects keep stable identity, attributed evidence, connected recall paths and audience privacy',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
