@@ -76,6 +76,24 @@ There is no learned entry or projection receipt yet. Owner correction, active
 recall, and downstream reaction meaning remain pending.
 [Live evidence](compatibility/results/2026-09-27-owner-violet-convention.json).
 
+Revision `d24ac74` with the trusted direct-speaker repair is active on the
+local app; all 17 services are healthy and the compiled fix was confirmed in
+the running container. A new owner convention DM was captured at
+2026-09-27T14:17:55Z in the same private scope. It had no linked reply and its
+Telegram, preparation, and source-learning workflows were still queued at the
+latest observation. Their outbox events were published; Telegram and source
+review each received one run, but preparation had none and stayed queued.
+Telegram waited on the guard and source review waited on a receipt. The
+registered workers were connected; 562 older source review workflows were
+waiting. The prior violet job was skipped after the
+guard epoch advanced from 30 to 31, so it cannot establish learned publication.
+
+The owner also stated a local 👍 convention in the selected forum topic at
+2026-09-27T14:11:09Z. A non-owner human added 👍 to the earlier source message
+in that same topic ten seconds later. Its individual reaction is the current
+stored state. Derived meaning remains pending.
+[Current live evidence](compatibility/results/2026-09-27-current-conventions-and-reaction.json).
+
 ## Next actions
 
 The following live observations are historical because the operating
