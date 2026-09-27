@@ -12,7 +12,7 @@ import {boundStorageOperations,storageWorkflowOperations} from '../src/stores/wo
 import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {observation} from '../src/workflows/pipeline.js';
-import {requestWorkflow,retireSupersededSourceReviews,type WorkflowFamily} from '../src/workflows/store.js';
+import {requestWorkflow,retireSupersededSourceWorkflows,type WorkflowFamily} from '../src/workflows/store.js';
 
 test('storage workflow admission leaves pool capacity for nested publications',async()=>{
   let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let calls=0;
@@ -22,30 +22,35 @@ test('storage workflow admission leaves pool capacity for nested publications',a
   release();await Promise.all([first,second]);assert.equal((await operations.preparation!('third',authority)).state,'completed');assert.equal(calls,3);
 });
 
-test('idle superseded source reviews retire without touching leases, receipts or current work',
+test('idle superseded source workflows retire without touching leases, receipts or current work',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),pool=stores.control;
   const source=(label:string)=>'source:'+digest('supersession:'+Date.now()+':'+label);
-  const pair=async(job:string)=>{
-    const db=await pool.connect();try{await db.query('BEGIN');const old=await requestWorkflow(db,'memory_review',job,1),current=await requestWorkflow(db,'memory_review',job,2);
+  const pair=async(job:string,family:'memory_review'|'honcho'='memory_review')=>{
+    const db=await pool.connect();try{await db.query('BEGIN');const old=await requestWorkflow(db,family,job,1),current=await requestWorkflow(db,family,job,2);
       await db.query('COMMIT');return {old,current};}catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   };
   try {
     const idle=await pair(source('idle')),leased=await pair(source('leased')),protectedJob=await pair(source('receipt'));
+    const honchoIdle=await pair(source('honcho-idle'),'honcho'),honchoLeased=await pair(source('honcho-leased'),'honcho'),
+      honchoProtected=await pair(source('honcho-receipt'),'honcho');
     const db=await pool.connect();let current:string;try{current=await requestWorkflow(db,'memory_review',source('current'));}finally{db.release();}
-    await pool.query("UPDATE workflow_registry SET state='waiting' WHERE id=ANY($1::text[])",[[idle.old,leased.old,protectedJob.old]]);
+    await pool.query("UPDATE workflow_registry SET state='waiting' WHERE id=ANY($1::text[])",[[idle.old,leased.old,protectedJob.old,honchoIdle.old,honchoLeased.old,honchoProtected.old]]);
     await pool.query('UPDATE workflow_registry SET lease_token=$2 WHERE id=$1',[leased.old,randomUUID()]);
+    await pool.query('UPDATE workflow_registry SET lease_token=$2 WHERE id=$1',[honchoLeased.old,randomUUID()]);
     await pool.query("INSERT INTO workflow_receipts(workflow_id,step,attempt,state) VALUES($1,'review',1,'started')",[protectedJob.old]);
-    assert.equal(await retireSupersededSourceReviews(pool),1);
+    await pool.query("INSERT INTO workflow_receipts(workflow_id,step,attempt,state) VALUES($1,'sync',1,'ambiguous')",[honchoProtected.old]);
+    assert.equal(await retireSupersededSourceWorkflows(pool),2);
     const rows=(await pool.query('SELECT id,state,waiting_reason FROM workflow_registry WHERE id=ANY($1::text[])',
-      [[idle.old,idle.current,leased.old,protectedJob.old,current]])).rows;
+      [[idle.old,idle.current,leased.old,protectedJob.old,current,honchoIdle.old,honchoIdle.current,honchoLeased.old,honchoProtected.old]])).rows;
     const byId=new Map(rows.map(row=>[row.id,row]));
-    assert.equal(byId.get(idle.old)?.state,'skipped');assert.equal(byId.get(idle.old)?.waiting_reason,'superseded');
-    for(const id of [idle.current,leased.old,protectedJob.old,current])assert.notEqual(byId.get(id)?.state,'skipped');
-    assert.equal(await retireSupersededSourceReviews(pool),0,'reconciliation is idempotent');
+    for(const id of [idle.old,honchoIdle.old]){assert.equal(byId.get(id)?.state,'skipped');assert.equal(byId.get(id)?.waiting_reason,'superseded');}
+    for(const id of [idle.current,leased.old,protectedJob.old,current,honchoIdle.current,honchoLeased.old,honchoProtected.old])
+      assert.notEqual(byId.get(id)?.state,'skipped');
+    assert.equal(await retireSupersededSourceWorkflows(pool),0,'reconciliation is idempotent');
     const pre=await pair(source('pre'));let preCalls=0;
     const before=await advanceWorkflow(pool,pre.old,1,'memory_review','supersession-pre',async()=>{
       preCalls++;return observation('waiting','review',0,Date.now()+1000,'prerequisite');
@@ -59,6 +64,20 @@ test('idle superseded source reviews retire without touching leases, receipts or
     await pool.query("UPDATE workflow_registry SET state='running' WHERE id=$1",[post.old]);
     const after=await advanceWorkflow(pool,post.old,1,'memory_review','supersession-post',async()=>observation('waiting','review',0,Date.now()+1000,'prerequisite'));
     assert.equal(after.state,'skipped','a running predecessor closes after its operation returns');
+    const honchoPre=await pair(source('honcho-pre'),'honcho');let honchoCalls=0;
+    const honchoBefore=await advanceWorkflow(pool,honchoPre.old,1,'honcho','supersession-honcho-pre',async()=>{
+      honchoCalls++;return observation('waiting','sync',0,Date.now()+1000,'prerequisite');
+    });
+    assert.equal(honchoBefore.state,'skipped');assert.equal(honchoCalls,0);
+    const protectedHonchoRun=await advanceWorkflow(pool,honchoProtected.old,1,'honcho','supersession-honcho-receipt',async()=>{
+      honchoCalls++;return observation('completed','sync');
+    });
+    assert.equal(protectedHonchoRun.state,'completed','a protected Honcho effect may finish');assert.equal(honchoCalls,1);
+    const honchoPost=await pair(source('honcho-post'),'honcho');
+    await pool.query("UPDATE workflow_registry SET state='running' WHERE id=$1",[honchoPost.old]);
+    const honchoAfter=await advanceWorkflow(pool,honchoPost.old,1,'honcho','supersession-honcho-post',async()=>
+      observation('waiting','sync',0,Date.now()+1000,'prerequisite'));
+    assert.equal(honchoAfter.state,'skipped');
   } finally {await stores.close();}
 });
 

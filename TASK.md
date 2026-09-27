@@ -119,6 +119,16 @@ recall, reaction-derived meaning, and the production Honcho projection receipt
 remain pending. GitHub push remains blocked by absent HTTPS authentication.
 [Repair evidence](compatibility/results/2026-09-27-source-review-backlog-repair.json).
 
+The same supersession race affects Honcho source workflows. A read-only control
+query found 441 idle older Honcho source generations with a newer generation and
+no started, completed, or ambiguous workflow effect receipt. A candidate extends
+the bounded startup retirement and advance-time guard to these source workflows,
+preserving active leases and effect receipts. The TypeScript build and runnable
+focused workflow check passed, and a read-only `EXPLAIN` parsed the exact update.
+The isolated database fixture remains skipped under the one-stack rule. The
+candidate has not yet been activated; its queue and owner-memory effect remain
+release gates. [Evidence](compatibility/results/2026-09-27-honcho-source-backlog-repair.json).
+
 ## Next actions
 
 The following live observations are historical because the operating
