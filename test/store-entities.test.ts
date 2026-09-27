@@ -20,6 +20,25 @@ test('direct entity claims can omit the trusted speaker ID without weakening att
   assert.equal(attributedSpeaker('reported',other,trusted,trusted),trusted);
 });
 
+test('malformed model candidate IDs remain unbound while unknown canonical IDs are rejected',async()=>{
+  const source={id:digest('suggestion-source'),kind:'event',store:'archive',revision:'1',input_hash:digest('source-input')} as any;
+  const known=digest('known-person'),unknown=digest('unknown-person'),seen:(string|undefined)[]=[];
+  const entities=Object.create(EntityRepository.prototype) as EntityRepository;
+  (entities as any).suggest=async(_kind:string,_name:string,_source:unknown,_reason:string,candidate?:string)=>{
+    seen.push(candidate);return {candidate};
+  };
+  const context:any={source,evidence:[{reference:source,text:'synthetic evidence',space:'synthetic'}],
+    entities:{speaker:{id:known,kind:'person',name:'Synthetic person'},project:null,mentioned_projects:[],mentioned_people:[]}};
+  const input=(candidate_id:unknown)=>({entity_suggestions:[{kind:'person',name:'Synthetic person',reason:'synthetic evidence',
+    evidence_ids:[source.id],candidate_id}],entity_claims:[]});
+  await entities.publishDiscoveries(context,input('placeholder'),'suggest:invalid');
+  assert.deepEqual(seen,[undefined]);
+  await entities.publishDiscoveries(context,input(known),'suggest:known');
+  assert.deepEqual(seen,[undefined,known]);
+  await assert.rejects(entities.publishDiscoveries(context,input(unknown),'suggest:unknown'),{code:'entity_candidate_unavailable'});
+  assert.deepEqual(seen,[undefined,known]);
+});
+
 test('people and projects keep stable identity, attributed evidence, connected recall paths and audience privacy',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},check=new pg.Pool(config);
