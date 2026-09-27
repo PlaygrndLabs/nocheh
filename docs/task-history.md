@@ -110,3 +110,7 @@ revision is the complete ledger before this summary replaced it.
 ## Operating data restored for live acceptance, 2026-09-27
 
 - The owner authorized restoring the retained dev copy. With dev stopped, its PostgreSQL and Honcho databases were copied into empty operating volumes and their copied logins rotated to the operating credentials. The single owned original passed a source/destination SHA-256 comparison. The new operating stack started with 17 healthy services, 92 archive events, two artifacts, zero Honcho messages, Telegram paused, and no provider login. Release equivalence and remaining live acceptance are pending. [Restore evidence](../compatibility/results/2026-09-27-operating-data-restore.json).
+
+## Operating login and forum readiness, 2026-09-27
+
+- A fresh device login created one shared provider credential. Atomic cutover passed subscription chat, speech, Honcho reasoning, monitor outage/recovery, and restart checks. The owner's new group had topics enabled, an owner topic message, and bot administrator status. It was added beside the retained group; Telegram connected and captured two topic messages. The restored archive and source comparison support carrying only the former installation's listed passed observations forward. Reset-specific post-boundary validation, new learning/reaction checks, and production Honcho acceptance remain pending. [Equivalence](../compatibility/results/2026-09-27-operating-live-equivalence.json).
