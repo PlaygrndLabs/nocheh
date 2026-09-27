@@ -154,3 +154,7 @@ revision is the complete ledger before this summary replaced it.
 ## Shared agent skill location, 2026-09-27
 
 - The owner asked to use `.agent` for support across AI agents. The admin and deployment skill sources moved to `.agent/skills`; the existing Codex skill paths and generic `.agents/skills` paths resolve to those same files. Root agent instructions and repository links point to the canonical location. Runtime and live acceptance state did not change.
+
+## Operating Honcho verification and attachment, 2026-09-27
+
+- Exact app revision `a14ca40` was deployed to the operating Compose app, and all 17 services reported healthy. A short-lived synthetic workspace passed guarded subscription reasoning, labeled-secret masking and embedding, one-message ingestion, retrieval, API/deriver restart recall, and a controlled gateway-only external provider failure followed by recovery. The closed workspace rejected a further request without adding a ledger call. The conservative pilot reservation reached $0.64 under the $5 cap. The six-check report verified the connection, then the owner-directed release work attached it for new activity with history and catch-up off. No production generation or projection receipt existed at attachment. [Evidence](../compatibility/results/2026-09-27-honcho-operating-acceptance.json).
