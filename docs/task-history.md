@@ -206,3 +206,7 @@ revision is the complete ledger before this summary replaced it.
 ## Single agent support directory, 2026-09-27
 
 - On owner direction, moved the Graphify skill into `.agent/skills` beside the admin and deployment skills. Removed the tracked `.agents/` and `.codex/` support trees, the agent-specific hook config, and the root `CLAUDE.md` link. Root `AGENTS.md` remains the working-instructions file; no runtime services changed. [Decision](adr/0070-single-agent-support-root.md).
+
+## Corrected owner recall and duplicate forum rule diagnosis, 2026-09-27
+
+- The owner sent one fresh ordinary DM after the scoped recall rollout. Its captured event completed in one dispatch attempt with one linked reply using the corrected “needs a second review” meaning and omitting the superseded wording. The exact revision 3 Honcho projection receipt was already complete. Local app revision `bad8f6f` activated trigger-only interpretation validation; the current reaction job then passed its earlier evidence-ID failure but rejected its saved model result for a missing explicit-convention quote. Two active same-topic 👍 rules both say done/completed yet exact-text comparison marked their minor grammar differences as a conflict. A convention-only equivalence candidate passed focused tests and read-only replay on those entries. Its rollout and a fresh derived reaction result remained pending. [Evidence](../compatibility/results/2026-09-27-owner-correction-and-workflow-recovery.json).
