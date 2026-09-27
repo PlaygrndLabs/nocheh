@@ -6,6 +6,8 @@ events, files, and separately recorded transcripts stay in an owned, portable ar
 [SPECS.md](SPECS.md) defines the product. [AGENTS.md](AGENTS.md) explains the coding
 workflow. [TASK.md](TASK.md) records implementation, activation, and outstanding
 acceptance; [ADRs](docs/adr/README.md) preserve the decision history.
+Agent skills for [admin inspection](.agent/skills/nocheh-admin/SKILL.md) and
+[app deployment](.agent/skills/nocheh-deploy/SKILL.md) live in `.agent/skills`.
 
 The reviewed deployment combines application responsibilities and uses clear tool
 service names. See [the service map and workflow](docs/services.md).
@@ -75,5 +77,6 @@ See [operations and configuration](docs/deploy.md),
 [guarded memory system and operating instructions](docs/guarded-memory-system.md),
 [shared provider and monitoring](docs/provider.md),
 [rebuild execution checkpoints](docs/rebuild-plan.md), and
-[subscription evidence](compatibility/findings.md). VPS setup is deferred; local
-Compose is the current development and acceptance target (ADR-0019).
+[subscription evidence](compatibility/findings.md). VPS provisioning is deferred;
+an existing VPS checkout can receive [app rollouts](docs/deploy.md). Local
+Compose is the development and acceptance target (ADR-0019).

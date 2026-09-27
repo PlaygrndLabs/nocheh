@@ -150,3 +150,7 @@ revision is the complete ledger before this summary replaced it.
 ## Detached Honcho preflight and owner convention turn, 2026-09-27
 
 - A candidate added a thirty-minute synthetic Honcho workspace that can prepare only metered chat and embedding requests through the existing guard while production memory stays detached. The host TypeScript build and focused isolated native-memory and storage-server checks passed; the candidate was not activated and no paid provider acceptance ran. A new owner DM supplied an explicit synthetic conversation convention. It was captured, the first assistant attempt failed with `assistant_runtime_unavailable`, and a second attempt produced one linked reply after about ten minutes. The Archive dashboard showed the convention acknowledgment and limited-memory disclosure; Telegram visibility and learning remained pending. [Decision](adr/0068-detached-honcho-acceptance-workspace.md), [turn evidence](../compatibility/results/2026-09-27-owner-convention-turn.json).
+
+## Shared agent skill location, 2026-09-27
+
+- The owner asked to use `.agent` for support across AI agents. The admin and deployment skill sources moved to `.agent/skills`; the existing Codex skill paths and generic `.agents/skills` paths resolve to those same files. Root agent instructions and repository links point to the canonical location. Runtime and live acceptance state did not change.
