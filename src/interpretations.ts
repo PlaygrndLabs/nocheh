@@ -11,7 +11,7 @@ export interface Interpretation {
 export interface LearningEvidence {reference:SourceReference;text:string;space:string}
 
 /** A model can propose interpretations, never administration or privacy policy. */
-export function parseInterpretations(input:unknown,evidence:LearningEvidence[],space:string,projects:{id:string;name:string}[]):Interpretation[] {
+export function parseInterpretations(input:unknown,evidence:LearningEvidence[],space:string,projects:{id:string;name:string}[],sessionId?:string):Interpretation[] {
   const result=object(input);
   if(Object.keys(result).some(k=>!['interpretations','entity_suggestions','entity_claims'].includes(k))||!Array.isArray(result.interpretations)||result.interpretations.length>12)
     throw new HttpError(422,'invalid_interpretation_result');
@@ -32,7 +32,10 @@ export function parseInterpretations(input:unknown,evidence:LearningEvidence[],s
       if(!quote.text.trim()||!sources.some(e=>e.reference.id===quote!.source_id&&e.text.includes(quote!.text)))throw new HttpError(422,'unverified_convention_quote');}
     if((value.kind==='convention'||value.uncertainty==='explicit')&&!quote)throw new HttpError(422,'convention_quote_required');
     if(scope.kind==='conversation') {
-      if(scope.id!==space||sources.some(e=>e.space!==space))throw new HttpError(422,'interpretation_scope_mismatch');
+      // Honcho sometimes names its current session instead of the conversation.
+      // Only that trusted, exact session alias can resolve to the evidence space.
+      if(sources.some(e=>e.space!==space)||(scope.id!==space&&(!sessionId||scope.id!==sessionId)))
+        throw new HttpError(422,'interpretation_scope_mismatch');
     } else {
       const project=projects.find(p=>p.id===scope.id);
       const quoted=quote?.text??'';
@@ -42,7 +45,7 @@ export function parseInterpretations(input:unknown,evidence:LearningEvidence[],s
     }
     const conflicts=value.conflicts??[];
     if(!Array.isArray(conflicts)||conflicts.length>30||conflicts.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(422,'invalid_interpretation_conflicts');
-    return {kind:value.kind as Interpretation['kind'],subject,text,scope:{kind:scope.kind as InterpretationScope['kind'],id:string(scope.id,256)},
+    return {kind:value.kind as Interpretation['kind'],subject,text,scope:{kind:scope.kind as InterpretationScope['kind'],id:scope.kind==='conversation'?space:string(scope.id,256)},
       uncertainty:value.uncertainty as Interpretation['uncertainty'],evidence:sources.map(e=>e.reference),...(quote?{quote}:{}),conflicts:[...new Set(conflicts as string[])]};
   });
 }

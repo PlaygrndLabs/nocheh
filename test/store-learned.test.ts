@@ -16,6 +16,13 @@ test('conventions are quoted evidence, general meanings stay contextual and expl
   const input={kind:'convention',subject:'check reaction',text:'A check means reviewed.',scope:{kind:'conversation',id:'-42'},uncertainty:'explicit',
     evidence_ids:[reference.id],quote:{source_id:reference.id,text:evidence[0]!.text},conflicts:[]};
   const [local]=parseInterpretations({interpretations:[input]},evidence,'-42',[]);assert.ok(local);
+  const session=digest('current-honcho-session');
+  const [aliased]=parseInterpretations({interpretations:[{...input,scope:{kind:'conversation',id:session}}]},evidence,'-42',[],session);
+  assert.equal(aliased?.scope.id,'-42','only the current session resolves to the evidence conversation');
+  assert.throws(()=>parseInterpretations({interpretations:[{...input,scope:{kind:'conversation',id:digest('other-session')}}]},evidence,'-42',[],session),
+    {code:'interpretation_scope_mismatch'});
+  assert.throws(()=>parseInterpretations({interpretations:[{...input,scope:{kind:'conversation',id:session}}]},
+    [{...evidence[0]!,space:'-99'}],'-42',[],session),{code:'interpretation_scope_mismatch'});
   const project={id:digest('atlas'),name:'Atlas'};
   assert.equal(parseInterpretations({interpretations:[{...input,scope:{kind:'project',id:project.id}}]},evidence,'-42',[project])[0]?.scope.kind,'project');
   assert.throws(()=>parseInterpretations({interpretations:[{...input,scope:{kind:'project',id:project.id}}]},evidence,'-42',[project,{id:digest('duplicate'),name:'Atlas'}]),{code:'explicit_project_reference_required'});
