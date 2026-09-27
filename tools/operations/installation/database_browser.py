@@ -48,8 +48,8 @@ def _catalog(state):
     if config.get('NOCHEH_HONCHO_ENABLED') == 'true':
         databases.append({'id': 'honcho', 'name': 'Honcho memory', 'engine': 'postgres',
                           'service': 'honcho-postgres', 'database': 'honcho_experiment', 'user': 'experiment'})
-    from integrations.hermes.native_memory import registered_profiles
-    from integrations.hermes.isolated_profile import database_path
+    from services.hermes.native_memory import registered_profiles
+    from services.hermes.isolated_profile import database_path
     root = Path(state) / 'hermes'
     if root.is_symlink():
         raise ValueError('database_path_denied')

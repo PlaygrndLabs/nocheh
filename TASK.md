@@ -55,6 +55,27 @@ delay is a current release investigation, separate from the prior
 `unexpected_profile_tool` error.
 [Content-free evidence](compatibility/results/2026-09-27-owner-convention-turn.json).
 
+A second owner synthetic convention DM was captured after Honcho attachment at
+2026-09-27T13:20:48Z and produced one linked dashboard reply on its first
+attempt. Its first source ingestion receipt completed, and the owner generation
+became ready before a subsequent source write returned it to building. The
+interpretation attempt failed because Honcho put its current session ID in the
+conversation scope field. A focused fix accepts only that exact trusted session
+alias, stores the evidence conversation scope, and rejects other IDs and
+cross-conversation evidence. Build and focused parser checks passed. Revision
+`4262cb7` is active on the local app with all 17 services healthy; the GitHub
+push remains blocked by missing HTTPS credentials. The production Honcho
+generation is ready with a fresh context snapshot and two completed source
+receipts. The saved model result passed the deployed scope parser with one
+canonical conversation interpretation. Its next workflow attempt then failed
+`entity_attribution_mismatch`: a direct claim about the trusted source speaker
+omitted the redundant speaker ID. A focused candidate fills only that omission
+from trusted context and still rejects conflicting or reported attribution;
+build and focused tests passed. It needs rollout and a fresh workflow attempt.
+There is no learned entry or projection receipt yet. Owner correction, active
+recall, and downstream reaction meaning remain pending.
+[Live evidence](compatibility/results/2026-09-27-owner-violet-convention.json).
+
 ## Next actions
 
 The following live observations are historical because the operating
@@ -94,7 +115,7 @@ These are implementation checkpoints, not substitutes for the release decision a
 | Admin CLI inspection | The read-only `./bin/nocheh admin` provides event traces with linked reply IDs, event-filtered workflow receipts, Honcho, learned memory, reviews, and approvals using the authenticated loopback API. `trace latest` selects the newest captured incoming event, optionally by exact scope, and reports its ID and timestamp. Metadata is the default; source content requires `--content`. The operating app activated revision `508494b` and a metadata-only `trace latest` returned one linked reply and five workflows with a matching event filter. The database-backed workflow test skipped without an isolated PostgreSQL fixture; fresh owner live acceptance remains pending. The agent skill is canonical under `.agent/skills` and linked from compatibility paths. [Activation](compatibility/results/2026-09-27-admin-api-activation.json), [CLI guide](docs/admin-cli.md), [agent skill](.agent/skills/nocheh-admin-cli/SKILL.md) |
 | App deployment tooling | Exact-revision local and VPS plans and applies are implemented for existing Compose installations. Local apply checks the clean checkout and app ownership, rebuilds only `nocheh-app`, and waits for health. The operating local app was replaced with revision `508494b`; all 17 Nocheh containers were healthy after rollout. VPS apply requires a supplied SSH host and checkout path, verifies clean remote `main`, fetches and fast forwards to the selected revision, then runs local apply there. Focused tests and skill validation passed. VPS execution remains pending. The agent skill is canonical under `.agent/skills` and linked from compatibility paths. [Activation](compatibility/results/2026-09-27-admin-api-activation.json), [Guide](docs/deploy.md), [agent skill](.agent/skills/nocheh-deploy/SKILL.md), [decision](docs/adr/0067-exact-revision-app-rollout.md) |
 
-| Tooling layout | The owner command and admin CLI use `./bin/nocheh`; tooling is under `tools/`, the dashboard is under `dashboard/`, and the admin skill is `nocheh-admin-cli`. The tooling and dashboard increment passed CLI, Python, TypeScript, dashboard, and Compose checks in the worktree. Hermes and Honcho service moves remain pending. The operating installation was not redeployed. |
+| Source layout | The owner command and admin CLI use `./bin/nocheh`; tooling is under `tools/`, the dashboard is under `dashboard/`, Hermes and Honcho are under `services/`, and the admin skill is `nocheh-admin-cli`. The tooling/dashboard increment passed CLI, Python, TypeScript, dashboard, and Compose checks and was merged locally as `5ef25d0`; push is blocked by missing HTTPS credentials. The service increment passed Python, TypeScript, Compose, candidate image builds, and 371 isolated Hermes tests (3 skipped). No operating installation was redeployed. [Decision](docs/adr/0069-role-based-source-layout.md) |
 
 ## Development follow-ups
 

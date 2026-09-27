@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {layoutGraph, neighborhood, isReference, nodeStyle} from '../integrations/hermes/dashboard/graph-layout.mjs';
+import {layoutGraph, neighborhood, isReference, nodeStyle} from '../services/hermes/dashboard/graph-layout.mjs';
 
 const fixture = () => ({
   scope: 'fixture',

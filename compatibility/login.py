@@ -9,7 +9,7 @@ else:
 def save_login_result(result):
     """The native device flow returns an envelope; the store expects its tokens."""
     from hermes_cli.auth_codex import _save_codex_tokens
-    from integrations.hermes.subscription import SubscriptionCredentials
+    from services.hermes.subscription import SubscriptionCredentials
 
     if not isinstance(result, dict) or result.get("auth_mode") != "chatgpt":
         raise ValueError("Expected a native ChatGPT device-login result")

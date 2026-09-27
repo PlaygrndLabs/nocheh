@@ -50,7 +50,7 @@ def _wait_monitor(state,minimum,seconds=45):
 
 def _verify(command,env,state,name,checks=()):
     target=f'/reports/shared-provider-{name}.json'
-    args=command+['exec','-T','hermes','python','-m','integrations.hermes.verify','--live','--output',target]
+    args=command+['exec','-T','hermes','python','-m','services.hermes.verify','--live','--output',target]
     for check in checks:args+=['--check',check]
     _run(args,env=env,cwd=REPO_ROOT)
     report=json.loads((Path(state)/'reports'/Path(target).name).read_text())

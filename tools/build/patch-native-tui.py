@@ -12,7 +12,7 @@ def patch(relative, replacements):
 
 patch('ui-tui/src/gatewayClient.ts', [
     ("    const cwd = process.env.HERMES_CWD || root", "    const cwd = root // mandatory bootstrap cannot be shadowed by workspace files"),
-    ("spawn(python, ['-m', 'tui_gateway.entry']", "spawn(python, ['-m', 'integrations.hermes.browser_gateway']"),
+    ("spawn(python, ['-m', 'tui_gateway.entry']", "spawn(python, ['-m', 'services.hermes.browser_gateway']"),
     ('  request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {', '''  private nochehInputs: Array<{text: string; event_id: string; session_id: unknown}> = []
 
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
