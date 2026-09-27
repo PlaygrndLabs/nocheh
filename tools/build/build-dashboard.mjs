@@ -4,8 +4,8 @@ import {execFileSync} from 'node:child_process';
 
 // One local, lazy-loaded module. No remote scripts or duplicated React runtime.
 await build({
-  entryPoints: ['integrations/hermes/dashboard/graph-3d.js'],
-  outfile: 'integrations/hermes/dashboard/dist/graph-3d.js',
+  entryPoints: ['services/hermes/dashboard/graph-3d.js'],
+  outfile: 'services/hermes/dashboard/dist/graph-3d.js',
   bundle: true, format: 'esm', platform: 'browser', target: 'es2022',
   minify: true, legalComments: 'eof',
 });
@@ -16,4 +16,4 @@ execFileSync(process.execPath,['node_modules/@tailwindcss/cli/dist/index.mjs','-
 await build({entryPoints:{app:'dashboard/app.tsx'},tsconfig:'tsconfig.dashboard.json',outdir:'dashboard/dist',chunkNames:'chunks/[name]-[hash]',splitting:true,bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,legalComments:'eof'});
 await writeFile('dashboard/dist/style.css',(await readFile('dashboard/dist/tailwind.css','utf8'))+'\n'+await readFile('dashboard/style.css','utf8'));
 await copyFile('dashboard/index.html','dashboard/dist/index.html');
-await copyFile('integrations/hermes/dashboard/dist/graph-3d.js','dashboard/dist/graph-3d.js');
+await copyFile('services/hermes/dashboard/dist/graph-3d.js','dashboard/dist/graph-3d.js');

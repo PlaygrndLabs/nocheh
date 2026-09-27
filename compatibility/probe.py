@@ -45,12 +45,12 @@ def configure_probe_home(home: Path):
     plugin = home / "plugins/nocheh"
     plugin.parent.mkdir(exist_ok=True)
     if not plugin.is_symlink() and not plugin.exists():
-        plugin.symlink_to(ROOT / "integrations/hermes", target_is_directory=True)
+        plugin.symlink_to(ROOT / "services/hermes", target_is_directory=True)
 
 
 def read_probe_credentials(auth_file: Path):
     """Read only the current external token; never copy or rotate its refresh token."""
-    from integrations.hermes.subscription import SubscriptionCredentials
+    from services.hermes.subscription import SubscriptionCredentials
     data = json.loads(auth_file.read_text())
     if data.get("auth_mode") not in {"chatgpt", "chatgpt_auth_tokens"}:
         raise ValueError("Probe needs ChatGPT login")
@@ -65,12 +65,12 @@ def read_hermes_probe_credentials():
     # The explicit live refresh check below uses Hermes's own refresh/save APIs.
     # Avoid the generic resolver's legacy fallback to another application's store.
     from hermes_cli.auth_codex import _read_codex_tokens
-    from integrations.hermes.subscription import SubscriptionCredentials
+    from services.hermes.subscription import SubscriptionCredentials
     return SubscriptionCredentials(_read_codex_tokens()["tokens"]["access_token"])
 
 
 def docker_asr(path, language, token):
-    from integrations.hermes.transcription import process_environment
+    from services.hermes.transcription import process_environment
     container_name = "nocheh-compat-" + uuid.uuid4().hex
     command = [
         "docker", "run", "--rm", "--name", container_name, "--read-only", "--cap-drop", "ALL",
@@ -169,7 +169,7 @@ def main():
 
 def run_probes(args):
     logging.disable(logging.CRITICAL)
-    from integrations.hermes.subscription import detect_literals
+    from services.hermes.subscription import detect_literals
     credential_resolver = read_hermes_probe_credentials if args.auth_source == "hermes" else lambda: read_probe_credentials(args.auth_file)
     credentials = credential_resolver()
     fixture = json.loads((ROOT / "compatibility/fixtures/subscription-speech.json").read_text())
@@ -237,7 +237,7 @@ def run_probes(args):
     def refresh():
         nonlocal credentials
         from hermes_cli.auth_codex import _read_codex_tokens, _save_codex_tokens, refresh_codex_oauth_pure
-        from integrations.hermes.subscription import SubscriptionCredentials
+        from services.hermes.subscription import SubscriptionCredentials
         owned = _read_codex_tokens()["tokens"]
         refreshed = refresh_codex_oauth_pure(owned["access_token"], owned["refresh_token"])
         _save_codex_tokens(refreshed)

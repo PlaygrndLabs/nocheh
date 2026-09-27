@@ -77,3 +77,4 @@ records current implementation and activation.
 | [0066](0066-fixed-name-standard-port-development.md) | Development uses one named stack and normal ports | Supersedes 0065 development name, ports, and builder details |
 | [0067](0067-exact-revision-app-rollout.md) | Exact-revision app rollout for local and VPS Compose installations | Extends 0019 with deployment tooling; local acceptance remains separate |
 | [0068](0068-detached-honcho-acceptance-workspace.md) | Time-bound guarded synthetic workspace for preattachment Honcho checks | Extends 0033 and 0034 without authorizing attachment |
+| [0069](0069-role-based-source-layout.md) | Role-based tooling, services, dashboard, and one owner launcher | Extends 0025 and 0067 on code ownership and launcher placement |

@@ -44,12 +44,12 @@ ARG LOCAL_UID=1000
 ARG LOCAL_GID=1000
 RUN /usr/sbin/useradd --uid ${LOCAL_UID} --create-home nocheh && mkdir -p /workspace /reports && chown ${LOCAL_UID}:${LOCAL_GID} /workspace /reports
 WORKDIR /workspace
-COPY --chown=${LOCAL_UID}:${LOCAL_GID} integrations ./integrations
+COPY --chown=${LOCAL_UID}:${LOCAL_GID} services ./services
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/fixtures ./compatibility/fixtures
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} tools ./tools
 USER nocheh
-CMD ["python", "-m", "integrations.hermes.runtime"]
+CMD ["python", "-m", "services.hermes.runtime"]
 
 
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS tui-assets
@@ -81,23 +81,23 @@ COPY tools/build/native-browser-recovery.tsx /tmp/native-browser-recovery.tsx
 RUN python3 /tmp/patch-native-dashboard.py /opt/hermes && cd /opt/hermes && npm run build --workspace web -- --base=/hermes/
 COPY tools/build/build-dashboard.mjs ./tools/build/build-dashboard.mjs
 COPY tsconfig.dashboard.json ./tsconfig.dashboard.json
-COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
+COPY services/hermes/dashboard ./services/hermes/dashboard
 COPY src/source-content.ts ./src/source-content.ts
 COPY dashboard ./dashboard
 RUN npm run build:dashboard
 
 FROM native-runtime
 COPY --from=dashboard-assets /opt/hermes/hermes_cli/web_dist /opt/hermes/hermes_cli/web_dist
-COPY --from=dashboard-assets /opt/nocheh/integrations/hermes/dashboard/dist /workspace/integrations/hermes/dashboard/dist
+COPY --from=dashboard-assets /opt/nocheh/services/hermes/dashboard/dist /workspace/services/hermes/dashboard/dist
 COPY --from=tui-assets /usr/local/bin/node /usr/local/bin/node
 COPY --from=tui-assets /opt/hermes/ui-tui/dist /opt/hermes/ui-tui/dist
 # Each isolated turn starts a fresh interpreter on a read-only root. Compile
 # the pinned libraries during the image build instead of recompiling them on
 # every request (runtime bytecode writes remain disabled).
 USER root
-RUN python -m compileall -q /opt/venv/lib/python3.11/site-packages /workspace/integrations /workspace/tools \
+RUN python -m compileall -q /opt/venv/lib/python3.11/site-packages /workspace/services /workspace/tools \
     /opt/hermes/agent /opt/hermes/gateway /opt/hermes/tools /opt/hermes/hermes_cli \
     /opt/hermes/run_agent.py /opt/hermes/hermes_state.py /opt/hermes/model_tools.py \
     /opt/hermes/toolsets.py /opt/hermes/hermes_constants.py /opt/hermes/utils.py
 USER nocheh
-CMD ["python", "-m", "integrations.hermes.runtime"]
+CMD ["python", "-m", "services.hermes.runtime"]

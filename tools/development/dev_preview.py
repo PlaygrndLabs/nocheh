@@ -31,10 +31,10 @@ def assert_private_state():
         if not path.is_symlink():
             continue
         relative = path.relative_to(STATE).as_posix()
-        if relative == 'hermes/plugins/nocheh' and path.resolve() == (ROOT / 'integrations/hermes').resolve():
+        if relative == 'hermes/plugins/nocheh' and path.resolve() == (ROOT / 'services/hermes').resolve():
             continue
         if (relative == 'admin/dashboard/home/plugins/nocheh'
-                and os.readlink(path) == '/workspace/integrations/hermes'):
+                and os.readlink(path) == '/workspace/services/hermes'):
             continue
         raise ValueError('Development state contains an unexpected symlink')
     if MARKER.exists():
@@ -179,7 +179,7 @@ def assert_ports(containers):
 def prepare_source_mounts():
     # Nested named volumes need existing mount points under read-only source
     # binds. These ignored directories hold no generated output on the host.
-    for relative in ('dashboard/dist', 'integrations/hermes/dashboard/dist'):
+    for relative in ('dashboard/dist', 'services/hermes/dashboard/dist'):
         path = ROOT / relative
         if path.is_symlink():
             raise ValueError(f'Development source mount {relative} must not be a symlink')
@@ -209,7 +209,7 @@ def prepare_runtime_images(env):
             raise ValueError(f'Pinned runtime image {source} is unavailable or has the wrong revision; build the pinned local runtime images before starting the full development stack')
         subprocess.run(['docker', 'tag', source, destination], cwd=ROOT, env=env,
                        check=True, capture_output=True)
-    honcho_source = 'nocheh-honcho:' + json.loads((ROOT / 'integrations/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+    honcho_source = 'nocheh-honcho:' + json.loads((ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
     if subprocess.run(['docker', 'image', 'inspect', honcho_source], cwd=ROOT, env=env,
                       capture_output=True).returncode:
         raise ValueError(f'Pinned Honcho image {honcho_source} is unavailable')

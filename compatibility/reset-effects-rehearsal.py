@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from integrations.hermes.capture import Capture
+from services.hermes.capture import Capture
 from tools.acceptance import reset_effects
 from tools.operations.installation.store_recovery import StoreRecovery
 

@@ -19,12 +19,12 @@ services:
       - ./src:/app/src:ro
       - ./dashboard:/app/dashboard:ro
       - ./tools:/app/tools:ro
-      - ./integrations/hermes/dashboard:/app/integrations/hermes/dashboard:ro
+      - ./services/hermes/dashboard:/app/services/hermes/dashboard:ro
       - ./tsconfig.json:/app/tsconfig.json:ro
       - ./tsconfig.dashboard.json:/app/tsconfig.dashboard.json:ro
       - dev_dist:/app/dist
       - dev_web_dist:/app/dashboard/dist
-      - dev_graph_dist:/app/integrations/hermes/dashboard/dist
+      - dev_graph_dist:/app/services/hermes/dashboard/dist
 
   nocheh-dashboard:
     image: ${NOCHEH_DEV_PROJECT:?}:dashboard
@@ -39,10 +39,10 @@ services:
     command: [--watch, /app/tools, --, python3, -m, tools.runtime.container_service, dashboard]
     volumes:
       - ./tools:/app/tools:ro
-      - ./integrations/hermes/dashboard:/app/integrations/hermes/dashboard:ro
+      - ./services/hermes/dashboard:/app/services/hermes/dashboard:ro
       - dev_dist:/app/dist:ro
       - dev_web_dist:/app/dashboard/dist:ro
-      - dev_graph_dist:/app/integrations/hermes/dashboard/dist:ro
+      - dev_graph_dist:/app/services/hermes/dashboard/dist:ro
     depends_on:
       nocheh-app: {condition: service_healthy}
 
@@ -75,21 +75,21 @@ services:
     build: !reset null
     restart: "no"
     entrypoint: [python, -m, tools.development.dev_reload]
-    command: [--watch, /workspace/integrations/hermes, --watch, /workspace/tools, --, python, -m, integrations.hermes.runtime]
+    command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.runtime]
     volumes:
-      - ./integrations:/workspace/integrations:ro
+      - ./services:/workspace/services:ro
       - ./tools:/workspace/tools:ro
       - ./compatibility/fixtures:/workspace/compatibility/fixtures:ro
-      - dev_graph_dist:/workspace/integrations/hermes/dashboard/dist:ro
+      - dev_graph_dist:/workspace/services/hermes/dashboard/dist:ro
 
   chatgpt-speech:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
     build: !reset null
     restart: "no"
     entrypoint: [python, -m, tools.development.dev_reload]
-    command: [--watch, /workspace/integrations/hermes, --watch, /workspace/tools, --, python, -m, integrations.hermes.speech_gateway]
+    command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.speech_gateway]
     volumes:
-      - ./integrations:/workspace/integrations:ro
+      - ./services:/workspace/services:ro
       - ./tools:/workspace/tools:ro
 
   hermes-agent-sb:
@@ -97,9 +97,9 @@ services:
     build: !reset null
     restart: "no"
     entrypoint: [python, -m, tools.development.dev_reload]
-    command: [--watch, /workspace/integrations/hermes, --watch, /workspace/tools, --, python, -m, integrations.hermes.security_launcher]
+    command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.security_launcher]
     volumes:
-      - ./integrations:/workspace/integrations:ro
+      - ./services:/workspace/services:ro
       - ./tools:/workspace/tools:ro
 
   cliproxy-api:

@@ -116,7 +116,7 @@ provenance and retry behavior, immutable action requests and owner-only approval
 The synthetic native memory rehearsal sends no Telegram messages:
 
 ```sh
-docker compose exec -T hermes python -m integrations.hermes.verify_assistant
+docker compose exec -T hermes python -m services.hermes.verify_assistant
 ```
 
 Before release, verify actual owner DM replies, selected-group replies and silence,

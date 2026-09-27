@@ -62,7 +62,7 @@ def initialize():
 
 
 def sources():
-    pins=json.loads((ROOT/'integrations/honcho/upstreams.lock.json').read_text())
+    pins=json.loads((ROOT/'services/honcho/upstreams.lock.json').read_text())
     for name,pin in pins.items():
         if not isinstance(pin,dict) or 'repository' not in pin: continue
         path=ROOT/'data/compat/upstreams/honcho'
@@ -109,7 +109,7 @@ def runtime_up():
 
 def monthly():
     from tools.operations.archive.archive import API
-    from integrations.honcho.meter import Ledger
+    from services.honcho.meter import Ledger
     connection=API().call('/v1/memory/honcho')['connection']
     if not connection['verified'] or not connection['attached']:
         raise ValueError('honcho_monthly_requires_accepted_attached_memory')

@@ -2,7 +2,7 @@
 import json
 import subprocess
 
-from integrations.honcho.cli.cli_runner import validate
+from services.honcho.cli.cli_runner import validate
 from tools.operations.memory.honcho_setup import ROOT, STATE, PROVIDER_STATE, initialize, sources, runtime_init, runtime_up, monthly
 from tools.operations.memory.honcho_runtime import enabled, operate
 from tools.operations.provider.provider import compose, login, login_state

@@ -7,7 +7,7 @@ import os
 import sqlite3
 from contextlib import ExitStack
 from pathlib import Path
-from integrations.hermes.isolated_profile import DATA_DIRS
+from services.hermes.isolated_profile import DATA_DIRS
 
 def convert(profile):
     profile=Path(profile)

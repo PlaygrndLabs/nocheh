@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-from integrations.hermes import preference_transfer
+from services.hermes import preference_transfer
 
 from tools.operations.installation import configuration
 from tools.acceptance import (reset_accounting, reset_configuration, reset_files,
