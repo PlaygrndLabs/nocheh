@@ -10,6 +10,25 @@ import {captureInput,claimRun,finishRun} from '../src/managed-runs.js';
 import {admitBrowser} from '../src/workflows/browser.js';
 import {controlReview} from '../src/learning.js';
 
+test('workflow health keeps family totals while explaining queued and waiting records',async()=>{
+  const oldest=new Date('2026-09-25T09:00:00Z'),later=new Date('2026-09-26T09:00:00Z');
+  const rows=[
+    [{family:'honcho',state:'waiting',waiting_reason:'prerequisite',count:4,oldest},{family:'honcho',state:'waiting',waiting_reason:'guard_pending',count:2,oldest:later},{family:'memory_review',state:'waiting',waiting_reason:'prerequisite',count:3,oldest:later},{family:'preparation',state:'queued',waiting_reason:null,count:1,oldest:later},{family:'memory_review',state:'denied',waiting_reason:'consent_required',count:5,oldest}],
+    [{family:'honcho',connected:true}],
+    [{pending:0,admitted:0,oldest:null}],
+    [{service:'workflow-pipeline',fresh:true}],
+    [{at:later}]
+  ];
+  let index=0;
+  const pool={query:async()=>({rows:rows[index++]})} as unknown as pg.Pool;
+  const health=await workflowHealth(pool);
+  assert.equal(index,5);
+  assert.deepEqual(health.counts,[{family:'honcho',state:'waiting',count:6},{family:'memory_review',state:'waiting',count:3},{family:'preparation',state:'queued',count:1},{family:'memory_review',state:'denied',count:5}]);
+  assert.deepEqual(health.waiting_reasons,[{state:'waiting',waiting_reason:'prerequisite',count:7},{state:'waiting',waiting_reason:'guard_pending',count:2},{state:'queued',waiting_reason:null,count:1}]);
+  assert.equal(health.oldest_waiting,oldest);
+  assert.equal(health.outbox.pending,0);
+});
+
 test('owner workflow event filter is validated and bound to the query',async()=>{
   const event='a'.repeat(64),calls:{sql:string;values:unknown[]}[]=[];
   const pool={query:async(sql:string,values:unknown[])=>{calls.push({sql,values});return {rows:[]};}} as unknown as pg.Pool;

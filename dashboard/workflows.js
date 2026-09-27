@@ -17,11 +17,15 @@ export function WorkflowSummary({health,stale=false}){
   for(const row of available?health.counts:[])counts[row.state]=(counts[row.state]||0)+row.count;
   const failed=(counts.failed||0)+(counts.retryable_failed||0);
   const uncertain=counts.ambiguous||0,denied=counts.denied||0;
+  const waiting=(counts.queued||0)+(counts.waiting||0);
+  const waitingFamilies=Object.entries(families).map(([family,label])=>({label,count:(available?health.counts:[]).filter(row=>row.family===family&&['queued','waiting'].includes(row.state)).reduce((total,row)=>total+row.count,0)})).filter(row=>row.count).sort((a,b)=>b.count-a.count);
+  const waitingReasons=Array.isArray(health?.waiting_reasons)?health.waiting_reasons:[];
+  const reasonLabel=row=>row.state==='queued'&&!row.waiting_reason?'Queued to start':row.waiting_reason?readable(row.waiting_reason):'Reason not recorded';
   const workers=health?.workers||[],disconnected=workers.filter(worker=>!worker.connected).length;
   const staleServices=(health?.services||[]).filter(service=>!service.fresh).length;
   const metrics=[
     ['Running',counts.running||0,'Executing now','active',Activity],
-    ['Waiting',(counts.queued||0)+(counts.waiting||0),'Queued or awaiting a prerequisite','warning',Clock3],
+    ['Waiting',waiting,`${counts.queued||0} queued · ${counts.waiting||0} awaiting a condition`,'warning',Clock3],
     ['Failed',failed,`${counts.retryable_failed||0} retry scheduled · ${counts.failed||0} terminal`,'danger',CircleX],
     ['Last success',health?.last_success_at?time(health.last_success_at):'None recorded','Last confirmed workflow completion',health?.last_success_at?'success':'neutral',CircleCheck],
     ['Backlog',health?.outbox?.pending??'—','Requests awaiting publication',health?.outbox?.pending!=null?'warning':'neutral',Inbox]
@@ -33,8 +37,15 @@ export function WorkflowSummary({health,stale=false}){
     stale&&h('p',{role:'alert'},'These are the last known workflow observations and may be out of date.'),
     h('dl',{className:'n-workflow-metrics'},...metrics.map(([label,value,note,tone,Icon])=>h('div',{key:label,'data-tone':available?tone:'neutral'},
       h('dt',null,h(Icon,{size:14,'aria-hidden':true}),label),h('dd',{className:label==='Last success'?'n-workflow-time':undefined},available?value:'—'),h('small',null,available?note:'Unavailable')))),
-    available&&(failed>0||uncertain>0||denied>0)&&h('p',{className:'n-monitor-attention',role:'status'},
-      [failed>0?`${failed} failed (${counts.retryable_failed||0} retry scheduled)`:null,uncertain>0?`${uncertain} uncertain — review before another effect`:null,denied>0?`${denied} denied`:null].filter(Boolean).join(' · ')),
+    available&&waiting>0&&h('section',{className:'n-workflow-breakdown','aria-label':'Waiting workflow breakdown'},
+      h('div',{className:'n-workflow-breakdown-heading'},h('h3',null,'Why work is waiting'),h('small',null,'Oldest waiting record: '+time(health.oldest_waiting))),
+      h('p',{className:'n-muted'},'These are workflow records across all families. One source can have several workflows.'),
+      h('div',{className:'n-workflow-breakdown-grid'},
+        h('div',null,h('h4',null,'By reason'),!Array.isArray(health?.waiting_reasons)?h('p',null,'Reason breakdown unavailable.'):h('ul',null,...waitingReasons.slice(0,4).map((row,index)=>h('li',{key:row.state+':'+row.waiting_reason+':'+index},h('span',null,reasonLabel(row)),h('strong',null,row.count))),waitingReasons.length>4&&h('li',{className:'n-muted'},`${waitingReasons.length-4} more reasons in Workflow details`))),
+        h('div',null,h('h4',null,'By family'),h('ul',null,...waitingFamilies.slice(0,4).map(row=>h('li',{key:row.label},h('span',null,row.label),h('strong',null,row.count))),waitingFamilies.length>4&&h('li',{className:'n-muted'},`${waitingFamilies.length-4} more families in Workflow details`))))),
+    available&&(failed>0||uncertain>0)&&h('p',{className:'n-monitor-attention',role:'status'},
+      [failed>0?`${failed} failed (${counts.retryable_failed||0} retry scheduled)`:null,uncertain>0?`${uncertain} uncertain — review before another effect`:null].filter(Boolean).join(' · ')),
+    available&&denied>0&&h('p',{className:'n-workflow-closed'},`${denied} denied or rejected outcomes · Closed records; inspect Workflow details for the individual reason.`),
     available&&h('p',{className:disconnected||staleServices?'n-monitor-attention':'n-muted',role:disconnected||staleServices?'status':undefined},
       `${workers.length-disconnected}/${workers.length} workflow workers observed`,disconnected?` · ${disconnected} stale or disconnected`:null,staleServices?` · ${staleServices} stale service heartbeat${staleServices===1?'':'s'}`:null),
     h('small',null,'Observed '+time(health?.observed_at)+' · Inngest history is read-only. Retry and cancel are in Workflow details.'));

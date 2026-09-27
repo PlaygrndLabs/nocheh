@@ -2675,3 +2675,18 @@ synthetic dashboard found portal-rendered drawer styles scoped to the app
 root; they were rescoped.
 
 </entry>
+
+<entry date="2026-10-09" area="Monitoring waiting summary port">
+
+The owner asked to resolve every open worktree and branch so that only `main`
+remains. The unmerged September Monitoring candidate, requested when the owner
+found the combined waiting and denied counts unclear, was ported onto `main`:
+the summary separates queued from condition-bound work, shows leading waiting
+reasons and families with the oldest waiting record, and presents denied or
+rejected outcomes as closed records apart from failures. The TypeScript and
+dashboard builds, all 33 dashboard checks and the focused health aggregation
+check pass; the database-backed workflow fixture stayed skipped. The operating
+installation has not activated this change.
+
+</entry>
+
