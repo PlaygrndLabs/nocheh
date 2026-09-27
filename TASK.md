@@ -60,11 +60,17 @@ A second owner synthetic convention DM was captured after Honcho attachment at
 attempt. Its first source ingestion receipt completed, and the owner generation
 became ready before a subsequent source write returned it to building. The
 interpretation attempt failed because Honcho put its current session ID in the
-conversation scope field. A focused code candidate accepts only that exact
-trusted session alias, stores the evidence conversation scope, and rejects
-other IDs and cross-conversation evidence. Build and focused parser checks
-passed; the operating image still needs this repair and the failed workflow
-must be retried. [Live evidence](compatibility/results/2026-09-27-owner-violet-convention.json).
+conversation scope field. A focused fix accepts only that exact trusted session
+alias, stores the evidence conversation scope, and rejects other IDs and
+cross-conversation evidence. Build and focused parser checks passed. Revision
+`4262cb7` is active on the local app with all 17 services healthy; the GitHub
+push remains blocked by missing HTTPS credentials. The production Honcho
+generation is ready with a fresh context snapshot and two completed source
+receipts. The learned job remains failed with its original error; its workflow
+is overdue in `waiting` after a manual retry returned a family-lock conflict.
+There is no learned entry or projection receipt yet. Owner correction, active
+recall, and downstream reaction meaning remain pending.
+[Live evidence](compatibility/results/2026-09-27-owner-violet-convention.json).
 
 ## Next actions
 
