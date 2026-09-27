@@ -5,7 +5,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import database_browser
+from tools.operations.installation import database_browser
 
 
 class DatabaseBrowserTests(unittest.TestCase):

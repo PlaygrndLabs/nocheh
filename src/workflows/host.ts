@@ -18,7 +18,7 @@ const rpc:ArchiveRPC=async(path,body)=>{
 };
 function batch(body:unknown):Promise<unknown> {
   return new Promise((accept,reject)=>{
-    const child=spawn(process.env.NOCHEH_PYTHON??'python3',['-m','scripts.management'],{cwd:root,env:process.env,stdio:['pipe','pipe','ignore']});
+    const child=spawn(process.env.NOCHEH_PYTHON??'python3',['-m','tools.runtime.management'],{cwd:root,env:process.env,stdio:['pipe','pipe','ignore']});
     let buffer='',result:unknown,failure='workflow_host_operation_failed';const timer=setTimeout(()=>child.kill('SIGKILL'),300000);
     child.stdout.setEncoding('utf8');child.stdout.on('data',chunk=>{
       buffer+=chunk;if(buffer.length>65536){child.kill('SIGKILL');return;}

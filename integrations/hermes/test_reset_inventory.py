@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import reset_inventory as inventory
+from tools.acceptance import reset_inventory as inventory
 
 
 class ResetInventoryTests(unittest.TestCase):

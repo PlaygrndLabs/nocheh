@@ -20,7 +20,7 @@ import time
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.configuration import initialize, write_env, compose_command, compose_environment
+from tools.operations.installation.configuration import initialize, write_env, compose_command, compose_environment
 
 
 def main():

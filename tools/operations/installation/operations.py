@@ -1,0 +1,330 @@
+"""Consistent local backups and inactive restores into a new Compose project."""
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import tarfile
+import tempfile
+import time
+import urllib.request
+from datetime import datetime,timezone
+from contextlib import ExitStack
+from pathlib import Path,PurePosixPath
+
+from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
+ROOT=INSTALLATION_ROOT
+SERVICES=['hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security','chatgpt-speech','cliproxy-monitor','cliproxy-api']
+TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
+        'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
+        'guard_context_values':'id','guard_context_inputs':'id',
+        'honcho_connection':'singleton','honcho_generations':'id','honcho_receipts':'id',
+        'honcho_prepared_sources':'source_id,guard_epoch,policy_revision','honcho_context_cache':'generation',
+        'spool_failures':'file_name','guarded_cache':'cache_key','transcription_jobs':'artifact_id','action_requests':'id',
+        'event_spaces':'event_id','memory_policy_state':'singleton','memory_spaces':'id','memory_shares':'id',
+        'memory_learning_sources':'event_id','memory_review_jobs':'id','memory_filtered':'id','managed_runs':'event_id','controlled_actions':'id','action_permissions':'id',
+        'security_policy_versions':'revision','security_policy':'singleton','security_events':'id'}
+TABLES.update(workflow_owners='family',workflow_registry='id',workflow_outbox='id',workflow_runs='workflow_id,run_id',workflow_receipts='workflow_id,step,attempt')
+TABLES.update(workflow_request_revisions='family,job_id')
+TABLES.update(workflow_imports='id',workflow_host_receipts='token')
+TABLES.update(workflow_worker_registrations='family')
+TABLES.update(workflow_schedules='id')
+TABLES.update(workflow_controls='workflow_id,revision,action')
+TABLES.update(workflow_migrations='id')
+TABLES.update(source_model_migrations='version',source_objects='id',source_revisions='id',
+              source_observations='event_id',source_relations='event_id,kind,target_id')
+
+
+def compose(state,project=None):
+    return compose_command(state,project)
+
+
+def environment(state): return compose_environment(state)
+
+
+def sha(path):
+    result=hashlib.sha256()
+    with path.open('rb') as file:
+        for chunk in iter(lambda:file.read(1024*1024),b''): result.update(chunk)
+    return result.hexdigest()
+
+
+def sync(path):
+    with path.open('rb') as file: os.fsync(file.fileno())
+
+
+def fingerprints(command,env,tables=None):
+    result={}
+    if tables is None:
+        raw=subprocess.check_output(command+['exec','-T','nocheh-db','psql','-X','-A','-t','-U','nocheh','-d','nocheh','-c',
+            "SELECT tablename FROM pg_tables WHERE schemaname='public'"],env=env,text=True)
+        tables=[name for name in raw.split() if name in TABLES]
+    if not set(tables).issubset(TABLES): raise ValueError('Unknown snapshot table')
+    for table in tables:
+        key=TABLES[table]
+        query=f'COPY (SELECT row_to_json(t) FROM (SELECT * FROM public.{table} ORDER BY {key}) t) TO STDOUT'
+        process=subprocess.Popen(command+['exec','-T','nocheh-db','psql','-X','-q','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',query],env=env,stdout=subprocess.PIPE)
+        digest=hashlib.sha256()
+        while chunk:=process.stdout.read(1024*1024): digest.update(chunk)
+        if process.wait(): raise RuntimeError('database_fingerprint_failed')
+        result[table]=digest.hexdigest()
+    return result
+
+
+def backup(state,output,leave_stopped=False):
+    command=compose(state);env=environment(state)
+    if output.exists(): raise ValueError('Backup destination already exists')
+    if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
+        copied_roots=[Path(state)/name for name in ('files','spool','hermes','provider','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
+        if any(output.resolve().is_relative_to(root.resolve()) for root in copied_roots):
+            raise ValueError('Backup destination would be included in its own snapshot')
+        from tools.operations.installation.store_recovery import StoreRecovery
+        recovery=StoreRecovery(command,env)
+        with recovery.maintenance():return _backup(state,output,leave_stopped,command,env,recovery)
+    return _backup(state,output,leave_stopped,command,env)
+
+
+def _backup(state,output,leave_stopped,command,env,recovery=None):
+    from tools.operations.workflows.workflow_worker import running as workflows_running,stop as stop_workflows,start as start_workflows
+    output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    stage=Path(tempfile.mkdtemp(prefix='.backup-',dir=output.parent));stage.chmod(0o700)
+    running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
+    three_stores=env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1'
+    from tools.operations.installation.management_maintenance import coordinating_dashboard
+    coordinator=coordinating_dashboard(state,command,env) if three_stores else None
+    exempt={'nocheh-db','honcho-postgres','inngest-redis','nocheh-executor'}
+    if coordinator:exempt.add('nocheh-dashboard')
+    stopped=([name for name in running if name not in exempt]
+        if three_stores else [name for name in SERVICES if name in running])
+    barrier=ExitStack()
+    workflow_was_running=workflows_running(state)
+    try:
+        if 'hermes' in stopped:subprocess.run(command+['stop','hermes'],env=env,check=True)
+        if workflow_was_running:stop_workflows(state,wait=True)
+        # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
+        for service in stopped:
+            if service!='hermes':subprocess.run(command+['stop',service],env=env,check=True)
+        manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
+                  'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+                  'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
+        if three_stores:
+            from tools.operations.installation.store_recovery import assert_no_state_writers
+            assert_no_state_writers(state,env,command,coordinator)
+            barrier.enter_context(recovery.barrier())
+            manifest['stores']=recovery.snapshot(stage,sha)
+            manifest['tables']={store:record['tables'] for store,record in manifest['stores']['databases'].items()}
+        else:
+            manifest['tables']=fingerprints(command,env)
+            dump=stage/'archive.dump'
+            with dump.open('xb') as file:
+                subprocess.run(command+['exec','-T','nocheh-db','pg_dump','-U','nocheh','-d','nocheh','-Fc','--no-owner'],env=env,stdout=file,check=True)
+            dump.chmod(0o600);sync(dump);manifest['dump_sha256']=sha(dump)
+        from tools.operations.workflows.workflow_recovery import enabled_or_present,snapshot as workflow_snapshot
+        if enabled_or_present(state,env):
+            manifest.update(version=4,workflows=workflow_snapshot(command,env,stage,sha))
+        memory_state=Path(env.get('NOCHEH_HONCHO_STATE_DIR') or state/'honcho')
+        if env.get('NOCHEH_HONCHO_ENABLED')=='true':
+            from tools.operations.memory.honcho_recovery import snapshot as memory_snapshot
+            manifest.update(version=5,honcho=memory_snapshot(command,env,stage,sha))
+        archive=stage/'state.tar.gz'
+        with tarfile.open(archive,'w:gz',dereference=False) as tar:
+            for name in ('.env','files','spool','hermes','provider','admin/jobs','admin/tools/receipts','admin/dashboard/home'):
+                base=env_path(state) if name=='.env' else state/name
+                if (name=='provider' or name.startswith('admin/')) and not base.exists(): continue
+                candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
+                for path in candidates:
+                    relative='.env' if name=='.env' else path.relative_to(state).as_posix()
+                    cache=re.match(r'(hermes/(?:profiles/[^/]+/)?\.cache/uv)(?:/|$)',relative)
+                    if cache:
+                        # Native uv may create wheel-cache links. This exact
+                        # dependency cache is rebuildable, never owned memory.
+                        if cache[1] not in manifest['excluded_rebuildable_caches']:manifest['excluded_rebuildable_caches'].append(cache[1])
+                        continue
+                    if path.is_symlink():
+                        if relative.endswith('plugins/nocheh'):
+                            manifest['recreated_plugin_links'].append(relative);continue
+                        raise ValueError('Unsupported state symlink: '+relative)
+                    if path.is_dir(): continue
+                    if not path.is_file(): raise ValueError('Missing/non-regular state file: '+relative)
+                    manifest['files'][relative]={'sha256':sha(path),'size':path.stat().st_size}
+                    tar.add(path,arcname='state/'+relative,recursive=False)
+            if manifest.get('honcho'):
+                for name in ('honcho.env','meter.env','internal_token','database_password','temporary_embedding_key','honcho.Dockerfile'):
+                    path=memory_state/name
+                    if path.is_symlink() or not path.is_file():raise ValueError('honcho_backup_state_missing')
+                    relative='honcho/'+name
+                    manifest['files'][relative]={'sha256':sha(path),'size':path.stat().st_size}
+                    tar.add(path,arcname='state/'+relative,recursive=False)
+            # Provider reservations live outside the archive. Snapshot them with
+            # SQLite's backup API; restoring Nocheh never resets the live ledger.
+            memory_state=env.get('NOCHEH_HONCHO_STATE_DIR') or (ROOT/'data/honcho-experiment' if state.resolve()==(ROOT/'data/local').resolve() else state/'honcho')
+            ledger=Path(memory_state)/'ledger/budget.sqlite'
+            if ledger.is_file():
+                copy=stage/'memory-budget.sqlite';source=sqlite3.connect(ledger.as_uri()+'?mode=ro',uri=True);target=sqlite3.connect(copy)
+                try:source.backup(target);target.commit()
+                finally:source.close();target.close()
+                copy.chmod(0o600);relative='memory-ledger/budget.sqlite'
+                manifest['files'][relative]={'sha256':sha(copy),'size':copy.stat().st_size}
+                tar.add(copy,arcname='state/'+relative,recursive=False)
+                copy.unlink()
+        archive.chmod(0o600);sync(archive);manifest['state_sha256']=sha(archive)
+        if three_stores:
+            recovery.assert_barrier();manifest.update(version=6,storage_layout='original-only-v1')
+            if coordinator:coordinator.assert_current()
+        metadata=stage/'manifest.json';metadata.write_text(json.dumps(manifest,indent=2)+'\n');metadata.chmod(0o600);sync(metadata)
+        if three_stores:validate_snapshot(stage)
+        stage.rename(output)
+        descriptor=os.open(output.parent,os.O_RDONLY)
+        try: os.fsync(descriptor)
+        finally: os.close(descriptor)
+        return {'status':'backed_up','path':str(output),'files':len(manifest['files']),'tables':sum(len(v) for v in manifest['tables'].values()) if three_stores else len(manifest['tables'])}
+    finally:
+        barrier.close()
+        if three_stores:recovery.assert_maintenance()
+        if coordinator:coordinator.assert_current()
+        # Resume precisely the services that were running before the snapshot.
+        if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--no-deps','--wait','--wait-timeout','180']+stopped,env=env,check=True)
+        if workflow_was_running and not leave_stopped:start_workflows(state)
+
+
+def validate_snapshot(snapshot):
+    manifest=json.loads((snapshot/'manifest.json').read_text())
+    if manifest.get('version') not in (1,2,3,4,5,6) or sha(snapshot/'state.tar.gz')!=manifest['state_sha256']:
+        raise ValueError('Backup checksum mismatch')
+    if manifest['version']==6:
+        from tools.operations.installation.store_recovery import validate
+        if manifest.get('storage_layout')!='original-only-v1':raise ValueError('Backup storage layout mismatch')
+        validate(snapshot,manifest.get('stores'),sha)
+        if manifest.get('tables')!={store:record['tables'] for store,record in manifest['stores']['databases'].items()}:
+            raise ValueError('Backup table manifest mismatch')
+    elif sha(snapshot/'archive.dump')!=manifest['dump_sha256']:raise ValueError('Backup checksum mismatch')
+    if manifest['version']==4 or manifest.get('workflows'):
+        from tools.operations.workflows.workflow_recovery import validate
+        validate(snapshot,manifest.get('workflows'),sha)
+    if manifest['version']==5 or manifest.get('honcho'):
+        from tools.operations.memory.honcho_recovery import validate as validate_honcho
+        validate_honcho(snapshot,manifest.get('honcho'),sha)
+    seen=set()
+    with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
+        for member in tar:
+            parts=PurePosixPath(member.name).parts
+            if not member.isfile() or len(parts)<2 or parts[0]!='state' or '..' in parts or PurePosixPath(member.name).is_absolute(): raise ValueError('Unsafe backup member')
+            relative='/'.join(parts[1:])
+            if relative in seen or relative not in manifest['files']: raise ValueError('Unexpected backup member')
+            seen.add(relative);spec=manifest['files'][relative]
+            digest=hashlib.sha256()
+            with tar.extractfile(member) as file:
+                for chunk in iter(lambda:file.read(1024*1024),b''): digest.update(chunk)
+            if member.size!=spec['size'] or digest.hexdigest()!=spec['sha256']: raise ValueError('State file checksum mismatch')
+    if seen!=set(manifest['files']): raise ValueError('Incomplete backup')
+    return manifest
+
+
+def restore(snapshot,state,project,port):
+    if state.exists(): raise ValueError('Restore requires a new, nonexistent state directory')
+    if not re.fullmatch(r'nocheh-[a-z0-9-]{3,50}',project) or project=='nocheh': raise ValueError('Use a new nocheh-* Compose project name')
+    if subprocess.run(['docker','volume','inspect',project+'_postgres_data'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
+        raise ValueError('Restore project database volume already exists')
+    manifest=validate_snapshot(snapshot)
+    state.mkdir(parents=True,mode=0o700)
+    with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
+        for member in tar:
+            destination=state/PurePosixPath(member.name).relative_to('state')
+            destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            with tar.extractfile(member) as source,destination.open('xb') as target: shutil.copyfileobj(source,target)
+            destination.chmod(0o600)
+    for directory in ('reports','files','spool','hermes','provider','secrets'): (state/directory).mkdir(exist_ok=True,mode=0o700)
+    # Retain the saved settings, but don't activate duplicate bot/OAuth owners.
+    auth=state/'hermes/auth.json'
+    if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')
+    provider_auth=state/'provider/auth'
+    if provider_auth.is_dir() and any(provider_auth.iterdir()):
+        provider_auth.rename(state/'provider/auth.restore-pending')
+    from tools.operations.provider.provider import initialize as initialize_provider
+    initialize_provider(state)
+    config=initialize(state) if manifest['version']==1 else load(state)
+    write_env(state/'restored.env',config)
+    config.update(TELEGRAM_ENABLED='false',NOCHEH_HONCHO_ENABLED='false',NOCHEH_HONCHO_STATE_DIR=str(state/'honcho'),
+                  NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
+                  NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
+                  NOCHEH_PROVIDER_MONITOR_PORT=str(port+10 if port<=65525 else port-10),
+                  NOCHEH_DASHBOARD_PORT=str(port+3 if port<=65532 else port-3),NOCHEH_OAUTH_PORT=str(port+4 if port<=65531 else port-4),
+                  COMPOSE_PROJECT_NAME=project,NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
+    (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
+    (state/'admin/tools/inactive').touch()
+    (state/'hermes/scheduler-inactive').touch()
+    (state/'spool/.restore-inactive').touch()
+    (state/'workflows').mkdir(parents=True,exist_ok=True,mode=0o700)
+    (state/'workflows/inactive').touch()
+    if manifest['version']==6:config['NOCHEH_STORAGE_LAYOUT']='original-only-v1'
+    write_env(env_path(state),config)
+    command=compose(state,project);env=environment(state)
+    subprocess.run(command+['up','-d','--wait','nocheh-db'],env=env,check=True)
+    if manifest['version']==6:
+        from tools.operations.installation.store_recovery import StoreRecovery
+        StoreRecovery(command,env).restore_inactive(snapshot,manifest['stores'],sha)
+        actual=manifest['tables']
+    else:
+        with (snapshot/'archive.dump').open('rb') as file:
+            subprocess.run(command+['exec','-T','nocheh-db','pg_restore','-U','nocheh','-d','nocheh','--no-owner','--exit-on-error'],env=env,stdin=file,check=True)
+        # Old snapshots predate the policy tables; verify exactly their recorded set.
+        actual=fingerprints(command,env,manifest['tables'])
+        if actual!=manifest['tables']: raise RuntimeError('Restored database differs from the snapshot')
+    if manifest.get('workflows'):
+        from tools.operations.workflows.workflow_recovery import restore as restore_workflows
+        restore_workflows(command,env,snapshot,state,manifest['workflows'],sha)
+    if manifest.get('honcho'):
+        from tools.operations.memory.honcho_recovery import restore as restore_honcho
+        restore_honcho(command,env,snapshot,state,manifest['honcho'],sha)
+    if 'honcho_connection' in manifest['tables']:
+        subprocess.run(command+['exec','-T','nocheh-db','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
+            "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
+    if manifest['version']!=6:
+        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes','hermes-agent-sb','chatgpt-speech','cliproxy-api','cliproxy-monitor','inngest-server'],env=env,check=True)
+    result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
+            'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
+            'telegram_enabled':False,'subscription_login_activated':False}
+    result['honcho_attached']=False
+    result['executors_active']=False
+    (state/'reports/restore.json').write_text(json.dumps(result,indent=2)+'\n')
+    return result
+
+
+def main(command,state,rest):
+    parser=argparse.ArgumentParser(description=__doc__)
+    if command=='diagnose':
+        parser.parse_args(rest)
+        from tools.operations.installation.services import containers,describe,host_status
+        result={'containers':describe(containers(compose(state),environment(state)),load(state),host_status(state))}
+        result['execution_holds']={
+            'workflows':(state/'workflows/inactive').exists(),
+            'workers':(state/'spool/.restore-inactive').exists(),
+            'tools':(state/'admin/tools/inactive').exists(),
+            'scheduler':(state/'hermes/scheduler-inactive').exists(),
+            'subscription_login':(state/'hermes/auth.restore-pending.json').exists() or (state/'provider/auth.restore-pending').exists(),
+        }
+        config=load(state)
+        port=int(config.get('NOCHEH_PORT','8780'))
+        request=urllib.request.Request(archive_url(state)+'/v1/status',headers={'Authorization':'Bearer '+config['SERVICE_TOKEN']})
+        try:
+            with urllib.request.urlopen(request,timeout=10) as response: result['archive']=json.load(response)
+        except Exception as error: result['archive']={'error':type(error).__name__}
+        try:
+            raw=subprocess.check_output(compose(state)+['exec','-T','hermes','python','-c',
+                "import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:8781/health',timeout=5))))"],env=environment(state),text=True)
+            result['hermes']=json.loads(raw)
+        except Exception as error: result['hermes']={'error':type(error).__name__}
+    elif command=='backup':
+        parser.add_argument('--output',type=Path,default=ROOT/'data/backups'/time.strftime('%Y%m%d-%H%M%S'))
+        parser.add_argument('--leave-stopped',action='store_true',help='Keep writers stopped for a planned cutover')
+        args=parser.parse_args(rest);result=backup(state,args.output.resolve(),args.leave_stopped)
+    else:
+        parser.add_argument('snapshot',type=Path);parser.add_argument('--state',type=Path,required=True)
+        parser.add_argument('--project',required=True);parser.add_argument('--port',type=int,default=8795)
+        args=parser.parse_args(rest)
+        if not 1024<=args.port<=65535: parser.error('Port must be between 1024 and 65535')
+        result=restore(args.snapshot.resolve(),args.state.resolve(),args.project,args.port)
+    print(json.dumps(result,indent=2));return 0

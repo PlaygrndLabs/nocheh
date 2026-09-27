@@ -3,9 +3,9 @@ import argparse,json,os,sqlite3,subprocess,sys,time,uuid
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from scripts import operations
-from scripts.configuration import initialize,write_env,compose_command,compose_environment,load
-from scripts.store_recovery import StoreRecovery
+from tools.operations.installation import operations
+from tools.operations.installation.configuration import initialize,write_env,compose_command,compose_environment,load
+from tools.operations.installation.store_recovery import StoreRecovery
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--directory',type=Path,required=True)

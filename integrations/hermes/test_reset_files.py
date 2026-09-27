@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from scripts import reset_files, reset_inventory
+from tools.acceptance import reset_files
+from tools.acceptance import reset_inventory
 
 
 class ResetFilesTests(unittest.TestCase):
@@ -72,7 +73,7 @@ class ResetFilesTests(unittest.TestCase):
         def interrupted(name,**kwargs):
             unlink(name,**kwargs);removed.append(name)
             if len(removed)==1:raise RuntimeError('interrupted after unlink')
-        with patch('scripts.reset_files.os.unlink',side_effect=interrupted):
+        with patch('tools.acceptance.reset_files.os.unlink',side_effect=interrupted):
             with self.assertRaisesRegex(RuntimeError,'interrupted'):reset_files.erase(plan,lambda:None)
         self.assertEqual(len(removed),1)
         self.assertGreater(reset_files.erase(plan,lambda:None)['removed_entries'],0)

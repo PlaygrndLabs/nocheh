@@ -10,8 +10,13 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import (configuration, reset_accounting, reset_inventory,
-                     reset_ownership, reset_preservation, reset_protocol, reset_quiescence)
+from tools.operations.installation import configuration
+from tools.acceptance import reset_accounting
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_ownership
+from tools.acceptance import reset_preservation
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
 
 MARKER = 'SYNTHETIC_PRIVATE_RESET_PRESERVATION_5b27867c'
 PASSWORD = 'synthetic-reset-preservation-only'

@@ -1,14 +1,14 @@
 import unittest
 from unittest.mock import patch
 
-from scripts.knowledge import allowed_path
-from scripts.management import dispatch
+from tools.operations.archive.knowledge import allowed_path
+from tools.runtime.management import dispatch
 
 
 class KnowledgeRouteTests(unittest.TestCase):
     def test_dashboard_proxy_forwards_memory_map_and_rejects_unowned_paths(self):
         path = '/v1/memory-map?after=&limit=180&q='
-        with patch('scripts.archive.API') as api:
+        with patch('tools.operations.archive.archive.API') as api:
             call = api.return_value.call
             call.return_value = {'nodes': []}
             self.assertEqual(dispatch({'operation': 'knowledge.api', 'path': path}), {'nodes': []})

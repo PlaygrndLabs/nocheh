@@ -54,7 +54,7 @@ permits inspection; Nocheh endpoints validate retry/cancel requests.
 <monitoring_implementation>
 
 I6 exposes `/api/nocheh/workflows` list/detail and revision-validated retry/cancel,
-with `./scripts/nocheh workflows list|show|status|retry|cancel` equivalents. Closed
+with `./bin/nocheh workflows list|show|status|retry|cancel` equivalents. Closed
 outcomes and active effects reject generic controls. Native schedule definitions
 and source/consent policies retain their existing controls. An explicitly resumed
 cancelled memory review creates a new generation while preserving its closed
@@ -139,7 +139,7 @@ dependency separately and wait for its expected source count before the next
 fault. `crash-receipt` arms an exit after the next synthetic runtime receipt is
 fsynced, before its HTTP response. Runtime requests never reach a provider.
 
-`python3 -m scripts.workflow_fixture_recovery FIXTURE_ENV FRESH_DESTINATION`
+`python3 -m tools.acceptance.workflow_fixture_recovery FIXTURE_ENV FRESH_DESTINATION`
 stops the fixture's execution authorities and Inngest, then uses the production
 workflow snapshot/restore functions. A fresh restore project verifies archive and
 Inngest table fingerprints, protected file hashes, Redis AOF conversion and a

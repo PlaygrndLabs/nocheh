@@ -15,8 +15,8 @@ its health check. The local checkout must be clean, contain its installation
 `.env`, and own exactly one running app container.
 
 ```bash
-./scripts/nocheh deploy local --revision FULL_COMMIT_ID
-./scripts/nocheh deploy local --revision FULL_COMMIT_ID --apply
+./bin/nocheh deploy local --revision FULL_COMMIT_ID
+./bin/nocheh deploy local --revision FULL_COMMIT_ID --apply
 ```
 
 For an existing VPS checkout, supply its SSH destination and absolute checkout
@@ -27,8 +27,8 @@ credentials or state. The target requires Git, Docker Compose, access to its
 own `.env`, and a running Nocheh app in that checkout.
 
 ```bash
-./scripts/nocheh deploy vps --host USER@HOST --root /absolute/nocheh --revision FULL_COMMIT_ID
-./scripts/nocheh deploy vps --host USER@HOST --root /absolute/nocheh --revision FULL_COMMIT_ID --apply
+./bin/nocheh deploy vps --host USER@HOST --root /absolute/nocheh --revision FULL_COMMIT_ID
+./bin/nocheh deploy vps --host USER@HOST --root /absolute/nocheh --revision FULL_COMMIT_ID --apply
 ```
 
 After either apply, inspect health and the relevant read-only admin command
@@ -41,9 +41,9 @@ Host services require Node 24.x; set `NOCHEH_NODE` when selecting a non-default 
 ## Start and develop
 
 ```bash
-./scripts/nocheh up
-./scripts/nocheh status
-./scripts/nocheh diagnose
+./bin/nocheh up
+./bin/nocheh status
+./bin/nocheh diagnose
 make dev
 make dev-status
 make dev-stop
@@ -67,13 +67,13 @@ Hermes and provider base images must match the pinned revisions. Telegram stays
 disabled and no installation login is imported. External model and embedding
 calls require separate development credentials. `make dev-stop` stops only
 the development project and retains its state. Release acceptance uses
-`./scripts/nocheh up` separately.
+`./bin/nocheh up` separately.
 See Docker's [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/)
 documentation.
 
 ## Configuration and credentials
 
-Run `./scripts/nocheh init`, edit the root `.env`, then run `./scripts/nocheh up`.
+Run `./bin/nocheh init`, edit the root `.env`, then run `./bin/nocheh up`.
 Initialization fills missing internal passwords; existing passwords stay unchanged.
 Only variables explicitly listed in Compose enter each service. The wrapper reads
 literal values without shell expansion and gives this file precedence over stale
@@ -115,8 +115,8 @@ cutover. It does not share the Codex desktop application's token store. For the
 single shared login and guarded cutover:
 
 ```bash
-./scripts/nocheh provider login
-./scripts/nocheh provider cutover
+./bin/nocheh provider login
+./bin/nocheh provider cutover
 ```
 
 If requested by OpenAI, enable device-code authorization in ChatGPT Security
@@ -128,11 +128,11 @@ monitor failure isolation and restart recovery.
 ## Daily commands
 
 ```bash
-./scripts/nocheh test
-./scripts/nocheh logs nocheh-app
-./scripts/nocheh status
-./scripts/nocheh down
-./scripts/nocheh up
+./bin/nocheh test
+./bin/nocheh logs nocheh-app
+./bin/nocheh status
+./bin/nocheh down
+./bin/nocheh up
 ```
 
 `down` retains all persistent state. Do not add `--volumes` unless intentionally
@@ -149,8 +149,8 @@ its own `.env` in that state directory and its own login; do not duplicate a ref
 ## Backup and restore
 
 ```sh
-./scripts/nocheh backup --output data/backups/my-snapshot
-./scripts/nocheh restore data/backups/my-snapshot \
+./bin/nocheh backup --output data/backups/my-snapshot
+./bin/nocheh restore data/backups/my-snapshot \
   --state data/restored --project nocheh-restored --port 8795
 ```
 
@@ -183,7 +183,7 @@ and receipts after the snapshot; verify the source is stopped. Commands for the
 restored project use both environment variables:
 
 ```sh
-NOCHEH_STATE_DIR="$PWD/data/restored" COMPOSE_PROJECT_NAME=nocheh-restored ./scripts/nocheh diagnose
+NOCHEH_STATE_DIR="$PWD/data/restored" COMPOSE_PROJECT_NAME=nocheh-restored ./bin/nocheh diagnose
 ```
 
 Only after reconciliation and an approved cutover should the operator remove the
@@ -199,7 +199,7 @@ Maintenance → **Export archive and memory** creates an authenticated ZIP downl
 The same export is available without the dashboard:
 
 ```sh
-./scripts/nocheh export --output data/exports/my-portable-copy
+./bin/nocheh export --output data/exports/my-portable-copy
 ```
 
 The destination must be new. `archive/` preserves the existing NDJSON/file replay
@@ -214,9 +214,9 @@ profile. Use a full backup for installation recovery.
 ## Hermes updates and rollback
 
 ```sh
-./scripts/nocheh compatibility status
-./scripts/nocheh compatibility check
-./scripts/nocheh compatibility check --revision FULL_40_CHARACTER_COMMIT
+./bin/nocheh compatibility status
+./bin/nocheh compatibility check
+./bin/nocheh compatibility check --revision FULL_40_CHARACTER_COMMIT
 ```
 
 Candidates build into separate image tags with no production state mounts or

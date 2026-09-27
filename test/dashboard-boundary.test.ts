@@ -45,7 +45,7 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
     const csrf=JSON.parse(html.match(/window\.__NOCHEH_CSRF__=("[^"]+")/)![1]!);
     assert.match(html,/Nocheh/);assert.ok(!html.includes(secret));assert.ok(!html.includes('__HERMES_PLUGIN_SDK__'));
     assert.equal((await fetch(base+'/assets/app.js')).status,200);
-    const chunks=await readdir(resolve('web/dist/chunks'));
+    const chunks=await readdir(resolve('dashboard/dist/chunks'));
     assert.ok(chunks.some(name=>name.endsWith('.js')));
     for(const name of chunks.filter(name=>name.endsWith('.js')))assert.equal((await fetch(base+'/assets/chunks/'+name)).status,200);
     assert.equal((await fetch(base+'/assets/chunks/package.json')).status,404);

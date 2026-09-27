@@ -7,8 +7,8 @@ description: Plan or apply an exact-revision Nocheh app rollout to an existing l
 
 Read [the deployment guide](../../../docs/deploy.md), [current status](../../../TASK.md),
 and the applicable [release gates](../../../docs/release-acceptance.md) before
-deploying. Use `./scripts/nocheh deploy local` for the operating local checkout,
-or `./scripts/nocheh deploy vps --host HOST --root /absolute/checkout` for an
+deploying. Use `./bin/nocheh deploy local` for the operating local checkout,
+or `./bin/nocheh deploy vps --host HOST --root /absolute/checkout` for an
 existing remote checkout. Supply the full integrated commit ID with `--revision`.
 Run without `--apply` to see the target and revision, then run with `--apply`
 when deployment is authorized.

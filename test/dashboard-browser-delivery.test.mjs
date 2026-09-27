@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {transform} from 'esbuild';
-const {code}=await transform(await readFile(new URL('../scripts/native-browser-delivery.ts',import.meta.url),'utf8'),{loader:'ts',format:'esm'});
+const {code}=await transform(await readFile(new URL('../tools/build/native-browser-delivery.ts',import.meta.url),'utf8'),{loader:'ts',format:'esm'});
 const load=async id=>import('data:text/javascript;base64,'+Buffer.from(code+'\n// '+id).toString('base64'));
 
 test('native browser acknowledges exact completed text and retains opaque receipts through outage and reconnect',async()=>{

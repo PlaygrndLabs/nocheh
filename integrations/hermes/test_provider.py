@@ -4,9 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.configuration import initialize as initialize_configuration
-from scripts.provider import CLIENTS,initialize,login_state,status
-from scripts.provider_acceptance import _retire_native_login,cutover
+from tools.operations.installation.configuration import initialize as initialize_configuration
+from tools.operations.provider.provider import CLIENTS,initialize,login_state,status
+from tools.acceptance.provider_acceptance import _retire_native_login,cutover
 from integrations.hermes.subscription import SHARED_BASE_URL,resolve_credentials
 from integrations.hermes.verify import valid_refresh
 
@@ -35,7 +35,7 @@ class SharedProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize_configuration(state)
             before={p.name:p.read_text() for p in (state/'provider/keys').glob('*.key')}
-            with patch('scripts.provider.subprocess.check_output',side_effect=OSError()):result=status(state)
+            with patch('tools.operations.provider.provider.subprocess.check_output',side_effect=OSError()):result=status(state)
             self.assertEqual(before,{p.name:p.read_text() for p in (state/'provider/keys').glob('*.key')})
             encoded=json.dumps(result)
             self.assertFalse(any(value in encoded for value in before.values()))
@@ -74,13 +74,13 @@ class SharedProviderTests(unittest.TestCase):
     def test_cutover_stays_native_without_fresh_provider_login(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize_configuration(state)
-            from scripts.configuration import load,write_env,env_path
+            from tools.operations.installation.configuration import load,write_env,env_path
             values=load(state);values['NOCHEH_REASONING_ROUTE']='native';write_env(env_path(state),values)
             result=cutover(state)
             self.assertEqual(result['status'],'credentials_pending')
             saved=json.loads((state/'reports/shared-provider-acceptance.json').read_text())
             self.assertEqual(saved['status'],'credentials_pending')
-            from scripts.configuration import load
+            from tools.operations.installation.configuration import load
             self.assertEqual(load(state)['NOCHEH_REASONING_ROUTE'],'native')
 
     def test_native_login_retires_and_refresh_owner_is_route_specific(self):

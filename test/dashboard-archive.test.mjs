@@ -4,11 +4,11 @@ import {readFile} from 'node:fs/promises';
 
 test('archive presents one accessible table-to-agent-copy workflow',async()=>{
   const [archive,source,guarded,controls,style,spec]=await Promise.all([
-    readFile('web/pages/archive.tsx','utf8'),
-    readFile('web/pages/source.js','utf8'),
-    readFile('web/guarded-editor.js','utf8'),
-    readFile('web/lib/owner-controls.tsx','utf8'),
-    readFile('web/style.css','utf8'),
+    readFile('dashboard/pages/archive.tsx','utf8'),
+    readFile('dashboard/pages/source.js','utf8'),
+    readFile('dashboard/guarded-editor.js','utf8'),
+    readFile('dashboard/lib/owner-controls.tsx','utf8'),
+    readFile('dashboard/style.css','utf8'),
     readFile('SPECS.md','utf8'),
   ]);
   assert.match(archive,/CursorButtons/);

@@ -1,7 +1,7 @@
 import io,json,tempfile,unittest,urllib.error
 from pathlib import Path
-from scripts.archive import digest,file_digest
-from scripts.derivative_transfer import export_derivatives,import_derivatives,validate_derivatives
+from tools.operations.archive.archive import digest,file_digest
+from tools.operations.archive.derivative_transfer import export_derivatives,import_derivatives,validate_derivatives
 
 
 def record(key,parent=None):

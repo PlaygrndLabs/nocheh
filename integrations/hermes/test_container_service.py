@@ -5,8 +5,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.configuration import archive_url,native_endpoint,compose_command,initialize,compose_environment
-from scripts.container_service import main
+from tools.operations.installation.configuration import archive_url,native_endpoint,compose_command,initialize,compose_environment
+from tools.runtime.container_service import main
 
 
 class ContainerServiceTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class ContainerServiceTests(unittest.TestCase):
     def test_compose_uses_installation_paths_and_separate_dashboard_port(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize(state)
-            with patch('scripts.configuration.INSTALLATION_ROOT',Path('/installation')):
+            with patch('tools.operations.installation.configuration.INSTALLATION_ROOT',Path('/installation')):
                 self.assertEqual(compose_command(state)[-1],'/installation/docker-compose.yml')
                 env=compose_environment(state)
                 self.assertEqual(env['NOCHEH_INSTALLATION_ROOT'],'/installation')
@@ -34,7 +34,7 @@ class ContainerServiceTests(unittest.TestCase):
             self.assertEqual(main(['executor-health']),1)
 
     def test_container_shutdown_uses_compose_to_suppress_restart(self):
-        from scripts.workflow_worker import stop
-        with patch('scripts.workflow_worker.compose_command',return_value=['docker','compose']),patch('scripts.workflow_worker.compose_environment',return_value={}),patch('scripts.workflow_worker.subprocess.run') as call:
+        from tools.operations.workflows.workflow_worker import stop
+        with patch('tools.operations.workflows.workflow_worker.compose_command',return_value=['docker','compose']),patch('tools.operations.workflows.workflow_worker.compose_environment',return_value={}),patch('tools.operations.workflows.workflow_worker.subprocess.run') as call:
             self.assertEqual(stop(Path('/unused'),wait=True),{'state':'stopped'})
             self.assertEqual(call.call_args.args[0],['docker','compose','stop','nocheh-executor'])

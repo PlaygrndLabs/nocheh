@@ -3,8 +3,8 @@ import argparse,json,os,shutil,subprocess,tempfile,uuid
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from scripts.honcho_portable import NativeMemoryExport,TABLES,validate_honcho
-from scripts.archive import file_digest
+from tools.operations.memory.honcho_portable import NativeMemoryExport,TABLES,validate_honcho
+from tools.operations.archive.archive import file_digest
 
 parser=argparse.ArgumentParser();parser.add_argument('--env-file',required=True);args=parser.parse_args()
 root=Path(__file__).resolve().parents[1]

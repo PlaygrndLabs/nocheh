@@ -4,7 +4,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import configuration, reset_acceptance, reset_acceptance_refresh as refresh, reset_protocol, settings
+from tools.operations.installation import configuration
+from tools.acceptance import reset_acceptance
+from tools.acceptance import reset_acceptance_refresh as refresh
+from tools.acceptance import reset_protocol
+from tools.operations.installation import settings
 
 
 class Journal:

@@ -3,7 +3,7 @@ import argparse,json,os,subprocess,tempfile,uuid
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from scripts.honcho_portable import NativeMemoryExport,TABLES
+from tools.operations.memory.honcho_portable import NativeMemoryExport,TABLES
 
 parser=argparse.ArgumentParser();parser.add_argument('--env-file',required=True);args=parser.parse_args()
 root=Path(__file__).resolve().parents[1]

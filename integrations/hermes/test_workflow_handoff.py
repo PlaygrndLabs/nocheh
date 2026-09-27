@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.archive import digest
-from scripts.workflow_handoff import import_records,stopped_dashboard
-from scripts.tool_receipts import flush_receipts
+from tools.operations.archive.archive import digest
+from tools.operations.workflows.workflow_handoff import import_records,stopped_dashboard
+from tools.operations.security.tool_receipts import flush_receipts
 
 
 class WorkflowHandoffTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class WorkflowHandoffTests(unittest.TestCase):
             (folder/'job.json').write_text(json.dumps(job));calls=[]
             class API:
                 def call(self,path,body=None):calls.append((path,body));return {'state':'queued'}
-            with patch('scripts.workflow_handoff.load',return_value={'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':''}):
+            with patch('tools.operations.workflows.workflow_handoff.load',return_value={'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':''}):
                 migration={'id':'a'*64,'to_owner':'inngest'}
                 self.assertEqual(import_records(root,API(),migration),{'staged':1,'closed':0})
                 self.assertEqual(calls[0][1]['completed'],1);self.assertFalse(calls[0][1]['review_approved']);self.assertEqual(calls[0][1]['learning_after'],0)
@@ -58,10 +58,10 @@ class WorkflowHandoffTests(unittest.TestCase):
             self.assertEqual(flush_receipts(root,api),1);self.assertFalse(path.exists());self.assertEqual(api.calls,[body,body])
 
     def test_retired_import_runner_cannot_execute(self):
-        from scripts.management import dispatch
+        from tools.runtime.management import dispatch
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);identity='11111111-1111-4111-8111-111111111111'
-            with patch.dict('os.environ',{'NOCHEH_STATE_DIR':str(root)}),patch('scripts.import_job.run') as execute:
+            with patch.dict('os.environ',{'NOCHEH_STATE_DIR':str(root)}),patch('tools.operations.archive.import_job.run') as execute:
                 with self.assertRaisesRegex(ValueError,'unknown_operation'):dispatch({'operation':'import.run','job':identity,'mapping':{}})
                 execute.assert_not_called()
 
@@ -78,7 +78,7 @@ class WorkflowHandoffTests(unittest.TestCase):
                     if self.fail:raise RuntimeError('lost ack')
                     return {'state':'completed'}
             api=FinishedAPI()
-            with patch('scripts.workflow_handoff.load',return_value=policy):
+            with patch('tools.operations.workflows.workflow_handoff.load',return_value=policy):
                 with self.assertRaisesRegex(RuntimeError,'lost ack'):import_records(root,api,{'id':'a'*64,'to_owner':'inngest'})
                 self.assertTrue(receipt.exists());api.fail=False
                 self.assertEqual(import_records(root,api,{'id':'a'*64,'to_owner':'inngest'}),{'staged':0,'closed':1})
