@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.configuration import initialize,compose_environment,write_env,env_path
-from scripts.settings import view,save
-from scripts.operations import sha
-from scripts.workflow_recovery import snapshot,validate,restore,REDIS_RESTORE_SCRIPT
+from tools.operations.installation.configuration import initialize,compose_environment,write_env,env_path
+from tools.operations.installation.settings import view,save
+from tools.operations.installation.operations import sha
+from tools.operations.workflows.workflow_recovery import snapshot,validate,restore,REDIS_RESTORE_SCRIPT
 
 
 class WorkflowRecoveryTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class WorkflowRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             def run(command,**kwargs):kwargs['stdout'].write(b'REDIS-fixture' if 'redis-cli' in command else b'database-fixture')
-            with patch('scripts.workflow_recovery.fingerprints',return_value={'public.events':'hash'}),patch('scripts.workflow_recovery.subprocess.run',side_effect=run):
+            with patch('tools.operations.workflows.workflow_recovery.fingerprints',return_value={'public.events':'hash'}),patch('tools.operations.workflows.workflow_recovery.subprocess.run',side_effect=run):
                 metadata=snapshot(['fixture'],{},root,sha)
             validate(root,metadata,sha)
             (root/'workflow-redis.rdb').write_bytes(b'corrupted')
@@ -49,10 +49,10 @@ class WorkflowRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);backup=root/'snapshot';backup.mkdir();state=root/'state';state.mkdir()
             def dump(command,**kwargs):kwargs['stdout'].write(b'fixture')
-            with patch('scripts.workflow_recovery.fingerprints',return_value={'public.events':'hash'}),patch('scripts.workflow_recovery.subprocess.run',side_effect=dump):
+            with patch('tools.operations.workflows.workflow_recovery.fingerprints',return_value={'public.events':'hash'}),patch('tools.operations.workflows.workflow_recovery.subprocess.run',side_effect=dump):
                 metadata=snapshot(['fixture'],{},backup,sha)
             commands=[]
-            with patch('scripts.workflow_recovery.fingerprints',return_value=metadata['tables']),patch('scripts.workflow_recovery.subprocess.run',side_effect=lambda command,**kwargs:commands.append(command)):
+            with patch('tools.operations.workflows.workflow_recovery.fingerprints',return_value=metadata['tables']),patch('tools.operations.workflows.workflow_recovery.subprocess.run',side_effect=lambda command,**kwargs:commands.append(command)):
                 result=restore(['fixture'],{},backup,state,metadata,sha)
             self.assertFalse(result['active'])
             self.assertEqual(commands[0],['fixture','run','--rm','--no-deps','nocheh-app','node','dist/src/workflows/bootstrap.js'])
@@ -64,10 +64,10 @@ class WorkflowRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);backup=root/'snapshot';backup.mkdir();state=root/'state';state.mkdir()
             def dump(command,**kwargs):kwargs['stdout'].write(b'fixture')
-            with patch('scripts.workflow_recovery.fingerprints',return_value={'public.events':'hash'}),patch('scripts.workflow_recovery.subprocess.run',side_effect=dump):
+            with patch('tools.operations.workflows.workflow_recovery.fingerprints',return_value={'public.events':'hash'}),patch('tools.operations.workflows.workflow_recovery.subprocess.run',side_effect=dump):
                 metadata=snapshot(['fixture'],{},backup,sha)
             commands=[]
-            with patch('scripts.workflow_recovery.fingerprints',return_value=metadata['tables']),patch('scripts.workflow_recovery.subprocess.run',side_effect=lambda command,**kwargs:commands.append(command)):
+            with patch('tools.operations.workflows.workflow_recovery.fingerprints',return_value=metadata['tables']),patch('tools.operations.workflows.workflow_recovery.subprocess.run',side_effect=lambda command,**kwargs:commands.append(command)):
                 restore(['fixture'],{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'},backup,state,metadata,sha)
             self.assertEqual(commands[0],['fixture','exec','-T','nocheh-db','node','/app/dist/src/workflows/bootstrap.js'])
             self.assertFalse(any('nocheh-app' in c or 'dist/src/stores/bootstrap.js' in c for c in commands))

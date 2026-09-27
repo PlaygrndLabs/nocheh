@@ -60,7 +60,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
   };
   const stop=async()=>{if(child&&child.exitCode===null){const done=once(child,'exit');child.kill('SIGTERM');await done;}};
   try {
-    const setup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from scripts.configuration import initialize,write_env,env_path; s=Path(sys.argv[1]); v=initialize(s); v['NOCHEH_PORT']=sys.argv[2]; write_env(env_path(s),v)",state,String(archivePort)],{cwd:resolve('.')});
+    const setup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from tools.operations.installation.configuration import initialize,write_env,env_path; s=Path(sys.argv[1]); v=initialize(s); v['NOCHEH_PORT']=sys.argv[2]; write_env(env_path(s),v)",state,String(archivePort)],{cwd:resolve('.')});
     assert.equal(setup.status,0,setup.stderr.toString());
     await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),token);
     await start();

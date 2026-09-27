@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from scripts import reset_protocol as protocol
+from tools.acceptance import reset_protocol as protocol
 
 
 class ResetProtocolTests(unittest.TestCase):
@@ -199,7 +199,7 @@ class ResetProtocolTests(unittest.TestCase):
     def test_coordinators_exclude_other_processes_and_reject_replaced_lock(self):
         with protocol.locked(self.state) as journal:
             journal.create(self.preflight, self.generation)
-            script = "from scripts.reset_protocol import locked; import sys\nwith locked(sys.argv[1]): pass"
+            script = "from tools.acceptance.reset_protocol import locked; import sys\nwith locked(sys.argv[1]): pass"
             result = subprocess.run([sys.executable, '-c', script, str(self.state)], text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0); self.assertIn('reset_coordinator_busy', result.stderr)
             lock = journal.directory / 'coordinator.lock'; lock.unlink(); lock.touch()

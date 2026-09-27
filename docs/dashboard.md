@@ -2,14 +2,14 @@
 
 # Owner dashboard and CLI
 
-Start the archive with `./scripts/nocheh up`. With pinned Node 24 and Python 3 available
+Start the archive with `./bin/nocheh up`. With pinned Node 24 and Python 3 available
 locally, install the repository's locked development dependencies using `npm ci`,
 then run:
 
 ```sh
-./scripts/nocheh dashboard
-./scripts/nocheh dashboard --no-open
-./scripts/nocheh dashboard --stop
+./bin/nocheh dashboard
+./bin/nocheh dashboard --no-open
+./bin/nocheh dashboard --stop
 ```
 
 Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
@@ -80,12 +80,12 @@ Upload limits are 32 MiB export JSON, 50 MiB per media file, 256 MiB uploaded ZI
 remain supported alongside these conveniences:
 
 ```sh
-./scripts/nocheh config show
-./scripts/nocheh config set NOCHEH_GUARD_MODE on
-./scripts/nocheh config apply
-./scripts/nocheh import telegram /absolute/export/result.json
-./scripts/nocheh jobs list
-./scripts/nocheh jobs show JOB_ID
+./bin/nocheh config show
+./bin/nocheh config set NOCHEH_GUARD_MODE on
+./bin/nocheh config apply
+./bin/nocheh import telegram /absolute/export/result.json
+./bin/nocheh jobs list
+./bin/nocheh jobs show JOB_ID
 ```
 
 Secret settings take a hidden prompt or piped stdin, never a value in argv.
@@ -131,19 +131,19 @@ character preview per message. Notes are bounded to 256 KiB and explicitly show
 truncation. A note's presence does not establish source provenance.
 
 ```sh
-./scripts/nocheh memory list
-./scripts/nocheh memory show --scope CHAT_ID
-./scripts/nocheh memory show --scope CHAT_OR_TOPIC --profile NATIVE_PROFILE_ID
-./scripts/nocheh memory show --scope CHAT_ID --session SESSION_ID --offset 50
-./scripts/nocheh memory preferences --scope CHAT_ID
-./scripts/nocheh honcho doctor
-./scripts/nocheh honcho install
-./scripts/nocheh honcho workspace list
-./scripts/nocheh honcho peer inspect PEER_ID -w WORKSPACE_ID
-./scripts/nocheh honcho peer representation PEER_ID -w WORKSPACE_ID
-./scripts/nocheh honcho conclusion list --observer PEER_ID -w WORKSPACE_ID
-./scripts/nocheh honcho session view SESSION_ID -w WORKSPACE_ID --page 2 --size 50
-./scripts/nocheh honcho session view SESSION_ID -w WORKSPACE_ID --all > transcript.json
+./bin/nocheh memory list
+./bin/nocheh memory show --scope CHAT_ID
+./bin/nocheh memory show --scope CHAT_OR_TOPIC --profile NATIVE_PROFILE_ID
+./bin/nocheh memory show --scope CHAT_ID --session SESSION_ID --offset 50
+./bin/nocheh memory preferences --scope CHAT_ID
+./bin/nocheh honcho doctor
+./bin/nocheh honcho install
+./bin/nocheh honcho workspace list
+./bin/nocheh honcho peer inspect PEER_ID -w WORKSPACE_ID
+./bin/nocheh honcho peer representation PEER_ID -w WORKSPACE_ID
+./bin/nocheh honcho conclusion list --observer PEER_ID -w WORKSPACE_ID
+./bin/nocheh honcho session view SESSION_ID -w WORKSPACE_ID --page 2 --size 50
+./bin/nocheh honcho session view SESSION_ID -w WORKSPACE_ID --all > transcript.json
 ```
 
 Honcho lifecycle (`init`, `up`, `down`, `status`, `login`) targets the installation
@@ -208,8 +208,8 @@ includes the original record, downloadable retained files, transcripts and their
 generation provenance. Use the next cursor to retrieve additional graph pages:
 
 ```sh
-./scripts/nocheh memory graph --scope CHAT_ID --output graph.json
-./scripts/nocheh memory graph --scope CHAT_ID --after EVENT_ID --output next-page.json
+./bin/nocheh memory graph --scope CHAT_ID --output graph.json
+./bin/nocheh memory graph --scope CHAT_ID --after EVENT_ID --output next-page.json
 ```
 
 Maintenance provides diagnostics, portable archive ZIP export, consistent backup,
@@ -217,7 +217,7 @@ service restart, and restore into a new inactive Compose project. Backup and
 restart show a review step. Restore selects a locally generated backup ID and an
 unused loopback port; it cannot overwrite current state. Restored Telegram stays
 disabled, and the copied OAuth login stays inactive. The existing `backup`,
-`restore`, `diagnose`, and `scripts/archive.py export` commands remain available.
+`restore`, `diagnose`, and `archive export` commands remain available under `./bin/nocheh`.
 
 Jobs, downloads, exports, backups and inactive restores are private files under
 `data/local/admin/` (or the selected `NOCHEH_STATE_DIR`). The UI streams downloads
@@ -263,14 +263,14 @@ Job preference overrides can be stored via CLI; scheduler execution is P6 work.
 Broader tool and approval policy controls are P5 work, not active capabilities yet.
 
 ```sh
-./scripts/nocheh runtime profiles
-./scripts/nocheh runtime status
-./scripts/nocheh runtime show --profile PROFILE
-./scripts/nocheh policy show
-./scripts/nocheh policy show --profile PROFILE
-./scripts/nocheh policy set agent.max_iterations 8
-./scripts/nocheh policy inherit agent.max_iterations --profile PROFILE
-./scripts/nocheh policy set agent.max_iterations 4 --job JOB_ID
+./bin/nocheh runtime profiles
+./bin/nocheh runtime status
+./bin/nocheh runtime show --profile PROFILE
+./bin/nocheh policy show
+./bin/nocheh policy show --profile PROFILE
+./bin/nocheh policy set agent.max_iterations 8
+./bin/nocheh policy inherit agent.max_iterations --profile PROFILE
+./bin/nocheh policy set agent.max_iterations 4 --job JOB_ID
 ```
 
 Pass `--revision REVISION` to conditional CLI writes. Native profiles created here
@@ -309,13 +309,13 @@ processes and interactive browser actions remain unavailable. Global/profile
 preferences can disable each tool. Enabling a tool still requires action approval.
 
 ```sh
-./scripts/nocheh approvals list
-./scripts/nocheh approvals show ACTION_ID
-./scripts/nocheh approvals approve ACTION_ID --fingerprint DISPLAYED_FINGERPRINT
-./scripts/nocheh approvals deny ACTION_ID --fingerprint DISPLAYED_FINGERPRINT
-./scripts/nocheh approvals grant ACTION_ID --fingerprint DISPLAYED_FINGERPRINT --uses 3 --minutes 60
-./scripts/nocheh approvals revoke PERMISSION_ID
-./scripts/nocheh approvals status
+./bin/nocheh approvals list
+./bin/nocheh approvals show ACTION_ID
+./bin/nocheh approvals approve ACTION_ID --fingerprint DISPLAYED_FINGERPRINT
+./bin/nocheh approvals deny ACTION_ID --fingerprint DISPLAYED_FINGERPRINT
+./bin/nocheh approvals grant ACTION_ID --fingerprint DISPLAYED_FINGERPRINT --uses 3 --minutes 60
+./bin/nocheh approvals revoke PERMISSION_ID
+./bin/nocheh approvals status
 ```
 
 `up` starts one approved-tool worker; `down` and backup drain it. Restored tool
@@ -345,19 +345,19 @@ operate on queued work; an interrupted native write is marked ambiguous and need
 an explicit resume. Retrying an ambiguous review may repeat a native memory edit.
 
 ```sh
-./scripts/nocheh memory spaces
-./scripts/nocheh memory policy --space=-100123/topic/42
-./scripts/nocheh memory policy --space=-100123/topic/42 --set policy.json --revision REVISION
-./scripts/nocheh memory share --space=-100123/topic/42 --file shared.txt --revision REVISION
-./scripts/nocheh memory revoke SHARE_ID --revision REVISION
-./scripts/nocheh memory preview --space=-100123/topic/42 --query Juniper
-./scripts/nocheh memory recall Juniper
-./scripts/nocheh memory reviews
-./scripts/nocheh memory pause JOB_ID
-./scripts/nocheh memory resume JOB_ID
-./scripts/nocheh memory review EVENT_ID --approve
-./scripts/nocheh import telegram /path/to/result.json --approve-memory-review
-./scripts/nocheh memory graph --scope '*' --output graph.json
+./bin/nocheh memory spaces
+./bin/nocheh memory policy --space=-100123/topic/42
+./bin/nocheh memory policy --space=-100123/topic/42 --set policy.json --revision REVISION
+./bin/nocheh memory share --space=-100123/topic/42 --file shared.txt --revision REVISION
+./bin/nocheh memory revoke SHARE_ID --revision REVISION
+./bin/nocheh memory preview --space=-100123/topic/42 --query Juniper
+./bin/nocheh memory recall Juniper
+./bin/nocheh memory reviews
+./bin/nocheh memory pause JOB_ID
+./bin/nocheh memory resume JOB_ID
+./bin/nocheh memory review EVENT_ID --approve
+./bin/nocheh import telegram /path/to/result.json --approve-memory-review
+./bin/nocheh memory graph --scope '*' --output graph.json
 ```
 
 Use the revision returned by `memory policy`; stale edits are rejected. A minimal
@@ -381,15 +381,15 @@ It does not replay every missed interval. Original prompts and generated results
 remain separately inspectable in Activity, including after deleting a schedule.
 
 ```sh
-./scripts/nocheh cron list --profile all
-./scripts/nocheh cron create --profile PROFILE --file job.json
-./scripts/nocheh cron show JOB_ID --profile PROFILE
-./scripts/nocheh cron update JOB_ID --profile PROFILE --file changes.json --revision REVISION
-./scripts/nocheh cron pause JOB_ID --profile PROFILE
-./scripts/nocheh cron trigger JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
-./scripts/nocheh cron catch-up JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
-./scripts/nocheh cron cancel JOB_ID --profile PROFILE
-./scripts/nocheh cron runs JOB_ID --profile PROFILE
+./bin/nocheh cron list --profile all
+./bin/nocheh cron create --profile PROFILE --file job.json
+./bin/nocheh cron show JOB_ID --profile PROFILE
+./bin/nocheh cron update JOB_ID --profile PROFILE --file changes.json --revision REVISION
+./bin/nocheh cron pause JOB_ID --profile PROFILE
+./bin/nocheh cron trigger JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
+./bin/nocheh cron catch-up JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
+./bin/nocheh cron cancel JOB_ID --profile PROFILE
+./bin/nocheh cron runs JOB_ID --profile PROFILE
 ```
 
 A minimal job file is `{"name":"Daily review","prompt":"Review today's archived notes.","schedule":"0 18 * * *","deliver":"local"}`.
@@ -430,9 +430,9 @@ Telegram reception. **Inspect original** opens the archived evidence.
 
 The provider panel's **OAuth Login → Codex** uses a temporary callback listener on
 the host at port 1455. Start a fresh login after an expired attempt. If that port
-is busy with another login, finish it first or use `./scripts/nocheh provider login`
+is busy with another login, finish it first or use `./bin/nocheh provider login`
 for device authentication. Once the shared login is present, run
-`./scripts/nocheh provider cutover` to validate and switch the active route.
+`./bin/nocheh provider cutover` to validate and switch the active route.
 
 The three API keys shown in the provider panel are generated local access keys
 for Hermes, Honcho and guarded-text preparation. The management key protects the
@@ -485,9 +485,9 @@ count in the labeled category, rather than an unavailable observation.
 No sampling service, uptime claim, or provider analytics collection is added.
 Detailed provider analytics remain in CPA.
 
-Page implementations live under `web/pages/`; shared controls live in
-`web/components/ui/`, while data subscriptions and revision-bound drafts live in
-`web/lib/`. Browser code is checked with `tsconfig.web.json`. The build removes
+Page implementations live under `dashboard/pages/`; shared controls live in
+`dashboard/components/ui/`, while data subscriptions and revision-bound drafts live in
+`dashboard/lib/`. Browser code is checked with `tsconfig.dashboard.json`. The build removes
 obsolete chunks and emits independent chart, access-control, and Three.js bundles.
 `npm run test:dashboard` covers graph behavior and request handoff/cancellation.
 

@@ -6,7 +6,9 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from scripts import reset_inventory, reset_protocol, reset_quiescence as shutdown
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence as shutdown
 
 
 class ResetQuiescenceTests(unittest.TestCase):

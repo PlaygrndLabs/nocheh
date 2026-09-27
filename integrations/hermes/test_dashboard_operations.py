@@ -3,13 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.admin_operations import run,identifier
-from scripts.graph import read
+from tools.operations.installation.admin_operations import run,identifier
+from tools.operations.archive.graph import read
 
 class DashboardOperationsTests(unittest.TestCase):
     def test_original_graph_does_not_depend_on_native_memory(self):
         original={'nodes':[{'id':'message:'+'a'*64,'kind':'message'}],'edges':[], 'bounds':{'truncated':False}}
-        with patch('scripts.graph.API') as api:
+        with patch('tools.operations.archive.graph.API') as api:
             api.return_value.storage_layout='original-only-v1'
             api.return_value.call.side_effect=lambda path: original if path.startswith('/v1/graph?') else self.fail('native memory requested')
             graph=read('*')
@@ -24,7 +24,7 @@ class DashboardOperationsTests(unittest.TestCase):
                   'edges':[{'from':'user:alice','to':'message:'+'a'*64,'kind':'authored'},
                            {'from':'event:'+'b'*64,'to':'message:'+'a'*64,'kind':'attempt'},
                            {'from':'profile:fixture','to':'message:'+'a'*64,'kind':'explicit_citation'}]}
-        with patch('scripts.graph.API') as api:
+        with patch('tools.operations.archive.graph.API') as api:
             api.return_value.call.side_effect=lambda path: original if path.startswith('/v1/graph?') else self.fail('native memory requested')
             graph=read('-20')
         self.assertEqual([node['kind'] for node in graph['nodes']],['user','message'])
@@ -39,7 +39,7 @@ class DashboardOperationsTests(unittest.TestCase):
                   'edges':[{'from':'author:alice','to':'scope:123','kind':'member'},
                            {'from':'project:work','to':'scope:123','kind':'assigned'}],
                   'bounds':{'truncated':True}}
-        with patch('scripts.graph.API') as api:
+        with patch('tools.operations.archive.graph.API') as api:
             api.return_value.call.return_value=original
             graph=read('*')
         self.assertEqual([(node['id'],node['kind']) for node in graph['nodes']],
@@ -50,7 +50,7 @@ class DashboardOperationsTests(unittest.TestCase):
 
     def test_operations_fixed_destinations_and_inactive_restore(self):
         job='11111111-1111-4111-8111-111111111111';backup='22222222-2222-4222-8222-222222222222'
-        with tempfile.TemporaryDirectory() as folder,patch('scripts.admin_operations.subprocess.run') as command:
+        with tempfile.TemporaryDirectory() as folder,patch('tools.operations.installation.admin_operations.subprocess.run') as command:
             state=Path(folder);command.return_value.returncode=0;command.return_value.stdout='{"status":"restored_inactive"}'
             result=run(state,'restore',job,{'backup':backup,'port':19543})
             self.assertEqual(result['status'],'restored_inactive')

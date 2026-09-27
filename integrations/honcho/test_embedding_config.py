@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.configuration import write_env,read_env,initialize,env_path,load
-from scripts.embedding_config import embeddings
-from scripts.settings import view
-from scripts import honcho_setup as control
+from tools.operations.installation.configuration import write_env,read_env,initialize,env_path,load
+from tools.operations.provider.embedding_config import embeddings
+from tools.operations.installation.settings import view
+from tools.operations.memory import honcho_setup as control
 from .meter import Egress,Ledger,Rejected
 from .test_meter import Transport
 

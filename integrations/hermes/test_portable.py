@@ -1,7 +1,7 @@
 import json,sqlite3,tempfile,unittest
 from pathlib import Path
-from scripts.portable import export_all
-from scripts.compatibility import commands
+from tools.operations.archive.portable import export_all
+from tools.acceptance.compatibility import commands
 from .native_memory import registered_profiles
 
 
@@ -31,7 +31,7 @@ class PortableTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):export_all(root/'state',root/'export',API())
 
     def test_native_export_rejects_symlinked_notes_and_profile_roots(self):
-        from scripts.portable import export_native
+        from tools.operations.archive.portable import export_native
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);home=root/'hermes/profiles'/('nocheh-'+'a'*24);home.mkdir(parents=True)
             outside=root/'outside';outside.mkdir();(outside/'MEMORY.md').write_text('private fixture')
@@ -39,7 +39,7 @@ class PortableTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'native_export_path_denied'):export_native(root/'hermes',root/'export')
 
     def test_closed_wal_database_exports_without_creating_native_wal_or_shm(self):
-        from scripts.portable import export_native
+        from tools.operations.archive.portable import export_native
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);home=root/'hermes/profiles'/('nocheh-'+'b'*24);home.mkdir(parents=True)
             (home/'.memory.lock').touch()
@@ -74,8 +74,8 @@ class PortableTests(unittest.TestCase):
             with self.assertRaises(ValueError):commands(value)
 
     def test_migrated_native_history_remains_portable(self):
-        from scripts.portable import export_native
-        from scripts.security_profiles import convert
+        from tools.operations.archive.portable import export_native
+        from tools.operations.security.security_profiles import convert
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);home=root/'hermes/profiles'/('nocheh-'+'c'*24);home.mkdir(parents=True)
             source=sqlite3.connect(home/'state.db');source.execute('CREATE TABLE sessions(content text)')

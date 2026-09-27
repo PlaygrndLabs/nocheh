@@ -5,12 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.knowledge import allowed_path, main
+from tools.operations.archive.knowledge import allowed_path, main
 
 
 class KnowledgeCliTests(unittest.TestCase):
     def invoke(self,command,args):
-        with patch('scripts.knowledge.API') as api,contextlib.redirect_stdout(io.StringIO()):
+        with patch('tools.operations.archive.knowledge.API') as api,contextlib.redirect_stdout(io.StringIO()):
             api.return_value.call.return_value={}
             self.assertEqual(main(command,args),0)
             return api.return_value.call.call_args.args
@@ -21,7 +21,7 @@ class KnowledgeCliTests(unittest.TestCase):
         self.assertEqual(path,'/v1/sources/'+source+'/reprocess')
         self.assertEqual(body['input_hash'],'c'*64);self.assertEqual(body['operation_id'],'job-1')
         self.assertEqual(self.invoke('sources',['activate',artifact,'--revision','0','--operation-id','choose-1'])[1],{'expected_revision':None,'operation_id':'choose-1'})
-        with patch('scripts.knowledge.API') as api,contextlib.redirect_stderr(io.StringIO()):
+        with patch('tools.operations.archive.knowledge.API') as api,contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):main('sources',['activate',artifact,'--revision','0'])
             api.assert_not_called()
 
@@ -30,7 +30,7 @@ class KnowledgeCliTests(unittest.TestCase):
         self.assertEqual(self.invoke('sources',['learning-consent',source]),(path,None))
         self.assertEqual(self.invoke('sources',['set-learning',source,'--revision','2','--operation-id','consent-3','--enabled','false']),
                          (path,{'expected_revision':2,'operation_id':'consent-3','enabled':False}))
-        with patch('scripts.knowledge.API') as api,contextlib.redirect_stderr(io.StringIO()):
+        with patch('tools.operations.archive.knowledge.API') as api,contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):main('sources',['set-learning',source,'--enabled','true'])
             api.assert_not_called()
 

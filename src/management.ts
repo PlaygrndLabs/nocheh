@@ -78,7 +78,7 @@ export function uploadName(name: string): string {
 function python(body: unknown, progress?: (value: Record<string, unknown>) => void,
                 started?: (child: ChildProcess) => void, coordinator?:string): Promise<unknown> {
   return new Promise((accept, reject) => {
-    const child = spawn(process.env.NOCHEH_PYTHON ?? 'python3', ['-m', 'scripts.management'],
+    const child = spawn(process.env.NOCHEH_PYTHON ?? 'python3', ['-m', 'tools.runtime.management'],
       {cwd: ROOT, env: {...process.env, NOCHEH_STATE_DIR: STATE,NOCHEH_MAINTENANCE_COORDINATOR:coordinator??''}, stdio: ['pipe', 'pipe', 'ignore']});
     started?.(child);
     let buffer = '', result: unknown, failure: string | undefined;
@@ -346,20 +346,20 @@ export async function startManagement() {
     if(req.method==='GET'&&path==='/hermes'){res.writeHead(308,{location:'/hermes/'+url.search});res.end();return;}
     if(req.method==='GET'&&(path==='/providers'||path==='/providers/')){res.writeHead(308,{location:'/providers/management.html'+url.search});res.end();return;}
     if(process.env.NOCHEH_DEV_WATCH==='1'&&req.method==='GET'&&path==='/__dev/revision') {
-      const revision=await readFile(join(ROOT,'web/dist/.dev-revision'),'utf8').catch(()=>'');
+      const revision=await readFile(join(ROOT,'dashboard/dist/.dev-revision'),'utf8').catch(()=>'');
       res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});res.end(revision);return;
     }
     if(req.method==='GET'&&path==='/') {
       const session=sessions.page(req);
       res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
       const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision)location.reload();nochehRevision=next}catch{}},1000)</script>` : '';
-      const html=(await readFile(join(ROOT,'web/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
+      const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
     }
     const asset=path.match(/^\/assets\/(app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/);
     if(req.method==='GET'&&asset?.[1]) {
       res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache'});
-      createReadStream(join(ROOT,'web/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;
+      createReadStream(join(ROOT,'dashboard/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;
     }
     if(path.startsWith('/providers/')) {
       const page=req.method==='GET'&&path==='/providers/management.html';

@@ -39,5 +39,5 @@ services:
     profiles: [checks]
     volumes:
       - ${NOCHEH_RESET_FIXTURE_STATE}:/fixture
-      - ../scripts/reset_accounting.py:/app/scripts/reset_accounting.py:ro
+      - ../tools/acceptance/reset_accounting.py:/app/tools/acceptance/reset_accounting.py:ro
       - ./reset-accounting-rehearsal.py:/app/compatibility/reset-accounting-rehearsal.py:ro

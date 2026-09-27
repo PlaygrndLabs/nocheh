@@ -20,10 +20,10 @@ Start the pinned services, complete one fresh device login, then run the atomic
 cutover:
 
 ```sh
-./scripts/nocheh up
-./scripts/nocheh provider status
-./scripts/nocheh provider login
-./scripts/nocheh provider cutover
+./bin/nocheh up
+./bin/nocheh provider status
+./bin/nocheh provider login
+./bin/nocheh provider cutover
 ```
 
 `provider login` refuses to start when any provider login file already exists.
@@ -47,8 +47,8 @@ report is `data/local/reports/shared-provider-acceptance.json`.
 Infrastructure health alone does not prove subscription access:
 
 ```sh
-./scripts/nocheh provider verify
-./scripts/nocheh provider status
+./bin/nocheh provider verify
+./bin/nocheh provider status
 ```
 
 `verify` checks the pinned source revisions and both service health checks.
@@ -57,7 +57,7 @@ still pending when `login_present` is false.
 
 ## Owner monitoring UI
 
-Run `./scripts/nocheh dashboard` and choose **Provider monitor** from the sidebar
+Run `./bin/nocheh dashboard` and choose **Provider monitor** from the sidebar
 or **Integrations**. Nocheh serves CPA Manager Plus at
 `/providers/management.html` through the existing owner session. The browser
 never receives the CLIProxyAPI management key or the CPA Manager Plus admin/data

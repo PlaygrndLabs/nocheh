@@ -23,7 +23,7 @@ test('management adapter normalizes legacy context entities and removes dangling
     {id:'event:m',kind:'message',label:'M'},{id:'project:p',kind:'project',label:'P'},
     {id:'event:x',kind:'event',label:'Action'},{id:'derived:x',kind:'derived',label:'runtime_context'}],
     edges:[{from:'scope:*',to:'event:m',kind:'contains'},{from:'event:x',to:'derived:x',kind:'derived_from'}],bounds:{messages:20,derived:200,truncated:true}};
-  const code='import json,sys;from scripts.graph import context_entities;print(json.dumps(context_entities(json.loads(sys.argv[1]))))';
+  const code='import json,sys;from tools.operations.archive.graph import context_entities;print(json.dumps(context_entities(json.loads(sys.argv[1]))))';
   const data=JSON.parse(execFileSync('python3',['-c',code,JSON.stringify(legacy)],{encoding:'utf8'}));
   assert.deepEqual(data.nodes.map(node=>node.kind),['collection','user','message','project']);
   assert.deepEqual(data.nodes.map(node=>node.id),['collection:*','user:a','message:m','project:p']);
@@ -94,7 +94,7 @@ test('a full bounded page including 400 messages retains every node with finite 
 // small hook driver keeps these tests independent of the native React bundle.
 const {readFile} = await import('node:fs/promises');
 const {runInNewContext} = await import('node:vm');
-const pluginSource = (await readFile(new URL('../web/pages/graph.js',import.meta.url),'utf8')).replace(/^import .*;$/gm,'').replace('export function Graph', 'function Graph')+'\nwindow.__NOCHEH_PAGES__={graph:{component:Graph}};';
+const pluginSource = (await readFile(new URL('../dashboard/pages/graph.js',import.meta.url),'utf8')).replace(/^import .*;$/gm,'').replace('export function Graph', 'function Graph')+'\nwindow.__NOCHEH_PAGES__={graph:{component:Graph}};';
 const deferred = () => {let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 function componentDriver(fetchJSON) {
   let cursor=0, dirty=true, tree;

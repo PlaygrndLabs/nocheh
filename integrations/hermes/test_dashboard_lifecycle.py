@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.dashboard import compose, start
+from tools.operations.installation.dashboard import compose, start
 
 
 class DashboardLifecycleTests(unittest.TestCase):
@@ -17,9 +17,9 @@ class DashboardLifecycleTests(unittest.TestCase):
 
     def test_dashboard_stop_does_not_stop_runtime_containers(self):
         with tempfile.TemporaryDirectory() as folder, \
-             patch('scripts.dashboard.request', return_value={'ok': True}), \
-             patch('scripts.dashboard.compose_environment', return_value={}), \
-             patch('scripts.dashboard.subprocess.call', return_value=0) as call:
+             patch('tools.operations.installation.dashboard.request', return_value={'ok': True}), \
+             patch('tools.operations.installation.dashboard.compose_environment', return_value={}), \
+             patch('tools.operations.installation.dashboard.subprocess.call', return_value=0) as call:
             result = start(Path(folder), ['--stop'])
         self.assertEqual(result, 0)
         self.assertEqual(call.call_args.args[0][-2:],['stop','nocheh-dashboard'])

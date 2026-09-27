@@ -75,10 +75,10 @@ const server=createServer((req,res)=>{void(async()=>{
  if(req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`)throw new HttpError(403,'origin_denied');
  if(req.method==='GET'&&path==='/'){
   const session=sessions.page(req);res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/`);
-  res.setHeader('content-type','text/html');res.end((await readFile('web/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;
+  res.setHeader('content-type','text/html');res.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;
  }
  if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){
-  res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('web/dist',path.slice(8))));return;
+  res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;
  }
  sessions.authorize(req,req.method!=='GET');const route=path.replace(/^\/api\/nocheh/,'');
  if(req.method==='GET'&&route==='/entities')return json(res,200,await services.entities.list(owner,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',after:url.searchParams.get('after')??'',state:url.searchParams.get('state')??'active'}));

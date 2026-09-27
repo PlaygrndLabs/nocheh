@@ -3,7 +3,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from scripts import deploy
+from tools.operations.installation import deploy
 
 
 REV = "a" * 40

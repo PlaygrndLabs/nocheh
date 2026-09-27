@@ -1,8 +1,8 @@
 import json,sqlite3,tempfile,unittest
 from pathlib import Path
-from scripts.archive import canonical,digest,file_digest
-from scripts.portable import export_all,import_all,validate_package
-from scripts.honcho_portable import TABLES,validate_honcho
+from tools.operations.archive.archive import canonical,digest,file_digest
+from tools.operations.archive.portable import export_all,import_all,validate_package
+from tools.operations.memory.honcho_portable import TABLES,validate_honcho
 
 
 class API:
@@ -123,11 +123,11 @@ class PortableBundleTests(unittest.TestCase):
             self.assertFalse(any(path.startswith('/v1/imports/derivatives') for path in paths))
 
     def test_native_restore_requires_an_inactive_installation_before_any_process(self):
-        from scripts.honcho_portable import restore_honcho
+        from tools.operations.memory.honcho_portable import restore_honcho
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
-            with patch('scripts.honcho_portable.subprocess.check_output') as process:
+            with patch('tools.operations.memory.honcho_portable.subprocess.check_output') as process:
                 with self.assertRaisesRegex(ValueError,'requires_inactive'):restore_honcho(root,root/'memory')
                 process.assert_not_called()
 

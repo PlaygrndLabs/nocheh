@@ -137,7 +137,7 @@ revision is the complete ledger before this summary replaced it.
 
 ## Local admin inspection candidate, 2026-09-27
 
-- A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. A follow-up check made event tracing reject an older running API that silently ignores the new filter. The operating installation was not changed; live acceptance remains open. [CLI guide](../admin/README.md).
+- A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. A follow-up check made event tracing reject an older running API that silently ignores the new filter. The operating installation was not changed; live acceptance remains open. [CLI guide](admin-cli.md).
 
 ## Admin and deployment tooling, 2026-09-27
 
@@ -158,3 +158,7 @@ revision is the complete ledger before this summary replaced it.
 ## Operating Honcho verification and attachment, 2026-09-27
 
 - Exact app revision `a14ca40` was deployed to the operating Compose app, and all 17 services reported healthy. A short-lived synthetic workspace passed guarded subscription reasoning, labeled-secret masking and embedding, one-message ingestion, retrieval, API/deriver restart recall, and a controlled gateway-only external provider failure followed by recovery. The closed workspace rejected a further request without adding a ledger call. The conservative pilot reservation reached $0.64 under the $5 cap. The six-check report verified the connection, then the owner-directed release work attached it for new activity with history and catch-up off. No production generation or projection receipt existed at attachment. [Evidence](../compatibility/results/2026-09-27-honcho-operating-acceptance.json).
+
+## Tooling and dashboard layout, 2026-09-27
+
+- Moved the owner launcher, admin CLI, operations, runtime, acceptance, development, and build tools into role-based packages and renamed the dashboard source. Focused CLI and Python tests, TypeScript/dashboard builds, and Compose structure passed in the isolated worktree. Hermes and Honcho service moves were the next increment; operating installations were not redeployed.

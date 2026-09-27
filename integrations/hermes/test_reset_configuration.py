@@ -6,7 +6,10 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock
 
-from scripts import reset_configuration as configuration, reset_inventory, reset_protocol, reset_quiescence
+from tools.acceptance import reset_configuration as configuration
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_protocol
+from tools.acceptance import reset_quiescence
 
 
 class ResetConfigurationTests(unittest.TestCase):

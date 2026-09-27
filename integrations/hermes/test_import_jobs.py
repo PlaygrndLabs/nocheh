@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from scripts.import_job import inspect, run
+from tools.operations.archive.import_job import inspect, run
 
 
 class FakeArchive:

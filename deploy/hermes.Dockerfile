@@ -47,7 +47,7 @@ WORKDIR /workspace
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} integrations ./integrations
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/fixtures ./compatibility/fixtures
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} compatibility/upstreams.lock.json ./compatibility/upstreams.lock.json
-COPY --chown=${LOCAL_UID}:${LOCAL_GID} scripts ./scripts
+COPY --chown=${LOCAL_UID}:${LOCAL_GID} tools ./tools
 USER nocheh
 CMD ["python", "-m", "integrations.hermes.runtime"]
 
@@ -58,7 +58,7 @@ COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.jso
 COPY --from=native-runtime /opt/hermes/ui-tui ./ui-tui
 COPY --from=native-runtime /opt/hermes/apps/shared ./apps/shared
 COPY --from=native-runtime /opt/hermes/web/package.json ./web/package.json
-COPY scripts/patch-native-tui.py /tmp/patch-native-tui.py
+COPY tools/build/patch-native-tui.py /tmp/patch-native-tui.py
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/* && python3 /tmp/patch-native-tui.py /opt/hermes
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --workspace ui-tui --workspace apps/shared --ignore-scripts --no-audit --no-fund \
@@ -75,15 +75,15 @@ RUN npm ci --workspace web --workspace apps/shared --ignore-scripts --no-audit -
 WORKDIR /opt/nocheh
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
-COPY scripts/patch-native-dashboard.py /tmp/patch-native-dashboard.py
-COPY scripts/native-browser-delivery.ts /tmp/native-browser-delivery.ts
-COPY scripts/native-browser-recovery.tsx /tmp/native-browser-recovery.tsx
+COPY tools/build/patch-native-dashboard.py /tmp/patch-native-dashboard.py
+COPY tools/build/native-browser-delivery.ts /tmp/native-browser-delivery.ts
+COPY tools/build/native-browser-recovery.tsx /tmp/native-browser-recovery.tsx
 RUN python3 /tmp/patch-native-dashboard.py /opt/hermes && cd /opt/hermes && npm run build --workspace web -- --base=/hermes/
-COPY scripts/build-dashboard.mjs ./scripts/build-dashboard.mjs
-COPY tsconfig.web.json ./tsconfig.web.json
+COPY tools/build/build-dashboard.mjs ./tools/build/build-dashboard.mjs
+COPY tsconfig.dashboard.json ./tsconfig.dashboard.json
 COPY integrations/hermes/dashboard ./integrations/hermes/dashboard
 COPY src/source-content.ts ./src/source-content.ts
-COPY web ./web
+COPY dashboard ./dashboard
 RUN npm run build:dashboard
 
 FROM native-runtime
@@ -95,7 +95,7 @@ COPY --from=tui-assets /opt/hermes/ui-tui/dist /opt/hermes/ui-tui/dist
 # the pinned libraries during the image build instead of recompiling them on
 # every request (runtime bytecode writes remain disabled).
 USER root
-RUN python -m compileall -q /opt/venv/lib/python3.11/site-packages /workspace/integrations \
+RUN python -m compileall -q /opt/venv/lib/python3.11/site-packages /workspace/integrations /workspace/tools \
     /opt/hermes/agent /opt/hermes/gateway /opt/hermes/tools /opt/hermes/hermes_cli \
     /opt/hermes/run_agent.py /opt/hermes/hermes_state.py /opt/hermes/model_tools.py \
     /opt/hermes/toolsets.py /opt/hermes/hermes_constants.py /opt/hermes/utils.py

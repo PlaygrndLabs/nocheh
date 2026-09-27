@@ -4,7 +4,9 @@ import unittest
 import uuid
 from pathlib import Path
 
-from scripts import reset_files, reset_inventory, reset_ownership
+from tools.acceptance import reset_files
+from tools.acceptance import reset_inventory
+from tools.acceptance import reset_ownership
 
 
 class ResetOwnershipTests(unittest.TestCase):

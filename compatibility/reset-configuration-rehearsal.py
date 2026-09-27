@@ -8,8 +8,8 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import reset_configuration
-from scripts.store_recovery import StoreRecovery
+from tools.acceptance import reset_configuration
+from tools.operations.installation.store_recovery import StoreRecovery
 
 BOOTSTRAP = r'''
 import pg from 'pg';

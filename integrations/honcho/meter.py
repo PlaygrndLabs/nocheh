@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import contextmanager
 try:
-    from scripts.embedding_config import embeddings
+    from tools.operations.provider.embedding_config import embeddings
 except ModuleNotFoundError:
     from embedding_config import embeddings
 

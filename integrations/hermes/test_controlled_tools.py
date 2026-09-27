@@ -1,8 +1,8 @@
 import json,sys,tempfile,unittest,subprocess
 from pathlib import Path
 from unittest.mock import patch
-from scripts.tool_execution import public_target,workspace,sandbox_command,mcp_call,execute
-from scripts.tool_receipts import tick
+from tools.operations.security.tool_execution import public_target,workspace,sandbox_command,mcp_call,execute
+from tools.operations.security.tool_receipts import tick
 
 class ToolTests(unittest.TestCase):
     def test_public_resolver_denies_every_private_candidate_and_pins_public_ip(self):

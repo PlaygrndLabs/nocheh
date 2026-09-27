@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts import honcho_recovery as recovery
-from scripts.operations import sha
+from tools.operations.memory import honcho_recovery as recovery
+from tools.operations.installation.operations import sha
 
 
 class HonchoRecoveryTests(unittest.TestCase):
