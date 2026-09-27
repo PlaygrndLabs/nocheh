@@ -142,3 +142,7 @@ revision is the complete ledger before this summary replaced it.
 ## Admin and deployment tooling, 2026-09-27
 
 - The CLI gained a newest-incoming-event trace with an optional exact scope and an agent skill for content-free evidence inspection. A second skill and guarded script cover exact-revision app rollout to existing local and VPS Compose installations. Focused CLI/deployment tests, skill validation, the TypeScript build, and an AST-only graph refresh passed in the worktree. Operating local activation, remote execution, and live acceptance are tracked separately in [TASK.md](../TASK.md).
+
+## Local admin API activation, 2026-09-27
+
+- The exact-revision deployment preflight confirmed the operating checkout owned its app container. The app image was built and the service replaced with revision `508494b`; all 17 Nocheh containers were healthy. The read-only newest-event trace returned a captured event ID and timestamp, one linked reply, and five event-filtered workflows, with the filter matching the selected event. Fresh owner live acceptance, remote rollout, and release remain pending. [Metadata-only evidence](../compatibility/results/2026-09-27-admin-api-activation.json).
