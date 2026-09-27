@@ -165,7 +165,7 @@ revision is the complete ledger before this summary replaced it.
 
 ## Current owner and forum conventions, 2026-09-27
 
-- The trusted direct-speaker repair reached the local app at revision `d24ac74`, with all 17 services healthy. The earlier owner interpretation was superseded by a guard-epoch change before its next attempt. A forum convention and a non-owner 👍 on the older source message were captured in the same topic; that reaction is the current individual state. A fresh owner-private convention was captured in the same DM scope, but its reply waited on guarded preparation. Preparation remained queued without a run receipt; source review waited on a receipt amid a large review backlog. Publication, correction, recall, projection, and derived reaction meaning remained pending. [Evidence](../compatibility/results/2026-09-27-current-conventions-and-reaction.json).
+- The trusted direct-speaker repair reached the local app at revision `d24ac74`, with all 17 services healthy. The earlier owner interpretation was superseded by a guard-epoch change before its next attempt. A forum convention and a non-owner 👍 on the older source message were captured in the same topic; that reaction is the current individual state. A fresh owner-private convention was captured in the same DM scope, but its reply waited on guarded preparation. Preparation remained queued without a run receipt or linked reply more than 21 minutes after capture. A review backlog included hundreds of waiting generations for dozens of sources. Publication, correction, recall, projection, and derived reaction meaning remained pending. [Evidence](../compatibility/results/2026-09-27-current-conventions-and-reaction.json).
 
 ## Tooling and dashboard layout, 2026-09-27
 
