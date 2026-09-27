@@ -220,7 +220,10 @@ export class EntityRepository {
       if(!['person','project','binding'].includes(String(row.kind))||!Array.isArray(row.evidence_ids)||!row.evidence_ids.length||row.evidence_ids.length>30)
         throw new HttpError(422,'invalid_entity_suggestion');
       const references=row.evidence_ids.map(id=>{const ref=evidence.get(String(id));if(!ref)throw new HttpError(422,'entity_evidence_unavailable');return ref;});
-      const candidate=row.candidate_id===undefined?undefined:entityId(row.candidate_id);if(candidate&&!knownIds.has(candidate))throw new HttpError(422,'entity_candidate_unavailable');
+      // A model may put a name or placeholder in candidate_id. Keep that
+      // suggestion unbound; only an exact known entity ID may create a link.
+      const candidate=typeof row.candidate_id==='string'&&/^[a-f0-9]{64}$/.test(row.candidate_id)?row.candidate_id:undefined;
+      if(candidate&&!knownIds.has(candidate))throw new HttpError(422,'entity_candidate_unavailable');
       suggestions.push(await this.suggest(row.kind as 'person'|'project'|'binding',string(row.name,200),references[0]!,string(row.reason,1000),candidate));
     }
     if(context.entities.project&&context.entities.speaker)published.push(await this.publishClaim({subject_id:context.entities.project.id,predicate:'participates',
