@@ -138,3 +138,7 @@ revision is the complete ledger before this summary replaced it.
 ## Local admin inspection candidate, 2026-09-27
 
 - A dedicated read-only CLI was added for content-free live-acceptance inspection by event ID, including linked reply IDs and event-filtered workflow receipts. Focused CLI privacy and routing checks, reply-link and workflow-filter checks, the TypeScript build, and the AST-only graph refresh passed in the isolated worktree. A follow-up check made event tracing reject an older running API that silently ignores the new filter. The operating installation was not changed; live acceptance remains open. [CLI guide](../admin/README.md).
+
+## Admin and deployment tooling, 2026-09-27
+
+- The CLI gained a newest-incoming-event trace with an optional exact scope and an agent skill for content-free evidence inspection. A second skill and guarded script cover exact-revision app rollout to existing local and VPS Compose installations. Focused CLI/deployment tests, skill validation, the TypeScript build, and an AST-only graph refresh passed in the worktree. Operating local activation, remote execution, and live acceptance are tracked separately in [TASK.md](../TASK.md).

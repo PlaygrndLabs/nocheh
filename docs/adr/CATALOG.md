@@ -74,3 +74,5 @@ records current implementation and activation.
 | [0063](0063-owner-database-browser.md) | Read-only inspection of configured installation tables | Extends 0025 owner inspection and 0053 separate stores |
 | [0064](0064-isolated-source-watched-development-preview.md) | Checkout-scoped Compose Watch full core stack | Extends 0019 local development and 0024 configuration |
 | [0065](0065-single-stack-source-mounted-development.md) | One running stack with source-mounted development | Supersedes 0064 concurrent-project and rebuild-on-edit behavior |
+| [0066](0066-fixed-name-standard-port-development.md) | Development uses one named stack and normal ports | Supersedes 0065 development name, ports, and builder details |
+| [0067](0067-exact-revision-app-rollout.md) | Exact-revision app rollout for local and VPS Compose installations | Extends 0019 with deployment tooling; local acceptance remains separate |

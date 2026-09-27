@@ -69,12 +69,16 @@ def run_isolated_tests(rest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "reset", "admin"))
+    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "reset", "admin", "deploy"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
     if args.command == 'admin':
         sys.path.insert(0, str(ROOT))
         from scripts.admin import main as admin
         return admin(rest)
+    if args.command == 'deploy':
+        sys.path.insert(0, str(ROOT))
+        from scripts.deploy import main as deploy
+        return deploy(rest)
     if args.command in ('dev', 'dev-stop', 'dev-status'):
         sys.path.insert(0, str(ROOT))
         from scripts.dev_preview import main as dev_preview

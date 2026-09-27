@@ -44,7 +44,8 @@ def parser_for():
     event = commands.add_parser("event", help="Inspect one original and linked output metadata")
     event.add_argument("id")
     trace = commands.add_parser("trace", help="Correlate an event with linked replies and workflows")
-    trace.add_argument("id")
+    trace.add_argument("id", help="Event ID, or 'latest' for the newest incoming event")
+    trace.add_argument("--scope", default="", help="Exact conversation scope when using latest")
     workflows = commands.add_parser("workflows", help="Workflow list with source and receipt IDs")
     workflows.add_argument("--family")
     workflows.add_argument("--state")
@@ -77,7 +78,10 @@ def path_for(parser, args):
         if not args.query.strip(): parser.error("search query must not be empty")
         if not 1 <= args.limit <= 50: parser.error("--limit must be between 1 and 50")
         return "/v1/search?" + urlencode({"q": args.query, "scope": args.scope, "limit": args.limit})
-    if command in ("event", "trace"): return "/v1/events/" + identity(parser, args.id)
+    if command == "trace" and args.id == "latest": return "/v1/data?" + urlencode({"kind": "incoming", "scope": args.scope})
+    if command in ("event", "trace"):
+        if command == "trace" and args.scope: parser.error("--scope requires trace latest")
+        return "/v1/events/" + identity(parser, args.id)
     if command == "workflows":
         if not 1 <= args.limit <= 100: parser.error("--limit must be between 1 and 100")
         if args.event: identity(parser, args.event)
@@ -142,13 +146,26 @@ def render(value, command):
 def main(arguments=None):
     parser = parser_for()
     arguments = list(sys.argv[1:] if arguments is None else arguments)
-    # Match epa's useful global-flag placement without making each subcommand
-    # define separate, potentially inconsistent privacy defaults.
+    # Permit global flags around commands without repeating privacy defaults.
     global_flags = [item for item in arguments if item in ("--json", "--content")]
     args = parser.parse_args(global_flags + [item for item in arguments if item not in ("--json", "--content")])
     path = path_for(parser, args)
     try:
         api = API()
+        if args.command == "trace" and args.id == "latest":
+            listing = api.call(path, timeout=30)
+            records = listing.get("records") if isinstance(listing, dict) else None
+            if not isinstance(records, list):
+                raise RuntimeCompatibilityError("running installation did not return an event page")
+            if not records:
+                raise RuntimeCompatibilityError("no captured incoming event found in this scope")
+            selected = records[0]
+            if not isinstance(selected, dict) or not isinstance(selected.get("id"), str):
+                raise RuntimeCompatibilityError("running installation returned an invalid event ID")
+            if not ID.fullmatch(selected["id"]):
+                raise RuntimeCompatibilityError("running installation returned an invalid event ID")
+            args.id = selected["id"]
+            path = "/v1/events/" + args.id
         value = api.call(path, timeout=30)
         if args.command in ("event", "trace") and (not isinstance(value, dict) or not isinstance(value.get("reply_messages"), list)):
             raise RuntimeCompatibilityError("running installation lacks linked event replies; activate the matching API before inspecting this event")
