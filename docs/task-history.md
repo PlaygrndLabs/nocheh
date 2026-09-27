@@ -222,3 +222,7 @@ revision is the complete ledger before this summary replaced it.
 ## Fresh human reaction after rollout, 2026-09-27
 
 - The same non-owner participant removed and restored 👍 on the same older forum message. Both original updates were captured with no linked replies, and the restored individual reaction is current. The new guard epoch correctly invalidated an interpretation that was running for the earlier event. The current event passed guarded preparation; forum-scoped Honcho ingestion completed and derivation was still running. Derived meaning and its active recall remain pending. Detailed identifiers are stored only in ignored local evidence.
+
+## Reaction publication churn and owner latency, 2026-09-27
+
+- The exact fresh reaction completed guarded preparation, source review, and one-attempt forum-scoped Honcho ingestion. Its forum generation reached ready state. A separately requested guarded interpretation then waited for worker admission and was superseded when another learned publication advanced the guard epoch. No active learned entry cited either reaction event at the latest check; derived meaning remains pending. The corrected owner-DM reply had the intended meaning and one linked delivery, but elapsed about 18 minutes 41 seconds from capture; the Telegram effect started roughly 14 minutes 55 seconds after capture. This latency and the intermittent tool-registration issue remain release investigations. Private event IDs and timings remain in ignored local evidence.
