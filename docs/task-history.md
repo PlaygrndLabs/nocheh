@@ -186,3 +186,7 @@ revision is the complete ledger before this summary replaced it.
 ## Superseded Honcho source repair and first learned entries, 2026-09-27
 
 - Local app revision `a92b3f9` extended the safe source-workflow cleanup to Honcho. All 17 services were healthy; the exact eligible Honcho queue fell from 441 to zero and 441 source workflows were recorded as superseded. The first four learned entries appeared, including the owner-private and forum-topic synthetic conventions with expected source provenance. The forum convention had a completed Honcho projection receipt; owner correction, corrected active recall, the owner projection, and the human reaction's derived meaning remained open. The isolated database fixture stayed skipped under the one-stack rule. [Evidence](../compatibility/results/2026-09-27-honcho-source-backlog-repair.json).
+
+## Owner correction and workflow connection recovery, 2026-09-27
+
+- The owner saved the intended synthetic private-chat correction as active revision 3; revision 2 had repeated the original meaning. The earlier owner projection completed only for revision 1. The corrected projection stayed queued while Inngest lacked a healthy worker connection after its pause. Restarting the persisted workflow server and then the app restored the connection and published the queued outbox. All 17 services were healthy. The corrected projection receipt, active recall, and human reaction's derived meaning remained pending. [Evidence](../compatibility/results/2026-09-27-owner-correction-and-workflow-recovery.json).
