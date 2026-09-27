@@ -10,6 +10,25 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {LearnedMemoryRepository,type PreparedDependency} from '../src/stores/learned.js';
 
 const owner={admin:true,scope:null};
+test('identical automatic interpretations do not require a new revision, but evidence and meaning changes do',async()=>{
+  const source={store:'archive' as const,kind:'event' as const,id:digest('repeat-source'),revision:'1',input_hash:digest('repeat-input')};
+  const value:Interpretation={kind:'state',subject:'synthetic task',text:'The task is under review.',
+    scope:{kind:'conversation',id:'synthetic'},uncertainty:'supported',evidence:[source],conflicts:[]};
+  const dependencies:PreparedDependency[]=[{source_id:'events:'+source.id,revision:1,value_hash:digest('guarded-source')}];
+  const {text,...learning}=value;
+  const row={author:'honcho',retired:false,dependencies,content:Buffer.from(text),provenance:{learning}};
+  let staged=false;
+  const stores={derived:{query:async()=>({rows:staged?[]:[row]})}} as any;
+  const learned=new LearnedMemoryRepository(stores,{} as any,{} as any,{} as any);
+  const check=(candidate:Interpretation,deps=dependencies)=>learned.matchesActiveAutomatic(digest('entry'),candidate,deps,'synthetic-operation');
+  assert.equal(await check(value),true);
+  assert.equal(await check({...value,text:'The task is complete.'}),false);
+  assert.equal(await check({...value,evidence:[{...source,revision:'2'}]}),false);
+  assert.equal(await check(value,[{...dependencies[0]!,revision:2}]),false);
+  row.author='owner';assert.equal(await check(value),false);
+  row.author='honcho';row.retired=true;assert.equal(await check(value),false);
+  row.retired=false;staged=true;assert.equal(await check(value),false,'a previously staged operation must use recovery');
+});
 test('reaction learning ignores unrelated conclusions and keeps strict original-source validation',()=>{
   const trigger=digest('reaction'),target=digest('older-message'),rule=digest('learned-rule'),unknown=digest('unknown');
   const evidence=[trigger,target].map(id=>({reference:{store:'archive' as const,kind:'event' as const,id,revision:'1',input_hash:digest(id)},text:'Synthetic source.',space:'-42'}));

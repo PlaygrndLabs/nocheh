@@ -92,6 +92,8 @@ export class ContextualLearningRepository {
           const prior=(await this.derived.pool.query('SELECT active_revision FROM learned_entries WHERE id=$1',[entryId])).rows[0];
           // Existing owner corrections remain authoritative, including after new evidence.
           if(prior&&(await this.derived.pool.query("SELECT 1 FROM learned_versions WHERE entry_id=$1 AND revision=$2 AND author='owner'",[entryId,prior.active_revision])).rowCount){ids.push(entryId);continue;}
+          // An identical active interpretation cannot justify another global guard epoch and Honcho rebuild.
+          if(prior&&await this.learned.matchesActiveAutomatic(entryId,value,context.dependencies,id+':'+index)){ids.push(entryId);continue;}
           const version=await this.learned.stageAutomatic(entryId,value,prior?.active_revision??null,id+':'+index,context.dependencies,
             job.binding,protocol,detect,{workspace:job.workspace,result_id:result.id,limitations:['reasoning_response_has_no_exact_conclusion_citations']});
           ids.push(version.entry_id);versions.push(version);
