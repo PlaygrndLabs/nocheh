@@ -16,6 +16,18 @@ ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive
                'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall'}
 
 
+class UnexpectedProfileTool(RuntimeError):
+    def __init__(self,names):
+        super().__init__('unexpected_profile_tool')
+        # Tool identifiers are configuration metadata, not model or chat content.
+        self.names=sorted(name for name in names if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}',name))[:16]
+
+
+def verify_profile_tools(names):
+    unexpected=set(names)-ALLOWED_TOOLS
+    if unexpected:raise UnexpectedProfileTool(unexpected)
+
+
 def exact_predecessor_question(text):
     """Do not infer an exact predecessor from a history that can omit sources."""
     if not isinstance(text,str):return False
@@ -155,7 +167,7 @@ def run(body, emit=None):
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'])
-        if not agent.valid_tool_names.issubset(ALLOWED_TOOLS):raise RuntimeError('unexpected_profile_tool')
+        verify_profile_tools(agent.valid_tool_names)
         for tool in agent.tools:
             if tool['function']['name']=='session_search':
                 tool['function']['parameters']['properties'].pop('profile',None)
@@ -228,6 +240,7 @@ def main():
         known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','required_guard_unavailable','invalid_process_scope_binding'}
         result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
+        if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names
     record('total',started);result['timings']=safe(VALUES)
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()
 

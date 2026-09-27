@@ -164,6 +164,16 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     adapter.set_message_handler(message);retry['attempt']=2
                     self.assertEqual(await gateway.dispatch(retry),{'state':'done'})
                     self.assertEqual(len(request.sent),before+1,'fresh retry attempt sends exactly once')
+                    async def unexpected_tool(event):
+                        TURN.get()['agent_result']={'state':'failed','error_code':'unexpected_profile_tool',
+                            'unexpected_tool_names':['foreign_tool','private:payload']}
+                        return None
+                    adapter.set_message_handler(unexpected_tool)
+                    mismatch=envelope(25,'Tool mismatch remains fail closed')
+                    expected={'state':'failed','error_code':'unexpected_profile_tool','unexpected_tool_names':['foreign_tool']}
+                    self.assertEqual(await gateway.dispatch(mismatch),expected)
+                    self.assertEqual(await gateway.dispatch(mismatch),expected,'replay preserves the bounded diagnostic')
+                    self.assertEqual(len(request.sent),before+1,'tool mismatch cannot send')
                     uncertain_calls=[]
                     async def interrupt_after_delivery_started(event):
                         uncertain_calls.append(event);TURN.get()['delivery_started']=True

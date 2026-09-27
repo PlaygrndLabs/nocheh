@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from .scopes import Scopes,verify_capability
 from .assistant_gateway import AssistantGateway,prepare_profile
-from .assistant_turn import restrict_session_search,ALLOWED_TOOLS
+from .assistant_turn import restrict_session_search,ALLOWED_TOOLS,UnexpectedProfileTool,verify_profile_tools
 from .capture import canonical,immutable_file
 
 
@@ -115,6 +115,13 @@ class ScopeTests(unittest.TestCase):
                 names={item['function']['name'] for item in definitions}
                 self.assertEqual(names,ALLOWED_TOOLS)
             finally:reset_hermes_home_override(token)
+
+    def test_unexpected_profile_tool_names_are_bounded_and_fail_closed(self):
+        verify_profile_tools(ALLOWED_TOOLS)
+        with self.assertRaises(UnexpectedProfileTool) as caught:
+            verify_profile_tools(ALLOWED_TOOLS|{'foreign_tool','private:payload'})
+        self.assertEqual(str(caught.exception),'unexpected_profile_tool')
+        self.assertEqual(caught.exception.names,['foreign_tool'])
 
     def test_restart_marks_orphan_dispatch_and_action_receipts_ambiguous(self):
         with tempfile.TemporaryDirectory() as folder:

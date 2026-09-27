@@ -250,7 +250,13 @@ class AssistantGateway:
                 agent=turn.get('agent_result')
                 if not agent:result={'state':'suppressed','error_code':'unsupported_message'}
                 elif agent['state']=='cancelled':result={'state':'cancelled'}
-                elif agent['state']!='done':result={'state':'failed','error_code':agent.get('error_code','model_unavailable')}
+                elif agent['state']!='done':
+                    result={'state':'failed','error_code':agent.get('error_code','model_unavailable')}
+                    if result['error_code']=='unexpected_profile_tool':
+                        names=agent.get('unexpected_tool_names')
+                        if isinstance(names,list):
+                            result['unexpected_tool_names']=[name for name in names[:16]
+                                if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}',name)]
                 elif turn.get('delivery_skipped'):result={'state':'suppressed','error_code':'intentional_silence'}
                 elif turn.get('delivery_success'):result={'state':'done'}
                 else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
