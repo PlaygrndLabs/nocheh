@@ -4,6 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import pg from 'pg';
+import {randomUUID} from 'node:crypto';
 import {digest,type Envelope} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
@@ -11,7 +12,7 @@ import {boundStorageOperations,storageWorkflowOperations} from '../src/stores/wo
 import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {observation} from '../src/workflows/pipeline.js';
-import {requestWorkflow,type WorkflowFamily} from '../src/workflows/store.js';
+import {requestWorkflow,retireSupersededSourceReviews,type WorkflowFamily} from '../src/workflows/store.js';
 
 test('storage workflow admission leaves pool capacity for nested publications',async()=>{
   let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let calls=0;
@@ -19,6 +20,46 @@ test('storage workflow admission leaves pool capacity for nested publications',a
   const authority={owner:'inngest' as const,epoch:1},first=operations.preparation!('first',authority),second=operations.preparation!('second',authority);
   const third=await operations.preparation!('third',authority);assert.equal(third.state,'waiting');assert.equal(calls,2);
   release();await Promise.all([first,second]);assert.equal((await operations.preparation!('third',authority)).state,'completed');assert.equal(calls,3);
+});
+
+test('idle superseded source reviews retire without touching leases, receipts or current work',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),pool=stores.control;
+  const source=(label:string)=>'source:'+digest('supersession:'+Date.now()+':'+label);
+  const pair=async(job:string)=>{
+    const db=await pool.connect();try{await db.query('BEGIN');const old=await requestWorkflow(db,'memory_review',job,1),current=await requestWorkflow(db,'memory_review',job,2);
+      await db.query('COMMIT');return {old,current};}catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  };
+  try {
+    const idle=await pair(source('idle')),leased=await pair(source('leased')),protectedJob=await pair(source('receipt'));
+    const db=await pool.connect();let current:string;try{current=await requestWorkflow(db,'memory_review',source('current'));}finally{db.release();}
+    await pool.query("UPDATE workflow_registry SET state='waiting' WHERE id=ANY($1::text[])",[[idle.old,leased.old,protectedJob.old]]);
+    await pool.query('UPDATE workflow_registry SET lease_token=$2 WHERE id=$1',[leased.old,randomUUID()]);
+    await pool.query("INSERT INTO workflow_receipts(workflow_id,step,attempt,state) VALUES($1,'review',1,'started')",[protectedJob.old]);
+    assert.equal(await retireSupersededSourceReviews(pool),1);
+    const rows=(await pool.query('SELECT id,state,waiting_reason FROM workflow_registry WHERE id=ANY($1::text[])',
+      [[idle.old,idle.current,leased.old,protectedJob.old,current]])).rows;
+    const byId=new Map(rows.map(row=>[row.id,row]));
+    assert.equal(byId.get(idle.old)?.state,'skipped');assert.equal(byId.get(idle.old)?.waiting_reason,'superseded');
+    for(const id of [idle.current,leased.old,protectedJob.old,current])assert.notEqual(byId.get(id)?.state,'skipped');
+    assert.equal(await retireSupersededSourceReviews(pool),0,'reconciliation is idempotent');
+    const pre=await pair(source('pre'));let preCalls=0;
+    const before=await advanceWorkflow(pool,pre.old,1,'memory_review','supersession-pre',async()=>{
+      preCalls++;return observation('waiting','review',0,Date.now()+1000,'prerequisite');
+    });
+    assert.equal(before.state,'skipped','a queued predecessor closes before its operation');assert.equal(preCalls,0);
+    let calls=0;const result=await advanceWorkflow(pool,protectedJob.old,1,'memory_review','supersession-test',async()=>{
+      calls++;return observation('waiting','review',0,Date.now()+1000,'prerequisite');
+    });
+    assert.equal(result.state,'waiting','a protected receipt is never bypassed');assert.equal(calls,1);
+    const post=await pair(source('post'));
+    await pool.query("UPDATE workflow_registry SET state='running' WHERE id=$1",[post.old]);
+    const after=await advanceWorkflow(pool,post.old,1,'memory_review','supersession-post',async()=>observation('waiting','review',0,Date.now()+1000,'prerequisite'));
+    assert.equal(after.state,'skipped','a running predecessor closes after its operation returns');
+  } finally {await stores.close();}
 });
 
 test('workflow engine prepares originals, learns silently, reconciles effects and refreshes new native work',

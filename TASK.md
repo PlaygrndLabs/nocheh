@@ -99,6 +99,19 @@ in that same topic ten seconds later. Its individual reaction is the current
 stored state. Derived meaning remains pending.
 [Current live evidence](compatibility/results/2026-09-27-current-conventions-and-reaction.json).
 
+A targeted source-review backlog repair is in the task worktree. The touch
+operation closes idle predecessors, but a predecessor running at touch time
+can later return to `waiting`; current control rows show that pattern across
+many generations. Exactly 550 current rows match the candidate's safe idle
+filter. The candidate retires bounded batches of idle superseded
+source reviews without started or closed effect receipts and closes a
+predecessor when it advances after a newer generation exists. TypeScript and
+the runnable focused Node check passed. The database-backed fixture cases
+remain unrun because the synthetic fixture must not share the host with the
+operating Compose installation. A rollback-only temporary-table SQL check
+passed. The candidate is not active and does not yet clear the release gate.
+[Repair evidence](compatibility/results/2026-09-27-source-review-backlog-repair.json).
+
 ## Next actions
 
 The following live observations are historical because the operating
