@@ -70,30 +70,30 @@ SEC5 verification and activation, 2026-09-10:
   skipped. Real Docker confinement ran separately and passed. Coverage includes
   hosted-tool and opaque-history rejection, revocation during streamed output,
   mandatory-denial receipts, browser mode propagation and portable native history.
-  [Test record](../compatibility/results/security-service-tests.json).
+  Test record (report removed for privacy).
 * The initial recall, grounding and reasoning comparison passed 12/12 factual
   checks. In the stricter comparison, the evidence candidate passed 6/6 exact
   checks; baseline passed 5/6, with correct factual values under different JSON
   field names in one answer. Both used `gpt-5.6-sol` and the original 272,000-token
   context window. No approval was requested for context work. These small
   synthetic fixtures establish observed parity only, not universal accuracy.
-  [Exact comparison](../compatibility/results/security-service-acceptance.json).
+  Exact comparison (report removed for privacy).
 * The actual launcher passed credential rejection, supervised recall, persistent
   history, disconnect cleanup and orphan removal after restart without replay.
   Native import-time delegation/delivery ledgers now share the persistent DB;
   the native memory lock is shared across the container boundary. The acceptance
   gate caught and prevented activation with a temporary history database.
-  [Launcher evidence](../compatibility/results/security-service-launcher-acceptance.json).
+  Launcher evidence (report removed for privacy).
 * Four existing profile databases were checkpointed, integrity checked, moved
   without changing their bytes and privately copied for preservation. Local
   Compose now uses `isolated` execution and `evidence` memory; the bounded tool
   executor was drained and restarted. The rebuilt images reuse the already
-  installed pinned dependency images. [Activation receipt](../compatibility/results/security-service-activation.json).
+  installed pinned dependency images. Activation receipt (report removed for privacy).
 * The active subscription turn passed exact saved owner-copy recall, durable
   conversation history, provider receipts and routine work without approval.
-  [Active check](../compatibility/results/security-service-active.json). The
+  Active check (report removed for privacy). The
   existing secret detector masked a harmless synthetic colour; that observation
-  is [retained separately](../compatibility/results/security-service-active-detector-observation.json).
+  is retained separately (report removed for privacy).
   The owner-edit check isolates the transport guarantee from detector quality.
 
 No new layer summarizes or deletes memory, changes reasoning effort, or reduces
