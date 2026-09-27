@@ -19,6 +19,14 @@ export interface EntityClaimInput {
 }
 
 const entityId=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_entity_id');return id;};
+export function attributedSpeaker(attribution:'direct'|'reported'|'inferred',subject:string,supplied:string|undefined,trusted:string|undefined):string|undefined {
+  // A direct claim about the actual source speaker can omit a redundant speaker ID.
+  // Never replace a conflicting explicit ID or infer who reported another subject.
+  const speaker=supplied??(attribution==='direct'&&subject===trusted?trusted:undefined);
+  if(attribution==='direct'&&(!speaker||speaker!==subject||speaker!==trusted)||
+    attribution==='reported'&&(!speaker||speaker!==trusted))throw new HttpError(422,'entity_attribution_mismatch');
+  return speaker;
+}
 const revision=(value:unknown):number=>{if(!Number.isSafeInteger(value)||Number(value)<0)throw new HttpError(400,'invalid_revision');return Number(value);};
 const exact=(value:unknown,keys:string[])=>{const row=object(value);if(Object.keys(row).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_entity_field');return row;};
 const participantName=(payload:unknown,fallback:string):string=>{
@@ -229,12 +237,11 @@ export class EntityRepository {
     const claims=value.entity_claims??[];if(!Array.isArray(claims)||claims.length>20)throw new HttpError(422,'invalid_entity_claims');
     for(const raw of claims) {
       const row=exact(raw,['subject_id','predicate','content','object_entity_id','relationship_kind','attribution','speaker_entity_id','uncertainty','evidence_ids']);
-      const subject=entityId(row.subject_id),objectId=row.object_entity_id===undefined?undefined:entityId(row.object_entity_id),speaker=row.speaker_entity_id===undefined?undefined:entityId(row.speaker_entity_id);
-      if(!knownIds.has(subject)||objectId&&!knownIds.has(objectId)||speaker&&!knownIds.has(speaker)||!['direct','reported','inferred'].includes(String(row.attribution))||
+      const subject=entityId(row.subject_id),objectId=row.object_entity_id===undefined?undefined:entityId(row.object_entity_id),suppliedSpeaker=row.speaker_entity_id===undefined?undefined:entityId(row.speaker_entity_id);
+      if(!knownIds.has(subject)||objectId&&!knownIds.has(objectId)||suppliedSpeaker&&!knownIds.has(suppliedSpeaker)||!['direct','reported','inferred'].includes(String(row.attribution))||
         !['uncertain','supported','explicit'].includes(String(row.uncertainty))||!Array.isArray(row.evidence_ids)||!row.evidence_ids.length||row.evidence_ids.length>30)
         throw new HttpError(422,'invalid_entity_claim');
-      if(row.attribution==='direct'&&(!speaker||speaker!==subject||speaker!==context.entities.speaker?.id)||
-        row.attribution==='reported'&&(!speaker||speaker!==context.entities.speaker?.id))throw new HttpError(422,'entity_attribution_mismatch');
+      const speaker=attributedSpeaker(row.attribution as EntityClaimInput['attribution'],subject,suppliedSpeaker,context.entities.speaker?.id);
       const references=row.evidence_ids.map(id=>{const ref=evidence.get(String(id));if(!ref)throw new HttpError(422,'entity_evidence_unavailable');return ref;});
       published.push(await this.publishClaim({subject_id:subject,predicate:string(row.predicate,100),content:string(row.content,8000),
         attribution:row.attribution as EntityClaimInput['attribution'],uncertainty:row.uncertainty as EntityClaimInput['uncertainty'],evidence:references,

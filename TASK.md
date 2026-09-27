@@ -66,8 +66,12 @@ cross-conversation evidence. Build and focused parser checks passed. Revision
 `4262cb7` is active on the local app with all 17 services healthy; the GitHub
 push remains blocked by missing HTTPS credentials. The production Honcho
 generation is ready with a fresh context snapshot and two completed source
-receipts. The learned job remains failed with its original error; its workflow
-is overdue in `waiting` after a manual retry returned a family-lock conflict.
+receipts. The saved model result passed the deployed scope parser with one
+canonical conversation interpretation. Its next workflow attempt then failed
+`entity_attribution_mismatch`: a direct claim about the trusted source speaker
+omitted the redundant speaker ID. A focused candidate fills only that omission
+from trusted context and still rejects conflicting or reported attribution;
+build and focused tests passed. It needs rollout and a fresh workflow attempt.
 There is no learned entry or projection receipt yet. Owner correction, active
 recall, and downstream reaction meaning remain pending.
 [Live evidence](compatibility/results/2026-09-27-owner-violet-convention.json).
