@@ -79,9 +79,9 @@ recall, and downstream reaction meaning remain pending.
 Revision `d24ac74` with the trusted direct-speaker repair is active on the
 local app; all 17 services are healthy and the compiled fix was confirmed in
 the running container. A new owner convention DM was captured at
-2026-09-27T14:17:55Z in the same private scope. It had no linked reply and its
+2026-09-27T14:17:55Z in the same private scope. At the 14:39Z diagnosis it had no linked reply and its
 Telegram, preparation, and source-learning workflows were still queued at the
-latest observation. Their outbox events were published; Telegram and source
+then-latest observation. Their outbox events were published; Telegram and source
 review each received one run, but preparation had none and stayed queued.
 Telegram waited on the guard and source review waited on a receipt. The
 registered workers were connected; 562 older source review workflows were
@@ -99,17 +99,24 @@ in that same topic ten seconds later. Its individual reaction is the current
 stored state. Derived meaning remains pending.
 [Current live evidence](compatibility/results/2026-09-27-current-conventions-and-reaction.json).
 
-A targeted source-review backlog repair is in the task worktree. The touch
+A targeted source-review backlog repair is active in local app revision
+`53502ef` with all 17 Compose services healthy. The touch
 operation closes idle predecessors, but a predecessor running at touch time
 can later return to `waiting`; current control rows show that pattern across
-many generations. Exactly 550 current rows match the candidate's safe idle
-filter. The candidate retires bounded batches of idle superseded
+many generations. Before rollout, exactly 550 rows matched the repair's safe idle
+filter. The active worker retires bounded batches of idle superseded
 source reviews without started or closed effect receipts and closes a
 predecessor when it advances after a newer generation exists. TypeScript and
 the runnable focused Node check passed. The database-backed fixture cases
 remain unrun because the synthetic fixture must not share the host with the
 operating Compose installation. A rollback-only temporary-table SQL check
-passed. The candidate is not active and does not yet clear the release gate.
+passed. After rollout, the same read-only eligible-row query returned zero,
+and 559 source reviews were recorded as superseded. The fresh owner DM now
+has one linked reply and completed its first Telegram attempt, but its native
+review became ambiguous after an unconfirmed runtime call. The forum reaction's
+native review completed. Neither has a learned entry; owner correction, active
+recall, reaction-derived meaning, and the production Honcho projection receipt
+remain pending. GitHub push remains blocked by absent HTTPS authentication.
 [Repair evidence](compatibility/results/2026-09-27-source-review-backlog-repair.json).
 
 ## Next actions
