@@ -98,6 +98,17 @@ export class LearnedMemoryRepository {
     return this.publish(id,value,expected,operationId,author,false,dependencies,binding,producerVersion,hash,detect,nativeProvenance);
   }
 
+  async matchesActiveAutomatic(id:string,value:Interpretation,dependencies:PreparedDependency[],operationId:string):Promise<boolean> {
+    const row=(await this.stores.derived.query(`SELECT v.author,v.retired,v.dependencies,d.content,d.provenance
+      FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
+      JOIN derived_artifacts d ON d.id=v.derived_id WHERE e.id=$1
+      AND NOT EXISTS (SELECT 1 FROM learned_versions staged WHERE staged.operation_id=$2)`,[id,operationId])).rows[0];
+    if(!row||row.author==='owner'||row.retired)return false;
+    const {text,...metadata}=value;
+    return row.content.toString()===text&&canonical(row.provenance?.learning)===canonical(metadata)&&
+      canonical(row.dependencies)===canonical(dependencies);
+  }
+
   /** One control commit revokes for the whole prepared batch and records recovery before any pointer changes. */
   async activateBatch(versions:LearnedPublication[],binding:GuardBinding,jobId:string,resultId:string,resultIds:string[]):Promise<void> {
     if(versions.length>12||new Set(versions.map(v=>v.entry_id)).size!==versions.length)throw new HttpError(400,'invalid_learning_batch');
