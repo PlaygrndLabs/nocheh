@@ -151,15 +151,25 @@ export async function controlWorkflow(pool:pg.Pool,id:string,action:string,input
 }
 export async function workflowHealth(pool:pg.Pool){
   const results=await Promise.all([
-    pool.query('SELECT family,state,count(*)::int AS count FROM workflow_observations GROUP BY family,state ORDER BY family,state'),
+    pool.query('SELECT family,state,waiting_reason,count(*)::int AS count,min(created_at) AS oldest FROM workflow_observations GROUP BY family,state,waiting_reason ORDER BY family,state'),
     pool.query(`SELECT o.family,o.owner,o.epoch,o.admission,r.app,r.version,r.seen_at,(r.seen_at>now()-interval '30 seconds') IS TRUE AS connected FROM workflow_owners o LEFT JOIN workflow_worker_registrations r USING(family) ORDER BY family`),
     pool.query(`SELECT count(*)::int AS pending,count(*) FILTER(WHERE f.owner='inngest' AND f.admission)::int AS admitted,min(o.created_at) AS oldest
       FROM workflow_outbox o JOIN workflow_registry w ON w.id=o.workflow_id JOIN workflow_owners f USING(family)
       WHERE o.published_at IS NULL AND o.dispatch=w.dispatch AND w.state IN ('queued','waiting','running','retryable_failed')`),
-    pool.query("SELECT min(created_at) AS oldest FROM workflow_observations WHERE state IN ('queued','waiting','retryable_failed')"),
     pool.query("SELECT service,seen_at,(seen_at>now()-interval '30 seconds') AS fresh FROM service_heartbeats WHERE service IN ('nocheh-app','workflow-pipeline','workflow-host') ORDER BY service"),
     // A domain may finish before orchestration records completion. Report the
     // last confirmed workflow completion, never its admission/update timestamp.
     pool.query("SELECT max(updated_at) AS at FROM workflow_registry WHERE state='completed'")]);
-  return {counts:results[0].rows,workers:results[1].rows,outbox:results[2].rows[0],oldest_waiting:results[3].rows[0].oldest,services:results[4].rows,last_success_at:results[5].rows[0].at,observed_at:new Date().toISOString()};
+  const counts=new Map<string,{family:string;state:string;count:number}>();
+  const reasons=new Map<string,{state:string;waiting_reason:string|null;count:number}>();
+  let oldestWaiting:Date|null=null;
+  for(const row of results[0].rows){
+    const key=row.family+':'+row.state,previous=counts.get(key);
+    counts.set(key,{family:row.family,state:row.state,count:(previous?.count||0)+row.count});
+    if(row.state!=='queued'&&row.state!=='waiting')continue;
+    const reasonKey=row.state+':'+(row.waiting_reason||''),prior=reasons.get(reasonKey);
+    reasons.set(reasonKey,{state:row.state,waiting_reason:row.waiting_reason,count:(prior?.count||0)+row.count});
+    if(row.oldest&&(!oldestWaiting||row.oldest<oldestWaiting))oldestWaiting=row.oldest;
+  }
+  return {counts:[...counts.values()],waiting_reasons:[...reasons.values()].sort((a,b)=>b.count-a.count||a.state.localeCompare(b.state)),workers:results[1].rows,outbox:results[2].rows[0],oldest_waiting:oldestWaiting,services:results[3].rows,last_success_at:results[4].rows[0].at,observed_at:new Date().toISOString()};
 }
