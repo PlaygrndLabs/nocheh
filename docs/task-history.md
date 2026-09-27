@@ -178,3 +178,7 @@ revision is the complete ledger before this summary replaced it.
 ## Empty-file cleanup, 2026-09-27
 
 - Removed thirteen redundant zero-byte Python subpackage markers after verifying namespace imports in the pinned Hermes runtime. Kept the explicit `services` package root with a short description to protect service import resolution. No empty source directories or other zero-byte tracked files remained. Manual security and guarded-memory acceptance programs were retained because they produce documented evidence. The TypeScript build, 45 host Python tests, and 371 isolated Hermes tests passed (3 skipped).
+
+## Superseded source review repair rollout, 2026-09-27
+
+- Local app revision `53502ef` activated the bounded cleanup of idle superseded source reviews. All 17 Compose services were healthy, and the exact eligible queue fell from 550 to zero; 559 source reviews were recorded as superseded. The fresh owner DM later produced one linked reply on its first Telegram attempt. Its native memory review became ambiguous after an unconfirmed runtime call; the forum reaction's native review completed. No learned entry or projection receipt was established, so owner correction, active recall, and derived reaction meaning remained open. The isolated database fixture was skipped under the one-stack rule. [Evidence](../compatibility/results/2026-09-27-source-review-backlog-repair.json).
