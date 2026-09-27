@@ -55,6 +55,17 @@ delay is a current release investigation, separate from the prior
 `unexpected_profile_tool` error.
 [Content-free evidence](compatibility/results/2026-09-27-owner-convention-turn.json).
 
+A second owner synthetic convention DM was captured after Honcho attachment at
+2026-09-27T13:20:48Z and produced one linked dashboard reply on its first
+attempt. Its first source ingestion receipt completed, and the owner generation
+became ready before a subsequent source write returned it to building. The
+interpretation attempt failed because Honcho put its current session ID in the
+conversation scope field. A focused code candidate accepts only that exact
+trusted session alias, stores the evidence conversation scope, and rejects
+other IDs and cross-conversation evidence. Build and focused parser checks
+passed; the operating image still needs this repair and the failed workflow
+must be retried. [Live evidence](compatibility/results/2026-09-27-owner-violet-convention.json).
+
 ## Next actions
 
 The following live observations are historical because the operating
