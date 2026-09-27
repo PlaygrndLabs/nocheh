@@ -174,3 +174,7 @@ revision is the complete ledger before this summary replaced it.
 ## Service and plugin layout, 2026-09-27
 
 - Moved the Nocheh Hermes plugin to `services/hermes`, Honcho code to `services/honcho`, and the sandbox entry point to `tools/runtime`. Updated image copies, Compose mounts, imports, watchers, tests, documentation, and the AST graph. Candidate app, management, tools, Honcho CLI, and Hermes images built; focused imports and tests passed. A cold isolated gateway and TUI test hit intermittent startup timeouts under host load; test-only deadlines were raised without changing production launch behavior, and all 371 isolated Hermes tests then passed (3 skipped). The operating installation was not redeployed. Its Honcho containers kept their old source bind mount through an ignored local copy; API, deriver, and provider gateway health remained good after the Git merge. The old mount needs a separate rollout before local cleanup.
+
+## Empty-file cleanup, 2026-09-27
+
+- Removed thirteen redundant zero-byte Python subpackage markers after verifying namespace imports in the pinned Hermes runtime. Kept the explicit `services` package root with a short description to protect service import resolution. No empty source directories or other zero-byte tracked files remained. Manual security and guarded-memory acceptance programs were retained because they produce documented evidence. The TypeScript build, 45 host Python tests, and 371 isolated Hermes tests passed (3 skipped).
