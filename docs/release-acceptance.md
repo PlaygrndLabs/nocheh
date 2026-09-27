@@ -5,8 +5,14 @@ actual implementation and acceptance. This file supplies the repeatable live pro
 The consolidated installation passed these gates on 2026-09-16; see the
 [recorded acceptance](../compatibility/results/2026-09-16-consolidated-services.json).
 These checks need actual incoming Telegram traffic; synthetic archive events and
-healthy containers cannot substitute for it. Credentials are already configured.
-No VPS or Honcho key is required.
+healthy containers cannot substitute for it. The operating installation needs
+its own Telegram and provider configuration. No VPS is required.
+
+Previously passed live checks may be carried forward when the operating installation
+has no relevant difference and the equivalence is recorded. Run the checks that have
+not passed. A deliberate reset using the `nocheh-fresh-acceptance-v1` journal still
+requires current post-boundary IDs for its validator; carrying earlier observations
+forward does not complete that reset-specific gate.
 
 When the reset preflight reports the legacy storage layout, the frozen setup must
 pass the legacy-to-original-only conversion before fresh services are created. The
