@@ -250,3 +250,4 @@ revision is the complete ledger before this summary replaced it.
 ## Live-data development clarification, 2026-09-28
 
 - The owner clarified that dev should use the existing Telegram bot and live Nocheh data while source changes apply in running containers. The existing launcher remains isolated. Automatic approval review rejected a direct Compose override attaching dev services to the operating PostgreSQL and Honcho volumes because unreviewed development code could mutate live data. The partial source edit was removed, and no live volume, bot login, or operating service was attached or started.
+- The owner added a working rule to wait for answers to agent questions before ending the turn or assuming an answer. `AGENTS.md` now records that rule. Automatic approval review rejected removing its existing dev credential isolation instruction; that boundary remains while the live-data transition is pending.

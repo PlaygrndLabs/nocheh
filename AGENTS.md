@@ -13,6 +13,12 @@ Telegram is an adapter; owned source data, useful memory, and reasoning are the 
 
 </context>
 
+<owner_questions>
+
+- Whenever you ask the owner a question, keep it pending and wait for the owner's answer before ending the turn or assuming an answer. Continue only work that does not depend on that answer while waiting. Silence and elapsed time are not answers.
+
+</owner_questions>
+
 <specification_maintenance>
 
 - `.md` files that AI writes and reads are plain-text context for AI, not documents that need one fixed format. Use XML for semantic structure and Markdown for content within that structure. Keep meaningful containers; avoid unnecessary leaf tags. Plain text can remain wherever neither adds clarity.
