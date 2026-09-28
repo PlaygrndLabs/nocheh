@@ -271,6 +271,9 @@ export async function startManagement() {
       }
       if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
+      if (req.method === 'GET' && route === '/honcho/budget') return json(res, 200, await python({operation: 'honcho.budget'}));
+      if (req.method === 'POST' && route === '/honcho/budget') return exclusive('honcho-budget',async()=>
+        json(res,200,await python({operation:'honcho.budget.update',request:object(await readJson(req))})));
       if (req.method === 'POST' && route === '/honcho/read') return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
       if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'hermes.manage',request:{action:'profiles'}}));
       if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {

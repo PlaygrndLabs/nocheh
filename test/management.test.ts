@@ -7,6 +7,7 @@ import {join, resolve} from 'node:path';
 import {spawn, spawnSync, type ChildProcess} from 'node:child_process';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
+import {randomUUID} from 'node:crypto';
 
 test('upload paths cannot escape a job or use ambiguous directory components', () => {
   for (const path of ['/tmp/private','../private','export/../private','export\\private','a//b','a/./b','a\0b']) {
@@ -29,6 +30,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     if(req.url?.startsWith('/v1/workflows/metrics?'))result={range:'7d',family:'browser',buckets:[],observed_at:'2026-09-16T12:00:00Z'};
     if(req.url?.startsWith('/v1/workflows?'))result={workflows:[{id:'a'.repeat(64),state:'waiting'}],next:null};
     if(req.url==='/v1/workflows/'+'a'.repeat(64)+'/retry')result={id:'a'.repeat(64),revision:body.revision+1};
+    if(req.url==='/v1/memory/honcho')result={connection:{attached:true,verified:true}};
     if(req.url==='/v1/workflows/imports/confirm'){
       confirmations.push(body);const previous=imports.get(body.id);
       const job={...previous,state:'queued',completed:previous?.completed??0,duplicates:previous?.duplicates??0};
@@ -62,14 +64,25 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
   try {
     const setup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from tools.operations.installation.configuration import initialize,write_env,env_path; s=Path(sys.argv[1]); v=initialize(s); v['NOCHEH_PORT']=sys.argv[2]; write_env(env_path(s),v)",state,String(archivePort)],{cwd:resolve('.')});
     assert.equal(setup.status,0,setup.stderr.toString());
+    const budgetSetup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from services.honcho.meter import Ledger; p=Path(sys.argv[1])/'honcho/ledger/budget.sqlite'; p.parent.mkdir(parents=True,exist_ok=True); Ledger(p).enable_monthly()",state],{cwd:resolve('.')});
+    assert.equal(budgetSetup.status,0,budgetSetup.stderr.toString());
     await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),token);
     await start();
     assert.equal((await fetch(base+'/settings')).status,401);
+    assert.equal((await fetch(base+'/honcho/budget')).status,401);
+    assert.equal((await fetch(base+'/honcho/budget',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
     assert.equal((await fetch(base+'/settings',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);
     assert.equal((await fetch(base+'/settings',{headers:{...headers,'Sec-Fetch-Site':'cross-site'}})).status,403);
     const health=await fetch(base+'/health',{headers});assert.match(health.headers.get('set-cookie')??'',/HttpOnly; SameSite=Strict/);
     assert.equal((await fetch(base+'/settings',{headers:{Cookie:'nocheh_download='+token}})).status,401,'download cookies cannot administer settings');
     const settings=await request('/settings');assert.ok(!JSON.stringify(settings).includes('test-owner-token'));
+    const initialBudget=await request('/honcho/budget');assert.equal(initialBudget.limit_usd,5);assert.ok(!('calls' in initialBudget));
+    const budgetOperation=randomUUID();
+    const changedBudget=await request('/honcho/budget',{limit_cents:700,expected_revision:0,operation_id:budgetOperation});
+    assert.equal(changedBudget.limit_usd,7);
+    assert.equal((await request('/honcho/budget',{limit_cents:700,expected_revision:0,operation_id:budgetOperation})).revision,1);
+    const staleBudget=await fetch(base+'/honcho/budget',{method:'POST',headers,body:JSON.stringify({limit_cents:800,expected_revision:0,operation_id:randomUUID()})});
+    assert.equal(staleBudget.status,409);
     const retirement='/sources/'+'a'.repeat(64)+'/retirement';
     assert.equal((await request(retirement)).retired,false);
     assert.equal((await request(retirement,{retired:true,expected_revision:0,operation_id:'owner-test'})).retired,true);

@@ -44,9 +44,10 @@ services:
     environment:
       NOCHEH_DEV_WATCH: "1"
     entrypoint: [python3, -m, tools.development.dev_reload]
-    command: [--watch, /app/tools, --, python3, -m, tools.runtime.container_service, dashboard]
+    command: [--watch, /app/tools, --watch, /app/services/honcho, --, python3, -m, tools.runtime.container_service, dashboard]
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/app/tools:ro
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/honcho:/app/services/honcho:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/hermes/dashboard:/app/services/hermes/dashboard:ro
       - dev_dist:/app/dist:ro
       - dev_web_dist:/app/dashboard/dist:ro

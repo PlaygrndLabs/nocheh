@@ -100,6 +100,12 @@ def dispatch(body):
         from tools.operations.memory.honcho import status, read
         if operation == 'honcho.status': return status()
         if operation == 'honcho.read': return read(body['args'])
+        if operation == 'honcho.budget':
+            from tools.operations.memory.honcho_budget import view
+            return view(state)
+        if operation == 'honcho.budget.update':
+            from tools.operations.memory.honcho_budget import update
+            return update(body['request'],state)
     if operation == 'hermes.manage':
         from tools.operations.archive.archive import API
         import urllib.error
