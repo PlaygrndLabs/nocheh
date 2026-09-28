@@ -110,20 +110,31 @@ projects were not deleted.
   lacked a token report. The edit control enabled for a draft change, then
   reload restored the saved $5 cap; the live cap was not changed during preview.
   The AST-only graph refreshed with 561 files and zero model calls.
+- A fresh owner voice note on this installation passed the release voice check.
+  The 11,998 stored original audio bytes matched their saved size and SHA-256;
+  a separate `nocheh-subscription` transcript exactly matched the expected
+  sentence, and one delivered Telegram reply had a saved source link to the
+  voice event. The content-free event, artifact, transcript, reply, workflow,
+  and retry evidence is retained only in ignored local acceptance state.
+  Delivery completed on the fifth attempt. Four earlier native dispatch
+  receipts failed closed with `unexpected_profile_tool` for `tool_call`,
+  `tool_describe`, and `tool_search`; the profile configuration had tool search
+  disabled. The cause and slow-reply impact remain unresolved.
 
 </verification>
 
 <pending>
 
-- Fresh live release acceptance is required after this reset: owner text, voice,
+- Fresh live release acceptance is still required after this reset: owner text,
   intentional group silence, corrections, reaction interpretation, active recall,
-  restart/recovery, and linked replies. Prior live observations are historical.
-  Subscription transcription remains a release requirement.
+  restart/recovery, and linked replies. Prior live observations are historical;
+  the current-installation voice and subscription transcription check has passed.
 - Complete the other fresh owner-facing release checks in
-  [release acceptance](docs/release-acceptance.md); Honcho attachment and owner
-  recall now pass. Historical ingestion remains unapproved.
-- Investigate prior slow owner replies and transient runtime/tool registration
-  failures when fresh live traffic supplies evidence.
+  [release acceptance](docs/release-acceptance.md); Honcho attachment, owner
+  recall, and voice now pass. Historical ingestion remains unapproved.
+- Investigate the reproducible native tool-registration mismatch and slow owner
+  replies using the saved failed and successful attempt receipts. Do not widen
+  the profile tool allowlist without verifying the tools' reach and isolation.
 - Run populated backup/recovery acceptance when fresh data exists. The prior
   incomplete backups were deleted with the authorized application-data reset.
 - Remote Git synchronization remains blocked by private material in reachable
