@@ -154,6 +154,14 @@ def assert_networks(env):
 
 
 def assert_volumes(env):
+    adoption = STATE / '.adopted-volume-owner'
+    previous = None
+    if adoption.exists():
+        if adoption.is_symlink() or not adoption.is_file():
+            raise ValueError('Development volume adoption marker is invalid')
+        previous = adoption.read_text().strip()
+        if not previous.startswith('/') or previous == str(ROOT) or Path(previous).exists():
+            raise ValueError('Development volume adoption source is still present or invalid')
     for suffix in ('postgres_data', 'dev_dist', 'dev_web_dist', 'dev_graph_dist',
                    'honcho_database', 'honcho_redis'):
         name = PROJECT + '_' + suffix
@@ -162,7 +170,8 @@ def assert_volumes(env):
         if result.returncode:
             continue
         labels = (json.loads(result.stdout)[0].get('Labels') or {})
-        if labels.get('com.nocheh.dev.checkout') != str(ROOT):
+        owner = labels.get('com.nocheh.dev.checkout')
+        if owner != str(ROOT) and owner != previous:
             raise ValueError(f'Development volume {name} belongs to another checkout')
 
 

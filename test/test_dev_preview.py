@@ -97,6 +97,26 @@ class DevPreviewTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'belongs to another checkout'):
                 dev_preview.assert_volumes({'PATH': '/usr/bin'})
 
+    def test_adopts_only_exact_volumes_from_a_removed_checkout(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / 'current'
+            state = root / 'data/dev'
+            state.mkdir(parents=True)
+            old = str(Path(folder) / 'retired' / 'nocheh')
+            marker = state / '.adopted-volume-owner'
+            marker.write_text(old + '\n')
+            volume = [{'Labels': {'com.nocheh.dev.checkout': old}}]
+            result = type('Result', (), {'returncode': 0, 'stdout': json.dumps(volume)})()
+            with patch.object(dev_preview, 'ROOT', root), patch.object(dev_preview, 'STATE', state), patch.object(dev_preview.subprocess, 'run', return_value=result):
+                dev_preview.assert_volumes({'PATH': '/usr/bin'})
+                (Path(folder) / 'retired' / 'nocheh').mkdir(parents=True)
+                with self.assertRaisesRegex(ValueError, 'still present'):
+                    dev_preview.assert_volumes({'PATH': '/usr/bin'})
+                (Path(folder) / 'retired' / 'nocheh').rmdir()
+                marker.write_text(str(Path(folder) / 'other') + '\n')
+                with self.assertRaisesRegex(ValueError, 'belongs to another checkout'):
+                    dev_preview.assert_volumes({'PATH': '/usr/bin'})
+
     def test_refuses_second_running_nocheh_stack(self):
         foreign = {'Config': {'Labels': {'com.docker.compose.project': 'nocheh',
                                          'com.docker.compose.service': 'nocheh-app'}}}
