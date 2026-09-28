@@ -24,7 +24,7 @@ flowchart TD
     B --> C
     C --> M["CPA Manager Plus<br/>Owner-only monitoring"]
     C --> T["Read-only speech boundary<br/>Subscription transcription"]
-    B --> E["Dedicated embeddings<br/>$5 pilot then $5 per month"]
+    B --> E["Dedicated embeddings<br/>$5 pilot then owner-set monthly cap"]
     G -->|Edit invalidates old context| I["Retire old profiles, caches and memory<br/>Rebuild current authorized sources"]
     I --> H
     I --> J
@@ -65,7 +65,10 @@ does not require another login or a paid transcription key.
 - Apply configuration with `./bin/nocheh up`. `auto` migrates to `on`.
 - Dashboard → Archive → Browse → open a source to inspect/edit guarded copies,
   original file access, preparation status and revision history.
-- Dashboard → Honcho shows attachment, generations, receipts and live-gate status.
+- Dashboard → Honcho shows attachment, generations, receipts, live-gate status,
+  the embedding reservation and usage estimate, and an owner control for the
+  monthly embedding cap after attachment. OpenAI's API Usage page is the source
+  for billed usage; Nocheh's reservation is a conservative admission limit.
 - `./bin/nocheh memory honcho status` provides the same connection state.
 - `./bin/nocheh memory honcho attach --catch-up` includes consented sources
   received while detached. `--include-history` includes older consented sources.
@@ -142,10 +145,14 @@ an explicit owner operation. The optional Hermes-versus-Honcho comparison harnes
 has been retired; it was not a production acceptance gate.
 
 The total pilot cap stays at $5. After the pilot, `./bin/nocheh honcho monthly`
-enables the agreed $5 per UTC calendar month cap and preserves all pilot
-reservations. If the exhausted pilot blocks required live acceptance, the owner
-can activate the monthly cap while memory is still detached and unverified.
-That does not accept or attach memory. Repeating the command cannot reset spending.
+enables a $5 per UTC calendar month cap and preserves all pilot reservations. If
+the exhausted pilot blocks required live acceptance, the owner can activate
+the monthly cap while memory is still detached and unverified. That does not
+accept or attach memory. After accepted attachment, the owner can change the
+monthly cap in the Honcho dashboard from $0 to $15 in cent increments.
+Changing or repeating the cap command cannot reset spending. The dashboard
+shows reservation headroom and an estimate from provider-reported embedding
+tokens; neither is an invoice.
 
 During outages or rebuilding, current context, native notes and archive search
 remain available with limited-memory status. Old provider data cannot be recalled

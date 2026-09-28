@@ -26,6 +26,13 @@ owner-visible Honcho recall passed in a follow-up Telegram turn. Service startup
 not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
 [procedure](docs/release-acceptance.md).
 
+The Honcho dashboard exposes the accepted monthly embedding cap for owner edits
+and shows reservations, remaining admission headroom, request counts, reported
+tokens, and a separate usage-based cost estimate. The pilot cap stays fixed;
+the accepted monthly cap starts at $5 and permits $0–$15 in cent increments.
+Budget changes retain reservations and use revision-checked, retry-safe writes.
+[Decision](docs/adr/0078-owner-honcho-budget-control.md).
+
 The active installation's 17 containers and six mounted volumes were removed.
 Six verified obsolete preview volumes and retired local runtime/output directories
 were also removed. Current credentials, bot settings, dashboard settings, bounded
@@ -93,6 +100,16 @@ projects were not deleted.
   runtime-unavailable retry. The operating status remained limited memory false;
   the monthly ledger reserved $0.31 of $5 after this check. Private identifiers
   and the metadata report remain in ignored local acceptance state.
+- Honcho budget ledger, mutation gate, and management route focused tests passed
+  (10 native, 2 TypeScript management tests). The TypeScript/dashboard build
+  passed in the pinned local development image. The source-watched dashboard
+  preview loaded the operating monthly ledger: $5 cap, $0.31 reserved,
+  $4.69 headroom, 31 embedding and 18 reasoning requests, and 9,280 reported
+  embedding tokens. At the configured model price, the displayed usage estimate
+  was $0.0001856. This estimate is not a provider invoice; one embedding call
+  lacked a token report. The edit control enabled for a draft change, then
+  reload restored the saved $5 cap; the live cap was not changed during preview.
+  The AST-only graph refreshed with 561 files and zero model calls.
 
 </verification>
 

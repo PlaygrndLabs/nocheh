@@ -9,10 +9,12 @@ from tools.operations.provider.provider import compose, login, login_state
 
 
 def status():
+    from services.honcho.meter import Ledger
+    ledger=STATE/'ledger/budget.sqlite'
     result = {
         'running': False,
         'cli_version': '0.1.4',
-        'api_budget_usd': 5,
+        'api_budget_usd': Ledger(ledger).report()['limit_usd'] if ledger.is_file() else 5,
         'embedding_credential': bool(
             (STATE / 'temporary_embedding_key').exists()
             and (STATE / 'temporary_embedding_key').stat().st_size

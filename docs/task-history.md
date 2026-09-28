@@ -369,3 +369,19 @@ cap after the check. Private message, reply, and artifact identifiers are saved
 only in ignored local acceptance state. Other fresh release gates remain pending.
 
 </verification>
+
+<increment date="2026-09-28" name="Owner Honcho budget dashboard">
+
+The Honcho Memory dashboard now shows the accepted monthly cap, conservative
+reservations, remaining admission headroom, embedding and subscription reasoning
+request counts, reported embedding tokens, and a separate cost estimate. The
+owner can change the monthly cap between $0 and $15 in cent increments after
+attachment, with durable revision-checked, retry-safe updates. The fixed pilot
+cap and existing reservations remain protected. Focused native and management
+tests and the dashboard build passed. The source-watched preview loaded the
+operating ledger and displayed the $5 cap with $0.31 reserved; it made no live
+cap change. Development preview needed the Honcho service source mounted in the
+dashboard container to exercise the new ledger code. The AST graph refreshed
+from 561 files without model calls.
+
+</increment>

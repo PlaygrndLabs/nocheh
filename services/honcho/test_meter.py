@@ -1,8 +1,10 @@
 import concurrent.futures
 import io
 import json
+import sqlite3
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from .meter import Egress, Ledger, Rejected, validate
 
@@ -21,6 +23,58 @@ class Transport:
 
 
 class BudgetTests(unittest.TestCase):
+    def test_monthly_limit_changes_are_durable_revision_checked_and_do_not_reset_reservations(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path);ledger.enable_monthly()
+            ledger.reserve('/v1/embeddings',b'first')
+            operation=str(uuid.uuid4())
+            self.assertEqual(ledger.set_monthly_limit(2,0,operation),1)
+            self.assertEqual(ledger.set_monthly_limit(2,0,operation),1)
+            self.assertEqual(ledger.report()['reserved_usd'],.01)
+            self.assertEqual(ledger.report()['limit_usd'],.02)
+            with self.assertRaisesRegex(Rejected,'budget_version_conflict'):
+                ledger.set_monthly_limit(3,0,str(uuid.uuid4()))
+            ledger.reserve('/v1/embeddings',b'second')
+            with self.assertRaisesRegex(Rejected,'monthly_budget_exhausted'):
+                ledger.reserve('/v1/embeddings',b'third')
+            self.assertEqual(ledger.set_monthly_limit(0,1,str(uuid.uuid4())),2)
+            # The paid route stops, but subscription reasoning remains available.
+            ledger.reserve('/v1/chat/completions',b'reasoning')
+            with self.assertRaisesRegex(Rejected,'monthly_budget_exhausted'):
+                ledger.reserve('/v1/embeddings',b'paused')
+            restored=Ledger(path).report()
+            self.assertEqual((restored['limit_usd'],restored['reserved_usd'],restored['revision']),(0,.02,2))
+
+    def test_limit_validation_and_old_policy_migration(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite'
+            with sqlite3.connect(path) as db:
+                db.execute('CREATE TABLE policy(id INTEGER PRIMARY KEY CHECK(id=1),monthly_since REAL)')
+                db.execute('INSERT INTO policy VALUES(1,NULL)')
+            ledger=Ledger(path)
+            self.assertEqual(ledger.report()['limit_cents'],500)
+            with self.assertRaisesRegex(Rejected,'monthly_budget_not_enabled'):
+                ledger.set_monthly_limit(100,0,str(uuid.uuid4()))
+            ledger.enable_monthly()
+            for amount in (True,-1,1_501,1.5):
+                with self.assertRaisesRegex(Rejected,'invalid_budget_limit'):
+                    ledger.set_monthly_limit(amount,0,str(uuid.uuid4()))
+            with self.assertRaisesRegex(Rejected,'invalid_budget_operation'):
+                ledger.set_monthly_limit(100,0,'not-a-uuid')
+
+    def test_summary_distinguishes_reserved_from_reported_embedding_usage(self):
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite');ledger.enable_monthly()
+            good=ledger.reserve('/v1/embeddings',b'good');ledger.finish(good,200,0.1,{'total_tokens':9280})
+            failed=ledger.reserve('/v1/embeddings',b'failed');ledger.finish(failed,502,0.1,None)
+            reasoning=ledger.reserve('/v1/chat/completions',b'reasoning');ledger.finish(reasoning,200,0.1,{'total_tokens':40})
+            summary=ledger.summary()
+            self.assertNotIn('calls',summary)
+            self.assertEqual((summary['embedding_requests'],summary['reasoning_requests']),(2,1))
+            self.assertEqual((summary['embedding_reported_requests'],summary['embedding_unreported_requests']),(1,1))
+            self.assertEqual(summary['reserved_usd'],.02)
+            self.assertEqual(summary['estimated_embedding_cost_usd'],.0001856)
+
     def test_monthly_cutover_is_durable_and_does_not_erase_pilot(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'budget.sqlite';ledger=Ledger(path)
