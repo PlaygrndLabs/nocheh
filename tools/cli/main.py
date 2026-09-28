@@ -19,13 +19,6 @@ STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
 
 def bootstrap():
     initialize(STATE)
-    # Transfer the dedicated test login once. There must be only one refresh owner.
-    prior = ROOT / "data/compat/hermes-auth/auth.json"
-    current = STATE / "hermes/auth.json"
-    if STATE == ROOT / "data/local" and prior.is_file() and not current.exists():
-        shutil.move(prior, current)
-        current.chmod(0o600)
-        print("Transferred the dedicated Hermes login into the Compose runtime.")
 
 
 def run_isolated_tests(rest):

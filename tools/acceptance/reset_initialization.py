@@ -246,7 +246,7 @@ def _layout_base(journal, preflight, current):
     target = {**source, 'NOCHEH_STORAGE_LAYOUT': TARGET_LAYOUT}
     configuration.validate(source); configuration.validate(target)
     if (_configuration_sha(source) != preflight['installation']['configuration_sha256'] or
-            preflight['installation']['storage_layout'] not in ('legacy', TARGET_LAYOUT) or
+            preflight['installation']['storage_layout'] != TARGET_LAYOUT or
             str(configuration.env_path(journal.state)) != preflight['installation']['config_path']):
         raise ValueError('reset_initialization_configuration_changed')
     return {'format': LAYOUT_FORMAT, 'reset_id': journal.value['reset_id'],

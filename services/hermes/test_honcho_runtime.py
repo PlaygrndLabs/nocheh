@@ -23,27 +23,30 @@ class HonchoRuntimeTests(unittest.TestCase):
                 self.assertEqual(compose_environment(state)['COMPOSE_PROFILES'],'')
                 with self.assertRaisesRegex(ValueError,'inactive_restore'):operate(state,'up')
 
-    def test_legacy_writers_and_existing_data_prevent_automatic_new_database(self):
+    def test_other_project_writers_block_and_clean_setup_uses_managed_volumes(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state);memory=state/'honcho';memory.mkdir()
             (memory/'internal_token').write_text('synthetic-memory-token')
             values['NOCHEH_MEMORY_TOKEN']='synthetic-memory-token';write_env(env_path(state),values)
             with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value='running-id\n'):
-                with self.assertRaisesRegex(ValueError,'quiesced_migration'):enable(state,memory)
-            with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value=''),patch('tools.operations.memory.honcho_runtime.subprocess.run',return_value=subprocess.CompletedProcess([],0)) as run:
-                with self.assertRaisesRegex(ValueError,'verified_adoption'):enable(state,memory)
-                self.assertEqual(run.call_count,1)
-            self.assertEqual(load(state)['NOCHEH_HONCHO_ENABLED'],'false')
+                with self.assertRaisesRegex(ValueError,'other_project_running'):enable(state,memory)
+            with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value=''),patch('tools.operations.memory.honcho_runtime.subprocess.run') as run:
+                enable(state,memory)
+                run.assert_not_called()
+            saved=load(state)
+            self.assertEqual(saved['NOCHEH_HONCHO_ENABLED'],'true')
+            self.assertEqual(saved['NOCHEH_HONCHO_DATABASE_VOLUME'],'nocheh_honcho_database')
+            self.assertEqual(saved['NOCHEH_HONCHO_REDIS_VOLUME'],'nocheh_honcho_redis')
 
     @unittest.skipUnless(shutil.which('docker'),'Compose CLI unavailable')
-    def test_resolved_compose_keeps_memory_private_and_uses_preserved_external_volumes(self):
+    def test_resolved_compose_keeps_memory_private_and_uses_managed_volumes(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state)
             values.update(NOCHEH_HONCHO_ENABLED='true',NOCHEH_HONCHO_DATABASE_VOLUME='synthetic-preserved-db',NOCHEH_HONCHO_REDIS_VOLUME='synthetic-preserved-cache')
             write_env(env_path(state),values)
             raw=subprocess.check_output(['docker','compose','--env-file',str(env_path(state)),'-f',str(ROOT/'docker-compose.yml'),'--profile','honcho','--profile','honcho-tools','config','--format','json'],env=compose_environment(state),text=True,stderr=subprocess.PIPE,timeout=30)
             config=json.loads(raw);services=config['services']
-            self.assertTrue(config['volumes']['honcho_database']['external'])
+            self.assertFalse(config['volumes']['honcho_database'].get('external',False))
             self.assertEqual(config['volumes']['honcho_database']['name'],'synthetic-preserved-db')
             self.assertTrue(config['networks']['honcho-isolated']['internal'])
             self.assertNotIn('honcho-isolated',services['hermes']['networks'])
@@ -56,7 +59,7 @@ class HonchoRuntimeTests(unittest.TestCase):
             self.assertTrue(any(mount['source'].endswith('/services/honcho/meter.py')
                                 for mount in services['honcho-provider-gateway']['volumes']))
             self.assertTrue(services['honcho-cli']['build']['context'].endswith('/services/honcho/cli'))
-            self.assertTrue(config['volumes']['honcho_redis']['external'])
+            self.assertFalse(config['volumes']['honcho_redis'].get('external',False))
             self.assertEqual(services['honcho-redis']['volumes'][0]['source'],'honcho_redis')
             for name in ('honcho-postgres','honcho-redis','honcho-api','honcho-deriver','honcho-provider-gateway'):
                 self.assertEqual(services[name]['restart'],'unless-stopped')

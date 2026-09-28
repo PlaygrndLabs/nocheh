@@ -48,7 +48,6 @@ def main():
     installation = directory / 'installation'
     (installation / 'deploy').mkdir()
     shutil.copyfile(root / 'deploy/upstreams.lock.json', installation / 'deploy/upstreams.lock.json')
-    (installation / 'deploy/original-only-compose.yml').write_text('services: {}\n')
     project = 'nocheh-installation-' + uuid.uuid4().hex[:12]
     config = initialize(state)
     token = secrets.token_hex(32)

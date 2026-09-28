@@ -8,7 +8,7 @@ import pg from 'pg';
 import { reader, scopeToken, admin } from '../src/access.js';
 import { digest, ingest, type Envelope } from '../src/archive.js';
 import { initialize } from '../src/database.js';
-import { settings } from '../src/config.js';
+import { settings } from './fixture-settings.js';
 import { exportPage, importRecord, readArtifact, readEvent, replay, search, uploadArtifact } from '../src/retrieval.js';
 
 test('scope capabilities are signed, expiring and cannot grant administrative writes',()=>{

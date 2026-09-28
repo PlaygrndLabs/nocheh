@@ -1,25 +1,9 @@
-# Isolated automated-test override; use with a synthetic Compose project.
+# Synthetic integration tests use generated credentials and a temporary project.
 services:
   nocheh-app:
     image: nocheh-services:dev
     build: {target: development}
-    command: [npm, run, dev]
-    develop:
-      watch:
-        - {action: sync+restart, path: ./src, target: /app/src}
-        - {action: sync+restart, path: ./test, target: /app/test}
-        - {action: rebuild, path: ./package-lock.json}
-        - {action: rebuild, path: ./tsconfig.json}
-        - {action: rebuild, path: ./tools/build/build.mjs}
-  nocheh-security:
-    image: nocheh-services:dev
-    build: {target: development}
-    command: [sh, -c, "npm run build && node dist/src/security/main.js"]
-    develop:
-      watch:
-        - {action: sync+restart, path: ./src, target: /app/src}
-  hermes:
-    develop:
-      watch:
-        - {action: sync+restart, path: ./services, target: /workspace/services}
-        - {action: rebuild, path: ./deploy/hermes.Dockerfile}
+    environment:
+      PGUSER: nocheh
+      PGDATABASE: nocheh
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Synthetic test credential required}

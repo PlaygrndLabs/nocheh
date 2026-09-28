@@ -86,11 +86,10 @@ class LiveDevTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Another Nocheh stack'):
                 live_dev.assert_only_development_running([], {'PATH': '/usr/bin'})
 
-    def test_missing_or_foreign_operating_database_volume_is_rejected(self):
+    def test_clean_volumes_are_created_but_foreign_ownership_is_rejected(self):
         env = self.values()
-        with patch.object(live_dev.subprocess, 'run', return_value=type('Result', (), {'returncode': 1})()):
-            with self.assertRaisesRegex(ValueError, 'Missing operating volume'):
-                live_dev.assert_operating_volumes(env)
+        with patch.object(live_dev.subprocess, 'run', return_value=type('Result', (), {'returncode': 1, 'stderr': 'No such volume'})()):
+            live_dev.assert_operating_volumes(env)
         foreign = [{'Labels': {'com.docker.compose.project': 'other',
                                'com.docker.compose.volume': 'postgres_data'}}]
         result = type('Result', (), {'returncode': 0, 'stdout': json.dumps(foreign)})()
@@ -98,14 +97,20 @@ class LiveDevTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'unexpected ownership'):
                 live_dev.assert_operating_volumes(env)
 
+    def test_volume_inspection_error_does_not_authorize_creation(self):
+        result = type('Result', (), {'returncode': 1, 'stderr': 'Cannot connect to Docker'})()
+        with patch.object(live_dev.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(ValueError, 'Unable to inspect'):
+                live_dev.assert_operating_volumes(self.values())
+
     def test_compose_mount_check_rejects_wrong_volume(self):
         env = self.values()
         env['NOCHEH_STATE_DIR'] = '/synthetic/state'
         env['NOCHEH_INSTALLATION_ROOT'] = '/synthetic/root'
         rendered = {'name': 'nocheh',
-                    'volumes': {'postgres_data': {'name': 'wrong', 'external': True},
-                                'honcho_database': {'name': 'synthetic-honcho-db', 'external': True},
-                                'honcho_redis': {'name': 'synthetic-honcho-redis', 'external': True}},
+                    'volumes': {'postgres_data': {'name': 'wrong', 'external': False},
+                                'honcho_database': {'name': 'synthetic-honcho-db', 'external': False},
+                                'honcho_redis': {'name': 'synthetic-honcho-redis', 'external': False}},
                     'services': {'nocheh-db': {'volumes': []}}}
         with patch.object(live_dev.subprocess, 'check_output', return_value=json.dumps(rendered)):
             with self.assertRaisesRegex(ValueError, 'operating volumes'):
@@ -118,9 +123,9 @@ class LiveDevTests(unittest.TestCase):
         def mounts(items):
             return [{'source': source, 'target': target} for target, source in items.items()]
         rendered = {'name': 'nocheh',
-                    'volumes': {'postgres_data': {'name': 'nocheh_postgres_data', 'external': True},
-                                'honcho_database': {'name': 'synthetic-honcho-db', 'external': True},
-                                'honcho_redis': {'name': 'synthetic-honcho-redis', 'external': True}},
+                    'volumes': {'postgres_data': {'name': 'nocheh_postgres_data', 'external': False},
+                                'honcho_database': {'name': 'synthetic-honcho-db', 'external': False},
+                                'honcho_redis': {'name': 'synthetic-honcho-redis', 'external': False}},
                     'services': {
                         'nocheh-db': {'volumes': mounts({'/var/lib/postgresql/data': 'postgres_data'})},
                         'honcho-postgres': {'volumes': mounts({'/var/lib/postgresql/data': 'honcho_database'})},
@@ -149,8 +154,8 @@ class LiveDevTests(unittest.TestCase):
         root = Path('/synthetic/operating')
         command = live_dev.command(root)
         self.assertEqual(command[-4:], ['-f', str(live_dev.ROOT / 'docker-compose.dev.yml'), '-p', 'nocheh'])
-        self.assertIn(str(root / 'docker-compose.yml'), command)
-        self.assertIn(str(root / 'deploy/original-only-compose.yml'), command)
+        self.assertIn(str(live_dev.ROOT / 'docker-compose.yml'), command)
+        self.assertIn(str(root), command)
 
     def test_rejects_occupied_development_port(self):
         with patch.object(live_dev, 'port_available', side_effect=lambda port: port != 8783):
@@ -165,7 +170,7 @@ class LiveDevTests(unittest.TestCase):
 
     def test_existing_images_start_without_rebuild(self):
         present = type('Result', (), {'returncode': 0})()
-        missing = type('Result', (), {'returncode': 1})()
+        missing = type('Result', (), {'returncode': 1, 'stderr': 'No such volume'})()
         with patch.object(live_dev.subprocess, 'run', return_value=present):
             self.assertFalse(live_dev.build_needed({'PATH': '/usr/bin'}))
         with patch.object(live_dev.subprocess, 'run', side_effect=[present, missing]):

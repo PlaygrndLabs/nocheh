@@ -16,7 +16,7 @@ DEFAULTS = {
     'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}', 'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
-    'NOCHEH_STORAGE_LAYOUT': 'legacy',
+    'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
     'NOCHEH_WORKFLOW_UI_PORT': '8288',
     'NOCHEH_HONCHO_ENABLED': 'false',
@@ -32,9 +32,8 @@ def env_path(state):
 
 def compose_command(state, project=None):
     command=['docker','compose','--env-file',str(env_path(state)),'-f',str(INSTALLATION_ROOT/'docker-compose.yml')]
-    layout=read_env(env_path(state)).get('NOCHEH_STORAGE_LAYOUT','legacy')
-    if layout not in ('legacy','original-only-v1'):raise ValueError('Invalid NOCHEH_STORAGE_LAYOUT')
-    if layout=='original-only-v1':command+=['-f',str(INSTALLATION_ROOT/'deploy/original-only-compose.yml')]
+    layout=read_env(env_path(state)).get('NOCHEH_STORAGE_LAYOUT','original-only-v1')
+    if layout != 'original-only-v1':raise ValueError('Invalid NOCHEH_STORAGE_LAYOUT')
     if project:command+=['-p',project]
     return command
 
@@ -127,8 +126,8 @@ def group_access(values):
 
 def validate(values):
     embeddings(values)
-    layout=values.get('NOCHEH_STORAGE_LAYOUT','legacy')
-    if layout not in ('legacy','original-only-v1'):raise ValueError('Invalid NOCHEH_STORAGE_LAYOUT')
+    layout=values.get('NOCHEH_STORAGE_LAYOUT','original-only-v1')
+    if layout != 'original-only-v1':raise ValueError('Invalid NOCHEH_STORAGE_LAYOUT')
     storage=[values.get('NOCHEH_'+name+'_PASSWORD','') for name in ('ARCHIVE','DERIVED','CONTROL')]
     if any(value and not re.fullmatch('[a-f0-9]{64}',value) for value in storage):raise ValueError('Invalid storage credential')
     if layout=='original-only-v1' and (not all(storage) or len(set(storage+[values.get('POSTGRES_PASSWORD'),values.get('INNGEST_POSTGRES_PASSWORD')]))!=5):raise ValueError('Separate storage credentials required')
@@ -162,33 +161,15 @@ def initialize(state):
     for name in ('files', 'spool', 'hermes', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
     path = env_path(state); existing = read_env(path)
     values = dict(DEFAULTS)
-    # Preserve the already-tested rebuild's generated credentials during this
-    # setup simplification. Unrelated legacy provider keys are never reused.
-    active = existing.get('NOCHEH_CONFIG_VERSION') == '1'
-    previous = {} if active else read_env(state / 'compose.env')
-    values.update({k:v for k,v in previous.items() if k in DEFAULTS or k in ('NOCHEH_UID','NOCHEH_GID')})
-    policy = state / 'assistant.json'
-    if not active and policy.exists():
-        data = json.loads(policy.read_text())
-        values.update(TELEGRAM_ENABLED=str(data['enabled']).lower(), TELEGRAM_OWNER_ID=data.get('owner_id') or '', TELEGRAM_GROUP_IDS=','.join(data['group_ids']))
-    for name, old in [('POSTGRES_PASSWORD','database_password'),('SERVICE_TOKEN','service_token'),('TELEGRAM_BOT_TOKEN','telegram_bot_token')]:
-        file = state / 'secrets' / old
-        if not active and file.exists(): values[name] = file.read_text().strip()
-    if active: values.update(existing)
+    values.update(existing)
     values.pop('NOCHEH_WORKFLOWS_ENABLED',None)
-    if active and 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
+    if 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))
     for name in ('POSTGRES_PASSWORD','SERVICE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD'):
         if not values[name]: values[name] = secrets.token_hex(32)
     validate(values)
     (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
-    if not active and existing:
-        preserved = state / 'previous-configuration'; preserved.mkdir(exist_ok=True, mode=0o700)
-        saved = preserved / 'legacy.env'
-        if saved.exists(): raise ValueError('Legacy environment backup already exists; refusing to overwrite it')
-        path.rename(saved); saved.chmod(0o600)
-        print('Preserved the old environment in the private state directory; unrelated provider keys were not imported.')
     if values != existing: write_env(path, values)
     path.chmod(0o600)
     from tools.operations.provider.provider import initialize as initialize_provider

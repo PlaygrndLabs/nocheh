@@ -4,7 +4,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {startLoops} from '../src/worker-loops.js';
 import {startCapture} from '../src/worker.js';
 import {startWorkflowService} from '../src/workflows/service.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import type pg from 'pg';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';

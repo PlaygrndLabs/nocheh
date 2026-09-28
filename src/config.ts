@@ -21,7 +21,7 @@ export function settings() {
   if (!Array.isArray(trusted) || trusted.some(v=>typeof v!=='string' || !['http:','https:'].includes(new URL(v).protocol))) throw new Error('Invalid trusted endpoints');
   return {
     service: service as Service, host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 8780),
-    token: secret('SERVICE_TOKEN'), databasePassword: layout==='legacy'?secret('PGPASSWORD'):'',storageLayout:layout,
+    token: secret('SERVICE_TOKEN'), databasePassword: '',storageLayout:layout,
     dataDir: process.env.NOCHEH_DATA_DIR ?? '/data',
     hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
     honchoUrl:process.env.HONCHO_URL??'http://honcho-api:8000',

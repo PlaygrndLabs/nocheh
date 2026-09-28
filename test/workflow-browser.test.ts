@@ -4,7 +4,7 @@ import pg from 'pg';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {captureInput,claimRun,finishRun} from '../src/managed-runs.js';
 import {admitBrowser,activeBrowser,browserObservation,browserWorkflowContext,browserAuthority,browserOperation,cancelBrowser} from '../src/workflows/browser.js';

@@ -6,6 +6,7 @@ services:
   nocheh-db:
     image: ${NOCHEH_DEV_PROJECT:?}:db
     build:
+      context: ${NOCHEH_DEV_SOURCE_ROOT:?}
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
@@ -15,9 +16,12 @@ services:
     image: ${NOCHEH_DEV_PROJECT:?}:app
     labels: {com.nocheh.runtime-mode: source-watched}
     build:
+      context: ${NOCHEH_DEV_SOURCE_ROOT:?}
       target: development
     restart: "no"
     command: [node, tools/development/dev-app-watch.mjs]
+    healthcheck:
+      start_period: 180s
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/src:/app/src:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/dashboard:/app/dashboard:ro
@@ -32,6 +36,7 @@ services:
   nocheh-dashboard:
     image: ${NOCHEH_DEV_PROJECT:?}:dashboard
     build:
+      context: ${NOCHEH_DEV_SOURCE_ROOT:?}
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
@@ -52,6 +57,7 @@ services:
   nocheh-executor:
     image: ${NOCHEH_DEV_PROJECT:?}:executor
     build:
+      context: ${NOCHEH_DEV_SOURCE_ROOT:?}
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
@@ -65,6 +71,8 @@ services:
       nocheh-app: {condition: service_healthy}
 
   nocheh-security:
+    build:
+      context: ${NOCHEH_DEV_SOURCE_ROOT:?}
     image: ${NOCHEH_DEV_PROJECT:?}:security
     restart: "no"
     command: [node, --watch, dist/src/security/main.js]
@@ -158,12 +166,3 @@ volumes:
     labels: {com.nocheh.dev.checkout: "${NOCHEH_DEV_SOURCE_ROOT:?}"}
   dev_graph_dist:
     labels: {com.nocheh.dev.checkout: "${NOCHEH_DEV_SOURCE_ROOT:?}"}
-  postgres_data: !override
-    external: true
-    name: nocheh_postgres_data
-  honcho_database: !override
-    external: true
-    name: ${NOCHEH_HONCHO_DATABASE_VOLUME:?}
-  honcho_redis: !override
-    external: true
-    name: ${NOCHEH_HONCHO_REDIS_VOLUME:?}

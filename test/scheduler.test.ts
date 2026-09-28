@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {captureInput,claimRun,finishRun,cancelScheduled,renewRun,recoverScheduled,scheduledRuns,scheduledDelivery,scheduleDefinition} from '../src/managed-runs.js';
 

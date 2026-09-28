@@ -3,8 +3,8 @@ import type pg from 'pg';
 import type {StorePasswords} from './connections.js';
 
 export function storageLayout(env:NodeJS.ProcessEnv=process.env):'legacy'|'original-only-v1' {
-  const value=env.NOCHEH_STORAGE_LAYOUT??'legacy';
-  if(value!=='legacy'&&value!=='original-only-v1')throw Error('invalid_storage_layout');
+  const value=env.NOCHEH_STORAGE_LAYOUT??'original-only-v1';
+  if(value!=='original-only-v1')throw Error('invalid_storage_layout');
   return value;
 }
 export function storageConfiguration(env:NodeJS.ProcessEnv=process.env):{connection:pg.PoolConfig;passwords:StorePasswords} {

@@ -50,7 +50,8 @@ missing live gates remain pending even after this rehearsal passes.
 The saved `NOCHEH_STORAGE_LAYOUT` selects the installation layout; existing
 configurations default to `legacy` until the controlled cutover. Ordinary settings
 Apply cannot change this internal setting. `original-only-v1` selects
-`deploy/original-only-compose.yml` through the shared Compose command builder.
+the root `docker-compose.yml` through the shared Compose command builder.
+The separate storage overlay was folded into the base setup by [ADR-0075](adr/0075-clean-development-setup.md).
 Shell overrides cannot silently select another layout.
 
 The `nocheh-db` service already owns the administrator login and provisions
