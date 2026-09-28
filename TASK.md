@@ -119,7 +119,12 @@ projects were not deleted.
   Delivery completed on the fifth attempt. Four earlier native dispatch
   receipts failed closed with `unexpected_profile_tool` for `tool_call`,
   `tool_describe`, and `tool_search`; the profile configuration had tool search
-  disabled. The cause and slow-reply impact remain unresolved.
+  disabled. A process-level policy now pins tool search off before native agent
+  construction, so a native config-loader fallback cannot expose its bridge.
+  Focused scope tests and a credential-free isolated-image check passed with a
+  synthetic profile that enabled tool search. The exact cause of the earlier
+  intermittent config reads is unproven. The operating isolated-turn image has
+  not been replaced, so the live retry and latency outcome remains unverified.
 
 </verification>
 
@@ -132,9 +137,11 @@ projects were not deleted.
 - Complete the other fresh owner-facing release checks in
   [release acceptance](docs/release-acceptance.md); Honcho attachment, owner
   recall, and voice now pass. Historical ingestion remains unapproved.
-- Investigate the reproducible native tool-registration mismatch and slow owner
-  replies using the saved failed and successful attempt receipts. Do not widen
-  the profile tool allowlist without verifying the tools' reach and isolation.
+- Activate the verified tool-search policy in the operating isolated-turn image
+  through a controlled image refresh, then confirm on the next naturally sent
+  owner turn that tool registration passes on its first attempt. Keep the saved
+  attempt receipts for latency comparison; do not widen the profile tool
+  allowlist.
 - Run populated backup/recovery acceptance when fresh data exists. The prior
   incomplete backups were deleted with the authorized application-data reset.
 - Remote Git synchronization remains blocked by private material in reachable

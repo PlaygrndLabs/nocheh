@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from .scopes import Scopes,verify_capability
 from .assistant_gateway import AssistantGateway,prepare_profile
-from .assistant_turn import restrict_session_search,ALLOWED_TOOLS,UnexpectedProfileTool,verify_profile_tools
+from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,UnexpectedProfileTool,verify_profile_tools
 from .capture import canonical,immutable_file
 
 
@@ -114,6 +114,32 @@ class ScopeTests(unittest.TestCase):
                 definitions=get_tool_definitions(enabled_toolsets=['memory','session_search','nocheh_archive'],quiet_mode=True)
                 names={item['function']['name'] for item in definitions}
                 self.assertEqual(names,ALLOWED_TOOLS)
+            finally:reset_hermes_home_override(token)
+
+    def test_turn_policy_disables_native_tool_search_even_when_loader_enables_it(self):
+        from hermes_constants import set_hermes_home_override,reset_hermes_home_override
+        from hermes_cli.plugins import discover_plugins
+        from model_tools import get_tool_definitions
+        from tools import tool_search
+        from .profile_config import atomic_yaml,read
+        with tempfile.TemporaryDirectory() as folder:
+            profile=prepare_profile(Path(folder),self.scopes.resolve(self.update(-20,123),'-20'),'synthetic')
+            config=read(profile/'config.yaml')
+            config['tools']['tool_search']={'enabled':'on'}
+            atomic_yaml(profile/'config.yaml',config)
+            token=set_hermes_home_override(str(profile))
+            try:
+                discover_plugins()
+                self.assertEqual(tool_search.load_config().enabled,'on')
+                restore=install_tool_search_policy()
+                try:
+                    self.assertEqual(tool_search.load_config().enabled,'off')
+                    self.assertEqual(tool_search.load_config_readonly().enabled,'off')
+                    definitions=get_tool_definitions(enabled_toolsets=['memory','session_search','nocheh_archive'],quiet_mode=False)
+                    names={item['function']['name'] for item in definitions}
+                    self.assertEqual(names,ALLOWED_TOOLS)
+                finally:restore()
+                self.assertEqual(tool_search.load_config().enabled,'on')
             finally:reset_hermes_home_override(token)
 
     def test_unexpected_profile_tool_names_are_bounded_and_fail_closed(self):
