@@ -246,3 +246,7 @@ revision is the complete ledger before this summary replaced it.
 ## Archived dev checkout recovery, 2026-09-28
 
 - The prior dev checkout was archived while its containers still used source mounts there, leaving several unhealthy. The 17 orphaned containers and their networks were stopped without deleting six dev volumes. A credential-free dev state was copied into the current session worktree, its internal database roles were aligned and verified over container network connections, and an exact absent-checkout marker admitted the preserved volumes. Compose recreation prompts were answered No. The source-mounted dev stack then reached 17 healthy services, retained 165 archive events, served the dashboard with HTTP 200, and compiled the memory refresh change. Telegram and external provider login remain disabled; this is development evidence, not a live reaction or memory pass. [Dev procedure](deploy.md).
+
+## Live-data development clarification, 2026-09-28
+
+- The owner clarified that dev should use the existing Telegram bot and live Nocheh data while source changes apply in running containers. The existing launcher remains isolated. Automatic approval review rejected a direct Compose override attaching dev services to the operating PostgreSQL and Honcho volumes because unreviewed development code could mutate live data. The partial source edit was removed, and no live volume, bot login, or operating service was attached or started.
