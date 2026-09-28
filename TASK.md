@@ -20,8 +20,9 @@ normal stops retain them. [Decision](docs/adr/0075-clean-development-setup.md),
 Fresh local setup now enables and prepares the Honcho service by default; an
 explicit saved disable remains effective. The operating installation has passed
 the six-check synthetic Honcho acceptance and is verified and attached with
-Honcho as primary memory. Historical ingestion is off. There is no ready owner
-generation yet, so owner-visible recall remains pending. Service startup does
+Honcho as primary memory. Historical ingestion is off. A fresh owner source has
+now produced a ready generation, so memory availability is no longer limited;
+owner-visible recall from a follow-up turn remains pending. Service startup does
 not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
 [procedure](docs/release-acceptance.md).
 
@@ -80,7 +81,12 @@ projects were not deleted.
   $0.07 of $5 at verification; reservations are conservative rather than an API
   invoice. The local acceptance record is in ignored state. Verification was
   accepted and Honcho attached without historical ingestion. The operating admin
-  status reports verified, attached, and primary Honcho, with no ready generation.
+  status reported verified, attached, and primary Honcho before owner capture.
+- An ordinary owner Telegram message was captured after attachment. Its guarded
+  source was ingested with a completed Honcho receipt, and the owner generation
+  reached ready. Subsequent synchronization retained that ready snapshot;
+  operating status now reports limited memory false. Event and receipt IDs are
+  retained only in ignored local acceptance state.
 
 </verification>
 
@@ -90,10 +96,11 @@ projects were not deleted.
   intentional group silence, corrections, reaction interpretation, active recall,
   restart/recovery, and linked replies. Prior live observations are historical.
   Subscription transcription remains a release requirement.
-- Trace a fresh owner Telegram message through projection and test owner-visible
-  Honcho recall. A ready generation and current ingestion receipt are still
-  required; the synthetic acceptance workspace does not satisfy this gate.
-  Historical ingestion remains unapproved.
+- Test owner-visible Honcho recall in an ordinary follow-up Telegram turn and
+  correlate its captured event, retrieval, and delivered answer. The initial
+  ready generation and current ingestion receipt are verified, but the synthetic
+  acceptance workspace alone does not satisfy owner-facing recall. Historical
+  ingestion remains unapproved.
 - Investigate prior slow owner replies and transient runtime/tool registration
   failures when fresh live traffic supplies evidence.
 - Run populated backup/recovery acceptance when fresh data exists. The prior

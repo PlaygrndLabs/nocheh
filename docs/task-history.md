@@ -346,3 +346,14 @@ owner memory generation was ready at attachment, so fresh owner-visible recall
 and the broader release acceptance remained pending.
 
 </verification>
+
+<verification date="2026-09-28" name="First owner Honcho generation">
+
+After attachment, an ordinary owner Telegram message was captured and
+processed as a current guarded source. Its Honcho ingestion receipt completed,
+and the owner generation reached ready. Later synchronization retained the
+ready snapshot, so the operating memory status reported limited memory false.
+The event, source, and receipt identifiers remain in ignored local acceptance
+state. Owner-visible recall in a follow-up reply remained pending.
+
+</verification>
