@@ -328,6 +328,21 @@ explicit-command path now permits an exhausted pilot to enter that monthly
 window while detached and unverified; it does not attach memory. Focused tests
 covered the blocked premature cutover, exhausted detached case, partial
 attachment rejection, and idempotence. Operating budget activation and paid
-live acceptance remain pending.
+live acceptance were pending at this increment.
 
 </increment>
+
+<verification date="2026-09-28" name="Capped synthetic Honcho live acceptance">
+
+The owner-selected $5 UTC-monthly cap was activated on the operating ledger.
+A fresh, closed synthetic workspace passed the six required Honcho checks:
+subscription reasoning, guarded embedding, ingestion, retrieval, restart
+persistence, and provider-failure recovery. The provider gateway returned a
+bounded failure while egress was disconnected, then recovered after its network
+was restored. The monthly ledger reserved $0.07 of $5 at verification. The
+accepted report and workspace identifiers remain in ignored local state. Honcho
+was verified and attached as primary memory without historical ingestion. No
+owner memory generation was ready at attachment, so fresh owner-visible recall
+and the broader release acceptance remained pending.
+
+</verification>

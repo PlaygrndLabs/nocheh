@@ -18,9 +18,11 @@ normal stops retain them. [Decision](docs/adr/0075-clean-development-setup.md),
 [commands](docs/deploy.md), [layout](docs/repository-layout.md).
 
 Fresh local setup now enables and prepares the Honcho service by default; an
-explicit saved disable remains effective. The current installation already has
-the Honcho service running, but its memory connection is detached and unverified.
-Service startup does not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
+explicit saved disable remains effective. The operating installation has passed
+the six-check synthetic Honcho acceptance and is verified and attached with
+Honcho as primary memory. Historical ingestion is off. There is no ready owner
+generation yet, so owner-visible recall remains pending. Service startup does
+not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
 [procedure](docs/release-acceptance.md).
 
 The active installation's 17 containers and six mounted volumes were removed.
@@ -70,8 +72,15 @@ projects were not deleted.
   clarification that API embeddings are billed separately from ChatGPT. A narrow
   exhausted-pilot preattachment cutover passed focused allowance, rejection, and
   idempotence checks (20 focused tests total). The AST-only graph refreshed with
-  559 files and zero model calls. The monthly cap has not yet been activated on
-  the operating ledger.
+  559 files and zero model calls. The operating ledger entered monthly mode.
+- A new, closed synthetic acceptance workspace passed subscription reasoning,
+  guarded embedding, ingestion, retrieval, restart persistence, and provider
+  failure/recovery. The gateway returned the expected failure while isolated and
+  recovered after its egress network was restored. The monthly ledger reserved
+  $0.07 of $5 at verification; reservations are conservative rather than an API
+  invoice. The local acceptance record is in ignored state. Verification was
+  accepted and Honcho attached without historical ingestion. The operating admin
+  status reports verified, attached, and primary Honcho, with no ready generation.
 
 </verification>
 
@@ -81,10 +90,10 @@ projects were not deleted.
   intentional group silence, corrections, reaction interpretation, active recall,
   restart/recovery, and linked replies. Prior live observations are historical.
   Subscription transcription remains a release requirement.
-- Honcho activation and current recall must be verified against the fresh stores.
-  Preserved pilot reservations reached the accepted cap. Activate the owner-selected
-  $5 monthly cap, complete the remaining live checks, and attach only after their
-  acceptance. Historical ingestion remains unapproved.
+- Trace a fresh owner Telegram message through projection and test owner-visible
+  Honcho recall. A ready generation and current ingestion receipt are still
+  required; the synthetic acceptance workspace does not satisfy this gate.
+  Historical ingestion remains unapproved.
 - Investigate prior slow owner replies and transient runtime/tool registration
   failures when fresh live traffic supplies evidence.
 - Run populated backup/recovery acceptance when fresh data exists. The prior
