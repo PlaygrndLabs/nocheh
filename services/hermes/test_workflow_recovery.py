@@ -26,7 +26,7 @@ class WorkflowRecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'unsupported_setting'):
                 save(root,{'NOCHEH_WORKFLOWS_ENABLED':'true'},view(root)['revision'])
             with patch.dict('os.environ',{'COMPOSE_PROFILES':'tools,workflows'}):
-                self.assertEqual(compose_environment(root)['COMPOSE_PROFILES'],'tools')
+                self.assertEqual(compose_environment(root)['COMPOSE_PROFILES'],'tools,honcho')
             values['NOCHEH_WORKFLOWS_ENABLED']='false';write_env(env_path(root),values)
             self.assertNotIn('NOCHEH_WORKFLOWS_ENABLED',initialize(root))
             self.assertTrue((root/'workflows/redis').is_dir())

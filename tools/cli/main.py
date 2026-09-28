@@ -222,6 +222,9 @@ def main():
         ensure_source();ensure_monitor_source()
         from tools.acceptance.subscription.setup import checkout,LOCK
         checkout('hermes-agent',LOCK['hermes'])
+        if args.command in ('up','build') and env.get('NOCHEH_HONCHO_ENABLED')=='true':
+            from tools.operations.memory.honcho_setup import sources as honcho_sources
+            honcho_sources()
     command = compose_command(STATE)
     if args.command == 'db':
         from tools.operations.installation.database_viewer import start

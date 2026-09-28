@@ -19,7 +19,7 @@ DEFAULTS = {
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
     'NOCHEH_WORKFLOW_UI_PORT': '8288',
-    'NOCHEH_HONCHO_ENABLED': 'false',
+    'NOCHEH_HONCHO_ENABLED': 'true',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
 }
@@ -174,6 +174,11 @@ def initialize(state):
     path.chmod(0o600)
     from tools.operations.provider.provider import initialize as initialize_provider
     initialize_provider(state)
+    if values['NOCHEH_HONCHO_ENABLED']=='true':
+        from tools.operations.memory.honcho_setup import initialize as initialize_honcho, runtime_init
+        initialize_honcho(state)
+        runtime_init(state)
+        values=load(state)
     return values
 
 

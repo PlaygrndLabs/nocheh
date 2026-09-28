@@ -1,6 +1,7 @@
 # ADR catalog
 
 Current setup: [0075 — Clean development setup](0075-clean-development-setup.md).
+Honcho service default: [0076](0076-honcho-enabled-local-default.md).
 
 This is the complete chronological index. Start with the
 [current decision map and historical summary](README.md) unless you need to audit
@@ -85,3 +86,5 @@ records current implementation and activation.
 | [0072](0072-validated-honcho-context-renewal.md) | Revalidate unchanged Honcho context without repeated representation calls | Supersedes 0044's unconditional representation refresh; retains five-minute freshness |
 | [0073](0073-live-data-source-watched-development.md) | Source-watched development reuses the operating Compose project, bot, data, and provider login | Supersedes 0066's separate project, state, and credential boundary |
 | [0074](0074-root-development-compose-layout.md) | Root development override and acceptance test overlay in their role-based locations | Refines 0073 on file placement; retires the isolated preview entrypoint |
+| [0075](0075-clean-development-setup.md) | Clean development reset with Compose-owned stores and one source-watched stack | Refines 0073 and 0074; release acceptance remains separate |
+| [0076](0076-honcho-enabled-local-default.md) | Enable and prepare Honcho for fresh local installations | Extends 0033 and 0045; live acceptance still gates attachment |

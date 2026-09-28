@@ -297,3 +297,15 @@ restarted Node without recreating the app container. Saved control settings
 matched exactly under a new installation generation. Release gates remain pending.
 
 </verification>
+
+<increment date="2026-09-28" name="Honcho enabled for fresh local setup">
+
+Fresh configuration now prepares and enables the Honcho service by default while
+preserving an explicit disable and the separate production attachment gate.
+Focused native checks and a synthetic Compose render passed; the AST graph was
+refreshed without model calls. The operating installation already runs Honcho
+services but remains detached and unverified after the reset. Paid embedding
+acceptance awaits clarification of the owner's spending instruction, since the
+ChatGPT subscription does not cover the dedicated API embedding key.
+
+</increment>

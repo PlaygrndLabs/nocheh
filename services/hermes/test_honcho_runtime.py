@@ -15,6 +15,7 @@ class HonchoRuntimeTests(unittest.TestCase):
     def test_profiles_cannot_activate_from_ambient_shell_or_inactive_restore(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state)
+            values['NOCHEH_HONCHO_ENABLED']='false';write_env(env_path(state),values)
             with patch.dict(os.environ,{'COMPOSE_PROFILES':'honcho,honcho-tools,workflows'}):
                 self.assertEqual(compose_environment(state)['COMPOSE_PROFILES'],'')
                 values['NOCHEH_HONCHO_ENABLED']='true';write_env(env_path(state),values)
@@ -25,7 +26,7 @@ class HonchoRuntimeTests(unittest.TestCase):
 
     def test_other_project_writers_block_and_clean_setup_uses_managed_volumes(self):
         with tempfile.TemporaryDirectory() as folder:
-            state=Path(folder);values=initialize(state);memory=state/'honcho';memory.mkdir()
+            state=Path(folder);values=initialize(state);memory=state/'honcho'
             (memory/'internal_token').write_text('synthetic-memory-token')
             values['NOCHEH_MEMORY_TOKEN']='synthetic-memory-token';write_env(env_path(state),values)
             with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value='running-id\n'):

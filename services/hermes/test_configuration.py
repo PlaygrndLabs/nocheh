@@ -10,6 +10,21 @@ from services.hermes.environment import secret, telegram_policy
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_fresh_setup_enables_prepared_honcho_without_overriding_an_explicit_disable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            self.assertEqual(values['NOCHEH_HONCHO_ENABLED'],'true')
+            self.assertEqual(compose_environment(state)['COMPOSE_PROFILES'],'honcho')
+            token=values['NOCHEH_MEMORY_TOKEN']
+            self.assertTrue(token)
+            self.assertEqual((state/'honcho/internal_token').read_text().strip(),token)
+            self.assertEqual(initialize(state)['NOCHEH_MEMORY_TOKEN'],token)
+            self.assertTrue((state/'honcho/honcho.env').is_file())
+            self.assertTrue((state/'honcho/meter.env').is_file())
+            values['NOCHEH_HONCHO_ENABLED']='false';write_env(env_path(state),values)
+            self.assertEqual(initialize(state)['NOCHEH_HONCHO_ENABLED'],'false')
+            self.assertEqual(compose_environment(state)['COMPOSE_PROFILES'],'')
+
     def test_auto_migrates_to_on_and_new_configuration_has_only_two_states(self):
         from tools.operations.installation.configuration import validate
         with tempfile.TemporaryDirectory() as folder:
