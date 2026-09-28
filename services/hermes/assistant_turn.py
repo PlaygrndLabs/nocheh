@@ -76,6 +76,23 @@ def sealed_dependencies():
     os.environ.pop('HERMES_LAZY_INSTALL_TARGET',None)
 
 
+def install_tool_search_policy():
+    """Pin the isolated turn's tool surface even if native config loading falls back.
+
+    Hermes treats an unreadable tool-search setting as ``auto``. That adds the
+    bridge tools to a restricted Nocheh turn, so the allowlist rejects the turn.
+    The saved profile still records the policy; this pins it in the process too.
+    """
+    from tools import tool_search
+    previous=(tool_search.load_config,tool_search.load_config_readonly)
+    disabled=tool_search.ToolSearchConfig.from_raw({'enabled':'off'})
+    tool_search.load_config=lambda:disabled
+    tool_search.load_config_readonly=lambda:disabled
+    def restore():
+        tool_search.load_config,tool_search.load_config_readonly=previous
+    return restore
+
+
 def run(body, emit=None):
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
@@ -89,6 +106,7 @@ def run(body, emit=None):
     # Install the durable path before importing any agent/tool module.
     from .isolated_profile import database_path,install_database_paths
     install_database_paths()
+    install_tool_search_policy()
     from services.hermes.archive_tools import bind_process_credential
     from services.hermes.request_boundary import install
     from services.hermes.compatibility_patch import install as native_gate

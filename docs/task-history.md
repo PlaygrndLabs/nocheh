@@ -399,3 +399,16 @@ Private event, artifact, transcript, reply, and workflow identifiers are saved
 only in ignored local acceptance state. Other fresh release gates remain pending.
 
 </verification>
+
+<increment date="2026-09-28" name="Pin native tool-search policy in isolated turns">
+
+Hermes tool-search config loading defaults to `auto` when its config read
+fails. A native turn now pins that feature off in process before constructing
+the agent, while the explicit ten-tool allowlist still rejects any unexpected
+registration. Focused tests passed with a synthetic profile that enabled tool
+search, and a credential-free isolated-image check exposed exactly the ten
+allowed tools. The exact source of the earlier intermittent config reads was
+not established. The operating isolated-turn image was not replaced, so live
+first-attempt delivery and reply latency remain pending.
+
+</increment>
