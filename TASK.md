@@ -22,7 +22,7 @@ explicit saved disable remains effective. The operating installation has passed
 the six-check synthetic Honcho acceptance and is verified and attached with
 Honcho as primary memory. Historical ingestion is off. A fresh owner source has
 now produced a ready generation, so memory availability is no longer limited;
-owner-visible recall from a follow-up turn remains pending. Service startup does
+owner-visible Honcho recall passed in a follow-up Telegram turn. Service startup does
 not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
 [procedure](docs/release-acceptance.md).
 
@@ -87,6 +87,12 @@ projects were not deleted.
   reached ready. Subsequent synchronization retained that ready snapshot;
   operating status now reports limited memory false. Event and receipt IDs are
   retained only in ignored local acceptance state.
+- An ordinary owner follow-up asked for the remembered phrase. A Honcho memory
+  result containing that phrase preceded the delivered Telegram answer, which
+  contained the phrase. The Telegram workflow completed after a transient
+  runtime-unavailable retry. The operating status remained limited memory false;
+  the monthly ledger reserved $0.31 of $5 after this check. Private identifiers
+  and the metadata report remain in ignored local acceptance state.
 
 </verification>
 
@@ -96,11 +102,9 @@ projects were not deleted.
   intentional group silence, corrections, reaction interpretation, active recall,
   restart/recovery, and linked replies. Prior live observations are historical.
   Subscription transcription remains a release requirement.
-- Test owner-visible Honcho recall in an ordinary follow-up Telegram turn and
-  correlate its captured event, retrieval, and delivered answer. The initial
-  ready generation and current ingestion receipt are verified, but the synthetic
-  acceptance workspace alone does not satisfy owner-facing recall. Historical
-  ingestion remains unapproved.
+- Complete the other fresh owner-facing release checks in
+  [release acceptance](docs/release-acceptance.md); Honcho attachment and owner
+  recall now pass. Historical ingestion remains unapproved.
 - Investigate prior slow owner replies and transient runtime/tool registration
   failures when fresh live traffic supplies evidence.
 - Run populated backup/recovery acceptance when fresh data exists. The prior
