@@ -54,13 +54,13 @@ make dev-stop
 service health. Services restart automatically while the Docker engine is running.
 Docker must itself be configured to start at login/boot for unattended operation.
 
-The earlier isolated `nocheh-dev` project and its volumes are retained for
-recovery but are not used by `make dev`. Stop it with its original checkout's
-launcher before the first live-data development run; do not delete its volumes.
+An older isolated development project may have retained volumes. It is not part
+of the active development command. Do not delete those volumes as routine cleanup.
 
-`make dev` uses the operating `nocheh` Compose project, its normal localhost
-ports, existing database and Honcho volumes, Telegram bot, provider login, and
-other owned state. Stop unattended services first. Verify a local backup, exact
+`make dev` combines the operating Compose file with the root
+`docker-compose.dev.yml` override. It uses the operating `nocheh` Compose
+project, normal localhost ports, existing database and Honcho volumes, Telegram
+bot, provider login, and other owned state. Stop unattended services first. Verify a local backup, exact
 volume identities, and exclusive Telegram polling and provider refresh ownership
 before the first switch. The launcher refuses another running Nocheh project or
 an active unattended stack. It starts PostgreSQL, app, dashboard, executor,

@@ -32,9 +32,10 @@ npm ci                  # development/build dependencies; runtime tools are in D
 ./bin/nocheh init     # create .env with generated internal credentials
 # Edit .env for Telegram, model and optional guarding settings.
 ./bin/nocheh up       # build, start in the background, wait for health checks
-make dev                  # one source-mounted full core development stack
-make dev-status           # inspect that checkout's preview
-make dev-stop             # stop it; retain its database and generated state
+make dev                  # source-watched operating Compose stack
+make dev-build            # rebuild after dependency or Dockerfile changes
+make dev-status           # inspect the development stack
+make dev-stop             # stop it; retain operating data
 ./bin/nocheh status
 ./bin/nocheh diagnose # health, credentials presence, and archive job states
 ./bin/nocheh db       # optional read-only pgweb browser at 127.0.0.1:8782
@@ -44,20 +45,17 @@ make dev-stop             # stop it; retain its database and generated state
 ./bin/nocheh down     # stop services; retain data
 ```
 
-Stop the operating Nocheh stack before `make dev`; the command refuses to start
-while another Nocheh project runs. `make dev` prints the dashboard URL and uses
-generated credentials under that checkout's ignored `data/dev/`. The existing
-`nocheh-app` container compiles changed source into shared volumes; the running
-app, dashboard, executor, security, and Python services reload without a Docker
-image rebuild or another `make dev`. Dependency and Dockerfile edits still need an
-image build. Pinned Hermes and provider images must be available locally; the
-command verifies their revisions and creates dev tags. The single Compose
-project is `nocheh-dev`, with the normal dashboard URL `http://127.0.0.1:8783/`.
-Honcho's five services run in that project with separate dev storage. Development
-does not import an installation login or enable Telegram polling. External model
-and embedding calls require separate development credentials. Run
-`make dev-stop` when finished. Release acceptance uses the operating installation's
-`up` workflow.
+Stop unattended services before `make dev`; the launcher refuses a competing
+Nocheh stack and verifies the operating volume, source mount, port, and
+project ownership. The root `docker-compose.dev.yml` mounts this checkout's source into
+the operating `nocheh` project, using its existing data, Telegram bot, and provider
+login. The existing app service compiles changed source into shared generated-code
+volumes, and the running services reload without an image rebuild or another
+`make dev`. Use `make dev-build` after dependency or Dockerfile edits, and
+`make dev-stop` to stop development without deleting operating state. The
+normal dashboard URL is `http://127.0.0.1:8783/`. Development health does not
+complete release acceptance. See [the development procedure](docs/deploy.md).
+
 The archive API is bound to `127.0.0.1:8780`; PostgreSQL and internal services are
 not exposed on the host. Health checks use `/health`. Authenticated status uses
 `/v1/status` and the generated service token.

@@ -145,6 +145,24 @@ class LiveDevTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'writable home'):
                 live_dev.assert_compose_mounts(['docker', 'compose'], env)
 
+    def test_root_development_override_and_operating_compose(self):
+        root = Path('/synthetic/operating')
+        command = live_dev.command(root)
+        self.assertEqual(command[-4:], ['-f', str(live_dev.ROOT / 'docker-compose.dev.yml'), '-p', 'nocheh'])
+        self.assertIn(str(root / 'docker-compose.yml'), command)
+        self.assertIn(str(root / 'deploy/original-only-compose.yml'), command)
+
+    def test_rejects_occupied_development_port(self):
+        with patch.object(live_dev, 'port_available', side_effect=lambda port: port != 8783):
+            with self.assertRaisesRegex(ValueError, '8783 is in use'):
+                live_dev.assert_ports([])
+
+    def test_rejects_unpinned_runtime_base(self):
+        result = type('Result', (), {'returncode': 0, 'stdout': 'wrong-revision\n'})()
+        with patch.object(live_dev.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(ValueError, 'wrong pinned revision'):
+                live_dev.prepare_runtime_images({'PATH': '/usr/bin'})
+
     def test_existing_images_start_without_rebuild(self):
         present = type('Result', (), {'returncode': 0})()
         missing = type('Result', (), {'returncode': 1})()
