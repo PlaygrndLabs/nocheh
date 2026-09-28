@@ -233,6 +233,11 @@ The partial Compose edit was removed. No live volume was attached, no operating
 service was started, and the owner approval required for that specific risky
 implementation remains pending. A safe transition design and verification are
 needed before the live development connection or its acceptance can be claimed.
+The owner also required agents to wait for answers to their questions rather
+than ending the turn; this instruction is recorded in `AGENTS.md`. Automatic
+approval review separately rejected removal of the existing instruction that
+keeps Telegram and installation logins out of dev. That instruction remains in
+place pending a reviewed live-data transition.
 
 ## Next actions
 
