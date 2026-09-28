@@ -60,6 +60,18 @@ projects were not deleted.
   zero model calls). The broader host native suite cannot pass outside its pinned
   runtime and restricted socket environment; its prior exact-source run is not
   evidence for this increment.
+- A fresh synthetic Honcho acceptance workspace completed one guarded
+  subscription reasoning call with the expected answer and usage report, then
+  closed. Its ledger reservation was zero and the preserved $5 pilot total did
+  not change. This is one live preflight check, not embedding, ingestion, recall,
+  restart, provider-failure, or production attachment acceptance. The metadata
+  report is retained only in ignored local acceptance state.
+- The owner selected the $5 UTC-monthly embedding cap for live testing after
+  clarification that API embeddings are billed separately from ChatGPT. A narrow
+  exhausted-pilot preattachment cutover passed focused allowance, rejection, and
+  idempotence checks (20 focused tests total). The AST-only graph refreshed with
+  559 files and zero model calls. The monthly cap has not yet been activated on
+  the operating ledger.
 
 </verification>
 
@@ -70,8 +82,8 @@ projects were not deleted.
   restart/recovery, and linked replies. Prior live observations are historical.
   Subscription transcription remains a release requirement.
 - Honcho activation and current recall must be verified against the fresh stores.
-  Preserved pilot reservations reached the accepted cap. A clarified owner
-  decision on separately billed API embedding spend is pending before paid live
+  Preserved pilot reservations reached the accepted cap. Activate the owner-selected
+  $5 monthly cap, complete the remaining live checks, and attach only after their
   acceptance. Historical ingestion remains unapproved.
 - Investigate prior slow owner replies and transient runtime/tool registration
   failures when fresh live traffic supplies evidence.

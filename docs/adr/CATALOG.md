@@ -2,6 +2,7 @@
 
 Current setup: [0075 — Clean development setup](0075-clean-development-setup.md).
 Honcho service default: [0076](0076-honcho-enabled-local-default.md).
+Exhausted-pilot acceptance budget: [0077](0077-exhausted-pilot-honcho-acceptance-budget.md).
 
 This is the complete chronological index. Start with the
 [current decision map and historical summary](README.md) unless you need to audit
@@ -88,3 +89,4 @@ records current implementation and activation.
 | [0074](0074-root-development-compose-layout.md) | Root development override and acceptance test overlay in their role-based locations | Refines 0073 on file placement; retires the isolated preview entrypoint |
 | [0075](0075-clean-development-setup.md) | Clean development reset with Compose-owned stores and one source-watched stack | Refines 0073 and 0074; release acceptance remains separate |
 | [0076](0076-honcho-enabled-local-default.md) | Enable and prepare Honcho for fresh local installations | Extends 0033 and 0045; live acceptance still gates attachment |
+| [0077](0077-exhausted-pilot-honcho-acceptance-budget.md) | Permit monthly spending after exhausted pilot to finish detached live acceptance | Extends 0034 and 0068; preserves attachment gate |
