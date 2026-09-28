@@ -26,12 +26,13 @@ owner-visible Honcho recall passed in a follow-up Telegram turn. Service startup
 not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
 [procedure](docs/release-acceptance.md).
 
-The Honcho dashboard exposes the accepted monthly embedding cap for owner edits
-and shows reservations, remaining admission headroom, request counts, reported
-tokens, and a separate usage-based cost estimate. The pilot cap stays fixed;
-the accepted monthly cap starts at $5 and permits $0–$15 in cent increments.
-Budget changes retain reservations and use revision-checked, retry-safe writes.
-[Decision](docs/adr/0078-owner-honcho-budget-control.md).
+The Honcho dashboard separates the paid API embedding dollar cap from
+subscription reasoning's request safety limit. Confirmed embedding calls with
+reported usage now settle their pre-egress hold to token-priced admission
+accounting; failed and unreported calls retain the full model-specific hold.
+The pilot cap stays fixed; the accepted monthly cap starts at $5 and permits
+$0–$15 in cent increments. Budget changes retain call accounting and use
+revision-checked, retry-safe writes. [Decision](docs/adr/0079-separated-honcho-budgets-and-settlement.md).
 
 The active installation's 17 containers and six mounted volumes were removed.
 Six verified obsolete preview volumes and retired local runtime/output directories
@@ -125,6 +126,19 @@ projects were not deleted.
   synthetic profile that enabled tool search. The exact cause of the earlier
   intermittent config reads is unproven. The operating isolated-turn image has
   not been replaced, so the live retry and latency outcome remains unverified.
+- Honcho budget settlement, embedding-model, and independent reasoning-limit
+  checks passed (14 focused tests) in a disposable pinned runtime. The dashboard
+  bundle built offline with pinned app dependencies, and the AST-only graph
+  refreshed from 561 files with zero model calls.
+  The live Memory preview showed separate API embedding and subscription panels:
+  140 embedding requests, 83 subscription reasoning requests, $0.011248 counted
+  toward the $5 embedding cap, and $0.001178 reported-token cost estimate.
+  One embedding request lacked a usage report and retains its full hold. The
+  screenshot of OpenAI usage shows less than $0.01 for the day; the local estimate
+  is neither that day-only provider total nor an invoice. No paid call or cap
+  edit was made for this UI check. A source-watched asset rebuild failed with
+  `EROFS` on the generated dashboard volume; the verified bundle was copied
+  into that preview volume without recreating it.
 
 </verification>
 
@@ -142,6 +156,11 @@ projects were not deleted.
   owner turn that tool registration passes on its first attempt. Keep the saved
   attempt receipts for latency comparison; do not widen the profile tool
   allowlist.
+- Repair the source-watched dashboard asset volume ownership/mount mismatch
+  before the next UI iteration. The existing volume identifies another checkout;
+  `make dev` asks to recreate it and the app watcher reports `EROFS` even though
+  the operating services remain healthy. Do not accept volume recreation without
+  checking which generated outputs it would remove.
 - Run populated backup/recovery acceptance when fresh data exists. The prior
   incomplete backups were deleted with the authorized application-data reset.
 - Remote Git synchronization remains blocked by private material in reachable

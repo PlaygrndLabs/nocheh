@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 from .meter import Egress, Ledger, Rejected, validate
 
 
@@ -72,8 +73,40 @@ class BudgetTests(unittest.TestCase):
             self.assertNotIn('calls',summary)
             self.assertEqual((summary['embedding_requests'],summary['reasoning_requests']),(2,1))
             self.assertEqual((summary['embedding_reported_requests'],summary['embedding_unreported_requests']),(1,1))
-            self.assertEqual(summary['reserved_usd'],.02)
+            self.assertEqual(summary['reserved_usd'],.010186)
+            self.assertEqual(summary['counted_toward_cap_usd'],.010186)
             self.assertEqual(summary['estimated_embedding_cost_usd'],.0001856)
+
+    def test_monthly_legacy_successes_settle_once_but_uncertain_and_pilot_calls_keep_their_holds(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path)
+            pilot=ledger.reserve('/v1/embeddings',b'pilot')
+            ledger.enable_monthly()
+            good=ledger.reserve('/v1/embeddings',b'good')
+            failed=ledger.reserve('/v1/embeddings',b'failed')
+            unknown=ledger.reserve('/v1/embeddings',b'unknown')
+            with sqlite3.connect(path) as db:
+                db.execute('UPDATE calls SET status=200,usage=?,settlement_version=0 WHERE id=?',(json.dumps({'total_tokens':9280}),good))
+                db.execute('UPDATE calls SET status=502,settlement_version=0 WHERE id=?',(failed,))
+                db.execute('UPDATE calls SET status=200,usage=NULL,settlement_version=0 WHERE id=?',(unknown,))
+                db.execute('UPDATE calls SET status=200,usage=?,settlement_version=0 WHERE id=?',(json.dumps({'total_tokens':10}),pilot))
+            first=Ledger(path).report()
+            second=Ledger(path).report()
+            self.assertEqual(first['reserved_usd'],.020186)
+            self.assertEqual(second['reserved_usd'],first['reserved_usd'])
+            self.assertEqual(first['lifetime_reserved_usd'],.030186)
+
+    def test_embedding_cap_and_subscription_request_bound_are_independent(self):
+        with tempfile.TemporaryDirectory() as root, patch('services.honcho.meter.REQUEST_LIMIT',2):
+            ledger=Ledger(Path(root)/'budget.sqlite');ledger.enable_monthly()
+            ledger.set_monthly_limit(1,0,str(uuid.uuid4()))
+            for index in range(2):ledger.reserve('/v1/chat/completions',f'reasoning-{index}'.encode())
+            with self.assertRaisesRegex(Rejected,'subscription_request_limit_exhausted'):
+                ledger.reserve('/v1/chat/completions',b'third')
+            ledger.reserve('/v1/embeddings',b'paid')
+            with self.assertRaisesRegex(Rejected,'monthly_budget_exhausted'):
+                ledger.reserve('/v1/embeddings',b'second-paid')
+            self.assertEqual(ledger.summary()['reasoning_remaining_requests'],0)
 
     def test_monthly_cutover_is_durable_and_does_not_erase_pilot(self):
         with tempfile.TemporaryDirectory() as root:
@@ -116,7 +149,7 @@ class BudgetTests(unittest.TestCase):
             with concurrent.futures.ThreadPoolExecutor(8) as pool: results=list(pool.map(send,range(16)))
             self.assertEqual(results.count(200),1);self.assertEqual(len(transport.calls),1)
             restored=Ledger(Path(root)/'budget.sqlite')
-            self.assertEqual(restored.report()['reserved_usd'],5)
+            self.assertEqual(restored.report()['reserved_usd'],4.990001)
             with self.assertRaises(Rejected): restored.reserve('/v1/embeddings',b'new')
 
     def test_timeout_reservation_and_missing_key(self):
