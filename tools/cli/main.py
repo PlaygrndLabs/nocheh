@@ -91,8 +91,8 @@ def main():
         return security_profiles(rest)
     if args.command in ('dev', 'dev-stop', 'dev-status'):
         sys.path.insert(0, str(ROOT))
-        from tools.development.dev_preview import main as dev_preview
-        return dev_preview(args.command, rest)
+        from tools.development.live_dev import main as live_dev
+        return live_dev(args.command, rest)
     if args.command == 'test':
         return run_isolated_tests(rest)
     if args.command=='reset':

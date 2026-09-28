@@ -45,6 +45,7 @@ Host services require Node 24.x; set `NOCHEH_NODE` when selecting a non-default 
 ./bin/nocheh status
 ./bin/nocheh diagnose
 make dev
+make dev-build
 make dev-status
 make dev-stop
 ```
@@ -53,31 +54,28 @@ make dev-stop
 service health. Services restart automatically while the Docker engine is running.
 Docker must itself be configured to start at login/boot for unattended operation.
 
-If a development checkout was archived while its `nocheh-dev` volumes remain,
-stop its orphaned containers without deleting volumes. A replacement checkout
-can use a copied, credential-free dev state after its database roles are checked
-against that state. Record the exact absent former checkout path in the ignored
-`data/dev/.adopted-volume-owner` file with mode 0600. The dev launcher then
-accepts only volumes bearing that checkout label; it still rejects a present
-former checkout or any other volume owner. When Compose offers to recreate a
-retained volume, choose **No** to preserve its data. Keep the operating
-installation's state and credentials separate.
+The earlier isolated `nocheh-dev` project and its volumes are retained for
+recovery but are not used by `make dev`. Stop it with its original checkout's
+launcher before the first live-data development run; do not delete its volumes.
 
-Stop the operating Nocheh project before `make dev`; the command refuses to
-run a second Nocheh stack. `make dev` uses the `nocheh-dev` project and normal
-localhost ports, with checkout-owned images, networks, credentials, and state.
-It starts PostgreSQL, app, dashboard, executor, security, Hermes, speech,
-provider, monitor, workflow services, and Honcho. The existing app container
-mounts source read-only and compiles changed TypeScript, React, CSS, and plugin
-assets into shared volumes. Node watches generated code, the dashboard reloads
-when its asset revision changes, and Python processes restart automatically on
+`make dev` uses the operating `nocheh` Compose project, its normal localhost
+ports, existing database and Honcho volumes, Telegram bot, provider login, and
+other owned state. Stop unattended services first. Verify a local backup, exact
+volume identities, and exclusive Telegram polling and provider refresh ownership
+before the first switch. The launcher refuses another running Nocheh project or
+an active unattended stack. It starts PostgreSQL, app, dashboard, executor,
+security, Hermes, speech, provider, monitor, workflow services, and Honcho.
+The existing app container mounts source from the session checkout read-only
+and compiles changed TypeScript, React, CSS, and plugin assets into separate
+generated-code volumes. Node watches generated code, the dashboard reloads when
+its asset revision changes, and Python processes restart automatically on
 mounted source edits. Ordinary source edits need no `make dev` rerun or Docker
-image rebuild; dependency and Dockerfile edits still need one. Locally available
-Hermes and provider base images must match the pinned revisions. Telegram stays
-disabled and no installation login is imported. External model and embedding
-calls require separate development credentials. `make dev-stop` stops only
-the development project and retains its state. Release acceptance uses
-`./bin/nocheh up` separately.
+image rebuild; `make dev-build` rebuilds images after dependency or Dockerfile
+edits. `make dev` builds only when its development images are absent. Pinned Hermes
+and provider base image revisions are checked before startup. `make dev-stop`
+stops the watched project without deleting the operating volumes or state;
+`./bin/nocheh up` from the operating checkout resumes unattended operation.
+Development health does not replace live release acceptance.
 See Docker's [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/)
 documentation.
 
