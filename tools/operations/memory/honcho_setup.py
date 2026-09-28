@@ -114,10 +114,16 @@ def runtime_up():
     return operate(PROVIDER_STATE,'up')
 
 
-def monthly():
+def monthly(provider_state=PROVIDER_STATE):
     from tools.operations.archive.archive import API
     from services.honcho.meter import Ledger
     connection=API().call('/v1/memory/honcho')['connection']
-    if not connection['verified'] or not connection['attached']:
-        raise ValueError('honcho_monthly_requires_accepted_attached_memory')
-    Ledger(STATE/'ledger/budget.sqlite').enable_monthly()
+    ledger=Ledger(state_for(provider_state)/'ledger/budget.sqlite')
+    budget=ledger.report()
+    if budget['mode']=='monthly':return
+    accepted=connection['verified'] and connection['attached']
+    exhausted_preflight=(not connection['verified'] and not connection['attached'] and
+                         budget['mode']=='pilot' and budget['reserved_usd']>=budget['limit_usd'])
+    if not (accepted or exhausted_preflight):
+        raise ValueError('honcho_monthly_requires_accepted_memory_or_exhausted_pilot_preflight')
+    ledger.enable_monthly()

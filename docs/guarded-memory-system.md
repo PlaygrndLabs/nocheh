@@ -142,8 +142,10 @@ an explicit owner operation. The optional Hermes-versus-Honcho comparison harnes
 has been retired; it was not a production acceptance gate.
 
 The total pilot cap stays at $5. After the pilot, `./bin/nocheh honcho monthly`
-enables the agreed $5 per UTC calendar month cap; it requires accepted, attached
-memory and preserves all pilot reservations. Repeating it cannot reset spending.
+enables the agreed $5 per UTC calendar month cap and preserves all pilot
+reservations. If the exhausted pilot blocks required live acceptance, the owner
+can activate the monthly cap while memory is still detached and unverified.
+That does not accept or attach memory. Repeating the command cannot reset spending.
 
 During outages or rebuilding, current context, native notes and archive search
 remain available with limited-memory status. Old provider data cannot be recalled

@@ -309,3 +309,25 @@ acceptance awaits clarification of the owner's spending instruction, since the
 ChatGPT subscription does not cover the dedicated API embedding key.
 
 </increment>
+
+<verification date="2026-09-28" name="Subscription-only Honcho preflight">
+
+One fresh synthetic acceptance workspace returned the expected guarded
+subscription reasoning response and usage record, then closed. Its ledger call
+reserved zero dollars, leaving the $5 pilot reservation total unchanged. This
+partial live check did not verify embeddings, ingestion, recall, restart, or
+provider-failure recovery and did not attach production memory.
+
+</verification>
+
+<increment date="2026-09-28" name="Exhausted-pilot Honcho acceptance budget">
+
+After the owner learned that embeddings use separately billed API capacity,
+they selected the specified $5 UTC-monthly cap for live testing. A narrow
+explicit-command path now permits an exhausted pilot to enter that monthly
+window while detached and unverified; it does not attach memory. Focused tests
+covered the blocked premature cutover, exhausted detached case, partial
+attachment rejection, and idempotence. Operating budget activation and paid
+live acceptance remain pending.
+
+</increment>
