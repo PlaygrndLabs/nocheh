@@ -123,14 +123,15 @@ and restart the production Honcho services through the installation CLI.
 `./bin/nocheh provider login` starts the one shared CLIProxyAPI device login.
 Production Honcho uses pinned revisions and the installation Compose project.
 The retained state directory and ledger have historical names for data compatibility;
-they are production state and must not be reset to tidy their names. For a fresh
-installation, prepare the source and credentials, then start the production profile:
+they are production state and must not be reset to tidy their names. Fresh local
+installations enable Honcho by default. `init` prepares its protected runtime
+credentials, and `up` checks the pinned source and starts the production profile.
+An explicit `NOCHEH_HONCHO_ENABLED='false'` disables that profile. After
+configuring the dedicated embedding key and shared provider login, start with:
 
 ```sh
-./bin/nocheh honcho init
-./bin/nocheh honcho runtime-init
+./bin/nocheh init
 ./bin/nocheh up
-./bin/nocheh honcho runtime-up
 ```
 
 Run the [Honcho acceptance procedure](guarded-memory-plan.md) before attaching

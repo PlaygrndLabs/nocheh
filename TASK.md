@@ -17,6 +17,12 @@ comes from the session worktree. Fresh volumes are created with Compose ownershi
 normal stops retain them. [Decision](docs/adr/0075-clean-development-setup.md),
 [commands](docs/deploy.md), [layout](docs/repository-layout.md).
 
+Fresh local setup now enables and prepares the Honcho service by default; an
+explicit saved disable remains effective. The current installation already has
+the Honcho service running, but its memory connection is detached and unverified.
+Service startup does not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
+[procedure](docs/release-acceptance.md).
+
 The active installation's 17 containers and six mounted volumes were removed.
 Six verified obsolete preview volumes and retired local runtime/output directories
 were also removed. Current credentials, bot settings, dashboard settings, bounded
@@ -48,6 +54,12 @@ projects were not deleted.
 - Reset initialization and failure-path tests (5) passed.
 - Documentation links, obsolete file references, and credential-pattern scans passed.
 - AST-only graph refreshed: 558 files, zero model calls.
+- Honcho-default configuration, runtime-profile, and workflow-key tests passed
+  (18); a synthetic fresh-install Compose render includes all five Honcho
+  services. The AST-only graph refreshed again after this code change (558 files,
+  zero model calls). The broader host native suite cannot pass outside its pinned
+  runtime and restricted socket environment; its prior exact-source run is not
+  evidence for this increment.
 
 </verification>
 
@@ -58,8 +70,9 @@ projects were not deleted.
   restart/recovery, and linked replies. Prior live observations are historical.
   Subscription transcription remains a release requirement.
 - Honcho activation and current recall must be verified against the fresh stores.
-  Preserved pilot reservations reached the accepted cap; this reset does not
-  authorize more spending, monthly-cap activation, or historical ingestion.
+  Preserved pilot reservations reached the accepted cap. A clarified owner
+  decision on separately billed API embedding spend is pending before paid live
+  acceptance. Historical ingestion remains unapproved.
 - Investigate prior slow owner replies and transient runtime/tool registration
   failures when fresh live traffic supplies evidence.
 - Run populated backup/recovery acceptance when fresh data exists. The prior

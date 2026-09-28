@@ -135,6 +135,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 <area name="Honcho and native memory">
 
 - Honcho is the primary long-term memory, with subscription reasoning through CLIProxyAPI and dedicated capped embeddings. Hermes keeps small native `MEMORY.md` and `USER.md` notes alongside Honcho and retains its native sessions.
+- Fresh local installations enable and prepare the Honcho service by default. Honcho memory attaches for ordinary turns only after its production live acceptance passes; an explicit installation setting can disable the service. Initial attachment does not ingest earlier history unless the owner selects that option.
 - Honcho production support and read-only inspection are part of the installed memory integration. No separate Hermes-versus-Honcho comparison runtime or experiment workflow is shipped.
 - People and projects are the entity types used for connected memory. Exact platform identities are reused automatically. Different people with the same name remain separate; ambiguous name-based or cross-platform matches remain suggestions until the owner confirms them. Registered projects are reused, and newly discovered or uncertain project identities require owner confirmation.
 - An unambiguous reference to a confirmed project attributes that statement to the referenced project instead of the conversation's default project. It does not reassign the conversation or change access permissions.

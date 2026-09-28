@@ -13,14 +13,21 @@ STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
            (PROVIDER_STATE/'honcho')).resolve()
 
 
-def initialize():
+def state_for(provider_state):
+    provider_state=Path(provider_state).resolve()
+    return Path(read_env(env_path(provider_state)).get('NOCHEH_HONCHO_STATE_DIR') or
+                (provider_state/'honcho')).resolve()
+
+
+def initialize(provider_state=PROVIDER_STATE):
     from tools.operations.installation.configuration import read_env
     from tools.operations.provider.embedding_config import embeddings
-    values=read_env(env_path(PROVIDER_STATE));embedding=embeddings(values)
+    provider_state=Path(provider_state).resolve();state=state_for(provider_state)
+    values=read_env(env_path(provider_state));embedding=embeddings(values)
     for directory in ('','ledger'):
-        (STATE/directory).mkdir(parents=True,exist_ok=True,mode=0o700)
+        (state/directory).mkdir(parents=True,exist_ok=True,mode=0o700)
     for name in ('internal_token','database_password','temporary_embedding_key'):
-        path=STATE/name
+        path=state/name
         if not path.exists(): path.write_text('' if name=='temporary_embedding_key' else secrets.token_hex(32))
         path.chmod(0o600)
     # Only the owner-designated embedding key. Never use unrelated provider keys.
@@ -28,11 +35,11 @@ def initialize():
     # name is accepted only when the new setting is absent; never use shell keys.
     if 'OPENAI_API_KEY' in values or 'NOCHEH_EMBEDDING_API_KEY' in values:
         dedicated=values.get('OPENAI_API_KEY',values.get('NOCHEH_EMBEDDING_API_KEY','')).strip()
-        (STATE/'temporary_embedding_key').write_text(dedicated)
-        (STATE/'temporary_embedding_key').chmod(0o600)
-    token=(STATE/'internal_token').read_text().strip()
-    password=(STATE/'database_password').read_text().strip()
-    (STATE/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedding.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\nNOCHEH_REASONING_URL=http://shared-provider:8317/v1\n')
+        (state/'temporary_embedding_key').write_text(dedicated)
+        (state/'temporary_embedding_key').chmod(0o600)
+    token=(state/'internal_token').read_text().strip()
+    password=(state/'database_password').read_text().strip()
+    (state/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedding.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\nNOCHEH_REASONING_URL=http://shared-provider:8317/v1\n')
     env={'DB_CONNECTION_URI':f'postgresql+psycopg://experiment:{password}@database:5432/honcho_experiment',
          'CACHE_URL':'redis://redis:6379/0?suppress=true','CACHE_ENABLED':'true','AUTH_USE_AUTH':'false',
          'PYTHON_DOTENV_DISABLED':'1','HONCHO_CONFIG_TOML_DISABLED':'1',
@@ -54,11 +61,11 @@ def initialize():
                     prefix+'__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'})
     env['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
     for level in ('minimal','low','medium','high','max'): env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
-    (STATE/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
-    for name in ('honcho.env','meter.env'): (STATE/name).chmod(0o600)
+    (state/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
+    for name in ('honcho.env','meter.env'): (state/name).chmod(0o600)
     if values.get('NOCHEH_HONCHO_ENABLED')=='true':
         from tools.operations.memory.honcho_runtime import normalize_endpoints
-        normalize_endpoints(STATE)
+        normalize_endpoints(state)
 
 
 def sources():
@@ -87,10 +94,10 @@ def provider_ready():
     return result['healthy'] and result['login_present']
 
 
-def runtime_init():
+def runtime_init(provider_state=PROVIDER_STATE):
     from tools.operations.installation.configuration import write_env
-    path=env_path(PROVIDER_STATE);values=read_env(path)
-    values['NOCHEH_MEMORY_TOKEN']=(STATE/'internal_token').read_text().strip()
+    path=env_path(provider_state);values=read_env(path)
+    values['NOCHEH_MEMORY_TOKEN']=(state_for(provider_state)/'internal_token').read_text().strip()
     write_env(path,values)
 
 
