@@ -357,3 +357,15 @@ The event, source, and receipt identifiers remain in ignored local acceptance
 state. Owner-visible recall in a follow-up reply remained pending.
 
 </verification>
+
+<verification date="2026-09-28" name="Owner-visible Honcho recall">
+
+The owner sent an ordinary follow-up question after the first generation became
+ready. A Honcho memory result containing the expected phrase was recorded before
+the Telegram reply, and the delivered reply contained that phrase. The Telegram
+workflow completed after a transient runtime-unavailable retry. Memory
+availability stayed current, and the monthly ledger reserved $0.31 of its $5
+cap after the check. Private message, reply, and artifact identifiers are saved
+only in ignored local acceptance state. Other fresh release gates remain pending.
+
+</verification>
