@@ -9,6 +9,30 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
+import {NativeMemoryRepository} from '../src/stores/native-memory.js';
+
+test('unchanged ready memory revalidates its context without another paid representation',async()=>{
+  const id=digest('stable-memory-workspace'),calls:string[]=[],queries:string[]=[];
+  let state='ready',pending=0,updated=true;
+  const control={query:async(sql:string)=>{
+    queries.push(sql);
+    if(sql.startsWith('SELECT 1 FROM memory_context_snapshots'))return {rowCount:1};
+    if(sql.startsWith('UPDATE memory_context_snapshots'))return {rowCount:updated?1:0};
+    throw Error('unexpected_control_query');
+  }};
+  const memory=new NativeMemoryRepository({access:{stores:{control}}} as any,{} as any,{} as any,{} as any,
+    async(path:string)=>{calls.push(path);return {pending_work_units:pending,in_progress_work_units:0};},async()=>[]);
+  (memory as any).current=async()=>({row:{state,work_revision:7,last_ready_at:new Date()},binding:{},principal:{}});
+  assert.equal(await memory.refreshContext(id,'first'),true);
+  assert.deepEqual(calls,['/v3/workspaces/'+id+'/queue/status']);
+  assert.deepEqual(queries.filter(sql=>sql.startsWith('UPDATE memory_context_snapshots')).length,1);
+  pending=1;assert.equal(await memory.refreshContext(id,'second'),false,'unfinished Honcho work cannot validate a stale snapshot');
+  assert.equal(queries.filter(sql=>sql.startsWith('UPDATE memory_context_snapshots')).length,1);
+  pending=0;updated=false;assert.equal(await memory.refreshContext(id,'third'),false,'a changed generation revision cannot renew the old snapshot');
+  state='building';updated=true;const before=calls.length;
+  assert.equal(await memory.refreshContext(id,'fourth'),true,'previously ready context stays available while new work builds');
+  assert.equal(calls.length,before,'building refresh does not request a new representation');
+});
 
 test('native memory keeps content derived, reconciles uncertain writes and rebuilds corrected guarded generations',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{

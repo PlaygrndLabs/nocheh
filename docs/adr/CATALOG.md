@@ -80,3 +80,4 @@ records current implementation and activation.
 | [0069](0069-role-based-source-layout.md) | Role-based tooling, services, dashboard, and one owner launcher | Extends 0025 and 0067 on code ownership and launcher placement |
 | [0070](0070-single-agent-support-root.md) | One `.agent/` directory for project agent support | Extends 0069 on agent skill and support placement |
 | [0071](0071-local-only-acceptance-evidence.md) | Track source and synthetic fixtures; keep runtime output and live evidence local | Extends 0040 on evidence retention and privacy |
+| [0072](0072-validated-honcho-context-renewal.md) | Revalidate unchanged Honcho context without repeated representation calls | Supersedes 0044's unconditional representation refresh; retains five-minute freshness |

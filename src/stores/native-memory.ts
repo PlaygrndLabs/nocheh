@@ -312,7 +312,27 @@ export class NativeMemoryRepository {
   }
   async refreshContext(id:string,requestId=String(Math.floor(Date.now()/120000))):Promise<boolean> {
     const current=await this.current(id);if(!current.row.last_ready_at&&current.row.state!=='ready')return false;
-    string(requestId,200);const key='native-context:'+id+':'+requestId;
+    string(requestId,200);
+    const cached=(await this.control.query(`SELECT 1 FROM memory_context_snapshots
+      WHERE generation=$1 AND refreshed_at>=(SELECT last_ready_at FROM memory_generations WHERE id=$1)`,[id])).rowCount;
+    if(cached) {
+      if(current.row.state==='building') {
+        const retained=await this.control.query(`UPDATE memory_context_snapshots s SET refreshed_at=now()
+          FROM memory_generations g WHERE s.generation=g.id AND g.id=$1 AND g.state='building' AND g.work_revision=$2
+          AND s.refreshed_at>=g.last_ready_at RETURNING s.generation`,[id,current.row.work_revision]);
+        return !!retained.rowCount;
+      }
+      if(current.row.state==='ready') {
+        const queue=await this.call('/v3/workspaces/'+id+'/queue/status');await this.current(id);
+        if(queue.pending_work_units!==0||queue.in_progress_work_units!==0)return false;
+        const touched=await this.control.query(`UPDATE memory_context_snapshots s SET refreshed_at=now()
+          FROM memory_generations g WHERE s.generation=g.id AND g.id=$1 AND g.state='ready' AND g.work_revision=$2
+          AND s.refreshed_at>=g.last_ready_at RETURNING s.generation`,[id,current.row.work_revision]);
+        return !!touched.rowCount;
+      }
+    }
+    if(current.row.state!=='ready')return false;
+    const key='native-context:'+id+':'+current.row.work_revision+':'+requestId;
     let raw=await this.derived.checkpoint(key);
     if(!raw) {
       const connected=await this.connectedPeers(current,current.principal),parts=[];
@@ -326,15 +346,20 @@ export class NativeMemoryRepository {
         provenance:{binding:current.binding,partial:connected.partial,limitations:['representation_has_no_exact_citations']}});
       raw={id:reference.id,content:Buffer.from(text),content_hash:reference.input_hash};
     }
-    await this.current(id);
+    const after=await this.current(id);
+    if(after.row.work_revision!==current.row.work_revision||after.row.state!=='ready')return false;
     const output=await this.derived.record({operation_id:key+':bounded',source:current.row.root_reference,parents:[{store:'derived',kind:'artifact',id:raw.id,input_hash:raw.content_hash}],
       kind:'memory_context',content:Buffer.from(Array.from(raw.content.toString() as string).slice(0,20000).join('')),producer:'nocheh',producer_version:protocol,
       configuration:{max_characters:20000,workspace:id},provenance:{limitations:['representation_has_no_exact_citations']}});
-    await this.guards.prepareContext(output,protocol,current.principal,this.prepared,this.detect);await this.current(id);
+    await this.guards.prepareContext(output,protocol,current.principal,this.prepared,this.detect);
+    const final=await this.current(id);
+    if(final.row.work_revision!==current.row.work_revision||final.row.state!=='ready')return false;
     const snapshot=(await this.derived.pool.query('SELECT created_at FROM derived_artifacts WHERE id=$1',[raw.id])).rows[0];
-    await this.control.query(`INSERT INTO memory_context_snapshots(generation,derived_id,content_hash,refreshed_at) VALUES($1,$2,$3,$4)
-      ON CONFLICT(generation) DO UPDATE SET derived_id=$2,content_hash=$3,refreshed_at=$4 WHERE memory_context_snapshots.refreshed_at<=$4`,
-      [id,output.id,output.input_hash,snapshot.created_at]);await this.current(id);return true;
+    const saved=await this.control.query(`INSERT INTO memory_context_snapshots(generation,derived_id,content_hash,refreshed_at)
+      SELECT $1,$2,$3,$4 FROM memory_generations g WHERE g.id=$1 AND g.state='ready' AND g.work_revision=$5
+      ON CONFLICT(generation) DO UPDATE SET derived_id=$2,content_hash=$3,refreshed_at=$4 WHERE memory_context_snapshots.refreshed_at<=$4
+      RETURNING generation`,[id,output.id,output.input_hash,snapshot.created_at,current.row.work_revision]);
+    await this.current(id);return !!saved.rowCount;
   }
   private async audienceGeneration(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),audience=principal.scope===null?'owner':principal.space??principal.scope;
