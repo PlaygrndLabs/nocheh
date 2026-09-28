@@ -53,6 +53,16 @@ make dev-stop
 service health. Services restart automatically while the Docker engine is running.
 Docker must itself be configured to start at login/boot for unattended operation.
 
+If a development checkout was archived while its `nocheh-dev` volumes remain,
+stop its orphaned containers without deleting volumes. A replacement checkout
+can use a copied, credential-free dev state after its database roles are checked
+against that state. Record the exact absent former checkout path in the ignored
+`data/dev/.adopted-volume-owner` file with mode 0600. The dev launcher then
+accepts only volumes bearing that checkout label; it still rejects a present
+former checkout or any other volume owner. When Compose offers to recreate a
+retained volume, choose **No** to preserve its data. Keep the operating
+installation's state and credentials separate.
+
 Stop the operating Nocheh project before `make dev`; the command refuses to
 run a second Nocheh stack. `make dev` uses the `nocheh-dev` project and normal
 localhost ports, with checkout-owned images, networks, credentials, and state.
