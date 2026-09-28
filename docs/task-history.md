@@ -385,3 +385,17 @@ dashboard container to exercise the new ledger code. The AST graph refreshed
 from 561 files without model calls.
 
 </increment>
+
+<verification date="2026-09-28" name="Fresh owner voice and subscription transcript">
+
+One owner voice note reached the operating post-reset archive. Its 11,998
+original bytes matched the saved size and SHA-256. A separate transcript from
+`nocheh-subscription` exactly matched the expected sentence. The Telegram
+workflow eventually completed with one delivered reply linked to that voice
+source, so this installation's voice check passed. Four earlier attempts failed
+closed with `unexpected_profile_tool` for the native tool-search trio; the fifth
+attempt delivered. The tool-registration mismatch and reply delay remain open.
+Private event, artifact, transcript, reply, and workflow identifiers are saved
+only in ignored local acceptance state. Other fresh release gates remain pending.
+
+</verification>
