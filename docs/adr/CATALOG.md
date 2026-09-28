@@ -92,3 +92,4 @@ records current implementation and activation.
 | [0076](0076-honcho-enabled-local-default.md) | Enable and prepare Honcho for fresh local installations | Extends 0033 and 0045; live acceptance still gates attachment |
 | [0077](0077-exhausted-pilot-honcho-acceptance-budget.md) | Permit monthly spending after exhausted pilot to finish detached live acceptance | Extends 0034 and 0068; preserves attachment gate |
 | [0078](0078-owner-honcho-budget-control.md) | Let the owner adjust the accepted monthly embedding cap and inspect usage | Extends 0034 and 0077; preserves pilot and attachment gates |
+| [0079](0079-separated-honcho-budgets-and-settlement.md) | Separate embedding dollars from subscription requests and settle reported embedding usage | Supersedes permanent per-request reservations in 0034; extends 0078 |

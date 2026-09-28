@@ -32,10 +32,10 @@ class EmbeddingConfigTests(unittest.TestCase):
     def test_honcho_and_meter_follow_env_without_receiving_paid_reasoning_key(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);state=root/'state'
-            values={'NOCHEH_EMBEDDING_PROVIDER':'openai','NOCHEH_EMBEDDING_MODEL':'text-embedding-3-large','OPENAI_API_KEY':'synthetic-dedicated-key'}
+            values={'NOCHEH_HONCHO_STATE_DIR':str(state),'NOCHEH_EMBEDDING_PROVIDER':'openai','NOCHEH_EMBEDDING_MODEL':'text-embedding-3-large','OPENAI_API_KEY':'synthetic-dedicated-key'}
             write_env(root/'.env',values)
-            with patch.object(control,'ROOT',root),patch.object(control,'STATE',state),patch.object(control,'PROVIDER_STATE',root),patch.dict(os.environ,{'OPENAI_API_KEY':'unrelated-shell-key'}):
-                control.initialize()
+            with patch.dict(os.environ,{'OPENAI_API_KEY':'unrelated-shell-key'}):
+                control.initialize(root)
                 self.assertEqual((state/'temporary_embedding_key').read_text(),'synthetic-dedicated-key')
                 self.assertEqual((state/'temporary_embedding_key').stat().st_mode&0o777,0o600)
                 honcho=read_env(state/'honcho.env');meter=read_env(state/'meter.env')
@@ -47,9 +47,9 @@ class EmbeddingConfigTests(unittest.TestCase):
                     self.assertNotIn(values['OPENAI_API_KEY'],(state/name).read_text())
                     self.assertNotIn('unrelated-shell-key',(state/name).read_text())
                 values['OPENAI_API_KEY']='';values['NOCHEH_EMBEDDING_API_KEY']='old-key';write_env(root/'.env',values)
-                control.initialize();self.assertEqual((state/'temporary_embedding_key').read_text(),'','explicit empty key must revoke saved and legacy credentials')
+                control.initialize(root);self.assertEqual((state/'temporary_embedding_key').read_text(),'','explicit empty key must revoke saved and legacy credentials')
 
-    def test_large_model_forces_matching_dimensions_and_reserves_its_full_cost(self):
+    def test_large_model_forces_matching_dimensions_and_settles_reported_usage(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'budget.sqlite';ledger=Ledger(path);transport=Transport()
             large=embeddings({'NOCHEH_EMBEDDING_MODEL':'text-embedding-3-large'})
@@ -60,12 +60,13 @@ class EmbeddingConfigTests(unittest.TestCase):
             sent=transport.calls[0]
             self.assertEqual(json.loads(sent.data)['dimensions'],1536)
             self.assertEqual(sent.full_url,'https://api.openai.com/v1/embeddings')
-            self.assertEqual(ledger.report()['reserved_usd'],.02)
+            self.assertEqual(ledger.report()['embedding_hold_usd'],.02)
+            self.assertEqual(ledger.report()['reserved_usd'],.000002)
             for _ in range(249):ledger.reserve('/v1/embeddings',b'fixture',large)
             with self.assertRaises(Rejected):egress.send('/v1/embeddings',payload)
             self.assertEqual(len(transport.calls),1)
             restored=Ledger(path)
-            self.assertEqual(restored.report()['reserved_usd'],5)
+            self.assertEqual(restored.report()['reserved_usd'],4.980002)
             with self.assertRaisesRegex(Rejected,'embedding_model_change_requires_rebuild'):restored.reserve('/v1/embeddings',b'fixture')
             self.assertEqual(restored.report()['embedding_route']['model'],large.model)
 

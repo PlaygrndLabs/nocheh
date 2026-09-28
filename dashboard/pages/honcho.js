@@ -1,6 +1,7 @@
 import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText,labels,Panel,Data,friendlyState,jobName,profileName,Details,RouteLink,Steps,download,exportJSON,useLoad,useResource,refreshResources,StatusBadge,Button,Badge,Alert,Progress,Table,Tabs,TabsList,TabsTrigger,TabsContent,Modal,Sheet,EmptyState} from '../lib/page-helpers.js';
 import {useOwnerCommand} from '../lib/owner-controls.tsx';
-const dollars=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:value>0&&value<.01?6:2,maximumFractionDigits:value>0&&value<.01?6:2}).format(value);
+const dollars=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:value>0&&value<.1?6:2,maximumFractionDigits:value>0&&value<.1?6:2}).format(value);
+const percentLabel=value=>value>0&&value<1?'Less than 1%':Math.round(value)+'%';
 
 function HonchoBudget({notify,editable}) {
     const {data:budget,error}=useResource('/honcho/budget',10000),command=useOwnerCommand();
@@ -16,27 +17,35 @@ function HonchoBudget({notify,editable}) {
         const result=await command.run('/honcho/budget',{limit_cents:cents,expected_revision:draftRevision});
         if(result){setDraft((result.limit_cents/100).toFixed(2));setDraftRevision(result.revision);setDirty(false);notify('Monthly embedding cap updated.');}
     };
-    return h(Panel,{title:'Embedding budget',note:'Your local cap controls paid Honcho embeddings. Subscription reasoning is separate.'},
-      error&&h('p',{role:'alert'},error),!budget&&!error&&h('p',{role:'status'},'Loading budget…'),budget&&h('div',null,
-        h('div',{className:'honcho-budget-summary'},
-          h('div',{className:'honcho-budget-stat'},h('small',null,'Reserved this budget window'),h('strong',null,dollars(budget.reserved_usd)),h('span',null,'of '+dollars(budget.limit_usd)+' cap')),
-          h('div',{className:'honcho-budget-stat'},h('small',null,'Remaining admission headroom'),h('strong',null,dollars(budget.remaining_usd)),h('span',null,budget.mode==='monthly'?'Resets with the UTC month':'Pilot budget')),
-          h('div',{className:'honcho-budget-stat'},h('small',null,'Estimated embedding cost'),h('strong',null,dollars(budget.estimated_embedding_cost_usd)),h('span',null,budget.embedding_tokens.toLocaleString()+' reported tokens')),
-          h('div',{className:'honcho-budget-stat'},h('small',null,'Requests this window'),h('strong',null,budget.embedding_requests.toLocaleString()+' embeddings'),h('span',null,budget.reasoning_requests.toLocaleString()+' subscription reasoning · '+budget.total_requests.toLocaleString()+' of '+budget.request_limit.toLocaleString()+' safety limit'))),
-        budget.limit_usd>0&&h(Progress,{value:Math.min(100,100*budget.reserved_usd/budget.limit_usd),label:Math.round(100*budget.reserved_usd/budget.limit_usd)+'% of cap reserved'}),
-        h('p',{className:'n-muted honcho-budget-note'},'Each embedding request reserves $0.01, including failed calls. '+budget.embedding_unreported_requests+' embedding request'+(budget.embedding_unreported_requests===1?'':'s')+' had no token report. The estimate uses reported tokens and is not your provider invoice. ',
-          h('a',{href:'https://platform.openai.com/usage',target:'_blank',rel:'noopener noreferrer'},'Check OpenAI API usage')),
-        budget.mode==='monthly'&&editable?h('form',{className:'honcho-budget-form',onSubmit:save},
-          h('label',{htmlFor:'honcho-budget-limit'},'Monthly embedding cap (USD)'),
-          h('input',{id:'honcho-budget-limit',type:'number',inputMode:'decimal',min:0,max:budget.max_limit_cents/100,step:'.01',value:draft,
-            'aria-describedby':'honcho-budget-help'+(inputError?' honcho-budget-error':''),'aria-invalid':!!inputError,
-            onChange:event=>{setDraft(event.target.value);setDirty(true);setInputError('');}}),
-          h('p',{id:'honcho-budget-help',className:'n-muted'},'Set $0 to pause paid embeddings. Lowering the cap never erases existing reservations; subscription reasoning remains available within the request safety limit.'),
-          changed&&h(Alert,null,'The cap changed elsewhere. Load the latest value before saving.'),
-          inputError&&h('p',{id:'honcho-budget-error',role:'alert',className:'honcho-budget-error'},inputError),
-          command.error&&h(Alert,null,command.error),
-          h('div',{className:'n-actions'},h(Button,{type:'submit',disabled:command.busy||changed||!dirty},command.busy?'Saving…':'Save monthly cap'),changed&&button('Load latest cap',reload)))
-          :h('p',{className:'n-muted'},budget.mode==='monthly'?'Changing the monthly cap requires verified, attached Honcho memory.':'The $5 pilot cap is fixed. Monthly editing becomes available after the pilot cutover and accepted attachment.')));
+    return h(React.Fragment,null,
+      h(Panel,{title:'API embedding budget',note:'Paid OpenAI embeddings use the dedicated API key and this monthly dollar cap.'},
+        error&&h('p',{role:'alert'},error),!budget&&!error&&h('p',{role:'status'},'Loading embedding budget…'),budget&&h('div',null,
+          h('div',{className:'honcho-budget-summary'},
+            h('div',{className:'honcho-budget-stat'},h('small',null,'Counted toward cap'),h('strong',null,dollars(budget.counted_toward_cap_usd)),h('span',null,'of '+dollars(budget.limit_usd)+' cap')),
+            h('div',{className:'honcho-budget-stat'},h('small',null,'Remaining admission headroom'),h('strong',null,dollars(budget.remaining_usd)),h('span',null,budget.mode==='monthly'?'UTC monthly window':'Pilot budget')),
+            h('div',{className:'honcho-budget-stat'},h('small',null,'Estimated API cost'),h('strong',null,dollars(budget.estimated_embedding_cost_usd)),h('span',null,budget.embedding_tokens.toLocaleString()+' reported tokens')),
+            h('div',{className:'honcho-budget-stat'},h('small',null,'Embedding requests'),h('strong',null,budget.embedding_requests.toLocaleString()),h('span',null,budget.embedding_unreported_requests.toLocaleString()+' without a usage report'))),
+          budget.limit_usd>0&&h(Progress,{value:Math.min(100,100*budget.counted_toward_cap_usd/budget.limit_usd),label:percentLabel(100*budget.counted_toward_cap_usd/budget.limit_usd)+' of embedding cap counted'}),
+          h('p',{className:'n-muted honcho-budget-note'},'Each attempt holds $'+budget.embedding_hold_usd.toFixed(2)+' before the API call. Successful calls with reported tokens settle to their token-priced estimate; failed calls and calls without a usage report keep the full hold. The estimate covers reported Honcho tokens in this window, not your full provider bill. ',
+            h('a',{href:'https://platform.openai.com/usage',target:'_blank',rel:'noopener noreferrer'},'Check OpenAI API usage')),
+          budget.mode==='monthly'&&editable?h('form',{className:'honcho-budget-form',onSubmit:save},
+            h('label',{htmlFor:'honcho-budget-limit'},'Monthly embedding cap (USD)'),
+            h('input',{id:'honcho-budget-limit',type:'number',inputMode:'decimal',min:0,max:budget.max_limit_cents/100,step:'.01',value:draft,
+              'aria-describedby':'honcho-budget-help'+(inputError?' honcho-budget-error':''),'aria-invalid':!!inputError,
+              onChange:event=>{setDraft(event.target.value);setDirty(true);setInputError('');}}),
+            h('p',{id:'honcho-budget-help',className:'n-muted'},'Set $0 to pause paid embeddings. Lowering the cap preserves all existing accounting.'),
+            changed&&h(Alert,null,'The cap changed elsewhere. Load the latest value before saving.'),
+            inputError&&h('p',{id:'honcho-budget-error',role:'alert',className:'honcho-budget-error'},inputError),
+            command.error&&h(Alert,null,command.error),
+            h('div',{className:'n-actions'},h(Button,{type:'submit',disabled:command.busy||changed||!dirty},command.busy?'Saving…':'Save monthly cap'),changed&&button('Load latest cap',reload)))
+            :h('p',{className:'n-muted'},budget.mode==='monthly'?'Changing the monthly cap requires verified, attached Honcho memory.':'The $5 pilot cap is fixed. Monthly editing becomes available after the pilot cutover and accepted attachment.'))),
+      h(Panel,{title:'Subscription reasoning limit',note:'Honcho LLM calls use the shared ChatGPT subscription, separate from the paid embedding key.'},
+        error&&h('p',{role:'alert'},error),!budget&&!error&&h('p',{role:'status'},'Loading reasoning usage…'),budget&&h('div',null,
+          h('div',{className:'honcho-budget-summary'},
+            h('div',{className:'honcho-budget-stat'},h('small',null,'Reasoning requests this window'),h('strong',null,budget.reasoning_requests.toLocaleString()),h('span',null,'of '+budget.reasoning_request_limit.toLocaleString()+' safety limit')),
+            h('div',{className:'honcho-budget-stat'},h('small',null,'Requests remaining'),h('strong',null,budget.reasoning_remaining_requests.toLocaleString()),h('span',null,budget.mode==='monthly'?'Resets with the UTC month':'Pilot window'))),
+          h(Progress,{value:Math.min(100,100*budget.reasoning_requests/budget.reasoning_request_limit),label:Math.round(100*budget.reasoning_requests/budget.reasoning_request_limit)+'% of subscription request limit used'}),
+          h('p',{className:'n-muted honcho-budget-note'},'This is a request safety limit, not a dollar budget. Reasoning calls do not consume the embedding cap.'))));
 }
 export function Honcho({notify}) {
     const [tick,setTick]=useState(0),{data:memory,error:memoryError}=useResource('/memory/honcho',10000,tick),[history,setHistory]=useState(false),[catchUp,setCatchUp]=useState(false);

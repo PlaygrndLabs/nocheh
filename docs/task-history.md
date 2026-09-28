@@ -412,3 +412,20 @@ not established. The operating isolated-turn image was not replaced, so live
 first-attempt delivery and reply latency remain pending.
 
 </increment>
+
+<increment date="2026-09-28" name="Separate Honcho budgets and settle confirmed embeddings">
+
+The embedding dollar cap and subscription reasoning request bound now admit
+their own routes independently. Successful embedding calls with reported token
+usage settle their pre-egress hold to a rounded-up token-priced amount; failed,
+unfinished, and unreported calls keep their hold. Existing successful monthly
+entries settle once while pilot history remains intact. Fourteen focused ledger,
+embedding-model, and owner budget tests passed. A pinned offline dashboard
+build and live local preview showed separate panels, $0.011248 counted toward
+the $5 cap, and a $0.001178
+reported-token estimate; one unreported embedding kept its full hold. The
+source-watched asset volume had a checkout-label mismatch and produced `EROFS`,
+so verified preview assets were copied into that existing generated-output
+volume without recreating it. No paid call or cap edit was made for the preview.
+
+</increment>

@@ -8,6 +8,7 @@ import time
 import uuid
 import urllib.error
 import urllib.request
+from decimal import Decimal, ROUND_CEILING
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from datetime import datetime, timezone
@@ -21,9 +22,7 @@ MODEL = 'text-embedding-3-small'
 REASONING_MODEL = 'gpt-5.6-sol'
 PILOT_LIMIT_MICRODOLLARS = 5_000_000
 MAX_MONTHLY_LIMIT_CENTS = 1_500
-REQUEST_LIMIT = 1_500
-RESERVATION = 10_000  # $0.01; never released, including unknown/failed requests.
-PRICE_PER_MILLION = 0.02  # Default model; reviewed 2026-09-09; see README.
+REQUEST_LIMIT = 1_500  # Subscription reasoning attempts per budget window.
 
 
 class Rejected(Exception):
@@ -43,6 +42,37 @@ class Ledger:
             if 'last_operation_id' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN last_operation_id TEXT')
             db.execute('CREATE TABLE IF NOT EXISTS embedding_route(id INTEGER PRIMARY KEY CHECK(id=1),provider TEXT,model TEXT,dimensions INTEGER)')
             if 'audit' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]: db.execute('ALTER TABLE calls ADD COLUMN audit TEXT')
+            if 'settlement_version' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]:
+                db.execute('ALTER TABLE calls ADD COLUMN settlement_version INTEGER NOT NULL DEFAULT 0')
+            # Preserve the exhausted pilot's historical accounting. Reconcile
+            # confirmed monthly calls once, without changing failed or unknown
+            # reservations; a restart cannot repeatedly lower a reservation.
+            monthly_since=db.execute('SELECT monthly_since FROM policy WHERE id=1').fetchone()[0]
+            if monthly_since is not None:
+                for (call,) in db.execute("SELECT id FROM calls WHERE route='/v1/embeddings' AND started>=? AND settlement_version=0 AND status IS NOT NULL",(monthly_since,)).fetchall():
+                    self._settle_call(db,call)
+
+    @staticmethod
+    def _reported_tokens(usage):
+        try: value=json.loads(usage) if isinstance(usage,str) else usage
+        except (ValueError,TypeError): return None
+        count=value.get('total_tokens',value.get('prompt_tokens')) if isinstance(value,dict) else None
+        return count if type(count) is int and count>=0 else None
+
+    def _settle_call(self,db,call):
+        row=db.execute('SELECT route,reserved,status,usage FROM calls WHERE id=?',(call,)).fetchone()
+        if row is None: return
+        route,reserved,status,usage=row
+        if route!='/v1/embeddings' or not isinstance(status,int): return
+        tokens=self._reported_tokens(usage)
+        if 200 <= status < 300 and tokens is not None:
+            selected=db.execute('SELECT model FROM embedding_route WHERE id=1').fetchone()
+            model=selected[0] if selected else MODEL
+            price=embeddings({'NOCHEH_EMBEDDING_MODEL':model}).price_per_million
+            settled=max(1,int((Decimal(tokens)*Decimal(str(price))).to_integral_value(rounding=ROUND_CEILING)))
+            db.execute('UPDATE calls SET reserved=min(reserved,?),settlement_version=1 WHERE id=?',(settled,call))
+        else:
+            db.execute('UPDATE calls SET settlement_version=1 WHERE id=?',(call,))
 
     def enable_monthly(self):
         # An explicit post-pilot cutover, persisted once; restart cannot reset it.
@@ -101,9 +131,12 @@ class Ledger:
                 db.execute('INSERT OR IGNORE INTO embedding_route VALUES(1,?,?,?)',selected)
             start,mode=self.window(db)
             limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else db.execute('SELECT monthly_limit FROM policy WHERE id=1').fetchone()[0]
-            total, count = db.execute('SELECT coalesce(sum(reserved),0),count(*) FROM calls WHERE started>=?',(start,)).fetchone()
-            if (amount and total + amount > limit) or count >= REQUEST_LIMIT:
+            total = db.execute("SELECT coalesce(sum(reserved),0) FROM calls WHERE route='/v1/embeddings' AND started>=?",(start,)).fetchone()[0]
+            reasoning = db.execute("SELECT count(*) FROM calls WHERE route='/v1/chat/completions' AND started>=?",(start,)).fetchone()[0]
+            if amount and total + amount > limit:
                 raise Rejected('pilot_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
+            if route=='/v1/chat/completions' and reasoning >= REQUEST_LIMIT:
+                raise Rejected('subscription_request_limit_exhausted')
             audit={'owner_wording':b'Database credentials are in my password manager.' in body,
                    'synthetic_raw_canary':b'mango123' in body}
             return db.execute('INSERT INTO calls(route,digest,reserved,started,audit) VALUES(?,?,?,?,?)',
@@ -113,6 +146,7 @@ class Ledger:
         with self.connect() as db:
             db.execute('UPDATE calls SET status=?,duration_ms=?,usage=? WHERE id=?',
                 (status, round(duration*1000), json.dumps(usage), call))
+            self._settle_call(db,call)
 
     def report(self):
         with self.connect() as db:
@@ -123,13 +157,16 @@ class Ledger:
             selected=db.execute('SELECT provider,model,dimensions FROM embedding_route WHERE id=1').fetchone()
         limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else monthly_limit
         reserved=sum(c['reserved'] for c in calls if c['started']>=start)
+        embedding=embeddings({'NOCHEH_EMBEDDING_MODEL':selected['model']}) if selected else embeddings({})
         return {'limit_usd':limit/1e6,'limit_cents':limit//10_000,'max_limit_cents':MAX_MONTHLY_LIMIT_CENTS,
                 'revision':revision,'window_started_at':datetime.fromtimestamp(start,timezone.utc).isoformat(),
                 'mode':mode,'reserved_usd':reserved/1e6,'remaining_usd':max(0,limit-reserved)/1e6,
+                'counted_toward_cap_usd':reserved/1e6,
                 'lifetime_reserved_usd':sum(c['reserved'] for c in calls)/1e6,
                 'embedding_route':dict(selected) if selected else None,
-                'pricing_usd_per_million_embedding_tokens': embeddings({'NOCHEH_EMBEDDING_MODEL':selected['model']}).price_per_million if selected else PRICE_PER_MILLION,
-                'note': 'Reservations are conservative, not a provider invoice; unfinished calls remain reserved.', 'calls': calls}
+                'embedding_hold_usd':embedding.reservation/1e6,
+                'pricing_usd_per_million_embedding_tokens':embedding.price_per_million,
+                'note': 'Confirmed reported embeddings settle to token-priced accounting; failed, unfinished, and unreported calls retain their hold. This is not a provider invoice.', 'calls': calls}
 
     def summary(self):
         report=self.report();start=datetime.fromisoformat(report['window_started_at']).timestamp()
@@ -139,13 +176,12 @@ class Ledger:
         tokens=reported=0
         for call in embeddings:
             if not isinstance(call['status'],int) or not 200 <= call['status'] < 300: continue
-            try: usage=json.loads(call['usage']) if call['usage'] else {}
-            except (ValueError,TypeError): usage={}
-            count=usage.get('total_tokens',usage.get('prompt_tokens')) if isinstance(usage,dict) else None
-            if type(count) is int and count>=0:tokens+=count;reported+=1
+            count=self._reported_tokens(call['usage'])
+            if count is not None:tokens+=count;reported+=1
         return {key:value for key,value in report.items() if key!='calls'} | {
             'embedding_requests':len(embeddings),'reasoning_requests':reasoning,
-            'total_requests':len(current),'request_limit':REQUEST_LIMIT,
+            'total_requests':len(current),'reasoning_request_limit':REQUEST_LIMIT,
+            'reasoning_remaining_requests':max(0,REQUEST_LIMIT-reasoning),
             'embedding_reported_requests':reported,'embedding_unreported_requests':len(embeddings)-reported,
             'embedding_tokens':tokens,
             'estimated_embedding_cost_usd':round(tokens*report['pricing_usd_per_million_embedding_tokens']/1_000_000,8)}
