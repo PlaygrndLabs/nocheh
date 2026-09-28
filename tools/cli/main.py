@@ -40,7 +40,7 @@ def run_isolated_tests(rest):
         from tools.acceptance.subscription.setup import checkout, LOCK
         checkout('hermes-agent', LOCK['hermes'])
         project = state.name
-        command = compose_command(state, project) + ['-f', str(INSTALLATION_ROOT / 'docker-compose.dev.yml')]
+        command = compose_command(state, project) + ['-f', str(INSTALLATION_ROOT / 'deploy/acceptance/test-compose.yml')]
         env = compose_environment(state)
         env['COMPOSE_PROJECT_NAME'] = project
         env['NOCHEH_AGENT_NETWORK'] = project + '-agent'

@@ -4,14 +4,83 @@ from tools.paths import ROOT
 
 import json
 import os
+import socket
 import subprocess
 from pathlib import Path
 
-from tools.development import dev_preview
 from tools.operations.installation import configuration
 
 PROJECT = 'nocheh'
 DEV_IMAGES = 'nocheh-dev'
+SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
+            'nocheh-security', 'hermes-agent-sb', 'cliproxy-api',
+            'cliproxy-monitor', 'inngest-redis', 'inngest-server',
+            'chatgpt-speech', 'hermes', 'honcho-postgres', 'honcho-redis',
+            'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
+PORTS = (8780, 8783, 8785, 1455, 18317)
+
+
+def port_available(port):
+    with socket.socket() as probe:
+        try:
+            probe.bind(('127.0.0.1', port))
+        except OSError:
+            return False
+    return True
+
+
+def assert_ports(containers):
+    owned = set()
+    for container in containers:
+        if not container['State']['Running']:
+            continue
+        for bindings in (container['NetworkSettings'].get('Ports') or {}).values():
+            for binding in bindings or []:
+                owned.add(int(binding['HostPort']))
+    for port in PORTS:
+        if port not in owned and not port_available(port):
+            raise ValueError(f'Local development port {port} is in use by another process')
+
+
+def prepare_source_mounts():
+    # Nested named volumes need existing mount points under read-only source
+    # binds. These ignored directories hold no generated output on the host.
+    for relative in ('dashboard/dist', 'services/hermes/dashboard/dist'):
+        path = ROOT / relative
+        if path.is_symlink():
+            raise ValueError(f'Development source mount {relative} must not be a symlink')
+        path.mkdir(exist_ok=True)
+
+
+def prepare_runtime_images(env):
+    """Reuse only revision-checked, credential-free pinned image contents."""
+    locks = json.loads((ROOT / 'deploy/upstreams.lock.json').read_text())
+    sources = (
+        ('nocheh-hermes:local', locks['hermes']['revision'], DEV_IMAGES + ':hermes-base'),
+        ('nocheh-cliproxy:c76dfd4e', locks['cliproxy']['revision'], DEV_IMAGES + ':cliproxy'),
+        (locks['cpamp']['image'], locks['cpamp']['revision'], DEV_IMAGES + ':monitor'),
+    )
+    for source, revision, destination in sources:
+        def image_revision(tag):
+            result = subprocess.run(['docker', 'image', 'inspect', '--format',
+                                     '{{ index .Config.Labels "org.opencontainers.image.revision" }}', tag],
+                                    cwd=ROOT, env=env, capture_output=True, text=True)
+            return result.stdout.strip() if result.returncode == 0 else None
+        saved = image_revision(destination)
+        if saved == revision:
+            continue
+        if saved is not None:
+            raise ValueError(f'Development image {destination} has the wrong pinned revision')
+        if image_revision(source) != revision:
+            raise ValueError(f'Pinned runtime image {source} is unavailable or has the wrong revision; build the pinned local runtime images before starting the full development stack')
+        subprocess.run(['docker', 'tag', source, destination], cwd=ROOT, env=env,
+                       check=True, capture_output=True)
+    honcho_source = 'nocheh-honcho:' + json.loads((ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+    if subprocess.run(['docker', 'image', 'inspect', honcho_source], cwd=ROOT, env=env,
+                      capture_output=True).returncode:
+        raise ValueError(f'Pinned Honcho image {honcho_source} is unavailable')
+    subprocess.run(['docker', 'tag', honcho_source, DEV_IMAGES + ':honcho'], cwd=ROOT, env=env,
+                   check=True, capture_output=True)
 
 
 def operating_root():
@@ -68,7 +137,7 @@ def command(root):
     return ['docker', 'compose', '--env-file', str(root / '.env'),
             '-f', str(root / 'docker-compose.yml'),
             '-f', str(root / 'deploy/original-only-compose.yml'),
-            '-f', str(ROOT / 'deploy/dev-compose.yml'), '-p', PROJECT]
+            '-f', str(ROOT / 'docker-compose.dev.yml'), '-p', PROJECT]
 
 
 def assert_operating_volumes(env):
@@ -99,7 +168,7 @@ def inspect_project(root, env):
         labels = container['Config']['Labels'] or {}
         service = labels.get('com.docker.compose.service') or ''
         if (labels.get('com.docker.compose.project.working_dir') != str(root)
-                or service not in dev_preview.SERVICES
+                or service not in SERVICES
                 and not service.startswith('nocheh-reset-')
                 and service != 'pgweb-archive'):
             raise ValueError('Operating Compose project belongs to another checkout or service')
@@ -116,7 +185,7 @@ def assert_only_development_running(containers, env):
         for container in running:
             labels = container['Config']['Labels'] or {}
             if (labels.get('com.docker.compose.project') != PROJECT
-                    and labels.get('com.docker.compose.service') in dev_preview.SERVICES):
+                    and labels.get('com.docker.compose.service') in SERVICES):
                 raise ValueError('Another Nocheh stack is running; stop it before make dev')
     active = [container for container in containers if container['State']['Running']]
     if active and not any(
@@ -188,15 +257,15 @@ def main(action, rest):
     if action == 'dev-status':
         return subprocess.call(cmd + ['ps'], cwd=root, env=env)
     assert_only_development_running(containers, env)
-    dev_preview.assert_ports(containers)
+    assert_ports(containers)
     assert_operating_volumes(env)
     assert_compose_mounts(cmd, env)
-    dev_preview.prepare_source_mounts()
-    dev_preview.prepare_runtime_images(env)
+    prepare_source_mounts()
+    prepare_runtime_images(env)
     build_flag = '--build' if build_needed(env) else '--no-build'
     print('Live development: http://127.0.0.1:8783/', flush=True)
     print(f'Source checkout: {ROOT}\nOperating state: {root / "data/local"}', flush=True)
     try:
-        return subprocess.call(cmd + ['up', build_flag, *dev_preview.SERVICES], cwd=root, env=env)
+        return subprocess.call(cmd + ['up', build_flag, *SERVICES], cwd=root, env=env)
     except KeyboardInterrupt:
         return 130
