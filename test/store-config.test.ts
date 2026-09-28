@@ -11,8 +11,9 @@ import {settings} from '../src/config.js';
 
 const env=()=>({NOCHEH_STORAGE_LAYOUT:'original-only-v1',NOCHEH_ARCHIVE_PASSWORD:digest('archive'),NOCHEH_DERIVED_PASSWORD:digest('derived'),NOCHEH_CONTROL_PASSWORD:digest('control')});
 test('storage layout and role secrets fail closed without inheriting database authority',async()=>{
-  assert.equal(storageLayout({}),'legacy');assert.throws(()=>storageLayout({NOCHEH_STORAGE_LAYOUT:'unknown'}),/invalid_storage_layout/);
-  assert.throws(()=>storageConfiguration({}),/original_storage_layout_required/);
+  assert.equal(storageLayout({}),'original-only-v1');assert.throws(()=>storageLayout({NOCHEH_STORAGE_LAYOUT:'unknown'}),/invalid_storage_layout/);
+  assert.throws(()=>storageConfiguration({}),/invalid_archive_credential/);
+  assert.throws(()=>storageLayout({NOCHEH_STORAGE_LAYOUT:'legacy'}),/invalid_storage_layout/);
   const value=storageConfiguration({...env(),PGHOST:'fixture',PGPORT:'6543',PGUSER:'nocheh',PGDATABASE:'nocheh'});
   assert.deepEqual(value.connection,{host:'fixture',port:6543});assert.equal(new Set(Object.values(value.passwords)).size,3);
   for(const port of ['0','65536','not-port','1.5'])assert.throws(()=>storageConfiguration({...env(),PGPORT:port}),/invalid_store_port/);

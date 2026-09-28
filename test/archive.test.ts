@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import pg from 'pg';
 import { canonical, digest, ingest, archiveStatus, type Envelope } from '../src/archive.js';
 import { initialize } from '../src/database.js';
-import { settings } from '../src/config.js';
+import { settings } from './fixture-settings.js';
 import { drainSpool, fetchAttachments, immutableFile, reconcileLegacyDeliveries } from '../src/storage.js';
 import {runInput} from '../src/run-source.js';
 import {readEvent, importRecord,search} from '../src/retrieval.js';

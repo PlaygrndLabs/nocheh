@@ -4,7 +4,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest,type Envelope} from '../src/archive.js';
 import {approveLearning,prepareReviews,runReviewJobs,controlReview} from '../src/learning.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {HttpError} from '../src/http.js';
 
 test('real PostgreSQL: explicit import consent, complete chunking, retries and durable pause/resume',{skip:!process.env.PGHOST},async()=>{

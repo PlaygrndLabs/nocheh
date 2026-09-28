@@ -4,7 +4,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {workflowMetrics} from '../src/workflows/metrics.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 test('workflow metrics use bounded, confirmed, content-free registry evidence',async()=>{
  const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:settings().databasePassword};
  const admin=new pg.Pool(connection),schema='metrics_'+Date.now();await admin.query(`CREATE SCHEMA ${schema}`);

@@ -265,3 +265,35 @@ revision is the complete ledger before this summary replaced it.
 ## Development Compose layout cleanup, 2026-09-28
 
 - The active source-watched override moved to the repository root; the isolated automated-test override moved under `deploy/acceptance`, and the obsolete preview launcher, overlay, and tests were removed. Twelve focused launcher checks and three Compose renders passed. A fresh consistent backup failed during workflow database fingerprinting when PostgreSQL ran out of temporary-file space; the original containers were restarted and all 17 returned healthy/running. The live worktree startup and isolated Compose test command remain pending. [Current status](../TASK.md), [decision](adr/0074-root-development-compose-layout.md).
+
+<increment date="2026-09-28" name="Clean pre-release development setup">
+
+The owner superseded data-preserving setup cleanup with a clean reset, explicitly
+keeping credentials and settings and requesting development startup. Historical
+voice, group-silence, corrections, reaction learning, and Honcho recall observations
+from the preceding installation no longer constitute fresh acceptance. That
+installation had long reply delays, an exhausted conservative pilot budget, and
+incomplete backups; those pending release concerns remain in TASK.md.
+
+The storage overlay was folded into base Compose, retired startup paths removed,
+and synthetic regression fixtures retained. The active installation and verified
+obsolete preview resources were erased. Credentials, bounded settings/preferences,
+and budget accounting were retained; fresh source and learned-memory counts were
+zero before capture. Source worktree archives were preserved. See
+[ADR-0075](adr/0075-clean-development-setup.md) and current verification in TASK.md.
+
+</increment>
+
+<verification date="2026-09-28" name="Clean setup validation">
+
+The TypeScript/dashboard build, focused ownership/configuration/recovery checks,
+operating/development/test Compose renders, 147 PostgreSQL/TypeScript tests and
+the database-disconnect check passed; 49 explicit fixture gates skipped. The
+final exact-source native suite ran 371 tests successfully with two skips in the
+pinned runtime. The all-in-one native image rebuild was stopped because it
+competed with source compilation; native verification completed separately.
+All 17 development services became healthy. A source touch rebuilt assets and
+restarted Node without recreating the app container. Saved control settings
+matched exactly under a new installation generation. Release gates remain pending.
+
+</verification>

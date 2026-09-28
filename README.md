@@ -31,7 +31,6 @@ Install Docker with Compose, Python 3 and Node 24.x, then run:
 npm ci                  # development/build dependencies; runtime tools are in Docker
 ./bin/nocheh init     # create .env with generated internal credentials
 # Edit .env for Telegram, model and optional guarding settings.
-./bin/nocheh up       # build, start in the background, wait for health checks
 make dev                  # source-watched operating Compose stack
 make dev-build            # rebuild after dependency or Dockerfile changes
 make dev-status           # inspect the development stack
@@ -48,8 +47,9 @@ make dev-stop             # stop it; retain operating data
 Stop unattended services before `make dev`; the launcher refuses a competing
 Nocheh stack and verifies the operating volume, source mount, port, and
 project ownership. The root `docker-compose.dev.yml` mounts this checkout's source into
-the operating `nocheh` project, using its existing data, Telegram bot, and provider
-login. The existing app service compiles changed source into shared generated-code
+the operating `nocheh` project, using its configured Telegram bot and provider login. Root `docker-compose.yml`
+defines the three-store layout directly. Compose creates fresh owned database
+volumes on first startup and retains them across normal restarts. The existing app service compiles changed source into shared generated-code
 volumes, and the running services reload without an image rebuild or another
 `make dev`. Use `make dev-build` after dependency or Dockerfile edits, and
 `make dev-stop` to stop development without deleting operating state. The

@@ -7,7 +7,7 @@ Git contains source code, configuration needed to build and deploy it, documenta
 | `.agent/` | Shared agent skills and their references |
 | `bin/` | Owner command launcher |
 | `dashboard/` | Owner dashboard source |
-| `deploy/` | Dockerfiles, the operating storage overlay, synthetic acceptance overlays, and pinned upstream revisions |
+| `deploy/` | Dockerfiles, synthetic acceptance overlays, and pinned upstream revisions |
 | `docs/` | Specifications support, decisions, procedures, and non-identifying status summaries |
 | `services/` | Hermes plugin and Honcho service code |
 | `src/` | TypeScript application services |

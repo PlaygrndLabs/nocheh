@@ -9,7 +9,7 @@ import {readEvent,readArtifact,search} from '../src/retrieval.js';
 import {assertAudience} from '../src/access.js';
 import {captureInput,claimRun,finishRun,renewRun} from '../src/managed-runs.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';

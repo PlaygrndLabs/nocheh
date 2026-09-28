@@ -34,15 +34,10 @@ def _bounded(value, limit, code):
 
 def _catalog(state):
     config = load(state)
-    layout = config.get('NOCHEH_STORAGE_LAYOUT', 'legacy')
     databases = []
-    if layout == 'legacy':
-        databases.append({'id': 'archive', 'name': 'Legacy combined', 'engine': 'postgres',
-                          'service': 'nocheh-db', 'database': 'nocheh', 'user': 'nocheh'})
-    else:
-        for name in ('archive', 'derived', 'control'):
-            databases.append({'id': name, 'name': name.title(), 'engine': 'postgres',
-                              'service': 'nocheh-db', 'database': 'nocheh_' + name, 'user': 'nocheh'})
+    for name in ('archive', 'derived', 'control'):
+        databases.append({'id': name, 'name': name.title(), 'engine': 'postgres',
+                          'service': 'nocheh-db', 'database': 'nocheh_' + name, 'user': 'nocheh'})
     databases.append({'id': 'workflow', 'name': 'Workflow · Inngest', 'engine': 'postgres',
                       'service': 'nocheh-db', 'database': 'nocheh_inngest', 'user': 'nocheh'})
     if config.get('NOCHEH_HONCHO_ENABLED') == 'true':

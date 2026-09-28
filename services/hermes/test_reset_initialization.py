@@ -215,34 +215,20 @@ class ResetInitializationTests(unittest.TestCase):
                         environment=self.environment, command=self.command)
         self.assertEqual(fake.volumes, {}); self.assertEqual(fake.setup_calls, 0)
 
-    def test_legacy_layout_transition_is_recorded_before_write_and_retryable(self):
+    def test_retired_layout_is_rejected_before_writes(self):
         self.legacy(); fake = FakeDocker(self.root, self.state, self.project, self.command[3],
                                          self.state / 'admin/reset/setup.json')
-        writer = configuration.write_env; interrupted = False
-
-        def after_write(path, values):
-            nonlocal interrupted
-            writer(path, values)
-            if not interrupted:
-                interrupted = True; raise OSError('synthetic_layout_interruption')
-
+        before = configuration.env_path(self.state).read_bytes()
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)
             with patch.object(reset_initialization.reset_preservation, 'assert_frozen', return_value=self.artifacts), \
-                 patch.object(reset_initialization.configuration, 'write_env', side_effect=after_write):
-                with self.assertRaisesRegex(OSError, 'synthetic_layout_interruption'):
+                 patch.object(reset_initialization.configuration, 'write_env') as writer:
+                with self.assertRaisesRegex(ValueError, 'NOCHEH_STORAGE_LAYOUT'):
                     reset_initialization.initialize(journal, self.preflight, runner=fake,
                         environment=self.environment, command=self.command)
-            self.assertEqual(reset_protocol.read(journal.directory / 'layout.json')['stage'], 'prepared')
-            self.assertEqual(configuration.load(self.state)['NOCHEH_STORAGE_LAYOUT'], 'original-only-v1')
-            with patch.object(reset_initialization.reset_preservation, 'assert_frozen', return_value=self.artifacts):
-                result = reset_initialization.initialize(journal, self.preflight, runner=fake,
-                    environment=self.environment, command=self.command)
-            request = reset_protocol.read(journal.directory / 'setup.json')
-            self.assertEqual(result['phase'], 'initialized')
-            self.assertEqual(request['snapshot']['layout'], 'original-only-v1')
-            self.assertEqual(request['snapshot']['configuration']['sharing_rules'][0]['destination'], '-10')
-            self.assertTrue(request['snapshot']['configuration']['sharing_rules'][0]['enabled'])
+                writer.assert_not_called()
+            self.assertFalse((journal.directory / 'layout.json').exists())
+            self.assertEqual(configuration.env_path(self.state).read_bytes(), before)
 
     def test_empty_baseline_retires_private_artifacts_and_rejects_cache_content(self):
         fake = FakeDocker(self.root, self.state, self.project, self.command[3],

@@ -1,5 +1,7 @@
 # Architecture decisions
 
+Current setup: [0075 — Clean development setup](0075-clean-development-setup.md).
+
 [SPECS.md](../../SPECS.md) is the authoritative product definition;
 [AGENTS.md](../../AGENTS.md) defines agent workflow; and [TASK.md](../../TASK.md)
 records implementation, evidence, and activation state. ADRs explain why decisions

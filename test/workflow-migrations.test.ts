@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {ingest,type Envelope} from '../src/archive.js';
 import {beginMigration,finishMigration,migrationStatus,reconcileMigration,migrationHostReady,stageMigrationImport} from '../src/workflows/migrations.js';
 import {cancelImport,confirmImport} from '../src/workflows/imports.js';

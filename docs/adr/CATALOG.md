@@ -1,5 +1,7 @@
 # ADR catalog
 
+Current setup: [0075 — Clean development setup](0075-clean-development-setup.md).
+
 This is the complete chronological index. Start with the
 [current decision map and historical summary](README.md) unless you need to audit
 an individual decision or supersession chain.

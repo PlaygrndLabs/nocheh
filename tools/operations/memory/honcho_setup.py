@@ -10,7 +10,7 @@ ROOT=Path(os.environ.get('NOCHEH_INSTALLATION_ROOT',REPO_ROOT)).resolve()
 PROVIDER_STATE=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local')).resolve()
 from tools.operations.installation.configuration import read_env,env_path
 STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
-           (ROOT/'data/honcho-experiment' if PROVIDER_STATE==ROOT/'data/local' else PROVIDER_STATE/'honcho')).resolve()
+           (PROVIDER_STATE/'honcho')).resolve()
 
 
 def initialize():

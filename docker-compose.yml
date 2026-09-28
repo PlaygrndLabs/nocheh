@@ -14,9 +14,10 @@ x-service: &service
   stop_grace_period: 30s
   environment: &environment
     PGHOST: nocheh-db
-    PGUSER: nocheh
-    PGDATABASE: nocheh
-    PGPASSWORD: ${POSTGRES_PASSWORD:?Run ./bin/nocheh init}
+    NOCHEH_STORAGE_LAYOUT: original-only-v1
+    NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Run ./bin/nocheh init}
+    NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Run ./bin/nocheh init}
+    NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Run ./bin/nocheh init}
     SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
@@ -44,9 +45,9 @@ x-honcho-runtime: &honcho-runtime
   image: nocheh-honcho:be543555
   build:
     context: ./data/compat/upstreams/honcho
-    dockerfile: ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/honcho.Dockerfile
+    dockerfile: ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/honcho.Dockerfile
   profiles: [honcho]
-  env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/honcho.env", required: false}]
+  env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/honcho.env", required: false}]
   networks: [honcho-isolated]
   restart: unless-stopped
   stop_grace_period: 120s
@@ -73,10 +74,124 @@ x-management: &management
     - /var/run/docker.sock:/var/run/docker.sock
     - ${NOCHEH_INSTALLATION_ROOT:-${PWD}}:${NOCHEH_INSTALLATION_ROOT:-${PWD}}
     - ${NOCHEH_STATE_DIR:-${PWD}/data/local}:${NOCHEH_STATE_DIR:-${PWD}/data/local}
-    - ${NOCHEH_HONCHO_STATE_DIR:-${PWD}/data/honcho-experiment}:${NOCHEH_HONCHO_STATE_DIR:-${PWD}/data/honcho-experiment}
+    - ${NOCHEH_HONCHO_STATE_DIR:-${PWD}/data/local/honcho}:${NOCHEH_HONCHO_STATE_DIR:-${PWD}/data/local/honcho}
   networks: [default]
 
 services:
+  nocheh-reset-setup:
+    image: nocheh-services:local
+    build:
+      context: .
+      target: runtime
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    profiles: [reset]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, dist/src/stores/reset-setup-cli.js, /reset/setup.json]
+    environment:
+      PGHOST: nocheh-db
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Installation administrator credential required}
+      NOCHEH_DATA_DIR: /data
+      NOCHEH_STORAGE_LAYOUT: original-only-v1
+      NOCHEH_RESET_SETUP: "1"
+      NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
+      NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
+      NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:?Workflow credential required}
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/reset:/reset:ro
+    depends_on:
+      nocheh-db: {condition: service_healthy}
+  nocheh-reset-baseline:
+    image: nocheh-services:local
+    build:
+      context: .
+      target: runtime
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    profiles: [reset]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, dist/src/stores/reset-baseline-cli.js, /reset/setup.json]
+    environment:
+      PGHOST: nocheh-db
+      NOCHEH_STORAGE_LAYOUT: original-only-v1
+      NOCHEH_RESET_BASELINE: "1"
+      NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
+      NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
+      NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/reset:/reset:ro
+    depends_on:
+      nocheh-db: {condition: service_healthy}
+  nocheh-reset-state:
+    image: nocheh-services:local
+    build:
+      context: .
+      target: runtime
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    profiles: [reset]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, dist/src/stores/reset-state-cli.js]
+    environment:
+      PGHOST: nocheh-db
+      NOCHEH_STORAGE_LAYOUT: original-only-v1
+      NOCHEH_RESET_STATE: "1"
+      NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
+      NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
+      NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
+    depends_on:
+      nocheh-db: {condition: service_healthy}
+  nocheh-reset-acceptance:
+    image: nocheh-services:local
+    build:
+      context: .
+      target: runtime
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    profiles: [reset]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, dist/src/stores/reset-acceptance-cli.js, /reset/fresh-acceptance-request.json]
+    environment:
+      PGHOST: nocheh-db
+      NOCHEH_STORAGE_LAYOUT: original-only-v1
+      NOCHEH_RESET_ACCEPTANCE: "1"
+      NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
+      NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
+      NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/reset:/reset:ro
+    depends_on:
+      nocheh-db: {condition: service_healthy}
   nocheh-dashboard:
     <<: *management
     command: [dashboard]
@@ -161,13 +276,13 @@ services:
     restart: unless-stopped
     image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
     command: [python, /nocheh/meter.py]
-    env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/meter.env", required: false}]
+    env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/meter.env", required: false}]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     volumes:
       - ./services/honcho/meter.py:/nocheh/meter.py:ro
       - ./tools/operations/provider/embedding_config.py:/nocheh/embedding_config.py:ro
-      - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
-      - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/ledger:/ledger
+      - ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/internal_token:/state/internal_token:ro
+      - ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/ledger:/ledger
       - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/honcho.key:/run/secrets/cliproxy_honcho_key:ro
     secrets: [temporary_embedding_key]
     networks: [honcho-isolated, honcho-egress, memory]
@@ -182,7 +297,7 @@ services:
     read_only: true
     tmpfs: [/tmp]
     volumes:
-      - ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/internal_token:/state/internal_token:ro
+      - ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/internal_token:/state/internal_token:ro
     networks: [honcho-isolated]
 
   nocheh-security:
@@ -193,7 +308,8 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    volumes: []
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:8786/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
@@ -317,19 +433,31 @@ services:
       retries: 12
 
   nocheh-db:
-    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
-    restart: unless-stopped
+    image: nocheh-store-postgres:local
+    build:
+      context: .
+      target: store-postgres
+    init: true
     environment:
       POSTGRES_USER: nocheh
       POSTGRES_DB: nocheh
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run ./bin/nocheh init}
-    volumes: [postgres_data:/var/lib/postgresql/data]
-    networks: [default, workflows]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Installation administrator credential required}
+      NOCHEH_STORAGE_LAYOUT: original-only-v1
+      NOCHEH_DATA_DIR: /data
+      NOCHEH_ARCHIVE_PASSWORD: ${NOCHEH_ARCHIVE_PASSWORD:?Archive credential required}
+      NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
+      NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
+      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:?Workflow credential required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
+      test: [CMD-SHELL, "test -f /tmp/nocheh-stores-ready && pg_isready -h 127.0.0.1 -U nocheh -d nocheh"]
       interval: 3s
       timeout: 3s
-      retries: 20
+      retries: 30
+    restart: unless-stopped
+    networks: [default, workflows]
 
   inngest-redis:
     image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
@@ -375,7 +503,6 @@ services:
       <<: *environment
       NOCHEH_SERVICE: nocheh-app
       NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
-      INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:-}
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
@@ -422,6 +549,7 @@ services:
     stop_grace_period: 120s
     ports: ["127.0.0.1:${NOCHEH_NATIVE_ADMIN_PORT:-8785}:8785"]
     environment:
+      NOCHEH_STORAGE_LAYOUT: original-only-v1
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       NOCHEH_CAPTURE_ENABLED: '1'
@@ -462,10 +590,8 @@ services:
 
 volumes:
   honcho_database:
-    external: true
     name: ${NOCHEH_HONCHO_DATABASE_VOLUME:-nocheh_honcho_database}
   honcho_redis:
-    external: true
     name: ${NOCHEH_HONCHO_REDIS_VOLUME:-nocheh_honcho_redis}
   postgres_data:
 
@@ -484,6 +610,6 @@ networks:
 
 secrets:
   honcho_database_password:
-    file: ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/database_password
+    file: ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/database_password
   temporary_embedding_key:
-    file: ${NOCHEH_HONCHO_STATE_DIR:-./data/honcho-experiment}/temporary_embedding_key
+    file: ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/temporary_embedding_key

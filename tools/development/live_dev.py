@@ -1,4 +1,4 @@
-"""Source-watched development against the stopped operating installation."""
+"""Source-watched development for a single local installation."""
 
 from tools.paths import ROOT
 
@@ -135,20 +135,23 @@ def docker_env(root, values):
 
 def command(root):
     return ['docker', 'compose', '--env-file', str(root / '.env'),
-            '-f', str(root / 'docker-compose.yml'),
-            '-f', str(root / 'deploy/original-only-compose.yml'),
+            '--project-directory', str(root),
+            '-f', str(ROOT / 'docker-compose.yml'),
             '-f', str(ROOT / 'docker-compose.dev.yml'), '-p', PROJECT]
 
 
 def assert_operating_volumes(env):
     names = {'nocheh_postgres_data': ('nocheh', 'postgres_data'),
-             env['NOCHEH_HONCHO_DATABASE_VOLUME']: None,
-             env['NOCHEH_HONCHO_REDIS_VOLUME']: None}
+             env['NOCHEH_HONCHO_DATABASE_VOLUME']: ('nocheh', 'honcho_database'),
+             env['NOCHEH_HONCHO_REDIS_VOLUME']: ('nocheh', 'honcho_redis')}
     for name, expected in names.items():
         result = subprocess.run(['docker', 'volume', 'inspect', name],
                                 cwd=ROOT, env=env, capture_output=True, text=True)
         if result.returncode:
-            raise ValueError('Missing operating volume: ' + name)
+            # Compose creates missing, project-owned volumes on a clean setup.
+            if 'no such volume' not in result.stderr.lower():
+                raise ValueError('Unable to inspect operating volume: ' + name)
+            continue
         volume = json.loads(result.stdout)[0]
         if expected:
             labels = volume.get('Labels') or {}
@@ -206,7 +209,7 @@ def assert_compose_mounts(cmd, env):
                         'honcho_database': env['NOCHEH_HONCHO_DATABASE_VOLUME'],
                         'honcho_redis': env['NOCHEH_HONCHO_REDIS_VOLUME']}
     if any(rendered['volumes'][key].get('name') != name
-           or rendered['volumes'][key].get('external') is not True
+           or rendered['volumes'][key].get('external', False)
            for key, name in expected_volumes.items()):
         raise ValueError('Development databases are not attached to the operating volumes')
     def mount(service, target):

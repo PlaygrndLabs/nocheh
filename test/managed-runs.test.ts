@@ -5,7 +5,7 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {prepareArchiveFiles} from '../src/preparation.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {captureInput,claimRun,finishRun,renewRun,recoverRuns,prepareRun} from '../src/managed-runs.js';
 import {reader} from '../src/access.js';

@@ -7,7 +7,7 @@ import {setGuardMode,guardState} from '../src/guarded.js';
 import {requestPreparation} from '../src/workflows/preparation-request.js';
 import {pipelineOperations} from '../src/workflows/pipeline.js';
 import {pauseFamily,switchFamily} from '../src/workflows/store.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {spacePolicy} from '../src/spaces.js';
 import {shareKnowledge,sharedContext} from '../src/sharing.js';
 import type {Reader} from '../src/access.js';

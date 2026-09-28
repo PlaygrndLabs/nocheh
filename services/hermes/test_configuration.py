@@ -39,10 +39,10 @@ class ConfigurationTests(unittest.TestCase):
             (state/'secrets/service_token').write_text('old-service-token-'*3)
             (state/'.env').write_text('UNRELATED_PROVIDER_KEY=unused\n')
             values=initialize(state)
-            self.assertNotIn('UNRELATED_PROVIDER_KEY',values)
-            self.assertEqual(values['POSTGRES_PASSWORD'],'old-db-password-'*3)
-            self.assertEqual(values['SERVICE_TOKEN'],'old-service-token-'*3)
-            self.assertTrue((state/'previous-configuration/legacy.env').is_file())
+            self.assertEqual(values['UNRELATED_PROVIDER_KEY'],'unused')
+            self.assertNotEqual(values['POSTGRES_PASSWORD'],'old-db-password-'*3)
+            self.assertNotEqual(values['SERVICE_TOKEN'],'old-service-token-'*3)
+            self.assertFalse((state/'previous-configuration').exists())
             self.assertEqual(initialize(state),values)
             # An active .env must never inherit settings from retired sidecars.
             (state/'assistant.json').write_text('{"enabled":true,"owner_id":"42","group_ids":[]}')
@@ -95,7 +95,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state)
             names=['NOCHEH_'+name+'_PASSWORD' for name in ('ARCHIVE','DERIVED','CONTROL')]
-            self.assertEqual(values['NOCHEH_STORAGE_LAYOUT'],'legacy')
+            self.assertEqual(values['NOCHEH_STORAGE_LAYOUT'],'original-only-v1')
             self.assertEqual(len(set(values[name] for name in names)),3)
             self.assertEqual(initialize(state),values)
             fields=view(state)
@@ -104,9 +104,10 @@ class ConfigurationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'unsupported_setting'):save(state,{name:'replacement'},fields['revision'])
             with self.assertRaisesRegex(ValueError,'unsupported_setting'):save(state,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'},fields['revision'])
             with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
-                self.assertNotIn('original-only-compose.yml',' '.join(compose_command(state)))
-                self.assertEqual(compose_environment(state)['NOCHEH_STORAGE_LAYOUT'],'legacy')
+                self.assertEqual(compose_command(state).count('-f'),1)
+                self.assertEqual(compose_environment(state)['NOCHEH_STORAGE_LAYOUT'],'original-only-v1')
             values['NOCHEH_STORAGE_LAYOUT']='original-only-v1';validate(values);write_env(env_path(state),values)
-            self.assertTrue(compose_command(state)[-1].endswith('/deploy/original-only-compose.yml'))
+            self.assertTrue(compose_command(state)[-1].endswith('/docker-compose.yml'))
+            with self.assertRaises(ValueError):validate({**values,'NOCHEH_STORAGE_LAYOUT':'legacy'})
             for bad in ['',values[names[0]],values['POSTGRES_PASSWORD']]:
                 with self.assertRaises(ValueError):validate({**values,names[1]:bad})

@@ -60,7 +60,6 @@ try:
         # A standalone rendering gives the container the exact synthetic service
         # definitions without a production hook for arbitrary Compose overrides.
         installation=directory/'installation';(installation/'deploy').mkdir(parents=True,mode=0o700)
-        (installation/'deploy/original-only-compose.yml').write_text('services: {}\n')
         repository = root / '.git'
         (installation/'.git').write_text(repository.read_text() if repository.is_file()
                                          else 'gitdir: '+str(repository.resolve())+'\n')

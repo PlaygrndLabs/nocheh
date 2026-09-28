@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {ingest,digest,type Envelope} from '../src/archive.js';
 import {evidenceGraph} from '../src/graph.js';

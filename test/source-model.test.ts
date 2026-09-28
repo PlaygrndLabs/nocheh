@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {canonical,digest,envelope,ingest,schema,type Envelope} from '../src/archive.js';
 import {initialize} from '../src/database.js';
-import {settings} from '../src/config.js';
+import {settings} from './fixture-settings.js';
 import {sourceDescriptor,sourceObjectId,legacySource,type SourceIdentity} from '../src/source-model.js';
 import {evidenceGraph} from '../src/graph.js';
 import {exportPage,importRecord,readEvent,readArtifact,uploadArtifact,replay,search} from '../src/retrieval.js';
