@@ -93,6 +93,21 @@ def install_tool_search_policy():
     return restore
 
 
+def conversation_result(result, session_id, limited_memory=False):
+    """Only explicit native completion with an answer or silence marker succeeds."""
+    if (not isinstance(result,dict) or result.get('completed') is not True
+            or result.get('failed') or result.get('interrupted')):
+        return {'state':'failed','error_code':'model_unavailable'}
+    text=result.get('final_response')
+    if not isinstance(text,str) or not text.strip():
+        return {'state':'failed','error_code':'model_unavailable'}
+    if text.strip()=='[NO_REPLY]':
+        text=''
+    elif limited_memory:
+        text+='\n\nMemory is limited; current context, native notes and archive search remain available.'
+    return {'state':'done','text':text,'session_id':session_id}
+
+
 def run(body, emit=None):
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
@@ -214,12 +229,7 @@ def run(body, emit=None):
                 message.append({'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(data).decode()}})
         from .timing import measure
         with measure('conversation'):result=agent.run_conversation(message,**options)
-        if result.get('failed') or result.get('interrupted') or not result.get('completed'):
-            return {'state':'failed','error_code':'model_unavailable'}
-        text=result.get('final_response') or ''
-        if text.strip()!='[NO_REPLY]' and memory.get('limited_memory'):
-            text+='\n\nMemory is limited; current context, native notes and archive search remain available.'
-        return {'state':'done','text':'' if text.strip()=='[NO_REPLY]' else text,'session_id':agent.session_id}
+        return conversation_result(result,agent.session_id,memory.get('limited_memory',False))
     finally:
         agent.close();database.close();restore_evidence()
 

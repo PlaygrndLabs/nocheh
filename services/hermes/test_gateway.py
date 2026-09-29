@@ -195,6 +195,33 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(await gateway.dispatch(prepared),{'state':'done'})
                         self.assertEqual(await gateway.dispatch(prepared),{'state':'done'})
                     self.assertEqual(len(request.sent),before+2,'minimal prepared-media dispatch uses the committed receipt and sends once')
+                    from services.hermes.assistant_turn import conversation_result
+                    completion={'completed':True,'final_response':'   '};model_calls=[]
+                    async def native_completion(event):
+                        model_calls.append(event)
+                        result=conversation_result(completion,'synthetic-session',limited_memory=True)
+                        TURN.get()['agent_result']=result
+                        return result.get('text')
+                    adapter.set_message_handler(native_completion)
+                    empty=envelope(40,'An empty completion must be recoverable')
+                    sent_before=len(request.sent)
+                    expected={'state':'failed','error_code':'model_unavailable'}
+                    self.assertEqual(await gateway.dispatch(empty),expected)
+                    self.assertEqual(await gateway.dispatch(empty),expected)
+                    self.assertEqual(len(model_calls),1,'same attempt reuses the failure receipt')
+                    self.assertEqual(len(request.sent),sent_before,'empty completion cannot send a memory notice')
+                    completion['final_response']='Recovered synthetic answer';empty['attempt']=2
+                    self.assertEqual(await gateway.dispatch(empty),{'state':'done'})
+                    self.assertEqual(await gateway.dispatch(empty),{'state':'done'})
+                    self.assertEqual(len(model_calls),2,'only the new attempt calls the model')
+                    self.assertEqual(len(request.sent),sent_before+1,'recovery delivers once')
+                    completion['final_response']='[NO_REPLY]'
+                    silent=envelope(41,'Explicit silence remains a distinct completed decision')
+                    suppressed={'state':'suppressed','error_code':'intentional_silence'}
+                    self.assertEqual(await gateway.dispatch(silent),suppressed)
+                    self.assertEqual(await gateway.dispatch(silent),suppressed)
+                    self.assertEqual(len(model_calls),3)
+                    self.assertEqual(len(request.sent),sent_before+1,'silence adds no delivery')
                 finally:await app.shutdown()
 
 

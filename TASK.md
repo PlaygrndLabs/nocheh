@@ -23,8 +23,8 @@ Fresh local setup now enables and prepares the Honcho service by default; an
 explicit saved disable remains effective. The operating installation has passed
 the six-check synthetic Honcho acceptance and is verified and attached with
 Honcho as primary memory. Historical ingestion is off. A fresh owner source produced a ready generation and owner-visible Honcho
-recall passed in a follow-up Telegram turn. A later guard epoch rebuild is still
-synchronizing, so current long-term memory availability is limited. Service
+recall passed in a follow-up Telegram turn. At the latest recorded inspection,
+all four rebuilt guard-epoch generations were ready with snapshots. Service
 startup does not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
 [procedure](docs/release-acceptance.md).
 
@@ -258,10 +258,24 @@ projects were not deleted.
   delivery with `assistant_runtime_unavailable`; its later second-attempt
   recovery is recorded above. Private receipts remain in ignored local state.
 
+- Completed model results now require nonempty text or explicit `[NO_REPLY]`.
+  Blank, missing, malformed, failed, and interrupted answers return the existing
+  recoverable model failure before a memory notice can be appended. The shared
+  native result handling covers Telegram, browser, and scheduled conversations.
+  Sixteen focused tests passed with no skips in a disposable, networkless Hermes
+  runtime matching the pinned upstream revision. Synthetic Telegram delivery
+  checks verified no send on blank output, reuse of the failed attempt receipt,
+  one delivery on a fresh successful attempt, and preserved explicit silence.
+  The AST-only graph was refreshed after the code change. No live traffic or
+  operating runtime change was made. See the
+  [acceptance impact review](docs/mvp-acceptance-status.md).
+
 </verification>
 
 <pending>
 
+- Empty-completion rejection is implemented and verified in the candidate;
+  operating Hermes activation and affected live evidence remain pending.
 - Dependable answers take priority over speed. Next, assess the existing General
   answer and the same-topic recall limitation from retained evidence, and
   diagnose the first native timeout as a completion/recovery issue. A healthy

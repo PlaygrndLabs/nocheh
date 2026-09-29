@@ -55,6 +55,16 @@ voice, and General delivery remain dated observations; their timing and timeout
 reliability are specifically open. No new owner traffic is justified while the
 existing captured turns and saved Honcho readiness evidence can be inspected.
 
+Empty model completion validation passed 16 focused synthetic checks in the
+pinned Hermes runtime, including real native Telegram adapter/receipt handling
+with a mocked Bot API transport. Blank answers produce a pre-delivery failure,
+the same attempt reuses its receipt, a new successful attempt sends once, and
+explicit `[NO_REPLY]` remains intentional silence. This changes classification
+of invalid completed model results; it does not relabel any earlier live
+outcome. The candidate is not activated. Existing successful-delivery and
+silence observations retain their original dates; this candidate's operating
+behavior remains unverified. No new owner traffic was requested.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket

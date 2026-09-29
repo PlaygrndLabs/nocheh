@@ -699,3 +699,20 @@ runtime behavior or live acceptance outcome. Link, semantic-container, and
 consistency checks passed.
 
 </verification>
+
+<verification date="2026-09-29" name="Reject empty model completions">
+
+The owner asked for one important MVP release requirement to be selected and
+built, following the priority on dependable answers. Source inspection found
+that a completed native turn with missing or blank final text could be recorded
+as intentional silence or become only a limited-memory notice. The shared turn
+result now requires confirmed completion with nonempty text or explicit
+`[NO_REPLY]`; invalid or interrupted results fail before delivery. Sixteen
+focused tests passed with no skips in an isolated pinned Hermes runtime,
+including blank-result failure receipts, replay without execution, successful
+retry with one send, and explicit silence. The AST-only graph was refreshed;
+documentation links, container structure, and diff checks passed. No live
+message, activation, provider cutover, or release occurred. The candidate's
+operating acceptance remains pending.
+
+</verification>
