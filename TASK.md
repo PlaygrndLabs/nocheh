@@ -215,9 +215,13 @@ projects were not deleted.
   with Nocheh holding administrator and topic-management rights. An older
   captured synthetic note in a known forum topic was selected for the
   non-owner reaction sequence; it had zero linked replies before the check.
-  The human add/change/remove updates and topic-isolation evidence remain
-  pending. Group identity, message ID, and topic ID remain in ignored local
-  acceptance state.
+  The same non-owner human added a reaction and changed it; both individual
+  updates were captured against the exact old message, and the current
+  per-person state advanced from thumbs up to heart. The reaction relation
+  resolved to the target's known forum topic, and the old message still had
+  zero linked replies. Removal, final stale-meaning checks, and topic-isolation
+  evidence remain pending. Group, participant, message, and topic identities
+  remain in ignored local acceptance state.
 
 </verification>
 
@@ -225,9 +229,10 @@ projects were not deleted.
 
 - Complete the remaining fresh live checks in
   [release acceptance](docs/release-acceptance.md): non-owner reaction
-  change/removal and derived meaning, including forum-topic isolation. The
-  selected group and bot admin rights are verified; the non-owner human's
-  reaction updates are still required. Owner text, group silence and isolation,
+  removal and derived meaning, including forum-topic isolation. The
+  selected group, bot admin rights, reaction add, and reaction change are
+  verified; removal and final isolation checks are still required. Owner text,
+  group silence and isolation,
   private recall,
   exact owner approval, owner retirement, owner correction and active learned
   recall, in-flight restart/recovery, populated backup/restore, Honcho
