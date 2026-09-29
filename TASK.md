@@ -215,23 +215,25 @@ projects were not deleted.
   with Nocheh holding administrator and topic-management rights. An older
   captured synthetic note in a known forum topic was selected for the
   non-owner reaction sequence; it had zero linked replies before the check.
-  The same non-owner human added a reaction and changed it; both individual
-  updates were captured against the exact old message, and the current
-  per-person state advanced from thumbs up to heart. The reaction relation
-  resolved to the target's known forum topic, and the old message still had
-  zero linked replies. Removal, final stale-meaning checks, and topic-isolation
-  evidence remain pending. Group, participant, message, and topic identities
-  remain in ignored local acceptance state.
+  The same non-owner human added a reaction, changed it, and removed it. All
+  three individual updates were captured against the exact old message and
+  attributed to the same non-owner actor. The current per-person state is empty;
+  no active learned entry cites either superseded update or the removal, and
+  the old message still has zero linked replies. The reaction relation resolves
+  to the target's known forum topic. A second-topic live observation is still
+  needed for topic-isolation evidence. Group, participant, message, and topic
+  identities remain in ignored local acceptance state.
 
 </verification>
 
 <pending>
 
 - Complete the remaining fresh live checks in
-  [release acceptance](docs/release-acceptance.md): non-owner reaction
-  removal and derived meaning, including forum-topic isolation. The
-  selected group, bot admin rights, reaction add, and reaction change are
-  verified; removal and final isolation checks are still required. Owner text,
+  [release acceptance](docs/release-acceptance.md): forum-topic isolation for
+  the non-owner reaction sequence. The selected group, bot admin rights,
+  reaction add/change/removal, empty current state, absence of active learned
+  entries citing the superseded reactions, and no new reply to the old note are
+  verified. A distinct topic has not yet produced a live observation. Owner text,
   group silence and isolation,
   private recall,
   exact owner approval, owner retirement, owner correction and active learned

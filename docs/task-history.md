@@ -578,11 +578,12 @@ Read-only Telegram checks confirmed the selected configured group is a forum
 and the bot is an administrator with topic-management rights. An older captured
 synthetic owner note in a known forum topic was identified as the reaction
 target, with zero linked replies at baseline. The same non-owner participant
-added thumbs up and then changed it to heart. Both individual updates were
-captured against the target, and the current per-person state advanced to
-heart. The target relation resolved to its known forum topic; no new reply
-was linked to the old note. Removal and final stale-meaning and topic-isolation
-checks remain pending. Group, participant, message, and topic identities are
-retained only in ignored local acceptance state.
+added thumbs up, changed it to heart, then removed it. All three individual
+updates were captured against the target, and the current per-person state
+became empty. No active learned entry cited either superseded update or the
+removal; no new reply was linked to the old note. The target relation resolved
+to its known forum topic, but a distinct-topic live check remained pending.
+Group, participant, message, and topic identities are retained only in ignored
+local acceptance state.
 
 </verification>
