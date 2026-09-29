@@ -22,6 +22,22 @@ test('storage workflow admission leaves pool capacity for nested publications',a
   release();await Promise.all([first,second]);assert.equal((await operations.preparation!('third',authority)).state,'completed');assert.equal(calls,3);
 });
 
+test('memory work leaves admission capacity for incoming replies',async()=>{
+  let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+  const calls:string[]=[];
+  const operation=(family:string)=>async()=>{calls.push(family);await held;return observation('completed',family);};
+  const operations=boundStorageOperations({honcho:operation('honcho'),memory_review:operation('memory_review'),
+    preparation:operation('preparation'),telegram:operation('telegram')});
+  const authority={owner:'inngest' as const,epoch:1};
+  const memory=operations.honcho!('generation:fixture',authority);
+  assert.equal((await operations.memory_review!('native:fixture',authority)).state,'waiting');
+  const reply=operations.telegram!('fixture',authority);
+  assert.deepEqual(calls,['honcho','telegram']);
+  assert.equal((await operations.preparation!('fixture',authority)).state,'waiting');
+  release();await Promise.all([memory,reply]);
+  assert.equal((await operations.preparation!('fixture',authority)).state,'completed');
+});
+
 test('idle superseded source workflows retire without touching leases, receipts or current work',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};

@@ -22,10 +22,10 @@ normal stops retain them. [Decision](docs/adr/0075-clean-development-setup.md),
 Fresh local setup now enables and prepares the Honcho service by default; an
 explicit saved disable remains effective. The operating installation has passed
 the six-check synthetic Honcho acceptance and is verified and attached with
-Honcho as primary memory. Historical ingestion is off. A fresh owner source has
-now produced a ready generation, so memory availability is no longer limited;
-owner-visible Honcho recall passed in a follow-up Telegram turn. Service startup does
-not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
+Honcho as primary memory. Historical ingestion is off. A fresh owner source produced a ready generation and owner-visible Honcho
+recall passed in a follow-up Telegram turn. A later guard epoch rebuild is still
+synchronizing, so current long-term memory availability is limited. Service
+startup does not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
 [procedure](docs/release-acceptance.md).
 
 The Honcho dashboard separates the paid API embedding dollar cap from
@@ -229,6 +229,17 @@ projects were not deleted.
   the old note or any of its reaction event IDs. This completes the live
   reaction and topic-isolation gate. Group, participant, message, and topic
   identities remain in ignored local acceptance state.
+- Read-only inspection of the existing General event found one linked reply
+  after its failed first native attempt. The same-topic reaction question also
+  had one first-attempt reply; it lacked the old reaction because its topic
+  Honcho generation had no ready snapshot at the time. That epoch later became
+  ready. The current rebuild has acknowledged all its Nocheh ingestion receipts,
+  but Honcho still has pending derivation units. Its configured deriver has one
+  worker. The focused foreground admission test passed (2 executed, 2 fixture
+  skips) after TypeScript compilation in the pinned networkless Node 24 image;
+  the full focused Honcho setup file passed after a stale budget-policy
+  assertion was updated. The AST graph refreshed 561 files with zero model
+  calls. No live traffic or runtime configuration change occurred.
 - General-topic normalization now recognizes Telegram's ordinary markerless
   supergroup messages in the base conversation scope. Older full Bot API
   projections resolve from matching immutable message envelopes at read time;
@@ -242,8 +253,8 @@ projects were not deleted.
   into its base conversation scope; 109 assistant-context records contained
   none of the other topic's note or reaction IDs. The original source hash and
   saved projection remain unchanged. Its first native attempt failed before
-  delivery with `assistant_runtime_unavailable`; end-to-end delivery acceptance
-  remains pending. Private receipts are retained in ignored local state.
+  delivery with `assistant_runtime_unavailable`; its later second-attempt
+  recovery is recorded above. Private receipts remain in ignored local state.
 
 </verification>
 
@@ -261,20 +272,28 @@ projects were not deleted.
   sequence have current-installation evidence. Historical ingestion remains
   unapproved. The deliberate-reset journal validator does not apply to this
   clean development setup, which has no reset coordinator journal.
-- Complete delivery acceptance for the General turn that resumed after the fix.
-  Scope resolution, archive preservation, and named-topic source exclusion passed
-  live inspection. The first native attempt failed before delivery after about
-  233 seconds with `assistant_runtime_unavailable`; no linked reply was present
-  at the latest review; the existing workflow had reached attempt two. Diagnose
-  this runtime failure and observe recovery under the existing captured event;
-  another owner test message is not needed.
-- Investigate the roughly two-to-five-minute owner text replies and confirm continued
-  first-attempt tool registration on later turns. The earlier intermittent
-  native config-read cause is not established; do not widen the profile tool
-  allowlist. One owner-text workflow began its native receipt about 46 seconds
-  after capture; the saved native turn then reported 62.9 seconds total,
-  including 52.4 seconds of conversation and 26.0 seconds of model guarding
-  (overlapping timings). This narrows the delay but does not explain its cause.
+- The existing General turn recovered on its second Telegram execution attempt
+  and has one linked reply. Its first native attempt timed out before delivery
+  after about 233 seconds; the successful native turn took 136.6 seconds,
+  including 110.6 seconds of conversation and 27.0 seconds of model guarding.
+  Scope/archive preservation and exclusion of named-topic sources were checked
+  earlier. Reply content and owner-visible quality have not been confirmed.
+- The same-topic reaction question had one first-attempt reply after 424.4
+  seconds, but it could not identify the old reaction and truthfully reported
+  limited memory. Its topic generation had no ready snapshot at question time;
+  it became ready roughly an hour later. The current guard epoch has completed
+  Nocheh ingestion but still has a substantial Honcho derivation queue and no
+  ready generation. Follow the existing generation and receipts to readiness;
+  do not infer a new reaction state from removed observations.
+- Reply latency has separate observed stages. The same-topic turn spent about
+  116 seconds in preparation, roughly 190 seconds before native receipt start,
+  and 109.6 seconds in the native turn, including 97.5 seconds of conversation
+  and 58.4 seconds of model guarding (overlapping timings). A locally verified
+  scheduling change reserves one storage workflow slot for foreground work and
+  new setup uses two Honcho deriver workers. Neither change is activated on the
+  operating installation yet; verify queue progress and reply admission after
+  activation. The native 230-second timeout and earlier intermittent config
+  read still need separate diagnosis. Do not widen the profile tool allowlist.
 - Remote Git synchronization remains blocked by private material in reachable
   history. Sanitize and verify history before pushing; do not upload those blobs.
   The earlier HTTPS authentication failure also needs verification at push time.

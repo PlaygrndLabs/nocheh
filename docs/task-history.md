@@ -632,3 +632,23 @@ carries unaffected passes forward with their original dates. Documentation-only
 checks cover this increment. Detailed report references remain in ignored state.
 
 </verification>
+
+<verification date="2026-09-29" name="Topic memory and reply latency diagnosis">
+
+The owner directed diagnosis from retained receipts before any new test message.
+The existing General event recovered with one linked reply on its second Telegram
+execution attempt; the first native attempt had timed out before delivery. A
+same-topic reaction question had one first-attempt reply after about seven
+minutes, but its topic Honcho generation was still building with no snapshot.
+The generation later became ready; a subsequent guard epoch rebuilt the current
+memory while the Honcho queue remained backlogged. Nocheh ingestion receipts were
+complete, separating local synchronization from Honcho derivation. The operating
+Honcho deriver was configured with one worker. Native timings and workflow
+receipts separated preparation, admission, conversation, and guard costs. A
+focused code change reserves storage workflow capacity for incoming replies,
+and fresh Honcho setup configures two deriver workers. TypeScript compilation,
+the focused workflow test, the full Honcho setup file, and the AST-only graph
+refresh passed in isolated or synthetic environments. No new live traffic or operating runtime change occurred
+in this increment. Private event and receipt details remain in ignored state.
+
+</verification>
