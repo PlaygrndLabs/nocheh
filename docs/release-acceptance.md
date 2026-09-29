@@ -8,11 +8,31 @@ These checks need actual incoming Telegram traffic; synthetic archive events and
 healthy containers cannot substitute for it. The operating installation needs
 its own Telegram and provider configuration. No VPS is required.
 
-Previously passed live checks may be carried forward when the operating installation
-has no relevant difference and the equivalence is recorded. Run the checks that have
-not passed. A deliberate reset using the `nocheh-fresh-acceptance-v1` journal still
-requires current post-boundary IDs for its validator; carrying earlier observations
-forward does not complete that reset-specific gate.
+<evidence_reuse>
+
+Use the [MVP acceptance register](mvp-acceptance-status.md) before planning live
+checks. Do not rerun every real test after each change. The detailed private
+index is `data/acceptance/results/mvp-live-test-register.json`; referenced reports
+retain event IDs, receipts, dates, available runtime revisions/configuration,
+original failures, and later successful outcomes. Missing revisions remain
+explicitly unrecorded, never inferred from the latest commit.
+
+For each change, record the affected behavior and evidence dependencies. Carry
+unaffected passes forward with a reason; use focused automated tests for changed
+behavior. Rerun a live check only when relevant code, configuration, provider,
+audience policy, runtime, or installation state invalidates its evidence, a
+regression is observed, or its required evidence is missing. Record the specific
+reason before asking for owner traffic. An ambiguous relationship to an old pass
+requires an impact review, not an automatic full rerun. A carried pass retains
+its original test date and is never presented as a new run.
+
+For a pending check, first inspect its existing event and receipts with the admin
+CLI. Reuse that event when it can still establish the criterion. A deliberate
+reset using the `nocheh-fresh-acceptance-v1` journal requires current post-boundary
+IDs for its validator; earlier observations cannot complete that reset-specific
+gate. Do not expand this exception to unrelated changes or installations.
+
+</evidence_reuse>
 
 When the reset preflight reports the legacy storage layout, the frozen setup must
 pass the legacy-to-original-only conversion before fresh services are created. The

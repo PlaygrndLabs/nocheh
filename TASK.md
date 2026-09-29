@@ -5,6 +5,8 @@
 Last reconciled 2026-09-29. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. Prior implementation and
 live observations are summarized in [task history](docs/task-history.md).
+The [MVP live acceptance register](docs/mvp-acceptance-status.md) records passed
+checks, caveats, remaining gates, and reasons to repeat only affected checks.
 
 Nocheh is pre-release. The owner requested a clean setup, deletion of old
 containers and application data, preservation of credentials and settings,
@@ -247,8 +249,11 @@ projects were not deleted.
 
 <pending>
 
-- Reconcile the current-installation live evidence against
-  [release acceptance](docs/release-acceptance.md) before release. Owner text,
+- Finish release-candidate evidence and runtime-pin reconciliation against
+  [release acceptance](docs/release-acceptance.md), using the
+  [acceptance register](docs/mvp-acceptance-status.md). Audit retained provider
+  refresh, quota/failure, and literal-detection evidence before deciding whether
+  any specific check needs repeating. Owner text,
   group silence and isolation, private recall, exact owner approval, owner
   retirement, owner correction and active learned recall, in-flight
   restart/recovery, populated backup/restore, Honcho attachment, subscription
@@ -260,7 +265,7 @@ projects were not deleted.
   Scope resolution, archive preservation, and named-topic source exclusion passed
   live inspection. The first native attempt failed before delivery after about
   233 seconds with `assistant_runtime_unavailable`; no linked reply was present
-  at the latest check. The workflow still awaited receipt reconciliation. Diagnose
+  at the latest review; the existing workflow had reached attempt two. Diagnose
   this runtime failure and observe recovery under the existing captured event;
   another owner test message is not needed.
 - Investigate the roughly two-to-five-minute owner text replies and confirm continued
