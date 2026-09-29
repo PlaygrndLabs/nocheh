@@ -292,8 +292,12 @@ projects were not deleted.
   scheduling change reserves one storage workflow slot for foreground work and
   new setup uses two Honcho deriver workers. Neither change is activated on the
   operating installation yet; verify queue progress and reply admission after
-  activation. The native 230-second timeout and earlier intermittent config
-  read still need separate diagnosis. Do not widen the profile tool allowlist.
+  activation. Automatic approval review rejected copying the verified source
+  into the operating watched checkout because live behavior changes require
+  explicit authorization. The two existing General-topic edits and all running
+  services remain untouched. The Honcho worker setting also remains at one.
+  The native 230-second timeout and earlier intermittent config read still
+  need separate diagnosis. Do not widen the profile tool allowlist.
 - Remote Git synchronization remains blocked by private material in reachable
   history. Sanitize and verify history before pushing; do not upload those blobs.
   The earlier HTTPS authentication failure also needs verification at push time.
