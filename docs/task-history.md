@@ -668,3 +668,19 @@ it was nonempty, contained no internal source ID, and did not identify a removed
 reaction. This does not establish full answer quality.
 
 </verification>
+
+<verification date="2026-09-29" name="Focused reply and Honcho activation">
+
+The owner explicitly authorized applying the verified reply-admission source
+to the operating watched checkout and changing only the Honcho deriver from one
+worker to two. A preflight found no active Telegram dispatch. The source watcher
+compiled the change, and the focused Compose command recreated only the deriver.
+All 17 services were healthy afterward; the app, Hermes, Honcho API, and provider
+gateway retained their container identities. The existing queue advanced, and
+all four current generations reached ready with snapshots at a later read-only
+check. The affected topic's 24 work units completed. The earlier reply preceded this
+snapshot, so it does not establish corrected recall.
+No new owner message, provider cutover, or release action occurred. The two
+General-topic operating source edits were preserved.
+
+</verification>

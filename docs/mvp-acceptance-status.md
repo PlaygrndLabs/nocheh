@@ -29,7 +29,7 @@ reliability or release approval.
 | Honcho live acceptance | Passed | Subscription reasoning, guarded embedding, ingestion, retrieval, restart persistence, provider failure/recovery; closed synthetic workspace; attachment and owner recall observed. | Honcho/provider routing, guarding, ingestion, budget enforcement, or memory state changes. |
 | Non-owner reactions and named-topic isolation | Passed | Add/change/remove on an older note, correct actor/target/current state, no old-message reply; second named-topic answer/context excluded reaction evidence. | Reaction normalization/state, audience resolution, retrieval, or topic routing changes. |
 | General-topic recovery | Delivery observed; answer quality pending | Existing markerless message resolved to base scope; original hash/projection unchanged; 109 assistant-context records excluded other-topic sources. First native attempt failed before delivery; the second completed with one linked reply. | Confirm the existing reply's content and investigate the first native timeout; no new owner message needed for delivery. |
-| Same-topic reaction recall | Pending | One first-attempt reply arrived after 424.4 seconds and could not identify the old reaction. The topic generation had no ready snapshot then; it became ready later. Current rebuild has completed local ingestion while Honcho derivation remains queued. | Verify current topic readiness and snapshot, then assess only the affected recall behavior with existing evidence where possible. |
+| Same-topic reaction recall | Readiness passed; answer pending | One first-attempt reply arrived after 424.4 seconds and could not identify the old reaction because its topic generation had no ready snapshot then. The current generation reached ready with one snapshot and 24 of 24 Honcho work units complete after focused activation. | Assess a future answer in the same topic if owner traffic supplies one; the earlier reply cannot prove recall after readiness. |
 
 </checks>
 
@@ -44,16 +44,16 @@ Their prior live passes are carried forward. Voice transcription, exact approval
 backup/restore, and restart behavior have no relevant implementation change from
 this correction. This review does not close the separate runtime reliability gate.
 
-The reply-admission and Honcho-worker change has focused automated evidence only;
-it is not active in the operating stack. It targets latency and initial memory
-readiness. Automatic approval review rejected activating the verified source
-in the operating watched checkout because live behavior changes require explicit
-authorization. The deriver configuration was not changed. Prior reaction capture
-and named-topic isolation passes remain dated
+The reply-admission and Honcho-worker change has focused automated evidence and
+owner-authorized activation in the operating stack. The app watcher compiled the
+verified source; only the Honcho deriver was recreated with two workers. All 17
+services are healthy, and all four current generations reached ready with a
+snapshot each. This does not establish a faster live reply or corrected same-topic
+answer. Prior reaction capture and named-topic isolation passes remain dated
 passes because their normalization and audience rules did not change. Owner text,
 voice, and General delivery remain dated observations; their timing and timeout
 reliability are specifically open. No new owner traffic is justified while the
-existing captured turns and current Honcho queue can be inspected.
+existing captured turns and saved Honcho readiness evidence can be inspected.
 
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
@@ -64,10 +64,10 @@ permission to carry all evidence forward indefinitely.
 
 <remaining>
 
-1. Verify the current topic generation reaches ready and gains a snapshot; assess
-   the affected same-topic recall and the existing General reply content.
-2. Obtain authorization for live source and deriver activation, then measure the
-   focused admission and derivation changes. Continue
+1. Assess a future same-topic reply after the ready snapshot when owner traffic
+   supplies one, and assess the existing General reply content.
+2. Measure the focused admission and derivation changes from existing runtime
+   evidence when possible. Continue
    investigating model/guard time and the first General native timeout. Retain
    prior success evidence and verify only affected paths.
 3. Finish release-candidate evidence/pin reconciliation, including the required

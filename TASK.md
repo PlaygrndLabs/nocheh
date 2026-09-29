@@ -233,13 +233,15 @@ projects were not deleted.
   after its failed first native attempt. The same-topic reaction question also
   had one first-attempt reply; it lacked the old reaction because its topic
   Honcho generation had no ready snapshot at the time. That epoch later became
-  ready. The current rebuild has acknowledged all its Nocheh ingestion receipts,
-  but Honcho still has pending derivation units. Its configured deriver has one
-  worker. The focused foreground admission test passed (2 executed, 2 fixture
-  skips) after TypeScript compilation in the pinned networkless Node 24 image;
+  ready. The current rebuild acknowledged all its Nocheh ingestion receipts,
+  and all four current generations reached ready with a snapshot each after
+  focused two-worker deriver activation. The focused foreground admission test passed
+  (2 executed, 2 fixture skips) after TypeScript compilation in the pinned
+  networkless Node 24 image;
   the full focused Honcho setup file passed after a stale budget-policy
   assertion was updated. The AST graph refreshed 561 files with zero model
-  calls. No live traffic or runtime configuration change occurred.
+  calls. No live traffic or runtime configuration change occurred during that
+  code-verification increment.
 - General-topic normalization now recognizes Telegram's ordinary markerless
   supergroup messages in the base conversation scope. Older full Bot API
   projections resolve from matching immutable message envelopes at read time;
@@ -282,20 +284,23 @@ projects were not deleted.
   seconds, but it could not identify the old reaction and truthfully reported
   limited memory. Its topic generation had no ready snapshot at question time;
   it became ready roughly an hour later. The current guard epoch has completed
-  Nocheh ingestion but still has a substantial Honcho derivation queue and no
-  ready generation. Follow the existing generation and receipts to readiness;
-  do not infer a new reaction state from removed observations.
+  Nocheh ingestion and, after focused deriver activation, its topic generation
+  reached ready with one snapshot and 24 of 24 Honcho work units complete. All
+  four current generations are now ready with snapshots.
+  This does not retroactively correct the earlier answer or establish fresh
+  same-topic recall. Do not infer a new reaction state from removed observations.
 - Reply latency has separate observed stages. The same-topic turn spent about
   116 seconds in preparation, roughly 190 seconds before native receipt start,
   and 109.6 seconds in the native turn, including 97.5 seconds of conversation
   and 58.4 seconds of model guarding (overlapping timings). A locally verified
   scheduling change reserves one storage workflow slot for foreground work and
-  new setup uses two Honcho deriver workers. Neither change is activated on the
-  operating installation yet; verify queue progress and reply admission after
-  activation. Automatic approval review rejected copying the verified source
-  into the operating watched checkout because live behavior changes require
-  explicit authorization. The two existing General-topic edits and all running
-  services remain untouched. The Honcho worker setting also remains at one.
+  new setup uses two Honcho deriver workers. The owner authorized focused live
+  activation. The verified source is compiled in the operating watcher, and
+  only the Honcho deriver was recreated with two workers. All 17 services are
+  healthy; the app, Hermes, Honcho API, and provider gateway kept their container
+  identities. The topic queue completed and its generation became ready, but
+  no new reply has measured admission latency. The two
+  existing General-topic edits remain intact.
   The native 230-second timeout and earlier intermittent config read still
   need separate diagnosis. Do not widen the profile tool allowlist.
 - Remote Git synchronization remains blocked by private material in reachable
