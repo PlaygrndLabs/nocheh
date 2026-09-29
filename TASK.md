@@ -204,9 +204,12 @@ projects were not deleted.
   memory: one duplicate interpretation was retired by an owner-authored
   revision-checked action at revision 2. A separate interpretation of the same
   synthetic private fact received an owner-authored active revision 2, and its
-  post-correction Honcho projection receipt completed. A new private owner
-  recall message and its answer are still needed to finish the learned-recall
-  gate; the earlier recall preceded these corrections. Operation IDs and
+  post-correction Honcho projection receipt completed. The owner then sent a
+  new ordinary private recall question. It was captured after both corrections
+  and the completed projection; the one linked answer contained the correct
+  synthetic phrase, its Telegram workflow completed delivery on the first
+  execution attempt with one receipt, and the owner confirmed seeing exactly
+  one correct reply. This completes the learned-recall gate. Operation IDs and
   content remain in ignored local acceptance state.
 
 </verification>
@@ -215,13 +218,14 @@ projects were not deleted.
 
 - Complete the remaining fresh live checks in
   [release acceptance](docs/release-acceptance.md): non-owner reaction
-  change/removal and derived meaning, and post-correction active learned
-  recall. The current configured group is not a forum; the owner kept forum-topic
+  change/removal and derived meaning. The current configured group is not a
+  forum; the owner kept forum-topic
   isolation as an MVP gate, so a suitable forum group and non-owner participant
   are still required. Owner text, group silence and isolation, private recall,
-  exact owner approval, owner retirement, in-flight restart/recovery, populated
-  backup/restore, Honcho attachment, and subscription voice transcription have
-  current-installation evidence.
+  exact owner approval, owner retirement, owner correction and active learned
+  recall, in-flight restart/recovery, populated backup/restore, Honcho
+  attachment, and subscription voice transcription have current-installation
+  evidence.
   Historical ingestion remains unapproved.
 - Investigate the roughly two-to-five-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
