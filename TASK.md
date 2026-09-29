@@ -177,10 +177,18 @@ projects were not deleted.
   Honcho attachment, and
   subscription voice transcription have current-installation evidence.
   Historical ingestion remains unapproved.
+- The first fresh owner-retirement attempt received a confirmed reply about
+  27 seconds after capture, before an Archive retirement was recorded. It does
+  not pass the pre-delivery cancellation check. The source is still active;
+  later exclusion and Undo await the owner's Archive action. Its content-free
+  attempt record is in ignored local acceptance state.
 - Investigate the roughly two-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
   native config-read cause is not established; do not widen the profile tool
-  allowlist.
+  allowlist. One owner-text workflow began its native receipt about 46 seconds
+  after capture; the saved native turn then reported 62.9 seconds total,
+  including 52.4 seconds of conversation and 26.0 seconds of model guarding
+  (overlapping timings). This narrows the delay but does not explain its cause.
 - Repair the source-watched dashboard asset volume ownership/mount mismatch
   before the next UI iteration. The existing volume identifies another checkout;
   `make dev` asks to recreate it and the app watcher reports `EROFS` even though
