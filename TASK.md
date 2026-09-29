@@ -186,6 +186,11 @@ projects were not deleted.
   the operating UID/GID; the Compose render and focused recovery tests passed.
   The AST graph was refreshed with 561 files and zero model calls. Content-free
   evidence and both private snapshots remain in ignored local state.
+- After those controlled restarts, the previously owner-confirmed private
+  acknowledgment still had one linked reply and a completed Telegram workflow.
+  The exact-approval request still had one linked reply, and the newly retired
+  source still had zero replies with a cancelled workflow. These are
+  post-completion durability checks; no in-flight owner turn was restarted.
 
 </verification>
 
@@ -193,10 +198,14 @@ projects were not deleted.
 
 - Complete the remaining fresh live checks in
   [release acceptance](docs/release-acceptance.md): non-owner reaction
-  change/removal and derived meaning, correction, and restart/recovery without
-  duplicate effects. Owner text, group silence and isolation, private recall,
-  exact owner approval, owner retirement, Honcho attachment, and subscription
-  voice transcription have current-installation evidence.
+  change/removal and derived meaning, owner correction with active learned
+  recall, and in-flight restart/recovery without duplicate effects. The
+  current configured group is not a forum; the owner kept forum-topic
+  isolation as an MVP gate, so a suitable forum group and non-owner participant
+  are still required. Owner text, group silence and isolation, private recall,
+  exact owner approval, owner retirement, populated backup/restore, Honcho
+  attachment, and subscription voice transcription have current-installation
+  evidence.
   Historical ingestion remains unapproved.
 - Investigate the roughly two-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent

@@ -524,3 +524,14 @@ restore receipts, and content-free incident evidence remain only in ignored
 local state.
 
 </verification>
+
+<verification date="2026-09-29" name="Post-backup receipt durability">
+
+After the controlled backup restarts, the owner-confirmed private
+acknowledgment and the exact-approval request each retained one linked reply
+and a completed Telegram workflow. The new retired source retained zero linked
+replies and a cancelled workflow. This checks durable completed and cancelled
+decisions; no owner turn was restarted while in flight. Event and workflow IDs
+remain only in ignored local acceptance state.
+
+</verification>
