@@ -607,7 +607,14 @@ without rewriting archive bytes or descriptors. Partial observations, malformed
 topic markers, and contradictory target membership remain unavailable. Named
 topic access stays separate. TypeScript compilation and 14 focused isolated
 PostgreSQL/Compose tests passed with no skips, and the AST graph refreshed
-with 561 files and zero model calls. Recovery of the existing live General turn
-remained pending at candidate verification.
+with 561 files and zero model calls. The two source files were activated through
+the existing operating development watcher. The waiting General turn resumed
+into the base conversation scope. Its 109 assistant-context records contained
+none of the named topic's note or reaction IDs, and the archived source hash and
+saved projection remained unchanged. The first native attempt then failed before
+delivery after about 233 seconds with `assistant_runtime_unavailable`. No linked
+reply was present at the latest check; receipt reconciliation and successful
+delivery remain pending. Private evidence is retained only in ignored local
+acceptance state. This did not repeat or close the separate latency gate.
 
 </verification>
