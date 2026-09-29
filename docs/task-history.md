@@ -429,3 +429,36 @@ so verified preview assets were copied into that existing generated-output
 volume without recreating it. No paid call or cap edit was made for the preview.
 
 </increment>
+
+<verification date="2026-09-29" name="Fresh owner text, group isolation, private recall, and silence">
+
+On the operating post-reset installation, ordinary owner text received one
+first-attempt linked reply, and the owner confirmed one sensible visible reply.
+A networkless one-file Hermes image overlay activated the already integrated
+tool-search policy after eight focused native checks; its first live owner turn
+used that image and also delivered one first-attempt, owner-confirmed reply.
+The earlier intermittent config-read cause is still unknown, and text replies
+continued to take about two minutes.
+
+A fresh private synthetic phrase had a completed Honcho receipt and one linked
+reply. A group question produced one linked reply without that phrase; the
+group-bound dispatch context and event-bound runtime contexts also excluded the
+private phrase and source. A later private question recalled the phrase in one
+linked reply. In the same group, a fresh ordinary note asking for no reply was
+captured and ended in intentional silence with no linked reply. The source and
+receipt identifiers, timestamps, and content-free checks remain in ignored
+local acceptance reports. Other reset-specific live gates remain pending.
+
+</verification>
+
+<verification date="2026-09-29" name="Fresh exact owner approval">
+
+The owner sent an ordinary private request for a separate exact sentence. The
+assistant proposed one Telegram action with the requested text and the same
+private-chat destination; the owner approved its full action ID in Telegram.
+One exact delivered message was captured, and the native action receipt was
+complete. Replaying that completed action returned its saved result, with the
+exact delivered-message count still one. Event, action, and delivery IDs and
+timestamps remain in ignored local acceptance state.
+
+</verification>

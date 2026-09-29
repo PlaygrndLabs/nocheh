@@ -2,7 +2,7 @@
 
 <current>
 
-Last reconciled 2026-09-28. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-09-29. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. Prior implementation and
 live observations are summarized in [task history](docs/task-history.md).
 
@@ -124,8 +124,8 @@ projects were not deleted.
   construction, so a native config-loader fallback cannot expose its bridge.
   Focused scope tests and a credential-free isolated-image check passed with a
   synthetic profile that enabled tool search. The exact cause of the earlier
-  intermittent config reads is unproven. The operating isolated-turn image has
-  not been replaced, so the live retry and latency outcome remains unverified.
+  intermittent config reads is unproven. Later activation and a live result are
+  recorded below.
 - Honcho budget settlement, embedding-model, and independent reasoning-limit
   checks passed (14 focused tests) in a disposable pinned runtime. The dashboard
   bundle built offline with pinned app dependencies, and the AST-only graph
@@ -139,22 +139,47 @@ projects were not deleted.
   edit was made for this UI check. A source-watched asset rebuild failed with
   `EROFS` on the generated dashboard volume; the verified bundle was copied
   into that preview volume without recreating it.
+- Fresh owner text received one linked Telegram reply on the first attempt;
+  the owner confirmed one sensible visible reply. A networkless one-file Hermes
+  image overlay for the tool-search policy passed eight focused native checks.
+  With no isolated turn active, only the launcher restarted and pinned that
+  image. All 17 services remained healthy. Its next owner turn used the exact
+  candidate image and delivered one owner-confirmed reply on the first attempt.
+  The old image retains a rollback tag. The earlier config-read cause remains
+  unproven; text replies still took about two minutes.
+- A fresh private synthetic phrase received one linked, owner-confirmed reply
+  and a completed Honcho receipt. The group question used a different scope;
+  its one linked reply omitted the private phrase. Its saved dispatch binding
+  used the group scope, and 336 event-bound runtime contexts had zero matches
+  for the phrase or private source ID. The owner requested admin-CLI inspection
+  of that reply. A later private recall returned the exact phrase in one linked
+  first-attempt reply. Content-free evidence is in ignored local acceptance state.
+- Fresh intentional silence in that same group ended `suppressed` with
+  `intentional_silence`. Its Telegram workflow was skipped and there was no
+  linked reply. The captured event and checks are saved only in ignored local
+  acceptance state.
+- Fresh exact owner approval proposed one Telegram message with the requested
+  text and the original private-chat destination. The owner approved that
+  action via Telegram. One exact delivered message was captured in that scope;
+  the native action receipt was `done`. Replaying the completed action returned
+  its saved result, and the exact delivered-message count remained one. The
+  content-free action and receipt evidence is in ignored local acceptance state.
 
 </verification>
 
 <pending>
 
-- Fresh live release acceptance is still required after this reset: owner text,
-  intentional group silence, corrections, reaction interpretation, active recall,
-  restart/recovery, and linked replies. Prior live observations are historical;
-  the current-installation voice and subscription transcription check has passed.
-- Complete the other fresh owner-facing release checks in
-  [release acceptance](docs/release-acceptance.md); Honcho attachment, owner
-  recall, and voice now pass. Historical ingestion remains unapproved.
-- Activate the verified tool-search policy in the operating isolated-turn image
-  through a controlled image refresh, then confirm on the next naturally sent
-  owner turn that tool registration passes on its first attempt. Keep the saved
-  attempt receipts for latency comparison; do not widen the profile tool
+- Complete the remaining fresh live checks in
+  [release acceptance](docs/release-acceptance.md): retirement and later
+  exclusion, non-owner reaction change/removal and derived
+  meaning, correction, and restart/recovery without duplicate effects. Owner
+  text, group silence and isolation, private recall, exact owner approval,
+  Honcho attachment, and
+  subscription voice transcription have current-installation evidence.
+  Historical ingestion remains unapproved.
+- Investigate the roughly two-minute owner text replies and confirm continued
+  first-attempt tool registration on later turns. The earlier intermittent
+  native config-read cause is not established; do not widen the profile tool
   allowlist.
 - Repair the source-watched dashboard asset volume ownership/mount mismatch
   before the next UI iteration. The existing volume identifies another checkout;
