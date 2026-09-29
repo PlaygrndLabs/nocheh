@@ -262,6 +262,20 @@ projects were not deleted.
 
 <pending>
 
+- Dependable answers take priority over speed. Next, assess the existing General
+  answer and the same-topic recall limitation from retained evidence, and
+  diagnose the first native timeout as a completion/recovery issue. A healthy
+  stack or ready snapshot does not establish answer quality.
+- LLM timing metrics need explicit measurement boundaries before attributing
+  delays to the machine, network, or GPT. The existing
+  [native timing collector](services/hermes/timing.py) records broad phases;
+  [conversation timing](services/hermes/assistant_turn.py) includes nested
+  [guard work](services/hermes/request_boundary.py). It does not isolate remote
+  LLM request duration or pure model compute. CPA provider analytics and Honcho
+  request durations exist, but per-turn attribution across local waiting,
+  processing, and provider/network time remains an implementation task. Preserve
+  answer-quality checks while adding measurements; do not treat speed alone as
+  a dependability failure.
 - Finish release-candidate evidence and runtime-pin reconciliation against
   [release acceptance](docs/release-acceptance.md), using the
   [acceptance register](docs/mvp-acceptance-status.md). Audit retained provider

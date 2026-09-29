@@ -11,6 +11,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 - Nocheh is a personal AI brain. Owned source data, useful memory, and reasoning are the product. Telegram is an adapter; Hermes is the first replaceable runtime.
 - Nocheh owns its dashboard, CLI, archive and files, source identities, audience policy, guarding, approvals, and integration lifecycle.
+- Dependable answers are more important than speed. Answer dependability is evaluated separately from response time.
 
 <area name="Foundation and deployment">
 
@@ -191,6 +192,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 <area name="Monitoring">
 
 - Pinned CPA Manager Plus Full Mode runs as a separate service behind the Nocheh owner session. It shows request history, usage, latency, failures, and account/quota observations. Provider/admin keys stay server-side; automatic credential actions, external notifications, and request-body logging are disabled. Monitoring failure does not block inference.
+- LLM speed has measurable timing metrics, distinct from local workflow waiting and processing. Performance assessment accounts for the owner machine's resources, network conditions, and GPT/LLM response time. Metrics identify their measurement boundaries; combined network and provider time is not labeled as isolated model computation, overlapping phases are not added as independent durations, and unavailable measurements are not reported as zero. Timing telemetry excludes conversation content and credentials.
 - Service monitoring identifies each tool, purpose, host/container location, and expected running, completed, optional-stopped, or unhealthy state. API, capture, and Inngest connectivity are reported independently; process availability does not establish processing progress.
 - Nocheh monitoring exposes observed Telegram polling progress and incidents, recent workflows, retries, waiting, success, skips, failures, uncertain delivery, provider routes, and service state. A fatal polling failure cannot remain reported as connected; retryable fatal adapter failures enter supervised recovery.
 - Host OAuth callbacks are temporary and state-validated. Login status is observable without exposing credential values.

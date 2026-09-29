@@ -684,3 +684,18 @@ No new owner message, provider cutover, or release action occurred. The two
 General-topic operating source edits were preserved.
 
 </verification>
+
+<verification date="2026-09-29" name="Dependability priority and LLM timing requirement">
+
+The owner prioritized dependable answers over speed and noted that machine
+resources, network conditions, or GPT latency can affect response time. The
+product definition now requires measurable LLM timing with explicit boundaries,
+separate assessment of answer dependability, and no inference of pure model
+computation from combined network/provider time. Source inspection confirmed
+that native phase timings overlap and do not isolate LLM request time. The task
+ledger prioritizes answer quality and completion/recovery, and records the
+remaining timing instrumentation work. This documentation increment changes no
+runtime behavior or live acceptance outcome. Link, semantic-container, and
+consistency checks passed.
+
+</verification>
