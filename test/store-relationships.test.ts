@@ -11,6 +11,18 @@ const event=(key:string,payload:any):Envelope=>({version:1,key,origin:'live',bot
   source_id:String(payload.message?.message_id??payload.message_reaction?.message_id??payload.message_reaction_count?.message_id??1),
   revision:String(payload.update_id),occurred_at:null,text:payload.message?.text??null,payload});
 const check={type:'emoji',emoji:'✅'},heart={type:'custom_emoji',custom_emoji_id:'1234'};
+test('General messages use the base conversation while incomplete topic markers stay unknown',()=>{
+  const project=(extra:any={})=>observedSource(event('general',{update_id:1,message:{message_id:2,
+    chat:{id:-42,type:'supergroup'},text:'General fixture',...extra}})).metadata!.audience;
+  assert.deepEqual(project(),{chat_id:'-42',topic_state:'none'});
+  assert.deepEqual(project({chat:{id:-42,type:'supergroup',is_forum:true}}),{chat_id:'-42',topic_state:'none'});
+  assert.deepEqual(project({is_topic_message:false}),{chat_id:'-42',topic_state:'none'});
+  assert.deepEqual(project({message_thread_id:17,is_topic_message:true}),{chat_id:'-42',topic_state:'known',topic_id:'17'});
+  for(const extra of [{is_topic_message:true},{is_topic_message:null},{is_topic_message:'true'},
+    {message_thread_id:null},{message_thread_id:{}},{chat:{id:-42}}])
+    assert.deepEqual(project(extra),{chat_id:'-42',topic_state:'unknown'});
+});
+
 test('reaction observations retain actor changes, removals, anonymous counts and unknown types without meanings',()=>{
   const value=event('reaction',{update_id:3,message_reaction:{chat:{id:-42},message_id:1,date:1700000000,user:{id:9},old_reaction:[check],new_reaction:[heart]}});
   const source=observedSource(value),reaction=source.metadata!.reaction as any;
@@ -60,8 +72,26 @@ test('old targets resolve outside graph pagination; duplicates, delays and unkno
     assert.deepEqual((await relationships.describe(reaction)).reaction?.added,[check],'a delayed observation does not overwrite later evidence');
     const counts=(await capture(event(key+':counts',{update_id:31,message_reaction_count:{chat:{id:chatId},message_id:1,date:1700000011,reactions:[]}}))).source.reference;
     assert.deepEqual((await relationships.describe(counts)).reaction?.counts,[]);
-    const unknown=(await capture(event(key+':unknown',{update_id:50,message:{message_id:101,chat:{id:chatId,type:'supergroup'},text:'Topic not supplied'}}))).source.reference;
+    const unknown=(await capture(event(key+':unknown',{update_id:50,message:{message_id:101,chat:{id:chatId,type:'supergroup'},is_topic_message:true,text:'Topic not supplied'}}))).source.reference;
     assert.equal((await relationships.context(unknown,{...topic,topic_id:null})).source,null);
+    const general=event(key+':general',{update_id:52,message:{message_id:103,chat:{id:chatId,type:'supergroup'},text:'General original'}});
+    const legacy=observedSource(general);legacy.adapter_version='2';legacy.metadata={...legacy.metadata,audience:{chat_id:chatId,topic_state:'unknown'}};
+    const originalGeneral=(await capture({...general,source:legacy})).source.reference;
+    assert.deepEqual((await relationships.describe(originalGeneral)).audience,{chat_id:chatId,topic_state:'none'});
+    assert.equal((await relationships.context(originalGeneral,topic)).source,null);
+    const generalReaction=(await capture(event(key+':general-reaction',{update_id:53,message_reaction:{
+      ...(change.payload.message_reaction as object),message_id:103}}))).source.reference;
+    assert.deepEqual((await relationships.describe(generalReaction)).audience,{chat_id:chatId,topic_state:'none'});
+    assert.equal((await relationships.context(generalReaction,topic)).source,null);
+    assert.deepEqual((await relationships.context(generalReaction,{...topic,topic_id:null})).targets[0]?.references,[originalGeneral]);
+    const saved=(await stores.archive.query('SELECT e.payload,o.metadata FROM events e JOIN source_observations o ON o.event_id=e.id WHERE e.id=$1',[originalGeneral.id])).rows[0];
+    assert.equal(saved.payload.toString(),canonical(general.payload));assert.equal(saved.metadata.audience.topic_state,'unknown');
+    const partial={...legacy,completeness:'partial' as const};
+    const incomplete=(await capture({...event(key+':partial',{update_id:54,message:{message_id:104,chat:{id:chatId,type:'supergroup'}}}),
+      source:{...partial,object:{...partial.object,external_id:'104'}}})).source.reference;
+    assert.equal((await relationships.context(incomplete,{...topic,topic_id:null})).source,null,'partial evidence cannot resolve General');
+    await capture(event(key+':general-conflict',{update_id:55,message:{...general.payload.message as object,message_thread_id:17}}));
+    assert.equal((await relationships.context(generalReaction,{...topic,topic_id:null})).source,null,'conflicting General and named-topic observations remain unavailable');
     const otherChat=String(Number(chatId)-1);
     const foreign=(await capture(event(key+':foreign',{update_id:51,message:{message_id:102,chat:{id:chatId,type:'supergroup'},message_thread_id:17,
       external_reply:{chat:{id:otherChat},message_id:77},text:'External reply'}}))).source.reference;

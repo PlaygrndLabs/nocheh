@@ -19,9 +19,16 @@ function reactionList(value:unknown):Record<string,unknown>[]|null {
   if(value.some(v=>!v||typeof v!=='object'||Array.isArray(v)||typeof v.type!=='string'))return null;
   return value;
 }
-function audience(message:Record<string,any>,chatId:string):ObservedAudience {
+export function telegramMessageAudience(message:Record<string,any>,chatId:string):ObservedAudience {
   const thread=external(message.message_thread_id),chat=record(message.chat);
   if(thread)return {chat_id:chatId,topic_state:'known',topic_id:thread};
+  // Bot API omits both topic fields for General (see Client::get_forum_topic_id
+  // and Client::is_topic_message). An incomplete/malformed topic marker is not
+  // General. Reactions never enter this message-only normalization path.
+  if(Object.hasOwn(message,'message_thread_id')||
+    Object.hasOwn(message,'is_topic_message')&&message.is_topic_message!==false)
+    return {chat_id:chatId,topic_state:'unknown'};
+  if(chat.type==='supergroup')return {chat_id:chatId,topic_state:'none'};
   if(['private','group','channel'].includes(chat.type)||chat.is_forum===false)return {chat_id:chatId,topic_state:'none'};
   return {chat_id:chatId,topic_state:'unknown'};
 }
@@ -59,7 +66,7 @@ export function observedSource(value:Envelope):SourceDescriptor {
   const foreign=record(message.external_reply),foreignChat=external(record(foreign.chat).id),foreignId=external(foreign.message_id);
   if(foreignChat&&foreignId&&!relations.some(r=>r.kind==='reply_to'&&canonical(r.target)===canonical(messageIdentity(foreignChat,foreignId))))
     relations.push({kind:'reply_to',target:messageIdentity(foreignChat,foreignId),metadata:{external:true}});
-  const descriptor:SourceDescriptor={...base,adapter_version:'2',relations,
-    metadata:{...base.metadata,audience:audience(message,chat)},completeness:'full'};
+  const descriptor:SourceDescriptor={...base,adapter_version:'3',relations,
+    metadata:{...base.metadata,audience:telegramMessageAudience(message,chat)},completeness:'full'};
   try{return sourceDescriptor(descriptor);}catch{return fallback;}
 }

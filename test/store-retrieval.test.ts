@@ -16,6 +16,7 @@ import {AttachmentRepository} from '../src/stores/attachments.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {SourceRepository} from '../src/stores/retrieval.js';
 import {ProjectRepository} from '../src/stores/projects.js';
+import {observedSource} from '../src/observed-source.js';
 
 test('source-only retrieval keeps derivative links, independent relationship lookup and generation-bound privacy',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -38,11 +39,14 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     const foreign=(await archive.capture(event(':foreign','-654',{message_id:sequence+2,chat:{id:-654,type:'group'},text:'Foreign hazelwharf'}))).source.reference;
     const reply=(await archive.capture(event(':reply','-321',{message_id:sequence+3,chat:{id:-321,type:'group',title:'Quillmarsh team'},text:'A reply quillmarsh',from:{id:44,username:'alex_quill'},
       reply_to_message:{message_id:sequence+1,chat:{id:-321,type:'group'},text:'embeddedsecret'},external_reply:{message_id:sequence+2,chat:{id:-654},text:'foreignsecret'}}))).source.reference;
-    const unknown=(await archive.capture(event(':unknown','-321',{message_id:sequence+4,chat:{id:-321,type:'supergroup',is_forum:true},text:'Unknown membership'}))).source.reference;
+    const unknown=(await archive.capture(event(':unknown','-321',{message_id:sequence+4,chat:{id:-321,type:'supergroup',is_forum:true},is_topic_message:true,text:'Unknown membership'}))).source.reference;
     const topic=(await archive.capture(event(':topic','-321',{message_id:sequence+5,chat:{id:-321,type:'supergroup',is_forum:true},message_thread_id:77,text:'Topic quillmarsh'}))).source.reference;
+    const generalValue=event(':general','-321',{message_id:sequence+7,chat:{id:-321,type:'supergroup'},text:'General quillmarsh'});
+    const legacyGeneral=observedSource(generalValue);legacyGeneral.adapter_version='2';legacyGeneral.metadata={...legacyGeneral.metadata,audience:{chat_id:'-321',topic_state:'unknown'}};
+    const general=(await archive.capture({...generalValue,source:legacyGeneral})).source.reference;
     await assert.rejects(sources.read(await principal('-321'),target.id),{code:'guard_preparation_pending'});
     assert.equal((await sources.read(owner,target.id)).event.text,'Original quillmarsh');
-    for(const reference of [target,foreign,reply,unknown,topic])await guards.prepare(reference,'fixture',async()=>[]);
+    for(const reference of [target,foreign,reply,unknown,topic,general])await guards.prepare(reference,'fixture',async()=>[]);
     const transcript=await derived.record({operation_id:key+':transcript',source:target,kind:'transcript',content:Buffer.from('Derivative silverrush'),producer:'fixture',producer_version:'1',configuration:{}});
     const context=await derived.record({operation_id:key+':context',source:target,kind:'runtime_context',content:Buffer.from('runtime_context silverrush'),producer:'fixture',producer_version:'1',configuration:{}});
     await guards.prepare(transcript,'fixture',async()=>[]);await guards.prepare(context,'fixture',async()=>[]);
@@ -62,6 +66,10 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     await assert.rejects(sources.read(scoped,unknown.id),{code:'source_not_found'});
     await assert.rejects(sources.read(scoped,topic.id),{code:'source_not_found'});
     assert.equal((await sources.read(await principal('-321','-321/topic/77'),topic.id)).event.text,'Topic quillmarsh');
+    assert.equal((await sources.read(scoped,general.id)).event.text,'General quillmarsh');
+    await assert.rejects(sources.read(await principal('-321','-321/topic/77'),general.id),{code:'source_not_found'});
+    assert.ok(!(await sources.search(await principal('-321','-321/topic/77'),'quillmarsh')).some(row=>row.id===general.id));
+    assert.equal(await access.space(general),'-321');assert.equal(await access.canLearn(general,await guards.state()),true);
     const graph=await sources.graph(owner,'*','',1,reply.id);
     assert.ok(graph.nodes.some(n=>n.id==='collection:*'&&n.kind==='collection'&&n.label==='All private knowledge'));
     assert.ok(graph.edges.some(e=>e.from==='collection:*'&&e.to==='group:-321'&&e.kind==='contains'));

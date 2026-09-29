@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import {HttpError} from '../http.js';
-import type {ObservedAudience,ObservedReaction} from '../observed-source.js';
+import {telegramMessageAudience,type ObservedAudience,type ObservedReaction} from '../observed-source.js';
+import {canonical} from '../archive.js';
 import {sourceObjectId,type SourceIdentity} from '../source-model.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 
@@ -8,25 +9,46 @@ export type RelationshipAudience={kind:'owner'}|{kind:'conversation';chat_id:str
 const permits=(audience:RelationshipAudience,observed:ObservedAudience|null):boolean=>audience.kind==='owner'||!!observed&&
   audience.chat_id===observed.chat_id&&(observed.topic_state==='known'?audience.topic_id===observed.topic_id:observed.topic_state==='none'&&audience.topic_id===null);
 
+// Resolve the older adapter's unknown General projection from the immutable
+// full message. This changes neither archived bytes nor the saved descriptor.
+function messageAudience(row:any):ObservedAudience|null {
+  const saved:ObservedAudience|null=row.metadata?.audience??null;
+  if(saved?.topic_state!=='unknown'||row.adapter!=='telegram.bot-api'||row.adapter_version!=='2'||row.completeness!=='full'||
+    !['snapshot','update'].includes(row.operation)||row.channel!=='telegram'||
+    !['telegram_update','telegram_delivered_message'].includes(row.kind)||row.object_kind!=='message')return saved;
+  const body=JSON.parse(row.payload.toString()),message=body.message??body.edited_message??body.channel_post??body.edited_channel_post;
+  if(!message||String(message.chat?.id)!==saved.chat_id||row.scope!==saved.chat_id||String(message.message_id)!==row.external_id)return saved;
+  const resolved=telegramMessageAudience(message,saved.chat_id);
+  return resolved.topic_state==='none'?resolved:saved;
+}
+
+const observationColumns=`o.metadata,o.operation,o.adapter,o.adapter_version,o.completeness,
+  e.channel,e.kind,e.scope,
+  CASE WHEN o.metadata->'audience'->>'topic_state'='unknown' AND o.completeness='full' THEN e.payload END AS payload,
+  s.kind AS object_kind,s.external_id`;
+
 /** Archive-only joins. Returns references, never unguarded content or an access grant. */
 export class RelationshipRepository {
   constructor(readonly archive:ArchiveRepository){}
   private get pool():pg.Pool{return this.archive.pool;}
 
   private async targetAudience(objectId:string):Promise<ObservedAudience|null> {
-    const {rows}=await this.pool.query(`SELECT DISTINCT o.metadata->'audience' AS audience FROM source_observations o
-      JOIN source_revisions r ON r.id=o.revision_id WHERE r.object_id=$1
-      AND o.metadata->'audience'->>'topic_state' IN ('known','none') LIMIT 2`,[objectId]);
+    const {rows}=await this.pool.query(`SELECT ${observationColumns} FROM source_observations o
+      JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
+      JOIN events e ON e.id=o.event_id WHERE r.object_id=$1`,[objectId]);
+    const audiences=new Map<string,ObservedAudience>();
+    for(const row of rows){const value=messageAudience(row);if(value&&value.topic_state!=='unknown')audiences.set(canonical(value),value);}
     // Contradictory membership observations are unavailable to scoped consumers.
-    return rows.length===1?rows[0].audience:null;
+    return audiences.size===1?[...audiences.values()][0]!:null;
   }
 
   async describe(reference:SourceReference):Promise<{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string}> {
     await this.archive.verify(reference);
-    const row=(await this.pool.query(`SELECT o.metadata,o.operation,r.object_id FROM source_observations o
-      JOIN source_revisions r ON r.id=o.revision_id WHERE o.event_id=$1`,[reference.id])).rows[0];
+    const row=(await this.pool.query(`SELECT ${observationColumns},r.object_id FROM source_observations o
+      JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
+      JOIN events e ON e.id=o.event_id WHERE o.event_id=$1`,[reference.id])).rows[0];
     if(!row)throw new HttpError(404,'source_projection_not_found');
-    let audience:ObservedAudience|null=row.metadata.audience??null;
+    let audience=messageAudience(row);
     if(['reaction_change','reaction_counts'].includes(row.operation)) {
       const target=(await this.pool.query("SELECT target_id FROM source_relations WHERE event_id=$1 AND kind='reaction_to'",[reference.id])).rows[0];
       const resolved=target?await this.targetAudience(target.target_id):null;

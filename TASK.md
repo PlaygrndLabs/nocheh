@@ -227,6 +227,16 @@ projects were not deleted.
   the old note or any of its reaction event IDs. This completes the live
   reaction and topic-isolation gate. Group, participant, message, and topic
   identities remain in ignored local acceptance state.
+- General-topic normalization now recognizes Telegram's ordinary markerless
+  supergroup messages in the base conversation scope. Older full Bot API
+  projections resolve from matching immutable message envelopes at read time;
+  saved archive bytes and descriptors are preserved. Named topics retain their
+  explicit scope, while malformed topic markers and partial observations stay
+  unresolved. TypeScript compilation and 14 focused PostgreSQL/Compose checks
+  passed with no skips, covering privacy, reactions, learning, archive
+  preservation, and single-execution recovery. The AST graph was refreshed
+  with 561 files and zero model calls. Live recovery of the existing waiting
+  turn remains pending.
 
 </verification>
 
@@ -241,13 +251,10 @@ projects were not deleted.
   sequence have current-installation evidence. Historical ingestion remains
   unapproved. The deliberate-reset journal validator does not apply to this
   clean development setup, which has no reset coordinator journal.
-- Investigate General-topic handling in forum groups. Telegram delivered an
-  owner question in General without a thread ID or topic marker. Nocheh
-  classified the audience as unknown and correctly withheld topic-scoped
-  memory; the Telegram workflow remained waiting with no linked reply at the
-  last check. Establish whether General can be identified without weakening
-  unknown-topic isolation, and verify any change with focused privacy and
-  recovery tests before treating General as supported.
+- Complete live recovery for the verified General-topic handling correction.
+  The existing owner question has zero replies and zero execution attempts;
+  its captured event and source hash are saved in ignored local acceptance state.
+  General must deliver in its base scope while withholding named-topic sources.
 - Investigate the roughly two-to-five-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
   native config-read cause is not established; do not widen the profile tool
