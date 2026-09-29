@@ -535,3 +535,22 @@ decisions; no owner turn was restarted while in flight. Event and workflow IDs
 remain only in ignored local acceptance state.
 
 </verification>
+
+<verification date="2026-09-29" name="Captured-turn restart recovery">
+
+The owner sent a new ordinary private acknowledgment. It was captured with
+zero linked replies before the supervised Hermes runtime restarted. Hermes
+returned healthy, and the event's Telegram workflow entered its first execution
+attempt after the restart. One nonempty acknowledgment arrived afterward; the
+source had exactly one linked reply and the workflow completed delivery with
+one durable receipt. This passes the captured-turn restart gate without
+duplicate delivery. The reply took about four and a half minutes from
+capture, so text latency remains under investigation.
+
+During verification, the dashboard health endpoint was found to be refusing
+connections after a development source reload. An isolated restart restored
+dashboard health; all 17 operating services were healthy afterward. The cause
+of that reload stall remains unconfirmed. Event, workflow, receipt, and
+container timestamps remain in ignored local acceptance state.
+
+</verification>

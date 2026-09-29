@@ -191,6 +191,15 @@ projects were not deleted.
   The exact-approval request still had one linked reply, and the newly retired
   source still had zero replies with a cancelled workflow. These are
   post-completion durability checks; no in-flight owner turn was restarted.
+- A new ordinary owner acknowledgment was captured with zero replies, then the
+  supervised Hermes container restarted. It became healthy before the event's
+  first Telegram execution attempt. One nonempty acknowledgment arrived after
+  the restart; the linked source retained exactly one reply, and its workflow
+  completed delivery on the first execution attempt with one durable receipt.
+  The dashboard health endpoint had independently stopped listening after a
+  development source reload; restarting only that container restored health.
+  The 17 operating services were healthy afterward. Event, receipt, and restart
+  timestamps are saved in ignored local acceptance state.
 
 </verification>
 
@@ -199,15 +208,14 @@ projects were not deleted.
 - Complete the remaining fresh live checks in
   [release acceptance](docs/release-acceptance.md): non-owner reaction
   change/removal and derived meaning, owner correction with active learned
-  recall, and in-flight restart/recovery without duplicate effects. The
-  current configured group is not a forum; the owner kept forum-topic
+  recall. The current configured group is not a forum; the owner kept forum-topic
   isolation as an MVP gate, so a suitable forum group and non-owner participant
   are still required. Owner text, group silence and isolation, private recall,
-  exact owner approval, owner retirement, populated backup/restore, Honcho
-  attachment, and subscription voice transcription have current-installation
-  evidence.
+  exact owner approval, owner retirement, in-flight restart/recovery, populated
+  backup/restore, Honcho attachment, and subscription voice transcription have
+  current-installation evidence.
   Historical ingestion remains unapproved.
-- Investigate the roughly two-minute owner text replies and confirm continued
+- Investigate the roughly two-to-five-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
   native config-read cause is not established; do not widen the profile tool
   allowlist. One owner-text workflow began its native receipt about 46 seconds
