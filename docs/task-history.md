@@ -554,3 +554,16 @@ of that reload stall remains unconfirmed. Event, workflow, receipt, and
 container timestamps remain in ignored local acceptance state.
 
 </verification>
+
+<verification date="2026-09-29" name="Synthetic owner learned-memory correction">
+
+One duplicate learned interpretation from the fresh synthetic private phrase
+was retired through the owner operation with a checked revision. Its active
+version is revision 2, owner-authored, and retired. Another interpretation of
+that same synthetic fact was given a concise owner correction at revision 2.
+It remains active and received a completed Honcho projection receipt created
+after the correction. A fresh owner private recall turn after these changes
+is still pending; the earlier successful recall predates them. Identifiers,
+content, and receipts remain in ignored local acceptance state.
+
+</verification>
