@@ -462,3 +462,16 @@ exact delivered-message count still one. Event, action, and delivery IDs and
 timestamps remain in ignored local acceptance state.
 
 </verification>
+
+<verification date="2026-09-29" name="Retirement timing attempt and text latency">
+
+A fresh short owner message was captured, but its first-attempt Telegram reply
+was delivered 27 seconds later, before Archive retirement. This attempt cannot
+pass the pre-delivery cancellation check. The source remained active at the
+latest inspection, so future exclusion and Undo were also pending. A separate
+owner-text timing receipt showed roughly 46 seconds from capture until native
+receipt creation and 62.9 seconds in the native turn; conversation and model
+guarding accounted for substantial overlapping time. The cause of this delay
+was not established. Identifiers and timestamps remain in ignored local state.
+
+</verification>
