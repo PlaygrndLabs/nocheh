@@ -220,27 +220,34 @@ projects were not deleted.
   attributed to the same non-owner actor. The current per-person state is empty;
   no active learned entry cites either superseded update or the removal, and
   the old message still has zero linked replies. The reaction relation resolves
-  to the target's known forum topic. A second-topic live observation is still
-  needed for topic-isolation evidence. Group, participant, message, and topic
+  to the target's known forum topic. A new ordinary question in a second named
+  forum topic was captured with a different explicit topic ID. Its one linked
+  reply stayed in that second topic, expressed no knowledge of the reaction,
+  and disclosed no reaction. No stored runtime context for the question cited
+  the old note or any of its reaction event IDs. This completes the live
+  reaction and topic-isolation gate. Group, participant, message, and topic
   identities remain in ignored local acceptance state.
 
 </verification>
 
 <pending>
 
-- Complete the remaining fresh live checks in
-  [release acceptance](docs/release-acceptance.md): forum-topic isolation for
-  the non-owner reaction sequence. The selected group, bot admin rights,
-  reaction add/change/removal, empty current state, absence of active learned
-  entries citing the superseded reactions, and no new reply to the old note are
-  verified. A distinct topic has not yet produced a live observation. Owner text,
-  group silence and isolation,
-  private recall,
-  exact owner approval, owner retirement, owner correction and active learned
-  recall, in-flight restart/recovery, populated backup/restore, Honcho
-  attachment, and subscription voice transcription have current-installation
-  evidence.
-  Historical ingestion remains unapproved.
+- Reconcile the current-installation live evidence against
+  [release acceptance](docs/release-acceptance.md) before release. Owner text,
+  group silence and isolation, private recall, exact owner approval, owner
+  retirement, owner correction and active learned recall, in-flight
+  restart/recovery, populated backup/restore, Honcho attachment, subscription
+  voice transcription, and the full non-owner reaction and named-topic isolation
+  sequence have current-installation evidence. Historical ingestion remains
+  unapproved. The deliberate-reset journal validator does not apply to this
+  clean development setup, which has no reset coordinator journal.
+- Investigate General-topic handling in forum groups. Telegram delivered an
+  owner question in General without a thread ID or topic marker. Nocheh
+  classified the audience as unknown and correctly withheld topic-scoped
+  memory; the Telegram workflow remained waiting with no linked reply at the
+  last check. Establish whether General can be identified without weakening
+  unknown-topic isolation, and verify any change with focused privacy and
+  recovery tests before treating General as supported.
 - Investigate the roughly two-to-five-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
   native config-read cause is not established; do not widen the profile tool

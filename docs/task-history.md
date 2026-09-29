@@ -582,8 +582,17 @@ added thumbs up, changed it to heart, then removed it. All three individual
 updates were captured against the target, and the current per-person state
 became empty. No active learned entry cited either superseded update or the
 removal; no new reply was linked to the old note. The target relation resolved
-to its known forum topic, but a distinct-topic live check remained pending.
-Group, participant, message, and topic identities are retained only in ignored
-local acceptance state.
+to its known forum topic. An ordinary question in a second named forum topic
+was captured with a different explicit topic ID. One linked reply completed on
+the first Telegram workflow attempt in that same second topic, expressed no
+knowledge of the reaction, and did not disclose it. None of the question's
+stored runtime-context records contained the old note's event ID or reaction event IDs;
+the current individual reaction state stayed empty and no active learned entry
+cited the three reaction updates. This completed the live reaction and
+named-topic isolation gate. A separate question sent to General lacked both
+Telegram topic markers and was classified as unknown; its Telegram workflow
+was still waiting with no reply at the last check. That General behavior needs
+separate investigation. Group, participant, message, and topic identities are
+retained only in ignored local acceptance state.
 
 </verification>
