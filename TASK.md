@@ -235,8 +235,13 @@ projects were not deleted.
   unresolved. TypeScript compilation and 14 focused PostgreSQL/Compose checks
   passed with no skips, covering privacy, reactions, learning, archive
   preservation, and single-execution recovery. The AST graph was refreshed
-  with 561 files and zero model calls. Live recovery of the existing waiting
-  turn remains pending.
+  with 561 files and zero model calls. The two source files were activated
+  through the existing development watcher. The captured General turn resumed
+  into its base conversation scope; 109 assistant-context records contained
+  none of the other topic's note or reaction IDs. The original source hash and
+  saved projection remain unchanged. Its first native attempt failed before
+  delivery with `assistant_runtime_unavailable`; end-to-end delivery acceptance
+  remains pending. Private receipts are retained in ignored local state.
 
 </verification>
 
@@ -251,10 +256,13 @@ projects were not deleted.
   sequence have current-installation evidence. Historical ingestion remains
   unapproved. The deliberate-reset journal validator does not apply to this
   clean development setup, which has no reset coordinator journal.
-- Complete live recovery for the verified General-topic handling correction.
-  The existing owner question has zero replies and zero execution attempts;
-  its captured event and source hash are saved in ignored local acceptance state.
-  General must deliver in its base scope while withholding named-topic sources.
+- Complete delivery acceptance for the General turn that resumed after the fix.
+  Scope resolution, archive preservation, and named-topic source exclusion passed
+  live inspection. The first native attempt failed before delivery after about
+  233 seconds with `assistant_runtime_unavailable`; no linked reply was present
+  at the latest check. The workflow still awaited receipt reconciliation. Diagnose
+  this runtime failure and observe recovery under the existing captured event;
+  another owner test message is not needed.
 - Investigate the roughly two-to-five-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
   native config-read cause is not established; do not widen the profile tool
