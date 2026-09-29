@@ -211,6 +211,13 @@ projects were not deleted.
   execution attempt with one receipt, and the owner confirmed seeing exactly
   one correct reply. This completes the learned-recall gate. Operation IDs and
   content remain in ignored local acceptance state.
+- Read-only Telegram checks found the selected configured group is now a forum,
+  with Nocheh holding administrator and topic-management rights. An older
+  captured synthetic note in a known forum topic was selected for the
+  non-owner reaction sequence; it had zero linked replies before the check.
+  The human add/change/remove updates and topic-isolation evidence remain
+  pending. Group identity, message ID, and topic ID remain in ignored local
+  acceptance state.
 
 </verification>
 
@@ -218,10 +225,10 @@ projects were not deleted.
 
 - Complete the remaining fresh live checks in
   [release acceptance](docs/release-acceptance.md): non-owner reaction
-  change/removal and derived meaning. The current configured group is not a
-  forum; the owner kept forum-topic
-  isolation as an MVP gate, so a suitable forum group and non-owner participant
-  are still required. Owner text, group silence and isolation, private recall,
+  change/removal and derived meaning, including forum-topic isolation. The
+  selected group and bot admin rights are verified; the non-owner human's
+  reaction updates are still required. Owner text, group silence and isolation,
+  private recall,
   exact owner approval, owner retirement, owner correction and active learned
   recall, in-flight restart/recovery, populated backup/restore, Honcho
   attachment, and subscription voice transcription have current-installation

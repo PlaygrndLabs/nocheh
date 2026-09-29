@@ -571,3 +571,15 @@ three minutes and forty seconds from capture, so text latency remains open.
 Identifiers, content, and receipts remain in ignored local acceptance state.
 
 </verification>
+
+<verification date="2026-09-29" name="Forum reaction preflight">
+
+Read-only Telegram checks confirmed the selected configured group is a forum
+and the bot is an administrator with topic-management rights. An older captured
+synthetic owner note in a known forum topic was identified as the reaction
+target, with zero linked replies at baseline. The non-owner participant's
+reaction add, change, and removal had not yet been observed, so the reaction
+and topic-isolation gate remains pending. Group identity, message ID, and
+topic ID are retained only in ignored local acceptance state.
+
+</verification>
