@@ -577,9 +577,12 @@ Identifiers, content, and receipts remain in ignored local acceptance state.
 Read-only Telegram checks confirmed the selected configured group is a forum
 and the bot is an administrator with topic-management rights. An older captured
 synthetic owner note in a known forum topic was identified as the reaction
-target, with zero linked replies at baseline. The non-owner participant's
-reaction add, change, and removal had not yet been observed, so the reaction
-and topic-isolation gate remains pending. Group identity, message ID, and
-topic ID are retained only in ignored local acceptance state.
+target, with zero linked replies at baseline. The same non-owner participant
+added thumbs up and then changed it to heart. Both individual updates were
+captured against the target, and the current per-person state advanced to
+heart. The target relation resolved to its known forum topic; no new reply
+was linked to the old note. Removal and final stale-meaning and topic-isolation
+checks remain pending. Group, participant, message, and topic identities are
+retained only in ignored local acceptance state.
 
 </verification>
