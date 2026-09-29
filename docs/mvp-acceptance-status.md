@@ -28,7 +28,8 @@ reliability or release approval.
 | Populated backup and inactive restore | Passed on final snapshot | Checksums, 427 files, 88 table fingerprints; same operating containers resumed; restored authorities stayed inactive. Earlier failed resume attempts are retained. | Snapshot coverage, storage schema, restore, resume, or authority controls change. |
 | Honcho live acceptance | Passed | Subscription reasoning, guarded embedding, ingestion, retrieval, restart persistence, provider failure/recovery; closed synthetic workspace; attachment and owner recall observed. | Honcho/provider routing, guarding, ingestion, budget enforcement, or memory state changes. |
 | Non-owner reactions and named-topic isolation | Passed | Add/change/remove on an older note, correct actor/target/current state, no old-message reply; second named-topic answer/context excluded reaction evidence. | Reaction normalization/state, audience resolution, retrieval, or topic routing changes. |
-| General-topic recovery | Partial; delivery pending | Existing markerless message resolved to base scope; original hash/projection unchanged; 109 assistant-context records excluded other-topic sources. First native attempt failed before delivery; existing workflow reached attempt two with no reply at review. | Resolve the existing runtime failure and inspect the same event; no new owner message needed. |
+| General-topic recovery | Delivery observed; answer quality pending | Existing markerless message resolved to base scope; original hash/projection unchanged; 109 assistant-context records excluded other-topic sources. First native attempt failed before delivery; the second completed with one linked reply. | Confirm the existing reply's content and investigate the first native timeout; no new owner message needed for delivery. |
+| Same-topic reaction recall | Pending | One first-attempt reply arrived after 424.4 seconds and could not identify the old reaction. The topic generation had no ready snapshot then; it became ready later. Current rebuild has completed local ingestion while Honcho derivation remains queued. | Verify current topic readiness and snapshot, then assess only the affected recall behavior with existing evidence where possible. |
 
 </checks>
 
@@ -43,6 +44,14 @@ Their prior live passes are carried forward. Voice transcription, exact approval
 backup/restore, and restart behavior have no relevant implementation change from
 this correction. This review does not close the separate runtime reliability gate.
 
+The reply-admission and Honcho-worker change has focused automated evidence only;
+it is not active in the operating stack. It targets latency and initial memory
+readiness. Prior reaction capture and named-topic isolation passes remain dated
+passes because their normalization and audience rules did not change. Owner text,
+voice, and General delivery remain dated observations; their timing and timeout
+reliability are specifically open. No new owner traffic is justified while the
+existing captured turns and current Honcho queue can be inspected.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket
@@ -52,10 +61,11 @@ permission to carry all evidence forward indefinitely.
 
 <remaining>
 
-1. Complete the existing General turn's delivery/reconciliation and investigate
-   its pre-delivery assistant-runtime failure.
-2. Resolve reply latency and intermittent runtime failures; retain prior success
-   evidence and verify only affected paths after the fix.
+1. Verify the current topic generation reaches ready and gains a snapshot; assess
+   the affected same-topic recall and the existing General reply content.
+2. Activate and measure the focused admission and deriver changes, then continue
+   investigating model/guard time and the first General native timeout. Retain
+   prior success evidence and verify only affected paths.
 3. Finish release-candidate evidence/pin reconciliation, including the required
    provider refresh, quota/failure, and literal-detection evidence. The fresh
    Honcho checks cover part of this; they do not by themselves prove every
