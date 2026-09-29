@@ -618,3 +618,17 @@ delivery remain pending. Private evidence is retained only in ignored local
 acceptance state. This did not repeat or close the separate latency gate.
 
 </verification>
+
+<verification date="2026-09-29" name="Live acceptance record and selective reruns">
+
+The owner requested an update on real tests and remaining MVP work, and instructed
+that real tests be recorded and repeated only when needed. The retained local
+reports were indexed without new test traffic. The public register separates
+passed behavior and caveats from the pending General delivery and runtime
+reliability work. A read-only receipt check found the existing General turn on
+attempt two with no linked reply. AGENTS and the acceptance procedure now require
+an impact reason before requesting a live rerun; the product acceptance rule
+carries unaffected passes forward with their original dates. Documentation-only
+checks cover this increment. Detailed report references remain in ignored state.
+
+</verification>
