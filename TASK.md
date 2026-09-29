@@ -179,8 +179,9 @@ projects were not deleted.
   Historical ingestion remains unapproved.
 - The first fresh owner-retirement attempt received a confirmed reply about
   27 seconds after capture, before an Archive retirement was recorded. It does
-  not pass the pre-delivery cancellation check. The source is still active;
-  later exclusion and Undo await the owner's Archive action. Its content-free
+  not pass the pre-delivery cancellation check. The owner later retired that
+  exact source in Archive at revision 1; its original and confirmed reply remain
+  inspectable. Later exclusion and Undo await follow-up checks. Its content-free
   attempt record is in ignored local acceptance state.
 - Investigate the roughly two-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
