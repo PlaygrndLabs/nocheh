@@ -470,7 +470,15 @@ was delivered 27 seconds later, before Archive retirement. This attempt cannot
 pass the pre-delivery cancellation check. The source remained active at the
 initial inspection; the owner later retired it in Archive at revision 1, with
 the original and confirmed reply still inspectable. Future exclusion and Undo
-were still pending. A separate
+were still pending at that point. A later private follow-up received one
+first-attempt reply expressing uncertainty, with no retired content or false
+claim about another source. Its four event-bound runtime contexts omitted the
+retired phrase and source ID, so future exclusion passed. Undo and a separate
+pre-delivery cancellation attempt remained pending at that point. Owner Undo
+then restored the exact source at revision 2 with two saved action-history
+entries; Archive again marked it available while retaining the original and
+earlier confirmed reply. Pre-delivery cancellation still needs a fresh attempt.
+A separate
 owner-text timing receipt showed roughly 46 seconds from capture until native
 receipt creation and 62.9 seconds in the native turn; conversation and model
 guarding accounted for substantial overlapping time. The cause of this delay

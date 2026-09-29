@@ -181,8 +181,14 @@ projects were not deleted.
   27 seconds after capture, before an Archive retirement was recorded. It does
   not pass the pre-delivery cancellation check. The owner later retired that
   exact source in Archive at revision 1; its original and confirmed reply remain
-  inspectable. Later exclusion and Undo await follow-up checks. Its content-free
-  attempt record is in ignored local acceptance state.
+  inspectable. A later private question received one first-attempt reply that
+  expressed uncertainty, omitted the retired content, and did not misidentify
+  another source as retired. Its four event-bound runtime contexts contained no
+  retired phrase or source ID. Exclusion passed. Owner Undo restored the exact
+  source at revision 2 with two action-history entries; Archive again marks it
+  available while preserving the original and prior reply. Pre-delivery
+  cancellation still needs a fresh attempt. Its content-free record is in
+  ignored local acceptance state.
 - Investigate the roughly two-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
   native config-read cause is not established; do not widen the profile tool
