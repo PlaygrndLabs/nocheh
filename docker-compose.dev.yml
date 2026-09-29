@@ -18,6 +18,9 @@ services:
     build:
       context: ${NOCHEH_DEV_SOURCE_ROOT:?}
       target: development
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
     restart: "no"
     command: [node, tools/development/dev-app-watch.mjs]
     healthcheck:

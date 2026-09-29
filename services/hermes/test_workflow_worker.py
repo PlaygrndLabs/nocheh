@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from tools.operations.workflows.workflow_worker import start,running
+from tools.operations.workflows.workflow_worker import start,running,resume_existing
 
 
 class HostWorkerTests(unittest.TestCase):
@@ -36,6 +36,26 @@ class HostWorkerTests(unittest.TestCase):
             self.assertEqual(query.call_args.args[0][-5:],['ps','--status','running','--services','nocheh-executor'])
             with patch('tools.operations.workflows.workflow_worker.subprocess.run') as launch:
                 self.assertEqual(start(Path(folder))['state'],'running');launch.assert_not_called()
+
+    def test_backup_resumes_existing_executor_without_recreating_it(self):
+        with tempfile.TemporaryDirectory() as folder,\
+             patch('tools.operations.workflows.workflow_worker.compose_command',return_value=['docker','compose']),\
+             patch('tools.operations.workflows.workflow_worker.compose_environment',return_value={}),\
+             patch('tools.operations.workflows.workflow_worker.running',side_effect=[False,True]),\
+             patch('tools.operations.workflows.workflow_worker.subprocess.run') as launch:
+            state=Path(folder);directory=state/'admin/workflows';directory.mkdir(parents=True)
+            (directory/'stop').touch()
+            self.assertEqual(resume_existing(state)['state'],'running')
+            self.assertFalse((directory/'stop').exists())
+            self.assertEqual(launch.call_args.args[0],
+                             ['docker','compose','start','--wait','--wait-timeout','180','nocheh-executor'])
+        with tempfile.TemporaryDirectory() as folder,\
+             patch('tools.operations.workflows.workflow_worker.compose_command',return_value=['docker','compose']),\
+             patch('tools.operations.workflows.workflow_worker.compose_environment',return_value={}),\
+             patch('tools.operations.workflows.workflow_worker.running',return_value=False),\
+             patch('tools.operations.workflows.workflow_worker.subprocess.run'):
+            with self.assertRaisesRegex(RuntimeError,'did_not_resume'):
+                resume_existing(Path(folder))
 
     def test_stale_lock_file_does_not_report_a_stopped_container_as_running(self):
         with tempfile.TemporaryDirectory() as folder,\

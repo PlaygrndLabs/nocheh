@@ -88,7 +88,7 @@ def backup(state,output,leave_stopped=False):
 
 
 def _backup(state,output,leave_stopped,command,env,recovery=None):
-    from tools.operations.workflows.workflow_worker import running as workflows_running,stop as stop_workflows,start as start_workflows
+    from tools.operations.workflows.workflow_worker import running as workflows_running,stop as stop_workflows,resume_existing as resume_workflows
     output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     stage=Path(tempfile.mkdtemp(prefix='.backup-',dir=output.parent));stage.chmod(0o700)
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
@@ -185,9 +185,11 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
         barrier.close()
         if three_stores:recovery.assert_maintenance()
         if coordinator:coordinator.assert_current()
-        # Resume precisely the services that were running before the snapshot.
-        if stopped and not leave_stopped: subprocess.run(command+['up','-d','--no-build','--no-deps','--wait','--wait-timeout','180']+stopped,env=env,check=True)
-        if workflow_was_running and not leave_stopped:start_workflows(state)
+        # Resume the existing containers. A development stack may use a different
+        # Compose overlay or pinned image IDs than this checkout's configuration;
+        # `up` can recreate it or try to pull unavailable local image tags.
+        if stopped and not leave_stopped: subprocess.run(command+['start','--wait','--wait-timeout','180']+stopped,env=env,check=True)
+        if workflow_was_running and not leave_stopped:resume_workflows(state)
 
 
 def validate_snapshot(snapshot):

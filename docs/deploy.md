@@ -167,7 +167,9 @@ provider OAuth/monitor state, configuration and credentials while those writers 
 checksums and deterministic fingerprints of archive, policy, receipt and workflow
 tables. Version 5 also includes Honcho database fingerprints, a database dump,
 protected configuration and the embedding spending ledger. Honcho cache is rebuildable. It then
-restarts the previously running services. Backups are private local directories
+restarts the existing containers for previously running services, including
+the executor, without recreating them from the current checkout's Compose
+image tags. Backups are private local directories
 under ignored `data/backups/`; they contain original data and credentials. Keep
 their access permissions when copying them. Generated plugin symlinks are recorded
 and recreated by the integration. Native `.cache/uv` dependency caches are recorded
