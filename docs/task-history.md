@@ -596,3 +596,18 @@ separate investigation. Group, participant, message, and topic identities are
 retained only in ignored local acceptance state.
 
 </verification>
+
+<verification date="2026-09-29" name="General-topic handling correction">
+
+The owner requested resolution of General-topic handling. Telegram's Bot API
+server deliberately omits thread and topic markers for General. The message
+adapter now recognizes that ordinary message shape in the base conversation
+scope; older full Bot API observations resolve from matching original envelopes
+without rewriting archive bytes or descriptors. Partial observations, malformed
+topic markers, and contradictory target membership remain unavailable. Named
+topic access stays separate. TypeScript compilation and 14 focused isolated
+PostgreSQL/Compose tests passed with no skips, and the AST graph refreshed
+with 561 files and zero model calls. Recovery of the existing live General turn
+remained pending at candidate verification.
+
+</verification>

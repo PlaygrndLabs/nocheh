@@ -13,6 +13,7 @@ import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {requestWorkflow} from '../src/workflows/store.js';
+import {observedSource} from '../src/observed-source.js';
 
 test('guarded representations cannot change Telegram routing or embed unobserved reply snapshots',()=>{
   const original={update_id:1,message:{message_id:2,date:3,chat:{id:-4,type:'supergroup',is_forum:true},from:{id:5,is_bot:false},message_thread_id:6,is_topic_message:true}};
@@ -72,7 +73,18 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   const due=(id:string)=>stores.control.query('UPDATE dispatches SET next_attempt=now() WHERE event_id=$1',[id]);
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
-    const first=await capture('Original fixture-secret');assert.equal((await advance(first.reference.id)).waiting_reason,'guard_pending');assert.equal(calls.length,0);
+    const generalValue=envelope('General fixture',{chat:{id:Number(group),type:'supergroup'}});
+    const legacy=observedSource(generalValue);legacy.adapter_version='2';legacy.metadata={...legacy.metadata,audience:{chat_id:group,topic_state:'unknown'}};
+    const general=(await services.capture.capture({...generalValue,source:legacy})).source.reference;
+    await prepare(general.id);mode='done';
+    assert.equal((await advance(general.id)).state,'completed');
+    const generalCalls=calls.filter(c=>c.input.event_id===general.id&&c.operation==='run.start');
+    assert.equal(generalCalls.length,1);assert.equal(generalCalls[0]!.input.payload.message.message_thread_id,undefined);
+    assert.equal(reader({headers:{authorization:'Bearer '+generalCalls[0]!.input.archive_credential}} as any,token).space,group);
+    assert.equal((await advance(general.id)).state,'completed');
+    assert.equal(calls.filter(c=>c.input.event_id===general.id&&c.operation==='run.start').length,1);
+    const initialCalls=calls.length;
+    const first=await capture('Original fixture-secret');assert.equal((await advance(first.reference.id)).waiting_reason,'guard_pending');assert.equal(calls.length,initialCalls);
     await prepare(first.reference.id);
     const binding=await services.guards.state(),guard=await services.guards.read('events:'+first.reference.id,binding);
     await services.guards.edit('events:'+first.reference.id,guard.revision,{text:'Owner prepared text',payload:{message:{chat:{id:123,type:'private'},from:{id:123,first_name:'Prepared participant'},message_thread_id:999}}},key+':owner-edit');

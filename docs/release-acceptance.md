@@ -51,10 +51,11 @@ tool name or a test prefix.
 | Owner retirement | Send an ordinary short owner DM, save its captured event ID and timestamp, then use Archive to retire that exact message. Verify the original and any file/transcript remain inspectable, the owner action history records the revision, and no unsent reply is delivered. Ask a later ordinary question about the retired message. Verify its runtime context and answer exclude the retired content, and the answer does not identify the current question or another accessible source as the retired message. Undo with the revision-checked action and verify future use is permitted. Sending a second message must leave the first decision unchanged. |
 | Old reaction change/removal | Have a non-owner human react to an older captured message in a selected group, change the reaction, then remove it. Save the target and each reaction event ID and timestamp. Verify group admin rights, delivery of individual reaction updates, current per-actor state, absence of stale inferred meaning, topic isolation, and no new reply to the old message. Record absent updates or missing admin rights as pending or failed. Anonymous counts are separate and may arrive late. |
 
-For forum-topic isolation, use two named topics whose captured messages carry
-distinct explicit thread IDs. A General-topic message without a thread marker
-has unknown topic membership and cannot prove separation between two named
-topics.
+For forum-topic isolation, use distinct resolved audiences: General and a named
+topic, or two named topics with different thread IDs. General's ordinary
+messages omit the topic markers and use the group's base conversation scope.
+A message marked as a topic message but missing its thread ID remains
+unresolved and cannot pass the isolation check.
 
 The reset request also requires a current normalized reply and a reaction from a
 non-owner human in the dedicated group, active learned-memory recall after the
