@@ -164,31 +164,27 @@ projects were not deleted.
   the native action receipt was `done`. Replaying the completed action returned
   its saved result, and the exact delivered-message count remained one. The
   content-free action and receipt evidence is in ignored local acceptance state.
+- Fresh owner retirement passed across two sources. The first source was
+  retired after its reply had already been delivered; a later first-attempt
+  answer and four event-bound contexts excluded its content, and owner Undo
+  restored it at revision 2 while preserving the original and reply. A second
+  ordinary private message was captured with zero replies and retired at
+  revision 1 before delivery. Archive kept its original inspectable; its
+  Telegram workflow closed `cancelled` at admission with no delivery receipt,
+  and the source still had zero linked replies after closure. Content-free
+  event, revision, and workflow evidence is in ignored local acceptance state.
 
 </verification>
 
 <pending>
 
 - Complete the remaining fresh live checks in
-  [release acceptance](docs/release-acceptance.md): retirement and later
-  exclusion, non-owner reaction change/removal and derived
-  meaning, correction, and restart/recovery without duplicate effects. Owner
-  text, group silence and isolation, private recall, exact owner approval,
-  Honcho attachment, and
-  subscription voice transcription have current-installation evidence.
+  [release acceptance](docs/release-acceptance.md): non-owner reaction
+  change/removal and derived meaning, correction, and restart/recovery without
+  duplicate effects. Owner text, group silence and isolation, private recall,
+  exact owner approval, owner retirement, Honcho attachment, and subscription
+  voice transcription have current-installation evidence.
   Historical ingestion remains unapproved.
-- The first fresh owner-retirement attempt received a confirmed reply about
-  27 seconds after capture, before an Archive retirement was recorded. It does
-  not pass the pre-delivery cancellation check. The owner later retired that
-  exact source in Archive at revision 1; its original and confirmed reply remain
-  inspectable. A later private question received one first-attempt reply that
-  expressed uncertainty, omitted the retired content, and did not misidentify
-  another source as retired. Its four event-bound runtime contexts contained no
-  retired phrase or source ID. Exclusion passed. Owner Undo restored the exact
-  source at revision 2 with two action-history entries; Archive again marks it
-  available while preserving the original and prior reply. Pre-delivery
-  cancellation still needs a fresh attempt. Its content-free record is in
-  ignored local acceptance state.
 - Investigate the roughly two-minute owner text replies and confirm continued
   first-attempt tool registration on later turns. The earlier intermittent
   native config-read cause is not established; do not widen the profile tool

@@ -485,3 +485,17 @@ guarding accounted for substantial overlapping time. The cause of this delay
 was not established. Identifiers and timestamps remain in ignored local state.
 
 </verification>
+
+<verification date="2026-09-29" name="Pre-delivery owner retirement cancellation">
+
+The owner sent a second ordinary private message for the cancellation check.
+It was captured with zero linked replies, then retired at revision 1 before
+delivery. Archive retained the original and marked it retired. The Telegram
+workflow closed as cancelled at admission with no delivery receipt, and the
+source still had zero linked replies after closure. This completes the
+pre-delivery cancellation part of owner retirement; the earlier source
+already supplied future exclusion and revision-checked Undo evidence.
+Identifiers, timestamps, and content-free checks remain in ignored local
+acceptance state.
+
+</verification>
