@@ -652,3 +652,19 @@ refresh passed in isolated or synthetic environments. No new live traffic or ope
 in this increment. Private event and receipt details remain in ignored state.
 
 </verification>
+
+<verification date="2026-09-29" name="Local integration and activation gate">
+
+The focused code and documentation increment was committed and fast-forwarded into
+local main under the shared Git advisory lock after a successful fetch. Remote
+push was omitted because private material remains reachable in Git history.
+Read-only checks found one owned 17-service Compose stack, no active Telegram
+dispatch, and the operating checkout's two General-topic source edits intact.
+Automatic approval review nevertheless rejected copying the verified workflow
+source into the watched checkout because that would change live behavior without
+separate trusted authorization. No live source, Honcho configuration, container,
+or provider state was changed. An existing General reply was checked privately:
+it was nonempty, contained no internal source ID, and did not identify a removed
+reaction. This does not establish full answer quality.
+
+</verification>

@@ -46,7 +46,10 @@ this correction. This review does not close the separate runtime reliability gat
 
 The reply-admission and Honcho-worker change has focused automated evidence only;
 it is not active in the operating stack. It targets latency and initial memory
-readiness. Prior reaction capture and named-topic isolation passes remain dated
+readiness. Automatic approval review rejected activating the verified source
+in the operating watched checkout because live behavior changes require explicit
+authorization. The deriver configuration was not changed. Prior reaction capture
+and named-topic isolation passes remain dated
 passes because their normalization and audience rules did not change. Owner text,
 voice, and General delivery remain dated observations; their timing and timeout
 reliability are specifically open. No new owner traffic is justified while the
@@ -63,7 +66,8 @@ permission to carry all evidence forward indefinitely.
 
 1. Verify the current topic generation reaches ready and gains a snapshot; assess
    the affected same-topic recall and the existing General reply content.
-2. Activate and measure the focused admission and deriver changes, then continue
+2. Obtain authorization for live source and deriver activation, then measure the
+   focused admission and derivation changes. Continue
    investigating model/guard time and the first General native timeout. Retain
    prior success evidence and verify only affected paths.
 3. Finish release-candidate evidence/pin reconciliation, including the required
