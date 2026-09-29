@@ -42,6 +42,18 @@ def start(state):
     return {'state':'running'}
 
 
+def resume_existing(state):
+    """Resume the exact executor stopped for a backup without Compose recreation."""
+    state=Path(state);env=compose_environment(state)
+    if (state/'workflows/inactive').exists() or (state/'spool/.restore-inactive').exists():return {'state':'inactive_restore'}
+    if running(state):return {'state':'running'}
+    directory=state/'admin/workflows';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
+    (directory/'stop').unlink(missing_ok=True)
+    subprocess.run(compose_command(state)+['start','--wait','--wait-timeout','180','nocheh-executor'],env=env,check=True)
+    if not running(state):raise RuntimeError('existing_workflow_executor_did_not_resume')
+    return {'state':'running'}
+
+
 def stop(state,wait=False):
     # Compose suppresses restart while SIGTERM drains the foreground supervisor.
     # A stop-file alone races restart: unless-stopped and can relaunch the worker.

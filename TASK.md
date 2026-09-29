@@ -173,6 +173,19 @@ projects were not deleted.
   Telegram workflow closed `cancelled` at admission with no delivery receipt,
   and the source still had zero linked replies after closure. Content-free
   event, revision, and workflow evidence is in ignored local acceptance state.
+- A populated format-6 backup completed after two earlier snapshots exposed
+  unsafe development-stack resume paths. The final backup saved 427 state files
+  and 88 table fingerprints, resumed the same existing service and executor
+  containers, and passed checksum validation. An inactive restore of that
+  exact snapshot verified all three stores and 427 files. Telegram, executors,
+  scheduling, controlled tools, and provider login remained held; the restored
+  services were stopped afterward. The operating 17 services returned healthy
+  with one Telegram poller and one provider owner. The generated dashboard
+  volume was repaired to the app UID after a restart exposed root ownership;
+  the app rebuilt and recovered health. The development app build now receives
+  the operating UID/GID; the Compose render and focused recovery tests passed.
+  The AST graph was refreshed with 561 files and zero model calls. Content-free
+  evidence and both private snapshots remain in ignored local state.
 
 </verification>
 
@@ -192,13 +205,6 @@ projects were not deleted.
   after capture; the saved native turn then reported 62.9 seconds total,
   including 52.4 seconds of conversation and 26.0 seconds of model guarding
   (overlapping timings). This narrows the delay but does not explain its cause.
-- Repair the source-watched dashboard asset volume ownership/mount mismatch
-  before the next UI iteration. The existing volume identifies another checkout;
-  `make dev` asks to recreate it and the app watcher reports `EROFS` even though
-  the operating services remain healthy. Do not accept volume recreation without
-  checking which generated outputs it would remove.
-- Run populated backup/recovery acceptance when fresh data exists. The prior
-  incomplete backups were deleted with the authorized application-data reset.
 - Remote Git synchronization remains blocked by private material in reachable
   history. Sanitize and verify history before pushing; do not upload those blobs.
   The earlier HTTPS authentication failure also needs verification at push time.

@@ -499,3 +499,28 @@ Identifiers, timestamps, and content-free checks remain in ignored local
 acceptance state.
 
 </verification>
+
+<verification date="2026-09-29" name="Populated backup and inactive restore">
+
+The first populated snapshot passed checksum validation, but its automatic
+resume tried to recreate development containers from unavailable base Compose
+image tags. The exact original containers were restarted. An app restart then
+exposed root ownership of the generated dashboard volume; correcting that
+volume's ownership let its watcher rebuild and return healthy. An inactive
+restore of the first snapshot verified the three owned stores and 406 saved
+files without enabling Telegram, executors, or provider login.
+
+A backup retry resumed the existing services but found the separate executor
+helper still used Compose recreation. The executor's exact container was
+restarted. Both resume paths were changed to start existing containers, and
+focused success and failure tests passed. The development app build now takes
+the operating UID/GID; its Compose render was verified. A final populated
+backup returned successfully with 427 files and 88 table fingerprints. Its
+exact snapshot restored into a separate inactive project with all three store
+fingerprints and 427 files verified. Execution and login holds were checked,
+then the restored services were stopped. The operating 17 services were
+healthy with one Telegram poller and one provider owner. Private snapshots,
+restore receipts, and content-free incident evidence remain only in ignored
+local state.
+
+</verification>

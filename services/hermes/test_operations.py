@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -51,16 +52,20 @@ class SnapshotTests(unittest.TestCase):
             receipt=state/'hermes/review-receipt';receipt.write_text('ambiguous')
             cache=state/'hermes/profiles/fixture/.cache/uv';cache.mkdir(parents=True)
             (cache/'wheel-link').symlink_to('/not-read-by-backup')
+            commands=[]
             def run(command,**kwargs):
+                commands.append(command)
                 if 'pg_dump' in command:kwargs['stdout'].write(b'synthetic database dump')
             with patch('tools.operations.installation.operations.compose',return_value=['fixture']),patch('tools.operations.installation.operations.environment',return_value={}),\
-                 patch('tools.operations.installation.operations.subprocess.check_output',side_effect=['','fixture-revision']),\
+                 patch('tools.operations.installation.operations.subprocess.check_output',side_effect=['nocheh-app','fixture-revision']),\
                  patch('tools.operations.installation.operations.fingerprints',return_value={name:'hash' for name in TABLES}),\
                  patch('tools.operations.installation.operations.subprocess.run',side_effect=run),\
                  patch('tools.operations.workflows.workflow_worker.running',return_value=True),\
-                 patch('tools.operations.workflows.workflow_worker.stop') as stop_host,patch('tools.operations.workflows.workflow_worker.start') as start_host:
+                 patch('tools.operations.workflows.workflow_worker.stop') as stop_host,patch('tools.operations.workflows.workflow_worker.resume_existing') as start_host:
                 backup(state,root/'backup')
                 stop_host.assert_called_once_with(state,wait=True);start_host.assert_called_once_with(state)
+            self.assertIn(['fixture','start','--wait','--wait-timeout','180','nocheh-app'],commands)
+            self.assertFalse(any('up' in command for command in commands))
             manifest=validate_snapshot(root/'backup')
             self.assertEqual(manifest['version'],3)
             self.assertIn('admin/dashboard/home/config.yaml',manifest['files'])
@@ -83,6 +88,30 @@ class SnapshotTests(unittest.TestCase):
         with patch('tools.operations.installation.operations.subprocess.Popen') as process:
             with self.assertRaises(ValueError):fingerprints([],{},['events; DROP TABLE events'])
             process.assert_not_called()
+
+    def test_backup_resume_failure_preserves_snapshot_without_recreating_containers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);state=root/'state';state.mkdir()
+            (state/'.env').write_text('TELEGRAM_ENABLED=false\n')
+            for name in ('files','spool','hermes'):(state/name).mkdir()
+            commands=[]
+            def run(command,**kwargs):
+                commands.append(command)
+                if 'pg_dump' in command:kwargs['stdout'].write(b'synthetic database dump')
+                if 'start' in command:raise subprocess.CalledProcessError(1,command)
+            with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
+                 patch('tools.operations.installation.operations.environment',return_value={}),\
+                 patch('tools.operations.installation.operations.subprocess.check_output',side_effect=['nocheh-app','fixture-revision']),\
+                 patch('tools.operations.installation.operations.fingerprints',return_value={}),\
+                 patch('tools.operations.installation.operations.subprocess.run',side_effect=run),\
+                 patch('tools.operations.workflows.workflow_worker.running',return_value=True),\
+                 patch('tools.operations.workflows.workflow_worker.stop'),\
+                 patch('tools.operations.workflows.workflow_worker.resume_existing') as start_host:
+                with self.assertRaises(subprocess.CalledProcessError):backup(state,root/'backup')
+                start_host.assert_not_called()
+            self.assertIn(['fixture','start','--wait','--wait-timeout','180','nocheh-app'],commands)
+            self.assertFalse(any('up' in command for command in commands))
+            self.assertEqual(validate_snapshot(root/'backup')['version'],3)
 
     def test_restore_holds_all_executors_before_starting_services(self):
         with tempfile.TemporaryDirectory() as folder:
