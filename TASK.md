@@ -25,6 +25,11 @@ full model context. [Decision](docs/adr/0082-evidence-based-learning-deduplicati
 Owner edits to guarded automatic guidance also enter that identity; five focused
 learning/learned-memory checks pass. Operating reconciliation remains under
 observation. The new same-topic recall answer failed despite correct topic routing.
+The affected replacement generation has since reached readiness and produced a
+usable matching snapshot, but another background interpretation later replaced
+existing learned versions and revoked that generation. The focused conversational
+recheck delivered one reply on attempt four after about twenty minutes; it did
+not identify the removal. Reply assessment was performed through the CLI.
 
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
@@ -39,8 +44,12 @@ auth is absent; no duplicate login or refresh worker was introduced.
   about 175 seconds, including about 133 seconds before the native execution
   receipt started and 41 seconds until completion. The model effect recorded
   2.2 seconds of broker preparation and 3.2 seconds of provider transport waits.
-  These phases overlap other native work; they do not establish a pure model
-  compute time. The earlier timeout and recovered reply remain historical evidence.
+  Preparation completed about 51 seconds after capture, leaving about 82 seconds
+  before the native receipt. These are elapsed workflow boundaries, including
+  orchestration waits. Historical receipts lack finer preparation measurements,
+  and workflow run timestamps are overwritten by later steps. Native phases
+  overlap; they do not establish pure model compute time. The earlier timeout
+  and recovered reply remain historical evidence.
 - The trusted native parent now retains allowlisted timings and an explicit
   guard-change failure when authorization changes after child completion. It
   withholds the answer and session identity; fourteen focused process/timing/
@@ -53,6 +62,10 @@ auth is absent; no duplicate login or refresh worker was introduced.
   storage/access/retirement checks and eight native archive/delivery checks pass.
   The operating CLI now links the saved older note to its removal; all seventeen
   services are healthy. This does not pass the live conversational recall gate.
+- Owner workflow inspection now joins memory receipts by indexed identity. The
+  old event-filtered query exceeded a five-second database deadline on a
+  synthetic backlog; the repair and four adjacent workflow checks pass. The
+  change preserves receipt/reconciliation links and source-event filtering.
 - The prior native candidate passed 380 networkless image checks and three host checks,
   including real container isolation. Twenty-one subscription compatibility
   checks passed. Thirty workflow regression checks passed; separate bootstrap
@@ -97,13 +110,17 @@ auth is absent; no duplicate login or refresh worker was introduced.
    A background learned-rule replacement advanced the guard epoch during attempt
    one; the retry used a replacement generation with no ready context. Attempt
    one failed after about 182 seconds without native phase timings.
-   Preserve both outcomes, inspect memory reconciliation, and use focused
-   automated checks before requesting any additional owner traffic. The owner
-   delegated reply assessment to the CLI.
-2. Account for local preparation/admission time using the captured General turn.
-   Dependable answers take priority over speed. The earlier 230-second native
-   timeout is not explained by the new short greeting alone; retain that limit
-   and its failure evidence until diagnosis supports a change.
+   Both outcomes are preserved. Focused reaction-retrieval and receipt checks
+   passed. The focused rerun is also failed: one linked reply after four attempts
+   did not identify the removal. Its failures include a model failure, a proven
+   guard-context change during background learned replacement, and a generic
+   runtime failure. Preserve the saved event and use its CLI/native receipts;
+   do not request another copy or ask the owner to judge the answer.
+2. Preserve the measured General timing boundaries and their limitations. The
+   earlier 230-second native timeout is not explained by the short greeting or
+   the later recall attempt; retain its failure evidence and the existing limit.
+   Dependable answers take priority over speed. Use new receipts to diagnose
+   future failures without inventing missing historical measurements.
 3. Finish release evidence and runtime revision reconciliation against
    [release acceptance](docs/release-acceptance.md). Service health, Git integration,
    and historical readiness do not establish current recall or release approval.

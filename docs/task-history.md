@@ -891,3 +891,15 @@ the captured older note to its saved removal. All seventeen services are healthy
 Native async recovery and owned Telegram dispatch storage now preserve the bounded guard-change failure code while excluding answer text. Nine focused native async/delivery checks, two storage-dispatch checks, and the TypeScript/dashboard build passed in isolated synthetic fixtures. The earlier failed recall and missing measurements remain recorded; no new owner traffic was requested. Detailed evidence remains in ignored local acceptance state.
 
 </entry>
+
+<entry date="2026-10-02" task="CLI timing attribution and focused recall recheck">
+
+CLI inspection placed the successful General turn at about 51 seconds through preparation, 82 further seconds before native execution, and 41 seconds through its native receipt. These elapsed intervals include orchestration waiting; overwritten workflow run timestamps and missing older phase measurements prevent finer historical attribution. The affected replacement topic generation later reached readiness and produced a usable snapshot. A focused ordinary-question rerun was requested after the verified archive repair, with answer assessment delegated to the CLI. No new traffic or pass is claimed. Detailed receipts remain in ignored local acceptance state.
+
+</entry>
+
+<entry date="2026-10-02" task="Bound receipt joins in owner workflow inspection">
+
+The focused same-topic rerun produced one linked reply on attempt four after about twenty minutes, but did not recognize the removed reaction. Earlier attempts recorded model failure, guard-context change, and generic runtime failure. A background learned replacement from another source advanced the guard epoch during attempt two. The event-filtered CLI workflow list also failed repeatedly: its query plan scanned receipt candidates for each workflow. An indexed identity join preserves receipt and reconciliation links; the old query exceeded a five-second synthetic database deadline, while the new backlog regression and four adjacent workflow checks passed. The change was applied between isolated executions. Detailed live identifiers, answer hash/classifications, and timings remain in ignored local state.
+
+</entry>
