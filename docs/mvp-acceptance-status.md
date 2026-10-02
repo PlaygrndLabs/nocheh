@@ -116,6 +116,14 @@ are retained, followed by the passing clean fixture. Topic isolation, guarded
 owner edits, retirement, and superseded-state denial have fresh focused coverage.
 Live recall remains failed pending a correct answer after the relevant repair.
 
+The trusted-parent timing repair retains allowlisted durations when a completed
+child loses authorization before delivery. The answer and session identity are
+withheld, and the receipt keeps an explicit guard-change failure. Fourteen
+process/timing/delivery checks pass. Earlier generic failures and absent timing
+measurements remain unchanged; the fix cannot retroactively prove their cause.
+The operating CLI confirms the archive repair links the saved note to its removal,
+and all seventeen services are healthy. Conversational recall remains unpassed.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket

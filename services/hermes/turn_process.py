@@ -121,7 +121,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
         from .assistant_gateway import check_delivery_policy
-        if not await asyncio.to_thread(check_delivery_policy,body['archive_credential']):raise RuntimeError('guard_context_changed')
+        if not await asyncio.to_thread(check_delivery_policy,body['archive_credential']):
+            from .timing import safe
+            return {'state':'failed','error_code':'guard_context_changed','timings':safe(result.get('timings'))}
         return result
     try: return await asyncio.wait_for(collect(), timeout=230)
     finally:

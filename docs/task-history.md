@@ -872,3 +872,16 @@ with no ready context. The generic first-attempt error and missing phase timings
 remain limitations; neither this diagnosis nor the tool fix passes live recall.
 
 </entry>
+
+<entry date="2026-10-02" task="Retain safe timings after late turn revocation">
+
+A guard change after a native child completed previously raised past the result,
+losing its phase timings and producing a generic runtime failure. The trusted
+parent now returns an explicit guard-change failure with only validated numeric
+timings. It excludes the answer and session identity. Fourteen focused process,
+timing, and delivery checks passed. This repairs future receipts; it cannot
+recover missing measurements or establish the cause of older generic failures.
+The earlier archive repair is confirmed through the operating CLI, which links
+the captured older note to its saved removal. All seventeen services are healthy.
+
+</entry>
