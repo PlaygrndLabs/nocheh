@@ -885,3 +885,9 @@ The earlier archive repair is confirmed through the operating CLI, which links
 the captured older note to its saved removal. All seventeen services are healthy.
 
 </entry>
+
+<entry date="2026-10-02" task="Guard-change receipt propagation">
+
+Native async recovery and owned Telegram dispatch storage now preserve the bounded guard-change failure code while excluding answer text. Nine focused native async/delivery checks, two storage-dispatch checks, and the TypeScript/dashboard build passed in isolated synthetic fixtures. The earlier failed recall and missing measurements remain recorded; no new owner traffic was requested. Detailed evidence remains in ignored local acceptance state.
+
+</entry>

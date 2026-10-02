@@ -44,7 +44,9 @@ auth is absent; no duplicate login or refresh worker was introduced.
 - The trusted native parent now retains allowlisted timings and an explicit
   guard-change failure when authorization changes after child completion. It
   withholds the answer and session identity; fourteen focused process/timing/
-  delivery checks pass. Missing measurements in older receipts remain missing.
+  delivery checks pass. The guard-change reason also survives durable native
+  and workflow receipts; nine async/delivery and two storage-dispatch checks pass.
+  Missing measurements in older receipts remain missing.
 - Archive reads now link a note to at most twenty currently captured reaction
   sources after access checks. The native tool retains guarded reaction changes,
   removals, and anonymous counts, and explains the all-word search behavior. Four

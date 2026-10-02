@@ -63,6 +63,16 @@ class AsyncRunTests(unittest.TestCase):
             self.assertEqual(runs.start(body)['state'],'cancelled')
             self.assertEqual(runs.cancel(body)['state'],'cancelled')
 
+    def test_guard_change_reason_survives_durable_async_receipt_without_answer(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'guard_context_changed','text':'private answer'},lambda body:None)
+            body=self.body();runs.start(body);result=self.wait(runs,body)
+            self.assertEqual(result['error_code'],'guard_context_changed')
+            self.assertEqual(result['state'],'failed')
+            self.assertNotIn('private',runs._path(identity(body),'.result').read_text())
+            recovered=AsyncRuns(folder,lambda *args:self.fail('completed failure restarted'),lambda body:None)
+            self.assertEqual(recovered.resume(body),result)
+
     def test_exception_content_is_removed_from_durable_results(self):
         with tempfile.TemporaryDirectory() as folder:
             def fail(*args):raise RuntimeError('private provider response')

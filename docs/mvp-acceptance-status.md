@@ -129,6 +129,11 @@ pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket
 permission to carry all evidence forward indefinitely.
 
+The follow-up receipt repair preserves the allowlisted guard-change reason through
+native async recovery and owned dispatch storage, without retaining answer text.
+Nine native async/delivery checks and two storage-dispatch checks pass. This does
+not reinterpret the older generic failure or satisfy the conversational recall gate.
+
 </impact_review>
 
 <remaining>
