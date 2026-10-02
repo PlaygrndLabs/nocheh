@@ -91,12 +91,49 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[nextWorkspace,currentBinding.generation,currentBinding.epoch,space]);
     assert.equal(await learning.request(removed,nextWorkspace,space),updateJob,'an unrelated generation refresh reuses identical authorized inputs');
     assert.equal(calls,2);
+    // A convention's generated wording is guidance, not independent new evidence.
+    const conventionText='In this conversation a green mark means ready for review.';
+    const convention=(await archive.capture(event('convention',{update_id:40,message:{message_id:4,chat:{id:group,type:'supergroup'},message_thread_id:17,
+      from:{id:7},text:conventionText}}))).source.reference;
+    await guards.prepare(convention,'fixture',detect);
+    const ruleDependencies=(await contexts.prepare(convention,await guards.state())).dependencies;
+    const rule={kind:'convention' as const,subject:'green mark',text:conventionText,scope:{kind:'conversation' as const,id:space},
+      uncertainty:'explicit' as const,evidence:[convention],quote:{source_id:convention.id,text:conventionText},conflicts:[]};
+    const ruleId=digest(key+':rule');
+    await learned.publishAutomatic(ruleId,rule,null,key+':rule-first',ruleDependencies,await guards.state(),'fixture',detect);
+    const withConvention=await learning.request(removed,nextWorkspace,space);
+    assert.notEqual(withConvention,updateJob,'new original convention evidence must trigger fresh learning');
+    response={interpretations:[]};await learning.run(withConvention,detect,authority);assert.equal(calls,3);
+    const beforeRewrite=await contexts.prepare(removed,await guards.state());
+    await learned.publishAutomatic(ruleId,{...rule,text:'A green mark signals readiness for review here.'},1,key+':rule-rephrased',
+      ruleDependencies,await guards.state(),'fixture',detect);
+    const workspaceNow=async(label:string)=>{
+      const state=await guards.state(),id=digest(key+':'+label);
+      await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[id,state.generation,state.epoch,space]);return id;
+    };
+    const rephrasedWorkspace=await workspaceNow('rephrased');
+    const afterRewrite=await contexts.prepare(removed,await guards.state());
+    assert.notDeepEqual(beforeRewrite.rules,afterRewrite.rules,'the model still receives the complete current rule wording');
+    assert.deepEqual(beforeRewrite.rule_inputs,afterRewrite.rule_inputs);
+    assert.equal(await learning.request(removed,rephrasedWorkspace,space),withConvention,'generated paraphrasing cannot restart learning');
+    await learned.publishAutomatic(digest(key+':second-rule'),{...rule,subject:'readiness'},null,key+':rule-renamed',ruleDependencies,
+      await guards.state(),'fixture',detect);
+    assert.equal(await learning.request(removed,rephrasedWorkspace,space),withConvention,'model-chosen rule identities cannot multiply the same evidence');
+    await learned.correct({admin:true,scope:null},ruleId,{expected_revision:2,operation_id:key+':owner-rule',
+      text:'A green mark only requests review; it never confirms completion.',retired:false},detect);
+    const ownerWorkspace=await workspaceNow('owner-rule');
+    const ownerJob=await learning.request(removed,ownerWorkspace,space);
+    assert.notEqual(ownerJob,withConvention,'an owner correction must invalidate the prior interpretation input');
+    await learning.run(ownerJob,detect,authority);assert.equal(calls,4);
+    await learned.correct({admin:true,scope:null},ruleId,{expected_revision:3,operation_id:key+':retire-owner-rule',text:'',retired:true},detect);
+    const retiredWorkspace=await workspaceNow('retired-rule');
+    assert.notEqual(await learning.request(removed,retiredWorkspace,space),ownerJob,'retiring owner guidance must not reuse that guidance');
     const stale=await guards.state();
     await access.setConsent({admin:true,scope:null},parent,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
     await assert.rejects(guards.assertCurrent(stale),{code:'guard_context_changed'});
     assert.equal(await access.canLearn(parent,await guards.state()),false);
     await assert.rejects(learning.request(reaction,workspace,space),{code:'memory_context_retired'});
-    assert.equal(calls,2);
+    assert.equal(calls,4);
   } finally {
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');await stores.close();
   }

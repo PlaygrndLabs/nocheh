@@ -95,3 +95,4 @@ records current implementation and activation.
 | [0079](0079-separated-honcho-budgets-and-settlement.md) | Separate embedding dollars from subscription requests and settle reported embedding usage | Supersedes permanent per-request reservations in 0034; extends 0078 |
 | [0080](0080-reply-admission-and-honcho-derivation.md) | Reserve reply admission and use two Honcho deriver workers | Extends 0041 and 0076 without changing memory readiness or provider limits |
 | [0081](0081-bounded-workflow-backup-fingerprints.md) | Bound workflow verification storage with versioned row hashes | Extends 0023 and 0041; preserves existing snapshot compatibility |
+| [0082](0082-evidence-based-learning-deduplication.md) | Deduplicate learning with original convention evidence and owner revisions | Extends 0053 and 0056; generated rule wording is not new evidence |

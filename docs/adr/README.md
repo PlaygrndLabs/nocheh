@@ -6,6 +6,7 @@ Exhausted-pilot acceptance budget: [0077](0077-exhausted-pilot-honcho-acceptance
 Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).
 Separated Honcho budgets and settlement: [0079](0079-separated-honcho-budgets-and-settlement.md).
 Reply admission and Honcho derivation: [0080](0080-reply-admission-and-honcho-derivation.md).
+Contextual learning deduplication: [0082](0082-evidence-based-learning-deduplication.md).
 Bounded workflow backup verification: [0081](0081-bounded-workflow-backup-fingerprints.md).
 
 [SPECS.md](../../SPECS.md) is the authoritative product definition;

@@ -69,7 +69,7 @@ test('people and projects keep stable identity, attributed evidence, connected r
     const context=await entities.context(samSource,[beacon],'Beacon needs Alex to deliver Friday.');
     assert.equal(context.project?.project_id,atlas.id);assert.equal(context.mentioned_projects[0]?.project_id,beacon.id);
     const binding=await guards.state(),prepared:any={source:samSource,source_object:'fixture',space:atlasGroup,binding,evidence:[{reference:samSource,text:'',space:atlasGroup}],
-      dependencies:[],observations:[],rules:[],rule_ids:[],projects:[],entities:context,limitations:[]};
+      dependencies:[],observations:[],rules:[],rule_ids:[],rule_inputs:[],projects:[],entities:context,limitations:[]};
     await entities.publishDiscoveries(prepared,{entity_suggestions:[],entity_claims:[{subject_id:context.mentioned_projects[0]!.id,predicate:'commitment',
       content:'Alex promised Friday according to the speaker.',attribution:'reported',speaker_entity_id:sam!.id,uncertainty:'supported',evidence_ids:[samSource.id]}]},`${stamp}:discover`);
 
