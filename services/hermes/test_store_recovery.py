@@ -92,7 +92,8 @@ class StoreRecoveryTests(unittest.TestCase):
                 def assert_maintenance(self):test.assertNotIn('maintenance released',order)
             def run(command,**kwargs):
                 if 'stop' in command:order.append('stop '+command[-1])
-                if 'up' in command:
+                test.assertNotIn('up',command,'backup must resume existing containers without recreating them')
+                if 'start' in command:
                     test.assertIn('released',order);order.append('resumed')
             with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
                  patch('tools.operations.installation.operations.environment',return_value={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}),\

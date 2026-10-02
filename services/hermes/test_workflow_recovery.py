@@ -8,10 +8,25 @@ from unittest.mock import patch
 from tools.operations.installation.configuration import initialize,compose_environment,write_env,env_path
 from tools.operations.installation.settings import view,save
 from tools.operations.installation.operations import sha
-from tools.operations.workflows.workflow_recovery import snapshot,validate,restore,REDIS_RESTORE_SCRIPT
+from tools.operations.workflows.workflow_recovery import snapshot,validate,restore,REDIS_RESTORE_SCRIPT,FINGERPRINT_FORMAT
 
 
 class WorkflowRecoveryTests(unittest.TestCase):
+    def test_restore_uses_saved_fingerprint_format_and_rejects_unknown_formats(self):
+        for format in (None,FINGERPRINT_FORMAT):
+            with tempfile.TemporaryDirectory() as folder:
+                root=Path(folder);backup=root/'snapshot';backup.mkdir();state=root/'state';state.mkdir()
+                def dump(command,**kwargs):kwargs['stdout'].write(b'fixture')
+                with patch('tools.operations.workflows.workflow_recovery.fingerprints',return_value={'public.events':'hash'}) as measure,patch('tools.operations.workflows.workflow_recovery.subprocess.run',side_effect=dump):
+                    metadata=snapshot(['fixture'],{},backup,sha)
+                    self.assertEqual(measure.call_args.kwargs,{'format':FINGERPRINT_FORMAT})
+                if format is None:metadata.pop('fingerprint_format')
+                with patch('tools.operations.workflows.workflow_recovery.fingerprints',return_value=metadata['tables']) as measure,patch('tools.operations.workflows.workflow_recovery.subprocess.run'):
+                    restore(['fixture'],{},backup,state,metadata,sha)
+                self.assertEqual(measure.call_args.kwargs,{'format':format or 'row-json-v1'})
+                metadata['fingerprint_format']='unknown'
+                with self.assertRaisesRegex(ValueError,'fingerprint_format_invalid'):validate(backup,metadata,sha)
+
     def test_dedicated_keys_are_private_idempotent_and_cannot_enable_cutover_through_settings(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);values=initialize(root)

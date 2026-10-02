@@ -743,3 +743,17 @@ repair and completed backup remain required. Fetch succeeded; remote main alread
 contains the historical private reports and has not been rewritten.
 
 </entry>
+
+
+<entry date="2026-10-02" task="Bound workflow backup verification space">
+
+The release backup's full-row workflow fingerprint sort exhausted temporary
+storage. New snapshots sort fixed-size per-row SHA-256 values in UTC with an
+explicit format marker. Duplicate multiplicity is retained; old snapshots still
+use their original algorithm and unknown formats fail before restore. Two real
+PostgreSQL checks passed, including a 4 MiB temporary-file cap under which the old
+algorithm fails and the new one succeeds. The focused recovery suite passed.
+Populated backup and inactive restore are not established by these synthetic
+checks and remain pending. [Decision](adr/0081-bounded-workflow-backup-fingerprints.md).
+
+</entry>

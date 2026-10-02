@@ -7,6 +7,17 @@ import subprocess
 from pathlib import Path
 
 DATABASE='nocheh_inngest'
+FINGERPRINT_FORMAT='row-sha256-v2'
+
+
+def fingerprint_query(relation,format):
+    if format=='row-json-v1':
+        return f'COPY (SELECT row_to_json(t) FROM {relation} t ORDER BY row_to_json(t)::text) TO STDOUT'
+    if format!=FINGERPRINT_FORMAT:raise ValueError('workflow_fingerprint_format_invalid')
+    # Sort fixed-size digests, never full workflow payloads. Retain one line per
+    # row (including duplicates), so multiplicity and any changed value matter.
+    return ("SET TIME ZONE 'UTC'; COPY (SELECT fingerprint FROM (SELECT encode(sha256(convert_to(row_to_json(t)::text,'UTF8')),'hex') "
+            f'AS fingerprint FROM {relation} t) rows ORDER BY fingerprint COLLATE "C") TO STDOUT')
 
 # Daemonization returns before Redis has necessarily loaded the RDB or opened
 # its listener. Wait for readiness before enabling the replacement AOF.
@@ -28,7 +39,7 @@ trap - EXIT
 '''
 
 
-def fingerprints(command,env,tables=None):
+def fingerprints(command,env,tables=None,*,format='row-json-v1'):
     prefix=command+['exec','-T','nocheh-db','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d',DATABASE]
     if tables is None:
         raw=subprocess.check_output(prefix+['-c',"SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY 1"],env=env,text=True)
@@ -37,10 +48,11 @@ def fingerprints(command,env,tables=None):
     result={}
     for table in tables:
         relation='.'.join('"'+part+'"' for part in table.split('.'))
-        query=f'COPY (SELECT row_to_json(t) FROM {relation} t ORDER BY row_to_json(t)::text) TO STDOUT'
+        query=fingerprint_query(relation,format)
         process=subprocess.Popen(prefix+['-c',query],env=env,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
         digest=hashlib.sha256()
         for chunk in iter(lambda:process.stdout.read(1024*1024),b''):digest.update(chunk)
+        process.stdout.close()
         if process.wait():raise RuntimeError('workflow_snapshot_fingerprint_failed')
         result[table]=digest.hexdigest()
     return result
@@ -53,7 +65,7 @@ def enabled_or_present(state,env):
 def snapshot(command,env,stage,sha):
     # Caller has stopped execution/publishing authorities and Inngest. Redis is
     # still up solely to export its quiesced dataset as a portable RDB.
-    result={'version':1,'tables':fingerprints(command,env)}
+    result={'version':1,'fingerprint_format':FINGERPRINT_FORMAT,'tables':fingerprints(command,env,format=FINGERPRINT_FORMAT)}
     for filename,args in (
         ('inngest.dump',['nocheh-db','pg_dump','-U','nocheh','-d',DATABASE,'-Fc','--no-owner']),
         ('workflow-redis.rdb',['inngest-redis','redis-cli','--rdb','-']),
@@ -69,6 +81,7 @@ def snapshot(command,env,stage,sha):
 
 def validate(directory,metadata,sha):
     if not isinstance(metadata,dict) or metadata.get('version')!=1:raise ValueError('workflow_snapshot_version_invalid')
+    if metadata.get('fingerprint_format','row-json-v1') not in ('row-json-v1',FINGERPRINT_FORMAT):raise ValueError('workflow_fingerprint_format_invalid')
     for filename in ('inngest.dump','workflow-redis.rdb'):
         path=Path(directory)/filename;record=metadata.get(filename,{})
         if path.is_symlink() or not path.is_file() or path.stat().st_size!=record.get('size') or sha(path)!=record.get('sha256'):
@@ -88,7 +101,7 @@ def restore(command,env,snapshot_dir,state,metadata,sha):
     subprocess.run(setup,env=env,check=True,stdout=subprocess.DEVNULL)
     with (Path(snapshot_dir)/'inngest.dump').open('rb') as source:
         subprocess.run(command+['exec','-T','nocheh-db','pg_restore','-U','nocheh','-d',DATABASE,'--role=nocheh_inngest','--no-owner','--exit-on-error'],env=env,stdin=source,check=True,stdout=subprocess.DEVNULL)
-    if fingerprints(command,env,metadata['tables'])!=metadata['tables']:raise RuntimeError('workflow_restore_fingerprint_mismatch')
+    if fingerprints(command,env,metadata['tables'],format=metadata.get('fingerprint_format','row-json-v1'))!=metadata['tables']:raise RuntimeError('workflow_restore_fingerprint_mismatch')
     directory=Path(state)/'workflows/redis';directory.mkdir(parents=True,mode=0o700)
     target=directory/'dump.rdb';shutil.copyfile(Path(snapshot_dir)/'workflow-redis.rdb',target);target.chmod(0o600)
     if sha(target)!=metadata['workflow-redis.rdb']['sha256']:raise RuntimeError('workflow_restore_redis_mismatch')
