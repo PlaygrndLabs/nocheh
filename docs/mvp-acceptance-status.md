@@ -202,6 +202,12 @@ not change the failed live result. Current inspection shows four building memory
 generations and twenty unattempted current receipts; background admission and
 candidate activation remain pending. No additional owner traffic was requested.
 
+The background-admission candidate replaces sleeping retry reservations with
+one live callback waiting for at most one second. Five affected workflow tests
+pass with no skips, retaining foreground capacity, timeout/overflow behavior,
+exception release, protected receipts and supersession. This is candidate
+verification; current memory readiness and the failed recall gate stay open.
+
 1. Resolve the failed October 2 same-topic recall from its saved CLI trace and
    tool results. Preserve the first failed execution and the delivered limited
    answer; neither establishes correct recall. The General greeting is passed.

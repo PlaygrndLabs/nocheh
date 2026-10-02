@@ -38,30 +38,32 @@ test('memory work leaves admission capacity for incoming replies',async()=>{
   assert.equal((await operations.preparation!('fixture',authority)).state,'completed');
 });
 
-test('background waiters retain retry order without holding reply capacity or abandoned reservations',async t=>{
-  t.mock.timers.enable({apis:['Date'],now:1000});
+test('background callbacks hand off in order without holding reply capacity or abandoned reservations',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:1000});
   let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;}),calls:string[]=[];
   const operation=async(job:string)=>{calls.push(job);if(job==='held')await held;if(job==='failed')throw Error('synthetic failure');return observation('completed','sync');};
   const operations=boundStorageOperations({honcho:operation,memory_review:operation,telegram:operation});
   const authority={owner:'inngest' as const,epoch:1},first=operations.honcho!('held',authority);
-  assert.equal((await operations.honcho!('oldest',authority)).state,'waiting');
+  const oldest=operations.honcho!('oldest',authority);
   assert.equal((await operations.memory_review!('newer',authority)).state,'waiting');
   assert.equal((await operations.telegram!('reply',authority)).state,'completed');
   release();await first;
-  for(let retry=0;retry<3;retry++)assert.equal((await operations.memory_review!('newer',authority)).state,'waiting');
-  assert.equal((await operations.honcho!('oldest',authority)).state,'completed');
+  assert.equal((await oldest).state,'completed','release starts the waiting callback without another scheduled retry');
   assert.equal((await operations.memory_review!('newer',authority)).state,'completed');
   assert.deepEqual(calls,['held','reply','oldest','newer']);
   await assert.rejects(operations.honcho!('failed',authority),/synthetic failure/);
   assert.equal((await operations.memory_review!('after-failure',authority)).state,'completed');
 
   let free!:()=>void;const busy=new Promise<void>(resolve=>{free=resolve;});
-  const recovery=boundStorageOperations({honcho:async job=>{if(job==='busy')await busy;return observation('completed','sync');}});
+  const recovered:string[]=[];
+  const recovery=boundStorageOperations({honcho:async job=>{recovered.push(job);if(job==='busy')await busy;return observation('completed','sync');}});
   const running=recovery.honcho!('busy',authority);
-  await recovery.honcho!('abandoned',authority);await recovery.honcho!('surviving',authority);
+  const abandoned=recovery.honcho!('abandoned',authority);
+  assert.equal((await recovery.honcho!('overflow',authority)).state,'waiting','only one background callback can occupy a spare worker slot');
+  t.mock.timers.tick(1000);assert.equal((await abandoned).state,'waiting');
   free();await running;
-  t.mock.timers.tick(60000);assert.equal((await recovery.honcho!('surviving',authority)).state,'waiting');
-  t.mock.timers.tick(60000);assert.equal((await recovery.honcho!('surviving',authority)).state,'completed');
+  assert.equal((await recovery.honcho!('surviving',authority)).state,'completed','an absent retry never reserves an idle background slot');
+  assert.deepEqual(recovered,['busy','surviving'],'timed-out and overflow callbacks have no effects');
 });
 
 test('idle superseded source workflows retire without touching leases, receipts or current work',

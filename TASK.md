@@ -38,8 +38,9 @@ attempt. Older pending receipts are separate historical state.
 
 The release-review candidate includes guarded reaction observations and bounded
 target excerpts in discovery itself. Its focused storage checks pass; operating
-activation and conversational recall remain pending. Background admission is
-being investigated independently.
+activation and conversational recall remain pending. Background admission now
+has a verified bounded live-callback handoff candidate; its operating effect
+still needs observation.
 
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
@@ -92,17 +93,13 @@ auth is absent; no duplicate login or refresh worker was introduced.
   after the wait; owner corrections and privacy revocations remain immediate.
   Five focused learning/workflow checks pass, including recovery and owner edits.
   [Decision](docs/adr/0083-defer-automatic-memory-publication-during-replies.md). This does not pass recall.
-- Background workflow retries retain a bounded waiting order so newly retried
-  work cannot repeatedly overtake an older waiter. Foreground capacity and the
-  concurrency cap are unchanged. Three focused admission checks pass, including
-  failure release and abandoned-waiter expiry; the old code fails the ordering
-  regression. [Decision](docs/adr/0085-fair-background-workflow-admission.md).
-  This addresses an observed receipt waiting over thirty-five minutes without
-  its first ingestion attempt. The operating compiled repair is verified.
-  The previously starved receipt is now done with one ingestion attempt.
-  Inngest later exited and was recovered without replacing its container or
-  state; all workers reconnected. The affected topic still has four pending
-  receipts and no ready snapshot, so memory readiness remains pending.
+- Background admission now hands a free slot directly to one live callback
+  waiting for at most one second. Sleeping retries cannot reserve idle capacity.
+  Five workflow checks pass, including foreground capacity, bounded overflow,
+  timeout without effects, exception release, supersession and durable receipts.
+  [Decision](docs/adr/0087-live-background-admission-handoff.md) supersedes the
+  earlier retry-order hint. Operating activation and memory readiness remain
+  pending. The recovered scheduler's earlier unexplained exit is still retained.
 - Owner workflow inspection now joins memory receipts by indexed identity. The
   old event-filtered query exceeded a five-second database deadline on a
   synthetic backlog; the repair and four adjacent workflow checks pass. The

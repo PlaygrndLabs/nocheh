@@ -100,3 +100,4 @@ records current implementation and activation.
 | [0084](0084-scoped-reaction-discovery.md) | Discover bounded current reaction sources within the caller’s audience | Extends 0051 and 0053; handles never grant access and observations remain incomplete |
 | [0085](0085-fair-background-workflow-admission.md) | Preserve bounded background retry order without occupying reply capacity | Extends 0080; Inngest remains the execution and retry authority |
 | [0086](0086-reaction-discovery-evidence.md) | Include guarded reaction observations and bounded target excerpts in discovery | Extends 0084; a separate model-selected read is no longer required to inspect the observation |
+| [0087](0087-live-background-admission-handoff.md) | Hand a free background slot to one bounded live callback | Supersedes 0085 retry-order hints; retains 0080 operation and foreground-capacity limits |
