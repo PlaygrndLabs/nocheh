@@ -757,3 +757,14 @@ Populated backup and inactive restore are not established by these synthetic
 checks and remain pending. [Decision](adr/0081-bounded-workflow-backup-fingerprints.md).
 
 </entry>
+
+<entry date="2026-10-02" task="Patch release dependency findings">
+
+The release build found two vulnerable transitive lockfile entries. Updated only
+`@grpc/grpc-js` to 1.14.5 and `brace-expansion` to 2.1.7, preserving the direct
+manifest and all optional-platform records. The TypeScript/dashboard build
+passed and npm reported zero known vulnerabilities. Of 32 workflow checks, 28
+passed, two environment-specific cases were skipped, and two exposed existing
+source/fixture failures that require a separate repair before activation.
+
+</entry>
