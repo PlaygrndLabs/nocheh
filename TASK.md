@@ -2,7 +2,7 @@
 
 <current>
 
-Last reconciled 2026-10-02. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-03. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
@@ -35,6 +35,16 @@ not identify the removal. Reply assessment was performed through the CLI.
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
 auth is absent; no duplicate login or refresh worker was introduced.
+
+The relationships and memory access UI now separates Explore, Review requests,
+and Shared memory, with a list-first explorer, optional map, direct fact sharing,
+and state-aware access explanations. The dashboard build and all 27 dashboard
+checks pass; isolated synthetic browser checks cover desktop, phone, keyboard,
+failed approval drafts, successful approval, sharing, and revocation. See the
+[implementation](dashboard/pages/memory-map.tsx),
+[access-state checks](test/dashboard-memory-access.test.mjs), and
+[completed increment](docs/task-history.md). Operating activation remains pending;
+this UI verification does not establish live recall or release readiness.
 
 </current>
 
