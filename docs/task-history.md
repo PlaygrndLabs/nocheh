@@ -933,3 +933,17 @@ Current-topic ingestion still had a source receipt waiting over thirty-five minu
 Inngest exited with code one and no OOM flag. Filtered diagnostics retained cancellation and connection-error categories without raw runtime logs; the exit cause remains unresolved. After ownership, volume, port, and single-scheduler checks, the existing container was started without recreation or state replacement. All seventeen services became healthy, all nine worker families reconnected, and new background completions appeared. Read-only receipt correlation confirmed the previously starved receipt completed on one attempt; the affected topic still had four pending receipts and no ready snapshot. Recovery does not pass conversational recall or release. Detailed observations remain in ignored local evidence.
 
 </entry>
+
+<entry date="2026-10-03" task="Return guarded evidence with reaction discovery">
+
+The latest saved recall answer found a reaction source without reading it and
+failed after about six minutes. Discovery now includes bounded guarded reaction
+observations and independently authorized target excerpts. Five storage checks
+and six networkless native archive checks pass, with TypeScript compilation and
+an AST-only graph refresh. Coverage retains topic isolation, owner edits,
+retirement, supersession, bounds and revalidation. Candidate activation, current
+memory readiness and conversational recall remain pending. The live inspection
+found twenty unattempted current receipts and four building generations. Private
+verification is indexed under `data/acceptance/results/release-20261003/`.
+
+</entry>
