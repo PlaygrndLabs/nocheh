@@ -41,11 +41,16 @@ auth is absent; no duplicate login or refresh worker was introduced.
   2.2 seconds of broker preparation and 3.2 seconds of provider transport waits.
   These phases overlap other native work; they do not establish a pure model
   compute time. The earlier timeout and recovered reply remain historical evidence.
+- The trusted native parent now retains allowlisted timings and an explicit
+  guard-change failure when authorization changes after child completion. It
+  withholds the answer and session identity; fourteen focused process/timing/
+  delivery checks pass. Missing measurements in older receipts remain missing.
 - Archive reads now link a note to at most twenty currently captured reaction
   sources after access checks. The native tool retains guarded reaction changes,
   removals, and anonymous counts, and explains the all-word search behavior. Four
   storage/access/retirement checks and eight native archive/delivery checks pass.
-  This repairs a deterministic tool gap; it does not pass the live recall gate.
+  The operating CLI now links the saved older note to its removal; all seventeen
+  services are healthy. This does not pass the live conversational recall gate.
 - The prior native candidate passed 380 networkless image checks and three host checks,
   including real container isolation. Twenty-one subscription compatibility
   checks passed. Thirty workflow regression checks passed; separate bootstrap

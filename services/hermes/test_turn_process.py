@@ -47,13 +47,13 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         signature=base64.urlsafe_b64encode(hmac.new(self.secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
-    async def execute(self,source,cancel=None):
+    async def execute(self,source,cancel=None,delivery_allowed=True):
         with tempfile.TemporaryDirectory() as folder:
             self.env=None;original=asyncio.create_subprocess_exec
             async def spawn(*args,**kwargs):
                 self.env=kwargs['env']
                 return await original(sys.executable,'-c',source,**kwargs)
-            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
                 events=[]
                 result=await _run_process(Path(folder),Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser'},'model',
@@ -65,6 +65,12 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
+    async def test_completed_child_revocation_keeps_safe_timings_without_answer_or_delivery(self):
+        result,events=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"revoked answer","session_id":"private-session","timings":{"conversation":{"ms":10,"calls":1},"private_phase":{"ms":3,"calls":1},"total":{"ms":12,"calls":1,"content":"private"}}}))',delivery_allowed=False)
+        self.assertEqual(result,{'state':'failed','error_code':'guard_context_changed',
+            'timings':{'conversation':{'ms':10,'calls':1}}})
+        self.assertEqual(events,[])
+
     async def test_cancel_kills_child(self):
         cancel=threading.Event()
         async def stop(): await asyncio.sleep(.15);cancel.set()
