@@ -72,6 +72,13 @@ passed. It does not change provider payloads, audience checks, approval authorit
 or delivery decisions. Prior dated passes remain preserved; activation, new timing
 observations, runtime reconciliation, and backup verification remain pending.
 
+The October 2 workflow repair preserves protected effect receipts when an older
+source generation is superseded after an operation. Thirty focused workflow
+checks pass; the separate bootstrap and pinned-engine UI fixture checks were not
+enabled. Existing delivery identities and Telegram replay code are unchanged.
+Observe affected Honcho/memory workflow reconciliation after activation; no new
+owner approval, reaction capture, or voice input is justified by this repair.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket

@@ -85,6 +85,9 @@ test('idle superseded source workflows retire without touching leases, receipts 
       honchoCalls++;return observation('waiting','sync',0,Date.now()+1000,'prerequisite');
     });
     assert.equal(honchoBefore.state,'skipped');assert.equal(honchoCalls,0);
+    const waitingHonchoRun=await advanceWorkflow(pool,honchoProtected.old,1,'honcho','supersession-honcho-wait',async()=>
+      observation('waiting','reconcile',1,Date.now()+1000,'receipt_pending'));
+    assert.equal(waitingHonchoRun.state,'waiting','an ambiguous Honcho receipt stays available for reconciliation');
     const protectedHonchoRun=await advanceWorkflow(pool,honchoProtected.old,1,'honcho','supersession-honcho-receipt',async()=>{
       honchoCalls++;return observation('completed','sync');
     });
@@ -120,7 +123,8 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       return {};
     }});
   const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});let run=0;
-  const advance=async(family:WorkflowFamily,job:string,generation=1)=>{
+  const advance=async(family:WorkflowFamily,job:string,generation?:number)=>{
+    generation??=(family==='memory_review'||family==='honcho')&&job.startsWith('source:')?(await services.guards.state()).epoch:1;
     const db=await stores.control.connect();let id:string;
     try{await db.query('BEGIN');id=await requestWorkflow(db,family,job,generation);await db.query('COMMIT');}catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     const result=await advanceWorkflow(stores.control,id,1,family,'fixture-'+(++run),operations[family]!);safeMetadata(result);return result;
