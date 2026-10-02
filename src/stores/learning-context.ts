@@ -9,7 +9,7 @@ import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
 import {EntityRepository,type EntityContext} from './entities.js';
 
-export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner';id:string;revision:number;text:string};
+export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner'|'owner_guard';id:string;revision:number;text:string};
 export interface PreparedLearningContext {
   source:SourceReference;source_object:string;space:string;binding:GuardBinding;
   evidence:LearningEvidence[];dependencies:PreparedDependency[];
@@ -82,7 +82,10 @@ export class LearningContextRepository {
       else limitations.push('ambiguous_project_reference');
     }
     const entities=await this.entities.context(source,mentioned,corpus);
-    const candidates=(await this.access.stores.derived.query(`SELECT e.id,v.dependencies FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision WHERE e.active_revision IS NOT NULL AND
+    const candidates=(await this.access.stores.derived.query(`SELECT e.id,v.dependencies,g.active_revision AS rule_guard_revision,r.author AS rule_guard_author
+      FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
+      LEFT JOIN guard_sources g ON g.id='derived_artifacts:'||v.derived_id
+      LEFT JOIN guard_revisions r ON r.source_id=g.id AND r.revision=g.active_revision WHERE e.active_revision IS NOT NULL AND
       ((scope_kind='conversation' AND scope_id=$1) OR (scope_kind='project' AND scope_id=$2)) ORDER BY e.id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
     if(candidates.length>100)throw new HttpError(409,'learning_rule_limit');
     const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>();
@@ -98,6 +101,8 @@ export class LearningContextRepository {
       const inputs:LearningRuleInput[]=version.author==='owner'?
         [{kind:'owner',id:version.id,revision:version.revision,text:version.text}]:
         (candidate.dependencies as PreparedDependency[]).map(dependency=>({kind:'source',dependency}));
+      if(version.author!=='owner'&&binding.mode==='on'&&candidate.rule_guard_author==='owner')
+        inputs.push({kind:'owner_guard',id:version.id,revision:candidate.rule_guard_revision,text:canonical(version)});
       for(const input of inputs)ruleInputs.set(canonical(input),input);
     } catch(error) {
       if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code))continue;throw error;

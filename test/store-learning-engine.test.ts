@@ -119,12 +119,20 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await learned.publishAutomatic(digest(key+':second-rule'),{...rule,subject:'readiness'},null,key+':rule-renamed',ruleDependencies,
       await guards.state(),'fixture',detect);
     assert.equal(await learning.request(removed,rephrasedWorkspace,space),withConvention,'model-chosen rule identities cannot multiply the same evidence');
+    const ruleArtifact=(await stores.derived.query('SELECT derived_id FROM learned_versions WHERE entry_id=$1 AND revision=2',[ruleId])).rows[0].derived_id;
+    const guardedRule=await guards.read('derived_artifacts:'+ruleArtifact,await guards.state());
+    await guards.edit('derived_artifacts:'+ruleArtifact,guardedRule.revision,
+      {...guardedRule.value as object,text:'The owner-edited guarded convention requires review only.'},key+':rule-guard-edit');
+    const guardedWorkspace=await workspaceNow('guarded-rule');
+    const guardedJob=await learning.request(removed,guardedWorkspace,space);
+    assert.notEqual(guardedJob,withConvention,'an owner edit to a guarded automatic convention must trigger fresh learning');
+    await learning.run(guardedJob,detect,authority);assert.equal(calls,4);
     await learned.correct({admin:true,scope:null},ruleId,{expected_revision:2,operation_id:key+':owner-rule',
       text:'A green mark only requests review; it never confirms completion.',retired:false},detect);
     const ownerWorkspace=await workspaceNow('owner-rule');
     const ownerJob=await learning.request(removed,ownerWorkspace,space);
     assert.notEqual(ownerJob,withConvention,'an owner correction must invalidate the prior interpretation input');
-    await learning.run(ownerJob,detect,authority);assert.equal(calls,4);
+    await learning.run(ownerJob,detect,authority);assert.equal(calls,5);
     await learned.correct({admin:true,scope:null},ruleId,{expected_revision:3,operation_id:key+':retire-owner-rule',text:'',retired:true},detect);
     const retiredWorkspace=await workspaceNow('retired-rule');
     assert.notEqual(await learning.request(removed,retiredWorkspace,space),ownerJob,'retiring owner guidance must not reuse that guidance');
@@ -133,7 +141,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await assert.rejects(guards.assertCurrent(stale),{code:'guard_context_changed'});
     assert.equal(await access.canLearn(parent,await guards.state()),false);
     await assert.rejects(learning.request(reaction,workspace,space),{code:'memory_context_retired'});
-    assert.equal(calls,4);
+    assert.equal(calls,5);
   } finally {
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');await stores.close();
   }
