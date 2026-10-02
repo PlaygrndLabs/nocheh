@@ -9,6 +9,18 @@ from . import archive_tools
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_current_reaction_discovery_uses_bound_scope_without_text_or_memory_search(self):
+        result={'sources':[{'source':'nocheh:event:'+'a'*64,'kind':'captured_reaction','target_sources':['nocheh:event:'+'b'*64]}],'complete':False}
+        with patch.object(archive_tools,'request',return_value=result) as request:
+            self.assertEqual(json.loads(archive_tools.search_tool({'mode':'current_reactions','scope':'private','query':'ignored','limit':99})),result)
+            request.assert_called_once_with('/v1/search?mode=current_reactions&limit=10')
+        with patch.object(archive_tools,'request',side_effect=ValueError('audience_context_changed')):
+            self.assertEqual(json.loads(archive_tools.search_tool({'mode':'current_reactions'})),{'error':'archive_search_unavailable'})
+        with patch.object(archive_tools,'request') as request:
+            for args in ({'mode':'unknown'},{'mode':'text'},{'query':'   '}):
+                self.assertEqual(json.loads(archive_tools.search_tool(args)),{'error':'archive_search_unavailable'})
+            request.assert_not_called()
+
     def test_slow_context_and_honcho_reads_can_finish_without_extending_normal_archive_reads(self):
         def slow_read(request,timeout):
             if timeout < 30: raise TimeoutError()

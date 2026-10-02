@@ -97,3 +97,4 @@ records current implementation and activation.
 | [0081](0081-bounded-workflow-backup-fingerprints.md) | Bound workflow verification storage with versioned row hashes | Extends 0023 and 0041; preserves existing snapshot compatibility |
 | [0082](0082-evidence-based-learning-deduplication.md) | Deduplicate learning with original convention evidence and owner revisions | Extends 0053 and 0056; generated rule wording is not new evidence |
 | [0083](0083-defer-automatic-memory-publication-during-replies.md) | Defer automatic learned publication while an admitted reply is active | Extends 0080 and 0082; owner and privacy revocations remain immediate |
+| [0084](0084-scoped-reaction-discovery.md) | Discover bounded current reaction sources within the caller’s audience | Extends 0051 and 0053; handles never grant access and observations remain incomplete |

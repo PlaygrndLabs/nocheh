@@ -158,6 +158,15 @@ workflow checks passed, including immediate owner correction, expired managed
 leases, and revoked Telegram bindings. Recall remains failed; no new live pass
 is claimed by this scheduling repair.
 
+Current reaction discovery now returns bounded permitted reaction and target
+handles without requiring message words. Five storage/route and nine native
+archive/delivery checks pass; the immutable native package also passes its six
+archive checks. Existing audience and retirement rules are reused, with explicit
+return-time checks. Prior live capture and isolation observations retain their
+dates, supported by the focused privacy regressions. The last live answer read
+one unrelated source and stopped; this retrieval repair does not turn that answer
+into a pass or establish conversational recall on the new candidate.
+
 </impact_review>
 
 <remaining>

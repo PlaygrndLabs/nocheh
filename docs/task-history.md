@@ -909,3 +909,9 @@ The focused same-topic rerun produced one linked reply on attempt four after abo
 A saved live retry was revoked when an unrelated background interpretation replaced existing learned versions. Automatic batch activation now waits before its publication barrier while a reply is active under the current binding, including first publications; it retains the completed reasoning and staged versions. Five focused learning/workflow checks and the build passed, covering Telegram and managed replies, expired leases, revoked bindings, publication recovery, and immediate owner correction. Source and privacy revocations retain their immediate paths. The failed recall outcome remains open.
 
 </entry>
+
+<entry date="2026-10-02" task="Discover current reaction evidence without a target ID">
+
+The final failed recall attempt read one unrelated source without searching again. Reaction updates have no independent message text, so lexical search could not discover them. The existing archive tool now has bounded current-reaction discovery with permitted target handles; actual observations still pass through guarded reads. Five storage/route checks and nine native archive/delivery checks passed, including topic isolation, supersession, retirement, bounds, and access revalidation. The route fixture initially lacked its inert control-store stub; the corrected focused recheck passed. The native package retains the verified base image user and exact tested source. The compiled operating lookup finds the saved removal and older target under the original topic boundary using read-only runtime roles. All seventeen services are healthy, and the launcher restarted after the verified image was selected. Previous conversational failures remain failed, and no new owner traffic was requested.
+
+</entry>
