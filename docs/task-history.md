@@ -933,3 +933,25 @@ Current-topic ingestion still had a source receipt waiting over thirty-five minu
 Inngest exited with code one and no OOM flag. Filtered diagnostics retained cancellation and connection-error categories without raw runtime logs; the exit cause remains unresolved. After ownership, volume, port, and single-scheduler checks, the existing container was started without recreation or state replacement. All seventeen services became healthy, all nine worker families reconnected, and new background completions appeared. Read-only receipt correlation confirmed the previously starved receipt completed on one attempt; the affected topic still had four pending receipts and no ready snapshot. Recovery does not pass conversational recall or release. Detailed observations remain in ignored local evidence.
 
 </entry>
+
+<entry date="2026-10-03" task="Clarify relationships and memory access">
+
+The owner reported that the relation and memory access page was not clear or
+usable. It now separates exploration, pending review, and shared memory; starts
+with readable records; keeps the interactive map optional; and exposes connections
+without requiring graph navigation. Facts have a direct sharing form with an exact
+destination picker and wording review. Requests explain one-time versus persistent
+access, past decisions are collapsed, and request/grant pagination is available.
+Suspended, revoked, expired, and consumed access no longer reads as an active
+grant. Saving reports its outcome and restores focus after a fact editor closes.
+
+The dashboard build and all 27 dashboard checks passed, including three focused
+access-presentation checks. Synthetic in-app browser checks covered desktop and
+390-pixel layouts, keyboard task navigation, search/empty recovery, map facts,
+approval conflict draft retention, successful approval, direct sharing, revocation,
+and the displayed revoked state. Preview state and images remain ignored under
+`data/ui-memory-access/`. The AST graph was rebuilt without model calls. The
+operating installation was not deployed; existing recall and release gates remain
+open. Remote publication remains subject to the existing sanitized-history gate.
+
+</entry>

@@ -36,6 +36,14 @@ reliability or release approval.
 
 <impact_review>
 
+The October 3 relationships and memory access UI change has a passing dashboard
+build, 27 dashboard checks, and isolated synthetic browser coverage for approval,
+revocation, sharing, conflict draft retention, keyboard access, and phone layout.
+It changes presentation and uses the existing revision-checked owner commands;
+storage authorization, Telegram delivery, and provider routes are unchanged.
+Existing live outcomes retain their dates and limitations. Operating activation
+and live recall remain pending; this change does not require new owner traffic.
+
 For the General-topic correction, new coverage is needed for markerless
 supergroup messages and older full message projections previously classified as
 unknown. That coverage passed 14 focused automated checks and live scope/archive
