@@ -837,3 +837,19 @@ client connection closes and commits before process exit. Existing backup drain,
 maintenance fencing, and progress access checks also passed.
 
 </entry>
+
+<entry date="2026-10-02" task="Preserve guarded owner guidance and inspect recall">
+
+Owner edits to the guarded copy of an automatic convention now enter the
+learning input identity. The new regression failed on the earlier candidate;
+five focused learning/learned-memory checks and the build pass on the repair.
+Automatic paraphrases still reuse existing evidence.
+
+The owner delegated reply inspection to the CLI. The saved same-topic question
+produced one linked reply after two attempts, about 384 seconds after capture.
+The reply could not identify the removed reaction and correctly avoided claiming
+completion. Saved source metadata verifies the question and target share a topic
+and the removal is retained. First execution failed after about 182 seconds; its
+phase timings were unavailable. Retrieval and runtime diagnosis remain open.
+
+</entry>

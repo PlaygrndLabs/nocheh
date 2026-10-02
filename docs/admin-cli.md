@@ -53,8 +53,8 @@ in [the release procedure](../docs/release-acceptance.md).
 
 <timing_boundaries>
 
-`timings EVENT_ID` joins the event's workflow receipts with its security effect
-page. `effects.next` is the cursor for `--after`; a missing measurement is `null`,
+`timings EVENT_ID` joins the event's workflow listing with its security effect
+page. Use `workflow WORKFLOW_ID` for the workflow's individual receipts. `effects.next` is the cursor for `--after`; a missing measurement is `null`,
 not zero. Earlier receipts are not retroactively measured. The CLI rejects an API
 without the exact event filter. The numeric measurements contain no source text,
 prompts, credentials, URLs, or exception bodies.
@@ -72,6 +72,10 @@ prompts, credentials, URLs, or exception bodies.
 The upstream headers and read waits can be added for observed provider-transport
 waiting. Native `conversation`, `context_prepare`, and `model_guard` phases can
 overlap; do not add them or add the broker measurements to those inclusive phases.
+Native phase timings are retained in runtime receipts and are not included in
+the CLI workflow listing. `model_guard` includes detector calls and their waiting;
+a selected chat model transport measurement is not the total time spent on all
+model requests.
 Workflow admission/completion timestamps include orchestration waits and retries.
 Failure receipts retain measurements made before failure; absent phases remain
 unavailable. Completion and latency are evaluated separately.

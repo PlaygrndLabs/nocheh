@@ -22,7 +22,9 @@ Saved repeated interpretation inputs had unchanged source observations and
 changed learned rules. The verified repair deduplicates automatic rule guidance
 by its original prepared dependencies while retaining owner revision changes and
 full model context. [Decision](docs/adr/0082-evidence-based-learning-deduplication.md).
-Its operating reconciliation and same-topic recall remain pending.
+Owner edits to guarded automatic guidance also enter that identity; five focused
+learning/learned-memory checks pass. Operating reconciliation remains under
+observation. The new same-topic recall answer failed despite correct topic routing.
 
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
@@ -75,11 +77,15 @@ auth is absent; no duplicate login or refresh worker was introduced.
 
 <pending>
 
-1. Observe the learning repair on the operating memory queues, then verify a
-   correct same-topic answer after readiness. The prior answer honestly reported
-   limited memory and did not establish recall. Removed reactions must not be
-   treated as active. Do not request duplicate traffic for the completed General
-   check or repeat unaffected live gates.
+1. Diagnose the October 2 same-topic recall failure using the saved event and
+   CLI. One linked reply arrived on attempt two after about 384 seconds. It
+   correctly avoided a completion claim but could not identify the removed
+   reaction. Topic routing and the saved removal match; the native tools returned
+   no matching long-term memory and archive search found only the new question.
+   Attempt one failed after about 182 seconds without native phase timings.
+   Preserve both outcomes, inspect memory reconciliation, and use focused
+   automated checks before requesting any additional owner traffic. The owner
+   delegated reply assessment to the CLI.
 2. Account for local preparation/admission time using the captured General turn.
    Dependable answers take priority over speed. The earlier 230-second native
    timeout is not explained by the new short greeting alone; retain that limit

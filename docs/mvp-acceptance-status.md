@@ -3,8 +3,8 @@
 <scope>
 
 Last evidence review: 2026-10-02. Most observations remain dated September 28–29;
-the General greeting and populated backup/inactive restore have new October 2
-evidence. Carried observations are not newly repeated tests. [TASK.md](../TASK.md)
+the General greeting, same-topic recall attempt, and populated backup/inactive
+restore have new October 2 evidence. Carried observations are not newly repeated tests. [TASK.md](../TASK.md)
 tracks release blockers; [the procedure](release-acceptance.md) defines the gates.
 The private index at `data/acceptance/results/mvp-live-test-register.json` maps
 these rows to the original ignored reports. Exact timestamps, receipt IDs, source data, and
@@ -30,7 +30,7 @@ reliability or release approval.
 | Honcho live acceptance | Passed | Subscription reasoning, guarded embedding, ingestion, retrieval, restart persistence, provider failure/recovery; closed synthetic workspace; attachment and owner recall observed. | Honcho/provider routing, guarding, ingestion, budget enforcement, or memory state changes. |
 | Non-owner reactions and named-topic isolation | Passed | Add/change/remove on an older note, correct actor/target/current state, no old-message reply; second named-topic answer/context excluded reaction evidence. | Reaction normalization/state, audience resolution, retrieval, or topic routing changes. |
 | General-topic recovery | Passed focused October 2 greeting | One execution and one linked reply; owner confirmed one sensible answer. About 175 seconds total; measured provider transport wait about 3.2 seconds. Earlier scope preservation and recovered timeout remain dated evidence. | Investigate local waiting and retain the earlier timeout; do not repeat this greeting solely for a new commit. |
-| Same-topic reaction recall | Readiness passed; answer pending | One first-attempt reply arrived after 424.4 seconds and could not identify the old reaction because its topic generation had no ready snapshot then. The September 29 generation later reached ready; subsequent automatic-rule replacements started new generations. Current readiness must be re-established. | Assess a future answer in the same topic if owner traffic supplies one; the earlier reply cannot prove recall after readiness. |
+| Same-topic reaction recall | Failed October 2 answer | Correct topic and recorded removal verified. One reply after two attempts and about 384 seconds; it could not identify the removed reaction but avoided claiming completion. First attempt failed after about 182 seconds. Earlier September limited-memory outcome remains retained. | Diagnose existing event, memory availability and tool retrieval before requesting further traffic. Owner delegated answer inspection to the CLI. |
 
 </checks>
 
@@ -100,6 +100,13 @@ finish before process exit. Backup fencing and progress access remain covered.
 This does not change Telegram delivery, source storage, or memory authority and
 does not justify repeating their live acceptance.
 
+Owner edits to the guarded copy of an automatic rule now invalidate completed
+learning reuse, as owner-authored rule revisions already do. The regression
+failed on the previous candidate; five focused learning/learned-memory checks
+and the build pass on the repair. This retains the automatic paraphrase
+deduplication and existing owner-authority requirement. It does not establish
+live memory quality or justify repeating unaffected live checks.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket
@@ -109,8 +116,9 @@ permission to carry all evidence forward indefinitely.
 
 <remaining>
 
-1. Verify a same-topic reply after current readiness; the General greeting is
-   now owner-confirmed. Preserve the earlier limited-memory answer as its own outcome.
+1. Resolve the failed October 2 same-topic recall from its saved CLI trace and
+   tool results. Preserve the first failed execution and the delivered limited
+   answer; neither establishes correct recall. The General greeting is passed.
 2. Measure the focused admission and derivation changes from existing runtime
    evidence when possible. Continue
    investigating model/guard time and the first General native timeout. Retain
