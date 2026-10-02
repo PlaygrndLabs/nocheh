@@ -8,7 +8,7 @@ import type {GuardBinding} from './guards.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
 const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found']);
-const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','native_review_busy','honcho_sync_busy']);
+const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','honcho_sync_busy']);
 
 /** Bound admission before borrowing any pool connection, including nested publication work. */
 export function boundStorageOperations(operations:Partial<Record<WorkflowFamily,WorkflowOperation>>,maximum=2) {

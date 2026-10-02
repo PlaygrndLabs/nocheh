@@ -58,6 +58,11 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const job=await learning.request(reaction,workspace,space);
     await assert.rejects(learning.run(job,async()=>{throw Error('injected-detector-outage');},authority),/injected-detector-outage/);
     assert.equal(calls,1);
+    await stores.control.query("INSERT INTO dispatches(event_id,source_reference,binding,state) VALUES($1,$2,$3,'running')",[parent.id,parent,binding]);
+    await assert.rejects(learning.run(job,detect,authority),{code:'learning_publication_pending'},'a first learned publication also waits before taking the guard barrier');
+    assert.equal(calls,1);assert.deepEqual(await guards.state(),binding);
+    assert.equal((await stores.control.query('SELECT state,jsonb_array_length(publication_ids) AS publications FROM interpretation_jobs WHERE id=$1',[job])).rows[0].publications,0);
+    await stores.control.query("UPDATE dispatches SET state='done' WHERE event_id=$1",[parent.id]);
     const realFinish=learned.finish.bind(learned);learned.finish=async()=>{throw Error('injected-batch-interruption');};
     await assert.rejects(learning.run(job,detect,authority),/injected-batch-interruption/);
     assert.equal((await stores.control.query('SELECT state FROM interpretation_jobs WHERE id=$1',[job])).rows[0].state,'publishing');
@@ -67,7 +72,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.deepEqual(await learning.run(job,detect,authority),ids);
     assert.equal(await learning.request(reaction,workspace,space),job,'learned output does not recursively create another learning request');
     for(const id of ids)assert.equal((await learned.read(access.principal(space),id,await guards.state(),r=>access.canRead(access.principal(space),r,binding))).revision,1);
-    // No dispatch, outbound action or approval exists in this execution path.
+    // Learning never schedules a dispatch, outbound action, or approval; the row above only simulates an active reply.
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE job_id=$1 AND family='memory_review'",['interpret:'+job])).rows[0].count,'1');
     const wrong={...access.principal(space),space:group+'/topic/18'};
     assert.equal(await access.canRead(wrong,parent,binding),false);
@@ -79,6 +84,20 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
       {kind:'state',subject:'packet',text:'The review signal was withdrawn; actual completion is unknown.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[removed.id,parent.id],conflicts:[]},
     ]};
     const updateJob=await learning.request(removed,workspace,space);let finished=0;
+    await stores.control.query("UPDATE dispatches SET state='running',binding=$2 WHERE event_id=$1",[parent.id,binding]);
+    await assert.rejects(learning.run(updateJob,detect,authority),{code:'learning_publication_pending'});
+    assert.equal(calls,2,'the pending publication retains its completed reasoning result');
+    assert.equal((await stores.control.query('SELECT state FROM interpretation_jobs WHERE id=$1',[updateJob])).rows[0].state,'pending');
+    assert.deepEqual(await guards.state(),binding,'automatic replacement cannot revoke an admitted reply');
+    for(const id of ids)assert.equal((await learned.read(access.principal(space),id,binding,r=>access.canRead(access.principal(space),r,binding))).revision,1);
+    await stores.control.query("UPDATE dispatches SET state='done' WHERE event_id=$1",[parent.id]);
+    const browserRun=digest(key+':active-browser');
+    await stores.control.query(`INSERT INTO managed_runs(event_id,channel,source_reference,scope,space_id,logical_profile,conversation_id,binding,state,lease_until)
+      VALUES($1,'browser',$2,$3,$4,'default','publication-fixture',$5,'running',now()+interval '1 minute')`,[browserRun,parent,group,space,binding]);
+    await assert.rejects(learning.run(updateJob,detect,authority),{code:'learning_publication_pending'});
+    assert.equal(calls,2,'managed reply deferral reuses the same saved reasoning result');
+    await stores.control.query("UPDATE managed_runs SET lease_until=now()-interval '1 second' WHERE event_id=$1",[browserRun]);
+    await stores.control.query("UPDATE dispatches SET state='running',binding=$2 WHERE event_id=$1",[parent.id,{...binding,epoch:binding.epoch-1}]);
     learned.finish=async operation=>{if(++finished===2)throw Error('injected-partial-batch');await realFinish(operation);};
     await assert.rejects(learning.run(updateJob,detect,authority),/injected-partial-batch/);
     assert.equal(calls,2);await assert.rejects(guards.state(),{code:'guard_transition_pending'});
@@ -127,8 +146,12 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const guardedJob=await learning.request(removed,guardedWorkspace,space);
     assert.notEqual(guardedJob,withConvention,'an owner edit to a guarded automatic convention must trigger fresh learning');
     await learning.run(guardedJob,detect,authority);assert.equal(calls,4);
+    const beforeOwnerCorrection=await guards.state();
+    await stores.control.query("UPDATE dispatches SET state='running',binding=$2 WHERE event_id=$1",[parent.id,beforeOwnerCorrection]);
     await learned.correct({admin:true,scope:null},ruleId,{expected_revision:2,operation_id:key+':owner-rule',
       text:'A green mark only requests review; it never confirms completion.',retired:false},detect);
+    await assert.rejects(guards.assertCurrent(beforeOwnerCorrection),{code:'guard_context_changed'},'owner correction remains immediate during an admitted reply');
+    await stores.control.query("UPDATE dispatches SET state='done' WHERE event_id=$1",[parent.id]);
     const ownerWorkspace=await workspaceNow('owner-rule');
     const ownerJob=await learning.request(removed,ownerWorkspace,space);
     assert.notEqual(ownerJob,withConvention,'an owner correction must invalidate the prior interpretation input');

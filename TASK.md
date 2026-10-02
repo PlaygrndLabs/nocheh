@@ -62,6 +62,11 @@ auth is absent; no duplicate login or refresh worker was introduced.
   storage/access/retirement checks and eight native archive/delivery checks pass.
   The operating CLI now links the saved older note to its removal; all seventeen
   services are healthy. This does not pass the live conversational recall gate.
+- Automatic learned publications now wait while a current Telegram reply or
+  leased managed reply is active. Saved reasoning and staged versions are reused
+  after the wait; owner corrections and privacy revocations remain immediate.
+  Five focused learning/workflow checks pass, including recovery and owner edits.
+  [Decision](docs/adr/0083-defer-automatic-memory-publication-during-replies.md). This does not pass recall.
 - Owner workflow inspection now joins memory receipts by indexed identity. The
   old event-filtered query exceeded a five-second database deadline on a
   synthetic backlog; the repair and four adjacent workflow checks pass. The

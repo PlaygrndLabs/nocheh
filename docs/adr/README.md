@@ -7,6 +7,7 @@ Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).
 Separated Honcho budgets and settlement: [0079](0079-separated-honcho-budgets-and-settlement.md).
 Reply admission and Honcho derivation: [0080](0080-reply-admission-and-honcho-derivation.md).
 Contextual learning deduplication: [0082](0082-evidence-based-learning-deduplication.md).
+Automatic publication during replies: [0083](0083-defer-automatic-memory-publication-during-replies.md).
 Bounded workflow backup verification: [0081](0081-bounded-workflow-backup-fingerprints.md).
 
 [SPECS.md](../../SPECS.md) is the authoritative product definition;

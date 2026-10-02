@@ -903,3 +903,9 @@ CLI inspection placed the successful General turn at about 51 seconds through pr
 The focused same-topic rerun produced one linked reply on attempt four after about twenty minutes, but did not recognize the removed reaction. Earlier attempts recorded model failure, guard-context change, and generic runtime failure. A background learned replacement from another source advanced the guard epoch during attempt two. The event-filtered CLI workflow list also failed repeatedly: its query plan scanned receipt candidates for each workflow. An indexed identity join preserves receipt and reconciliation links; the old query exceeded a five-second synthetic database deadline, while the new backlog regression and four adjacent workflow checks passed. The change was applied between isolated executions. Detailed live identifiers, answer hash/classifications, and timings remain in ignored local state.
 
 </entry>
+
+<entry date="2026-10-02" task="Defer automatic learned publication during active replies">
+
+A saved live retry was revoked when an unrelated background interpretation replaced existing learned versions. Automatic batch activation now waits before its publication barrier while a reply is active under the current binding, including first publications; it retains the completed reasoning and staged versions. Five focused learning/workflow checks and the build passed, covering Telegram and managed replies, expired leases, revoked bindings, publication recovery, and immediate owner correction. Source and privacy revocations retain their immediate paths. The failed recall outcome remains open.
+
+</entry>
