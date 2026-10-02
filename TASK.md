@@ -46,6 +46,11 @@ auth is absent; no duplicate login or refresh worker was introduced.
 - Timing changes passed seven broker/security/storage checks, eleven admin CLI
   checks, and the TypeScript/dashboard build. The dependency patch build passed;
   npm reported zero known vulnerabilities at the recorded audit.
+- Dashboard reload shutdown now closes stalled HTTP connections after a bounded
+  grace period and still waits for admitted owner writes and lifecycle jobs. The
+  regression reproduces the old hang; all four focused shutdown/maintenance checks
+  pass on the repair. A one-time recovery of the already-stuck dashboard child
+  restored the page after confirming no active workers.
 - The learning repair passed four focused learning/entity checks and seven
   learned-memory/native-context/review checks. They cover generated paraphrases,
   changed model identities, new convention evidence, owner corrections,

@@ -824,3 +824,16 @@ credential-free fixture before applying it to the operating watcher. Current
 memory readiness and same-topic recall remain separate live gates.
 
 </entry>
+
+<entry date="2026-10-02" task="Drain dashboard connections during reload">
+
+A source rebuild left the dashboard waiting indefinitely for graceful termination.
+Its already-stopping child had no active workers and was recovered in isolation.
+The regression fixture reproduces the hang with an incomplete HTTP request. The
+repair closes remaining transports after a short grace period while waiting for
+admitted owner requests and lifecycle jobs to finish. Four shutdown/maintenance
+checks passed, including an owner settings write that remains alive after its
+client connection closes and commits before process exit. Existing backup drain,
+maintenance fencing, and progress access checks also passed.
+
+</entry>

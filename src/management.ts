@@ -194,7 +194,9 @@ export async function startManagement() {
     if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
     if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
-  const server = createServer((req, res) => {const tracked=maintenance.enter();
+  const server = createServer((req, res) => {
+    if(stopping){json(res,503,{error:'dashboard_stopping'});return;}
+    const tracked=maintenance.enter();
     const responseDone=new Promise<void>(resolve=>{res.once('finish',resolve);res.once('close',resolve);});
     void (async () => {
     const authority = `127.0.0.1:${PORT}`;
@@ -416,7 +418,12 @@ export async function startManagement() {
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
     providerOAuth.close();
-    server.close(()=>{void Promise.allSettled([...runningTasks]).then(()=>process.exit(0));});
+    // A partial request or stalled stream must not hold a reload open forever.
+    // Closing its transport does not cancel admitted owner writes or lifecycle jobs.
+    const admitted=maintenance.drain();
+    const drainConnections=setTimeout(()=>server.closeAllConnections(),1000);drainConnections.unref();
+    server.close(()=>{clearTimeout(drainConnections);void Promise.allSettled([admitted,...runningTasks]).then(()=>process.exit(0));});
+    server.closeIdleConnections();
   };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
   return server;

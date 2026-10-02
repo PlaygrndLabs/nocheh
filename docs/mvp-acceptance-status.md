@@ -93,6 +93,13 @@ expiry was not deliberately forced. Twenty-one provider failure/quota checks
 passed in the pinned native fixture. Historical voice evidence remains applicable
 because speech source, dependencies, and refresh ownership are unchanged.
 
+The October 2 dashboard shutdown repair was reproduced with a partial HTTP
+request and verified with four focused shutdown/maintenance checks. Disconnected
+clients no longer hold reloads open indefinitely; admitted owner operations still
+finish before process exit. Backup fencing and progress access remain covered.
+This does not change Telegram delivery, source storage, or memory authority and
+does not justify repeating their live acceptance.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket

@@ -7,6 +7,7 @@ export class ManagementMaintenance {
   private current:{job:string;token:string;ready:boolean}|undefined;
   enter(){const id=Symbol();let done!:()=>void;const completion=new Promise<void>(resolve=>{done=resolve;});
     this.requests.set(id,completion);return {id,finish:()=>{this.requests.delete(id);done();}};}
+  async drain(){await Promise.all([...this.requests.values()]);}
   get active(){return !!this.current;}
   get state(){return this.current?{...this.current}:null;}
   allows(method:string,path:string){
