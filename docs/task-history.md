@@ -921,3 +921,9 @@ The final failed recall attempt read one unrelated source without searching agai
 Repeated CLI timing inspection still timed out after the source repair. Catalog inspection showed that PostgreSQL retained the old disjunctive receipt join: source watching had compiled the new definition without applying it. The exact tested view was installed in a bounded owner-role transaction, preserving data and runtime authority, then verified from the catalog. The full event-bound CLI timing command succeeded in about 2.2 seconds and returned the saved turn's receipts. Its native successful attempt took about 101 seconds; all four attempts and the approximately twenty-minute capture-to-reply duration remain recorded failures for recall quality. The deployment guide now distinguishes mounted source, database definitions, and isolated native image activation. Detailed measurements and previous definitions remain in ignored local evidence.
 
 </entry>
+
+<entry date="2026-10-02" task="Preserve background retry order">
+
+Current-topic ingestion still had a source receipt waiting over thirty-five minutes with zero attempts while newer work advanced. The admission wrapper let background retries race for each free slot. A bounded, expiring in-memory order now gives a continuously waiting job precedence over newer retries without holding connections or changing durable authority. The old implementation fails the fairness regression; three focused admission checks pass on the repair, including reply capacity, release after failure, and abandoned-waiter recovery. The source watcher compiled the repair and its running output was verified. A subsequent health check found Inngest stopped with exit code one and no OOM flag; the other sixteen services were healthy. Scheduler recovery, memory readiness, and the failed conversational recall remain separate open gates.
+
+</entry>
