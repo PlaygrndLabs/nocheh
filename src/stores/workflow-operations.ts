@@ -14,23 +14,37 @@ const pending=new Set(['guard_transition_pending','guard_preparation_pending','g
 export function boundStorageOperations(operations:Partial<Record<WorkflowFamily,WorkflowOperation>>,maximum=2) {
   if(!Number.isSafeInteger(maximum)||maximum<1||maximum>2)throw Error('invalid_storage_workflow_concurrency');
   let active=0;
-  const backgroundWaiters=new Map<string,number>();
+  // At most one live callback waits for the background slot. A historical
+  // retry hint cannot reserve an idle slot while its Inngest step is asleep.
+  let backgroundWaiter:{start:()=>void}|null=null;
   const foreground=new Set<WorkflowFamily>(['preparation','telegram','browser','schedules','actions']);
   return Object.fromEntries(Object.entries(operations).map(([family,operation])=>[family,async(...args:Parameters<WorkflowOperation>)=>{
     // Initial replies must retain one admission slot while memory derivation
     // and reviews run in the background. No pool connection is held while waiting.
     const immediate=foreground.has(family as WorkflowFamily),limit=immediate?maximum:Math.max(1,maximum-1);
-    if(!immediate) {
-      // Inngest retains the wait; this bounded hint orders retries without
-      // holding a connection or creating a second execution authority.
-      const now=Date.now(),key=JSON.stringify([family,args[0],args[1].owner,args[1].epoch]);
-      for(const [id,seen] of backgroundWaiters)if(now-seen>=120000)backgroundWaiters.delete(id);
-      if(!backgroundWaiters.has(key)&&backgroundWaiters.size>=1024)return waiting('admission','receipt_pending',10000);
-      backgroundWaiters.set(key,now);
-      if(active>=limit||backgroundWaiters.keys().next().value!==key)return waiting('admission','receipt_pending',10000);
-      backgroundWaiters.delete(key);
-    } else if(active>=limit)return waiting('admission','receipt_pending',2000);
-    active++;try{return await operation(...args);}finally{active--;}
+    const run=async()=>{
+      active++;try{return await operation(...args);}finally{
+        active--;
+        if(active<Math.max(1,maximum-1)&&backgroundWaiter) {
+          const next=backgroundWaiter;backgroundWaiter=null;next.start();
+        }
+      }
+    };
+    if(immediate)return active>=limit?waiting('admission','receipt_pending',2000):run();
+    if(active<limit&&!backgroundWaiter)return run();
+    if(backgroundWaiter)return waiting('admission','receipt_pending',10000);
+    // This is a bounded handoff within an already admitted Inngest step, not
+    // another retry loop. No database connection is borrowed while waiting.
+    // One pending callback plus at most two operations leaves a worker slot
+    // free under the pipeline's four-worker concurrency limit.
+    return new Promise<Observation>((resolve,reject)=>{
+      const entry={start:()=>{clearTimeout(timeout);void run().then(resolve,reject);}};
+      const timeout=setTimeout(()=>{
+        if(backgroundWaiter===entry)backgroundWaiter=null;
+        resolve(waiting('admission','receipt_pending',10000));
+      },1000);
+      backgroundWaiter=entry;
+    });
   }])) as Partial<Record<WorkflowFamily,WorkflowOperation>>;
 }
 
