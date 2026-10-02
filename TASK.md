@@ -9,8 +9,9 @@ retains completed increments and earlier observations. The
 reasons for carrying historical evidence forward.
 
 Nocheh is pre-release. The operating local installation runs one source-watched
-`make dev` Compose stack from the release session worktree. The latest health check has 16 healthy services; Inngest exited and requires
-recovery before workflow acceptance continues. The pinned native candidate includes empty-completion rejection; the
+`make dev` Compose stack from the release session worktree. All 17 services are
+healthy after recovery of the existing Inngest container. Its unexplained exit
+remains recorded; workers reconnected and background completions resumed. The pinned native candidate includes empty-completion rejection; the
 running TypeScript services include event-bound provider timings, dependency
 patches, and protected workflow receipt reconciliation. The prior source checkout
 and its three local edits remain preserved.
@@ -83,8 +84,10 @@ auth is absent; no duplicate login or refresh worker was introduced.
   regression. [Decision](docs/adr/0085-fair-background-workflow-admission.md).
   This addresses an observed receipt waiting over thirty-five minutes without
   its first ingestion attempt. The operating compiled repair is verified.
-  Current memory readiness remains pending; a later Inngest exit interrupted
-  background progress and is being investigated.
+  The previously starved receipt is now done with one ingestion attempt.
+  Inngest later exited and was recovered without replacing its container or
+  state; all workers reconnected. The affected topic still has four pending
+  receipts and no ready snapshot, so memory readiness remains pending.
 - Owner workflow inspection now joins memory receipts by indexed identity. The
   old event-filtered query exceeded a five-second database deadline on a
   synthetic backlog; the repair and four adjacent workflow checks pass. The

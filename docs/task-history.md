@@ -927,3 +927,9 @@ Repeated CLI timing inspection still timed out after the source repair. Catalog 
 Current-topic ingestion still had a source receipt waiting over thirty-five minutes with zero attempts while newer work advanced. The admission wrapper let background retries race for each free slot. A bounded, expiring in-memory order now gives a continuously waiting job precedence over newer retries without holding connections or changing durable authority. The old implementation fails the fairness regression; three focused admission checks pass on the repair, including reply capacity, release after failure, and abandoned-waiter recovery. The source watcher compiled the repair and its running output was verified. A subsequent health check found Inngest stopped with exit code one and no OOM flag; the other sixteen services were healthy. Scheduler recovery, memory readiness, and the failed conversational recall remain separate open gates.
 
 </entry>
+
+<entry date="2026-10-02" task="Recover the existing workflow scheduler">
+
+Inngest exited with code one and no OOM flag. Filtered diagnostics retained cancellation and connection-error categories without raw runtime logs; the exit cause remains unresolved. After ownership, volume, port, and single-scheduler checks, the existing container was started without recreation or state replacement. All seventeen services became healthy, all nine worker families reconnected, and new background completions appeared. Read-only receipt correlation confirmed the previously starved receipt completed on one attempt; the affected topic still had four pending receipts and no ready snapshot. Recovery does not pass conversational recall or release. Detailed observations remain in ignored local evidence.
+
+</entry>
