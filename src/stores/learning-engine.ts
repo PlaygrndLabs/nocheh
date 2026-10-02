@@ -21,8 +21,8 @@ export class ContextualLearningRepository {
     const context=await this.contexts.prepare(source,binding);
     const owner=this.contexts.access.policy().owner_id;
     if(audience!==(context.space===owner?'owner':context.space))throw new HttpError(403,'learning_workspace_scope_mismatch');
-    const {binding:_,...inputs}=context,contextHash=digest(canonical([protocol,audience,inputs]));
-    // Unrelated authorization epochs cannot cause a self-sustaining reasoning loop.
+    const {binding:_,rules:_rules,rule_ids:_ruleIds,...inputs}=context,contextHash=digest(canonical([protocol,audience,inputs]));
+    // Unrelated epochs and regenerated rule wording cannot cause a reasoning loop.
     // Every source, selected result and applicable convention is still revalidated above.
     const completed=(await this.contexts.access.stores.control.query("SELECT id FROM interpretation_jobs WHERE context_hash=$1 AND state='done' ORDER BY created_at DESC LIMIT 1",[contextHash])).rows[0];
     if(completed)return completed.id;

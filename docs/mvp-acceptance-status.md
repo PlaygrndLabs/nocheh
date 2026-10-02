@@ -2,8 +2,9 @@
 
 <scope>
 
-Last evidence review: 2026-09-29. These are saved observations from the fresh local
-installation on September 28–29, not newly repeated tests. [TASK.md](../TASK.md)
+Last evidence review: 2026-10-02. Most observations remain dated September 28–29;
+the General greeting and populated backup/inactive restore have new October 2
+evidence. Carried observations are not newly repeated tests. [TASK.md](../TASK.md)
 tracks release blockers; [the procedure](release-acceptance.md) defines the gates.
 The private index at `data/acceptance/results/mvp-live-test-register.json` maps
 these rows to the original ignored reports. Exact timestamps, receipt IDs, source data, and
@@ -25,11 +26,11 @@ reliability or release approval.
 | Archive retirement and Undo | Passed | Original retained; later answer/context excluded retired content; Undo restored eligibility. Separate source retired before delivery stayed cancelled with zero replies. | Retirement/access rules, archive revisions, or cancellation changes. |
 | Private recall and owner correction | Passed | Correct private recall; owner-authored learned revisions; completed Honcho projection; one correct owner-confirmed answer after correction. | Learning, correction, projection, or recall changes. |
 | Restart recovery | Passed for captured pending turn | Runtime restarted after capture and before first execution; one reply and one receipt. Separate completed-turn durability also passed. Does not claim a restart during model execution. | Receipt identity, runtime recovery, dispatch, or supervision changes. |
-| Populated backup and inactive restore | Passed on final snapshot | Checksums, 427 files, 88 table fingerprints; same operating containers resumed; restored authorities stayed inactive. Earlier failed resume attempts are retained. | Snapshot coverage, storage schema, restore, resume, or authority controls change. |
+| Populated backup and inactive restore | Passed on final snapshot | October 2 snapshot: 1,461 files, 88 owned-store table fingerprints, workflow and Honcho verified; restored authorities stayed inactive. Prior backup failures remain recorded. | Snapshot coverage, storage schema, restore, resume, or authority controls change. |
 | Honcho live acceptance | Passed | Subscription reasoning, guarded embedding, ingestion, retrieval, restart persistence, provider failure/recovery; closed synthetic workspace; attachment and owner recall observed. | Honcho/provider routing, guarding, ingestion, budget enforcement, or memory state changes. |
 | Non-owner reactions and named-topic isolation | Passed | Add/change/remove on an older note, correct actor/target/current state, no old-message reply; second named-topic answer/context excluded reaction evidence. | Reaction normalization/state, audience resolution, retrieval, or topic routing changes. |
-| General-topic recovery | Delivery observed; answer quality pending | Existing markerless message resolved to base scope; original hash/projection unchanged; 109 assistant-context records excluded other-topic sources. First native attempt failed before delivery; the second completed with one linked reply. | Confirm the existing reply's content and investigate the first native timeout; no new owner message needed for delivery. |
-| Same-topic reaction recall | Readiness passed; answer pending | One first-attempt reply arrived after 424.4 seconds and could not identify the old reaction because its topic generation had no ready snapshot then. The current generation reached ready with one snapshot and 24 of 24 Honcho work units complete after focused activation. | Assess a future answer in the same topic if owner traffic supplies one; the earlier reply cannot prove recall after readiness. |
+| General-topic recovery | Passed focused October 2 greeting | One execution and one linked reply; owner confirmed one sensible answer. About 175 seconds total; measured provider transport wait about 3.2 seconds. Earlier scope preservation and recovered timeout remain dated evidence. | Investigate local waiting and retain the earlier timeout; do not repeat this greeting solely for a new commit. |
+| Same-topic reaction recall | Readiness passed; answer pending | One first-attempt reply arrived after 424.4 seconds and could not identify the old reaction because its topic generation had no ready snapshot then. The September 29 generation later reached ready; subsequent automatic-rule replacements started new generations. Current readiness must be re-established. | Assess a future answer in the same topic if owner traffic supplies one; the earlier reply cannot prove recall after readiness. |
 
 </checks>
 
@@ -61,16 +62,15 @@ with a mocked Bot API transport. Blank answers produce a pre-delivery failure,
 the same attempt reuses its receipt, a new successful attempt sends once, and
 explicit `[NO_REPLY]` remains intentional silence. This changes classification
 of invalid completed model results; it does not relabel any earlier live
-outcome. The candidate is not activated. Existing successful-delivery and
-silence observations retain their original dates; this candidate's operating
-behavior remains unverified. No new owner traffic was requested.
+outcome. The candidate was activated on October 2 after the broader native suite passed. Existing successful-delivery and
+silence observations retain their original dates; the October 2 ordinary General greeting completed on its first attempt and the owner confirmed its quality.
 
 The October 2 timing candidate adds nullable, content-free numeric measurements to
 security effect receipts and an event-filtered owner inspection command. Seven
 focused broker/security/storage checks and eleven CLI checks passed; the build
 passed. It does not change provider payloads, audience checks, approval authority,
-or delivery decisions. Prior dated passes remain preserved; activation, new timing
-observations, runtime reconciliation, and backup verification remain pending.
+or delivery decisions. Prior dated passes remain preserved. October 2 activation, General timing
+measurements, populated backup, and inactive restore are now recorded.
 
 The October 2 workflow repair preserves protected effect receipts when an older
 source generation is superseded after an operation. Thirty focused workflow
@@ -78,6 +78,20 @@ checks pass; the separate bootstrap and pinned-engine UI fixture checks were not
 enabled. Existing delivery identities and Telegram replay code are unchanged.
 Observe affected Honcho/memory workflow reconciliation after activation; no new
 owner approval, reaction capture, or voice input is justified by this repair.
+
+The October 2 learning repair changes only completed-job deduplication: automatic
+rule guidance contributes original prepared dependencies, while owner guidance
+contributes its exact revision and text. Full rules and conflicts still reach the
+model. Four focused learning/entity checks and seven related memory checks passed.
+Prior capture, voice, approval, and isolation evidence is carried because those
+boundaries are unchanged. Observe current memory reconciliation and require the
+still-open same-topic answer; the prior limited answer cannot establish recall.
+
+Fresh provider chat, detector, and refresh-delegation checks passed. Persisted
+refresh metadata and later successful chat support current provider operation;
+expiry was not deliberately forced. Twenty-one provider failure/quota checks
+passed in the pinned native fixture. Historical voice evidence remains applicable
+because speech source, dependencies, and refresh ownership are unchanged.
 
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
@@ -88,19 +102,20 @@ permission to carry all evidence forward indefinitely.
 
 <remaining>
 
-1. Assess a future same-topic reply after the ready snapshot when owner traffic
-   supplies one, and assess the existing General reply content.
+1. Verify a same-topic reply after current readiness; the General greeting is
+   now owner-confirmed. Preserve the earlier limited-memory answer as its own outcome.
 2. Measure the focused admission and derivation changes from existing runtime
    evidence when possible. Continue
    investigating model/guard time and the first General native timeout. Retain
    prior success evidence and verify only affected paths.
-3. Finish release-candidate evidence/pin reconciliation, including the required
-   provider refresh, quota/failure, and literal-detection evidence. The fresh
+3. Finish release-candidate evidence/pin reconciliation, retaining provider
+   refresh, quota/failure, and literal-detection evidence and its stated limits. The fresh
    Honcho checks cover part of this; they do not by themselves prove every
    provider-cutover criterion. Inspect retained evidence first and rerun only a
    missing or invalidated criterion. No provider cutover is authorized here.
-4. Remove private material from reachable Git history and verify it before
-   pushing. Remote synchronization remains blocked.
+4. The cleaned history is prepared with an identical current tree. Await the
+   explicit one-time force-with-lease exception, reconcile later source commits,
+   and verify before publication. Remote synchronization remains blocked.
 
 Historical ingestion is unapproved and is not required to repeat this test set.
 The deliberate-reset journal validator is not applicable to the clean development

@@ -9,11 +9,13 @@ import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
 import {EntityRepository,type EntityContext} from './entities.js';
 
+export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner';id:string;revision:number;text:string};
 export interface PreparedLearningContext {
   source:SourceReference;source_object:string;space:string;binding:GuardBinding;
   evidence:LearningEvidence[];dependencies:PreparedDependency[];
   observations:{source:SourceReference;value:unknown;derivatives:{kind:string;id:string;value:unknown}[]}[];
-  rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];projects:{id:string;name:string}[];
+  // Older persisted contexts predate rule_inputs; fresh preparation always supplies it.
+  rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];rule_inputs?:LearningRuleInput[];projects:{id:string;name:string}[];
   entities:EntityContext;
   limitations:string[];
 }
@@ -80,10 +82,10 @@ export class LearningContextRepository {
       else limitations.push('ambiguous_project_reference');
     }
     const entities=await this.entities.context(source,mentioned,corpus);
-    const candidates=(await this.access.stores.derived.query(`SELECT id FROM learned_entries WHERE active_revision IS NOT NULL AND
-      ((scope_kind='conversation' AND scope_id=$1) OR (scope_kind='project' AND scope_id=$2)) ORDER BY id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
+    const candidates=(await this.access.stores.derived.query(`SELECT e.id,v.dependencies FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision WHERE e.active_revision IS NOT NULL AND
+      ((scope_kind='conversation' AND scope_id=$1) OR (scope_kind='project' AND scope_id=$2)) ORDER BY e.id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
     if(candidates.length>100)throw new HttpError(409,'learning_rule_limit');
-    const versions:InterpretationVersion[]=[];
+    const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>();
     for(const candidate of candidates)try {
       const version=await this.learned.read(principal,candidate.id,binding,async reference=>
         await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding));
@@ -91,11 +93,17 @@ export class LearningContextRepository {
       if(version.author!=='owner'&&(await this.access.stores.archive.query(`SELECT 1 FROM source_observations o JOIN source_revisions r ON r.id=o.revision_id
         WHERE o.event_id=ANY($1::text[]) AND r.object_id=$2 LIMIT 1`,[version.evidence.map(e=>e.id),observed.object_id])).rowCount)continue;
       versions.push(version);
+      // Generated wording and model-chosen rule identities are not new evidence.
+      // Automatic guidance changes only when its authorized source inputs change.
+      const inputs:LearningRuleInput[]=version.author==='owner'?
+        [{kind:'owner',id:version.id,revision:version.revision,text:version.text}]:
+        (candidate.dependencies as PreparedDependency[]).map(dependency=>({kind:'source',dependency}));
+      for(const input of inputs)ruleInputs.set(canonical(input),input);
     } catch(error) {
       if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code))continue;throw error;
     }
     await this.guards.assertCurrent(binding);
     return {source,source_object:observed.object_id,space,binding,evidence,dependencies,observations,
-      rules:applicableInterpretations(versions),rule_ids:versions.map(v=>v.id),projects,entities,limitations:[...new Set(limitations)]};
+      rules:applicableInterpretations(versions),rule_ids:versions.map(v=>v.id),rule_inputs:[...ruleInputs.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([,v])=>v),projects,entities,limitations:[...new Set(limitations)]};
   }
 }

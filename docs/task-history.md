@@ -793,3 +793,34 @@ its incomplete dumps are not recovery evidence. Detailed manifests and receipts
 remain in ignored local state.
 
 </entry>
+
+<entry date="2026-10-02" task="Activate verified runtime and inspect General reply">
+
+Activated the pinned native candidate and patched source-watched services in one
+operating Compose stack, preserving the prior checkout and runtime state. All 17
+services are healthy. The native suite passed 380 image checks and three host
+checks; 21 provider compatibility checks passed. Fresh chat, literal detection,
+and refresh delegation passed. Persisted refresh metadata and historical voice
+and provider receipts retain their limits; token expiry was not forced.
+
+The owner sent the requested ordinary General greeting and confirmed one sensible
+reply. Its first execution completed with one linked delivery. Total elapsed time
+was about 175 seconds; native receipt execution occupied about 41 seconds and
+the measured model transport waited about 3.2 seconds. This passes that focused
+reply check, not all latency or same-topic recall requirements.
+
+</entry>
+
+<entry date="2026-10-02" task="Stop generated-rule learning feedback">
+
+Saved repeated learning contexts changed only their learned rules, while original
+observations and dependencies stayed identical. The reuse key now uses sorted
+original dependencies for automatic guidance and exact owner revisions for owner
+guidance. Full current rule text and conflicts still reach the model. Four focused
+learning/entity checks and seven related memory checks passed, including new
+source evidence, paraphrasing, generated rule identities, owner correction,
+retirement, consent, and durable recovery. The source was tested in an isolated
+credential-free fixture before applying it to the operating watcher. Current
+memory readiness and same-topic recall remain separate live gates.
+
+</entry>

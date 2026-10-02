@@ -3,163 +3,91 @@
 <current>
 
 Last reconciled 2026-10-02. [SPECS.md](SPECS.md) defines the product;
-[AGENTS.md](AGENTS.md) defines working instructions. Prior implementation and
-live observations are summarized in [task history](docs/task-history.md).
-The [MVP live acceptance register](docs/mvp-acceptance-status.md) records passed
-checks, caveats, remaining gates, and reasons to repeat only affected checks.
+[AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
+retains completed increments and earlier observations. The
+[MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
+reasons for carrying historical evidence forward.
 
-Nocheh is pre-release. The owner requested a clean setup, deletion of old
-containers and application data, preservation of credentials and settings,
-and startup in development mode.
+Nocheh is pre-release. The operating local installation runs one source-watched
+`make dev` Compose stack from the release session worktree. All 17 services are
+healthy. The pinned native candidate includes empty-completion rejection; the
+running TypeScript services include event-bound provider timings, dependency
+patches, and protected workflow receipt reconciliation. The prior source checkout
+and its three local edits remain preserved.
 
-The root Compose file now defines the archive, derived, control, and workflow
-stores directly. The separate storage overlay, legacy executable entrypoints,
-retired sidecar imports, and old preview path are removed. Development source
-comes from the session worktree. Fresh volumes are created with Compose ownership;
-normal stops retain them. [Decision](docs/adr/0075-clean-development-setup.md),
-[commands](docs/deploy.md), [layout](docs/repository-layout.md).
+Honcho is attached and verified as primary memory; historical ingestion is off.
+Earlier four-generation readiness was a dated observation. Current generations
+are rebuilding after automatic learned-rule replacements advanced the guard epoch.
+Saved repeated interpretation inputs had unchanged source observations and
+changed learned rules. The verified repair deduplicates automatic rule guidance
+by its original prepared dependencies while retaining owner revision changes and
+full model context. [Decision](docs/adr/0082-evidence-based-learning-deduplication.md).
+Its operating reconciliation and same-topic recall remain pending.
 
-Fresh local setup now enables and prepares the Honcho service by default; an
-explicit saved disable remains effective. The operating installation has passed
-the six-check synthetic Honcho acceptance and is verified and attached with
-Honcho as primary memory. Historical ingestion is off. A fresh owner source produced a ready generation and owner-visible Honcho
-recall passed in a follow-up Telegram turn. At the latest recorded inspection,
-all four rebuilt guard-epoch generations were ready with snapshots. Service
-startup does not bypass live memory acceptance. [Decision](docs/adr/0076-honcho-enabled-local-default.md),
-[procedure](docs/release-acceptance.md).
-
-The Honcho dashboard separates the paid API embedding dollar cap from
-subscription reasoning's request safety limit. Confirmed embedding calls with
-reported usage now settle their pre-egress hold to token-priced admission
-accounting; failed and unreported calls retain the full model-specific hold.
-The pilot cap stays fixed; the accepted monthly cap starts at $5 and permits
-$0–$15 in cent increments. Budget changes retain call accounting and use
-revision-checked, retry-safe writes. [Decision](docs/adr/0079-separated-honcho-budgets-and-settlement.md).
-
-The active installation's 17 containers and six mounted volumes were removed.
-Six verified obsolete preview volumes and retired local runtime/output directories
-were also removed. Current credentials, bot settings, dashboard settings, bounded
-native preferences, and spending accounting were preserved. All captured control settings were
-verified equal after reset; the temporary private preservation copy was removed. Fresh archive events
-and learned entries both counted zero before capture. Pending Telegram updates
-were discarded once. Source worktree archives and separate synthetic fixture
-projects were not deleted.
+The existing embedding spending cap and subscription request safety limit remain
+in force. The local provider route has one CPA login and one refresh owner. Native
+auth is absent; no duplicate login or refresh worker was introduced.
 
 </current>
 
 <verification>
 
-- The September 28–29 installation has retained passing evidence for owner text,
-  group silence and isolation, subscription voice transcription (with its original
-  retry caveat), exact approval, retirement and Undo, learned recall and owner
-  correction, captured-turn restart recovery, populated backup/inactive restore,
-  Honcho attachment, and non-owner reactions with named-topic isolation. The
-  [acceptance register](docs/mvp-acceptance-status.md) retains the scope and limits;
-  [task history](docs/task-history.md) retains the chronological summaries. These
-  are carried observations, not newly repeated tests.
-- The empty-completion candidate passed 16 focused native checks in its pinned,
-  networkless runtime. Operating activation and affected live evidence remain
-  pending.
-- The release audit verified hashes for every report supporting the 11 completed
-  acceptance areas. One later-updated topic report is referenced by two open
-  rows; its index hashes and readiness status require reconciliation.
-- Event-bound provider timing now separates broker preparation, upstream headers,
-  upstream byte waits, and downstream forwarding. The TypeScript/dashboard build,
-  seven focused broker/security/storage checks, and eleven admin CLI checks pass.
-  One storage check initially lost its database connection during the operating
-  backup failure; that affected check passed on its isolated rerun. The AST graph
-  refreshed from 564 files with no model calls. This is candidate evidence;
-  timing telemetry has not yet been activated or measured in a live owner turn.
-- The operating source checkout's three local edits exactly match integrated
-  main. A private patch preserves them; the original checkout remains intact.
-  All 17 services were healthy at initial inspection, then exited with code 255.
-  The first quiesced backup failed while fingerprinting workflow storage after
-  PostgreSQL reported temporary disk exhaustion. The repaired backup completed
-  with 1,461 files and 88 owned-store table fingerprints, plus workflow and Honcho
-  snapshots. Inactive restore passed with bot, provider login, and executors inactive. The operating installation is
-  stopped for candidate activation; failed partial dumps are retained privately.
-- Remote fetch succeeded. Private historical report paths are already reachable
-  from origin/main, so ordinary fast-forward publication cannot remove them.
-  History cleanup is being prepared separately; no remote rewrite has occurred.
-
-- Release-build audit found two vulnerable transitive dependencies. The lockfile
-  now pins `@grpc/grpc-js` 1.14.5 and `brace-expansion` 2.1.7 within the existing
-  parent constraints. The pinned build passes and npm reports zero known
-  vulnerabilities. Workflow regression checks exposed a pre-existing protected
-  receipt supersession bug; the candidate repair preserves started, completed,
-  and ambiguous receipts after an operation returns. Current-generation and
-  pagination fixtures are self-contained. Thirty workflow checks pass on a
-  clean PostgreSQL fixture; the separate bootstrap and pinned-engine UI cases
-  were not enabled and remain explicit skips.
-
-- The native candidate uses the verified pinned dependency image with current
-  Python source. It passes 380 networkless image checks plus all three host-only
-  checks, including real container isolation. No candidate activation or new
-  owner turn is claimed by those 383 passes.
+- The October 2 General check has one captured message, one linked reply, and one
+  execution attempt. The owner confirmed one sensible reply. Elapsed time was
+  about 175 seconds, including about 133 seconds before the native execution
+  receipt started and 41 seconds until completion. The model effect recorded
+  2.2 seconds of broker preparation and 3.2 seconds of provider transport waits.
+  These phases overlap other native work; they do not establish a pure model
+  compute time. The earlier timeout and recovered reply remain historical evidence.
+- The native candidate passed 380 networkless image checks and three host checks,
+  including real container isolation. Twenty-one subscription compatibility
+  checks passed. Thirty workflow regression checks passed; separate bootstrap
+  and pinned-engine UI fixture cases remain explicit skips.
+- Timing changes passed seven broker/security/storage checks, eleven admin CLI
+  checks, and the TypeScript/dashboard build. The dependency patch build passed;
+  npm reported zero known vulnerabilities at the recorded audit.
+- The learning repair passed four focused learning/entity checks and seven
+  learned-memory/native-context/review checks. They cover generated paraphrases,
+  changed model identities, new convention evidence, owner corrections,
+  retirement, consent, durable results, and uncertain execution identity.
+- Populated backup and inactive restore passed: 1,461 files, 88 owned-store table
+  fingerprints, workflow fingerprints, and Honcho were verified. Restored bot,
+  provider login, memory attachment, and executors stayed inactive. Restored
+  containers are stopped; saved state remains preserved. The earlier disk-space
+  failure and incomplete dumps remain recorded failures.
+- Fresh provider chat, literal detector, and refresh-delegation checks passed.
+  Persisted CPA refresh metadata predates successful current chat requests;
+  expiration was not forcibly induced. September provider cutover and voice
+  evidence is retained with its original dates and limitations. Speech source,
+  dependencies, and login ownership did not change, so another voice note is
+  not required solely by these increments.
+- The acceptance report hashes are reconciled, including the later-updated topic
+  report. Eleven earlier completed areas remain carried observations; General
+  has new owner-confirmed evidence. Exact reports, revisions, and identifiers
+  remain in ignored local state.
 
 </verification>
 
 <pending>
 
-- Empty-completion rejection is implemented and verified in the candidate;
-  operating Hermes activation and affected live evidence remain pending.
-- Dependable answers take priority over speed. Next, assess the existing General
-  answer and the same-topic recall limitation from retained evidence, and
-  diagnose the first native timeout as a completion/recovery issue. A healthy
-  stack or ready snapshot does not establish answer quality.
-- Event-bound LLM timing is implemented and verified in the candidate. Activate
-  it with the reconciled runtime, collect affected live evidence, and assess
-  local waiting separately from provider transport waits. The
-  [CLI guide](docs/admin-cli.md) defines the boundaries and overlap limits.
-- Workflow backup verification now uses sorted fixed-size row hashes with an
-  explicit algorithm marker and backward-compatible restoration. Two real
-  PostgreSQL checks and sixteen recovery checks passed. The new populated backup
-  and its inactive restore completed; preserved files, stores, workflow hashes,
-  Honcho, and inactive authorities passed verification. The earlier failure is
-  retained as a failure. [Decision](docs/adr/0081-bounded-workflow-backup-fingerprints.md).
-- Finish release-candidate evidence and runtime-pin reconciliation against
-  [release acceptance](docs/release-acceptance.md), using the
-  [acceptance register](docs/mvp-acceptance-status.md). Audit retained provider
-  refresh, quota/failure, and literal-detection evidence before deciding whether
-  any specific check needs repeating. Owner text,
-  group silence and isolation, private recall, exact owner approval, owner
-  retirement, owner correction and active learned recall, in-flight
-  restart/recovery, populated backup/restore, Honcho attachment, subscription
-  voice transcription, and the full non-owner reaction and named-topic isolation
-  sequence have current-installation evidence. Historical ingestion remains
-  unapproved. The deliberate-reset journal validator does not apply to this
-  clean development setup, which has no reset coordinator journal.
-- The existing General turn recovered on its second Telegram execution attempt
-  and has one linked reply. Its first native attempt timed out before delivery
-  after about 233 seconds; the successful native turn took 136.6 seconds,
-  including 110.6 seconds of conversation and 27.0 seconds of model guarding.
-  Scope/archive preservation and exclusion of named-topic sources were checked
-  earlier. Reply content and owner-visible quality have not been confirmed.
-- The same-topic reaction question had one first-attempt reply after 424.4
-  seconds, but it could not identify the old reaction and truthfully reported
-  limited memory. Its topic generation had no ready snapshot at question time;
-  it became ready roughly an hour later. The current guard epoch has completed
-  Nocheh ingestion and, after focused deriver activation, its topic generation
-  reached ready with one snapshot and 24 of 24 Honcho work units complete. All
-  four current generations are now ready with snapshots.
-  This does not retroactively correct the earlier answer or establish fresh
-  same-topic recall. Do not infer a new reaction state from removed observations.
-- Reply latency has separate observed stages. The same-topic turn spent about
-  116 seconds in preparation, roughly 190 seconds before native receipt start,
-  and 109.6 seconds in the native turn, including 97.5 seconds of conversation
-  and 58.4 seconds of model guarding (overlapping timings). A locally verified
-  scheduling change reserves one storage workflow slot for foreground work and
-  new setup uses two Honcho deriver workers. The owner authorized focused live
-  activation. The verified source is compiled in the operating watcher, and
-  only the Honcho deriver was recreated with two workers. All 17 services are
-  healthy; the app, Hermes, Honcho API, and provider gateway kept their container
-  identities. The topic queue completed and its generation became ready, but
-  no new reply has measured admission latency. The two
-  existing General-topic edits remain intact.
-  The native 230-second timeout and earlier intermittent config read still
-  need separate diagnosis. Do not widen the profile tool allowlist.
-- Remote Git synchronization remains blocked by private material in reachable
-  history. Sanitize and verify history before pushing; do not upload those blobs.
-  The earlier HTTPS authentication failure also needs verification at push time.
+1. Observe the learning repair on the operating memory queues, then verify a
+   correct same-topic answer after readiness. The prior answer honestly reported
+   limited memory and did not establish recall. Removed reactions must not be
+   treated as active. Do not request duplicate traffic for the completed General
+   check or repeat unaffected live gates.
+2. Account for local preparation/admission time using the captured General turn.
+   Dependable answers take priority over speed. The earlier 230-second native
+   timeout is not explained by the new short greeting alone; retain that limit
+   and its failure evidence until diagnosis supports a change.
+3. Finish release evidence and runtime revision reconciliation against
+   [release acceptance](docs/release-acceptance.md). Service health, Git integration,
+   and historical readiness do not establish current recall or release approval.
+4. Publish sanitized history only after the pending explicit one-time exception
+   to the prohibition on force-pushing main. The isolated cleaned history has
+   the same current source tree, removes historical private reports and known
+   identifiers, and preserves original history locally. Remote fetch succeeded;
+   origin/main is unchanged. Any additional source commits must be included in
+   the final verified publication plan. Ordinary pushing would retain private
+   historical material and remains blocked.
 
 </pending>

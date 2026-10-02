@@ -51,7 +51,7 @@ const entityContext=await services.entities.context(originals[4]!.reference,[bea
 const entityBinding=await services.guards.state();
 await services.entities.publishDiscoveries({source:originals[4]!.reference,source_object:'ui-fixture',space:'-10042',binding:entityBinding,
  evidence:[{reference:originals[4]!.reference,text:'Beacon is blocked while Alex checks the telescope.',space:'-10042'}],dependencies:[],observations:[],
- rules:[],rule_ids:[],projects:[{id:project.id,name:project.name},{id:beacon.id,name:beacon.name}],entities:entityContext,limitations:[]},
+ rules:[],rule_ids:[],rule_inputs:[],projects:[{id:project.id,name:project.name},{id:beacon.id,name:beacon.name}],entities:entityContext,limitations:[]},
  {entity_suggestions:[{kind:'person',name:'Alex',reason:'The mention is not bound to a platform identity.',evidence_ids:[originals[4]!.reference.id]}],
   entity_claims:[{subject_id:entityContext.mentioned_projects[0]!.id,predicate:'blocker',content:'Alex is checking the telescope, according to the participant.',
    attribution:'reported',speaker_entity_id:entityContext.speaker!.id,uncertainty:'supported',evidence_ids:[originals[4]!.reference.id]}]},'ui-entity-learning');
