@@ -59,6 +59,31 @@ export class SourceRepository {
     // Captured updates are bounded evidence, never a complete platform inventory.
     return {sources,complete:false as const};
   }
+  /** Discover observed current reactions without guessing the target's words or ID. */
+  async currentReactions(principal:Reader,count=5) {
+    limit(count,5,10);
+    const binding=principal.admin?null:await this.audience.assert(principal);
+    const rows=(await this.stores.control.query(`SELECT event_id FROM reaction_states
+      ORDER BY updated_at DESC,event_id LIMIT 200`)).rows;
+    const sources:{source:string;kind:'captured_reaction';target_sources:string[]}[]=[],references:SourceReference[]=[];
+    for(const row of rows) {
+      const reference=(await this.access.archive.captured(row.event_id)).reference;
+      if(binding&&!await this.access.canRead(principal,reference,binding))continue;
+      const context=await this.access.relationships.context(reference,binding&&principal.scope!==null?{
+        kind:'conversation',chat_id:principal.scope,topic_id:principal.space?.includes('/topic/')?principal.space.split('/topic/')[1]!:null}:{kind:'owner'},20);
+      const targets:SourceReference[]=[];
+      for(const relation of context.targets)if(relation.kind==='reaction_to')for(const target of relation.references) {
+        if(binding&&!await this.access.canRead(principal,target,binding))continue;
+        targets.push(target);
+      }
+      references.push(reference,...targets);
+      sources.push({source:'nocheh:event:'+reference.id,kind:'captured_reaction',target_sources:[...new Set(targets.map(target=>'nocheh:event:'+target.id))]});
+      if(sources.length===count)break;
+    }
+    if(binding){for(const reference of references)await this.permitted(principal,reference.id,binding);await this.audience.assert(principal);}
+    // Empty or bounded results never establish that a message has no reactions.
+    const result={sources,complete:false as const};await this.allowPrepared(principal,result);return result;
+  }
   async read(principal:Reader,id:string) {
     const binding=principal.admin?null:await this.audience.assert(principal),reference=await this.permitted(principal,id,binding);
     const row=(await this.stores.archive.query('SELECT * FROM events WHERE id=$1',[id])).rows[0];

@@ -32,6 +32,15 @@ test('archive reads link current captured reactions while preserving removal, gu
     const removed=await capture('removed',{update_id:3,message_reaction:{...base,old_reaction:[{type:'emoji',emoji:'✅'}],new_reaction:[]}});
     const latest=await s.sources.read(await actor(),target.id);
     assert.deepEqual(latest.current_reactions,{sources:['nocheh:event:'+removed.id],complete:false});
+    const discovered=await s.sources.currentReactions(await actor());
+    assert.deepEqual(discovered,{sources:[{source:'nocheh:event:'+removed.id,kind:'captured_reaction',target_sources:['nocheh:event:'+target.id]}],complete:false});
+    assert.deepEqual(await s.sources.search(await actor(),'reaction'),[],'ordinary text search must not invent searchable reaction text');
+    assert.deepEqual(await s.sources.currentReactions(await actor(18)),{sources:[],complete:false});
+    await assert.rejects(s.sources.currentReactions(await actor(),11),{code:'invalid_limit'});
+    const readable=s.access.canRead.bind(s.access);let checks=0;
+    s.access.canRead=async(principal,reference,binding)=>reference.id===removed.id&&++checks===2?false:readable(principal,reference,binding);
+    try{await assert.rejects(s.sources.currentReactions(await actor()),{code:'source_not_found'},'revalidate selected handles before returning them');}
+    finally{s.access.canRead=readable;}
     await assert.rejects(s.sources.read(await actor(),added.id),{code:'source_not_found'},'superseded state must not become a readable current source');
     const removal=await s.sources.read(await actor(),removed.id);
     assert.deepEqual((removal.event.payload as any).message_reaction.new_reaction,[]);
@@ -39,15 +48,21 @@ test('archive reads link current captured reactions while preserving removal, gu
     await assert.rejects(s.sources.read(await actor(18),removed.id),{code:'source_not_found'});
     const aggregate=await capture('aggregate',{update_id:4,message_reaction_count:{chat:message.chat,message_id:1,date:1700000011,reactions:[{type:{type:'emoji',emoji:'👍'},total_count:2}]}});
     assert.deepEqual(new Set((await s.sources.read(await actor(),target.id)).current_reactions.sources),new Set(['nocheh:event:'+removed.id,'nocheh:event:'+aggregate.id]));
+    assert.deepEqual(new Set((await s.sources.currentReactions(await actor())).sources.map(row=>row.source)),new Set(['nocheh:event:'+removed.id,'nocheh:event:'+aggregate.id]));
+    assert.equal((await s.sources.currentReactions(await actor(),1)).sources.length,1);
+    const stale=await actor();
     const guarded=await s.guards.read('events:'+removed.id,await s.guards.state());
     const changed=structuredClone(guarded.value) as any;changed.payload.message_reaction.old_reaction=[{type:'emoji',emoji:'👍'}];
     await s.guards.edit('events:'+removed.id,guarded.revision,changed,key+':guard-edit');
+    await assert.rejects(s.sources.currentReactions(stale),{code:'audience_context_changed'});
     assert.deepEqual((await s.sources.read(await actor(),removed.id)).event.payload,changed.payload,'reaction content must use the owner-edited guarded representation');
     await s.guards.setMode('off');
     assert.deepEqual(((await s.sources.read(await actor(),removed.id)).event.payload as any).message_reaction.old_reaction,[{type:'emoji',emoji:'✅'}]);
     await s.retirements.set({admin:true,scope:null},target.id,{retired:true,expected_revision:0,operation_id:key+':retire'});
     await assert.rejects(s.sources.read(await actor(),target.id),{code:'source_not_found'});
     await assert.rejects(s.sources.read(await actor(),removed.id),{code:'source_not_found'});
+    assert.deepEqual(await s.sources.currentReactions(await actor()),{sources:[],complete:false});
+    assert.ok((await s.sources.currentReactions({admin:true,scope:null},10)).sources.some(row=>row.source==='nocheh:event:'+removed.id),'owner discovery retains original evidence after retirement');
     assert.equal((await s.sources.read({admin:true,scope:null},target.id)).current_reactions.sources.length,2,'owner inspection retains original evidence after retirement');
   }finally{await s.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
 });

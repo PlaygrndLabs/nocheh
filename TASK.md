@@ -62,6 +62,15 @@ auth is absent; no duplicate login or refresh worker was introduced.
   storage/access/retirement checks and eight native archive/delivery checks pass.
   The operating CLI now links the saved older note to its removal; all seventeen
   services are healthy. This does not pass the live conversational recall gate.
+- Archive search can discover bounded current reaction sources without message
+  words or a target ID. Returned reaction and target handles retain topic,
+  generation, supersession, and retirement checks; evidence is read through the
+  guarded path and remains explicitly incomplete. Five storage/route checks and
+  nine native archive/delivery checks pass, including a packaged-image check.
+  [Decision](docs/adr/0084-scoped-reaction-discovery.md). The last live answer read
+  one unrelated source and stopped; the conversational recall gate stays failed.
+  The compiled operating lookup finds the saved removal and its older target
+  under the original topic boundary; the pinned native source is verified.
 - Automatic learned publications now wait while a current Telegram reply or
   leased managed reply is active. Saved reasoning and staged versions are reused
   after the wait; owner corrections and privacy revocations remain immediate.
@@ -120,7 +129,9 @@ auth is absent; no duplicate login or refresh worker was introduced.
    did not identify the removal. Its failures include a model failure, a proven
    guard-context change during background learned replacement, and a generic
    runtime failure. Preserve the saved event and use its CLI/native receipts;
-   do not request another copy or ask the owner to judge the answer.
+   do not request another copy or ask the owner to judge the answer. The scoped
+   discovery repair has focused automated evidence; reconcile its operating
+   source/image and current memory readiness before any further live check.
 2. Preserve the measured General timing boundaries and their limitations. The
    earlier 230-second native timeout is not explained by the short greeting or
    the later recall attempt; retain its failure evidence and the existing limit.

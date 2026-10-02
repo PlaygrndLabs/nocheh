@@ -252,7 +252,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(req.method==='GET') {
       if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.archive,principal));
-      if(path==='/v1/search')return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
+      if(path==='/v1/search') {
+        const mode=url.searchParams.get('mode')??'text';
+        if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);
+        if(mode!=='text')throw new HttpError(400,'invalid_search_mode');
+        return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
+      }
       if(path==='/v1/graph')return json(res,200,await s.sources.graph(principal,url.searchParams.get('scope')??'*',url.searchParams.get('after')??'',limit(url.searchParams.get('limit')),url.searchParams.get('focus')??''));
       const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
       if(event)return result(await s.sources.read(principal,event[1]!),true);

@@ -44,10 +44,15 @@ def request(path,body=None):
 def search_tool(args, **kwargs):
     from urllib.parse import urlencode
     try:
+        mode=args.get('mode','text')
+        count=min(10,max(1,int(args.get('limit',5))))
+        if mode=='current_reactions':
+            return json.dumps(request('/v1/search?'+urlencode({'mode':mode,'limit':count})),ensure_ascii=False)
+        if mode!='text':raise ValueError('invalid_search_mode')
         query=args.get('query')
-        if not isinstance(query,str) or not 0<len(query)<=2000:
+        if not isinstance(query,str) or not query.strip() or len(query)>2000:
             raise ValueError('invalid_query')
-        rows=request('/v1/search?'+urlencode({'q':query,'limit':min(10,max(1,int(args.get('limit',5))))}))
+        rows=request('/v1/search?'+urlencode({'q':query,'limit':count}))
         claims=json.loads(base64.urlsafe_b64decode((_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()).split('.')[1]+'==='))
         shared=request('/v1/memory/context?'+urlencode({'q':query})) if claims.get('space') and claims.get('scope') is not None else {'sources':[]}
         return json.dumps({'sources':rows+shared['sources'],'filter_status':shared.get('filter_status')},ensure_ascii=False)
@@ -97,8 +102,8 @@ def read_tool(args, **kwargs):
 
 def register(ctx):
     for name,description,properties,required,handler in (
-        ('nocheh_archive_search','Search current permitted archived text in your authorized scope. Every query word must match; try one or two distinctive words when a longer search misses. Read an older note to find its captured current reaction sources. Cite returned source references.',
-         {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],search_tool),
+        ('nocheh_archive_search','Find permitted archive evidence in your authorized scope. For reaction questions without a known note ID, use mode=current_reactions with no query, then read returned reaction and target source references. This bounded captured evidence is incomplete; empty results do not prove no reactions. For mode=text (default), query is required and every query word must match; try one or two distinctive words when a longer search misses. Cite returned source references.',
+         {'mode':{'type':'string','enum':['text','current_reactions']},'query':{'type':'string','description':'Required for text mode; omitted for current_reactions.'},'limit':{'type':'integer','minimum':1,'maximum':10}},[],search_tool),
         ('nocheh_archive_read','Read an archived source, its observed reaction data, and links to captured current reactions. Follow reaction links to inspect changes or removals; a reaction is not proof of task completion. Originals and generated artifacts have distinct provenance.',
          {'id':{'type':'string'}},['id'],read_tool),
         ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence.',
