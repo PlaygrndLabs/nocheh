@@ -30,8 +30,10 @@ export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,fam
     try{result=await operation(row.job_id,{owner:'inngest',epoch:row.epoch});}
     catch(error){result=executionFailure(error,row.attempts);}
     if((family==='memory_review'||family==='honcho')&&row.job_id.startsWith('source:')&&!(closedStates as readonly string[]).includes(result.state)) {
-      const newer=await pool.query('SELECT 1 FROM workflow_registry WHERE family=$1 AND job_id=$2 AND version=$3 AND generation>$4 LIMIT 1',
-        [family,row.job_id,row.version,row.generation]);
+      const newer=await pool.query(`SELECT 1 FROM workflow_registry WHERE family=$1 AND job_id=$2 AND version=$3 AND generation>$4
+        AND NOT EXISTS (SELECT 1 FROM workflow_receipts receipt WHERE receipt.workflow_id=$5
+          AND receipt.state IN ('started','done','ambiguous')) LIMIT 1`,
+        [family,row.job_id,row.version,row.generation,id]);
       if(newer.rowCount)result={...result,state:'skipped',next_attempt:Date.now(),waiting_reason:'superseded'};
     }
     safeMetadata(result);

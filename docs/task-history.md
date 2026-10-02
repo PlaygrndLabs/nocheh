@@ -768,3 +768,28 @@ passed, two environment-specific cases were skipped, and two exposed existing
 source/fixture failures that require a separate repair before activation.
 
 </entry>
+
+<entry date="2026-10-02" task="Preserve protected receipts during supersession">
+
+Regression checks found that post-operation supersession could close an older
+memory workflow despite a started, completed, or ambiguous effect receipt. The
+engine now applies the same receipt exclusion before and after the operation.
+Added ambiguous-Honcho waiting coverage, corrected the fixture to request the
+current source generation, and made pagination create its own second record.
+Thirty workflow checks passed on a clean PostgreSQL fixture; bootstrap and
+pinned-engine UI integration cases were explicitly skipped. The pinned build
+passed. This is candidate evidence; activation and live memory observation remain
+separate gates.
+
+</entry>
+
+<entry date="2026-10-02" task="Verify populated backup and inactive restore">
+
+The bounded workflow fingerprints allowed a complete populated backup: 1,461
+files and 88 owned-store table fingerprints, plus workflow and Honcho snapshots.
+A separate inactive restore verified the saved data and authorities remained
+inactive. The earlier temporary-disk failure is retained as a failed attempt;
+its incomplete dumps are not recovery evidence. Detailed manifests and receipts
+remain in ignored local state.
+
+</entry>

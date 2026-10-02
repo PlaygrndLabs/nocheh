@@ -73,10 +73,11 @@ projects were not deleted.
 - The operating source checkout's three local edits exactly match integrated
   main. A private patch preserves them; the original checkout remains intact.
   All 17 services were healthy at initial inspection, then exited with code 255.
-  Only the existing database and workflow-cache services were restarted for a
-  quiesced backup. The backup failed while fingerprinting workflow storage after
-  PostgreSQL reported temporary disk exhaustion; no complete snapshot or release
-  pass is claimed. Partial dumps remain private and are not recovery evidence.
+  The first quiesced backup failed while fingerprinting workflow storage after
+  PostgreSQL reported temporary disk exhaustion. The repaired backup completed
+  with 1,461 files and 88 owned-store table fingerprints, plus workflow and Honcho
+  snapshots. Inactive restore passed with bot, provider login, and executors inactive. The operating installation is
+  stopped for candidate activation; failed partial dumps are retained privately.
 - Remote fetch succeeded. Private historical report paths are already reachable
   from origin/main, so ordinary fast-forward publication cannot remove them.
   History cleanup is being prepared separately; no remote rewrite has occurred.
@@ -85,8 +86,16 @@ projects were not deleted.
   now pins `@grpc/grpc-js` 1.14.5 and `brace-expansion` 2.1.7 within the existing
   parent constraints. The pinned build passes and npm reports zero known
   vulnerabilities. Workflow regression checks exposed a pre-existing protected
-  receipt supersession bug and a stale generation fixture; their repair is
-  tracked separately before activation.
+  receipt supersession bug; the candidate repair preserves started, completed,
+  and ambiguous receipts after an operation returns. Current-generation and
+  pagination fixtures are self-contained. Thirty workflow checks pass on a
+  clean PostgreSQL fixture; the separate bootstrap and pinned-engine UI cases
+  were not enabled and remain explicit skips.
+
+- The native candidate uses the verified pinned dependency image with current
+  Python source. It passes 380 networkless image checks plus all three host-only
+  checks, including real container isolation. No candidate activation or new
+  owner turn is claimed by those 383 passes.
 
 </verification>
 
@@ -104,8 +113,9 @@ projects were not deleted.
   [CLI guide](docs/admin-cli.md) defines the boundaries and overlap limits.
 - Workflow backup verification now uses sorted fixed-size row hashes with an
   explicit algorithm marker and backward-compatible restoration. Two real
-  PostgreSQL checks and the focused recovery suite passed. Complete a new
-  populated backup and inactive restore before release; the earlier failure is
+  PostgreSQL checks and sixteen recovery checks passed. The new populated backup
+  and its inactive restore completed; preserved files, stores, workflow hashes,
+  Honcho, and inactive authorities passed verification. The earlier failure is
   retained as a failure. [Decision](docs/adr/0081-bounded-workflow-backup-fingerprints.md).
 - Finish release-candidate evidence and runtime-pin reconciliation against
   [release acceptance](docs/release-acceptance.md), using the
