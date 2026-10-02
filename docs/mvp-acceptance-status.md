@@ -30,7 +30,7 @@ reliability or release approval.
 | Honcho live acceptance | Passed | Subscription reasoning, guarded embedding, ingestion, retrieval, restart persistence, provider failure/recovery; closed synthetic workspace; attachment and owner recall observed. | Honcho/provider routing, guarding, ingestion, budget enforcement, or memory state changes. |
 | Non-owner reactions and named-topic isolation | Passed | Add/change/remove on an older note, correct actor/target/current state, no old-message reply; second named-topic answer/context excluded reaction evidence. | Reaction normalization/state, audience resolution, retrieval, or topic routing changes. |
 | General-topic recovery | Passed focused October 2 greeting | One execution and one linked reply; owner confirmed one sensible answer. About 175 seconds total; measured provider transport wait about 3.2 seconds. Earlier scope preservation and recovered timeout remain dated evidence. | Investigate local waiting and retain the earlier timeout; do not repeat this greeting solely for a new commit. |
-| Same-topic reaction recall | Failed October 2 answer | Correct topic and recorded removal verified. One reply after two attempts and about 384 seconds; it could not identify the removed reaction but avoided claiming completion. First attempt failed after about 182 seconds. Earlier September limited-memory outcome remains retained. | Diagnose existing event, memory availability and tool retrieval before requesting further traffic. Owner delegated answer inspection to the CLI. |
+| Same-topic reaction recall | Failed October 2 answer | Correct topic and captured removal verified. The first answer arrived after two attempts and about 384 seconds. The focused repaired-path rerun arrived after four attempts and about twenty minutes. Neither identified the removal; completion caution remained present. Earlier outcomes and all attempts remain retained. | Diagnose existing event, memory availability and tool retrieval before requesting further traffic. Owner delegated answer inspection to the CLI. |
 
 </checks>
 
@@ -133,6 +133,24 @@ The follow-up receipt repair preserves the allowlisted guard-change reason throu
 native async recovery and owned dispatch storage, without retaining answer text.
 Nine native async/delivery checks and two storage-dispatch checks pass. This does
 not reinterpret the older generic failure or satisfy the conversational recall gate.
+
+The affected replacement topic generation subsequently reached readiness and
+produced a usable matching snapshot. The focused repeat delivered one linked
+reply on attempt four after about twenty minutes. CLI assessment found no
+recognition of the removed reaction; completion caution remained present. The
+second attempt was revoked by a background learned replacement from another
+source. Both failed conversational outcomes and all attempt receipts are retained.
+No further owner traffic is requested.
+
+The General workflow completed preparation about 51 seconds after capture and
+started native execution about 82 seconds later. Historical receipts do not
+isolate preparation work from orchestration waits. The workflow run timestamp
+is updated on later steps and cannot establish first admission.
+
+Owner workflow-list inspection failed during the rerun. A populated synthetic
+regression reproduced the expensive receipt join, exceeding its five-second
+database deadline. Joining by indexed receipt identity passes that check and
+four adjacent workflow checks without changing source-event filtering.
 
 </impact_review>
 

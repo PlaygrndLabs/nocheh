@@ -44,7 +44,9 @@ LEFT JOIN controlled_actions t ON w.family='tools' AND t.id=w.job_id
 LEFT JOIN managed_runs m ON (w.family='browser' AND m.channel='browser' AND m.event_id=w.job_id)
  OR (w.family='schedules' AND m.channel='scheduler' AND w.job_id='run:'||m.event_id)
 LEFT JOIN native_review_jobs j ON w.family='memory_review' AND w.job_id='native:'||j.id
-LEFT JOIN memory_ingestion_receipts h ON w.family='honcho' AND w.job_id IN ('receipt:'||h.id,'reconcile:'||h.id)
+LEFT JOIN memory_ingestion_receipts h ON w.family='honcho' AND h.id=CASE
+ WHEN w.job_id LIKE 'receipt:%' THEN substring(w.job_id FROM 9)
+ WHEN w.job_id LIKE 'reconcile:%' THEN substring(w.job_id FROM 11) END
 LEFT JOIN reprocess_jobs r ON w.family='preparation' AND w.job_id='reprocess:'||r.id;
 CREATE TABLE IF NOT EXISTS workflow_controls (
  workflow_id text NOT NULL REFERENCES workflow_registry(id),revision integer NOT NULL,action text NOT NULL CHECK(action IN ('retry','cancel')),
