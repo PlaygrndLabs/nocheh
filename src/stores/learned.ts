@@ -125,6 +125,13 @@ export class LearnedMemoryRepository {
       if(job.state==='publishing'||job.state==='done'){await db.query('COMMIT');return;}
       if(canonical({epoch:Number(state.epoch),mode:state.mode,generation:state.generation})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
       const changed=versions.some(v=>v.expected_revision!==null);
+      // Automatic reinterpretation can wait until an admitted reply finishes.
+      // Owner corrections and source/privacy revocations use their immediate paths.
+      if(versions.length&&(await db.query(`SELECT 1 FROM dispatches WHERE state='running'
+        AND binding->>'generation'=$1 AND (binding->>'epoch')::bigint=$2
+        UNION ALL SELECT 1 FROM managed_runs WHERE state='running' AND lease_until>now()
+        AND binding->>'generation'=$1 AND (binding->>'epoch')::bigint=$2 LIMIT 1`,[binding.generation,binding.epoch])).rowCount)
+        throw new HttpError(409,'learning_publication_pending');
       const epoch=changed?Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch):Number(state.epoch);
       for(const version of versions) {
         await db.query(`INSERT INTO guard_publications(id,operation_kind,source_id,revision,expected_revision,epoch) VALUES($1,'memory',$2,$3,$4,$5)`,

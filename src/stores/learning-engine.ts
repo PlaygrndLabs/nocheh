@@ -103,7 +103,8 @@ export class ContextualLearningRepository {
         await client.query("UPDATE interpretation_jobs SET state='done',error_code=NULL WHERE id=$1",[id]);
         return ids;
       } catch(error) {
-        await client.query("UPDATE interpretation_jobs SET state=CASE WHEN state='publishing' THEN state ELSE 'failed' END,error_code=$2 WHERE id=$1",[id,error instanceof HttpError?error.code:'learning_unavailable']);throw error;
+        const code=error instanceof HttpError?error.code:'learning_unavailable';
+        await client.query("UPDATE interpretation_jobs SET state=CASE WHEN state='publishing' THEN state WHEN $2='learning_publication_pending' THEN 'pending' ELSE 'failed' END,error_code=$2 WHERE id=$1",[id,code]);throw error;
       }
     } finally {await releaseOperation(client,async()=>{if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended($1,803355))',[id]);if(fenced)await leaveFamily(client,'memory_review');});}
   }

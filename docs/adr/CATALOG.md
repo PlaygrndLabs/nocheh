@@ -96,3 +96,4 @@ records current implementation and activation.
 | [0080](0080-reply-admission-and-honcho-derivation.md) | Reserve reply admission and use two Honcho deriver workers | Extends 0041 and 0076 without changing memory readiness or provider limits |
 | [0081](0081-bounded-workflow-backup-fingerprints.md) | Bound workflow verification storage with versioned row hashes | Extends 0023 and 0041; preserves existing snapshot compatibility |
 | [0082](0082-evidence-based-learning-deduplication.md) | Deduplicate learning with original convention evidence and owner revisions | Extends 0053 and 0056; generated rule wording is not new evidence |
+| [0083](0083-defer-automatic-memory-publication-during-replies.md) | Defer automatic learned publication while an admitted reply is active | Extends 0080 and 0082; owner and privacy revocations remain immediate |

@@ -152,6 +152,12 @@ regression reproduced the expensive receipt join, exceeding its five-second
 database deadline. Joining by indexed receipt identity passes that check and
 four adjacent workflow checks without changing source-event filtering.
 
+Automatic learned publication now waits for admitted replies under the same
+guard binding, retaining saved reasoning for retry. Five focused learning and
+workflow checks passed, including immediate owner correction, expired managed
+leases, and revoked Telegram bindings. Recall remains failed; no new live pass
+is claimed by this scheduling repair.
+
 </impact_review>
 
 <remaining>
