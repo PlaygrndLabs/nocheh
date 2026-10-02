@@ -176,6 +176,15 @@ This is an observed inspection duration, not a controlled latency benchmark.
 Native attempt receipts and event-bound provider measurements remain distinct;
 background work can share an event reference, and overlapping phases are not summed.
 
+Background admission now preserves a bounded retry order. Three focused checks
+cover overtaking, foreground capacity, exception release, and abandoned waiters;
+the old code fails the ordering regression. Durable Inngest identity, provider
+limits, and source/guard policy are unchanged. This is a scheduling repair for
+observed ingestion starvation, not evidence of a ready memory snapshot or a
+successful conversational answer. The compiled operating repair is verified;
+a later health check found Inngest stopped while the other sixteen services were
+healthy. Recovery and current memory readiness remain pending.
+
 </impact_review>
 
 <remaining>

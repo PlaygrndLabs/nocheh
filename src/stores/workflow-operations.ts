@@ -14,12 +14,22 @@ const pending=new Set(['guard_transition_pending','guard_preparation_pending','g
 export function boundStorageOperations(operations:Partial<Record<WorkflowFamily,WorkflowOperation>>,maximum=2) {
   if(!Number.isSafeInteger(maximum)||maximum<1||maximum>2)throw Error('invalid_storage_workflow_concurrency');
   let active=0;
+  const backgroundWaiters=new Map<string,number>();
   const foreground=new Set<WorkflowFamily>(['preparation','telegram','browser','schedules','actions']);
   return Object.fromEntries(Object.entries(operations).map(([family,operation])=>[family,async(...args:Parameters<WorkflowOperation>)=>{
     // Initial replies must retain one admission slot while memory derivation
     // and reviews run in the background. No pool connection is held while waiting.
-    const limit=foreground.has(family as WorkflowFamily)?maximum:Math.max(1,maximum-1);
-    if(active>=limit)return waiting('admission','receipt_pending',foreground.has(family as WorkflowFamily)?2000:10000);
+    const immediate=foreground.has(family as WorkflowFamily),limit=immediate?maximum:Math.max(1,maximum-1);
+    if(!immediate) {
+      // Inngest retains the wait; this bounded hint orders retries without
+      // holding a connection or creating a second execution authority.
+      const now=Date.now(),key=JSON.stringify([family,args[0],args[1].owner,args[1].epoch]);
+      for(const [id,seen] of backgroundWaiters)if(now-seen>=120000)backgroundWaiters.delete(id);
+      if(!backgroundWaiters.has(key)&&backgroundWaiters.size>=1024)return waiting('admission','receipt_pending',10000);
+      backgroundWaiters.set(key,now);
+      if(active>=limit||backgroundWaiters.keys().next().value!==key)return waiting('admission','receipt_pending',10000);
+      backgroundWaiters.delete(key);
+    } else if(active>=limit)return waiting('admission','receipt_pending',2000);
     active++;try{return await operation(...args);}finally{active--;}
   }])) as Partial<Record<WorkflowFamily,WorkflowOperation>>;
 }
