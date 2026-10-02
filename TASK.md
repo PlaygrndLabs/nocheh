@@ -81,6 +81,13 @@ projects were not deleted.
   from origin/main, so ordinary fast-forward publication cannot remove them.
   History cleanup is being prepared separately; no remote rewrite has occurred.
 
+- Release-build audit found two vulnerable transitive dependencies. The lockfile
+  now pins `@grpc/grpc-js` 1.14.5 and `brace-expansion` 2.1.7 within the existing
+  parent constraints. The pinned build passes and npm reports zero known
+  vulnerabilities. Workflow regression checks exposed a pre-existing protected
+  receipt supersession bug and a stale generation fixture; their repair is
+  tracked separately before activation.
+
 </verification>
 
 <pending>
