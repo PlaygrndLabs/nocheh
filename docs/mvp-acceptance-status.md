@@ -183,7 +183,10 @@ limits, and source/guard policy are unchanged. This is a scheduling repair for
 observed ingestion starvation, not evidence of a ready memory snapshot or a
 successful conversational answer. The compiled operating repair is verified;
 a later health check found Inngest stopped while the other sixteen services were
-healthy. Recovery and current memory readiness remain pending.
+healthy. The existing scheduler was recovered with its saved state, all nine
+worker families reconnected, and background completions resumed. The previously
+starved receipt is done with one attempt. The topic still has four pending
+receipts and no ready snapshot; the exit cause remains unexplained.
 
 </impact_review>
 
