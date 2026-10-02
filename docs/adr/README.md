@@ -5,10 +5,12 @@ Honcho service default: [0076](0076-honcho-enabled-local-default.md).
 Exhausted-pilot acceptance budget: [0077](0077-exhausted-pilot-honcho-acceptance-budget.md).
 Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).
 Separated Honcho budgets and settlement: [0079](0079-separated-honcho-budgets-and-settlement.md).
-Fair background admission: [0085](0085-fair-background-workflow-admission.md).
+Background admission handoff: [0087](0087-live-background-admission-handoff.md),
+superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md).
 Reply admission and Honcho derivation: [0080](0080-reply-admission-and-honcho-derivation.md).
 Contextual learning deduplication: [0082](0082-evidence-based-learning-deduplication.md).
-Scoped reaction discovery: [0084](0084-scoped-reaction-discovery.md).
+Scoped reaction discovery: [0084](0084-scoped-reaction-discovery.md), extended with
+guarded evidence in [0086](0086-reaction-discovery-evidence.md).
 Automatic publication during replies: [0083](0083-defer-automatic-memory-publication-during-replies.md).
 Bounded workflow backup verification: [0081](0081-bounded-workflow-backup-fingerprints.md).
 

@@ -4,6 +4,7 @@ import {matchesArchiveFilters,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
+import {reactionObservation} from '../reaction-observation.js';
 import {limit} from '../retrieval.js';
 import {type Envelope} from '../archive.js';
 import {SourceAccessRepository} from './access.js';
@@ -65,7 +66,8 @@ export class SourceRepository {
     const binding=principal.admin?null:await this.audience.assert(principal);
     const rows=(await this.stores.control.query(`SELECT event_id FROM reaction_states
       ORDER BY updated_at DESC,event_id LIMIT 200`)).rows;
-    const sources:{source:string;kind:'captured_reaction';target_sources:string[]}[]=[],references:SourceReference[]=[];
+    const sources:{source:string;kind:'captured_reaction';target_sources:string[];reaction_observation:Record<string,unknown>|null;
+      targets:{source:string;text:string;truncated:boolean}[]}[]=[],references:SourceReference[]=[];
     for(const row of rows) {
       const reference=(await this.access.archive.captured(row.event_id)).reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
@@ -76,8 +78,16 @@ export class SourceRepository {
         if(binding&&!await this.access.canRead(principal,target,binding))continue;
         targets.push(target);
       }
+      // Return the observed change through the guarded read path so finding a
+      // handle is sufficient to inspect it. Control-store state is never content.
+      const reaction=await this.read(principal,reference.id),previews=[];
+      for(const target of targets.slice(0,3)) {
+        const record=await this.read(principal,target.id),text=String(record.event.text??'');
+        previews.push({source:record.source,text:text.slice(0,2000),truncated:text.length>2000});
+      }
       references.push(reference,...targets);
-      sources.push({source:'nocheh:event:'+reference.id,kind:'captured_reaction',target_sources:[...new Set(targets.map(target=>'nocheh:event:'+target.id))]});
+      sources.push({source:'nocheh:event:'+reference.id,kind:'captured_reaction',target_sources:[...new Set(targets.map(target=>'nocheh:event:'+target.id))],
+        reaction_observation:reactionObservation(reaction.event.payload),targets:previews});
       if(sources.length===count)break;
     }
     if(binding){for(const reference of references)await this.permitted(principal,reference.id,binding);await this.audience.assert(principal);}

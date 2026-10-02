@@ -33,7 +33,9 @@ test('archive reads link current captured reactions while preserving removal, gu
     const latest=await s.sources.read(await actor(),target.id);
     assert.deepEqual(latest.current_reactions,{sources:['nocheh:event:'+removed.id],complete:false});
     const discovered=await s.sources.currentReactions(await actor());
-    assert.deepEqual(discovered,{sources:[{source:'nocheh:event:'+removed.id,kind:'captured_reaction',target_sources:['nocheh:event:'+target.id]}],complete:false});
+    assert.deepEqual(discovered,{sources:[{source:'nocheh:event:'+removed.id,kind:'captured_reaction',target_sources:['nocheh:event:'+target.id],
+      reaction_observation:{mode:'individual',date:base.date,user:base.user,old_reaction:[{type:'emoji',emoji:'✅'}],new_reaction:[]},
+      targets:[{source:'nocheh:event:'+target.id,text:message.text,truncated:false}]}],complete:false});
     assert.deepEqual(await s.sources.search(await actor(),'reaction'),[],'ordinary text search must not invent searchable reaction text');
     assert.deepEqual(await s.sources.currentReactions(await actor(18)),{sources:[],complete:false});
     await assert.rejects(s.sources.currentReactions(await actor(),11),{code:'invalid_limit'});
@@ -49,6 +51,8 @@ test('archive reads link current captured reactions while preserving removal, gu
     const aggregate=await capture('aggregate',{update_id:4,message_reaction_count:{chat:message.chat,message_id:1,date:1700000011,reactions:[{type:{type:'emoji',emoji:'👍'},total_count:2}]}});
     assert.deepEqual(new Set((await s.sources.read(await actor(),target.id)).current_reactions.sources),new Set(['nocheh:event:'+removed.id,'nocheh:event:'+aggregate.id]));
     assert.deepEqual(new Set((await s.sources.currentReactions(await actor())).sources.map(row=>row.source)),new Set(['nocheh:event:'+removed.id,'nocheh:event:'+aggregate.id]));
+    const aggregateResult=(await s.sources.currentReactions(await actor())).sources.find(row=>row.source==='nocheh:event:'+aggregate.id)!;
+    assert.deepEqual(aggregateResult.reaction_observation,{mode:'aggregate',date:1700000011,reactions:[{type:{type:'emoji',emoji:'👍'},total_count:2}]});
     assert.equal((await s.sources.currentReactions(await actor(),1)).sources.length,1);
     const stale=await actor();
     const guarded=await s.guards.read('events:'+removed.id,await s.guards.state());
@@ -56,6 +60,11 @@ test('archive reads link current captured reactions while preserving removal, gu
     await s.guards.edit('events:'+removed.id,guarded.revision,changed,key+':guard-edit');
     await assert.rejects(s.sources.currentReactions(stale),{code:'audience_context_changed'});
     assert.deepEqual((await s.sources.read(await actor(),removed.id)).event.payload,changed.payload,'reaction content must use the owner-edited guarded representation');
+    assert.deepEqual((await s.sources.currentReactions(await actor())).sources.find(row=>row.source==='nocheh:event:'+removed.id)!.reaction_observation?.old_reaction,
+      [{type:'emoji',emoji:'👍'}],'discovery returns guarded observations, never raw current-state values');
+    const guardedTarget=await s.guards.read('events:'+target.id,await s.guards.state());
+    await s.guards.edit('events:'+target.id,guardedTarget.revision,{...guardedTarget.value as object,text:'Owner-edited target.'},key+':target-edit');
+    assert.equal((await s.sources.currentReactions(await actor())).sources[0]!.targets[0]!.text,'Owner-edited target.');
     await s.guards.setMode('off');
     assert.deepEqual(((await s.sources.read(await actor(),removed.id)).event.payload as any).message_reaction.old_reaction,[{type:'emoji',emoji:'✅'}]);
     await s.retirements.set({admin:true,scope:null},target.id,{retired:true,expected_revision:0,operation_id:key+':retire'});

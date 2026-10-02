@@ -30,7 +30,17 @@ The affected replacement generation has since reached readiness and produced a
 usable matching snapshot, but another background interpretation later replaced
 existing learned versions and revoked that generation. The focused conversational
 recheck delivered one reply on attempt four after about twenty minutes; it did
-not identify the removal. Reply assessment was performed through the CLI.
+not identify the removal. A later discovery-path check also failed after about
+six minutes: it found a reaction handle but did not read its observation. Reply
+assessment was performed through the CLI. Current inspection finds all four
+generations building and twenty current ingestion receipts without a first
+attempt. Older pending receipts are separate historical state.
+
+The release-review candidate includes guarded reaction observations and bounded
+target excerpts in discovery itself. Its focused storage checks pass; operating
+activation and conversational recall remain pending. Background admission now
+has a verified bounded live-callback handoff candidate; its operating effect
+still needs observation.
 
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
@@ -49,6 +59,12 @@ this UI verification does not establish live recall or release readiness.
 </current>
 
 <verification>
+
+- Guarded reaction evidence now accompanies discovery with bounded target
+  excerpts. Five storage/route/retirement checks and six networkless native
+  archive checks pass; TypeScript compilation and the AST-only graph update
+  pass. [Decision](docs/adr/0086-reaction-discovery-evidence.md). These checks
+  establish candidate behavior, not operating activation or conversational recall.
 
 - The October 2 General check has one captured message, one linked reply, and one
   execution attempt. The owner confirmed one sensible reply. Elapsed time was
@@ -87,17 +103,13 @@ this UI verification does not establish live recall or release readiness.
   after the wait; owner corrections and privacy revocations remain immediate.
   Five focused learning/workflow checks pass, including recovery and owner edits.
   [Decision](docs/adr/0083-defer-automatic-memory-publication-during-replies.md). This does not pass recall.
-- Background workflow retries retain a bounded waiting order so newly retried
-  work cannot repeatedly overtake an older waiter. Foreground capacity and the
-  concurrency cap are unchanged. Three focused admission checks pass, including
-  failure release and abandoned-waiter expiry; the old code fails the ordering
-  regression. [Decision](docs/adr/0085-fair-background-workflow-admission.md).
-  This addresses an observed receipt waiting over thirty-five minutes without
-  its first ingestion attempt. The operating compiled repair is verified.
-  The previously starved receipt is now done with one ingestion attempt.
-  Inngest later exited and was recovered without replacing its container or
-  state; all workers reconnected. The affected topic still has four pending
-  receipts and no ready snapshot, so memory readiness remains pending.
+- Background admission now hands a free slot directly to one live callback
+  waiting for at most one second. Sleeping retries cannot reserve idle capacity.
+  Five workflow checks pass, including foreground capacity, bounded overflow,
+  timeout without effects, exception release, supersession and durable receipts.
+  [Decision](docs/adr/0087-live-background-admission-handoff.md) supersedes the
+  earlier retry-order hint. Operating activation and memory readiness remain
+  pending. The recovered scheduler's earlier unexplained exit is still retained.
 - Owner workflow inspection now joins memory receipts by indexed identity. The
   old event-filtered query exceeded a five-second database deadline on a
   synthetic backlog; the repair and four adjacent workflow checks pass. The
@@ -158,6 +170,9 @@ this UI verification does not establish live recall or release readiness.
    do not request another copy or ask the owner to judge the answer. The scoped
    discovery repair has focused automated evidence; reconcile its operating
    source/image and current memory readiness before any further live check.
+   The later discovery-path answer found one handle without reading the reaction;
+   guarded observations and target excerpts now have focused candidate coverage.
+   Activate the verified candidate before judging the new path.
 2. Preserve the measured General timing boundaries and their limitations. The
    earlier 230-second native timeout is not explained by the short greeting or
    the later recall attempt; retain its failure evidence and the existing limit.
