@@ -77,6 +77,21 @@ Development health does not replace live release acceptance.
 See Docker's [startup ordering](https://docs.docker.com/compose/how-tos/startup-order/)
 documentation.
 
+<activation_verification>
+
+Source watching compiles application code; it does not apply database schema or
+view definitions. Activate a tested database change separately under the owned
+installation's database owner role, preserve its previous definition in ignored
+local evidence, and verify the actual catalog definition and affected read path.
+Compiled source and a healthy service alone do not establish schema activation.
+
+Isolated native turns load code from the image selected when their launcher
+starts. After changing a helper used inside those turns, verify the exact image
+contains the tested helper and that the launcher has loaded that image. Mounted
+parent source alone does not establish the child runtime's revision.
+
+</activation_verification>
+
 ## Configuration and credentials
 
 Run `./bin/nocheh init`, edit the root `.env`, then run `./bin/nocheh up`.

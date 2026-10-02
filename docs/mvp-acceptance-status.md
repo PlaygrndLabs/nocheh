@@ -167,6 +167,15 @@ dates, supported by the focused privacy regressions. The last live answer read
 one unrelated source and stopped; this retrieval repair does not turn that answer
 into a pass or establish conversational recall on the new candidate.
 
+The workflow-list repair initially reached compiled source without replacing
+its operating SQL view. A later catalog inspection verified the old disjunctive
+receipt join; its timeouts remain failures. The already-tested view was applied
+in a bounded transaction under the database owner role and its actual definition
+was verified. Full CLI timing inspection then succeeded in about 2.2 seconds.
+This is an observed inspection duration, not a controlled latency benchmark.
+Native attempt receipts and event-bound provider measurements remain distinct;
+background work can share an event reference, and overlapping phases are not summed.
+
 </impact_review>
 
 <remaining>

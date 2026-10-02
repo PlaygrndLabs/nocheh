@@ -80,6 +80,10 @@ auth is absent; no duplicate login or refresh worker was introduced.
   old event-filtered query exceeded a five-second database deadline on a
   synthetic backlog; the repair and four adjacent workflow checks pass. The
   change preserves receipt/reconciliation links and source-event filtering.
+  A later catalog check found that the operating database still used the old
+  view despite compiled source. The exact tested view is now activated and
+  catalog-verified; full CLI timing inspection succeeds in about 2.2 seconds.
+  The earlier source-only verification did not establish database activation.
 - The prior native candidate passed 380 networkless image checks and three host checks,
   including real container isolation. Twenty-one subscription compatibility
   checks passed. Thirty workflow regression checks passed; separate bootstrap
