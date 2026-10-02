@@ -25,6 +25,33 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(network.call_args.kwargs['timeout'],15)
         finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)
 
+    def test_archive_read_preserves_reaction_removal_and_bounded_current_source_links(self):
+        source='a'*64
+        record={'source':'nocheh:event:'+source,'event':{'scope':'-1','origin':'live','kind':'telegram_update','text':'',
+            'payload':{'message_reaction':{'date':1,'user':{'id':7},'old_reaction':[{'type':'emoji','emoji':'✅'}],'new_reaction':[],
+                'chat':{'title':'omitted metadata'},'unrelated':'not evidence'}}},'artifacts':[],'derived':[],
+            'current_reactions':{'sources':['nocheh:event:'+'b'*64],'complete':False}}
+        with patch.object(archive_tools,'request',return_value=record):
+            result=json.loads(archive_tools.read_tool({'id':source}))
+        self.assertEqual(result['reaction_observation']['mode'],'individual')
+        self.assertEqual(result['reaction_observation']['new_reaction'],[])
+        self.assertEqual(result['reaction_observation']['old_reaction'],[{'type':'emoji','emoji':'✅'}])
+        self.assertEqual(result['current_reactions'],record['current_reactions'])
+        self.assertNotIn('omitted metadata',json.dumps(result))
+        self.assertNotIn('not evidence',json.dumps(result))
+        record['event']['payload']={'message_reaction_count':{'date':2,'reactions':[{'type':{'type':'emoji','emoji':'👍'},'total_count':2}]}}
+        with patch.object(archive_tools,'request',return_value=record):
+            aggregate=json.loads(archive_tools.read_tool({'id':source}))['reaction_observation']
+        self.assertEqual(aggregate['mode'],'aggregate')
+        self.assertEqual(aggregate['reactions'][0]['total_count'],2)
+        self.assertNotIn('user',aggregate)
+        record['event']['payload']['message_reaction_count']['reactions']=['x'*7000]
+        with patch.object(archive_tools,'request',return_value=record):
+            bounded=json.loads(archive_tools.read_tool({'id':source}))['reaction_observation']
+        self.assertEqual(bounded,{'mode':'aggregate','unavailable':'observation_size_limit'})
+        with patch.object(archive_tools,'request',side_effect=ValueError('source_not_found')):
+            self.assertEqual(json.loads(archive_tools.read_tool({'id':source})),{'error':'archive_source_unavailable'})
+
     def test_telegram_entities_and_supplied_media_roundtrip_without_rewriting(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'voice.ogg').write_bytes(b'OggS\x00\xff')

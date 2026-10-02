@@ -41,7 +41,12 @@ auth is absent; no duplicate login or refresh worker was introduced.
   2.2 seconds of broker preparation and 3.2 seconds of provider transport waits.
   These phases overlap other native work; they do not establish a pure model
   compute time. The earlier timeout and recovered reply remain historical evidence.
-- The native candidate passed 380 networkless image checks and three host checks,
+- Archive reads now link a note to at most twenty currently captured reaction
+  sources after access checks. The native tool retains guarded reaction changes,
+  removals, and anonymous counts, and explains the all-word search behavior. Four
+  storage/access/retirement checks and eight native archive/delivery checks pass.
+  This repairs a deterministic tool gap; it does not pass the live recall gate.
+- The prior native candidate passed 380 networkless image checks and three host checks,
   including real container isolation. Twenty-one subscription compatibility
   checks passed. Thirty workflow regression checks passed; separate bootstrap
   and pinned-engine UI fixture cases remain explicit skips.
@@ -82,7 +87,9 @@ auth is absent; no duplicate login or refresh worker was introduced.
    correctly avoided a completion claim but could not identify the removed
    reaction. Topic routing and the saved removal match; the native tools returned
    no matching long-term memory and archive search found only the new question.
-   Attempt one failed after about 182 seconds without native phase timings.
+   A background learned-rule replacement advanced the guard epoch during attempt
+   one; the retry used a replacement generation with no ready context. Attempt
+   one failed after about 182 seconds without native phase timings.
    Preserve both outcomes, inspect memory reconciliation, and use focused
    automated checks before requesting any additional owner traffic. The owner
    delegated reply assessment to the CLI.

@@ -853,3 +853,22 @@ and the removal is retained. First execution failed after about 182 seconds; its
 phase timings were unavailable. Retrieval and runtime diagnosis remain open.
 
 </entry>
+
+<entry date="2026-10-02" task="Expose authorized reaction evidence to archive tools">
+
+CLI inspection confirmed the older note and its removal were readable in the
+correct topic. The bot searched multi-word combinations that matched only its
+new question; reaction sources themselves have no message text, and the native
+read tool omitted their observations. Archive reads now expose bounded links to
+current captured reactions, and the native tool retains their guarded individual
+changes or anonymous counts. Search help explains that every query word must
+match. Four focused storage/access/retirement checks and eight native
+archive/delivery checks passed. Initial fixture setup failures are retained in
+ignored evidence; the passing storage run used a clean synthetic database.
+
+A separate diagnostic found an automatic learned-rule replacement advancing the
+guard epoch during the first live attempt. The retry used a replacement generation
+with no ready context. The generic first-attempt error and missing phase timings
+remain limitations; neither this diagnosis nor the tool fix passes live recall.
+
+</entry>
