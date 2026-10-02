@@ -95,9 +95,11 @@ projects were not deleted.
   it with the reconciled runtime, collect affected live evidence, and assess
   local waiting separately from provider transport waits. The
   [CLI guide](docs/admin-cli.md) defines the boundaries and overlap limits.
-- Repair the workflow backup fingerprint sort, verify backward-compatible restore,
-  and complete a new populated backup before runtime activation. Preserve data;
-  do not remove workflow history to make the backup fit.
+- Workflow backup verification now uses sorted fixed-size row hashes with an
+  explicit algorithm marker and backward-compatible restoration. Two real
+  PostgreSQL checks and the focused recovery suite passed. Complete a new
+  populated backup and inactive restore before release; the earlier failure is
+  retained as a failure. [Decision](docs/adr/0081-bounded-workflow-backup-fingerprints.md).
 - Finish release-candidate evidence and runtime-pin reconciliation against
   [release acceptance](docs/release-acceptance.md), using the
   [acceptance register](docs/mvp-acceptance-status.md). Audit retained provider
