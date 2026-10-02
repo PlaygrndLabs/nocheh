@@ -11,6 +11,7 @@ import {ownerSecurityRoute} from './owner-api.js';
 import {providerPayload} from './provider-request.js';
 import type {SourceReference} from '../stores/archive.js';
 import type {OperationReference} from '../stores/operations.js';
+import {elapsed,timedBody,type ModelTimings} from './timing.js';
 
 export interface TurnBinding {
   event_id:string;scope:string;profile:string;logical_profile:string;owner:boolean;
@@ -74,6 +75,7 @@ export function brokerServer(options:BrokerOptions) {
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
     const closed=()=>{if(!res.writableEnded)controller.abort();};res.on('close',closed);
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
+    const timings:ModelTimings={};
     const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{
       const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{})};
       const decision=await evaluate(options.pool,effect);
@@ -129,6 +131,7 @@ export function brokerServer(options:BrokerOptions) {
         throw error;
       }
       const attempt=await authorizeEffect('model.request',payload);
+      const prepareStarted=performance.now();
       const transport=object(await rpc(options.hermes,'/internal/security/transport',{},'Bearer '+options.token));
       const destination=providerTarget(transport,path);
       const prepared=object(await options.prepare(principal,{destination,payload}));
@@ -137,24 +140,31 @@ export function brokerServer(options:BrokerOptions) {
       await assertCurrent(principal);
       const current=await evaluate(options.pool,attempt.effect);
       if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
+      timings.broker_prepare_ms=elapsed(prepareStarted);
       const headers:Record<string,string>={'content-type':'application/json',authorization:'Bearer '+String(transport.api_key)};
       for(const [key,value] of Object.entries(object(transport.headers??{})))if(['user-agent','originator','chatgpt-account-id'].includes(key.toLowerCase())&&typeof value==='string')headers[key]=value;
       await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.reference??binding.event_id);attempt.started=true;
-      const response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});
-      if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.reference??binding.event_id);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
-      await stream(response,principal,res,8*1024*1024);
-      await recordEffect(options.pool,attempt.effect,'completed',attempt.decision,binding.reference??binding.event_id);attempt.closed=true;
-    }catch(error){if(trace&&!trace.closed)await recordEffect(options.pool,trace.effect,trace.started?'ambiguous':'failed',trace.decision,binding.reference??binding.event_id);throw error;}
+      const providerStarted=performance.now();let response:Response;
+      try{response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});}
+      finally{timings.provider_headers_ms=elapsed(providerStarted);}
+      if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.reference??binding.event_id,undefined,timings);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
+      await stream(response,principal,res,8*1024*1024,timings);
+      await recordEffect(options.pool,attempt.effect,'completed',attempt.decision,binding.reference??binding.event_id,undefined,timings);attempt.closed=true;
+    }catch(error){if(trace&&!trace.closed)await recordEffect(options.pool,trace.effect,trace.started?'ambiguous':'failed',trace.decision,binding.reference??binding.event_id,undefined,timings);throw error;}
     finally{clearTimeout(timer);res.off('close',closed);controller.abort();}
   }
-  async function stream(response:Response,principal:Reader,res:ServerResponse,max:number) {
+  async function stream(response:Response,principal:Reader,res:ServerResponse,max:number,timings?:ModelTimings) {
     await assertCurrent(principal);
     res.writeHead(200,{'content-type':response.headers.get('content-type')??'application/octet-stream','cache-control':'no-store'});
     let size=0;
-    if(response.body)for await(const part of response.body) {
-      size+=part.length;if(size>max)throw new HttpError(413,'security_response_limit');
-      await assertCurrent(principal);
-      if(!res.write(part))await Promise.race([once(res,'drain'),once(res,'close').then(()=>{throw new Error('closed');})]);
+    if(timings)timings.downstream_ms=0;
+    if(response.body)for await(const part of timings?timedBody(response.body,timings):response.body) {
+      const localStarted=performance.now();
+      try {
+        size+=part.length;if(size>max)throw new HttpError(413,'security_response_limit');
+        await assertCurrent(principal);
+        if(!res.write(part))await Promise.race([once(res,'drain'),once(res,'close').then(()=>{throw new Error('closed');})]);
+      }finally{if(timings)timings.downstream_ms!+=elapsed(localStarted);}
     }
     res.end();
   }

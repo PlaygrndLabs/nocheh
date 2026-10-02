@@ -2,7 +2,7 @@
 
 <current>
 
-Last reconciled 2026-09-29. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-02. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. Prior implementation and
 live observations are summarized in [task history](docs/task-history.md).
 The [MVP live acceptance register](docs/mvp-acceptance-status.md) records passed
@@ -49,226 +49,37 @@ projects were not deleted.
 
 <verification>
 
-- TypeScript/dashboard build and focused storage-role configuration tests passed.
-- Launcher safety (13), installation configuration (8), database browser (5),
-  Honcho setup (3), deployment CLI (5), and admin CLI (9) tests passed.
-- Operating/development Compose render and source/volume identity checks passed.
-- PostgreSQL/TypeScript suite: 147 passed, 49 fixture-gated skips; the database
-  disconnect check passed. The final exact-source native suite passed 371 tests
-  with two fixture-gated skips in the revision-checked pinned runtime. The
-  all-in-one test command's redundant native image rebuild was interrupted;
-  its database/TypeScript stages passed and native tests completed separately.
-- All 17 development services are healthy. App and dashboard endpoints respond.
-  One configured Telegram poller and one provider service are running. Source
-  reload passed: a source touch produced a new asset revision, restarted Node,
-  and returned healthy without recreating the app container. The concurrent
-  native image rebuild slowed this check; it was stopped after the isolated
-  PostgreSQL/TypeScript and disconnect gates had passed.
-- Reset initialization and failure-path tests (5) passed.
-- Documentation links, obsolete file references, and credential-pattern scans passed.
-- AST-only graph refreshed: 558 files, zero model calls.
-- Honcho-default configuration, runtime-profile, and workflow-key tests passed
-  (18); a synthetic fresh-install Compose render includes all five Honcho
-  services. The AST-only graph refreshed again after this code change (558 files,
-  zero model calls). The broader host native suite cannot pass outside its pinned
-  runtime and restricted socket environment; its prior exact-source run is not
-  evidence for this increment.
-- A fresh synthetic Honcho acceptance workspace completed one guarded
-  subscription reasoning call with the expected answer and usage report, then
-  closed. Its ledger reservation was zero and the preserved $5 pilot total did
-  not change. This is one live preflight check, not embedding, ingestion, recall,
-  restart, provider-failure, or production attachment acceptance. The metadata
-  report is retained only in ignored local acceptance state.
-- The owner selected the $5 UTC-monthly embedding cap for live testing after
-  clarification that API embeddings are billed separately from ChatGPT. A narrow
-  exhausted-pilot preattachment cutover passed focused allowance, rejection, and
-  idempotence checks (20 focused tests total). The AST-only graph refreshed with
-  559 files and zero model calls. The operating ledger entered monthly mode.
-- A new, closed synthetic acceptance workspace passed subscription reasoning,
-  guarded embedding, ingestion, retrieval, restart persistence, and provider
-  failure/recovery. The gateway returned the expected failure while isolated and
-  recovered after its egress network was restored. The monthly ledger reserved
-  $0.07 of $5 at verification; reservations are conservative rather than an API
-  invoice. The local acceptance record is in ignored state. Verification was
-  accepted and Honcho attached without historical ingestion. The operating admin
-  status reported verified, attached, and primary Honcho before owner capture.
-- An ordinary owner Telegram message was captured after attachment. Its guarded
-  source was ingested with a completed Honcho receipt, and the owner generation
-  reached ready. Subsequent synchronization retained that ready snapshot;
-  operating status now reports limited memory false. Event and receipt IDs are
-  retained only in ignored local acceptance state.
-- An ordinary owner follow-up asked for the remembered phrase. A Honcho memory
-  result containing that phrase preceded the delivered Telegram answer, which
-  contained the phrase. The Telegram workflow completed after a transient
-  runtime-unavailable retry. The operating status remained limited memory false;
-  the monthly ledger reserved $0.31 of $5 after this check. Private identifiers
-  and the metadata report remain in ignored local acceptance state.
-- Honcho budget ledger, mutation gate, and management route focused tests passed
-  (10 native, 2 TypeScript management tests). The TypeScript/dashboard build
-  passed in the pinned local development image. The source-watched dashboard
-  preview loaded the operating monthly ledger: $5 cap, $0.31 reserved,
-  $4.69 headroom, 31 embedding and 18 reasoning requests, and 9,280 reported
-  embedding tokens. At the configured model price, the displayed usage estimate
-  was $0.0001856. This estimate is not a provider invoice; one embedding call
-  lacked a token report. The edit control enabled for a draft change, then
-  reload restored the saved $5 cap; the live cap was not changed during preview.
-  The AST-only graph refreshed with 561 files and zero model calls.
-- A fresh owner voice note on this installation passed the release voice check.
-  The 11,998 stored original audio bytes matched their saved size and SHA-256;
-  a separate `nocheh-subscription` transcript exactly matched the expected
-  sentence, and one delivered Telegram reply had a saved source link to the
-  voice event. The content-free event, artifact, transcript, reply, workflow,
-  and retry evidence is retained only in ignored local acceptance state.
-  Delivery completed on the fifth attempt. Four earlier native dispatch
-  receipts failed closed with `unexpected_profile_tool` for `tool_call`,
-  `tool_describe`, and `tool_search`; the profile configuration had tool search
-  disabled. A process-level policy now pins tool search off before native agent
-  construction, so a native config-loader fallback cannot expose its bridge.
-  Focused scope tests and a credential-free isolated-image check passed with a
-  synthetic profile that enabled tool search. The exact cause of the earlier
-  intermittent config reads is unproven. Later activation and a live result are
-  recorded below.
-- Honcho budget settlement, embedding-model, and independent reasoning-limit
-  checks passed (14 focused tests) in a disposable pinned runtime. The dashboard
-  bundle built offline with pinned app dependencies, and the AST-only graph
-  refreshed from 561 files with zero model calls.
-  The live Memory preview showed separate API embedding and subscription panels:
-  140 embedding requests, 83 subscription reasoning requests, $0.011248 counted
-  toward the $5 embedding cap, and $0.001178 reported-token cost estimate.
-  One embedding request lacked a usage report and retains its full hold. The
-  screenshot of OpenAI usage shows less than $0.01 for the day; the local estimate
-  is neither that day-only provider total nor an invoice. No paid call or cap
-  edit was made for this UI check. A source-watched asset rebuild failed with
-  `EROFS` on the generated dashboard volume; the verified bundle was copied
-  into that preview volume without recreating it.
-- Fresh owner text received one linked Telegram reply on the first attempt;
-  the owner confirmed one sensible visible reply. A networkless one-file Hermes
-  image overlay for the tool-search policy passed eight focused native checks.
-  With no isolated turn active, only the launcher restarted and pinned that
-  image. All 17 services remained healthy. Its next owner turn used the exact
-  candidate image and delivered one owner-confirmed reply on the first attempt.
-  The old image retains a rollback tag. The earlier config-read cause remains
-  unproven; text replies still took about two minutes.
-- A fresh private synthetic phrase received one linked, owner-confirmed reply
-  and a completed Honcho receipt. The group question used a different scope;
-  its one linked reply omitted the private phrase. Its saved dispatch binding
-  used the group scope, and 336 event-bound runtime contexts had zero matches
-  for the phrase or private source ID. The owner requested admin-CLI inspection
-  of that reply. A later private recall returned the exact phrase in one linked
-  first-attempt reply. Content-free evidence is in ignored local acceptance state.
-- Fresh intentional silence in that same group ended `suppressed` with
-  `intentional_silence`. Its Telegram workflow was skipped and there was no
-  linked reply. The captured event and checks are saved only in ignored local
-  acceptance state.
-- Fresh exact owner approval proposed one Telegram message with the requested
-  text and the original private-chat destination. The owner approved that
-  action via Telegram. One exact delivered message was captured in that scope;
-  the native action receipt was `done`. Replaying the completed action returned
-  its saved result, and the exact delivered-message count remained one. The
-  content-free action and receipt evidence is in ignored local acceptance state.
-- Fresh owner retirement passed across two sources. The first source was
-  retired after its reply had already been delivered; a later first-attempt
-  answer and four event-bound contexts excluded its content, and owner Undo
-  restored it at revision 2 while preserving the original and reply. A second
-  ordinary private message was captured with zero replies and retired at
-  revision 1 before delivery. Archive kept its original inspectable; its
-  Telegram workflow closed `cancelled` at admission with no delivery receipt,
-  and the source still had zero linked replies after closure. Content-free
-  event, revision, and workflow evidence is in ignored local acceptance state.
-- A populated format-6 backup completed after two earlier snapshots exposed
-  unsafe development-stack resume paths. The final backup saved 427 state files
-  and 88 table fingerprints, resumed the same existing service and executor
-  containers, and passed checksum validation. An inactive restore of that
-  exact snapshot verified all three stores and 427 files. Telegram, executors,
-  scheduling, controlled tools, and provider login remained held; the restored
-  services were stopped afterward. The operating 17 services returned healthy
-  with one Telegram poller and one provider owner. The generated dashboard
-  volume was repaired to the app UID after a restart exposed root ownership;
-  the app rebuilt and recovered health. The development app build now receives
-  the operating UID/GID; the Compose render and focused recovery tests passed.
-  The AST graph was refreshed with 561 files and zero model calls. Content-free
-  evidence and both private snapshots remain in ignored local state.
-- After those controlled restarts, the previously owner-confirmed private
-  acknowledgment still had one linked reply and a completed Telegram workflow.
-  The exact-approval request still had one linked reply, and the newly retired
-  source still had zero replies with a cancelled workflow. These are
-  post-completion durability checks; no in-flight owner turn was restarted.
-- A new ordinary owner acknowledgment was captured with zero replies, then the
-  supervised Hermes container restarted. It became healthy before the event's
-  first Telegram execution attempt. One nonempty acknowledgment arrived after
-  the restart; the linked source retained exactly one reply, and its workflow
-  completed delivery on the first execution attempt with one durable receipt.
-  The dashboard health endpoint had independently stopped listening after a
-  development source reload; restarting only that container restored health.
-  The 17 operating services were healthy afterward. Event, receipt, and restart
-  timestamps are saved in ignored local acceptance state.
-- The owner correction portion of fresh acceptance passed on test-only learned
-  memory: one duplicate interpretation was retired by an owner-authored
-  revision-checked action at revision 2. A separate interpretation of the same
-  synthetic private fact received an owner-authored active revision 2, and its
-  post-correction Honcho projection receipt completed. The owner then sent a
-  new ordinary private recall question. It was captured after both corrections
-  and the completed projection; the one linked answer contained the correct
-  synthetic phrase, its Telegram workflow completed delivery on the first
-  execution attempt with one receipt, and the owner confirmed seeing exactly
-  one correct reply. This completes the learned-recall gate. Operation IDs and
-  content remain in ignored local acceptance state.
-- Read-only Telegram checks found the selected configured group is now a forum,
-  with Nocheh holding administrator and topic-management rights. An older
-  captured synthetic note in a known forum topic was selected for the
-  non-owner reaction sequence; it had zero linked replies before the check.
-  The same non-owner human added a reaction, changed it, and removed it. All
-  three individual updates were captured against the exact old message and
-  attributed to the same non-owner actor. The current per-person state is empty;
-  no active learned entry cites either superseded update or the removal, and
-  the old message still has zero linked replies. The reaction relation resolves
-  to the target's known forum topic. A new ordinary question in a second named
-  forum topic was captured with a different explicit topic ID. Its one linked
-  reply stayed in that second topic, expressed no knowledge of the reaction,
-  and disclosed no reaction. No stored runtime context for the question cited
-  the old note or any of its reaction event IDs. This completes the live
-  reaction and topic-isolation gate. Group, participant, message, and topic
-  identities remain in ignored local acceptance state.
-- Read-only inspection of the existing General event found one linked reply
-  after its failed first native attempt. The same-topic reaction question also
-  had one first-attempt reply; it lacked the old reaction because its topic
-  Honcho generation had no ready snapshot at the time. That epoch later became
-  ready. The current rebuild acknowledged all its Nocheh ingestion receipts,
-  and all four current generations reached ready with a snapshot each after
-  focused two-worker deriver activation. The focused foreground admission test passed
-  (2 executed, 2 fixture skips) after TypeScript compilation in the pinned
-  networkless Node 24 image;
-  the full focused Honcho setup file passed after a stale budget-policy
-  assertion was updated. The AST graph refreshed 561 files with zero model
-  calls. No live traffic or runtime configuration change occurred during that
-  code-verification increment.
-- General-topic normalization now recognizes Telegram's ordinary markerless
-  supergroup messages in the base conversation scope. Older full Bot API
-  projections resolve from matching immutable message envelopes at read time;
-  saved archive bytes and descriptors are preserved. Named topics retain their
-  explicit scope, while malformed topic markers and partial observations stay
-  unresolved. TypeScript compilation and 14 focused PostgreSQL/Compose checks
-  passed with no skips, covering privacy, reactions, learning, archive
-  preservation, and single-execution recovery. The AST graph was refreshed
-  with 561 files and zero model calls. The two source files were activated
-  through the existing development watcher. The captured General turn resumed
-  into its base conversation scope; 109 assistant-context records contained
-  none of the other topic's note or reaction IDs. The original source hash and
-  saved projection remain unchanged. Its first native attempt failed before
-  delivery with `assistant_runtime_unavailable`; its later second-attempt
-  recovery is recorded above. Private receipts remain in ignored local state.
-
-- Completed model results now require nonempty text or explicit `[NO_REPLY]`.
-  Blank, missing, malformed, failed, and interrupted answers return the existing
-  recoverable model failure before a memory notice can be appended. The shared
-  native result handling covers Telegram, browser, and scheduled conversations.
-  Sixteen focused tests passed with no skips in a disposable, networkless Hermes
-  runtime matching the pinned upstream revision. Synthetic Telegram delivery
-  checks verified no send on blank output, reuse of the failed attempt receipt,
-  one delivery on a fresh successful attempt, and preserved explicit silence.
-  The AST-only graph was refreshed after the code change. No live traffic or
-  operating runtime change was made. See the
-  [acceptance impact review](docs/mvp-acceptance-status.md).
+- The September 28–29 installation has retained passing evidence for owner text,
+  group silence and isolation, subscription voice transcription (with its original
+  retry caveat), exact approval, retirement and Undo, learned recall and owner
+  correction, captured-turn restart recovery, populated backup/inactive restore,
+  Honcho attachment, and non-owner reactions with named-topic isolation. The
+  [acceptance register](docs/mvp-acceptance-status.md) retains the scope and limits;
+  [task history](docs/task-history.md) retains the chronological summaries. These
+  are carried observations, not newly repeated tests.
+- The empty-completion candidate passed 16 focused native checks in its pinned,
+  networkless runtime. Operating activation and affected live evidence remain
+  pending.
+- The release audit verified hashes for every report supporting the 11 completed
+  acceptance areas. One later-updated topic report is referenced by two open
+  rows; its index hashes and readiness status require reconciliation.
+- Event-bound provider timing now separates broker preparation, upstream headers,
+  upstream byte waits, and downstream forwarding. The TypeScript/dashboard build,
+  seven focused broker/security/storage checks, and eleven admin CLI checks pass.
+  One storage check initially lost its database connection during the operating
+  backup failure; that affected check passed on its isolated rerun. The AST graph
+  refreshed from 564 files with no model calls. This is candidate evidence;
+  timing telemetry has not yet been activated or measured in a live owner turn.
+- The operating source checkout's three local edits exactly match integrated
+  main. A private patch preserves them; the original checkout remains intact.
+  All 17 services were healthy at initial inspection, then exited with code 255.
+  Only the existing database and workflow-cache services were restarted for a
+  quiesced backup. The backup failed while fingerprinting workflow storage after
+  PostgreSQL reported temporary disk exhaustion; no complete snapshot or release
+  pass is claimed. Partial dumps remain private and are not recovery evidence.
+- Remote fetch succeeded. Private historical report paths are already reachable
+  from origin/main, so ordinary fast-forward publication cannot remove them.
+  History cleanup is being prepared separately; no remote rewrite has occurred.
 
 </verification>
 
@@ -280,16 +91,13 @@ projects were not deleted.
   answer and the same-topic recall limitation from retained evidence, and
   diagnose the first native timeout as a completion/recovery issue. A healthy
   stack or ready snapshot does not establish answer quality.
-- LLM timing metrics need explicit measurement boundaries before attributing
-  delays to the machine, network, or GPT. The existing
-  [native timing collector](services/hermes/timing.py) records broad phases;
-  [conversation timing](services/hermes/assistant_turn.py) includes nested
-  [guard work](services/hermes/request_boundary.py). It does not isolate remote
-  LLM request duration or pure model compute. CPA provider analytics and Honcho
-  request durations exist, but per-turn attribution across local waiting,
-  processing, and provider/network time remains an implementation task. Preserve
-  answer-quality checks while adding measurements; do not treat speed alone as
-  a dependability failure.
+- Event-bound LLM timing is implemented and verified in the candidate. Activate
+  it with the reconciled runtime, collect affected live evidence, and assess
+  local waiting separately from provider transport waits. The
+  [CLI guide](docs/admin-cli.md) defines the boundaries and overlap limits.
+- Repair the workflow backup fingerprint sort, verify backward-compatible restore,
+  and complete a new populated backup before runtime activation. Preserve data;
+  do not remove workflow history to make the backup fit.
 - Finish release-candidate evidence and runtime-pin reconciliation against
   [release acceptance](docs/release-acceptance.md), using the
   [acceptance register](docs/mvp-acceptance-status.md). Audit retained provider

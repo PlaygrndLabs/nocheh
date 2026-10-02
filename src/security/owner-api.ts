@@ -15,7 +15,7 @@ export async function ownerSecurityRoute(pool:pg.Pool,principal:Reader,req:Incom
     if(req.method==='POST'){json(res,200,await savePolicy(pool,principal,await readJson(req)));return true;}
   }
   if(url.pathname==='/v1/security/effects'&&req.method==='GET'){
-    json(res,200,await effectLog(pool,principal,url.searchParams.get('after')??'0',url.searchParams.get('effect')??undefined));return true;
+    json(res,200,await effectLog(pool,principal,url.searchParams.get('after')??'0',url.searchParams.get('effect')??undefined,url.searchParams.get('event')??undefined));return true;
   }
   if(url.pathname==='/v1/security/preview'&&req.method==='POST') {
     if(options.preview){json(res,200,await options.preview(await readJson(req)));return true;}

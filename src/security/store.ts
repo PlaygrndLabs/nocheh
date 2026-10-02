@@ -4,6 +4,7 @@ import {HttpError,object} from '../http.js';
 import {decide,defaultPolicy,validatePolicy,type Policy,type Effect,type Decision} from './contract.js';
 import type {SourceReference} from '../stores/archive.js';
 import type {OperationReference} from '../stores/operations.js';
+import {safeTimings,type ModelTimings} from './timing.js';
 type Db=pg.Pool|pg.PoolClient;
 export const securityCoreSchema=`
 CREATE TABLE IF NOT EXISTS security_policy_versions (
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS security_events (
 );
 CREATE INDEX IF NOT EXISTS security_events_effect ON security_events(effect_id,id);
 ALTER TABLE security_events ADD COLUMN IF NOT EXISTS source_reference jsonb;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS timings jsonb;
 `;
 export const securitySchema=securityCoreSchema+`ALTER TABLE action_requests ADD COLUMN IF NOT EXISTS security_decision jsonb;`;
 export async function policySnapshot(db:Db,lock=false):Promise<{revision:number;policy:Policy}> {
@@ -57,16 +59,17 @@ export async function evaluate(db:Db,effect:Effect,grant?:string,lock=false):Pro
   return decide(policy,revision,effect,grant?{grant}:{});
 }
 export type EffectState='proposed'|'allowed'|'blocked'|'awaiting_approval'|'claimed'|'started'|'completed'|'failed'|'ambiguous';
-export async function recordEffect(db:Db,effect:Effect,state:EffectState,decision:Decision,source?:string|SourceReference|OperationReference,permission?:string) {
+export async function recordEffect(db:Db,effect:Effect,state:EffectState,decision:Decision,source?:string|SourceReference|OperationReference,permission?:string,timings?:ModelTimings) {
   // A closed schema prevents payloads, URLs, headers or exception strings from entering logs.
-  await db.query(`INSERT INTO security_events(effect_id,state,kind,scope,profile,source_event_id,policy_revision,origin,rule,permission_id,source_reference)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
+  await db.query(`INSERT INTO security_events(effect_id,state,kind,scope,profile,source_event_id,policy_revision,origin,rule,permission_id,source_reference,timings)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
     [effect.id,state,effect.kind,effect.scope,effect.profile,typeof source==='string'?source:source?.id??null,
-      decision.revision,decision.origin,decision.rule,permission??null,typeof source==='string'?null:source??null]);
+      decision.revision,decision.origin,decision.rule,permission??null,typeof source==='string'?null:source??null,safeTimings(timings)]);
 }
-export async function effectLog(pool:pg.Pool,principal:Reader,after='0',effect?:string) {
+export async function effectLog(pool:pg.Pool,principal:Reader,after='0',effect?:string,event?:string) {
   admin(principal);
   if(!/^\d{1,18}$/.test(after)||effect!==undefined&&!/^[\w:.-]{1,128}$/.test(effect))throw new HttpError(400,'invalid_effect_cursor');
-  const rows=(await pool.query('SELECT * FROM security_events WHERE id>$1 AND ($2::text IS NULL OR effect_id=$2) ORDER BY id LIMIT 201',[after,effect??null])).rows;
-  return {events:rows.slice(0,200),next:rows.length>200?rows[199].id:null,receipt_semantics:'allowed is authority; completed is an observed result; ambiguous requires investigation and is never retried automatically'};
+  if(event!==undefined&&!/^[a-f0-9]{64}$/.test(event))throw new HttpError(400,'invalid_event_filter');
+  const rows=(await pool.query('SELECT * FROM security_events WHERE id>$1 AND ($2::text IS NULL OR effect_id=$2) AND ($3::text IS NULL OR source_event_id=$3) ORDER BY id LIMIT 201',[after,effect??null,event??null])).rows;
+  return {events:rows.slice(0,200).map(row=>({...row,timings:safeTimings(row.timings)})),next:rows.length>200?rows[199].id:null,...(event?{event_filter:event}:{}),receipt_semantics:'allowed is authority; completed is an observed result; ambiguous requires investigation and is never retried automatically'};
 }

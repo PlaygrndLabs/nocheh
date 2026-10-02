@@ -14,6 +14,7 @@ state.
 ./bin/nocheh admin trace EVENT_ID --json
 ./bin/nocheh admin trace latest --json
 ./bin/nocheh admin trace latest --scope CONVERSATION_SCOPE --json
+./bin/nocheh admin timings EVENT_ID --json
 ./bin/nocheh admin workflows --event EVENT_ID --json
 ./bin/nocheh admin workflow WORKFLOW_ID --json
 ./bin/nocheh admin honcho --json
@@ -49,3 +50,30 @@ unfiltered workflow page or omitting linked replies.
 The CLI cannot fabricate owner or group Telegram traffic. Live acceptance
 still requires fresh owner input and saved event IDs and timestamps as described
 in [the release procedure](../docs/release-acceptance.md).
+
+<timing_boundaries>
+
+`timings EVENT_ID` joins the event's workflow receipts with its security effect
+page. `effects.next` is the cursor for `--after`; a missing measurement is `null`,
+not zero. Earlier receipts are not retroactively measured. The CLI rejects an API
+without the exact event filter. The numeric measurements contain no source text,
+prompts, credentials, URLs, or exception bodies.
+
+- `broker_prepare_ms`: credential-route lookup, guarded preparation, and final
+  permission checks before the provider request.
+- `provider_headers_ms`: waiting for the provider transport to return response
+  headers, including the local subscription proxy, network, and remote service.
+- `provider_read_ms`: time awaiting upstream stream reads, excluding the broker's
+  per-chunk permission checks and downstream backpressure. Buffered bytes may
+  return immediately; this is observed waiting, not isolated model computation.
+- `downstream_ms`: per-chunk permission checks and forwarding/backpressure.
+- `provider_chunks`: observed chunks, not model tokens.
+
+The upstream headers and read waits can be added for observed provider-transport
+waiting. Native `conversation`, `context_prepare`, and `model_guard` phases can
+overlap; do not add them or add the broker measurements to those inclusive phases.
+Workflow admission/completion timestamps include orchestration waits and retries.
+Failure receipts retain measurements made before failure; absent phases remain
+unavailable. Completion and latency are evaluated separately.
+
+</timing_boundaries>

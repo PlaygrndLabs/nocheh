@@ -46,6 +46,9 @@ def parser_for():
     trace = commands.add_parser("trace", help="Correlate an event with linked replies and workflows")
     trace.add_argument("id", help="Event ID, or 'latest' for the newest incoming event")
     trace.add_argument("--scope", default="", help="Exact conversation scope when using latest")
+    timings = commands.add_parser("timings", help="Event-bound provider measurements and workflow receipts")
+    timings.add_argument("id")
+    timings.add_argument("--after", default="0", help="Security event cursor from the previous page")
     workflows = commands.add_parser("workflows", help="Workflow list with source and receipt IDs")
     workflows.add_argument("--family")
     workflows.add_argument("--state")
@@ -78,6 +81,9 @@ def path_for(parser, args):
         if not args.query.strip(): parser.error("search query must not be empty")
         if not 1 <= args.limit <= 50: parser.error("--limit must be between 1 and 50")
         return "/v1/search?" + urlencode({"q": args.query, "scope": args.scope, "limit": args.limit})
+    if command == "timings":
+        if not re.fullmatch(r"\d{1,18}", args.after): parser.error("invalid security event cursor")
+        return "/v1/security/effects?" + urlencode({"event": identity(parser, args.id), "after": args.after})
     if command == "trace" and args.id == "latest": return "/v1/data?" + urlencode({"kind": "incoming", "scope": args.scope})
     if command in ("event", "trace"):
         if command == "trace" and args.scope: parser.error("--scope requires trace latest")
@@ -98,10 +104,21 @@ def path_for(parser, args):
     raise AssertionError(command)
 
 
+def timing_metadata(value):
+    if not isinstance(value, dict): return None
+    durations = {"broker_prepare_ms", "provider_headers_ms", "provider_read_ms", "downstream_ms", "provider_chunks"}
+    phases = {"bootstrap", "memory_recall", "history_prepare", "agent_init", "conversation", "context_prepare", "model_guard", "total"}
+    numeric = lambda item: type(item) is int and 0 <= item <= 86400000
+    result = {key: item for key, item in value.items() if key in durations and numeric(item)}
+    result.update({key: item for key, item in value.items() if key in phases and isinstance(item, dict)
+                   and set(item) == {"ms", "calls"} and all(numeric(n) for n in item.values())})
+    return result or None
+
+
 def redact(value):
     """Only known metadata keys may reach default terminal or JSON output."""
     safe = {
-        "id", "event_id", "source_event_id", "workflow_id", "receipt_id", "operation_id", "action_id", "job_id", "generation",
+        "id", "event_id", "source_event_id", "workflow_id", "receipt_id", "effect_id", "operation_id", "action_id", "job_id", "generation",
         "kind", "family", "origin", "channel", "state", "status", "stage", "assistant_state", "assistant_stage",
         "assistant_error", "assistant_attempts", "error_code", "attempts", "waiting_reason", "control_reason",
         "created_at", "updated_at", "received_at", "occurred_at", "delivered_at", "attached_at", "last_ready_at", "event_filter",
@@ -111,12 +128,12 @@ def redact(value):
         "active_step", "can_retry", "can_cancel", "retired", "representation", "primary", "storage_layout", "guard_mode",
         "service", "mode", "admission", "dispatch", "format", "scope_kind", "truncated",
     }
-    containers = {"records", "workflows", "receipts", "event", "reply_messages", "runs", "outbox", "controls", "services",
+    containers = {"records", "events", "workflows", "receipts", "event", "reply_messages", "runs", "outbox", "controls", "services",
                   "archive", "workers", "connection", "generations", "guard", "policy", "jobs", "artifacts", "derived",
-                  "actions", "permissions", "telegram", "versions", "items", "counts"}
+                  "actions", "permissions", "telegram", "versions", "items", "counts", "effects", "result"}
     if isinstance(value, list): return [redact(item) for item in value]
     if isinstance(value, dict):
-        return {key: (item if key in safe and not isinstance(item, (dict, list)) else
+        return {key: (timing_metadata(item) if key == "timings" else item if key in safe and not isinstance(item, (dict, list)) else
                       redact(item) if key in containers else "[redacted]") for key, item in value.items()}
     return value
 
@@ -169,11 +186,13 @@ def main(arguments=None):
         value = api.call(path, timeout=30)
         if args.command in ("event", "trace") and (not isinstance(value, dict) or not isinstance(value.get("reply_messages"), list)):
             raise RuntimeCompatibilityError("running installation lacks linked event replies; activate the matching API before inspecting this event")
-        if args.command == "trace":
+        if args.command == "timings" and (not isinstance(value, dict) or value.get("event_filter") != args.id):
+            raise RuntimeCompatibilityError("running installation lacks event-filtered timing evidence; activate the matching API before inspecting timings")
+        if args.command in ("trace", "timings"):
             workflows = api.call("/v1/workflows?" + urlencode({"event": args.id, "limit": 100}), timeout=30)
             if not isinstance(workflows, dict) or workflows.get("event_filter") != args.id:
                 raise RuntimeCompatibilityError("running installation lacks the event workflow filter; activate the matching API before tracing")
-            value = {"event": value, "workflows": workflows}
+            value = {"effects" if args.command == "timings" else "event": value, "workflows": workflows}
         elif args.command == "workflows" and args.event and (not isinstance(value, dict) or value.get("event_filter") != args.event):
             raise RuntimeCompatibilityError("running installation lacks the event workflow filter; activate the matching API before using --event")
     except (FileNotFoundError, KeyError, ValueError):
