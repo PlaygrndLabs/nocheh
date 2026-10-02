@@ -50,7 +50,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const prior=native.get(id);assert.ok(!prior||['queued','failed'].includes(prior.state),'only an explicitly failed pre-delivery attempt may launch a fresh execution');
     const state=['running','queued','suppressed','failed','ambiguous'].includes(mode)?mode:'done';native.set(id,{state});
     if(mode==='lost_ack'){mode='done';throw Error('native result acknowledgement lost');}
-    return {state,stage:state==='done'?'delivery':'assistant',private_output:'not copied into workflow metadata'};
+    return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:state==='done'?'delivery':'assistant',private_output:'not copied into workflow metadata'};
   };
   const services=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Selected voice fixture-secret';}},
@@ -122,6 +122,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     }
     const failed=await capture('Retryable assistant failure');await prepare(failed.reference.id);mode='failed';
     assert.equal((await run(failed.reference.id)).state,'retryable_failed');
+    assert.equal((await stores.control.query('SELECT error_code FROM dispatches WHERE event_id=$1',[failed.reference.id])).rows[0].error_code,'guard_context_changed');
     const failedRetry=await stores.control.query("SELECT extract(epoch FROM next_attempt-now()) AS delay FROM dispatches WHERE event_id=$1",[failed.reference.id]);
     assert.ok(Number(failedRetry.rows[0].delay)<=11,'the first safe retry should be due in about ten seconds');
     assert.equal(calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start').length,1);
