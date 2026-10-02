@@ -107,6 +107,15 @@ and the build pass on the repair. This retains the automatic paraphrase
 deduplication and existing owner-authority requirement. It does not establish
 live memory quality or justify repeating unaffected live checks.
 
+The archive-reaction repair links a permitted note to bounded current captured
+reaction sources, preserving removal and anonymous-count distinctions in the
+native tool. Four storage/access/retirement checks and eight native archive and
+delivery checks pass. The first fixture run had a synthetic identity mismatch; a
+subsequent reused fixture retained a project assignment. Both failed setup runs
+are retained, followed by the passing clean fixture. Topic isolation, guarded
+owner edits, retirement, and superseded-state denial have fresh focused coverage.
+Live recall remains failed pending a correct answer after the relevant repair.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket

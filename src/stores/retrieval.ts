@@ -46,6 +46,19 @@ export class SourceRepository {
     if(binding&&!await this.access.canRead(principal,reference,binding))throw new HttpError(404,'source_not_found');
     return reference;
   }
+  private async currentReactionSources(principal:Reader,reference:SourceReference,binding:GuardBinding|null) {
+    const {object_id}=await this.access.relationships.describe(reference);
+    const rows=(await this.stores.control.query(`SELECT event_id FROM reaction_states
+      WHERE target_id=$1 ORDER BY event_id LIMIT 20`,[object_id])).rows;
+    const sources:string[]=[];
+    for(const row of rows) {
+      const reaction=(await this.access.archive.captured(row.event_id)).reference;
+      if(binding&&!await this.access.canRead(principal,reaction,binding))continue;
+      sources.push('nocheh:event:'+reaction.id);
+    }
+    // Captured updates are bounded evidence, never a complete platform inventory.
+    return {sources,complete:false as const};
+  }
   async read(principal:Reader,id:string) {
     const binding=principal.admin?null:await this.audience.assert(principal),reference=await this.permitted(principal,id,binding);
     const row=(await this.stores.archive.query('SELECT * FROM events WHERE id=$1',[id])).rows[0];
@@ -81,8 +94,10 @@ export class SourceRepository {
       kind:'conversation',chat_id:principal.scope,topic_id:principal.space?.includes('/topic/')?principal.space.split('/topic/')[1]!:null}:{kind:'owner'},20);
     if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const replies=principal.admin?await archiveReplyPreviews(this.stores.archive,this.stores.control,[{id,kind:row.kind,scope:row.scope}]):new Map();
+    const current_reactions=await this.currentReactionSources(principal,reference,binding);
+    if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const result={id,source:'nocheh:event:'+id,reference,received_at:row.received_at.toISOString(),representation:binding?.mode==='on'?'guarded':'original',
-      guarded_revision:guardedRevision,event,artifacts,derived,relationships,derivative_versions:'/v1/sources/'+id+'/derivatives',
+      guarded_revision:guardedRevision,event,artifacts,derived,relationships,current_reactions,derivative_versions:'/v1/sources/'+id+'/derivatives',
       ...(principal.admin?{reply_messages:replies.get(id)??[]}:{})};
     await this.allowPrepared(principal,result);return result;
   }

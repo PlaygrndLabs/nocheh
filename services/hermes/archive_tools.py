@@ -55,6 +55,22 @@ def search_tool(args, **kwargs):
         return json.dumps({'error':'archive_search_unavailable'})
 
 
+def reaction_observation(event):
+    """Retain guarded reaction evidence; unrelated payload content stays omitted."""
+    payload=event.get('payload')
+    if not isinstance(payload,dict):return None
+    for key,mode,fields in (
+        ('message_reaction','individual',('date','user','actor_chat','old_reaction','new_reaction')),
+        ('message_reaction_count','aggregate',('date','reactions')),
+    ):
+        value=payload.get(key)
+        if not isinstance(value,dict):continue
+        observation={'mode':mode,**{field:value[field] for field in fields if field in value}}
+        if len(json.dumps(observation,ensure_ascii=False))>6000:return {'mode':mode,'unavailable':'observation_size_limit'}
+        return observation
+    return None
+
+
 def read_tool(args, **kwargs):
     import re
     try:
@@ -69,6 +85,8 @@ def read_tool(args, **kwargs):
         # Model context is bounded and labels separately generated content.
         return json.dumps({'source':record['source'],'scope':event['scope'],'origin':event['origin'],
                            'kind':event['kind'],'text':text[:12000],'truncated':len(text)>12000,
+                           'reaction_observation':reaction_observation(event),
+                           'current_reactions':record.get('current_reactions',{'sources':[],'complete':False}),
                            'artifacts':[{'id':a['id'],'kind':a['kind'],'state':a['state']} for a in record['artifacts'][:50]],
                            'derived':[{'id':d['id'],'kind':d['kind'],
                              'text':base64.b64decode(d['content_base64']).decode('utf-8',errors='replace')[:2000],
@@ -79,9 +97,9 @@ def read_tool(args, **kwargs):
 
 def register(ctx):
     for name,description,properties,required,handler in (
-        ('nocheh_archive_search','Search the current permitted archived text in your authorized scope. Cite returned source references.',
+        ('nocheh_archive_search','Search current permitted archived text in your authorized scope. Every query word must match; try one or two distinctive words when a longer search misses. Read an older note to find its captured current reaction sources. Cite returned source references.',
          {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],search_tool),
-        ('nocheh_archive_read','Read an archived source. Originals and generated artifacts have distinct provenance.',
+        ('nocheh_archive_read','Read an archived source, its observed reaction data, and links to captured current reactions. Follow reaction links to inspect changes or removals; a reaction is not proof of task completion. Originals and generated artifacts have distinct provenance.',
          {'id':{'type':'string'}},['id'],read_tool),
         ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence.',
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
