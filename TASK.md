@@ -2,7 +2,7 @@
 
 <current>
 
-Last reconciled 2026-10-02. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-03. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
@@ -30,7 +30,16 @@ The affected replacement generation has since reached readiness and produced a
 usable matching snapshot, but another background interpretation later replaced
 existing learned versions and revoked that generation. The focused conversational
 recheck delivered one reply on attempt four after about twenty minutes; it did
-not identify the removal. Reply assessment was performed through the CLI.
+not identify the removal. A later discovery-path check also failed after about
+six minutes: it found a reaction handle but did not read its observation. Reply
+assessment was performed through the CLI. Current inspection finds all four
+generations building and twenty current ingestion receipts without a first
+attempt. Older pending receipts are separate historical state.
+
+The release-review candidate includes guarded reaction observations and bounded
+target excerpts in discovery itself. Its focused storage checks pass; operating
+activation and conversational recall remain pending. Background admission is
+being investigated independently.
 
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
@@ -39,6 +48,12 @@ auth is absent; no duplicate login or refresh worker was introduced.
 </current>
 
 <verification>
+
+- Guarded reaction evidence now accompanies discovery with bounded target
+  excerpts. Five storage/route/retirement checks and six networkless native
+  archive checks pass; TypeScript compilation and the AST-only graph update
+  pass. [Decision](docs/adr/0086-reaction-discovery-evidence.md). These checks
+  establish candidate behavior, not operating activation or conversational recall.
 
 - The October 2 General check has one captured message, one linked reply, and one
   execution attempt. The owner confirmed one sensible reply. Elapsed time was
@@ -148,6 +163,9 @@ auth is absent; no duplicate login or refresh worker was introduced.
    do not request another copy or ask the owner to judge the answer. The scoped
    discovery repair has focused automated evidence; reconcile its operating
    source/image and current memory readiness before any further live check.
+   The later discovery-path answer found one handle without reading the reaction;
+   guarded observations and target excerpts now have focused candidate coverage.
+   Activate the verified candidate before judging the new path.
 2. Preserve the measured General timing boundaries and their limitations. The
    earlier 230-second native timeout is not explained by the short greeting or
    the later recall attempt; retain its failure evidence and the existing limit.
