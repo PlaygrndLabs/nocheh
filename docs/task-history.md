@@ -716,3 +716,30 @@ message, activation, provider cutover, or release occurred. The candidate's
 operating acceptance remains pending.
 
 </verification>
+
+
+<entry date="2026-10-02" task="MVP release audit and timing evidence">
+
+The owner requested the remaining MVP release work, then authorized all of it.
+The source and saved acceptance audit found 11 completed areas with matching
+private report hashes, two open topic-quality rows referencing a later-updated
+report, and an operating source checkout older than integrated main. Its three
+local source edits exactly match main and were preserved privately.
+
+The timing increment records bounded numeric broker preparation, provider headers,
+upstream byte waits, and downstream forwarding against existing security effects.
+The owner admin CLI requires the exact event filter and includes workflow receipts;
+unknown historical measurements remain unavailable. Seven focused TypeScript
+security/storage checks and eleven CLI checks passed, with TypeScript/dashboard
+compilation. The three-store check was repeated after an infrastructure connection
+failure and passed. AST extraction used 564 files and no model calls. Runtime
+activation, answer-quality evidence, and the release remain pending.
+
+During the audit the operating containers exited with code 255. Existing storage
+services were resumed with application/provider writers stopped. A new populated
+backup reached workflow fingerprinting and failed after PostgreSQL reported disk
+exhaustion. Partial dumps are private, incomplete evidence. A bounded fingerprint
+repair and completed backup remain required. Fetch succeeded; remote main already
+contains the historical private reports and has not been rewritten.
+
+</entry>

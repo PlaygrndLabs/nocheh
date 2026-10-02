@@ -71,6 +71,29 @@ class AdminCliTests(unittest.TestCase):
         self.assertEqual(data["event"]["text"], "private phrase")
         self.assertEqual(data["reply_messages"][0]["text"], "agent reply")
 
+    def test_timing_evidence_is_event_bound_and_content_free(self):
+        class TimingAPI(FakeAPI):
+            def call(self, path, timeout=30):
+                if path.startswith('/v1/security/effects?'):
+                    self.calls.append((path, timeout))
+                    return {'event_filter': EVENT, 'events': [{'effect_id': 'synthetic-effect', 'scope': 'private',
+                        'timings': {'provider_headers_ms': 45, 'provider_chunks': True, 'prompt': 'private'}}], 'next': None}
+                return super().call(path, timeout)
+        output = io.StringIO()
+        with patch.object(admin, 'API', TimingAPI), contextlib.redirect_stdout(output):
+            self.assertEqual(admin.main(['timings', EVENT, '--json']), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['effects']['events'][0]['timings'], {'provider_headers_ms': 45})
+        self.assertNotIn('private', output.getvalue())
+        self.assertIn('event=' + EVENT, FakeAPI.calls[0][0])
+        self.assertEqual(admin.timing_metadata({'total': {'ms': 5, 'calls': 1}, 'conversation': {'ms': 2, 'calls': 1, 'text': 'private'}}),
+                         {'total': {'ms': 5, 'calls': 1}})
+
+    def test_old_api_cannot_silently_return_unfiltered_timing_evidence(self):
+        with patch.object(admin, 'API', FakeAPI), contextlib.redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(admin.main(['timings', EVENT, '--json']), 1)
+        self.assertIn('lacks event-filtered timing evidence', error.getvalue())
+
     def test_invalid_id_does_not_call_api(self):
         with patch.object(admin, "API", FakeAPI), contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as error:

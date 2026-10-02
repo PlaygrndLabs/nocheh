@@ -5,6 +5,7 @@ import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {turnToken} from '../src/access.js';
 import {brokerServer,providerTarget,scopedRoute} from '../src/security/broker.js';
+import {effectLog} from '../src/security/store.js';
 
 test('broker supports only explicit scoped routes and fixed subscription destinations',()=>{
   for(const route of ['/v1/export','/v1/tools/claim','/internal/security/transport','/v1/memory/shares','//example.com'])assert.equal(scopedRoute('POST',route),false);
@@ -50,6 +51,19 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const payload={model:'same-model',input:[{role:'user',content:'Exact owner edit 🧠\r\n two  spaces'}],reasoning:{effort:'high'}};
     const response=await request('/codex/responses',payload);
     assert.equal(response.status,200);assert.equal((await response.text()).includes(secret),false);
+    let measurements:any[]=[];
+    for(let i=0;i<30;i++){
+      measurements=(await effectLog(pool,{admin:true,scope:null},'0',undefined,event.id)).events.filter(row=>row.state==='completed');
+      if(measurements.length)break;await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    assert.equal(measurements.length,1);
+    assert.ok(Number.isSafeInteger(measurements[0].timings.provider_headers_ms));
+    assert.ok(Number.isSafeInteger(measurements[0].timings.provider_read_ms));
+    assert.ok(measurements[0].timings.provider_chunks>0);
+    assert.equal(JSON.stringify(measurements).includes(secret),false);
+    assert.equal((await effectLog(pool,{admin:true,scope:null},'0',undefined,'f'.repeat(64))).events.length,0);
+    await assert.rejects(effectLog(pool,{admin:false,scope:null},'0',undefined,event.id),{code:'owner_required'});
+    await assert.rejects(effectLog(pool,{admin:true,scope:null},'0',undefined,'bad'),{code:'invalid_event_filter'});
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
     assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);
     const before=calls.length;

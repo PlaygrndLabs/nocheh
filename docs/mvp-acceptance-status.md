@@ -65,6 +65,13 @@ outcome. The candidate is not activated. Existing successful-delivery and
 silence observations retain their original dates; this candidate's operating
 behavior remains unverified. No new owner traffic was requested.
 
+The October 2 timing candidate adds nullable, content-free numeric measurements to
+security effect receipts and an event-filtered owner inspection command. Seven
+focused broker/security/storage checks and eleven CLI checks passed; the build
+passed. It does not change provider payloads, audience checks, approval authority,
+or delivery decisions. Prior dated passes remain preserved; activation, new timing
+observations, runtime reconciliation, and backup verification remain pending.
+
 The acceptance-record/policy update is documentation only and invalidates no live
 pass. No new live traffic or runtime changes were performed for this review.
 Future changes require their own impact entry; these reasons are not blanket
