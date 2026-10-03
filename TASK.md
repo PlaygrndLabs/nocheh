@@ -306,9 +306,11 @@ only by the current question, yet foreground recall spends about 160 seconds
 reasoning over it. The repaired path passes focused checks; the fixture is
 stopped while its candidate is prepared for a fresh-topic recheck.
 The runner now binds replies to both chat and message, retains pending source
-identities before waiting, and stops after a failed case. Three focused checks
-pass for late/unrelated replies, cross-chat message-number reuse, and duplicate
-physical sends. Existing seeds can be reused with their original evidence;
+identities before waiting, and stops after a failed case. Four focused checks
+pass for late/unrelated replies, cross-chat message-number reuse, duplicate
+physical sends and invalid continuation rejected before fixture access. Existing
+seeds can be reused with their original evidence; a selected continuation records
+omitted cases and requires a previously unused topic for cold-audience isolation;
 this does not repeat the cold capture measurement. Earlier reaction and
 correction failures later delivered factually correct replies on attempts four
 and three; their original timing and first-attempt gates remain failed. The

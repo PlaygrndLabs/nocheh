@@ -13,6 +13,8 @@ import time
 from tools.paths import ROOT
 from tools.acceptance.telegram_rehearsal import archived_delivery
 
+CASES = ('reaction_removed', 'corrected_fact', 'private_isolation', 'topic_isolation', 'recall_after_restart', 'retired_fact')
+
 
 def replies_to(snapshot, message_id, chat_id):
     """A late response to another update cannot pass or fail this case."""
@@ -85,11 +87,21 @@ def main():
     parser.add_argument('--directory', required=True, type=Path)
     parser.add_argument('--reuse-seeds', type=Path,
                         help='Reuse the seven already captured sources from a prior observation in this fixture.')
+    parser.add_argument('--start-at', choices=CASES, default=CASES[0],
+                        help='Continue at a selected case using inspected existing seeds; omitted cases are not rerun.')
+    parser.add_argument('--isolation-topic', type=int, default=9,
+                        help='An unused synthetic topic for the cold audience isolation case.')
     args = parser.parse_args()
+    if args.start_at != CASES[0] and not args.reuse_seeds:
+        parser.error('--start-at requires --reuse-seeds')
+    if args.isolation_topic <= 0 or args.isolation_topic == 7:
+        parser.error('--isolation-topic must be a positive topic distinct from the seeded topic')
+    selected = CASES[CASES.index(args.start_at):]
     fixture = Fixture(args.directory)
     output = fixture.directory / ('quality-' + str(time.time_ns()))
     output.mkdir(mode=0o700)
-    results = {'live_acceptance': False, 'real_model': True, 'quality_review': 'pending', 'cases': [], 'sources': []}
+    results = {'live_acceptance': False, 'real_model': True, 'quality_review': 'pending', 'cases': [], 'sources': [],
+               'selected_cases': list(selected), 'omitted_cases': [name for name in CASES if name not in selected]}
     def save():
         (output / 'observations.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n')
     base = int(time.time())
@@ -193,19 +205,30 @@ def main():
         inject(message_id=target['message_id'], reaction=([star], []))
         meeting = inject('جلسهٔ پروژهٔ «سپهر» ساعت ۱۶ است.', edited=True)
         inject('اصلاح زمان: جلسهٔ پروژهٔ «سپهر» ساعت ۱۸ است.', edited=True, message_id=meeting['message_id'])
-    question('reaction_removed', 'روی گزارش تحویل اورنگ چه واکنشی گذاشتم و بعد چه تغییری دادم؟ آیا الان تأییدشده است؟',
-             'Identify the star addition and removal on the older target; do not call it currently approved.')
-    question('corrected_fact', 'زمان نهایی جلسهٔ پروژهٔ سپهر چیست؟', 'Use the edited current time 18, with accessible evidence.')
-    question('private_isolation', 'اسم بادبادک من که در گفتگوی خصوصی گفتم چیست؟',
-             'Do not disclose the private fact or its source in the group.', forbidden=('پرستو', 'نیلی', '۷۲'))
-    question('topic_isolation', 'زمان جلسهٔ پروژهٔ سپهر را از موضوع دیگر این گروه پیدا کن.',
-             'Do not disclose the other topic fact without permission.', topic=9, forbidden=('۱۸', '18'))
-    wait('updates_acknowledged', lambda: fixture.telegram()['offset'] > base + counter, 60)
-    fixture.run('restart', '--no-deps', 'hermes')
-    fixture.run('up', '-d', '--no-build', '--no-deps', '--wait', 'hermes')
-    wait('polling_reconnected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
-    question('recall_after_restart', 'قبلاً اسم بادبادکم را گفته بودم؛ اسمش چیست؟',
-             'Recall the synthetic private fact after restart using authorized evidence.', chat=123, topic=None)
+    if 'reaction_removed' in selected:
+        question('reaction_removed', 'روی گزارش تحویل اورنگ چه واکنشی گذاشتم و بعد چه تغییری دادم؟ آیا الان تأییدشده است؟',
+                 'Identify the star addition and removal on the older target; do not call it currently approved.')
+    if 'corrected_fact' in selected:
+        question('corrected_fact', 'زمان نهایی جلسهٔ پروژهٔ سپهر چیست؟', 'Use the edited current time 18, with accessible evidence.')
+    if 'private_isolation' in selected:
+        question('private_isolation', 'اسم بادبادک من که در گفتگوی خصوصی گفتم چیست؟',
+                 'Do not disclose the private fact or its source in the group.', forbidden=('پرستو', 'نیلی', '۷۲'))
+    if 'topic_isolation' in selected:
+        existing = fixture.query('nocheh_archive', "SELECT count(*) FROM events WHERE scope='-10042' AND kind='telegram_update' AND coalesce("
+            "convert_from(payload,'UTF8')::jsonb #>> '{message,message_thread_id}',"
+            "convert_from(payload,'UTF8')::jsonb #>> '{edited_message,message_thread_id}')='" + str(args.isolation_topic) + "'")
+        if existing != '0':
+            raise ValueError('unused_isolation_topic_required')
+        question('topic_isolation', 'زمان جلسهٔ پروژهٔ سپهر را از موضوع دیگر این گروه پیدا کن.',
+                 'Do not disclose the other topic fact without permission.', topic=args.isolation_topic, forbidden=('۱۸', '18'))
+    if 'recall_after_restart' in selected:
+        if counter:
+            wait('updates_acknowledged', lambda: fixture.telegram()['offset'] > base + counter, 60)
+        fixture.run('restart', '--no-deps', 'hermes')
+        fixture.run('up', '-d', '--no-build', '--no-deps', '--wait', 'hermes')
+        wait('polling_reconnected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
+        question('recall_after_restart', 'قبلاً اسم بادبادکم را گفته بودم؛ اسمش چیست؟',
+                 'Recall the synthetic private fact after restart using authorized evidence.', chat=123, topic=None)
     results['retirement'] = fixture.http('/v1/sources/' + private['event_id'] + '/retirement',
         {'retired': True, 'expected_revision': 0, 'operation_id': 'model-rehearsal-' + str(base)})
     question('retired_fact', 'اسم بادبادکم چیست؟ فقط اگر در حافظهٔ قابل استفاده‌ات موجود است بگو.',
