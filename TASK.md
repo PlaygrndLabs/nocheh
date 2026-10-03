@@ -298,13 +298,25 @@ needed; it does not reset accounting, alter the $5 embedding cap, or change the
 operating configuration. The relay's restart-safe admission journal has an
 explicitly authorized configurable allowance (six admission/HTTP checks pass);
 this fixture's next start uses 3,000 admissions and retains all prior entries.
-Real Hermes/Honcho evaluation remains in progress. Three first-attempt cases
-pass for reaction removal, corrected time and private isolation. Fresh-topic
-isolation fails with `assistant_runtime_unavailable`; restart recall and source
-retirement remain unrun. Diagnosis finds the fresh-topic Honcho peer supported
-only by the current question, yet foreground recall spends about 160 seconds
-reasoning over it. The repaired path passes focused checks; the fixture is
-stopped while its candidate is prepared for a fresh-topic recheck.
+Real Hermes/Honcho evaluation remains in progress. Four first-attempt cases
+pass for reaction removal, corrected time, private isolation and private recall
+after a Hermes restart. A fresh isolated topic receives a correct, single physical
+reply with an archived causal link, but workflow completion exceeds the 300-second
+gate; the earlier fresh-topic attempt fails before delivery. The current-question
+only Honcho peer exclusion has focused PostgreSQL evidence and the fresh-topic
+answer shows no other-topic disclosure, but neither failed timing gate is a pass.
+A later retirement question first fails with `assistant_runtime_unavailable`,
+then physically receives a non-disclosing answer on retry. Honcho also returned the synthetic name while a separately captured,
+still-active assistant reply stated the same fact. This observation alone does
+not establish reuse of the retired owner message. The fixture-only oracle must
+explicitly retire every captured private source containing that synthetic name
+before its next question. Hermes' parent
+turn limit is 230 seconds while its Honcho recall request allowed 615; a bounded
+foreground recall candidate passes 26 relevant Python checks and needs packaged
+and coupled verification. Four pinned-native memory formatter checks cannot run in
+the host Python environment and remain unverified here. The fixture remains
+stopped while the separately managed operating stack has stopped database and
+workflow services plus unhealthy app and security services.
 The runner now binds replies to both chat and message, retains pending source
 identities before waiting, and stops after a failed case. Four focused checks
 pass for late/unrelated replies, cross-chat message-number reuse, duplicate

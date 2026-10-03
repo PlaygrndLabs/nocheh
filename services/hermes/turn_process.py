@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 from .capture import canonical
 
@@ -70,7 +71,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
-               'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image']}
+               'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image'],
+               'turn_deadline_epoch':time.time()+230}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
     from .security_transport import isolated_enabled,scoped_transport

@@ -131,22 +131,31 @@ receipts while preparing the actual updates. Six focused/adjacent PostgreSQL
 checks pass without skips, and compiled candidate hashes are verified. The
 seed-reusing real-model recheck passes reaction removal, corrected time and
 private isolation, with one first-attempt reply and archived delivery each.
-Fresh-topic isolation still fails; its only ingested evidence is the current
-question, which nevertheless triggers a long foreground Honcho recall. Restart
-recall and source retirement are unrun. Earlier timed-out reaction/correction
-turns later answered correctly on retries without passing their original timing
-or first-attempt gates. These observations do not repeat cold ingestion or pass
-operating recall. Additional model requests are owner-authorized for
-this synthetic fixture only, preserving shared accounting and the $5 embedding
-cap. Six relay checks pass for explicit additional allowance, retained accounting,
-authentication, concurrency, streaming and redaction. This changes neither
-operating policy nor live acceptance status.
+Fresh-topic isolation remains failed at the full timing gate: a new topic's
+single physical reply was factually cautious, correctly scoped and causally
+archived, but workflow completion took longer than 300 seconds. The previous
+fresh-topic attempt failed before delivery. Private recall after a Hermes restart
+passes on its first attempt. A subsequent retirement question timed out on the
+first attempt and received a non-disclosing reply on retry. A separately captured assistant reply stating the same fact had not been
+retired, so Honcho’s later output is inconclusive about retired owner-source
+reuse. The fixture oracle needs explicit retirement of every captured synthetic source with
+that fact before retesting. Earlier timed-out reaction/correction turns later
+answered correctly on retries without passing their original gates. These
+observations do not repeat cold ingestion or pass operating recall. Additional
+model requests are owner-authorized for this synthetic fixture only, preserving
+shared accounting and the $5 embedding cap. Six relay checks pass for explicit
+additional allowance, retained accounting, authentication, concurrency,
+streaming and redaction. This changes neither operating policy nor live
+acceptance status. The foreground Hermes turn now passes a trusted 230-second
+limit to its Honcho recall tool and reserves 45 seconds for answering; 26
+relevant Python checks pass. The pinned-native formatter checks require the
+packaged runtime, and the real-model timing effect remains unverified.
 
 Foreground recall now excludes peers whose only completed source evidence is
 the current question; independent history and background representations remain
 available. Four checks pass, including three PostgreSQL checks, with TypeScript
-compilation. The coupled real-model fresh-topic, restart and retirement checks
-remain pending. [Decision](adr/0099-independent-evidence-for-historical-recall.md).
+compilation. The coupled fresh-topic timing gate failed, restart recall passed, and
+the retirement gate remains pending after an inconclusive source test. [Decision](adr/0099-independent-evidence-for-historical-recall.md).
 
 </simulation_impact>
 

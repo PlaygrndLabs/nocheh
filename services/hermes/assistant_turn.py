@@ -123,7 +123,7 @@ def run(body, emit=None):
     from .isolated_profile import database_path,install_database_paths
     install_database_paths()
     install_tool_search_policy()
-    from services.hermes.archive_tools import bind_process_credential
+    from services.hermes.archive_tools import bind_process_credential,bind_process_deadline
     from services.hermes.request_boundary import install
     from services.hermes.compatibility_patch import install as native_gate
     from run_agent import AIAgent
@@ -131,6 +131,7 @@ def run(body, emit=None):
     install();native_gate();restrict_session_search()
     review = body.get('review') is True
     bind_process_credential(body['archive_credential'])
+    if body.get('review') is not True:bind_process_deadline(body['turn_deadline_epoch'])
     from .prepared_context import install as prepare_native, prepare
     prepare_native()
     from .subscription import SubscriptionCredentials
