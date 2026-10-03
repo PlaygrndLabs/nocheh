@@ -47,7 +47,9 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
     const approve=()=>services.memoryAccess.decide(owner,request.id,decision);
     const saved=async()=>(await stores.control.query('SELECT * FROM memory_access_requests WHERE id=$1',[request.id])).rows[0];
     const authority={owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='actions'")).rows[0].epoch)};
-    return {services,destination,sent,principal,request,fact,approve,saved,authority,source,loseReceipt:()=>{loseReceipt=true;}};
+    const reviseFact=()=>services.entities.publishClaim({subject_id:entity.id,predicate:'launch_schedule',content:'Orion launch schedule milestone is November.',
+      attribution:'reported',uncertainty:'supported',evidence:[evidence]},current,label+':revised-fact');
+    return {services,destination,sent,principal,request,fact,approve,saved,authority,source,reviseFact,loseReceipt:()=>{loseReceipt=true;}};
   };
   try {
     await t.test('one-time approval follows up once and is consumed only after confirmation',async()=>{
@@ -101,6 +103,7 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
       assert.equal((await f.services.telegramActions.run(request.followup_action_id,f.authority)).state,'waiting');
       await f.services.memoryAccess.reconcile();assert.equal((await f.saved()).state,'approved');
       assert.equal((await stores.control.query('SELECT state FROM memory_fact_grants WHERE id=$1',[approval.grant_id])).rows[0].state,'active');
+      await f.reviseFact();
       await stores.control.query('UPDATE telegram_action_requests SET next_attempt=now() WHERE id=$1',[request.followup_action_id]);
       assert.equal((await f.services.telegramActions.run(request.followup_action_id,f.authority)).state,'completed');
       await f.services.memoryAccess.reconcile();assert.equal(f.sent.length,1);
@@ -123,6 +126,22 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
       await f.services.memoryAccess.revoke(owner,approval.grant_id!,{expected_revision:1,operation_id:key+':revoke'});
       const result=await f.services.telegramActions.run(request.followup_action_id,f.authority);
       assert.ok(['denied','cancelled'].includes(result.state));assert.equal(f.sent.length,0,'revoked wording must never leave the trusted boundary');
+    });
+    await t.test('an automatic fact revision blocks its already queued approved wording',async()=>{
+      const f=await fixture(),binding=await f.services.guards.state();await f.approve();const request=await f.saved();
+      const revised=await f.reviseFact();assert.equal(revised.id,f.fact.id);assert.equal(revised.revision,f.fact.revision+1);
+      assert.deepEqual(await f.services.guards.state(),binding,'automatic fact replacement can preserve the guard generation');
+      const result=await f.services.telegramActions.run(request.followup_action_id,f.authority);
+      assert.ok(['denied','cancelled'].includes(result.state),'a changed fact requires fresh review before delivery');
+      assert.equal(f.sent.length,0);
+    });
+    await t.test('the physical delivery check rejects a fact changed after action admission',async()=>{
+      const f=await fixture();await f.approve();const request=await f.saved(),action=await f.services.telegramActions.inspect(owner,request.followup_action_id);
+      await stores.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[action.id]);
+      assert.deepEqual(await f.services.telegramActions.authorizeDelivery({id:action.id,...action.arguments}),{valid:true});
+      await f.reviseFact();
+      await assert.rejects(f.services.telegramActions.authorizeDelivery({id:action.id,...action.arguments}),{code:'action_delivery_denied'});
+      assert.equal(f.sent.length,0);
     });
     await t.test('an old committed approval can recover its missing handoff on exact replay',async()=>{
       const f=await fixture(),first=await f.approve(),request=await f.saved(),id=request.followup_action_id;assert.ok(id);
