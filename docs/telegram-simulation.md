@@ -37,7 +37,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | Scenario family | Observable requirement | Primary automated coverage |
 | --- | --- | --- |
 | Capture and outages | Fsync before acknowledgment; duplicate updates, revisions and control-store failure lose no originals | `test_capture.py`, `archive.test.ts`, `stores.test.ts` |
-| Native Telegram delivery | Persian/emoji and long replies retain routing; replay adds no send; Markdown rejection and lost replies preserve receipts | `test_telegram_simulation.py`, `test_gateway.py`, `store-telegram-dispatch.test.ts` |
+| Native Telegram delivery | Persian/emoji and long replies retain routing; replay adds no send; rate-limit waits and bounded retries preserve receipts; Markdown rejection and lost replies retain the audience | `test_telegram_simulation.py`, `test_capture.py`, `test_gateway.py`, `store-telegram-dispatch.test.ts` |
 | Access and topics | Owner/private, granted/denied participants, General and named topics remain distinct; stale capabilities fail closed | `test_scopes.py`, `assistant.test.ts`, `store-retrieval.test.ts` |
 | Files and voice | Original bytes and hashes survive download/transcription failures; generated transcripts are separate; blank speech is terminal | `store-preparation.test.ts`, `worker.test.ts`, `test_speech_gateway.py` |
 | Guarding | Literal masking preserves other content; owner edits survive; stale representation has no original fallback | `store-guards.test.ts`, `store-prepared-context.test.ts`, `test_boundary.py` |

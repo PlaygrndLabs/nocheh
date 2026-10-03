@@ -73,13 +73,22 @@ this UI verification does not establish live recall or release readiness.
 
 - Personal-use Telegram simulation is in progress in an isolated session fixture;
   see the [scenario matrix](docs/telegram-simulation.md). The native Bot API
-  rehearsal reproduced topic fallback into General and continued chunks after
-  revocation. The repaired physical request boundary passed nine synthetic
-  scenarios and ten adjacent capture/gateway checks. No operating activation or
-  new live pass is claimed. Broad Hermes, Honcho, storage and host checks retain
-  their failures, environment limitations and pending reruns in ignored
+  rehearsal reproduced topic fallback into General, continued chunks after
+  revocation, and a rate-limit rejection that permanently prevented recovery.
+  Eleven native scenarios and fourteen capture/gateway checks now pass, including
+  bounded rate-limit waits, revoked retries, crash recovery and no repeated sends.
+  [Physical delivery](docs/adr/0089-physical-telegram-delivery-boundary.md) and
+  [rate-limit receipts](docs/adr/0090-durable-telegram-rate-limit-retries.md).
+  The official Honcho SDK check passes in its own dependency image; twenty-four
+  integration contracts pass separately. Focused reruns resolve the baseline
+  native-import and Redis timeouts, and subscription compatibility passes all
+  twenty-one checks. Real container isolation and Compose configuration pass.
+  Broad PostgreSQL and pinned native Honcho storage checks are still running.
+  The native composer test's readiness repair is verified but awaiting its own
+  increment; fingerprint fixture checks remain pending. No operating activation
+  or new live pass is claimed. Original failures, invocation errors, skipped
+  fixtures and focused outcomes stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
-  [Decision](docs/adr/0089-physical-telegram-delivery-boundary.md).
 
 - Guarded reaction evidence now accompanies discovery with bounded target
   excerpts. Five storage/route/retirement checks and six networkless native

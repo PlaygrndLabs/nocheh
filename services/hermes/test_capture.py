@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from .capture import Capture, DISPATCH_KEY, captured_adapter_class, instrument_request
+from .capture import Capture, DISPATCH_KEY, canonical, captured_adapter_class, digest, instrument_request
 
 
 class Request:
@@ -87,6 +87,68 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         Capture(self.root,'testbot')
         results=[json.loads(p.read_bytes()) for p in (self.root/'pending').glob('*.json')]
         self.assertEqual(next(e for e in results if e['kind']=='outbound_result')['payload']['state'],'ambiguous')
+
+    async def test_rate_limit_wait_survives_restart_then_success_is_reused(self):
+        parameters={'chat_id':20,'text':'synthetic rate limit'}
+        rejected=(429,canonical({'ok':False,'error_code':429,'parameters':{'retry_after':10}}))
+        key,_=self.capture.outbound('sendMessage',parameters,'limited')
+        self.capture.complete(key,'sendMessage',parameters,rejected)
+        original=self.root/'outbound'/(digest(key)+'.result')
+        original_bytes=original.read_bytes();completed_at=original.stat().st_mtime
+        restarted=Capture(self.root,'testbot')
+        with patch('services.hermes.capture.time.time',return_value=completed_at+9):
+            self.assertEqual(restarted.outbound('sendMessage',parameters,'limited'),(key,rejected))
+        with patch('services.hermes.capture.time.time',return_value=completed_at+10):
+            retry,saved=restarted.outbound('sendMessage',parameters,'limited')
+        self.assertNotEqual(retry,key);self.assertIsNone(saved)
+        delivered=(200,b'{"ok":true,"result":{"message_id":8}}')
+        restarted.complete(retry,'sendMessage',parameters,delivered)
+        with patch('services.hermes.capture.time.time',return_value=completed_at+20):
+            self.assertEqual(Capture(self.root,'testbot').outbound('sendMessage',parameters,'limited'),(retry,delivered))
+        self.assertEqual(original.read_bytes(),original_bytes,'a retry must preserve the original rejection receipt')
+        self.assertEqual(len(list((self.root/'outbound').glob('*.intent'))),2)
+
+    async def test_rate_limit_retries_are_bounded_across_restart(self):
+        parameters={'chat_id':20,'text':'bounded synthetic retry'}
+        rejected=(429,canonical({'ok':False,'error_code':429,'parameters':{'retry_after':0}}))
+        keys=[]
+        for _ in range(3):
+            key,saved=Capture(self.root,'testbot').outbound('sendMessage',parameters,'bounded')
+            self.assertIsNone(saved);keys.append(key)
+            self.capture.complete(key,'sendMessage',parameters,rejected)
+        self.assertEqual(len(set(keys)),3)
+        for _ in range(3):
+            self.assertEqual(Capture(self.root,'testbot').outbound('sendMessage',parameters,'bounded'),(keys[-1],rejected))
+        self.assertEqual(len(list((self.root/'outbound').glob('*.intent'))),3)
+
+    async def test_only_documented_rate_limit_rejections_allow_another_attempt(self):
+        responses=[(429,b'not json'),(429,b'[]'),(429,b'{"ok":false,"error_code":429}'),
+                   (429,canonical({'ok':False,'error_code':400,'parameters':{'retry_after':0}})),
+                   (400,canonical({'ok':False,'error_code':429,'parameters':{'retry_after':0}}))]
+        responses += [(429,canonical({'ok':False,'error_code':429,'parameters':{'retry_after':delay}}))
+                      for delay in (-1,False,'0',0.5,None)]
+        for index,response in enumerate(responses):
+            with self.subTest(response=response):
+                parameters={'chat_id':20,'text':'invalid synthetic retry'};dispatch='invalid-'+str(index)
+                key,_=self.capture.outbound('sendMessage',parameters,dispatch)
+                self.capture.complete(key,'sendMessage',parameters,response)
+                self.assertEqual(Capture(self.root,'testbot').outbound('sendMessage',parameters,dispatch),(key,response))
+
+    async def test_crashed_or_uncertain_rate_limit_retry_is_never_repeated(self):
+        parameters={'chat_id':20,'text':'uncertain synthetic retry'}
+        rejected=(429,canonical({'ok':False,'error_code':429,'parameters':{'retry_after':0}}))
+        for index,response in enumerate((None,(500,b'{"ok":false,"error_code":500}'))):
+            with self.subTest(response=response):
+                dispatch='uncertain-'+str(index)
+                first,_=self.capture.outbound('sendMessage',parameters,dispatch)
+                self.capture.complete(first,'sendMessage',parameters,rejected)
+                retry,saved=self.capture.outbound('sendMessage',parameters,dispatch)
+                self.assertIsNone(saved)
+                if response is not None:self.capture.complete(retry,'sendMessage',parameters,response)
+                with self.assertRaisesRegex(RuntimeError,'outbound_delivery_ambiguous'):
+                    Capture(self.root,'testbot').outbound('sendMessage',parameters,dispatch)
+                receipt=json.loads((self.root/'outbound'/(digest(retry)+'.result')).read_bytes())
+                self.assertEqual(receipt['state'],'ambiguous')
 
     async def test_native_cold_start_retains_updates_and_handlers_require_committed_dispatch(self):
         from plugins.platforms.telegram.adapter import TelegramAdapter

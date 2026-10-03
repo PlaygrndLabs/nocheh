@@ -103,3 +103,4 @@ records current implementation and activation.
 | [0087](0087-live-background-admission-handoff.md) | Hand a free background slot to one bounded live callback | Supersedes 0085 retry-order hints; retains 0080 operation and foreground-capacity limits |
 | [0088](0088-primary-ingestion-before-native-note-review.md) | Give primary-memory writes a first attempt before starting new native note reviews | Extends 0080 and 0087; running and uncertain reviews keep their receipt-reconciliation paths |
 | [0089](0089-physical-telegram-delivery-boundary.md) | Bind every physical Telegram request to its authorized audience and current authority | Extends 0029 and 0030; native fallback cannot widen a topic and partial delivery keeps its receipts |
+| [0090](0090-durable-telegram-rate-limit-retries.md) | Preserve rejected rate-limit attempts while permitting bounded native recovery | Extends 0018 and 0089; confirmed and uncertain sends retain their no-resend boundary |
