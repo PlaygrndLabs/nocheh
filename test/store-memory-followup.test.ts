@@ -49,9 +49,68 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
     const authority={owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='actions'")).rows[0].epoch)};
     const reviseFact=()=>services.entities.publishClaim({subject_id:entity.id,predicate:'launch_schedule',content:'Orion launch schedule milestone is November.',
       attribution:'reported',uncertainty:'supported',evidence:[evidence]},current,label+':revised-fact');
-    return {services,destination,sent,principal,request,fact,approve,saved,authority,source,reviseFact,loseReceipt:()=>{loseReceipt=true;}};
+    return {services,destination,sent,principal,request,fact,decision,approve,saved,authority,source,reviseFact,loseReceipt:()=>{loseReceipt=true;}};
   };
+  const overlapMissingReceipts=async<T>(operation:string,command:()=>Promise<T>,other=command)=>{
+    const original=stores.control.query,query=original.bind(stores.control) as (text:string,values?:unknown[])=>Promise<pg.QueryResult>;
+    let arrivals=0,release!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve;}),timeout=setTimeout(release,10000);
+    stores.control.query=(async(text:string,values?:unknown[])=>{
+      const result=await query(text,values);
+      if(text.includes('FROM memory_access_decisions WHERE operation_id=$1')&&values?.[0]===operation&&!result.rowCount&&arrivals<2){
+        if(++arrivals===2)release();await barrier;
+      }
+      return result;
+    }) as typeof stores.control.query;
+    try {const results=await Promise.allSettled([command(),other()]);assert.equal(arrivals,2,'both commands must observe the missing receipt');return results;
+    }finally{clearTimeout(timeout);release();stores.control.query=original;}
+  };
+  const sameConcurrentReceipt=async<T>(operation:string,command:()=>Promise<T>)=>{
+    const results=await overlapMissingReceipts(operation,command);
+    assert.deepEqual(results.map(result=>result.status==='fulfilled'?'fulfilled':String(result.reason?.code??result.reason)),['fulfilled','fulfilled']);
+    const values=results.map(result=>(result as PromiseFulfilledResult<T>).value);assert.deepEqual(values[0],values[1]);return values[0]!;
+  };
+  const oneConflict=(results:PromiseSettledResult<unknown>[])=>assert.deepEqual(results.map(result=>
+    result.status==='fulfilled'?'fulfilled':String(result.reason?.code??result.reason)).sort(),['fulfilled','memory_access_decision_conflict']);
   try {
+    await t.test('a manual grant replay preserves its exact expiration',async()=>{
+      const f=await fixture(),expires=new Date(Date.now()+3600000).toISOString();
+      const command={fact_id:f.fact.id,fact_revision:f.fact.revision,destination:f.destination,expires_at:expires,operation_id:key+':expiration'};
+      const grant=await f.services.memoryAccess.grant(owner,command);
+      assert.deepEqual(await f.services.memoryAccess.grant(owner,{...command,expires_at:expires.replace('Z','+00:00')}),grant);
+      await assert.rejects(f.services.memoryAccess.grant(owner,{...command,expires_at:new Date(Date.now()+7200000).toISOString()}),{code:'memory_access_decision_conflict'});
+      const {expires_at:_,...unbounded}=command;
+      await assert.rejects(f.services.memoryAccess.grant(owner,unbounded),{code:'memory_access_decision_conflict'});
+      assert.equal((await stores.control.query('SELECT expires_at FROM memory_fact_grants WHERE id=$1',[grant.id])).rows[0].expires_at.toISOString(),expires);
+    });
+    await t.test('concurrent manual grant retries share one receipt',async()=>{
+      const f=await fixture(),operation=key+':concurrent-grant';
+      const command={fact_id:f.fact.id,fact_revision:f.fact.revision,destination:f.destination,operation_id:operation};
+      const grant=await sameConcurrentReceipt(operation,()=>f.services.memoryAccess.grant(owner,command));
+      assert.equal((await stores.control.query('SELECT id FROM memory_fact_grants WHERE id=$1',[grant.id])).rowCount,1);
+    });
+    await t.test('concurrent manual commands with different expiration conflict',async()=>{
+      const f=await fixture(),operation=key+':concurrent-expiration',expires=new Date(Date.now()+3600000).toISOString();
+      const command={fact_id:f.fact.id,fact_revision:f.fact.revision,destination:f.destination,expires_at:expires,operation_id:operation};
+      oneConflict(await overlapMissingReceipts(operation,()=>f.services.memoryAccess.grant(owner,command),()=>f.services.memoryAccess.grant(owner,
+        {...command,expires_at:new Date(Date.now()+7200000).toISOString()})));
+      assert.equal((await stores.control.query('SELECT grant_id FROM memory_access_decisions WHERE operation_id=$1',[operation])).rowCount,1);
+    });
+    await t.test('concurrent approval retries share one grant and follow-up',async()=>{
+      const f=await fixture();const receipt=await sameConcurrentReceipt(f.decision.operation_id,f.approve),request=await f.saved();
+      assert.equal(request.grant_id,receipt.grant_id);assert.ok(request.followup_action_id);
+      await f.services.telegramActions.run(request.followup_action_id,f.authority);assert.equal(f.sent.length,1);
+    });
+    await t.test('concurrent rejection retries share one receipt',async()=>{
+      const f=await fixture(),command={...f.decision,decision:'reject'};
+      const receipt=await sameConcurrentReceipt(command.operation_id,()=>f.services.memoryAccess.decide(owner,f.request.id,command));
+      assert.equal(receipt.state,'rejected');assert.equal((await f.saved()).grant_id,null);
+    });
+    await t.test('concurrent approval and rejection cannot reuse one operation identity',async()=>{
+      const f=await fixture();oneConflict(await overlapMissingReceipts(f.decision.operation_id,f.approve,
+        ()=>f.services.memoryAccess.decide(owner,f.request.id,{...f.decision,decision:'reject'})));
+      const request=await f.saved();assert.equal(request.state==='approved',!!request.followup_action_id);
+      assert.equal((await stores.control.query('SELECT grant_id FROM memory_access_decisions WHERE operation_id=$1',[f.decision.operation_id])).rowCount,1);
+    });
     await t.test('one-time approval follows up once and is consumed only after confirmation',async()=>{
       const f=await fixture(),approval=await f.approve(),request=await f.saved();assert.ok(request.followup_action_id,'approval must stage its follow-up');
       assert.equal((await f.services.memoryAccess.context(f.principal,'Orion launch schedule')).sources.length,0,'one-time grants never enter later model context');

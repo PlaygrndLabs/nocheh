@@ -1454,3 +1454,24 @@ quality and live release gates remain pending. Earlier candidates and reports
 remain in ignored evidence.
 
 </entry>
+
+<entry date="2026-10-03" task="Preserve concurrent memory decision receipts and expiration">
+
+Four database scenarios reproduced an ignored expiration change, a uniqueness
+error for concurrent manual grants, and false changed-request errors for identical
+approval and rejection retries. A transaction advisory lock now serializes each
+operation identity and rechecks its receipt before request or guard locks.
+Manual replay compares the saved expiration instant without changing historical
+grant identities. First rejection and its retries return the same receipt shape.
+
+All 29 affected checks pass without skips, including 24 memory lifecycle scenarios,
+conflicting concurrent decisions and deadlines, exact delivery, security denial,
+revocation and interrupted recovery. TypeScript compilation and the AST-only
+graph update pass. The four original failures, with their failed parent suite,
+remain in ignored evidence. The service images still need this source increment;
+coupled execution awaits the pending single-stack exception. No operating
+activation, model-quality result or new live pass is claimed.
+[Decision](adr/0096-serialize-memory-decision-replays.md),
+[behavior checks](../test/store-memory-followup.test.ts).
+
+</entry>
