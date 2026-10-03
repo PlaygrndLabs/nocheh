@@ -1082,3 +1082,26 @@ recall evidence was changed; remote publication retains its sanitized-history ga
 
 
 </entry>
+
+<entry date="2026-10-03" task="Conversational knowledge tools and live-learning follow-up">
+
+Hermes receives typed inspection, proposal, and status tools over fixed scoped
+broker routes. Owner CLI commands inspect and manage delegation and proposal
+decisions without making an arbitrary runtime administration proxy. The existing
+learning request accepts an optional organization result; malformed optional
+organization does not disrupt ordinary learning. Both completion paths save the
+organization workflow request in the same control transaction. Historical jobs
+and imported evidence remain outside automatic authority.
+
+TypeScript compilation and affected broker/learning fixtures pass. After reconciling
+concurrent delivery changes, isolated pinned native checks pass 85 of 86 tests;
+the explicit nested Docker security boundary test remains skipped, requiring its
+opt-in fixture. A further 11 tools/CLI checks pass after aligning tool descriptions.
+[Broker checks](../test/knowledge-broker.test.ts),
+[learning checks](../test/store-learning-engine.test.ts),
+[native checks](../services/hermes/test_knowledge_tools.py).
+The foundation is integrated locally as `b002f78`, reconciled with concurrent work
+in `2fe9ab0`. No deployment, operating delegation, live acceptance, or remote
+publication occurred.
+
+</entry>

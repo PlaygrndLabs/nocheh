@@ -46,6 +46,23 @@ class KnowledgeCliTests(unittest.TestCase):
             self.assertEqual(self.invoke('sharing',['save','--file',str(file)])[1]['enabled'],False)
         self.assertEqual(self.invoke('projects',['effective','--space','-10/topic/77'])[0],'/v1/projects/effective?space=-10%2Ftopic%2F77')
 
+    def test_organization_and_knowledge_commands_preserve_exact_review_payloads(self):
+        identity='a'*64
+        self.assertEqual(self.invoke('organization',['list']),('/v1/organization/delegations?after=',None))
+        self.assertEqual(self.invoke('knowledge',['show',identity]),('/v1/knowledge/proposals/'+identity,None))
+        self.assertEqual(self.invoke('knowledge',['decisions']),('/v1/decisions?after=',None))
+        with tempfile.TemporaryDirectory() as folder:
+            file=Path(folder)/'request.json'
+            delegation={'name':'Example','scopes':['-10'],'project_ids':[],'enabled':False,'allow_create':False,'expected_revision':0,'operation_id':'synthetic-save'}
+            file.write_text(json.dumps(delegation))
+            self.assertEqual(self.invoke('organization',['save','--file',str(file)]),('/v1/organization/delegations',delegation))
+            review={'decision':'approve','expected_revision':2,'operation_id':'synthetic-review'}
+            file.write_text(json.dumps(review))
+            self.assertEqual(self.invoke('knowledge',['decide',identity,'--file',str(file)]),('/v1/knowledge/proposals/'+identity+'/decide',review))
+            undo={'expected_revision':3,'operation_id':'synthetic-undo'}
+            file.write_text(json.dumps(undo))
+            self.assertEqual(self.invoke('knowledge',['undo',identity,'--file',str(file)]),('/v1/knowledge/proposals/'+identity+'/undo',undo))
+
     def test_owner_proxy_has_an_explicit_route_allowlist(self):
         for path in ['/v1/projects','/v1/learned?scope_kind=conversation&scope_id=-10','/v1/derivatives/'+'a'*64+'/activate','/v1/guards/events/'+'b'*64+'/history']:
             self.assertTrue(allowed_path(path),path)
