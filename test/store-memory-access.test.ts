@@ -21,6 +21,13 @@ test('fact grants authorize exact destinations while relationships only create r
     payload:{message:{message_id:index,date:1,chat:{id:Number(scope),type:scope==='123'?'private':'group'},from:{id:Number(scope==='123'?'123':'456'),first_name:'Fixture'},text}}};
     const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;};
   const principal=async(source:{id:string},space=group):Promise<Reader>=>{const binding=await services.guards.state();return {admin:false,scope:group,space,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch};};
+  const find=async(kind:'requests'|'grants',id:string)=>{
+    let after='';do {
+      const page=kind==='requests'?await services.memoryAccess.list(owner,after):await services.memoryAccess.grants(owner,after);
+      const rows='requests' in page?page.requests:page.grants,row=rows.find(item=>item.id===id);if(row)return row;
+      if(page.next)assert.ok(page.next>after,'memory access pagination must advance');after=page.next??'';
+    }while(after);assert.fail('Synthetic memory access row was not found across its pages');
+  };
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
     const project=await services.projects.save(owner,{name:'Apollo',description:'Fixture',state:'active',expected_revision:0,operation_id:key+':project'});
@@ -36,18 +43,23 @@ test('fact grants authorize exact destinations while relationships only create r
     assert.equal(context.sources.length,1);assert.equal(context.sources[0]!.text,'The checkpoint is complete.');
     assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources.length,0,'topics keep their own boundary');
     const suggestion=await services.memoryAccess.suggest(actor,'Apollo launch schedule October');assert.ok(suggestion);
-    let requests=await services.memoryAccess.list(owner),pending=requests.requests.find(row=>row.id===suggestion!.id)!;
+    let pending=await find('requests',suggestion.id);
     assert.equal(pending.wording,'Apollo launch schedule milestone is October.');assert.equal(pending.state,'pending');
     const rejected=await services.memoryAccess.decide(owner,pending.id,{decision:'reject',expected_revision:pending.revision,operation_id:key+':reject'});assert.equal(rejected.state,'rejected');
     const nextSource=await capture(group,3,'Apollo launch schedule October?'),again=await services.memoryAccess.suggest(await principal(nextSource),'Apollo launch schedule October');assert.ok(again);assert.notEqual(again!.id,pending.id,'a later independent request may suggest again');
     const corrected=await services.entities.correct(owner,suggestedFact.id,{content:'Apollo launch schedule milestone is November.',relationship_kind:'associated',attribution:'reported',uncertainty:'supported',retired:false,expected_revision:suggestedFact.revision,operation_id:key+':correct'});
     assert.equal(corrected.revision,suggestedFact.revision+1);assert.equal((await stores.derived.query('SELECT relationship_kind FROM entity_claim_versions WHERE claim_id=$1 AND revision=$2',[suggestedFact.id,corrected.revision])).rows[0].relationship_kind,'associated');
-    requests=await services.memoryAccess.list(owner);pending=requests.requests.find(row=>row.id===again!.id)!;
+    pending=await find('requests',again.id);
     await assert.rejects(services.memoryAccess.decide(owner,pending.id,{decision:'persistent',expected_revision:pending.revision,operation_id:key+':stale'}),{code:'memory_fact_changed'});
-    requests=await services.memoryAccess.list(owner);assert.equal(requests.requests.find(row=>row.id===again!.id)!.state,'suspended','stale requests require a new review');
+    assert.equal((await find('requests',again.id)).state,'suspended','stale requests require a new review');
     actor=await principal(groupSource);context=await services.memoryAccess.context(actor,'checkpoint complete');assert.equal(context.sources.length,0,'authorization generation changes suspend prior grants');
-    const saved=(await services.memoryAccess.grants(owner)).grants.find(row=>row.id===grant.id)!;assert.equal(saved.state,'suspended');
-    const map=await services.memoryMap.read(owner,{after:'',limit:250,focus:'',query:'',kind:'',state:''});assert.ok(map.edges.some(edge=>edge.kind==='relationship'&&!edge.authoritative&&edge.detail?.claim_id===suggestedFact.id&&edge.detail?.relationship_kind==='associated'));assert.ok(map.edges.some(edge=>edge.kind==='access'&&edge.authoritative));
+    const saved=await find('grants',grant.id);assert.equal(saved.state,'suspended');
+    let after='',relationship=false,accessEdge=false;do {
+      const map=await services.memoryMap.read(owner,{after,limit:250,focus:'',query:'',kind:'',state:''});
+      relationship ||=map.edges.some(edge=>edge.kind==='relationship'&&!edge.authoritative&&edge.detail?.claim_id===suggestedFact.id&&edge.detail?.relationship_kind==='associated');
+      accessEdge ||=map.edges.some(edge=>edge.kind==='access'&&edge.authoritative&&edge.detail?.grant_id===grant.id);
+      if(map.next)assert.notEqual(map.next,after,'memory map pagination must advance');after=map.next??'';
+    }while(after&&(!relationship||!accessEdge));assert.ok(relationship);assert.ok(accessEdge);
     await assert.rejects(services.memoryMap.read(actor,{after:'',limit:10,focus:'',query:'',kind:'',state:''}),{code:'owner_required'});
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.default_grant_mode,'one_time');
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.request_ttl_seconds,86400);

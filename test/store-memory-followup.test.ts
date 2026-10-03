@@ -153,6 +153,33 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
       assert.deepEqual(await f.approve(),first);assert.equal((await f.saved()).followup_action_id,id);
       await f.services.telegramActions.run(id,f.authority);await f.approve();assert.equal(f.sent.length,1);
     });
+    await t.test('exact replay recovers an unstarted legacy action withheld for missing links',async()=>{
+      const f=await fixture(),approval=await f.approve(),request=await f.saved(),id=request.followup_action_id;
+      await stores.control.query('UPDATE memory_fact_grants SET delivery_action_id=NULL WHERE id=$1',[approval.grant_id]);
+      await stores.control.query('UPDATE memory_access_requests SET followup_action_id=NULL WHERE id=$1',[f.request.id]);
+      assert.equal((await f.services.telegramActions.run(id,f.authority)).state,'cancelled');assert.equal(f.sent.length,0);
+      const action=await f.services.telegramActions.inspect(owner,id);
+      const automatic=await f.services.telegramActions.approvedSystem({...f.principal,logical_profile:request.logical_profile},f.source,request.binding,
+        f.destination,action.arguments.text,'memory-access-followup:'+approval.grant_id);
+      assert.equal(automatic.state,'cancelled','automatic restaging cannot revive a cancelled action');
+      assert.deepEqual(await f.approve(),approval);
+      assert.equal((await f.services.telegramActions.run(id,f.authority)).state,'completed');
+      await f.services.memoryAccess.reconcile();assert.equal(f.sent.length,1);assert.equal((await f.saved()).state,'delivered');
+      assert.equal((await stores.control.query('SELECT state FROM memory_fact_grants WHERE id=$1',[approval.grant_id])).rows[0].state,'consumed');
+    });
+    await t.test('security denial rolls back explicit recovery of an unstarted legacy action',async()=>{
+      const f=await fixture(),approval=await f.approve(),request=await f.saved(),id=request.followup_action_id;
+      await stores.control.query('UPDATE memory_fact_grants SET delivery_action_id=NULL WHERE id=$1',[approval.grant_id]);
+      await stores.control.query('UPDATE memory_access_requests SET followup_action_id=NULL WHERE id=$1',[f.request.id]);
+      assert.equal((await f.services.telegramActions.run(id,f.authority)).state,'cancelled');
+      const policyRevision=Number((await stores.control.query('SELECT revision FROM security_policy WHERE singleton')).rows[0].revision);
+      const action=await f.services.telegramActions.inspect(owner,id);
+      await savePolicy(stores.control,owner,{expected_revision:policyRevision,policy:{version:1,rules:[{id:key+':recovery-denied',kind:'telegram.send',outcome:'deny',fingerprint:action.fingerprint}]}});
+      await assert.rejects(f.approve(),{code:'action_delivery_denied'});
+      assert.equal((await f.services.telegramActions.inspect(owner,id)).state,'cancelled');assert.equal((await f.saved()).followup_action_id,null);
+      assert.equal((await stores.control.query('SELECT delivery_action_id FROM memory_fact_grants WHERE id=$1',[approval.grant_id])).rows[0].delivery_action_id,null);
+      assert.equal(f.sent.length,0);
+    });
     await t.test('automatic follow-up disabled does not silently create an action',async()=>{
       const f=await fixture(undefined,false),first=await f.approve();assert.deepEqual(await f.approve(),first);
       assert.equal((await f.saved()).followup_action_id,null);

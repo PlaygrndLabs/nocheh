@@ -108,3 +108,4 @@ records current implementation and activation.
 | [0092](0092-exact-topic-action-destinations.md) | Bind approved Telegram destinations to their concrete chat and topic | Extends 0029 and 0089; retains numeric destinations and existing immutable approvals |
 | [0093](0093-atomic-memory-approval-followups.md) | Commit memory grants, exact follow-ups and outbox work atomically | Extends 0041 and 0057; exact command replay repairs a current older handoff without repeating delivery |
 | [0094](0094-current-memory-authority-at-delivery.md) | Recheck the exact memory grant and fact at physical delivery | Extends 0089 and 0093; stale authority stops new sends while confirmed receipts remain reconcilable |
+| [0095](0095-recover-unstarted-memory-handoffs.md) | Recover an unstarted withheld memory action on exact owner replay | Extends 0093 and 0094; current authority and atomic policy checks exclude automatic retries and prior effects |

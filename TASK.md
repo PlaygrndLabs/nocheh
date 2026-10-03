@@ -109,7 +109,7 @@ this UI verification does not establish live recall or release readiness.
   [rate-limit recovery](docs/adr/0090-durable-telegram-rate-limit-retries.md),
   [approved destinations](docs/adr/0092-exact-topic-action-destinations.md).
   Memory approvals now commit their grant, exact follow-up, links and outbox work
-  together. Sixteen lifecycle scenarios cover complete and whitespace-sensitive wording,
+  together. Eighteen lifecycle scenarios cover complete and whitespace-sensitive wording,
   current and historical approval identities, normal/topic delivery, interrupted
   staging, legacy handoff repair, uncertain receipts, revocation, expiry, disabled
   follow-up and security denial. Automatic fact replacement now stops the queued
@@ -119,6 +119,11 @@ this UI verification does not establish live recall or release readiness.
   [Atomic handoff](docs/adr/0093-atomic-memory-approval-followups.md),
   [current delivery authority](docs/adr/0094-current-memory-authority-at-delivery.md),
   [failure-path checks](test/store-memory-followup.test.ts).
+  Exact owner replay can recover an unstarted legacy follow-up withheld for
+  incomplete links; automatic retries cannot resume it, and security denial rolls
+  recovery back. The 22 passing action/lifecycle checks are retained, and the
+  adjacent grant check passes after its fixture follows request, grant and map
+  pagination. [Recovery decision](docs/adr/0095-recover-unstarted-memory-handoffs.md).
   Owner-chosen person names, merged identities and Undo, corrected fact wording,
   and retired facts now survive automatic refresh. Ten focused entity checks and
   23 adjacent learning, native-memory, organization, portability and sharing checks
@@ -132,13 +137,14 @@ this UI verification does not establish live recall or release readiness.
   subscription compatibility, Honcho SDK/contracts, pinned native migrations and
   vector portability, workflow provisioning, privacy and restart probes pass in
   their separate synthetic fixtures. These checks make no model-quality claim.
-  Service, management, database and native images include the verified topic,
-  handoff and complete-wording fixes at `63f9b99`. All 22 packaged native checks
-  pass without source mounts or network access; the packaged Node runtime imports
-  successfully. Service images need the later memory-authority and owner-entity repairs before coupled
-  execution. The earlier candidate's evidence remains preserved.
-  The updated 16-service synthetic installation has a validated manifest, verified
-  images, internal networks and no host ports. It has not started because the
+  Service, management, database and native images were rebuilt at `1699716`,
+  including the delivery-authority and owner-entity repairs. The native filesystem
+  layers and runtime configuration match `63f9b99`, so its 22 packaged native
+  checks are carried forward. Service images need the later unstarted-handoff
+  repair before coupled execution. The earlier candidate's evidence remains preserved.
+  The 16-service synthetic installation has a previously validated manifest with
+  internal networks and no host ports; its image identities need refreshing.
+  It has not started because the
   operating stack is running and the owner's
   explicit single-stack exception remains pending. Real-provider semantic recall
   is unrun for this candidate. No operating activation or new live pass is claimed.
