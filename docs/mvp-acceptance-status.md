@@ -14,6 +14,20 @@ reliability or release approval.
 
 </scope>
 
+<simulation_impact>
+
+The personal-use [Telegram simulation](telegram-simulation.md) reproduced native
+fallback from a missing topic into General and continued delivery after a
+mid-response revocation. The candidate physical-request boundary passes nine
+synthetic scenarios and ten adjacent capture/gateway checks. This changes reply
+and approved-action delivery; their historical live passes remain dated evidence
+and do not verify the new candidate. Verify operating activation before any
+targeted live delivery check. Source capture, original voice bytes, subscription
+transcription and their historical limitations are unaffected. No real Telegram
+traffic or operating activation was performed by the simulation session.
+
+</simulation_impact>
+
 <checks>
 
 | Check | Recorded result | Evidence established | Revisit when affected |

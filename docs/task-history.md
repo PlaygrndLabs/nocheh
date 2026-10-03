@@ -745,6 +745,8 @@ contains the historical private reports and has not been rewritten.
 </entry>
 
 
+
+
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -1008,5 +1010,22 @@ then passed isolated fresh-start and restart checks: the indexed view and
 installation generation were unchanged. No operating volume entered the fixture.
 The deployment guide now requires checking the bundled schema as well as the
 live catalog. The operating image replacement remains a separate pending step.
+
+</entry>
+
+<entry date="2026-10-03" task="Physical Telegram delivery boundary">
+
+The owner requested personal-use scenario testing with mocked Telegram while two
+other sessions continued. A dedicated worktree and synthetic fixtures preserved
+their services and source data. Six initial native scenarios reproduced two
+failures: a deleted topic fell back to General, and a long reply continued after
+revocation. The physical Bot API boundary now binds chat/topic and checks current
+authority and cancellation on each chunk and retry. Approved actions use the
+same boundary; existing durable receipts prevent repeated partial effects.
+
+All nine focused synthetic scenarios and ten existing capture/gateway checks
+passed. The AST-only graph update passed. Failed baseline reports remain ignored
+local evidence. Broader simulation and existing live recall/release gates are
+still pending; this increment neither deploys nor activates the operating runtime.
 
 </entry>

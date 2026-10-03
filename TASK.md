@@ -71,6 +71,16 @@ this UI verification does not establish live recall or release readiness.
 
 <verification>
 
+- Personal-use Telegram simulation is in progress in an isolated session fixture;
+  see the [scenario matrix](docs/telegram-simulation.md). The native Bot API
+  rehearsal reproduced topic fallback into General and continued chunks after
+  revocation. The repaired physical request boundary passed nine synthetic
+  scenarios and ten adjacent capture/gateway checks. No operating activation or
+  new live pass is claimed. Broad Hermes, Honcho, storage and host checks retain
+  their failures, environment limitations and pending reruns in ignored
+  `data/acceptance/results/telegram-simulation/` in the simulation worktree.
+  [Decision](docs/adr/0089-physical-telegram-delivery-boundary.md).
+
 - Guarded reaction evidence now accompanies discovery with bounded target
   excerpts. Five storage/route/retirement checks and six networkless native
   archive checks pass; TypeScript compilation and the AST-only graph update

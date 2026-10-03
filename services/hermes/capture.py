@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 DISPATCH_KEY = contextvars.ContextVar('nocheh_dispatch_key', default=None)
+OUTBOUND_CHECK = contextvars.ContextVar('nocheh_outbound_check', default=None)
 
 
 def canonical(value):
@@ -176,6 +177,11 @@ def instrument_request(request, capture: Capture, polling=False):
                 return await super().do_request(*args, **kwargs)
             data = kwargs.get('request_data')
             parameters = data.parameters if data else {}
+            # Formatting, chunks and native retries may change routing. Check
+            # the actual request before journaling or transmission each time.
+            check = OUTBOUND_CHECK.get()
+            if check is not None:
+                await asyncio.to_thread(check, method, parameters)
             # Parent context is inherited by PTB's background reply tasks.
             dispatch = DISPATCH_KEY.get() or 'control:' + uuid.uuid4().hex
             key, saved = await asyncio.to_thread(capture.outbound, method, parameters, dispatch)
