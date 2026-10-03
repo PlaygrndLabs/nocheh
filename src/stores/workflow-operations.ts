@@ -99,6 +99,19 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     return {source,binding};
   };
   const operations:Partial<Record<WorkflowFamily,WorkflowOperation>>={
+    organization:async(job,authority)=>{
+      if(!/^(proposal|learning):[a-f0-9]{64}$/.test(job))return observation('failed','admission');
+      return fenced('organization',authority,async()=>{
+        const result=await s.knowledge.process(job);
+        if(result.state==='waiting'||result.state==='queued')return waiting('organization',result.reason?.includes('turn')||result.reason?.includes('reply')?'receipt_pending':'prerequisite',2000);
+        if(result.state==='review')return observation('completed','review',0,Date.now(),'approval_required');
+        if(result.state==='cancelled')return observation('cancelled','organization');
+        if(result.state==='failed')return observation('failed','organization',0,Date.now(),'workflow_execution_failed');
+        if(result.state==='stale'||result.state==='undone')return observation('skipped','organization',0,Date.now(),'superseded');
+        if(result.state==='applied'||result.state==='noop')return observation('completed','organization');
+        throw new HttpError(503,'invalid_organization_outcome');
+      });
+    },
     telegram:(id,authority)=>s.telegram.run(id,authority),
     browser:(id,authority)=>s.browser.run(id,authority),
     schedules:(id,authority)=>s.scheduled.operation(id,authority),

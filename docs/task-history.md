@@ -997,3 +997,22 @@ and conversational recall remain open. Private evidence is under
 `data/acceptance/results/release-20261003/`.
 
 </entry>
+
+<entry date="2026-10-03" task="Bounded organization authority and application foundation">
+
+The accepted agent-led knowledge-management plan now has durable delegation,
+proposal, decision, and receipt schemas. Exact scope and assignment baselines,
+inherited-topic effects, explicit resumption, capture watermarks, guarded
+dependencies, deferred atomic batches, no-op replay, cancellation, and checked
+undo have synthetic Node 24/PostgreSQL coverage. Existing project commands share
+transaction-level mutations. Portable authority is retained as inactive history,
+including through the control-record restore path. Owner read models cover named
+conversations, independent authorities, complete decision totals, and exact lookup.
+[ADR-0090](adr/0090-bounded-agent-knowledge-organization.md),
+[application checks](../test/store-knowledge-management.test.ts),
+[read-model checks](../test/store-owner-supervision.test.ts),
+[workflow controls](../test/store-workflow-owner.test.ts).
+Runtime and dashboard integration follow separately. No live state or existing
+recall evidence was changed; remote publication retains its sanitized-history gate.
+
+</entry>

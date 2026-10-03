@@ -14,6 +14,26 @@ export interface Project {id:string;name:string;description:string;state:'active
 export interface Assignment {space_id:string;project_id:string|null;mode:'assigned'|'none'|'inherit';revision:number}
 export interface SharingRule {id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;revision:number}
 
+/** Trusted callers hold the guard lock and own the surrounding receipt transaction. */
+export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revision'>&{expected_revision:number}):Promise<Project> {
+  const prior=(await db.query('SELECT revision FROM projects WHERE id=$1 FOR UPDATE',[change.id])).rows[0];
+  if((prior?.revision??0)!==change.expected_revision)throw new HttpError(409,'project_revision_conflict');
+  const result:Project={id:change.id,name:change.name,description:change.description,state:change.state,revision:change.expected_revision+1};
+  await db.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,$2,$3,$4,$5)
+    ON CONFLICT(id) DO UPDATE SET name=$2,description=$3,state=$4,revision=$5,updated_at=now()`,[result.id,result.name,result.description,result.state,result.revision]);
+  return result;
+}
+
+export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'revision'>&{expected_revision:number}):Promise<Assignment> {
+  const previous=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1 FOR UPDATE',[change.space_id])).rows[0];
+  if((previous?.revision??0)!==change.expected_revision)throw new HttpError(409,'assignment_revision_conflict');
+  if(change.project_id&&!(await db.query("SELECT id FROM projects WHERE id=$1 AND state='active'",[change.project_id])).rowCount)throw new HttpError(409,'active_project_required');
+  const result:Assignment={space_id:change.space_id,project_id:change.project_id,mode:change.mode,revision:change.expected_revision+1};
+  await db.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,$4)
+    ON CONFLICT(space_id) DO UPDATE SET project_id=$2,mode=$3,revision=$4,updated_at=now()`,[result.space_id,result.project_id,result.mode,result.revision]);
+  return result;
+}
+
 export class ProjectRepository {
   private readonly commands:OwnerCommands;
   constructor(readonly control:pg.Pool){this.commands=new OwnerCommands(control);}
@@ -23,14 +43,7 @@ export class ProjectRepository {
     const name=string(body.name,200).trim(),description=string(body.description??'',4000),expected=revision(body.expected_revision);
     if(!name||!['active','archived'].includes(String(body.state)))throw new HttpError(400,'invalid_project');
     const change={id:projectId,name,description,state:body.state as Project['state'],expected_revision:expected};
-    return this.commands.run(principal,operationId,{kind:'project',...change},async db=>{
-      const prior=(await db.query('SELECT revision FROM projects WHERE id=$1 FOR UPDATE',[projectId])).rows[0];
-      if((prior?.revision??0)!==expected)throw new HttpError(409,'project_revision_conflict');
-      const result:Project={id:projectId,name,description,state:change.state,revision:expected+1};
-      await db.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,$2,$3,$4,$5)
-        ON CONFLICT(id) DO UPDATE SET name=$2,description=$3,state=$4,revision=$5,updated_at=now()`,[projectId,name,description,change.state,result.revision]);
-      return result;
-    });
+    return this.commands.run(principal,operationId,{kind:'project',...change},db=>writeProject(db,change));
   }
   async assign(principal:Reader,input:unknown):Promise<Assignment> {
     admin(principal);const body=object(input);exact(body,['space_id','project_id','mode','expected_revision','operation_id']);
@@ -38,15 +51,8 @@ export class ProjectRepository {
     if(!['assigned','none','inherit'].includes(mode))throw new HttpError(400,'invalid_project_assignment');
     const projectId=mode==='assigned'?id(body.project_id):null;
     if(mode!=='assigned'&&body.project_id!==undefined&&body.project_id!==null)throw new HttpError(400,'invalid_project_assignment');
-    return this.commands.run(principal,string(body.operation_id,200),{kind:'project_assignment',space,mode,projectId,expected},async db=>{
-      const previous=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1 FOR UPDATE',[space])).rows[0];
-      if((previous?.revision??0)!==expected)throw new HttpError(409,'assignment_revision_conflict');
-      if(projectId&&!(await db.query("SELECT id FROM projects WHERE id=$1 AND state='active'",[projectId])).rowCount)throw new HttpError(409,'active_project_required');
-      const result:Assignment={space_id:space,project_id:projectId,mode,revision:expected+1};
-      await db.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,$4)
-        ON CONFLICT(space_id) DO UPDATE SET project_id=$2,mode=$3,revision=$4,updated_at=now()`,[space,projectId,mode,result.revision]);
-      return result;
-    });
+    return this.commands.run(principal,string(body.operation_id,200),{kind:'project_assignment',space,mode,projectId,expected},
+      db=>writeAssignment(db,{space_id:space,project_id:projectId,mode,expected_revision:expected}));
   }
   async effective(space:string):Promise<{space:string;own_assignment:Assignment|null;assignment:Assignment|null;project:Project|null;inherited:boolean}> {
     validateSpace(space);const parent=parentSpace(space);

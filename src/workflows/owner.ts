@@ -67,12 +67,12 @@ function criteria(input:unknown){
 export function workflowView(row:Record<string,any>):Record<string,any>{
   const {created_cursor,...data}=row;
   const open=!closedStates.includes(row.state),owned=row.owner==='inngest';
-  const retry=owned&&row.admission&&!row.active_step&&!row.receipt_blocked&&row.state==='retryable_failed'&&row.retry_supported!==false;
+  const retry=owned&&row.admission&&!row.active_step&&!row.receipt_blocked&&(row.state==='retryable_failed'||row.family==='organization'&&row.state==='failed')&&row.retry_supported!==false;
   const schedule=row.family==='schedules'&&row.job_id.startsWith('schedule:');
   const domainCancel=row.domain_controllable??(['telegram','imports','browser','actions','tools'].includes(row.family)||row.family==='memory_review'&&row.job_id.startsWith('review:')||row.family==='schedules'&&!schedule);
   const cancel=owned&&row.admission&&open&&!row.active_step&&!row.receipt_blocked&&row.state!=='running'&&domainCancel;
   return {...data,can_retry:retry,can_cancel:cancel,
-    control_reason:!owned?'legacy_owner':!open?'closed':!row.admission?'owner_paused':schedule?'native_schedule_control':row.active_step||row.state==='running'?'execution_in_progress':row.receipt_blocked?'receipt_closed':!domainCancel?'source_policy_control':null,
+    control_reason:retry?null:!owned?'legacy_owner':!open?'closed':!row.admission?'owner_paused':schedule?'native_schedule_control':row.active_step||row.state==='running'?'execution_in_progress':row.receipt_blocked?'receipt_closed':!domainCancel?'source_policy_control':null,
     source_url:row.source_event_id?'/api/nocheh/events/'+row.source_event_id:null};
 }
 const view=workflowView;

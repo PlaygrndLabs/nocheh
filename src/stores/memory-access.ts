@@ -9,6 +9,7 @@ import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {EntityRepository} from './entities.js';
 import type {GuardBinding,GuardRepository} from './guards.js';
 import {OwnerCommands} from './owner-commands.js';
+import {foregroundReplyActive} from './automatic-publication.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {ProjectRepository} from './projects.js';
 import {defaultLogicalProfile} from './runtime-profile.js';
@@ -180,11 +181,14 @@ export class MemoryAccessRepository {
   async grant(principal:Reader,input:unknown) {
     admin(principal);const body=exact(input,['fact_id','fact_revision','destination','wording','expires_at','operation_id']),fact=await this.fact(identity(body.fact_id));
     if(fact.revision!==revision(body.fact_revision))throw new HttpError(409,'memory_fact_changed');const destination=validateSpace(body.destination),operation=string(body.operation_id,200);
-    const binding=await this.guards.state(),wording=body.wording===undefined?fact.content:string(body.wording,12000),representation=await this.representation(fact,wording,binding,operation);
+    const binding=await this.guards.state();
+    if(principal.guard_epoch!==undefined&&(principal.guard_epoch!==binding.epoch||principal.generation!==binding.generation))throw new HttpError(409,'guard_context_changed');
+    const wording=body.wording===undefined?fact.content:string(body.wording,12000),representation=await this.representation(fact,wording,binding,operation);
     const expires=body.expires_at===undefined?null:new Date(string(body.expires_at,100));if(expires&&(!Number.isFinite(expires.getTime())||expires<=new Date()))throw new HttpError(400,'invalid_grant_expiration');
     const id=digest(canonical([protocol,'manual-grant',operation,destination,fact.id,fact.revision,representation.hash])),hash=digest(canonical({kind:'manual_memory_grant',id,destination,fact:fact.id,revision:fact.revision}));
     const prior=(await this.stores.control.query('SELECT request_hash,grant_id,revision FROM memory_access_decisions WHERE operation_id=$1',[operation])).rows[0];if(prior){if(prior.request_hash!==hash)throw new HttpError(409,'memory_access_decision_conflict');return {id:prior.grant_id,state:'active',revision:prior.revision};}
     const db=await this.stores.control.connect();try{await db.query('BEGIN');await this.fence(db,binding,fact);
+      if(principal.guard_epoch!==undefined&&await foregroundReplyActive(db,binding))throw new HttpError(409,'foreground_reply_active');
       await db.query(`INSERT INTO memory_fact_grants(id,destination,fact_id,fact_revision,representation_reference,binding,guard_revision,text_hash,mode,expires_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'persistent',$9)`,[id,destination,fact.id,fact.revision,representation.reference,binding,representation.guard_revision,representation.hash,expires]);
       await db.query("INSERT INTO memory_access_decisions(operation_id,request_hash,grant_id,decision,revision) VALUES($1,$2,$3,'persistent',1)",[operation,hash,id]);await db.query('COMMIT');
