@@ -1044,3 +1044,21 @@ three-test gateway rerun. The original failure remains in ignored evidence.
 The repair does not activate the operating runtime or pass a live release gate.
 
 </entry>
+
+<entry date="2026-10-03" task="Synchronize the native composer acceptance input">
+
+The broad Hermes baseline and a focused rerun both failed the real TUI capture
+check. Its driver treated the startup window title as composer readiness, then
+pressed Enter after a fixed delay. Waiting for the ready profile prompt and the
+rendered synthetic input passes the unchanged assertions: an archive outage is
+visible, no managed turn starts, and no conversation message is saved. An initial
+prompt-matching mistake and both earlier failures remain in ignored evidence.
+The AST-only graph refresh includes the repaired driver. No product UI changed.
+
+Independent acceptance also passed the official Honcho SDK contract in its
+correct image and the pinned native migrations/ORM/pgvector eight-table inactive
+restore. The latter preserves exact content, citations and retired history,
+supports repeated import, and leaves the execution queue inactive, without any
+provider call. Broad storage and remaining fixture checks continue separately.
+
+</entry>

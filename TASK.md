@@ -83,9 +83,12 @@ this UI verification does not establish live recall or release readiness.
   integration contracts pass separately. Focused reruns resolve the baseline
   native-import and Redis timeouts, and subscription compatibility passes all
   twenty-one checks. Real container isolation and Compose configuration pass.
-  Broad PostgreSQL and pinned native Honcho storage checks are still running.
-  The native composer test's readiness repair is verified but awaiting its own
-  increment; fingerprint fixture checks remain pending. No operating activation
+  Honcho's packaged source matches its pin; its real migrations, ORM, eight-table
+  vector-data transfer and inactive restore pass with synthetic data and no
+  provider calls. The native composer test now waits for the ready prompt and
+  rendered input before Enter; its original capture-failure assertions pass.
+  Broad PostgreSQL checks are still running; fingerprint and real workflow
+  engine fixtures remain pending. No operating activation
   or new live pass is claimed. Original failures, invocation errors, skipped
   fixtures and focused outcomes stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
