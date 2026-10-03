@@ -29,9 +29,11 @@ traffic or operating activation was performed by the simulation session.
 
 Approved actions now retain the concrete topic in `current`, owner review and
 native delivery; General and deleted-topic fallback checks pass. The actual
-storage action suite passes. Separate one-time memory tests confirm normal and
-topic delivery and revocation, but recovery after an interrupted approval handoff
-still fails. Candidate images predate this topic repair and need rebuilding.
+storage action suite passes. Eleven one-time memory lifecycle cases and the existing grant suite now pass.
+Approval, its exact action and outbox work commit together; legacy command replay
+and confirmed receipt-link repair preserve authority and prevent repeated sends.
+The initial interrupted-handoff failure remains in the evidence history. Candidate
+images predate the topic and handoff repairs and need rebuilding.
 
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority

@@ -99,58 +99,37 @@ this UI verification does not establish live recall or release readiness.
 
 <verification>
 
-- Personal-use Telegram simulation is in progress in an isolated session fixture;
-  see the [scenario matrix](docs/telegram-simulation.md). The native Bot API
-  rehearsal reproduced topic fallback into General, continued chunks after
-  revocation, and a rate-limit rejection that permanently prevented recovery.
-  Fifteen native scenarios and fourteen capture/gateway checks now pass, including
-  bounded rate-limit waits, revoked retries, crash recovery and no repeated sends.
-  [Physical delivery](docs/adr/0089-physical-telegram-delivery-boundary.md) and
-  [rate-limit receipts](docs/adr/0090-durable-telegram-rate-limit-retries.md).
-  Approved actions now preserve the concrete source topic for `current` and carry
-  it through review, fingerprints and native delivery. Real PostgreSQL action
-  checks and native General/topic/replay/fallback checks pass; see
-  [exact destinations](docs/adr/0092-exact-topic-action-destinations.md).
-  Independent one-time memory tests pass normal delivery, topic delivery and
-  revocation, but reproduce a lost follow-up after an interrupted approval
-  handoff. That recovery defect remains pending; it is not a passing gate.
-  The official Honcho SDK check passes in its own dependency image; twenty-four
-  integration contracts pass separately. Focused reruns resolve the baseline
-  native-import and Redis timeouts, and subscription compatibility passes all
-  twenty-one checks. Real container isolation and Compose configuration pass.
-  Honcho's packaged source matches its pin; its real migrations, ORM, eight-table
-  vector-data transfer and inactive restore pass with synthetic data and no
-  provider calls. The native composer test now waits for the ready prompt and
-  rendered input before Enter; its original capture-failure assertions pass.
-  The broad Node/PostgreSQL baseline completed 210 checks: 203 passed, three
-  failed and four required separate fixtures. All four skipped boundaries now
-  pass with their explicit fixtures. The two stale storage test expectations
-  are repaired and pass. Portable access-history import had a reproduced
-  authority defect; four focused transfer/access checks pass after excluding
-  historical control records from active tables. The concurrent organization
-  increment independently includes the same filter. The combined branch ran 109
-  checks: 107 passed; a reset schema-inventory defect and a test startup race
-  were reproduced and repaired. The focused combined build and all 52 affected
-  backend/dashboard checks pass. The reset inventory now recognizes declarations
-  without treating SQL comment prose as a table; unexpected real tables still
-  block acceptance. Saved policy, incomplete-topic and HTTP startup fixtures now
-  follow current contracts without weakening their privacy or recovery checks.
-  The combined native run passes 83 checks; its skipped Docker-isolation check
-  retains the separate real-host pass. Two bounded
-  recovery fingerprint checks pass. The isolated workflow fixture now passes its
-  provisioning, inspection, pipeline, privacy and restart probes; see the
-  [completed fixture repair](docs/task-history.md) and
-  [rehearsal procedure](docs/telegram-simulation.md). Concurrent organization and
-  supervision work through `c994596` is reconciled; later changes need their own
-  impact review. Candidate service, database, management and native images are
-  built; sixteen packaged native checks pass for the earlier candidate. Those
-  images need the later topic fix before coupled execution. A complete 16-service synthetic
-  installation is prepared with verified images, internal networks and no host
-  ports. It has not started: the existing operating stack is running, and the
-  owner's explicit single-stack exception is pending. Real-provider semantic
-  recall also remains unrun for this simulation candidate. No operating activation
-  or new live pass is claimed. Original failures, invocation errors, skipped
-  fixtures and focused outcomes stay in ignored
+- Personal-use Telegram simulation is in progress; see the
+  [scenario matrix](docs/telegram-simulation.md) and dated
+  [completed increments](docs/task-history.md). Fifteen native Telegram scenarios
+  and fourteen capture/gateway checks pass through the pinned Hermes adapter.
+  Physical sends preserve current authority, exact chat/topic destinations and
+  cancellation; bounded rate-limit retries retain immutable receipts.
+  [Delivery boundary](docs/adr/0089-physical-telegram-delivery-boundary.md),
+  [rate-limit recovery](docs/adr/0090-durable-telegram-rate-limit-retries.md),
+  [approved destinations](docs/adr/0092-exact-topic-action-destinations.md).
+  Memory approvals now commit their grant, exact follow-up, links and outbox work
+  together. Eleven lifecycle scenarios cover normal/topic delivery, interrupted
+  staging, legacy handoff repair, uncertain receipts, revocation, expiry, disabled
+  follow-up and security denial. They and the existing memory grant suite pass;
+  adjacent real PostgreSQL action/dispatch checks also pass.
+  [Atomic handoff](docs/adr/0093-atomic-memory-approval-followups.md),
+  [failure-path checks](test/store-memory-followup.test.ts).
+  The broad storage and combined-branch runs retain their original failures and
+  focused repairs in ignored evidence. Portable history remains inactive; reset
+  inventory rejects unexpected real tables. The combined build and 52 affected
+  backend/dashboard checks pass. Concurrent organization and supervision through
+  `c994596` are reconciled; later changes need impact review. Host isolation,
+  subscription compatibility, Honcho SDK/contracts, pinned native migrations and
+  vector portability, workflow provisioning, privacy and restart probes pass in
+  their separate synthetic fixtures. These checks make no model-quality claim.
+  The earlier candidate images pass sixteen packaged native checks but need the
+  topic and memory-handoff repairs before coupled execution. A complete 16-service
+  synthetic installation is prepared with internal networks and no host ports;
+  it has not started because the operating stack is running and the owner's
+  explicit single-stack exception remains pending. Real-provider semantic recall
+  is unrun for this candidate. No operating activation or new live pass is claimed.
+  Detailed original outcomes, image identities and limitations stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
 
 - Guarded reaction evidence now accompanies discovery with bounded target
