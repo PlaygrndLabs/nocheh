@@ -87,8 +87,19 @@ this UI verification does not establish live recall or release readiness.
   vector-data transfer and inactive restore pass with synthetic data and no
   provider calls. The native composer test now waits for the ready prompt and
   rendered input before Enter; its original capture-failure assertions pass.
-  Broad PostgreSQL checks are still running; fingerprint and real workflow
-  engine fixtures remain pending. No operating activation
+  The broad Node/PostgreSQL baseline completed 210 checks: 203 passed, three
+  failed and four required separate fixtures. All four skipped boundaries now
+  pass with their explicit fixtures. The two stale storage test expectations
+  are repaired and pass. Portable access-history import had a reproduced
+  authority defect; four focused transfer/access checks pass after excluding
+  historical control records from active tables. The concurrent organization
+  increment independently includes the same filter; the combined branch still
+  requires affected verification. Two bounded
+  recovery fingerprint checks pass. The workflow fixture now uses the dedicated
+  database bootstrap; five provisioning/inspection checks and real pipeline,
+  host-import, privacy and restart-checkpoint probes pass. Concurrent changes
+  on `main` require reconciliation and affected reruns before the simulation is
+  considered current. No operating activation
   or new live pass is claimed. Original failures, invocation errors, skipped
   fixtures and focused outcomes stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.

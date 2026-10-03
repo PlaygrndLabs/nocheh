@@ -76,12 +76,24 @@ test('complete derivative transfer retains edits and lineage while imported auth
     const current=await source.guards.state(),cacheId=digest(key+':cache');
     await stores.derived.query('INSERT INTO runtime_prepared_values(id,audience,generation,epoch,content) VALUES($1,$2,$3,$4,$5)',[cacheId,'owner',current.generation,current.epoch,Buffer.from('Do not resurrect this authorization')]);
     await stores.derived.query('INSERT INTO runtime_prepared_inputs(id,audience,generation,epoch,source_id) VALUES($1,$2,$3,$4,$5)',[cacheId,'owner',current.generation,current.epoch,'events:'+original.reference.id]);
+    const destination='-'+Date.now(),requestId=digest(key+':access-request'),grantId=digest(key+':grant'),decisionId=key+':access-decision';
+    await stores.control.query(`INSERT INTO memory_access_settings(destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode)
+      VALUES($1,'related',true,true,86400,'persistent')`,[destination]);
+    await stores.control.query(`INSERT INTO memory_access_requests(id,request_hash,source_reference,destination,source_scope,logical_profile,
+      query_hash,fact_id,fact_revision,proposal_reference,binding,relationship_path,evidence,state,decision,grant_id,expires_at)
+      VALUES($1,$2,$3,$4,'123','fixture',$2,$5,1,$6,$7,'[]',$8,'approved','persistent',$9,now()+interval '1 day')`,
+      [requestId,digest(key+':request-hash'),original.reference,destination,entry,outputs[0],current,JSON.stringify([original.reference]),grantId]);
+    await stores.control.query(`INSERT INTO memory_fact_grants(id,request_id,destination,fact_id,fact_revision,representation_reference,binding,text_hash,mode)
+      VALUES($1,$2,$3,$4,1,$5,$6,$7,'persistent')`,[grantId,requestId,destination,entry,outputs[0],current,digest('Durable owner wording')]);
+    await stores.control.query(`INSERT INTO memory_access_decisions(operation_id,request_hash,request_id,grant_id,decision,revision)
+      VALUES($1,$2,$3,$4,'persistent',1)`,[decisionId,digest(key+':decision-hash'),requestId,grantId]);
+    const targetSettings=(await target.control.query('SELECT * FROM memory_access_settings ORDER BY destination')).rows;
     // Deliberately match the old generation and epoch: cache inertness must not
     // depend merely on coincidentally different installation identifiers.
     await target.control.query('UPDATE installation SET generation=$1',[current.generation]);await target.control.query('UPDATE guard_state SET epoch=$1,mode=$2',[current.epoch,'off']);
     await restored.sourcePortability.import(owner,await source.sourcePortability.record(owner,original.reference.id));
     await restored.attachments.commit(file.id,bytes);
-    const records:PortableRecord[]=[],keys=new Set<string>([entry,cacheId,operation.id]),entityKeys=new Set([project.id,entityContext.project!.id,entityContext.speaker!.id,entityClaim.id]);
+    const records:PortableRecord[]=[],keys=new Set<string>([entry,cacheId,operation.id,'*',destination,requestId,grantId,decisionId]),entityKeys=new Set([project.id,entityContext.project!.id,entityContext.speaker!.id,entityClaim.id]);
     for(const type of portableDerivativeTypes) {
       let after='';do {
         const page=await source.derivativePortability.page(owner,type,after,100);
@@ -97,6 +109,13 @@ test('complete derivative transfer retains edits and lineage while imported auth
     }
     assert.ok(records.some(r=>r.type==='runtime_prepared_values'));assert.ok(records.some(r=>r.type==='learned_versions'));assert.ok(records.some(r=>r.type==='guard_revisions'&&r.value.author==='owner'));
     assert.ok(records.some(r=>r.type==='memory_entities'));assert.ok(records.some(r=>r.type==='entity_claim_versions'));
+    const accessHistory=records.filter(record=>['memory_access_settings','memory_access_requests','memory_fact_grants','memory_access_decisions'].includes(record.type));
+    assert.equal(accessHistory.length,5,'default and destination settings, request, grant and decision are retained');
+    // Import the authority-shaped records directly as well as in the full
+    // package; matching generation IDs must never make imported grants live.
+    await restored.derivativePortability.restore(owner,accessHistory.filter(record=>record.type!=='memory_access_settings'));
+    for(const table of ['memory_access_requests','memory_fact_grants','memory_access_decisions'])
+      assert.equal((await target.control.query(`SELECT count(*) FROM ${table}`)).rows[0].count,'0','direct history import cannot activate access');
     // File/transcript parents can be sorted after their children in export order.
     // Retry only missing-parent records after another successful insertion.
     for(const type of portableDerivativeTypes) {
@@ -119,6 +138,13 @@ test('complete derivative transfer retains edits and lineage while imported auth
     assert.equal((await source.derived.checkpoint(key+':child')).id,child.id,'a local checkpoint still repairs lost workflow completion');
     assert.equal((await target.derived.query('SELECT count(*) FROM runtime_prepared_values')).rows[0].count,'0');
     assert.equal((await target.derived.query('SELECT count(*) FROM runtime_prepared_inputs')).rows[0].count,'0');
+    for(const table of ['memory_access_requests','memory_fact_grants','memory_access_decisions'])
+      assert.equal((await target.control.query(`SELECT count(*) FROM ${table}`)).rows[0].count,'0','imported access history cannot become live authority');
+    assert.deepEqual((await target.control.query('SELECT * FROM memory_access_settings ORDER BY destination')).rows,targetSettings,'import cannot overwrite or create destination policy');
+    for(const record of accessHistory) {
+      const saved=(await target.derived.query('SELECT content FROM portable_records WHERE id=$1',[digest(Buffer.from(canonical(record)))])).rows[0];
+      assert.deepEqual(JSON.parse(saved.content.toString()),record,'exact access history stays inspectable');
+    }
     await assert.rejects(restored.operations.verify(operation),{code:'operation_reference_conflict'});
     await assert.rejects(restored.operations.record({key:key+':runtime',kind:'scheduled_trigger',scope:'123',input_hash:digest('trigger')}),{code:'operation_identity_conflict'});
     await assert.rejects(restored.selections.current(file.event.id,file.id,'transcript',await restored.guards.state()),{code:'derivative_selection_pending'});

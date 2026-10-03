@@ -106,7 +106,9 @@ export class DerivativePortabilityRepository {
     for(const {record} of parsed)await this.retain(principal,record);
     // Control references are historical only. Operational receipt/job tables are
     // absent from the format, and imported roots cannot authorize new effects.
-    for(const entry of parsed.filter(p=>p.definition.store==='control'))await this.insert(this.stores.control,entry);
+    // Access settings, requests, grants and decisions are inspectable history,
+    // even when the imported generation happens to match this installation.
+    for(const entry of parsed.filter(p=>p.definition.store==='control'&&!p.definition.historyOnly))await this.insert(this.stores.control,entry);
     const db=await this.stores.derived.connect();
     try {
       await db.query('BEGIN');
