@@ -744,9 +744,6 @@ contains the historical private reports and has not been rewritten.
 
 </entry>
 
-
-
-
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -1585,5 +1582,25 @@ Scripted inference establishes no new model-quality or live recall pass.
 [Procedure](telegram-simulation.md), [runner](../tools/acceptance/telegram_rehearsal.py),
 [SDK checks](../services/hermes/test_telegram_http_fixture.py),
 [ownership checks](../test/test_telegram_rehearsal.py).
+
+</entry>
+
+<entry date="2026-10-03" task="Exercise HTTP rate limits and file recovery">
+
+The synthetic Bot API fixture now accepts bounded, durable file and fault
+controls, rejects invalid changes atomically, and records physical request times
+and statuses. Ten pinned-SDK checks and three ownership checks pass without
+skips; the AST-only graph refresh succeeds. The coupled extension passes seven
+recorded gates, including a 429 followed by a correctly delayed send to the same
+topic, separate rejected/delivered receipts, and one final reply. One transient
+file-download error recovers on attempt two with the original binary bytes/hash.
+
+The subsequent native reply misses its unchanged 230-second deadline before
+model dispatch. This run remains failed; neither file preservation nor the prior
+ordinary-message pass closes that response gate. Guarded preparation is under
+investigation with content-free diagnostics confined to the fixture. Original
+failure reports remain in ignored state. [Procedure](telegram-simulation.md),
+[runner](../tools/acceptance/telegram_rehearsal.py),
+[contract checks](../services/hermes/test_telegram_http_fixture.py).
 
 </entry>

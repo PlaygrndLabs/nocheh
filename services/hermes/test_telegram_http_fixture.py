@@ -77,6 +77,19 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         result=await self.bot.get_file('file-one')
         self.assertEqual(result.file_size,len(content));self.assertEqual(await result.download_as_bytearray(),content)
 
+    async def test_fault_and_file_control_is_durable_and_rejects_partial_invalid_changes(self):
+        content=b'\x00synthetic\xff';row={'file_id':'controlled','file_unique_id':'unique-controlled',
+            'file_path':'documents/controlled.bin','file_size':len(content),'bytes_base64':base64.b64encode(content).decode()}
+        with self.assertRaises(ValueError):self.mock.configure({'files':[row],'faults':[{'method':'unknown','code':500,'description':'invalid'}]})
+        self.assertEqual(self.mock.state['files'],{});self.assertEqual(self.mock.state['faults'],[])
+        self.mock.configure({'files':[row],'faults':[{'method':'sendMessage','code':429,'description':'Too Many Requests','parameters':{'retry_after':2}}]})
+        self.assertEqual(TelegramMock(self.path).state['files']['controlled'],row)
+        with self.assertRaises(RetryAfter):await self.bot.send_message(123,'first')
+        await self.bot.send_message(123,'second')
+        calls=[r for r in self.mock.state['calls'] if r['method']=='sendMessage']
+        self.assertEqual([r['status'] for r in calls],[429,200]);self.assertTrue(all(r['at']>0 for r in calls))
+        self.assertEqual(await (await self.bot.get_file('controlled')).download_as_bytearray(),content)
+
     async def test_delivery_receipt_contains_parsed_text_and_rich_markup_fails_explicitly(self):
         text='[mock] سلام 🔭. '
         from telegram.helpers import escape_markdown

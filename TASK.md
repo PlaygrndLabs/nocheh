@@ -163,6 +163,14 @@ this UI verification does not establish live recall or release readiness.
   are retained. One earlier native turn hit its 230-second deadline before a
   model request; automatic retry delivered once. Its cause remains unproven,
   although the later full run passed with reply times of 26–47 seconds.
+  The fault/file extension passes ten SDK checks and seven coupled gates,
+  including a physical 429 retry with the required delay, the exact topic,
+  separate rejected/delivered receipts and one reply. A transient file-download
+  failure recovers on attempt two with the exact original bytes/hash. Its native
+  reply then hits the unchanged 230-second deadline before model dispatch, so
+  this extended run is failed, not complete. Investigation has narrowed the
+  repeated delay to guarded context preparation; content-free fixture stack
+  diagnostics are enabled. No operating runtime change has been made.
   The operating seventeen services remain healthy and were not restarted.
   [HTTP runner](tools/acceptance/telegram_rehearsal.py),
   [SDK checks](services/hermes/test_telegram_http_fixture.py).
