@@ -19,13 +19,19 @@ reliability or release approval.
 The personal-use [Telegram simulation](telegram-simulation.md) reproduced native
 fallback from a missing topic into General, continued delivery after a
 mid-response revocation, and permanently replayed rate-limit rejections. The
-candidate passes eleven native scenarios and fourteen capture/gateway checks,
+candidate passes fifteen native scenarios and fourteen capture/gateway checks,
 including bounded, durable `429` recovery and authorization during its wait. This changes reply
 and approved-action delivery; their historical live passes remain dated evidence
 and do not verify the new candidate. Verify operating activation before any
 targeted live delivery check. Source capture, original voice bytes, subscription
 transcription and their historical limitations are unaffected. No real Telegram
 traffic or operating activation was performed by the simulation session.
+
+Approved actions now retain the concrete topic in `current`, owner review and
+native delivery; General and deleted-topic fallback checks pass. The actual
+storage action suite passes. Separate one-time memory tests confirm normal and
+topic delivery and revocation, but recovery after an interrupted approval handoff
+still fails. Candidate images predate this topic repair and need rebuilding.
 
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority

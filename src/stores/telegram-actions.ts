@@ -19,6 +19,8 @@ import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 
 const protocol='telegram-action-v2';
+const validDestination=(value:string)=>/^-?[1-9]\d{0,18}(?:\/topic\/[1-9]\d{0,15})?$/.test(value)&&
+  (!value.includes('/topic/')||Number.isSafeInteger(Number(value.split('/topic/')[1])));
 export class TelegramActionRepository {
   constructor(readonly stores:StorePools,readonly access:SourceAccessRepository,readonly derived:DerivedRepository,
     readonly guards:GuardRepository,readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,
@@ -92,8 +94,8 @@ export class TelegramActionRepository {
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string},binding:GuardBinding,
     source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string){
-    const requested=string(input.destination,32),destination=requested==='current'&&channel==='telegram'?turn.scope:requested,text=string(input.text,3500);
-    if(!/^-?[1-9]\d{0,18}$/.test(destination)||!text.trim())throw new HttpError(400,'invalid_action');
+    const requested=string(input.destination,64),destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:requested,text=string(input.text,3500);
+    if(!validDestination(destination)||!text.trim())throw new HttpError(400,'invalid_action');
     const id=digest(canonical([protocol,source,binding,destination,text]));
     const proposal=await this.derived.record({operation_id:'telegram-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
       producer:'nocheh',producer_version:protocol,configuration:{destination,binding},provenance:{purpose:'exact_owner_approval'}});
@@ -118,7 +120,7 @@ export class TelegramActionRepository {
    * delivery authorization, workflow, and receipt path still applies. */
   async approvedSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string) {
     if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
-    if(!/^-?[1-9]\d{0,18}$/.test(destination)||!text.trim()||text.length>3500)throw new HttpError(400,'invalid_action');
+    if(!validDestination(destination)||!text.trim()||text.length>3500)throw new HttpError(400,'invalid_action');
     await this.guards.assertCurrent(binding);await this.access.archive.verify(source);
     const id=digest(canonical(['nocheh-trusted-telegram-v1',key,source,binding,destination,text]));
     const proposal=await this.derived.record({operation_id:'telegram-system-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),

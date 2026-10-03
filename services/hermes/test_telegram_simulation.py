@@ -158,6 +158,37 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(result['state'], 'done')
         self.assertEqual(self.request.delivered, [], 'native fallback must not widen the approved audience')
 
+    async def test_general_forum_message_replies_in_general(self):
+        envelope = self.envelope(topic=None)
+        self.assertEqual(await self.gateway.dispatch(envelope), {'state': 'done'})
+        self.assertEqual(len(self.request.delivered), 1)
+        self.assertIn(self.request.delivered[0].get('message_thread_id'), (None, 1))
+
+    async def test_approved_action_preserves_exact_topic_and_receipt_after_restart(self):
+        body = {'id': 'b' * 64, 'destination': '-20/topic/17', 'text': 'پیگیری تأییدشدهٔ مصنوعی'}
+        with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}), patch(
+                'services.hermes.assistant_gateway.check_action_policy', return_value=True):
+            self.assertEqual(await self.gateway.send_action(body), {'state': 'done'})
+            self.assertEqual(await self.new_gateway().send_action(body), {'state': 'done'})
+        self.assertEqual(len(self.request.delivered), 1)
+        self.assertEqual(str(self.request.delivered[0]['chat_id']), '-20')
+        self.assertEqual(self.request.delivered[0]['message_thread_id'], 17)
+
+    async def test_explicit_general_topic_uses_the_native_general_send_convention(self):
+        self.assertEqual(await self.gateway.dispatch(self.envelope(topic=1)), {'state': 'done'})
+        self.assertEqual(len(self.request.delivered), 1)
+        self.assertIsNone(self.request.delivered[0].get('message_thread_id'))
+
+    async def test_approved_topic_action_never_falls_back_to_general(self):
+        self.request.respond = lambda data: (400, canonical({'ok': False, 'error_code': 400,
+            'description': 'Bad Request: message thread not found'})) if data.get('message_thread_id') else None
+        body = {'id': 'c' * 64, 'destination': '-20/topic/17', 'text': 'Synthetic approved topic follow-up'}
+        with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}), patch(
+                'services.hermes.assistant_gateway.check_action_policy', return_value=True):
+            self.assertEqual(await self.gateway.send_action(body), {'state': 'ambiguous'})
+            self.assertEqual(await self.new_gateway().send_action(body), {'state': 'ambiguous'})
+        self.assertEqual(self.request.delivered, [])
+
     async def test_revocation_between_chunks_prevents_every_later_physical_send(self):
         self.answer = 'پاسخ بلند مصنوعی 🌿 ' * 600
         def revoke_after_first(data):

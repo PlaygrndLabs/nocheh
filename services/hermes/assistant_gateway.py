@@ -32,7 +32,7 @@ def outbound_check(chat_id, space, authorized, cancelled=None):
     def check(method, parameters):
         if (method not in ('sendMessage', 'sendRichMessage', 'sendChatAction') or
                 str(parameters.get('chat_id')) != str(chat_id) or
-                parameters.get('message_thread_id') != topic or
+                parameters.get('message_thread_id') not in ((None, 1) if topic == 1 else (topic,)) or
                 parameters.get('direct_messages_topic_id') is not None or
                 parameters.get('ephemeral_message_parameters') is not None):
             raise RuntimeError('telegram_delivery_audience_changed')
@@ -303,7 +303,10 @@ class AssistantGateway:
     async def send_action(self,body):
         import re
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
-        if not re.fullmatch('[a-f0-9]{64}',body['id']) or not re.fullmatch(r'-?[1-9]\d{0,18}',body['destination']) or not isinstance(body['text'],str) or not 0<len(body['text'])<=3500:raise ValueError('invalid_action')
+        destination=re.fullmatch(r'(-?[1-9]\d{0,18})(?:/topic/([1-9]\d{0,15}))?',body['destination'])
+        if not re.fullmatch('[a-f0-9]{64}',body['id']) or not destination or not isinstance(body['text'],str) or not 0<len(body['text'])<=3500:raise ValueError('invalid_action')
+        chat_id,topic=destination.groups()
+        if topic and int(topic)>9007199254740991:raise ValueError('invalid_action')
         name='action-'+body['id']
         async with self.action_lock:
             receipt=self.receipts/(name+'.result')
@@ -315,10 +318,10 @@ class AssistantGateway:
                 return result
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
             token=DISPATCH_KEY.set('action:'+body['id'])
-            check=OUTBOUND_CHECK.set(outbound_check(body['destination'],body['destination'],
+            check=OUTBOUND_CHECK.set(outbound_check(chat_id,body['destination'],
                 lambda:os.environ.get('NOCHEH_STORAGE_LAYOUT')!='original-only-v1' or check_action_policy(body)))
             try:
-                sent=await self.adapter.send(body['destination'],body['text'],metadata={'notify':True})
+                sent=await self.adapter.send(chat_id,body['text'],metadata={'notify':True,**({'thread_id':topic} if topic else {})})
                 result={'state':'done' if sent.success else 'ambiguous'}
             except Exception:result={'state':'ambiguous'}
             finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
