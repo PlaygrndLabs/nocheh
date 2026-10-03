@@ -1285,7 +1285,9 @@ or live acceptance was performed. [Decision](adr/0092-exact-topic-action-destina
 <entry date="2026-10-03" task="Commit memory approval and automatic follow-up atomically">
 
 Synthetic failure injection reproduced a committed approval with no follow-up;
-replaying the saved decision did not repair it. Guarded message preparation now
+replaying the saved decision did not repair it. The initial normal-delivery
+fixture had retained an audience binding from before a settings revision;
+refreshing that binding resolved its fixture error before product verification. Guarded message preparation now
 precedes control locks, and the decision, grant, exact action, both links and
 workflow outbox commit together. Failed staging or security denial leaves the
 request pending. Expiry is checked again before commit, and delivery wording
@@ -1303,5 +1305,25 @@ Telegram checks retain the preceding topic increment's pass; no native source
 changed in this increment. No operating activation or live pass is claimed.
 [Decision](adr/0093-atomic-memory-approval-followups.md),
 [behavior checks](../test/store-memory-followup.test.ts).
+
+</entry>
+
+<entry date="2026-10-03" task="Refresh the isolated installation candidate after approval repairs">
+
+Service, management, database and native images were rebuilt from `beed79b`
+without changing operating tags or services. The first offline build could not
+install an uncached system package; the normal builds pass, including the full
+TypeScript/dashboard build. All twenty native Telegram and knowledge-tool checks
+pass from the new packaged image without source mounts or network access.
+
+The updated 16-service fixture is prepared with ten available image identities,
+internal networks, no published host ports and no operating state mounts.
+Compose configuration validates and no fixture containers exist. Its first
+preparation invocation lacked the host Docker CLI in PATH; the corrected
+invocation passes and preserves the earlier failure. The small synthetic database
+used for focused tests is stopped with its volume retained. All seventeen
+operating services remain running. Execution of the full fixture still awaits
+the owner's explicit single-stack exception; readiness, activation and live
+provider quality are not inferred from preparation or component checks.
 
 </entry>
