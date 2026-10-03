@@ -1235,3 +1235,27 @@ recorded alongside their focused repairs in ignored evidence. No live readiness
 or production model-quality pass is inferred from these deterministic fixtures.
 
 </entry>
+
+<entry date="2026-10-03" task="Prepare the coupled synthetic installation without activation">
+
+Service, database and management images were built from local integration
+`11f5310`; the native image packages the same verified integration on the pinned
+Hermes base. All 16 packaged Telegram and knowledge-tool checks pass. The first
+offline management build lacked cached system packages; the normal build passed.
+
+The installation rehearsal now supports preparation without service startup.
+Preparation creates its missing parent directory, tolerates the ledger already
+created by initialization, and preserves the generated manifest and owned state
+for inspection. Its execution waits for browser capture handoff and includes the
+organization worker in its expected pipeline inventory; those execution gates
+remain unrun. Compose validates the prepared 16-service manifest, all images are
+available, all networks are internal, no host ports are published, and no fixture
+containers exist. The operating source watcher still uses the release worktree.
+
+Full execution awaits the owner's answer about the explicit single-stack rule;
+the prepared manifest is not an acceptance pass. Original preparation failures
+and verified image/preflight records remain in ignored simulation state.
+[Runner](../tools/acceptance/rehearsals/installation-rehearsal.py),
+[procedure](telegram-simulation.md). No runtime activation or real provider use.
+
+</entry>

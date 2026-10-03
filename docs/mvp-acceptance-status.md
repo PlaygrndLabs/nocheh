@@ -27,6 +27,15 @@ targeted live delivery check. Source capture, original voice bytes, subscription
 transcription and their historical limitations are unaffected. No real Telegram
 traffic or operating activation was performed by the simulation session.
 
+Combined storage verification also reproduced inactive access-history import and
+reset schema-inventory defects. Their focused repairs preserve inactive authority
+and reject unexpected real tables. Concurrent organization and supervision changes
+are reconciled, with a successful combined build and 52 affected backend/dashboard
+checks. Sixteen native checks also pass from the packaged candidate image. A
+complete synthetic installation is prepared but has not run; the existing
+same-topic recall failure and live release gates remain open. Detailed original
+failures, repairs, image identities and limitations stay in the ignored register.
+
 </simulation_impact>
 
 <checks>

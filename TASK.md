@@ -29,7 +29,8 @@ distinguishes connection, synchronization, and usable memory. TypeScript and
 dashboard builds, affected Node 24/PostgreSQL suites, 85 native checks, and all
 33 dashboard checks pass. Synthetic desktop, phone, keyboard, deep-link, stale
 proposal dismissal, and retained-draft interactions are verified. The explicit
-nested Docker security boundary check remains unrun. No deployment, operating
+Docker security boundary passes in the simulation session's separate host fixture.
+No deployment, operating
 delegation, or live-memory-readiness claim is made; existing recall failures and
 the sanitized-history remote-publication gate remain open.
 [Dashboard checks](test/dashboard-supervision.test.mjs),
@@ -134,8 +135,12 @@ this UI verification does not establish live recall or release readiness.
   [completed fixture repair](docs/task-history.md) and
   [rehearsal procedure](docs/telegram-simulation.md). Concurrent organization and
   supervision work through `c994596` is reconciled; later changes need their own
-  impact review. A complete installation rehearsal and real-provider semantic
-  recall remain unrun for this simulation candidate. No operating activation
+  impact review. Candidate service, database, management and native images are
+  built; sixteen packaged native checks pass. A complete 16-service synthetic
+  installation is prepared with verified images, internal networks and no host
+  ports. It has not started: the existing operating stack is running, and the
+  owner's explicit single-stack exception is pending. Real-provider semantic
+  recall also remains unrun for this simulation candidate. No operating activation
   or new live pass is claimed. Original failures, invocation errors, skipped
   fixtures and focused outcomes stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
