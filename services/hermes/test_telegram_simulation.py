@@ -174,6 +174,28 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(self.request.delivered[0]['chat_id']), '-20')
         self.assertEqual(self.request.delivered[0]['message_thread_id'], 17)
 
+    async def test_long_approved_memory_wording_keeps_every_chunk_in_its_topic(self):
+        text = 'اطلاعات تأییدشدهٔ مصنوعی برای پیگیری حافظه 🌿\n' * 150
+        self.assertGreater(len(text), 4096)
+        self.assertLessEqual(len(text.encode('utf-16-le')) // 2, 12000)
+        body = {'id': 'd' * 64, 'destination': '-20/topic/17', 'text': text}
+        with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}), patch(
+                'services.hermes.assistant_gateway.check_action_policy', return_value=True):
+            self.assertEqual(await self.gateway.send_action(body), {'state': 'done'})
+            count = len(self.request.delivered)
+            self.assertGreater(count, 1)
+            self.assertEqual(await self.new_gateway().send_action(body), {'state': 'done'})
+        self.assertEqual(len(self.request.delivered), count)
+        self.assertTrue(all(str(d['chat_id']) == '-20' and d.get('message_thread_id') == 17 for d in self.request.delivered))
+        self.assertEqual(sum(d['text'].count('اطلاعات تأییدشدهٔ مصنوعی برای پیگیری حافظه 🌿') for d in self.request.delivered), 150)
+
+    async def test_oversized_approved_wording_is_rejected_before_any_request(self):
+        before = len(self.request.calls)
+        with self.assertRaises(ValueError):
+            await self.gateway.send_action({'id': 'e' * 64, 'destination': '-20/topic/17', 'text': '🌿' * 6001})
+        self.assertEqual(len(self.request.calls), before)
+        self.assertEqual(self.request.delivered, [])
+
     async def test_explicit_general_topic_uses_the_native_general_send_convention(self):
         self.assertEqual(await self.gateway.dispatch(self.envelope(topic=1)), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)

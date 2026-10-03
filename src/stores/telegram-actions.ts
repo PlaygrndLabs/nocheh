@@ -19,6 +19,9 @@ import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 
 const protocol='telegram-action-v2';
+// Owner-approved memory wording uses the memory input bound; native Telegram
+// splitting preserves one action identity and rechecks authority for each chunk.
+const trustedTextLimit=12000;
 const validDestination=(value:string)=>/^-?[1-9]\d{0,18}(?:\/topic\/[1-9]\d{0,15})?$/.test(value)&&
   (!value.includes('/topic/')||Number.isSafeInteger(Number(value.split('/topic/')[1])));
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
@@ -128,13 +131,13 @@ export class TelegramActionRepository {
   /** Prepare derived bytes before acquiring control locks; preparation can itself publish guard records. */
   async prepareSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<PreparedSystemAction> {
     if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
-    if(!validDestination(destination)||!text.trim()||text.length>3500)throw new HttpError(400,'invalid_action');
+    if(!validDestination(destination)||!text.trim()||text.length>trustedTextLimit)throw new HttpError(400,'invalid_action');
     await this.guards.assertCurrent(binding);await this.access.archive.verify(source);
     const id=digest(canonical(['nocheh-trusted-telegram-v1',key,source,binding,destination,text]));
     const proposal=await this.derived.record({operation_id:'telegram-system-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
       producer:'nocheh',producer_version:protocol,configuration:{destination,binding,key},provenance:{purpose:'exact_owner_approval',trusted_workflow:key}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
-    const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,3500);
+    const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,trustedTextLimit);
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
     return {id,source,proposal,binding,scope:principal.scope,space:principal.space,profile:principal.logical_profile,destination,
       fingerprint:digest(canonical({destination,text:preparedText})),text_hash:digest(preparedText),guard_revision:representation.revision};

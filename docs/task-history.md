@@ -1327,3 +1327,30 @@ the owner's explicit single-stack exception; readiness, activation and live
 provider quality are not inferred from preparation or component checks.
 
 </entry>
+
+<entry date="2026-10-03" task="Preserve complete approved memory wording">
+
+A supported long memory wording was rejected by the smaller trusted Telegram
+handoff bound. Trusted follow-ups now accept the memory input bound and let the
+pinned native adapter split messages while preserving action identity and exact
+topic authorization. The native bound counts UTF-16 units consistently with the
+service, rejects excess input before transport, and preserves every synthetic
+Persian content unit through chunking and restart replay.
+
+A separate PostgreSQL regression reproduced immediate suspension of a grant with
+leading/trailing whitespace: its saved hash described trimmed wording while the
+guarded record retained the complete text. New approvals preserve that text.
+Older normalized grants and manual command receipts are accepted only when their
+preserved guard revision and saved hash prove the exact historical wording and
+identity. Changed new commands conflict; mismatched hashes still suspend access.
+
+TypeScript compilation and all 17 affected storage checks pass without skips.
+Seventeen native Telegram scenarios and three gateway checks pass, with a focused
+content-completeness check after the new assertion. Original native rejection and
+storage suspension failures stay in ignored evidence. This repair requires
+refreshing the packaged candidate; the full synthetic installation, actual model
+quality and existing live release gates remain pending.
+[Grant and delivery checks](../test/store-memory-followup.test.ts),
+[native checks](../services/hermes/test_telegram_simulation.py).
+
+</entry>

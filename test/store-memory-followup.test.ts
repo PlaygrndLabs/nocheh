@@ -10,13 +10,13 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {savePolicy} from '../src/security/store.js';
 
-test('one-time memory follow-ups preserve topic, recovery, revocation and delivery authority',
+test('memory approvals preserve exact wording, topic, recovery and delivery authority',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async t=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-followup-'));
   const key='memory-followup:'+Date.now(),owner:Reader={admin:true,scope:null};let sequence=0;
-  const fixture=async(topic?:number,autoFollowup=true)=>{
+  const fixture=async(topic?:number,autoFollowup=true,wording='Orion launch schedule milestone is October.')=>{
     const label=key+':'+(++sequence),group='-'+(Date.now()*10+sequence),destination=group+(topic?'/topic/'+topic:''),sent:Record<string,unknown>[]=[];
     const receipts=new Set<string>();let loseReceipt=false;
     const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(label),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
@@ -43,7 +43,7 @@ test('one-time memory follow-ups preserve topic, recovery, revocation and delive
     const current=await services.guards.state();
     const principal:Reader={admin:false,scope:group,space:destination,turnEvent:source.id,generation:current.generation,guard_epoch:current.epoch};
     const request=await services.memoryAccess.suggest(principal,'Orion launch schedule October');assert.ok(request);
-    const decision={decision:'one_time',wording:'Orion launch schedule milestone is October.',expected_revision:1,operation_id:label+':approve'};
+    const decision={decision:'one_time',wording,expected_revision:1,operation_id:label+':approve'};
     const approve=()=>services.memoryAccess.decide(owner,request.id,decision);
     const saved=async()=>(await stores.control.query('SELECT * FROM memory_access_requests WHERE id=$1',[request.id])).rows[0];
     const authority={owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='actions'")).rows[0].epoch)};
@@ -63,6 +63,38 @@ test('one-time memory follow-ups preserve topic, recovery, revocation and delive
       const f=await fixture(17);await f.approve();const request=await f.saved();assert.ok(request.followup_action_id,'topic approval must stage its follow-up');
       assert.equal((await f.services.telegramActions.inspect(owner,request.followup_action_id)).arguments.destination,f.destination);
       await f.services.telegramActions.run(request.followup_action_id,f.authority);assert.equal(f.sent[0]!.destination,f.destination);
+    });
+    await t.test('long approved wording remains complete in the exact follow-up',async()=>{
+      const wording='Orion launch schedule milestone is October. '.repeat(130);assert.ok(wording.length>4096&&wording.length<=12000);
+      const f=await fixture(17,true,wording);await f.approve();const request=await f.saved();assert.ok(request.followup_action_id);
+      assert.equal((await f.services.telegramActions.inspect(owner,request.followup_action_id)).arguments.text,wording);
+      await f.services.telegramActions.run(request.followup_action_id,f.authority);assert.equal(f.sent[0]!.text,wording);
+      assert.equal(f.sent[0]!.destination,f.destination);
+    });
+    await t.test('approved whitespace stays consistent with the stored grant hash',async()=>{
+      const f=await fixture(),wording='\n  Orion launch schedule milestone is October.  \n';
+      const command={fact_id:f.fact.id,fact_revision:f.fact.revision,destination:f.destination,wording,operation_id:key+':spaced-grant'};
+      const grant=await f.services.memoryAccess.grant(owner,command);assert.deepEqual(await f.services.memoryAccess.grant(owner,command),grant);
+      await assert.rejects(f.services.memoryAccess.grant(owner,{...command,wording:wording+' '}),{code:'memory_access_decision_conflict'});
+      const context=await f.services.memoryAccess.context(f.principal,'Orion launch schedule');
+      assert.equal(context.sources.find(source=>source.id===grant.id)?.text,wording,'a valid approval must not immediately suspend its own wording');
+    });
+    await t.test('historical normalized wording still requires its recorded hash',async()=>{
+      const f=await fixture(),wording='\n  Orion launch schedule milestone is October.  \n';
+      const command={fact_id:f.fact.id,fact_revision:f.fact.revision,destination:f.destination,wording,operation_id:key+':legacy-spaced-grant'};
+      const grant=await f.services.memoryAccess.grant(owner,command),normalized=digest(wording.trim());
+      // Seed the public v1 normalized identity/receipt used before exact whitespace preservation.
+      const oldId=digest(canonical(['nocheh-memory-access-v1','manual-grant',command.operation_id,f.destination,f.fact.id,f.fact.revision,normalized]));
+      const oldHash=digest(canonical({kind:'manual_memory_grant',id:oldId,destination:f.destination,fact:f.fact.id,revision:f.fact.revision}));
+      await stores.control.query(`INSERT INTO memory_fact_grants(id,destination,fact_id,fact_revision,representation_reference,binding,guard_revision,text_hash,mode)
+        SELECT $2,destination,fact_id,fact_revision,representation_reference,binding,guard_revision,$3,mode FROM memory_fact_grants WHERE id=$1`,[grant.id,oldId,normalized]);
+      await stores.control.query('UPDATE memory_access_decisions SET grant_id=$2,request_hash=$3 WHERE operation_id=$1',[command.operation_id,oldId,oldHash]);
+      await stores.control.query('DELETE FROM memory_fact_grants WHERE id=$1',[grant.id]);
+      assert.deepEqual(await f.services.memoryAccess.grant(owner,command),{id:oldId,state:'active',revision:1},'the original command reuses its saved old receipt');
+      assert.equal((await f.services.memoryAccess.context(f.principal,'Orion launch schedule')).sources.find(source=>source.id===oldId)?.text,wording.trim());
+      await stores.control.query('UPDATE memory_fact_grants SET text_hash=$2 WHERE id=$1',[oldId,digest('unapproved changed wording')]);
+      assert.equal((await f.services.memoryAccess.context(f.principal,'Orion launch schedule')).sources.length,0);
+      assert.equal((await stores.control.query('SELECT state FROM memory_fact_grants WHERE id=$1',[oldId])).rows[0].state,'suspended');
     });
     await t.test('uncertain delivery stays unconsumed until the existing native receipt is observed',async()=>{
       const f=await fixture(),approval=await f.approve(),request=await f.saved();f.loseReceipt();

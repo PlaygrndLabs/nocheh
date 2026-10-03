@@ -93,7 +93,7 @@ export class MemoryAccessRepository {
       kind:'shared_knowledge',content:Buffer.from(wording),producer:'owner',producer_version:protocol,configuration:{fact_id:fact.id,fact_revision:fact.revision},
       provenance:{fact_id:fact.id,fact_revision:fact.revision,evidence:fact.evidence,destination_authority:'fact_grant'}});
     await this.guards.prepare(reference,protocol,this.detect);const guarded=await this.guards.read('derived_artifacts:'+reference.id,binding);
-    const text=string((guarded.value as any).text,12000).trim();if(!text)throw new HttpError(422,'empty_safe_wording');
+    const text=string((guarded.value as any).text,12000);if(!text.trim())throw new HttpError(422,'empty_safe_wording');
     return {reference,guard_revision:guarded.revision,text,hash:digest(text)};
   }
   private principal(row:any):Reader {return {admin:false,scope:row.source_scope,space:row.destination,turnEvent:row.source_reference.id,
@@ -216,7 +216,22 @@ export class MemoryAccessRepository {
     const wording=body.wording===undefined?fact.content:string(body.wording,12000),representation=await this.representation(fact,wording,binding,operation);
     const expires=body.expires_at===undefined?null:new Date(string(body.expires_at,100));if(expires&&(!Number.isFinite(expires.getTime())||expires<=new Date()))throw new HttpError(400,'invalid_grant_expiration');
     const id=digest(canonical([protocol,'manual-grant',operation,destination,fact.id,fact.revision,representation.hash])),hash=digest(canonical({kind:'manual_memory_grant',id,destination,fact:fact.id,revision:fact.revision}));
-    const prior=(await this.stores.control.query('SELECT request_hash,grant_id,revision FROM memory_access_decisions WHERE operation_id=$1',[operation])).rows[0];if(prior){if(prior.request_hash!==hash)throw new HttpError(409,'memory_access_decision_conflict');return {id:prior.grant_id,state:'active',revision:prior.revision};}
+    const prior=(await this.stores.control.query('SELECT request_hash,grant_id,revision FROM memory_access_decisions WHERE operation_id=$1',[operation])).rows[0];
+    if(prior) {
+      if(prior.request_hash!==hash) {
+        const oldId=digest(canonical([protocol,'manual-grant',operation,destination,fact.id,fact.revision,digest(representation.text.trim())]));
+        const oldHash=digest(canonical({kind:'manual_memory_grant',id:oldId,destination,fact:fact.id,revision:fact.revision}));
+        if(prior.grant_id!==oldId||prior.request_hash!==oldHash)throw new HttpError(409,'memory_access_decision_conflict');
+        const saved=(await this.stores.control.query('SELECT * FROM memory_fact_grants WHERE id=$1',[oldId])).rows[0];
+        if(!saved)throw new HttpError(409,'memory_access_decision_conflict');
+        const guarded=await this.guards.read('derived_artifacts:'+saved.representation_reference.id,binding),raw=string((guarded.value as any).text,12000);
+        // Compatibility applies only to a preserved, genuinely normalized old
+        // grant. A changed whitespace command against a new exact grant conflicts.
+        if(guarded.revision!==saved.guard_revision||digest(raw)===saved.text_hash||digest(raw.trim())!==saved.text_hash)
+          throw new HttpError(409,'memory_access_decision_conflict');
+      }
+      return {id:prior.grant_id,state:'active',revision:prior.revision};
+    }
     const db=await this.stores.control.connect();try{await db.query('BEGIN');await this.fence(db,binding,fact);
       if(principal.guard_epoch!==undefined&&await foregroundReplyActive(db,binding))throw new HttpError(409,'foreground_reply_active');
       await db.query(`INSERT INTO memory_fact_grants(id,destination,fact_id,fact_revision,representation_reference,binding,guard_revision,text_hash,mode,expires_at)
@@ -245,7 +260,10 @@ export class MemoryAccessRepository {
   private async validateGrant(row:any,binding:GuardBinding):Promise<string|null> {
     if(canonical(row.binding)!==canonical(binding)){await this.suspend(row.id,'authorization_generation_changed');return null;}
     const fact=await this.fact(row.fact_id).catch(()=>null);if(!fact||fact.revision!==row.fact_revision){await this.suspend(row.id,'fact_revision_changed');return null;}
-    try {const guarded=await this.guards.read('derived_artifacts:'+row.representation_reference.id,binding),text=string((guarded.value as any).text,12000);
+    try {const guarded=await this.guards.read('derived_artifacts:'+row.representation_reference.id,binding),raw=string((guarded.value as any).text,12000);
+      // Older grants hashed the trimmed wording while preserving the full
+      // guarded bytes. Accept only the exact wording named by the saved hash.
+      const text=digest(raw)===row.text_hash?raw:raw.trim();
       if(guarded.revision!==row.guard_revision||digest(text)!==row.text_hash){await this.suspend(row.id,'guarded_representation_changed');return null;}return text;
     }catch(error){if(!(error instanceof HttpError))throw error;await this.suspend(row.id,'guarded_representation_changed');return null;}
   }
