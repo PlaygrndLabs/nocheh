@@ -262,13 +262,17 @@ this UI verification does not establish live recall or release readiness.
 
 <pending>
 
-The simulation session has finished its deterministic coupled checks and stopped
-its synthetic stacks while preserving evidence. The owner's answer about an
-authorized real-model route is pending. That next evaluation keeps synthetic
-source data and mocked Telegram and targets reaction-removal recall, owner
-corrections/retirement, audience isolation and recall after restart. No provider
-login, spending-limit increase or operating activation has been authorized by
-the synthetic-fixture exception.
+The owner authorized the existing model route for the synthetic Telegram
+evaluation. A fresh isolated fixture uses scoped read-only client keys through
+the existing provider, without another login or refresh owner. Its Honcho meter
+uses the authoritative shared spending ledger. That ledger has reached its
+1,500 monthly subscription reasoning attempts; the $5 embedding cap still has
+headroom. No limit increase is authorized. Real Hermes evaluation is in progress
+for reaction-removal recall, corrections/retirement, audience isolation and
+recall after restart; full Honcho reasoning quality remains blocked by capacity.
+The fixture relay has four focused admission/HTTP checks, including restart-safe
+limits, concurrency, streaming and error redaction. These are infrastructure
+checks, not conversational quality passes. Operating activation remains separate.
 
 1. Diagnose the October 2 same-topic recall failure using the saved event and
    CLI. One linked reply arrived on attempt two after about 384 seconds. It

@@ -1,0 +1,180 @@
+"""Collect real-model answers to synthetic Telegram memory cases for review.
+
+Delivery assertions are mechanical; answer quality is explicitly left for review
+against saved synthetic ground truth. This cannot mark live acceptance passed.
+Start only a separately reviewed, owner-authorized model fixture before use.
+"""
+import argparse
+import json
+from pathlib import Path
+import re
+import subprocess
+import time
+from tools.paths import ROOT
+from tools.acceptance.telegram_rehearsal import archived_delivery
+
+
+class Fixture:
+    def __init__(self, directory):
+        self.directory = Path(directory).resolve()
+        if not self.directory.is_relative_to(ROOT / 'data/acceptance/results'):
+            raise ValueError('owned_fixture_required')
+        info = json.loads((self.directory / 'fixture.json').read_text())
+        manifest = json.loads((self.directory / 'compose.json').read_text())
+        self.project = info['project']
+        if not re.fullmatch(r'nocheh-installation-[a-f0-9]{12}', self.project) or manifest['name'] != self.project:
+            raise ValueError('fixture_project_required')
+        preflight = json.loads((self.directory / 'route-preflight.json').read_text())
+        if preflight.get('project') != self.project or preflight.get('authorized_existing_model_route') is not True:
+            raise ValueError('authorized_model_fixture_required')
+        native = manifest['services']['hermes']
+        homes = [v for v in native['volumes'] if v.get('target') == '/workspace/data/local/hermes']
+        if len(homes) != 1 or Path(homes[0]['source']).resolve() != self.directory / 'state/hermes':
+            raise ValueError('owned_native_state_required')
+        if native['environment'].get('TELEGRAM_BOT_TOKEN') != '123456:synthetic':
+            raise ValueError('synthetic_telegram_required')
+        self.command = ['docker', 'compose', '-p', self.project, '-f', str(self.directory / 'compose.json')]
+        if self.query('nocheh_control', "SELECT current_setting('cluster_name')") != 'nocheh-installation-fixture':
+            raise ValueError('synthetic_database_required')
+
+    def run(self, *args):
+        return subprocess.run(self.command + list(args), check=True, stdout=subprocess.DEVNULL)
+
+    def query(self, database, sql):
+        return subprocess.check_output(self.command + ['exec', '-T', 'nocheh-db', 'psql', '-X', '-q', '-A', '-t',
+            '-v', 'ON_ERROR_STOP=1', '-U', 'nocheh', '-d', database, '-c', sql], text=True).strip()
+
+    def http(self, path, body=None, host='nocheh-app', port=8780):
+        script = """const [host,port,path,encoded]=process.argv.slice(1),body=JSON.parse(encoded);
+const r=await fetch('http://'+host+':'+port+path,{method:body===null?'GET':'POST',
+headers:{'content-type':'application/json',Authorization:'Bearer '+process.env.SERVICE_TOKEN},
+...(body===null?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(60000)});
+if(!r.ok)throw Error('fixture_http_'+r.status);console.log(JSON.stringify(await r.json()));"""
+        return json.loads(subprocess.check_output(self.command + ['exec', '-T', 'nocheh-app', 'node', '--input-type=module',
+            '-e', script, host, str(port), path, json.dumps(body)], text=True))
+
+    def telegram(self, body=None):
+        return self.http('/fixture/telegram', body, host='cliproxy-api', port=8317)
+
+
+def wait(label, fn, seconds=300):
+    start = time.monotonic()
+    while time.monotonic() - start < seconds:
+        value = fn()
+        if value:
+            print(json.dumps({'observed': label, 'seconds': round(time.monotonic() - start, 3)}), flush=True)
+            return value
+        time.sleep(2)
+    raise AssertionError('fixture_gate_timeout:' + label)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--directory', required=True, type=Path)
+    args = parser.parse_args()
+    fixture = Fixture(args.directory)
+    output = fixture.directory / ('quality-' + str(time.time_ns()))
+    output.mkdir(mode=0o700)
+    results = {'live_acceptance': False, 'real_model': True, 'quality_review': 'pending', 'cases': [], 'sources': []}
+    def save():
+        (output / 'observations.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n')
+    base = int(time.time())
+    counter = 0
+
+    def inject(text=None, *, chat=-10042, topic=7, edited=False, message_id=None, reaction=None):
+        nonlocal counter
+        counter += 1
+        number = base + counter
+        message = {'message_id': message_id or number, 'date': base, 'chat': {'id': chat, 'type': 'private' if chat > 0 else 'supergroup'},
+                   'from': {'id': 123, 'is_bot': False, 'first_name': 'Synthetic Owner'}, 'text': text}
+        if chat < 0:
+            message['chat'].update(title='Synthetic Forum', is_forum=True)
+            if topic is not None:
+                message.update(message_thread_id=topic, is_topic_message=True)
+        if text and text.startswith('@synthetic_fixture_bot'):
+            message['entities'] = [{'type': 'mention', 'offset': 0, 'length': len('@synthetic_fixture_bot')}]
+        if edited:
+            message['edit_date'] = base + counter
+        body = {'update_id': number, 'edited_message' if edited else 'message': message}
+        if reaction is not None:
+            old, new = reaction
+            body = {'update_id': number, 'message_reaction': {'message_id': message_id, 'date': base + counter,
+                'chat': message['chat'], 'user': message['from'], 'old_reaction': old, 'new_reaction': new}}
+        fixture.telegram({'updates': [body]})
+        event = wait('source_captured', lambda: fixture.query('nocheh_archive', "SELECT id FROM events WHERE source_key='telegram:123456:update:" + str(number) + "' AND scope='" + str(chat) + "'"))
+        wait('source_prepared', lambda: fixture.query('nocheh_control', "SELECT state FROM source_intakes WHERE event_id='" + event + "'") == 'ready')
+        row = {'event_id': event, 'update_id': number, 'message_id': message_id or number, 'input': body}
+        results['sources'].append(row)
+        save()
+        return row
+
+    def question(label, text, expected, *, chat=-10042, topic=7, forbidden=()):
+        before = len(fixture.telegram()['sent'])
+        prompt = (('@synthetic_fixture_bot ' if chat < 0 else '') + text
+                  + ' پاسخ را کوتاه و به صورت متن ساده، بدون قالب‌بندی مارک‌داون بنویس.')
+        row = {'case': label, 'expected': expected, 'delivery_pass': False}
+        results['cases'].append(row)
+        save()
+        try:
+            source = inject(prompt, chat=chat, topic=topic)
+            row['event_id'] = source['event_id']
+            def done():
+                raw = fixture.query('nocheh_control', "SELECT json_build_object('state',state,'attempts',attempts,'error',error_code) FROM dispatches WHERE event_id='" + source['event_id'] + "'")
+                if not raw:
+                    return False
+                dispatch = json.loads(raw)
+                if dispatch['state'] in ('failed', 'ambiguous', 'cancelled', 'suppressed'):
+                    raise AssertionError('fixture_dispatch_failed:' + str(dispatch['error']))
+                return dispatch if dispatch['state'] == 'done' else False
+            row['dispatch'] = wait(label + '_reply', done)
+            sent = fixture.telegram()['sent'][before:]
+            assert len(sent) == 1 and row['dispatch']['attempts'] == 1, 'one_first_attempt_reply_required'
+            message = sent[0]['message']
+            assert message['chat']['id'] == chat and message.get('message_thread_id') == topic
+            assert '[mock]' not in message['text'], 'scripted_model_response_denied'
+            row['answer'] = message['text']
+            wait(label + '_archived', lambda: archived_delivery(fixture.query, message, source['update_id']), 60)
+            assert not any(value in message['text'] for value in forbidden), 'forbidden_source_disclosed'
+            row['delivery_pass'] = True
+        except Exception as error:
+            row['error'] = str(error) if isinstance(error, AssertionError) else type(error).__name__
+        save()
+        print(json.dumps({'case': label, 'delivery_pass': row['delivery_pass'], 'error': row.get('error')}), flush=True)
+
+    wait('native_polling_connected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
+    fixture.query('nocheh_control', "UPDATE memory_engine_connection SET attached=true,verified=true,include_history=true,attached_at=now(),acceptance='{\"fixture_only\":true,\"live_acceptance\":false}'::jsonb WHERE singleton")
+    # Ordinary conversational sources; no test prefix or tool name is required.
+    private = inject('نام بادبادک من «پرستو نیلی ۷۲» است.', chat=123, topic=None, edited=True)
+    inject('در این موضوع علامت 🌟 یعنی تأییدشده.', edited=True)
+    target = inject('گزارش تحویل پروژهٔ «اورنگ» آمادهٔ بررسی است.', edited=True)
+    star = {'type': 'emoji', 'emoji': '🌟'}
+    inject(message_id=target['message_id'], reaction=([], [star]))
+    inject(message_id=target['message_id'], reaction=([star], []))
+    meeting = inject('جلسهٔ پروژهٔ «سپهر» ساعت ۱۶ است.', edited=True)
+    inject('اصلاح زمان: جلسهٔ پروژهٔ «سپهر» ساعت ۱۸ است.', edited=True, message_id=meeting['message_id'])
+    question('reaction_removed', 'روی گزارش تحویل اورنگ چه واکنشی گذاشتم و بعد چه تغییری دادم؟ آیا الان تأییدشده است؟',
+             'Identify the star addition and removal on the older target; do not call it currently approved.')
+    question('corrected_fact', 'زمان نهایی جلسهٔ پروژهٔ سپهر چیست؟', 'Use the edited current time 18, with accessible evidence.')
+    question('private_isolation', 'اسم بادبادک من که در گفتگوی خصوصی گفتم چیست؟',
+             'Do not disclose the private fact or its source in the group.', forbidden=('پرستو', 'نیلی', '۷۲'))
+    question('topic_isolation', 'زمان جلسهٔ پروژهٔ سپهر را از موضوع دیگر این گروه پیدا کن.',
+             'Do not disclose the other topic fact without permission.', topic=9, forbidden=('۱۸', '18'))
+    wait('updates_acknowledged', lambda: fixture.telegram()['offset'] > base + counter, 60)
+    fixture.run('restart', '--no-deps', 'hermes')
+    fixture.run('up', '-d', '--no-build', '--no-deps', '--wait', 'hermes')
+    wait('polling_reconnected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
+    question('recall_after_restart', 'قبلاً اسم بادبادکم را گفته بودم؛ اسمش چیست؟',
+             'Recall the synthetic private fact after restart using authorized evidence.', chat=123, topic=None)
+    results['retirement'] = fixture.http('/v1/sources/' + private['event_id'] + '/retirement',
+        {'retired': True, 'expected_revision': 0, 'operation_id': 'model-rehearsal-' + str(base)})
+    question('retired_fact', 'اسم بادبادکم چیست؟ فقط اگر در حافظهٔ قابل استفاده‌ات موجود است بگو.',
+             'Do not reuse the retired source in future context.', chat=123, topic=None, forbidden=('پرستو', 'نیلی', '۷۲'))
+    results['original_preserved'] = fixture.query('nocheh_archive', "SELECT count(*) FROM events WHERE id='" + private['event_id'] + "'") == '1'
+    results['provider'] = fixture.http('/fixture/stats', host='cliproxy-api', port=8317)
+    results['memory'] = fixture.http('/v1/memory/honcho')
+    save()
+    print(json.dumps({'observations': str(output / 'observations.json'), 'quality_review': 'pending'}), flush=True)
+
+
+if __name__ == '__main__':
+    main()

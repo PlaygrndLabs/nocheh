@@ -5,8 +5,10 @@
 <scope>
 
 The rehearsal evaluates the requirements in [SPECS.md](../SPECS.md) using synthetic
-conversations. It never uses an installation's bot, source data, credentials,
-provider login, volumes, or background workers. Current outcomes and unresolved
+conversations. The deterministic fixture never uses an installation's bot, source
+data, credentials, provider login, volumes, or background workers. The separately
+authorized real-model variant below shares only the selected provider route and
+its authoritative accounting. Current outcomes and unresolved
 gates belong in [TASK.md](../TASK.md); dated reports stay in ignored
 `data/acceptance/results/telegram-simulation/`.
 
@@ -129,5 +131,28 @@ increments under the shared Git lock without activating the operating services.
 Carry unrelated evidence forward with its original revision and limitations.
 
 </execution>
+
+<real_model_evaluation>
+
+Use the [model relay](../tools/acceptance/model_relay.py) only after explicit
+authorization to use an existing model route. Its fixture client keys are
+distinct from the read-only scoped keys used upstream. It owns no OAuth files,
+login or refresh process. Only the selected chat-completions endpoint is
+forwarded; Telegram requests stay in the local mock. A durable, content-free
+journal caps the fixture at 300 model attempts across restarts. Honcho still
+requires its production preparation callback and the existing shared spending
+ledger; a fresh fixture ledger must never reset real spending or request limits.
+
+The [quality runner](../tools/acceptance/model_rehearsal.py) collects synthetic
+reaction-removal, correction, private/topic isolation, restart recall and
+retirement cases. It correlates incoming updates by their captured source key:
+a reaction's message ID identifies its target, not its update. Delivery checks
+require one first-attempt reply with a matching archived receipt. Saved answers
+remain pending semantic review against ground truth; successful delivery alone
+cannot pass recall. Budget exhaustion or degraded memory must be recorded as a
+limitation rather than substituted with scripted reasoning. These observations
+do not authorize operating activation or pass real Telegram release gates.
+
+</real_model_evaluation>
 
 </telegram_simulation>
