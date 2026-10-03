@@ -25,6 +25,35 @@ test('original archive rejects runtime, generated, schedule and transcript envel
   assert.throws(()=>connectStores({}, {...passwords,control:passwords.derived}),/store_credentials_must_differ/);
 });
 
+test('wire evidence survives capture recovery without competing with message preparation',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
+  const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const admin=new pg.Pool(config);
+  try{assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}
+  finally{await admin.end();}
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive);
+  const coordinator=new CaptureCoordinator(archive,stores.control),key='wire-handoff:'+Date.now();
+  const bytes=Buffer.from('{"ok":true,"result":[{"update_id":7,"message":{"text":"synthetic source"}}]}\n');
+  const wire:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_wire',scope:'system',source_id:key,
+    revision:'0',occurred_at:null,text:null,payload:{update_ids:[7]},wire_base64:bytes.toString('base64')};
+  try{
+    const captured=await archive.capture(wire); // Model a crash before the control handoff.
+    await coordinator.handoff(captured.source);
+    await coordinator.handoff(captured.source);
+    assert.equal((await coordinator.capture(wire)).duplicate,true);
+    assert.equal((await stores.control.query('SELECT count(*) FROM capture_handoffs WHERE event_id=$1',[captured.source.reference.id])).rows[0].count,'1');
+    assert.equal((await stores.control.query('SELECT state FROM source_intakes WHERE event_id=$1',[captured.source.reference.id])).rows[0].state,'ready');
+    assert.equal((await stores.control.query('SELECT count(*) FROM workflow_registry WHERE job_id=$1 OR job_id=$2',
+      [captured.source.reference.id,'source:'+captured.source.reference.id])).rows[0].count,'0');
+    const stored=(await stores.archive.query('SELECT wire FROM events WHERE id=$1',[captured.source.reference.id])).rows[0];
+    assert.deepEqual(stored.wire,bytes,'original transport bytes are retained independently of preparation');
+    const update=await coordinator.capture({...event(key),key:key+':update'});
+    assert.deepEqual((await stores.control.query('SELECT family FROM workflow_registry WHERE job_id=$1 OR job_id=$2 ORDER BY family',
+      [update.source.reference.id,'source:'+update.source.reference.id])).rows.map(row=>row.family),['memory_review','preparation','telegram']);
+  }finally{await stores.close();}
+});
+
 test('three real databases preserve originals, isolate roles, recover capture and retain versioned outputs',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   assert.equal(process.env.PGDATABASE,'nocheh');

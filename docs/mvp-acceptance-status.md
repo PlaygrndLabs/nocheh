@@ -125,6 +125,15 @@ The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
 
+Real-model rehearsal then exposed unnecessary preparation of raw Telegram
+transport envelopes. The candidate keeps their immutable bytes and recovery
+receipts while preparing the actual updates. Six focused/adjacent PostgreSQL
+checks pass without skips, and compiled candidate hashes are verified. The
+coupled real-model recheck is pending; the first five-minute conversational
+timeout remains a failure. Additional model requests are owner-authorized for
+this synthetic fixture only, preserving shared accounting and the $5 embedding
+cap. This changes neither operating policy nor live acceptance status.
+
 </simulation_impact>
 
 <checks>
