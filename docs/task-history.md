@@ -1491,3 +1491,26 @@ the owner's explicit single-stack exception. Model quality, live recall and
 release gates remain pending; no operating activation or new live pass is claimed.
 
 </entry>
+
+<entry date="2026-10-03" task="Start the authorized isolated installation and repair its provider import">
+
+The owner explicitly authorized the synthetic installation beside the operating
+stack. The first startup failed because the fixture imported the provider meter
+from an obsolete flat path. Its launcher now uses the repository package import,
+with the meter and embedding configuration mounted under that package root.
+All sixteen fixture services then start healthy; the seventeen operating
+container identities and their healthy state are preserved.
+
+The coupled run passes original capture, guarding, native Honcho ingestion,
+silent learned convention and reaction state, duplicate capture, and a real
+Hermes browser turn with archived delivery. The injected database/workflow outage
+retains its original and recovers handoff, but its ingestion misses the five-minute
+gate. It completes later without another capture or operator retry. Native review
+work delays the source before its primary receipt is created; the recovery gate
+remains failed pending repair. Startup failures, timings, original gate failure
+and later recovery are retained in ignored evidence. These deterministic
+transports establish no actual model-quality or live recall pass.
+[Rehearsal](../tools/acceptance/rehearsals/installation-rehearsal.py),
+[provider fixture](../tools/acceptance/rehearsals/installation-provider.py).
+
+</entry>

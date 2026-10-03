@@ -68,8 +68,13 @@ Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority
 and reject unexpected real tables. Concurrent organization and supervision changes
 are reconciled, with a successful combined build and 52 affected backend/dashboard
-checks. A complete synthetic installation is prepared but has not run; the existing
-same-topic recall failure and live release gates remain open. Detailed original
+checks. The owner-authorized parallel synthetic installation starts all sixteen
+services after a fixture import repair. Capture, guarding, silent learning,
+duplicate handling and the native browser turn pass. An outage preserves its
+new source and recovers handoff, but memory ingestion misses its five-minute
+gate before completing later; background admission remains under investigation.
+The full run is failed, and the existing same-topic recall failure and live
+release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
 
 </simulation_impact>

@@ -131,11 +131,19 @@ this UI verification does not establish live recall or release readiness.
   image and sources retain their exact filesystem/runtime equivalence to
   `63f9b99`, carrying its 22 packaged checks forward. The latest 16-service
   manifest validates with internal
-  networks, no host ports and no operating state mounts. No fixture containers
-  exist. Execution awaits the owner's explicit single-stack exception while the
-  operating stack remains active. Coupled execution, actual model quality and the
-  existing same-topic recall failure remain open; no new live pass or activation
-  is claimed. Detailed reports and image identities stay in ignored
+  networks, no host ports and no operating state mounts. The owner explicitly
+  authorized this independent fixture beside the operating stack. Its initial
+  gateway startup exposed an obsolete flat Python import; repository package
+  mounts repair it, and all sixteen fixture services start healthy. The seventeen
+  operating container identities and their health are preserved. The coupled run
+  passes capture, guarded ingestion, silent convention/reaction learning,
+  duplicate handling and a real native browser turn. Database/workflow outage
+  capture and handoff recover, but memory ingestion misses the five-minute gate
+  and completes later. Long native reviews occupy background admission before
+  the new source receives an ingestion receipt; this remains under repair.
+  The failed gate is retained, and the complete run has no pass. Actual model
+  quality and the existing same-topic recall failure remain open; no new live
+  pass or operating activation is claimed. Detailed reports and identities stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
 
 - Guarded reaction evidence now accompanies discovery with bounded target

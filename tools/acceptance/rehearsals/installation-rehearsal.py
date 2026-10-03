@@ -154,6 +154,12 @@ def main():
         meter = rendered['services']['honcho-provider-gateway']
         meter['command'] = ['python', '/fixture/provider.py', 'meter']
         meter['environment']['NOCHEH_INSTALLATION_FIXTURE'] = '1'
+        # The fixture entry point lives in /fixture, so retain repository package
+        # identities beneath that import root instead of a former flat location.
+        meter_modules = {'/nocheh/meter.py': '/fixture/services/honcho/meter.py',
+                         '/nocheh/embedding_config.py': '/fixture/tools/operations/provider/embedding_config.py'}
+        for mount in meter['volumes']:
+            mount['target'] = meter_modules.get(mount['target'], mount['target'])
         meter['volumes'].append({'type': 'bind', 'source': str(root / 'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True})
         # Assert isolation on the final executable definitions, not an unused overlay.
         assert all(network.get('internal') is True for network in rendered['networks'].values())
