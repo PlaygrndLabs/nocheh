@@ -99,109 +99,58 @@ this UI verification does not establish live recall or release readiness.
 
 <verification>
 
-- Personal-use Telegram simulation remains in progress. The
-  [scenario matrix](docs/telegram-simulation.md),
-  [completed increments](docs/task-history.md) and ignored evidence retain all
-  original failures, focused repairs and carried checks.
-  Seventeen native Telegram scenarios and fourteen capture/gateway checks pass
-  through the pinned Hermes adapter: exact chat/topic delivery, cancellation,
-  current authority and bounded durable rate-limit recovery are covered.
-  [Delivery boundary](docs/adr/0089-physical-telegram-delivery-boundary.md),
-  [rate-limit recovery](docs/adr/0090-durable-telegram-rate-limit-retries.md),
-  [approved destinations](docs/adr/0092-exact-topic-action-destinations.md).
-  Twenty-four memory lifecycle scenarios cover complete approved wording,
-  historical hashes, concurrent exact receipts, expiration conflicts, atomic
-  approval, current fact/grant checks, receipt reconciliation and unstarted
-  legacy recovery. All 29 affected PostgreSQL/action/dispatch checks pass without
-  skips; original failures remain in ignored evidence.
-  [Atomic handoff](docs/adr/0093-atomic-memory-approval-followups.md),
-  [current delivery authority](docs/adr/0094-current-memory-authority-at-delivery.md),
-  [unstarted recovery](docs/adr/0095-recover-unstarted-memory-handoffs.md),
-  [concurrent receipts](docs/adr/0096-serialize-memory-decision-replays.md),
-  [behavior checks](test/store-memory-followup.test.ts).
-  Owner names, merged identities/Undo, corrected wording and retired facts survive
-  automatic refresh. Ten focused entity and 23 adjacent learning, native-memory,
-  organization, portability and sharing checks pass without skips.
-  [Owner correction checks](test/store-entity-owner-corrections.test.ts).
-  Storage, workflow, inactive portability, host isolation, subscription contracts,
-  pinned Honcho migrations/vector transfer and native integration have separate
-  component evidence. These checks make no model-quality claim.
-  Service, management and database images at `92677f8` include the verified replay
-  repair; the packaged Node runtime imports successfully. The unchanged native
-  image and sources retain their exact filesystem/runtime equivalence to
-  `63f9b99`, carrying its 22 packaged checks forward. The latest 16-service
-  manifest validates with internal
-  networks, no host ports and no operating state mounts. The owner explicitly
-  authorized this independent fixture beside the operating stack. Its initial
-  gateway startup exposed an obsolete flat Python import; repository package
-  mounts repair it, and all sixteen fixture services start healthy. The seventeen
-  operating container identities and their health are preserved. The coupled run
-  passes capture, guarded ingestion, silent convention/reaction learning,
-  duplicate handling and a real native browser turn. Database/workflow outage
-  capture and handoff recover, but memory ingestion misses the five-minute gate
-  and completes later. A verified candidate now hands native review to one
-  bounded worker with durable launch/completion receipts, releasing workflow
-  admission while preserving the same effect identity. Twenty-five native and
-  six PostgreSQL/workflow checks pass without skips, including ingestion during
-  a running review, crashes, duplicate calls and credential-free observation.
-  [Decision](docs/adr/0097-durable-native-review-handoff.md),
-  [native checks](services/hermes/test_review_handoff.py),
-  [workflow checks](test/store-workflows.test.ts).
-  The native image at `92a4297` passes all 47 packaged review, Telegram and
-  managed-run checks. A fresh coupled installation passes all nineteen checks,
-  including outage memory recovery in 54.7 seconds under the unchanged
-  five-minute gate. Its current Honcho generation is ready, and three current
-  native reviews have confirmed completion. All seventeen operating services
-  retain their identities and healthy state. The original failed run remains
-  recorded. The HTTP Bot API extension now passes fourteen recorded gates:
-  real native polling, private/named-topic/General replies on the first attempt,
-  exact archived delivery and causal receipts, unselected-private silence,
-  acknowledgment and restart without repeated sends. Nine pinned-SDK contract
-  checks and three fixture-ownership checks pass. The fixture redirects only
-  Telegram transport after the unchanged security boundary; scripted inference
-  remains explicit. Initial fixture setup, parsed-text and offset-oracle failures
-  are retained. One earlier native turn hit its 230-second deadline before a
-  model request; automatic retry delivered once. Its cause remains unproven,
-  although the later full run passed with reply times of 26–47 seconds.
-  The fault/file extension passes ten SDK checks and seven coupled gates,
-  including a physical 429 retry with the required delay, the exact topic,
-  separate rejected/delivered receipts and one reply. A transient file-download
-  failure recovers on attempt two with the exact original bytes/hash. Its native
-  reply then hits the unchanged 230-second deadline before model dispatch, so
-  this extended run is failed, not complete. Investigation has narrowed the
-  repeated delay to guarded context preparation; content-free fixture stack
-  diagnostics identify a second delay: a replacement isolated child waits on
-  the killed child's native lease because container PIDs repeat. The original
-  file turn eventually delivers once on attempt three; that is not a pass.
-  A verified candidate reclaims only native admission rows after acquiring the
-  exclusive profile file lock, preserving history and native fencing. Five
-  crash/schema/mode checks and eighteen adjacent native checks pass without
-  skips. [Decision](docs/adr/0098-isolated-native-lease-recovery.md),
-  [recovery checks](services/hermes/test_native_leases.py).
-  The packaged recovery image passes its five focused checks and source-byte
-  equivalence. A new cold-topic run has an unclassified early native failure;
-  its retry delivers once in 148.5 seconds, including 122.9 seconds at the guard
-  boundary. The failed run is retained. A second verified candidate limits
-  independent guard publications to four concurrent operations, drains started
-  work before releasing a failed audience queue, and caps detector checkpoints
-  at 500 fragments. Three PostgreSQL guard/context/broker checks pass without
-  skips, covering failed-sibling recovery and all 501 input fragments; TypeScript
-  compilation passes. Coupled verification of this candidate remains pending.
-  Verification records explicitly disqualify the initial test run that mounted
-  compiled files at the wrong image root. The replacement checks verify runtime
-  and test hashes inside `/app` before execution: two adjacent checks pass, and
-  the corrected fresh-input context check passes in 255 seconds under its
-  unchanged component deadline. The first batch-count assertion incorrectly
-  assumed previously authorized numeric fragments were fresh; its failed report
-  is retained. The correct service overlay passes the packaged module/hash
-  preflight before any fixture change.
-  [Context checks](test/store-prepared-context.test.ts).
-  No operating runtime change has been made.
-  The operating seventeen services remain healthy and were not restarted.
+- Personal-use Telegram simulation has passing native, storage, workflow,
+  portability, host-isolation and provider-contract evidence across the
+  [scenario matrix](docs/telegram-simulation.md). These are synthetic checks;
+  [task history](docs/task-history.md) retains the original failures, repairs,
+  revisions and carried evidence. Scripted inference does not establish model
+  intelligence or actual provider quality.
+
+  The latest byte-verified native/service candidate passes thirteen HTTP Bot API
+  fault/file gates: cold-context first-attempt replies, physical `429` delay,
+  exact topic and rejected/delivered receipts, one confirmed send, transient file
+  recovery with original bytes/hash, denied-private silence and restart without
+  duplicate sends. The separate ordinary run passes fourteen gates, including
+  private, named-topic and General replies on their first attempts. It starts
+  with two abandoned one-hour native leases: actual isolated startup reclaims
+  both in the same profile, preserves every earlier message hash, and delivers
+  the owner reply in 22.1 seconds. The exclusive profile lock, native fencing,
+  current authority and original acceptance deadlines remain active.
   [HTTP runner](tools/acceptance/telegram_rehearsal.py),
-  [SDK checks](services/hermes/test_telegram_http_fixture.py).
-  Actual model quality and the existing same-topic recall failure remain open; no new live
-  pass or operating activation is claimed. Detailed reports and identities stay in ignored
+  [SDK checks](services/hermes/test_telegram_http_fixture.py),
+  [lease decision](docs/adr/0098-isolated-native-lease-recovery.md).
+
+  Guard preparation publishes at most four independent copies concurrently,
+  drains started work before releasing a failed audience queue, and checkpoints
+  at most 500 fragments per detector batch. Three actual PostgreSQL checks pass
+  without skips, including failed-sibling recovery and all 501 fresh fragments.
+  The initial wrong-root container test record is disqualified; replacement
+  checks verify runtime and test bytes before execution. Packaged source hashes,
+  TypeScript compilation and the AST-only graph update pass. Five packaged
+  native lease checks and eighteen adjacent native checks also pass.
+  [Context checks](test/store-prepared-context.test.ts),
+  [recovery checks](services/hermes/test_native_leases.py).
+
+  Earlier coupled evidence passes nineteen installation gates, including actual
+  Honcho ingestion, silent convention/reaction learning, native browser work and
+  outage memory recovery in 54.7 seconds under the unchanged five-minute gate.
+  Durable native review handoff has 25 native and six PostgreSQL/workflow passes,
+  with 47 packaged native checks. A fresh empty-state run with the latest guard
+  and lease candidate is pending. All original failed runs remain recorded,
+  including an unclassified early native exit; later passes do not explain it.
+  [Installation runner](tools/acceptance/rehearsals/installation-rehearsal.py),
+  [handoff decision](docs/adr/0097-durable-native-review-handoff.md).
+
+  Consequential delivery, approval, memory-sharing and entity repairs retain
+  their separate passing evidence: exact topics and live delivery authority;
+  complete approved wording, atomic follow-ups and concurrent receipts;
+  unstarted handoff recovery; owner names, merged identities, corrections and
+  retired facts. The matrix and history link their focused and adjacent checks.
+  The owner-authorized fixture uses only internal networks and synthetic state;
+  the operating seventeen services retain their identities, start times and
+  healthy state. No operating activation, real Telegram traffic or new live
+  acceptance pass is claimed. Actual model quality and the existing same-topic
+  recall failure remain open. Detailed reports stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
 
 - Guarded reaction evidence now accompanies discovery with bounded target

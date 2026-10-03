@@ -1673,3 +1673,35 @@ Coupled response acceptance remains pending.
 [procedure](telegram-simulation.md).
 
 </entry>
+
+<entry date="2026-10-03" task="Verify cold HTTP replies and abandoned native leases end to end">
+
+The byte-verified service overlay and packaged native lease repair pass all
+thirteen fault/file gates through actual native polling and isolated turns.
+An identical-content synthetic owner revision invalidates the context cache
+while guarding remains on. The topic response finishes on its first attempt;
+one physical 429 honors its delay before one exact-topic delivery with separate
+rejected and delivered receipts. File retrieval recovers on attempt two with
+exact binary bytes/hash; its reply finishes on its first attempt. Guard-boundary
+times are 51.4 and 26.5 seconds, under the unchanged RPC deadline. These shared-host
+observations are not an isolated performance benchmark. Denied-private silence,
+acknowledgment and restart without repeated sends pass.
+
+A second actual HTTP run begins after stopping only the idle fixture parent and
+launcher. Under the profile file lock, two native admission rows receive a
+one-hour lease held by a namespace-live PID; existing message hashes are saved.
+The first owner turn uses that same profile, clears both leases, preserves both
+previous messages exactly and appends its new exchange. It delivers once in
+22.1 seconds. All fourteen ordinary gates pass, including first-attempt private,
+named-topic and General replies, causal archive receipts and restart. All
+seventeen operating services retain their identities, start times and health.
+
+The original failed first-attempt runs, disqualified wrong-root test evidence
+and unclassified early native exit remain preserved in ignored state. No
+acceptance deadline, operating deployment or live acceptance classification
+changes. The previous installation result remains dated evidence while a fresh
+empty-state candidate run is prepared. [Procedure](telegram-simulation.md),
+[HTTP runner](../tools/acceptance/telegram_rehearsal.py),
+[lease decision](adr/0098-isolated-native-lease-recovery.md).
+
+</entry>
