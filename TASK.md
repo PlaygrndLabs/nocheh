@@ -139,9 +139,16 @@ this UI verification does not establish live recall or release readiness.
   passes capture, guarded ingestion, silent convention/reaction learning,
   duplicate handling and a real native browser turn. Database/workflow outage
   capture and handoff recover, but memory ingestion misses the five-minute gate
-  and completes later. Long native reviews occupy background admission before
-  the new source receives an ingestion receipt; this remains under repair.
-  The failed gate is retained, and the complete run has no pass. Actual model
+  and completes later. A verified candidate now hands native review to one
+  bounded worker with durable launch/completion receipts, releasing workflow
+  admission while preserving the same effect identity. Twenty-five native and
+  six PostgreSQL/workflow checks pass without skips, including ingestion during
+  a running review, crashes, duplicate calls and credential-free observation.
+  [Decision](docs/adr/0097-durable-native-review-handoff.md),
+  [native checks](services/hermes/test_review_handoff.py),
+  [workflow checks](test/store-workflows.test.ts).
+  Packaging and coupled recovery verification remain pending. The failed gate
+  is retained, and the complete run has no pass. Actual model
   quality and the existing same-topic recall failure remain open; no new live
   pass or operating activation is claimed. Detailed reports and identities stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.

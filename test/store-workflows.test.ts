@@ -135,12 +135,16 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-workflow-')),key='workflows:'+Date.now(),group='-'+Date.now(),owner='123';
   let sends=0,reviews=0,reasoning=0,engines=0,loseReply=true,sequence=0,targetIds:string[]=[],duringObserve:(()=>Promise<void>)|undefined;
-  const remote=new Map<string,any[]>(),runtimeCalls:string[]=[];
+  const remote=new Map<string,any[]>(),runtimeCalls:string[]=[];let reviewRunning=false,reviewObservations=0;
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:owner,group_ids:[group]}),
-    runtime:async(operation)=>{
+    runtime:async(operation,input)=>{
       runtimeCalls.push(operation);
       if(operation==='guard.detect')return {literals:[]};
-      if(operation==='memory.review'){reviews++;return {state:'done'};}
+      if(operation==='memory.review'){
+        if(input.observe_only){reviewObservations++;assert.equal(input.archive_credential,undefined);}
+        else reviews++;
+        return {state:reviewRunning?'running':'done'};
+      }
       throw Error('unexpected runtime operation');
     },transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){engines++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Improved synthetic reading';}},honcho:async(path,body:any)=>{
       if(path.endsWith('/messages/list'))return {items:(remote.get(path.replace('/list',''))??[]).filter(record=>record.metadata.nocheh_receipt===body.filters.metadata.nocheh_receipt)};
@@ -202,8 +206,22 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     const nextReceipts=(await stores.control.query("SELECT id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='pending'",[next.id])).rows;
     assert.ok(nextReceipts.length>0);
     for(const receipt of nextReceipts)assert.equal((await advance('honcho','receipt:'+receipt.id)).state,'completed');
-    assert.equal((await advance('memory_review','native:'+nextNative)).state,'completed','native review resumes after the pending writes complete');
+    reviewRunning=true;
+    assert.equal((await advance('memory_review','native:'+nextNative)).state,'running','native review hands off after the pending writes complete');
     assert.equal(reviews,beforeReviews+1);
+    const duringReview=(await services.capture.capture(event('during-review',{message:{message_id:4,date:1700000031,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Captured while native notes are still running'}}))).source.reference;
+    assert.equal((await advance('preparation',duringReview.id)).state,'completed');
+    assert.equal((await advance('honcho','source:'+duringReview.id)).state,'waiting');
+    const duringReceipts=(await stores.control.query("SELECT id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='pending'",[duringReview.id])).rows;
+    assert.equal(duringReceipts.length,2);
+    for(const receipt of duringReceipts)assert.equal((await advance('honcho','receipt:'+receipt.id)).state,'completed','primary ingestion progresses while native work is still running');
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[nextNative]);
+    assert.equal((await advance('memory_review','native:'+nextNative)).state,'running');
+    assert.equal(reviewObservations,1);assert.equal(reviews,beforeReviews+1,'observation cannot restart the native mutation');
+    reviewRunning=false;
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[nextNative]);
+    assert.equal((await advance('memory_review','native:'+nextNative)).state,'completed');
+    assert.equal(reviewObservations,2);assert.equal((await services.reviews.inspect(nextNative)).attempts,1);
     const voice=(await services.capture.capture(event('voice',{message:{message_id:3,date:1700000040,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},voice:{file_id:key+':voice'}}}))).source;
     const file=await services.attachments.commit(voice.artifact_ids[0]!,Buffer.from([79,103,103,0,255]));
     const reprocess=await services.reprocessing.request(file,'fixture-asr','2',{},key+':reprocess');
@@ -218,6 +236,6 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal((await stores.control.query('SELECT state FROM memory_generations WHERE id=$1',[workspace.id])).rows[0].state,'retired');
     const count=(await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id LIKE 'source:%' AND generation=$1",[epoch])).rows[0].count;assert.ok(count<=25,'refresh stores bounded progress instead of loading the archive');
     assert.equal((await advance('honcho','context:'+workspace.id)).state,'skipped','revoked generations never run native reasoning');
-    assert.equal((await stores.archive.query("SELECT count(*)::int AS count FROM events WHERE source_key LIKE $1",[key+':%'])).rows[0].count,4);
+    assert.equal((await stores.archive.query("SELECT count(*)::int AS count FROM events WHERE source_key LIKE $1",[key+':%'])).rows[0].count,5);
   }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });

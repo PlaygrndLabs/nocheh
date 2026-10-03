@@ -182,10 +182,10 @@ class Handler(BaseHTTPRequestHandler):
             from .native_memory import recall
             return recall(PROFILE_HOME,body)
         if self.path == '/internal/memory/review':
-            from .review_worker import review,observe
+            from .review_worker import start,observe
             from .scopes import Scopes
             if body.get('observe_only') is True:return observe(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),body)
-            return review(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),MODEL,resolve_credentials(),body)
+            return start(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),MODEL,resolve_credentials(),body)
         if self.path == '/internal/manage':
             from .management import dispatch
             from .scopes import Scopes

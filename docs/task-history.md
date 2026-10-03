@@ -1514,3 +1514,24 @@ transports establish no actual model-quality or live recall pass.
 [provider fixture](../tools/acceptance/rehearsals/installation-provider.py).
 
 </entry>
+
+<entry date="2026-10-03" task="Release workflow admission during durable native note review">
+
+The native review endpoint now returns after a durable launch handoff to one
+bounded supervisor worker. The parent retains the profile turn lock and
+foreground quiet interval. Its private journal stores only effect identities
+and completion markers; observation uses existing native receipts after parent
+loss and never repeats an uncertain mutation. Busy calls start no work.
+
+Twenty-five native checks pass, including blocked execution, concurrent/repeated
+calls, lost supervisor completion, failed thread start, child failure, current
+capability enforcement, quiet intervals and read-only observation without provider
+credentials. Six PostgreSQL/workflow checks pass without skips; a new source is
+prepared and ingested while the earlier review remains running, then its exact
+single attempt is reconciled. TypeScript compilation passes. Packaging and the
+coupled outage rerun remain pending; the original deadline failure is preserved.
+[Decision](adr/0097-durable-native-review-handoff.md),
+[native checks](../services/hermes/test_review_handoff.py),
+[workflow checks](../test/store-workflows.test.ts).
+
+</entry>

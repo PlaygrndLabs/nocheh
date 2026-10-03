@@ -118,11 +118,12 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result,{'state':'waiting','error_code':'profile_busy'});child.assert_not_called()
 
     async def test_review_requires_verified_review_capability_before_opening_profile(self):
-        from .review_worker import review
+        from .review_worker import review,start
         ordinary=self.review_body('assistant');forged=self.review_body();forged['archive_credential']+='invalid'
         with patch('services.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):
-            for body in (ordinary,forged):
-                with self.assertRaises(ValueError):review(Path('/unused'),SimpleNamespace(owner='42'),'model',None,body)
+            for operation in (review,start):
+                for body in (ordinary,forged):
+                    with self.assertRaises(ValueError):operation(Path('/unused'),SimpleNamespace(owner='42'),'model',None,body)
 
     async def test_already_cancelled_never_starts_a_child(self):
         cancel=threading.Event();cancel.set()

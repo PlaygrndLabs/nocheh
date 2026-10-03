@@ -110,3 +110,4 @@ records current implementation and activation.
 | [0094](0094-current-memory-authority-at-delivery.md) | Recheck the exact memory grant and fact at physical delivery | Extends 0089 and 0093; stale authority stops new sends while confirmed receipts remain reconcilable |
 | [0095](0095-recover-unstarted-memory-handoffs.md) | Recover an unstarted withheld memory action on exact owner replay | Extends 0093 and 0094; current authority and atomic policy checks exclude automatic retries and prior effects |
 | [0096](0096-serialize-memory-decision-replays.md) | Serialize memory decision replays and preserve expiration | Extends 0057 and 0093; preserves existing receipt identities |
+| [0097](0097-durable-native-review-handoff.md) | Release workflow admission while a bounded native review runs | Extends 0087 and 0088; durable launch and completion receipts preserve the original effect identity |

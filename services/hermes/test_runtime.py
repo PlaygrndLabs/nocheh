@@ -11,6 +11,20 @@ from unittest.mock import patch
 
 
 class RuntimeConcurrencyTests(unittest.TestCase):
+    def test_native_review_route_hands_off_and_observation_does_not_resolve_credentials(self):
+        from . import runtime
+        handler=object.__new__(runtime.Handler);handler.path='/internal/memory/review'
+        body={'id':'a'*64,'scope':'42'}
+        with patch('services.hermes.review_worker.start',return_value={'state':'running'}) as start,\
+             patch('services.hermes.review_worker.observe',return_value={'state':'done'}) as observe,\
+             patch('services.hermes.scopes.Scopes.load',return_value='synthetic-policy'),\
+             patch.object(runtime,'resolve_credentials',return_value='synthetic-credentials') as credentials:
+            self.assertEqual(handler.dispatch(body),{'state':'running'})
+            start.assert_called_once_with(runtime.PROFILE_HOME,'synthetic-policy',runtime.MODEL,'synthetic-credentials',body)
+            credentials.assert_called_once();credentials.reset_mock()
+            self.assertEqual(handler.dispatch({**body,'observe_only':True}),{'state':'done'})
+            credentials.assert_not_called();observe.assert_called_once()
+
     def test_file_and_detector_requests_progress_while_chat_is_waiting(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
             from . import runtime
