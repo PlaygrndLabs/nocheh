@@ -32,15 +32,15 @@ native delivery; General and deleted-topic fallback checks pass. The actual
 storage action suite passes. Eleven one-time memory lifecycle cases and the existing grant suite now pass.
 Approval, its exact action and outbox work commit together; legacy command replay
 and confirmed receipt-link repair preserve authority and prevent repeated sends.
-The initial interrupted-handoff failure remains in the evidence history. Candidate
-images predate the topic and handoff repairs and need rebuilding.
+The initial interrupted-handoff failure remains in the evidence history. The refreshed
+service/database/management/native images include both repairs at `beed79b`; all
+twenty packaged native checks pass. The updated full fixture remains unstarted.
 
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority
 and reject unexpected real tables. Concurrent organization and supervision changes
 are reconciled, with a successful combined build and 52 affected backend/dashboard
-checks. Sixteen native checks also pass from the packaged candidate image. A
-complete synthetic installation is prepared but has not run; the existing
+checks. A complete synthetic installation is prepared but has not run; the existing
 same-topic recall failure and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
 

@@ -123,10 +123,11 @@ this UI verification does not establish live recall or release readiness.
   subscription compatibility, Honcho SDK/contracts, pinned native migrations and
   vector portability, workflow provisioning, privacy and restart probes pass in
   their separate synthetic fixtures. These checks make no model-quality claim.
-  The earlier candidate images pass sixteen packaged native checks but need the
-  topic and memory-handoff repairs before coupled execution. A complete 16-service
-  synthetic installation is prepared with internal networks and no host ports;
-  it has not started because the operating stack is running and the owner's
+  Service, management, database and native images include the verified topic and
+  handoff fixes at `beed79b`. Twenty checks pass from the packaged native image.
+  The updated 16-service synthetic installation has a validated manifest, verified
+  images, internal networks and no host ports. It has not started because the
+  operating stack is running and the owner's
   explicit single-stack exception remains pending. Real-provider semantic recall
   is unrun for this candidate. No operating activation or new live pass is claimed.
   Detailed original outcomes, image identities and limitations stay in ignored
