@@ -137,8 +137,12 @@ this UI verification does not establish live recall or release readiness.
   envelope. Actual updates retain their preparation and dispatch workflows;
   unprepared retrieval still fails closed. Three storage/recovery checks and
   three adjacent preparation/generated-capture checks pass without skips.
-  TypeScript compilation and the candidate image's runtime/test hashes pass;
-  the coupled real-model timing and semantic recheck remains pending.
+  TypeScript compilation and the candidate image's runtime/test hashes pass.
+  A seed-reusing real-model run passes reaction removal, the edited meeting
+  time and private-to-group isolation on their first attempts in 118.2, 131.6
+  and 89.4 seconds. Each answer has one correctly routed physical reply and a
+  matching archived delivery. A fresh-topic case fails before delivery; these
+  partial passes do not establish cold ingestion or complete model quality.
   [Capture checks](test/stores.test.ts).
 
   A fresh empty-state installation of the latest guard/lease candidate passes
@@ -159,7 +163,9 @@ this UI verification does not establish live recall or release readiness.
   complete approved wording, atomic follow-ups and concurrent receipts;
   unstarted handoff recovery; owner names, merged identities, corrections and
   retired facts. The matrix and history link their focused and adjacent checks.
-  The owner-authorized fixture uses only internal networks and synthetic state;
+  The deterministic fixtures use internal networks and synthetic state; the
+  authorized model fixture adds only its scoped relay to the existing provider
+  network, without a public port or another OAuth owner. The
   the operating seventeen services retain their identities, start times and
   healthy state. No operating activation, real Telegram traffic or new live
   acceptance pass is claimed. Actual model quality and the existing same-topic
@@ -280,24 +286,29 @@ attempts were consumed, the owner authorized 200 additional fixture requests,
 then all additional requests needed for this evaluation. The temporary fixture
 starts with a shared ceiling of 1,700 and can increase its own allowance as
 needed; it does not reset accounting, alter the $5 embedding cap, or change the
-operating configuration. Real Hermes/Honcho evaluation remains in progress for
-reaction-removal recall, corrections/retirement, audience isolation and recall
-after restart. The first reaction question exceeded its unchanged five-minute
-gate; its pending execution and the subsequent already-captured correction
-question must be reconciled before injecting more questions. No semantic pass
-has been established.
+operating configuration. The relay's restart-safe admission journal has an
+explicitly authorized configurable allowance (six admission/HTTP checks pass);
+this fixture's next start uses 3,000 admissions and retains all prior entries.
+Real Hermes/Honcho evaluation remains in progress. Three first-attempt cases
+pass for reaction removal, corrected time and private isolation. Fresh-topic
+isolation fails with `assistant_runtime_unavailable`; restart recall and source
+retirement remain unrun. Diagnosis finds the fresh-topic Honcho peer supported
+only by the current question, yet foreground recall spends about 160 seconds
+reasoning over it. The fixture is stopped while this path is repaired.
 The runner now binds replies to both chat and message, retains pending source
 identities before waiting, and stops after a failed case. Three focused checks
 pass for late/unrelated replies, cross-chat message-number reuse, and duplicate
 physical sends. Existing seeds can be reused with their original evidence;
-this does not repeat the cold capture measurement. Two previous executions ended
-with runtime failures. The first fixture restart exceeded its health deadline
-before a later health-only retry succeeded. A measured Docker load average of
-61.76 on eight CPUs prompted a fixture-only probe cadence experiment (30 seconds,
-with reply and startup deadlines unchanged); its effect remains under evaluation.
-The fixture relay has four focused admission/HTTP checks, including restart-safe
-limits, concurrency, streaming and error redaction. These are infrastructure
-checks, not conversational quality passes. Operating activation remains separate.
+this does not repeat the cold capture measurement. Earlier reaction and
+correction failures later delivered factually correct replies on attempts four
+and three; their original timing and first-attempt gates remain failed. The
+first fixture restart exceeded its health deadline before a health-only retry
+succeeded. A fixture-only 30-second health-probe cadence subsequently passes the
+unchanged startup gate; Docker load was observed at 61.76 before and 22.41 later
+on eight CPUs. This does not establish a sole cause for the response failures.
+Detailed attempts, source identities and native tool evidence remain in ignored
+state. Infrastructure checks do not establish model quality, and operating
+activation remains separate.
 
 1. Diagnose the October 2 same-topic recall failure using the saved event and
    CLI. One linked reply arrived on attempt two after about 384 seconds. It

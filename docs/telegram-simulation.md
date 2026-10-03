@@ -139,7 +139,10 @@ authorization to use an existing model route. Its fixture client keys are
 distinct from the read-only scoped keys used upstream. It owns no OAuth files,
 login or refresh process. Only the selected chat-completions endpoint is
 forwarded; Telegram requests stay in the local mock. A durable, content-free
-journal caps the fixture at 300 model attempts across restarts. Honcho still
+journal defaults to 300 model attempts across restarts. An explicitly authorized
+increase uses `NOCHEH_FIXTURE_MODEL_REQUEST_LIMIT` together with
+`NOCHEH_ADDITIONAL_MODEL_REQUESTS_AUTHORIZED=1`; the fixture boundary accepts at
+most 10,000 admissions and retains every earlier journal entry. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
 An explicit owner exception may increase the allowance in the synthetic

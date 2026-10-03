@@ -129,10 +129,18 @@ Real-model rehearsal then exposed unnecessary preparation of raw Telegram
 transport envelopes. The candidate keeps their immutable bytes and recovery
 receipts while preparing the actual updates. Six focused/adjacent PostgreSQL
 checks pass without skips, and compiled candidate hashes are verified. The
-coupled real-model recheck is pending; the first five-minute conversational
-timeout remains a failure. Additional model requests are owner-authorized for
+seed-reusing real-model recheck passes reaction removal, corrected time and
+private isolation, with one first-attempt reply and archived delivery each.
+Fresh-topic isolation still fails; its only ingested evidence is the current
+question, which nevertheless triggers a long foreground Honcho recall. Restart
+recall and source retirement are unrun. Earlier timed-out reaction/correction
+turns later answered correctly on retries without passing their original timing
+or first-attempt gates. These observations do not repeat cold ingestion or pass
+operating recall. Additional model requests are owner-authorized for
 this synthetic fixture only, preserving shared accounting and the $5 embedding
-cap. This changes neither operating policy nor live acceptance status.
+cap. Six relay checks pass for explicit additional allowance, retained accounting,
+authentication, concurrency, streaming and redaction. This changes neither
+operating policy nor live acceptance status.
 
 </simulation_impact>
 

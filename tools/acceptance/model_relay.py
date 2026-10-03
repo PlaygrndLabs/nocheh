@@ -14,10 +14,22 @@ import time
 import urllib.error
 import urllib.request
 
+DEFAULT_REQUEST_LIMIT = 300
+MAX_REQUEST_LIMIT = 10_000
+
+
+def request_limit(environment):
+    limit = int(environment.get('NOCHEH_FIXTURE_MODEL_REQUEST_LIMIT', str(DEFAULT_REQUEST_LIMIT)))
+    if not 1 <= limit <= MAX_REQUEST_LIMIT:
+        raise ValueError('invalid_rehearsal_limit')
+    if limit > DEFAULT_REQUEST_LIMIT and environment.get('NOCHEH_ADDITIONAL_MODEL_REQUESTS_AUTHORIZED') != '1':
+        raise ValueError('additional_request_authorization_required')
+    return limit
+
 
 class Admission:
-    def __init__(self, journal, credentials, limit=300):
-        if type(limit) is not int or not 1 <= limit <= 300:
+    def __init__(self, journal, credentials, limit=DEFAULT_REQUEST_LIMIT):
+        if type(limit) is not int or not 1 <= limit <= MAX_REQUEST_LIMIT:
             raise ValueError('invalid_rehearsal_limit')
         self.path = Path(journal)
         self.credentials = credentials
@@ -137,7 +149,7 @@ def main():
             raise ValueError('distinct_scoped_credentials_required')
         credentials[name] = (local, existing)
     import uvicorn
-    app = create_app(Admission('/fixture-state/model-requests.jsonl', credentials),
+    app = create_app(Admission('/fixture-state/model-requests.jsonl', credentials, request_limit(os.environ)),
                      'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', '/fixture-state/telegram.json')
     uvicorn.run(app, host='0.0.0.0', port=8317, log_level='warning', access_log=False)
 
