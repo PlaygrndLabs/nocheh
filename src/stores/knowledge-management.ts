@@ -204,7 +204,7 @@ export class KnowledgeManagementRepository {
   // Masking must not change the operation the model proposed; owner edits require a new proposal.
   if(canonical(JSON.parse(text))!==canonical(proposal))throw new HttpError(409,'knowledge_proposal_guarded');
   input.dependencies.proposal_revision=guarded.revision;input.dependencies.proposal_hash=digest(text);
-  const match=proposal.kind==='organization'?await this.matchDelegation(proposal,input,undefined):null;
+  const match=proposal.kind==='organization'?await this.matchDelegation(proposal,{...input,binding},undefined):null;
   const state=match?'queued':'review',db=await this.stores.control.connect();
   try{await db.query('BEGIN');const guard=(await db.query('SELECT epoch,mode FROM guard_state WHERE singleton FOR UPDATE')).rows[0];
    if(Number(guard.epoch)!==binding.epoch||guard.mode!==binding.mode)throw new HttpError(409,'guard_context_changed');
@@ -230,8 +230,8 @@ export class KnowledgeManagementRepository {
    const status={id:row.id,kind:row.kind,state:row.state,revision:row.revision,approved:row.approved,error_code:row.error_code};
    await this.s.prepared.allow(principal,status);await this.s.turns.assertAudience(principal);return status;
   }
-  const proposal=await this.content(row);
-  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{}};}
+  const proposal=await this.content(row),decision_history=(await this.stores.control.query('SELECT operation_id,result,created_at FROM knowledge_decisions WHERE proposal_id=$1 ORDER BY created_at,operation_id',[row.id])).rows;
+  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},decision_history};}
  async proposals(principal:Reader,after=''){admin(principal);if(after)id(after);const rows=(await this.stores.control.query(`SELECT id FROM knowledge_proposals WHERE $1='' OR
   (created_at,id)<(SELECT created_at,id FROM knowledge_proposals WHERE id=$1) ORDER BY created_at DESC,id DESC LIMIT 101`,[after])).rows;
   return {proposals:await Promise.all(rows.slice(0,100).map(row=>this.proposal(principal,row.id))),next:rows.length>100?rows[99].id:null};}
@@ -453,7 +453,8 @@ export class KnowledgeManagementRepository {
    if(body.decision==='approve'){
     await this.validate(row);await db.query('UPDATE knowledge_proposals SET approved=true WHERE id=$1',[identity]);
    }
-   const result=await this.outcome(db,identity,body.decision==='approve'?'queued':'cancelled',body.decision==='approve'?null:'owner_'+body.decision);
+   const result={...await this.outcome(db,identity,body.decision==='approve'?'queued':'cancelled',body.decision==='approve'?null:'owner_'+body.decision),
+    decision:body.decision,previous:{state:row.state,error_code:row.error_code,revision:row.revision,result:row.result}};
    if(body.decision==='approve')await requestWorkflow(db,'organization','proposal:'+identity,result.revision);
    await db.query('INSERT INTO knowledge_decisions(operation_id,proposal_id,request_hash,result) VALUES($1,$2,$3,$4)',[operation,identity,hash,result]);
    await db.query('COMMIT');return result;

@@ -9,6 +9,7 @@ import type {ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {NativeMemoryRepository} from './native-memory.js';
+import type {SharingContentRepository} from './sharing.js';
 
 export const decisionKinds=['controlled_action','telegram_action','memory_access','entity','knowledge'] as const;
 export type DecisionKind=typeof decisionKinds[number];
@@ -19,6 +20,7 @@ export interface ConversationDirectoryItem {
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
   telegramActions:Pick<TelegramActionRepository,'inspect'>;memory:Pick<NativeMemoryRepository,'status'>;
+  shared:Pick<SharingContentRepository,'inspect'>;
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
 }
 type PageInput={q?:string;after?:string;limit?:number};
@@ -49,12 +51,14 @@ export class OwnerSupervisionRepository {
   private async directory():Promise<ConversationDirectoryItem[]> {
     // Extract only presentation metadata in SQL: no message text, captions, or source bodies leave the archive.
     const [observed,configured,configuration]=await Promise.all([
-      this.stores.archive.query(`WITH observations AS (
+      this.stores.archive.query(`WITH originals AS (
+        SELECT id,capture_sequence,received_at,scope,
+          CASE WHEN pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb') THEN convert_from(payload,'UTF8')::jsonb ELSE '{}'::jsonb END AS presentation
+        FROM events WHERE channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
+      ), observations AS (
         SELECT e.id,e.capture_sequence,e.received_at,e.scope,o.metadata->'audience' AS audience,
-          coalesce(convert_from(e.payload,'UTF8')::jsonb->'message',convert_from(e.payload,'UTF8')::jsonb->'edited_message',
-            convert_from(e.payload,'UTF8')::jsonb->'channel_post',convert_from(e.payload,'UTF8')::jsonb->'edited_channel_post',convert_from(e.payload,'UTF8')::jsonb) AS message
-        FROM events e LEFT JOIN source_observations o ON o.event_id=e.id
-        WHERE e.channel='telegram' AND e.kind IN ('telegram_update','telegram_delivered_message')
+          coalesce(e.presentation->'message',e.presentation->'edited_message',e.presentation->'channel_post',e.presentation->'edited_channel_post',e.presentation) AS message
+        FROM originals e LEFT JOIN source_observations o ON o.event_id=e.id
       ), scopes AS (
         SELECT *,scope AS space_id FROM observations
         UNION ALL SELECT *,scope||'/topic/'||(audience->>'topic_id') AS space_id FROM observations
@@ -156,7 +160,7 @@ export class OwnerSupervisionRepository {
       this.directory(),this.assistantConfiguration(),this.services.projects.effective(space),
       this.stores.control.query('SELECT * FROM sharing_rules WHERE destination=$1 ORDER BY id',[space]),
       this.stores.control.query('SELECT id,fact_id,fact_revision,mode,state,revision,binding,expires_at,suspended_reason FROM memory_fact_grants WHERE destination=$1 ORDER BY id',[space]),
-      this.stores.control.query(`SELECT r.id,r.rule_id,r.rule_revision,r.state,r.revision,r.generation,r.guard_mode,r.expires_at,p.revision AS current_rule_revision,p.enabled AS rule_enabled
+      this.stores.control.query(`SELECT r.id,r.preview_id,r.rule_id,r.rule_revision,r.state,r.revision,r.generation,r.guard_mode,r.guard_revision,r.text_hash,r.expires_at,p.revision AS current_rule_revision,p.enabled AS rule_enabled
         FROM sharing_releases r JOIN sharing_rules p ON p.id=r.rule_id WHERE p.destination=$1 ORDER BY r.id`,[space]),
       this.stores.control.query(`SELECT p.id,p.action_id,p.fingerprint,p.scope,p.profile,p.kind,p.job_id,p.expires_at,p.remaining,p.revision,p.revoked_at,p.binding,a.space_id AS source_space
         FROM action_permissions p JOIN controlled_actions a ON a.id=p.action_id WHERE p.scope=$1 ORDER BY p.id`,[parent]),
@@ -172,12 +176,21 @@ export class OwnerSupervisionRepository {
     const generations=memory.generations.filter(g=>g.audience===(owner?'owner':space)),connection=memory.connection;
     const attached=connection?.attached===true&&connection?.verified===true;
     const ready=attached&&generations.some(g=>g.state==='ready'||!!g.last_ready_at),syncing=generations.some(g=>g.state==='building');
+    const sharingReleases=[];
+    for(const row of releases.rows){
+      let current=row.state==='active'&&row.generation===guard.generation&&row.guard_mode===guard.mode&&row.rule_enabled&&row.rule_revision===row.current_rule_revision&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now());
+      if(current)try{
+        const preview=await this.services.shared.inspect(principal,row.preview_id);
+        current=preview.current&&preview.guard_revision===row.guard_revision&&preview.text_hash===row.text_hash;
+      }catch(error){if(!(error instanceof HttpError)||![403,404,409].includes(error.status))throw error;current=false;}
+      sharingReleases.push({...row,current,authorization:'rechecked_on_use'});
+    }
     return {conversation,observed_at:new Date().toISOString(),state:configuration&&security.rows[0]?'current':'partial',
       addressing:{state:configuration?'current':'unavailable',enabled:policy?.enabled??false,owner_id:policy?.owner_id??null,
         group_enabled:!!policy?.enabled&&!!policy.group_ids.includes(parent),granted:access?.granted??[],denied:access?.denied??[],revision:configuration?.revision??null},
       knowledge_access:{source_scope:space,owner_access:owner,sharing_rules:rules.rows,
         fact_grants:grants.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&factRevisions.get(row.fact_id)===row.fact_revision&&row.state==='active'&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
-        sharing_releases:releases.rows.map(row=>({...row,current:row.state==='active'&&row.generation===guard.generation&&row.guard_mode===guard.mode&&row.rule_enabled&&row.rule_revision===row.current_rule_revision&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
+        sharing_releases:sharingReleases,
         note:'Only exact conversation sources and valid published sharing or fact grants can be used. Project membership is not access; stored grants are rechecked on use.'},
       external_actions:{policy:security.rows[0]??null,permissions:permissions.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&!row.revoked_at&&row.remaining>0&&new Date(row.expires_at).getTime()>Date.now()})),
         note:'External actions require exact approval or a matching unexpired permission, and remain subject to the security policy. Authorization is not evidence of execution.'},

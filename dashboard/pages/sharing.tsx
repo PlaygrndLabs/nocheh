@@ -2,26 +2,26 @@ import {useRef,useState} from 'react';
 import {Badge,Button,Alert,EmptyState,Sheet,Tabs,TabsList,TabsTrigger,TabsContent} from '../components/ui/primitives';
 import {useResource} from '../lib/resource';
 import {CursorButtons,EvidenceLinks,Provenance,ResourceState,useOwnerCommand} from '../lib/owner-controls';
+import {ConversationSelector,ConversationContext} from '../components/conversations';
 import {sourceContentLabel} from '../../src/source-content.js';
 
 type Rule={id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;revision:number};
 type Preview={id:string;rule_id:string;rule_revision:number;state:string;created_at:string;text?:string;current?:boolean;guard_revision?:number|null;text_hash?:string;
  input?:{rule:Rule;sources:{id:string}[]};output_provenance?:unknown};
 type Release={id:string;preview_id:string;rule_id:string;state:string;mode:string;revision:number;expires_at:string|null;created_at:string};
-const values=(text:string)=>[...new Set(text.split(/[\n,]/).map(v=>v.trim()).filter(Boolean))];
 const sourceLabel=(row:{text?:string;preview?:string;content_types?:string[]})=>row.text?.trim()||row.preview?.trim()||row.content_types?.map(sourceContentLabel).join(' · ')||'Message without text';
 function RuleEditor({rule,onSaved}:{rule:Rule|null;onSaved:()=>void}){
- const [name,setName]=useState(rule?.name||''),[sources,setSources]=useState(rule?.sources.join('\n')||''),[destination,setDestination]=useState(rule?.destination||''),[enabled,setEnabled]=useState(rule?.enabled??false),[mode,setMode]=useState(rule?.mode??'approved'),[instructions,setInstructions]=useState(rule?.instructions||''),command=useOwnerCommand();
- return <form className="owner-form" onSubmit={e=>{e.preventDefault();void command.run('/sharing/rules',{...(rule?{id:rule.id}:{}),name,sources:values(sources),destination,enabled,mode,instructions,expected_revision:rule?.revision??0}).then(result=>{if(result)onSaved();});}}>
+ const [name,setName]=useState(rule?.name||''),[sources,setSources]=useState<string[]>(rule?.sources??[]),[destination,setDestination]=useState(rule?.destination||''),[enabled,setEnabled]=useState(rule?.enabled??false),[mode,setMode]=useState(rule?.mode??'approved'),[instructions,setInstructions]=useState(rule?.instructions||''),command=useOwnerCommand();
+ return <form className="owner-form" onSubmit={e=>{e.preventDefault();void command.run('/sharing/rules',{...(rule?{id:rule.id}:{}),name,sources,destination,enabled,mode,instructions,expected_revision:rule?.revision??0}).then(result=>{if(result)onSaved();});}}>
  <label>Rule name<input value={name} required maxLength={200} onChange={e=>setName(e.target.value)} disabled={command.busy}/></label>
- <label>Source conversations<textarea rows={3} value={sources} onChange={e=>setSources(e.target.value)} placeholder="One chat ID or chat/topic/ID per line" required disabled={command.busy}/><small>Only these exact chats or topics may contribute. Projects do not expand this selection.</small></label>
- <label>Destination conversation<input value={destination} required onChange={e=>setDestination(e.target.value)} placeholder="Chat ID or chat/topic/ID" disabled={command.busy}/></label>
+ <ConversationSelector label="Source conversations" value={sources} onChange={setSources} multiple disabled={command.busy} description="Only these exact chats or topics may contribute. Projects do not expand this selection."/>
+ <ConversationSelector label="Destination conversation" value={destination?[destination]:[]} onChange={ids=>setDestination(ids[0]??'')} disabled={command.busy}/>
  <label>Sharing mode<select value={mode} onChange={e=>setMode(e.target.value as Rule['mode'])} disabled={command.busy}><option value="approved">Owner approves exact text</option><option value="filtered">Filter permitted knowledge automatically</option></select></label>
  <p className="n-muted">{mode==='approved'?'Prepare a preview and approve its exact wording before the destination can retrieve it.':'Relevant selected sources pass through the privacy filter. Uncertain or private information is withheld.'}</p>
  <label>Additional privacy instructions<textarea rows={4} value={instructions} maxLength={4000} onChange={e=>setInstructions(e.target.value)} disabled={command.busy}/></label>
  <label className="owner-check"><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} disabled={command.busy}/>Enable this rule</label>
  <p className="n-muted">Changes revoke affected contexts. Disabling a rule immediately withholds its shares.</p>
- {command.error&&<Alert>{command.error}</Alert>}<Button type="submit" variant="default" disabled={command.busy||!name.trim()||!sources.trim()||!destination.trim()}>{command.busy?'Saving…':'Save sharing rule'}</Button></form>;
+ {command.error&&<Alert>{command.error}</Alert>}<Button type="submit" variant="default" disabled={command.busy||!name.trim()||!sources.length||!destination.trim()}>{command.busy?'Saving…':'Save sharing rule'}</Button></form>;
 }
 function PreviewForm({rule,onPreview}:{rule:Rule;onPreview:(id:string,trigger:HTMLElement)=>void}){
  const [draft,setDraft]=useState(''),[query,setQuery]=useState(''),[chosen,setChosen]=useState<{id:string;text:string}[]>([]),[text,setText]=useState(''),command=useOwnerCommand();
@@ -54,7 +54,7 @@ function PreviewDetail({id,onApproved}:{id:string;onApproved:()=>void}){
  </div>}</>;
 }
 export function Sharing(){
- const releasesTab=useRef<HTMLButtonElement>(null);
+ const releasesTab=useRef<HTMLButtonElement>(null),[context,setContext]=useState<string|null>(null);
  const [pages,setPages]=useState(['']),[previewPages,setPreviewPages]=useState(['']),[releasePages,setReleasePages]=useState(['']),[editor,setEditor]=useState<Rule|'new'|null>(null),[selectedRule,setSelectedRule]=useState(''),[preview,setPreview]=useState(''),[trigger,setTrigger]=useState<HTMLElement|null>(null),[tab,setTab]=useState('rules'),command=useOwnerCommand();
  const rules=useResource<{rules:Rule[];next:string|null}>('/sharing/rules?after='+pages.at(-1)),previews=useResource<{previews:Preview[];next:string|null}>('/sharing/previews?after='+previewPages.at(-1)),releases=useResource<{releases:Release[];next:string|null}>('/sharing/releases?after='+releasePages.at(-1));
  const rule=rules.data?.rules.find(r=>r.id===selectedRule),name=(id:string)=>rules.data?.rules.find(r=>r.id===id)?.name??'Sharing rule';
@@ -62,13 +62,13 @@ export function Sharing(){
  <Tabs value={tab} onValueChange={setTab}><TabsList aria-label="Sharing views"><TabsTrigger value="rules">Rules</TabsTrigger><TabsTrigger value="previews">Previews</TabsTrigger><TabsTrigger ref={releasesTab} value="releases">Released text</TabsTrigger></TabsList>
  <TabsContent value="rules"><section className="n-panel"><ResourceState {...rules} hasData={!!rules.data}/>{rules.data&&!rules.data.rules.length&&<EmptyState title="No sharing rules">Create a rule with explicit sources and a destination.</EmptyState>}
  <div className="owner-records">{rules.data?.rules.map(r=><article key={r.id}><div className="list-heading"><h3>{r.name}</h3><Badge>{r.enabled?'Enabled':'Disabled'}</Badge></div><p>{r.mode==='approved'?'Owner approves exact text':'Automatic privacy filter'} · {r.sources.length} source conversations</p><p>Destination <span className="owner-identifier">{r.destination}</span></p>
- <div className="n-actions"><Button onClick={e=>{setTrigger(e.currentTarget);setEditor(r);}}>Edit rule</Button><Button onClick={()=>setSelectedRule(r.id)}>Prepare a preview</Button></div></article>)}</div><CursorButtons pages={pages} next={rules.data?.next} onChange={setPages}/></section>
+ <div className="n-actions"><Button onClick={e=>{setTrigger(e.currentTarget);setEditor(r);}}>Edit rule</Button><Button onClick={()=>setSelectedRule(r.id)}>Prepare a preview</Button><Button onClick={e=>{setTrigger(e.currentTarget);setContext(r.destination);}}>Destination context</Button></div></article>)}</div><CursorButtons pages={pages} next={rules.data?.next} onChange={setPages}/></section>
  {rule&&<section className="n-panel"><div className="list-heading"><h2>Prepare shared text</h2><Button onClick={()=>setSelectedRule('')}>Close preview form</Button></div><PreviewForm key={rule.id+':'+rule.revision} rule={rule} onPreview={(id,button)=>{setTrigger(button);setPreview(id);}}/></section>}</TabsContent>
  <TabsContent value="previews"><section className="n-panel"><h2>Preview history</h2><ResourceState {...previews} hasData={!!previews.data}/>{previews.data&&!previews.data.previews.length&&<EmptyState title="No previews yet">Prepare a preview from a sharing rule.</EmptyState>}
  <div className="owner-records">{previews.data?.previews.map(p=><article key={p.id}><div className="list-heading"><h3>{name(p.rule_id)}</h3><Badge>{p.state==='ready'?'Prepared':'Preparation pending'}</Badge></div><p>Rule revision {p.rule_revision} · {new Date(p.created_at).toLocaleString()}</p><Button onClick={e=>{setTrigger(e.currentTarget);setPreview(p.id);}}>Inspect preview</Button></article>)}</div><CursorButtons pages={previewPages} next={previews.data?.next} onChange={setPreviewPages}/></section></TabsContent>
  <TabsContent value="releases"><section className="n-panel"><h2>Released representations</h2><ResourceState {...releases} hasData={!!releases.data}/>{command.error&&<Alert>{command.error}</Alert>}{releases.data&&!releases.data.releases.length&&<EmptyState title="Nothing has been released">Approve a prepared preview or enable a filtered sharing rule.</EmptyState>}
  <div className="owner-records">{releases.data?.releases.map(r=><article key={r.id}><div className="list-heading"><h3>{name(r.rule_id)}</h3><Badge>{r.state==='revoked'?'Revoked':r.expires_at&&Date.parse(r.expires_at)<Date.now()?'Expired':'Released'}</Badge></div><p>{r.mode==='approved'?'Owner approved':'Privacy filtered'} · {new Date(r.created_at).toLocaleString()}</p>
  <small>Availability also depends on current rules, guards, and source versions.</small><div className="n-actions"><Button onClick={e=>{setTrigger(e.currentTarget);setPreview(r.preview_id);}}>Inspect text and provenance</Button><Button variant="destructive" disabled={r.state!=='active'||command.busy} onClick={()=>void command.run('/sharing/releases/'+r.id+'/revoke',{expected_revision:r.revision})}>Revoke access</Button></div></article>)}</div><CursorButtons pages={releasePages} next={releases.data?.next} onChange={setReleasePages}/></section></TabsContent></Tabs>
- <Sheet open={!!editor} onOpenChange={open=>{if(!open)setEditor(null);}} title={editor==='new'?'Create sharing rule':'Edit sharing rule'} returnFocus={trigger}>{editor&&<RuleEditor key={editor==='new'?'new':editor.id} rule={editor==='new'?null:editor} onSaved={()=>setEditor(null)}/>}</Sheet>
+ <ConversationContext space={context} onClose={()=>setContext(null)} returnFocus={trigger}/><Sheet open={!!editor} onOpenChange={open=>{if(!open)setEditor(null);}} title={editor==='new'?'Create sharing rule':'Edit sharing rule'} returnFocus={trigger}>{editor&&<RuleEditor key={editor==='new'?'new':editor.id} rule={editor==='new'?null:editor} onSaved={()=>setEditor(null)}/>}</Sheet>
  <Sheet open={!!preview} onOpenChange={open=>{if(!open)setPreview('');}} title="Sharing preview" returnFocus={trigger}>{preview&&<PreviewDetail key={preview} id={preview} onApproved={()=>{setTrigger(releasesTab.current);setPreview('');setTab('releases');}}/>}</Sheet></>;
 }

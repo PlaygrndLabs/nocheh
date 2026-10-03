@@ -42,11 +42,11 @@ function Suggestions(){
   <ResourceState {...data} hasData={!!data.data}/>{data.data&&!data.data.suggestions.length&&<EmptyState title="No suggestions to review">Uncertain names and project references will appear here quietly.</EmptyState>}
   <div className="owner-records">{data.data?.suggestions.map(item=><SuggestionRow key={item.id} item={item}/>)}</div><CursorButtons pages={page} next={data.data?.next} onChange={setPage}/></section>;
 }
-function SuggestionRow({item}:{item:Suggestion}){
+export function SuggestionRow({item,disabled=false,onChanged=()=>{}}:{item:Suggestion;disabled?:boolean;onChanged?:()=>void}){
  const [target,setTarget]=useState(item.candidate_entity_id??''),command=useOwnerCommand();
- const decide=(decision:'confirm'|'reject')=>command.run('/entities/'+item.id+'/decide',{decision,expected_revision:item.revision,...(target?{entity_id:target}:{})});
+ const decide=async(decision:'confirm'|'reject')=>{if(await command.run('/entities/'+item.id+'/decide',{decision,expected_revision:item.revision,...(target?{entity_id:target}:{})}))onChanged();};
  return <article><div className="list-heading"><h3>{item.name}</h3><Badge>{item.kind}</Badge></div><p>{item.reason}</p>{item.kind==='binding'&&<label>Confirmed person ID<input value={target} onChange={event=>setTarget(event.target.value)} pattern="[a-f0-9]{64}" required/></label>}
-  <EvidenceLinks sources={[item.source_reference]}/>{command.error&&<Alert>{command.error}</Alert>}<div className="n-actions"><Button variant="default" disabled={command.busy||item.kind==='binding'&&!target} onClick={()=>void decide('confirm')}>Confirm</Button><Button disabled={command.busy} onClick={()=>void decide('reject')}>Reject</Button></div></article>;
+  <EvidenceLinks sources={[item.source_reference]}/>{command.error&&<Alert>{command.error}</Alert>}<div className="n-actions"><Button variant="default" disabled={disabled||command.busy||item.kind==='binding'&&!target} onClick={()=>void decide('confirm')}>Confirm</Button><Button disabled={disabled||command.busy} onClick={()=>void decide('reject')}>Reject</Button></div></article>;
 }
 export function EntityMemory({kind}:{kind:'person'|'project'}){
  const [query,setQuery]=useState(''),[pages,setPages]=useState(['']),[selected,setSelected]=useState<Entity|null>(null),[trigger,setTrigger]=useState<HTMLElement|null>(null);

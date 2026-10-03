@@ -12,8 +12,9 @@ test('stored owner directory and decisions span every page without turning reads
     const admin=new pg.Pool(config);try{assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
     const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
     await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),key='supervision:'+Date.now(),group='-'+Date.now(),second=String(Number(group)-1),owner={admin:true,scope:null};
+    let detectorCalls=0;
     const services=storageServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,second]}),
-      runtime:async()=>{throw Error('read projection must not call runtime');},honcho:async()=>{throw Error('read projection must not call Honcho');}});
+      runtime:async(operation)=>{assert.equal(operation,'guard.detect');detectorCalls++;return {literals:[]};},honcho:async()=>{throw Error('read projection must not call Honcho');}});
     const view=new OwnerSupervisionRepository({...services,knowledge:{proposal:async()=>{throw Error('not used');}}});
     try {
       const capture=async(scope:string,index:number,extra:Record<string,unknown>={})=>{
@@ -22,6 +23,7 @@ test('stored owner directory and decisions span every page without turning reads
         return (await services.capture.capture(event)).source.reference;
       };
       const source=await capture(group,1);await capture(second,2);await capture(group,3,{message_thread_id:19,forum_topic_created:{name:'Synthetic named topic'}});await capture(group,4,{message_thread_id:19});
+      const unrepresentableScope=String(Number(group)-2);await capture(unrepresentableScope,5,{text:'Original\u0000message'});
       const suggestions=Array.from({length:131},(_,index)=>({id:digest(key+':suggestion:'+index),name:'Suggestion '+index}));
       await stores.control.query(`INSERT INTO memory_entity_suggestions(id,kind,name,source_reference,reason)
         SELECT value->>'id','person',value->>'name',$2::jsonb,'Synthetic evidence' FROM jsonb_array_elements($1::jsonb) value`,[JSON.stringify(suggestions),source]);
@@ -39,6 +41,8 @@ test('stored owner directory and decisions span every page without turning reads
       assert.equal(topic?.parent_name,'Repeated synthetic name');assert.equal(topic?.kind,'topic');
       assert.equal((await view.conversations(owner,{q:'Repeated synthetic name'})).items.filter(item=>[group,second].includes(item.space_id)).length,2);
       assert.ok(!JSON.stringify(directory).includes('PRIVATE_FIXTURE_BODY'));
+      const unrepresentable=(await view.conversations(owner,{q:unrepresentableScope})).items.find(item=>item.space_id===unrepresentableScope);
+      assert.ok(unrepresentable,'source JSON that PostgreSQL cannot convert to jsonb retains its exact directory identity');assert.equal(unrepresentable.name,null);
       const before=await services.guards.state(),context=await view.context(owner,group+'/topic/19'),after=await services.guards.state();
       assert.deepEqual(after,before,'read projections never invalidate the current memory generation');
       assert.deepEqual(context.knowledge_access.sharing_rules,[]);assert.equal(context.organization.effective.project,null);
@@ -50,5 +54,26 @@ test('stored owner directory and decisions span every page without turning reads
       assert.equal(fact?.type,'claim');assert.equal(fact?.content,'Synthetic milestone is ready');assert.deepEqual(fact?.evidence,[source]);
       assert.equal(projectView.knowledge.total,1);assert.ok(projectView.conversations.some(item=>item.space_id===group+'/topic/19'&&item.effective.inherited));
       assert.deepEqual((await view.context(owner,group+'/topic/19')).knowledge_access.sharing_rules,[],'inherited project context never becomes sharing authority');
+      assert.equal(detectorCalls,0,'directory, decisions and context do not call the runtime');
+
+      await services.guards.reconcile();await services.guards.setMode('on');await services.guards.prepare(source,'fixture',services.detect);
+      const rule=await services.sharing.save(owner,{name:key+':share',sources:[group],destination:second,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':share-rule'});
+      const release=async(label:string)=>{
+        const preview=await services.shared.preview(owner,{rule_id:rule.id,expected_revision:rule.revision,source_ids:[source.id],content:'Synthetic approved project fact',operation_id:key+':preview:'+label});
+        const saved=await services.shared.approve(owner,preview.id,{expected_revision:rule.revision,guard_revision:preview.guard_revision,text_hash:preview.text_hash,operation_id:key+':approval:'+label});
+        return {preview,id:saved.id};
+      };
+      const firstRelease=await release('output'),callsBeforeRead=detectorCalls;
+      assert.equal((await view.context(owner,second)).knowledge_access.sharing_releases.find(row=>row.id===firstRelease.id)?.current,true);
+      assert.equal(detectorCalls,callsBeforeRead,'release inspection must read existing guarded records only');
+      const outputId='derived_artifacts:'+firstRelease.preview.output_reference!.id,output=await services.guards.read(outputId,await services.guards.state());
+      await services.guards.edit(outputId,output.revision,{...(output.value as object),text:JSON.stringify({items:[{text:'Owner changed the exact output'}]})},key+':edit-output');
+      assert.equal((await view.context(owner,second)).knowledge_access.sharing_releases.find(row=>row.id===firstRelease.id)?.current,false,'changed guarded output invalidates the exact published release');
+      const secondRelease=await release('source'),original=await services.guards.read('events:'+source.id,await services.guards.state());
+      assert.equal((await view.context(owner,second)).knowledge_access.sharing_releases.find(row=>row.id===secondRelease.id)?.current,true);
+      await services.guards.edit('events:'+source.id,original.revision,{...(original.value as object),text:'Owner corrected the original evidence'},key+':edit-source');
+      const beforeStaleRead=await services.guards.state(),callsBeforeStaleRead=detectorCalls;
+      assert.equal((await view.context(owner,second)).knowledge_access.sharing_releases.find(row=>row.id===secondRelease.id)?.current,false,'unchanged policy and generation cannot hide changed source dependencies');
+      assert.equal(detectorCalls,callsBeforeStaleRead);assert.deepEqual(await services.guards.state(),beforeStaleRead);
     } finally {await stores.close();}
   });
