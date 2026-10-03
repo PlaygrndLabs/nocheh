@@ -10,8 +10,8 @@ reasons for carrying historical evidence forward.
 
 Nocheh is pre-release. The operating local installation runs one source-watched
 `make dev` Compose stack from the release session worktree. All 17 services are
-healthy after recovery of the existing Inngest container. Its unexplained exit
-remains recorded; workers reconnected and background completions resumed. The pinned native candidate includes empty-completion rejection; the
+healthy after the release checkout restart. The earlier unexplained Inngest exit
+remains recorded. The pinned native candidate includes empty-completion rejection; the
 running TypeScript services include event-bound provider timings, dependency
 patches, and protected workflow receipt reconciliation. The prior source checkout
 and its three local edits remain preserved.
@@ -33,14 +33,23 @@ recheck delivered one reply on attempt four after about twenty minutes; it did
 not identify the removal. A later discovery-path check also failed after about
 six minutes: it found a reaction handle but did not read its observation. Reply
 assessment was performed through the CLI. Current inspection finds all four
-generations building and twenty current ingestion receipts without a first
-attempt. Older pending receipts are separate historical state.
+generations building; the later sample has thirty-one current ingestion receipts
+without a first attempt. Older pending receipts are separate historical state.
 
-The release-review candidate includes guarded reaction observations and bounded
-target excerpts in discovery itself. Its focused storage checks pass; operating
-activation and conversational recall remain pending. Background admission now
-has a verified bounded live-callback handoff candidate; its operating effect
-still needs observation.
+Guarded reaction observations and bounded target excerpts are active in discovery.
+The compiled app bytes match the verified source, and an actual isolated native
+turn used the verified packaged helper. Conversational recall remains failed.
+The bounded background handoff is active. Long native-note reviews still occupied
+its only background slot ahead of primary ingestion. A verified candidate now
+gives due, unattempted current ingestion priority before starting new native
+reviews; operating compilation and its effect remain to be verified.
+
+Restarting the cached development database image reinstated an older, slow
+workflow view. The tested view was reapplied under its owner role and catalog
+verified; workflow health then completed in 0.8 seconds with nine connected
+worker families. A rebuilt database image contains the corrected schema;
+isolated restart verification is pending. Development still has automatic
+service restarts disabled and is not the unattended release configuration.
 
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
@@ -63,8 +72,19 @@ this UI verification does not establish live recall or release readiness.
 - Guarded reaction evidence now accompanies discovery with bounded target
   excerpts. Five storage/route/retirement checks and six networkless native
   archive checks pass; TypeScript compilation and the AST-only graph update
-  pass. [Decision](docs/adr/0086-reaction-discovery-evidence.md). These checks
-  establish candidate behavior, not operating activation or conversational recall.
+  pass. [Decision](docs/adr/0086-reaction-discovery-evidence.md). Operating source
+  and actual isolated-child image verification also pass. Correct conversational
+  recall remains unverified after this activation.
+
+- Primary ingestion now receives its first attempt before a new native note
+  review can take the background slot. Five workflow checks and one native-review
+  recovery check pass with no skips. Pending review causes no native effect;
+  receipt completion releases the prerequisite. Existing uncertain reviews retain
+  their identity and reconciliation. Two initial fixture failures were corrected:
+  the global sweep may include older synthetic jobs, and Honcho list responses
+  must filter by the requested receipt. [Decision](docs/adr/0088-primary-ingestion-before-native-note-review.md).
+  TypeScript compilation and the AST-only graph update pass; operating readiness
+  remains pending.
 
 - The October 2 General check has one captured message, one linked reply, and one
   execution attempt. The owner confirmed one sensible reply. Elapsed time was
@@ -108,8 +128,9 @@ this UI verification does not establish live recall or release readiness.
   Five workflow checks pass, including foreground capacity, bounded overflow,
   timeout without effects, exception release, supersession and durable receipts.
   [Decision](docs/adr/0087-live-background-admission-handoff.md) supersedes the
-  earlier retry-order hint. Operating activation and memory readiness remain
-  pending. The recovered scheduler's earlier unexplained exit is still retained.
+  earlier retry-order hint. Operating compiled-byte verification passes; current
+  memory readiness remains pending. The scheduler's earlier unexplained exit is
+  still retained.
 - Owner workflow inspection now joins memory receipts by indexed identity. The
   old event-filtered query exceeded a five-second database deadline on a
   synthetic backlog; the repair and four adjacent workflow checks pass. The
@@ -172,7 +193,9 @@ this UI verification does not establish live recall or release readiness.
    source/image and current memory readiness before any further live check.
    The later discovery-path answer found one handle without reading the reaction;
    guarded observations and target excerpts now have focused candidate coverage.
-   Activate the verified candidate before judging the new path.
+   The discovery candidate is active and verified in an actual isolated child.
+   Finish the primary-ingestion priority activation and memory readiness check
+   before judging a new conversation.
 2. Preserve the measured General timing boundaries and their limitations. The
    earlier 230-second native timeout is not explained by the short greeting or
    the later recall attempt; retain its failure evidence and the existing limit.

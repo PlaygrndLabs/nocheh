@@ -2,7 +2,7 @@
 
 <scope>
 
-Last evidence review: 2026-10-02. Most observations remain dated September 28–29;
+Last evidence review: 2026-10-03. Most observations remain dated September 28–29;
 the General greeting, same-topic recall attempt, and populated backup/inactive
 restore have new October 2 evidence. Carried observations are not newly repeated tests. [TASK.md](../TASK.md)
 tracks release blockers; [the procedure](release-acceptance.md) defines the gates.
@@ -206,15 +206,30 @@ reaction handle without reading the observation. Candidate discovery now returns
 the guarded observation and bounded, independently authorized target excerpts in
 the same result. Five focused storage checks pass, including topic isolation,
 owner edits, retirement, supersession, limits and access revalidation. This does
-not change the failed live result. Current inspection shows four building memory
-generations and twenty unattempted current receipts; background admission and
-candidate activation remain pending. No additional owner traffic was requested.
+not change the failed live result. The compiled repair and an actual isolated
+native child's image are verified active. A later sample shows four building
+memory generations and thirty-one unattempted current receipts. No additional
+owner traffic was requested.
 
 The background-admission candidate replaces sleeping retry reservations with
 one live callback waiting for at most one second. Five affected workflow tests
 pass with no skips, retaining foreground capacity, timeout/overflow behavior,
-exception release, protected receipts and supersession. This is candidate
-verification; current memory readiness and the failed recall gate stay open.
+exception release, protected receipts and supersession. The compiled repair is
+active; current memory readiness and the failed recall gate stay open.
+
+New native note reviews now wait behind due current ingestion receipts that have
+not had a first attempt or recorded a failure. Five workflow checks and one
+native-review recovery check pass without skips. Running and uncertain reviews
+retain receipt reconciliation. Operating compilation and memory progress remain
+to be verified. This admission change does not invalidate the carried speech,
+approval, isolation, or backup evidence.
+
+The development database restart restored an old workflow view from its cached
+image. Reapplying the tested indexed view restored workflow-health inspection to
+0.8 seconds. The database image has been rebuilt; restart verification is pending.
+Honcho's 195 packaged source files match its pin, and Hermes, speech, provider and
+monitor image revision labels match their locks. These checks do not pass recall
+or the unattended release gate.
 
 1. Resolve the failed October 2 same-topic recall from its saved CLI trace and
    tool results. Preserve the first failed execution and the delivered limited
