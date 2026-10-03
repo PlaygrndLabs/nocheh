@@ -84,7 +84,7 @@ export class PreparedContextRepository {
       const pending=[...fresh.entries()];
       while(pending.length) {
         const batch:[string,string][]=[];let length=0;
-        while(pending.length&&length+pending[0]![0].length+32<=50000){const item=pending.shift()!;batch.push(item);length+=item[0].length+32;}
+        while(pending.length&&batch.length<500&&length+pending[0]![0].length+32<=50000){const item=pending.shift()!;batch.push(item);length+=item[0].length+32;}
         const inputs:{text:string;key:string;output:DerivativeReference;literals?:string[]}[]=[];
         for(const [text,key] of batch) {
           const saved=await this.derived.checkpoint('guard-context:'+key);
@@ -108,13 +108,20 @@ export class PreparedContextRepository {
             content:Buffer.from(canonical(input.literals)),producer:'nocheh-context-detector',producer_version:this.detectorVersion,
             configuration:{audience:scope,binding},provenance:{purpose:principal.purpose??'assistant'}})));
         }
-        for(const {text,key,output,literals} of inputs) {
-          literalSpans(text,literals);
-          await this.guards.prepare(output,this.detectorVersion,async fragment=>literals!.filter(literal=>fragment.includes(literal)));
-          const sourceId='derived_artifacts:'+output.id,prepared=await this.guards.read(sourceId,binding);
-          await this.derived.pool.query(`INSERT INTO runtime_prepared_inputs(id,audience,generation,epoch,source_id)
-            VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[key,scope,binding.generation,binding.epoch,sourceId]);
-          outputs.set(text,(prepared.value as {text:string}).text);
+        // Independent guarded copies keep their exact publication/checkpoint
+        // identities. Bound SQL work below the pool size instead of serializing
+        // hundreds of durable commits before the first model request. Drain all
+        // started work even on failure before releasing this audience's queue.
+        for(let offset=0;offset<inputs.length;offset+=4) {
+          const completed=await Promise.allSettled(inputs.slice(offset,offset+4).map(async({text,key,output,literals})=>{
+            literalSpans(text,literals);
+            await this.guards.prepare(output,this.detectorVersion,async fragment=>literals!.filter(literal=>fragment.includes(literal)));
+            const sourceId='derived_artifacts:'+output.id,prepared=await this.guards.read(sourceId,binding);
+            await this.derived.pool.query(`INSERT INTO runtime_prepared_inputs(id,audience,generation,epoch,source_id)
+              VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[key,scope,binding.generation,binding.epoch,sourceId]);
+            outputs.set(text,(prepared.value as {text:string}).text);
+          }));
+          for(const result of completed)if(result.status==='rejected')throw result.reason;
         }
       }
       for(const [original,parts] of plans)replacements.set(original,parts.map(part=>part.prepared||!part.text.trim()?part.text:outputs.get(part.text)!).join(''));

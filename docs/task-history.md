@@ -1625,3 +1625,28 @@ cold guarded preparation remain pending. No operating runtime was changed.
 [checks](../services/hermes/test_native_leases.py).
 
 </entry>
+
+<entry date="2026-10-03" task="Bound cold guarded-context publication work">
+
+The packaged native lease fix passes five focused checks and source-byte
+equivalence. Its cold-topic rehearsal retains an unclassified early native
+failure. The retry delivers once in 148.5 seconds, spending 122.9 seconds in the
+model guard. Fixture stack observations show waiting at the guard RPC, separate
+from the previously diagnosed abandoned native lease. The first attempt was not
+proven to be another 230-second deadline. Original evidence is preserved; stack
+timers are removed and subsequent fixture diagnostics retain only closed result,
+duration and container-exit metadata.
+
+Independent guarded publications now run at most four at a time. Each retains
+its durable identity, authority checks and owner revisions. Started siblings
+settle before a failure releases the audience queue; completed detection remains
+reusable. Batches also honor the derivative repository's 500-item bound before
+the text-size bound, preserving every input. Three affected PostgreSQL checks
+pass without skips, including failed-sibling draining/recovery and a 501-fragment
+payload. TypeScript compilation passes. Coupled verification remains pending; no
+operating code or provider configuration was changed.
+[Context checks](../test/store-prepared-context.test.ts),
+[guard checks](../test/store-guards.test.ts),
+[broker checks](../test/store-security-broker.test.ts).
+
+</entry>

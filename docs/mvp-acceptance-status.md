@@ -95,7 +95,12 @@ Its automatic retry eventually delivers once on attempt three. Content-free
 stacks also identify native admission waiting on a killed container's reused PID.
 A candidate reclaims those admission rows only under the existing exclusive
 profile file lock. Five focused recovery checks and eighteen adjacent native
-checks pass without skips; coupled candidate verification remains pending.
+checks pass without skips; the packaged image passes five recovery checks. A
+later cold-topic run has an unclassified early native failure, then delivers
+once on retry in 148.5 seconds, including 122.9 seconds of guard preparation.
+The separate bounded-publication candidate passes three PostgreSQL guard,
+context and broker checks, including a failed concurrent sibling and 501 input
+fragments, plus TypeScript compilation. Its coupled verification remains pending.
 The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.

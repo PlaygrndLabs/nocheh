@@ -178,7 +178,16 @@ this UI verification does not establish live recall or release readiness.
   crash/schema/mode checks and eighteen adjacent native checks pass without
   skips. [Decision](docs/adr/0098-isolated-native-lease-recovery.md),
   [recovery checks](services/hermes/test_native_leases.py).
-  Packaging, coupled recovery and cold guard preparation remain pending.
+  The packaged recovery image passes its five focused checks and source-byte
+  equivalence. A new cold-topic run has an unclassified early native failure;
+  its retry delivers once in 148.5 seconds, including 122.9 seconds at the guard
+  boundary. The failed run is retained. A second verified candidate limits
+  independent guard publications to four concurrent operations, drains started
+  work before releasing a failed audience queue, and caps detector checkpoints
+  at 500 fragments. Three PostgreSQL guard/context/broker checks pass without
+  skips, covering failed-sibling recovery and all 501 input fragments; TypeScript
+  compilation passes. Coupled verification of this candidate remains pending.
+  [Context checks](test/store-prepared-context.test.ts).
   No operating runtime change has been made.
   The operating seventeen services remain healthy and were not restarted.
   [HTTP runner](tools/acceptance/telegram_rehearsal.py),
