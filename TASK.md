@@ -119,6 +119,11 @@ this UI verification does not establish live recall or release readiness.
   [Atomic handoff](docs/adr/0093-atomic-memory-approval-followups.md),
   [current delivery authority](docs/adr/0094-current-memory-authority-at-delivery.md),
   [failure-path checks](test/store-memory-followup.test.ts).
+  Owner-chosen person names, merged identities and Undo, corrected fact wording,
+  and retired facts now survive automatic refresh. Ten focused entity checks and
+  23 adjacent learning, native-memory, organization, portability and sharing checks
+  pass without skips. Untouched platform names and automatic facts still update.
+  [Owner correction checks](test/store-entity-owner-corrections.test.ts).
   The broad storage and combined-branch runs retain their original failures and
   focused repairs in ignored evidence. Portable history remains inactive; reset
   inventory rejects unexpected real tables. The combined build and 52 affected
@@ -130,7 +135,7 @@ this UI verification does not establish live recall or release readiness.
   Service, management, database and native images include the verified topic,
   handoff and complete-wording fixes at `63f9b99`. All 22 packaged native checks
   pass without source mounts or network access; the packaged Node runtime imports
-  successfully. Service images need the later memory-authority check before coupled
+  successfully. Service images need the later memory-authority and owner-entity repairs before coupled
   execution. The earlier candidate's evidence remains preserved.
   The updated 16-service synthetic installation has a validated manifest, verified
   images, internal networks and no host ports. It has not started because the

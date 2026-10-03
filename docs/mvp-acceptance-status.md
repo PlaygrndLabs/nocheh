@@ -43,6 +43,15 @@ receipt observation still confirms an earlier send without repeating it. Service
 images need this authority repair before coupled execution. The updated full
 fixture remains unstarted.
 
+Four synthetic entity cases also reproduced loss of an owner display name,
+failure to use a merged identity, replacement of owner-corrected wording, and
+resurrection of an owner-retired fact. The repaired candidate passes ten focused
+entity checks and 23 adjacent learning, native-memory, organization, portability
+and sharing checks without skips. New messages use the current confirmed binding;
+automatic input preserves owner corrections. Service images need these changes
+before coupled execution. Historical owner-correction and recall observations
+retain their dates and do not verify this candidate's live behavior.
+
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority
 and reject unexpected real tables. Concurrent organization and supervision changes
