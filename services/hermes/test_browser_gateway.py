@@ -227,15 +227,20 @@ class BrowserGatewayTests(unittest.TestCase):
         env['HERMES_TUI_STARTUP_TIMEOUT_MS']='60000'
         master,slave=os.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',32,100,0,0))
         process=subprocess.Popen(argv,cwd=cwd,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
-        os.close(slave);output=b'';sent=False;entered=False;sent_at=0;deadline=time.monotonic()+90
+        os.close(slave);output=b'';sent=False;entered=False;deadline=time.monotonic()+90
         try:
             while time.monotonic()<deadline:
                 if select.select([master],[],[],.1)[0]:
                     try: output+=os.read(master,65536)
                     except OSError: break
-                if not sent and b'gpt-5.6-sol' in output:
-                    os.write(master,b'capture boundary fixture');sent=True;sent_at=time.monotonic()
-                if sent and not entered and time.monotonic()-sent_at>.5:
+                rendered=__import__('re').sub(rb'\x1b\[[0-?]*[ -/]*[@-~]',b'',output)
+                compact=__import__('re').sub(rb'\s',b'',rendered)
+                # The window title advertises the model before the composer is
+                # ready. Wait for the profile prompt, then for the typed text to
+                # be rendered; an early Enter can be consumed by native startup.
+                if not sent and b'ready' in compact and (profile+'❯').encode() in compact:
+                    os.write(master,b'capture boundary fixture');sent=True
+                if sent and not entered and b'captureboundaryfixture' in compact:
                     os.write(master,b'\r');entered=True
                 if b'archivecaptureisunavailable' in __import__('re').sub(rb'\s|\x1b\[[0-?]*[ -/]*[@-~]',b'',output): break
             plain=__import__('re').sub(rb'\x1b\[\d*C',b' ',output)

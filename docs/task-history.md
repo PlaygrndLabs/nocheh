@@ -745,6 +745,8 @@ contains the historical private reports and has not been rewritten.
 </entry>
 
 
+
+
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -998,6 +1000,69 @@ and conversational recall remain open. Private evidence is under
 
 </entry>
 
+<entry date="2026-10-03" task="Preserve the indexed workflow view across database restart">
+
+The release checkout restart exposed a cached database image whose bundled
+bootstrap reinstated the older workflow view. The live query plan proved the
+receipt join had reverted. Reapplying the tested view restored owner workflow
+health inspection to 0.8 seconds with nine connected families. The rebuilt image
+then passed isolated fresh-start and restart checks: the indexed view and
+installation generation were unchanged. No operating volume entered the fixture.
+The deployment guide now requires checking the bundled schema as well as the
+live catalog. The operating image replacement remains a separate pending step.
+
+</entry>
+
+<entry date="2026-10-03" task="Physical Telegram delivery boundary">
+
+The owner requested personal-use scenario testing with mocked Telegram while two
+other sessions continued. A dedicated worktree and synthetic fixtures preserved
+their services and source data. Six initial native scenarios reproduced two
+failures: a deleted topic fell back to General, and a long reply continued after
+revocation. The physical Bot API boundary now binds chat/topic and checks current
+authority and cancellation on each chunk and retry. Approved actions use the
+same boundary; existing durable receipts prevent repeated partial effects.
+
+All nine focused synthetic scenarios and ten existing capture/gateway checks
+passed. The AST-only graph update passed. Failed baseline reports remain ignored
+local evidence. Broader simulation and existing live recall/release gates are
+still pending; this increment neither deploys nor activates the operating runtime.
+
+</entry>
+
+<entry date="2026-10-03" task="Durable Telegram rate-limit recovery">
+
+The synthetic Bot API returned one documented `429` followed by a successful
+send. The initial native rehearsal failed because the durable journal replayed
+the rejection on every retry. Each valid, elapsed rate-limit rejection can now
+advance to a separately receipted attempt, with a three-attempt bound. Confirmed
+and uncertain effects remain non-repeatable, and current authority is rechecked.
+Eleven native scenarios and fourteen capture/gateway checks pass, including
+restart, wait deadlines, malformed errors, orphan retries and revocation during
+the wait. One mistyped test-module invocation is retained beside the successful
+three-test gateway rerun. The original failure remains in ignored evidence.
+The repair does not activate the operating runtime or pass a live release gate.
+
+</entry>
+
+<entry date="2026-10-03" task="Synchronize the native composer acceptance input">
+
+The broad Hermes baseline and a focused rerun both failed the real TUI capture
+check. Its driver treated the startup window title as composer readiness, then
+pressed Enter after a fixed delay. Waiting for the ready profile prompt and the
+rendered synthetic input passes the unchanged assertions: an archive outage is
+visible, no managed turn starts, and no conversation message is saved. An initial
+prompt-matching mistake and both earlier failures remain in ignored evidence.
+The AST-only graph refresh includes the repaired driver. No product UI changed.
+
+Independent acceptance also passed the official Honcho SDK contract in its
+correct image and the pinned native migrations/ORM/pgvector eight-table inactive
+restore. The latter preserves exact content, citations and retired history,
+supports repeated import, and leaves the execution queue inactive, without any
+provider call. Broad storage and remaining fixture checks continue separately.
+
+</entry>
+
 <entry date="2026-10-03" task="Bounded organization authority and application foundation">
 
 The accepted agent-led knowledge-management plan now has durable delegation,
@@ -1008,11 +1073,12 @@ undo have synthetic Node 24/PostgreSQL coverage. Existing project commands share
 transaction-level mutations. Portable authority is retained as inactive history,
 including through the control-record restore path. Owner read models cover named
 conversations, independent authorities, complete decision totals, and exact lookup.
-[ADR-0090](adr/0090-bounded-agent-knowledge-organization.md),
+[ADR-0091](adr/0091-bounded-agent-knowledge-organization.md),
 [application checks](../test/store-knowledge-management.test.ts),
 [read-model checks](../test/store-owner-supervision.test.ts),
 [workflow controls](../test/store-workflow-owner.test.ts).
 Runtime and dashboard integration follow separately. No live state or existing
 recall evidence was changed; remote publication retains its sanitized-history gate.
+
 
 </entry>
