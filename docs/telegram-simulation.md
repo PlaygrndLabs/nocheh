@@ -83,6 +83,9 @@ inference transports. It requires its own verified images and the repository's
 single-stack ownership preflight; component passes do not substitute for this
 coupled run. Actual provider reasoning and conversational recall require separate
 evidence even when the scripted installation rehearsal passes.
+Use `--prepare-only` to render and retain the dedicated manifest, synthetic state
+and owned empty volumes before starting any service. Preparation and Compose
+validation are distinct from execution and cannot pass the installation gate.
 
 Compile the current worktree with Node 24 before running its tests. Run storage
 tests sequentially because several use the same synthetic schema. Record test

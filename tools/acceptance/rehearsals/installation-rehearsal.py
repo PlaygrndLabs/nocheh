@@ -32,8 +32,11 @@ def main():
     parser.add_argument('--native-image', required=True)
     parser.add_argument('--honcho-image', required=True)
     parser.add_argument('--keep', action='store_true', help='Retain only this synthetic installation for diagnosis/preview')
+    parser.add_argument('--prepare-only', action='store_true', help='Keep a reviewed synthetic manifest and owned state without starting services')
     parser.add_argument('--preview-port', type=int, help='Publish only the owner dashboard on this available localhost port')
     args = parser.parse_args()
+    if args.prepare_only:
+        args.keep = True
     root = Path(__file__).resolve().parents[3]
     directory = args.directory.resolve()
     if args.preview_port:
@@ -46,7 +49,7 @@ def main():
     directory.mkdir(mode=0o700)
     state = directory / 'state'
     installation = directory / 'installation'
-    (installation / 'deploy').mkdir()
+    (installation / 'deploy').mkdir(parents=True)
     shutil.copyfile(root / 'deploy/upstreams.lock.json', installation / 'deploy/upstreams.lock.json')
     project = 'nocheh-installation-' + uuid.uuid4().hex[:12]
     config = initialize(state)
@@ -60,7 +63,7 @@ def main():
         config['NOCHEH_DASHBOARD_PORT'] = str(args.preview_port)
     write_env(state / '.env', config)
     memory = state / 'honcho'
-    (memory / 'ledger').mkdir(parents=True, mode=0o700)
+    (memory / 'ledger').mkdir(parents=True, mode=0o700, exist_ok=True)
     password = secrets.token_hex(32)
     for name, value in {'internal_token': token, 'database_password': password,
                         'temporary_embedding_key': 'synthetic-no-provider', 'honcho.Dockerfile': '# fixture uses an explicit image\n'}.items():
@@ -169,6 +172,9 @@ def main():
         (installation / 'docker-compose.yml').chmod(0o600)
         command = ['docker', 'compose', '-p', project, '-f', str(file)]
         (directory / 'fixture.json').write_text(json.dumps({'project': project, 'images': images, 'directory': str(directory)}, indent=2))
+        if args.prepare_only:
+            print(json.dumps({'prepared': True, 'project': project, 'services_started': False, 'live_acceptance': False}), flush=True)
+            return
         run(['up', '-d', '--no-build', '--wait', '--wait-timeout', '300'])
         verify(directory, command, env, project, images)
     except Exception as error:
@@ -231,7 +237,7 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
             time.sleep(2)
         raise AssertionError('fixture_gate_timeout:' + label)
 
-    wait('pipeline_registered', lambda: query('nocheh_control', "SELECT string_agg(family,',' ORDER BY family) FROM workflow_worker_registrations WHERE app='pipeline' AND seen_at>now()-interval '30 seconds'") == 'actions,browser,honcho,memory_review,preparation,schedules,telegram')
+    wait('pipeline_registered', lambda: query('nocheh_control', "SELECT string_agg(family,',' ORDER BY family) FROM workflow_worker_registrations WHERE app='pipeline' AND seen_at>now()-interval '30 seconds'") == 'actions,browser,honcho,memory_review,organization,preparation,schedules,telegram')
     wait('host_worker_registered', lambda: query('nocheh_control', "SELECT string_agg(family,',' ORDER BY family) FROM workflow_worker_registrations WHERE app='host' AND seen_at>now()-interval '30 seconds'") == 'imports,tools')
     # Seed only this fresh fixture's prerequisite. Never submit a fabricated
     # live report to the public verification endpoint or touch live control.
@@ -267,6 +273,7 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
         'text': 'Describe the synthetic telescope. Password: fixture-secret-ORCHID-2718', 'files': []}
     captured = http('/v1/browser/input', browser)
     context = {**browser, 'event_id': captured['event_id']}
+    wait('browser_capture_handoff', lambda: query('nocheh_control', "SELECT state FROM source_intakes WHERE event_id='" + captured['event_id'] + "'") == 'ready')
     http('/v1/browser/admit', context)
     def browser_done():
         row = json.loads(query('nocheh_control', "SELECT json_build_object('state',state,'error',error_code) FROM managed_runs WHERE event_id='" + captured['event_id'] + "'"))
