@@ -67,6 +67,50 @@ test('owner workflow inspection and receipt-aware controls use control storage o
     await s.telegramActions.decide(owner,{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'});
     const action=await find('actions',proposal.id);detail=await workflowDetail(stores.control,action);assert.equal(detail.can_cancel,true);
     await controlStorageWorkflow(stores.control,owner,action,'cancel',{revision:detail.revision});assert.equal((await s.telegramActions.inspect(owner,proposal.id)).state,'cancelled');
+    // A failed organization stays a distinct failed outcome until an exact owner retry.
+    const organizationId=digest(key+':organization'),learningJob=digest(key+':learning');
+    await stores.control.query(`INSERT INTO knowledge_proposals(id,request_hash,kind,origin,source_reference,source_scope,source_job_id,proposal_reference,binding,dependencies,state)
+      VALUES($1,$1,'organization','learning',$2,'123',$3,'{}',$4,'{}','failed')`,[organizationId,captured.reference,learningJob,binding]);
+    const orgDb=await stores.control.connect();let organization:string,learningWorkflow:string;
+    try{await orgDb.query('BEGIN');organization=await requestWorkflow(orgDb,'organization','proposal:'+organizationId);
+      learningWorkflow=await requestWorkflow(orgDb,'organization','learning:'+learningJob);await orgDb.query('COMMIT');}finally{orgDb.release();}
+    await stores.control.query("UPDATE workflow_registry SET state='failed' WHERE id=$1",[organization]);
+    detail=await workflowDetail(stores.control,organization);assert.equal(detail.state,'failed');assert.equal(detail.can_retry,true);assert.equal(detail.control_reason,null);
+    const application=await stores.control.connect();
+    try {
+      await application.query('SELECT pg_advisory_lock(hashtextextended($1,803356))',[organizationId]);
+      await assert.rejects(controlStorageWorkflow(stores.control,owner,organization,'retry',{revision:detail.revision}),{code:'workflow_execution_in_progress'});
+    }finally{await application.query('SELECT pg_advisory_unlock(hashtextextended($1,803356))',[organizationId]);application.release();}
+    const orgRevision=detail.revision;await controlStorageWorkflow(stores.control,owner,organization,'retry',{revision:orgRevision});
+    let proposalState=(await stores.control.query('SELECT id,state,approved,revision FROM knowledge_proposals WHERE id=$1',[organizationId])).rows[0];
+    assert.deepEqual(proposalState,{id:organizationId,state:'queued',approved:false,revision:2},'retry preserves identity and cannot manufacture approval');
+    await controlStorageWorkflow(stores.control,owner,organization,'retry',{revision:orgRevision});
+    assert.equal((await stores.control.query('SELECT revision FROM knowledge_proposals WHERE id=$1',[organizationId])).rows[0].revision,2,'replayed retry is idempotent');
+    await stores.control.query("UPDATE knowledge_proposals SET state='failed' WHERE id=$1",[organizationId]);
+    await stores.control.query("UPDATE workflow_registry SET state='failed' WHERE id=$1",[learningWorkflow]);
+    const failedLearning=await workflowDetail(stores.control,learningWorkflow);assert.equal(failedLearning.can_retry,true);
+    await controlStorageWorkflow(stores.control,owner,learningWorkflow,'retry',{revision:failedLearning.revision});
+    proposalState=(await stores.control.query('SELECT id,state,approved,revision FROM knowledge_proposals WHERE id=$1',[organizationId])).rows[0];
+    assert.deepEqual(proposalState,{id:organizationId,state:'queued',approved:false,revision:3});
+    const application2=await stores.control.connect();
+    try {
+      await application2.query('SELECT pg_advisory_lock(hashtextextended($1,803356))',[organizationId]);
+      detail=await workflowDetail(stores.control,organization);
+      await assert.rejects(controlStorageWorkflow(stores.control,owner,organization,'cancel',{revision:detail.revision}),{code:'workflow_execution_in_progress'});
+      const learningDetail=await workflowDetail(stores.control,learningWorkflow);
+      await assert.rejects(controlStorageWorkflow(stores.control,owner,learningWorkflow,'cancel',{revision:learningDetail.revision}),{code:'workflow_execution_in_progress'});
+    }finally{await application2.query('SELECT pg_advisory_unlock(hashtextextended($1,803356))',[organizationId]);application2.release();}
+    const learningDetail=await workflowDetail(stores.control,learningWorkflow);
+    await controlStorageWorkflow(stores.control,owner,learningWorkflow,'cancel',{revision:learningDetail.revision});
+    assert.equal((await stores.control.query('SELECT state FROM knowledge_proposals WHERE id=$1',[organizationId])).rows[0].state,'cancelled');
+    detail=await workflowDetail(stores.control,organization);assert.equal(detail.can_retry,false,'cancelled proposals never resume through workflow retry');
+    await stores.control.query("UPDATE workflow_registry SET state='retryable_failed' WHERE id=$1",[learningWorkflow]);
+    assert.equal((await workflowDetail(stores.control,learningWorkflow)).can_retry,false,'learning retry cannot reopen a cancelled related proposal');
+    for(const state of ['review','stale']) {
+      await stores.control.query('UPDATE knowledge_proposals SET state=$2 WHERE id=$1',[organizationId,state]);
+      await stores.control.query("UPDATE workflow_registry SET state='retryable_failed' WHERE id=$1",[organization]);
+      assert.equal((await workflowDetail(stores.control,organization)).can_retry,false,'review and stale require an exact knowledge decision, never generic retry');
+    }
     const snapshot=JSON.stringify({health:await workflowHealth(stores.control),metrics:await workflowMetrics(stores.control,{range:'24h'}),page:await listWorkflows(stores.control,{limit:100})});
     assert.ok(!snapshot.includes('private content canary'));assert.ok(!snapshot.includes('private action canary'));
     const definition=(await stores.control.query("SELECT pg_get_viewdef('workflow_observations',true) AS definition")).rows[0].definition;

@@ -8,6 +8,7 @@ import {DerivedRepository} from './derived.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
 import {ProjectRepository} from './projects.js';
 import {revokeBeforePublication} from './publications.js';
+import {foregroundReplyActive} from './automatic-publication.js';
 import {requestWorkflow} from '../workflows/store.js';
 
 export interface PreparedDependency {source_id:string;revision:number|null;value_hash:string;selection?:{id:string;revision:number}}
@@ -127,10 +128,7 @@ export class LearnedMemoryRepository {
       const changed=versions.some(v=>v.expected_revision!==null);
       // Automatic reinterpretation can wait until an admitted reply finishes.
       // Owner corrections and source/privacy revocations use their immediate paths.
-      if(versions.length&&(await db.query(`SELECT 1 FROM dispatches WHERE state='running'
-        AND binding->>'generation'=$1 AND (binding->>'epoch')::bigint=$2
-        UNION ALL SELECT 1 FROM managed_runs WHERE state='running' AND lease_until>now()
-        AND binding->>'generation'=$1 AND (binding->>'epoch')::bigint=$2 LIMIT 1`,[binding.generation,binding.epoch])).rowCount)
+      if(versions.length&&await foregroundReplyActive(db,binding))
         throw new HttpError(409,'learning_publication_pending');
       const epoch=changed?Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch):Number(state.epoch);
       for(const version of versions) {

@@ -8,7 +8,7 @@ import {portableDerivativeTypes} from './derivative-portability.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -19,6 +19,21 @@ export class OwnerStorageApi {
     admin(principal);const path=url.pathname,s=this.services,q=url.searchParams;
     if(!this.owns(path))throw new HttpError(404,'not_found');
     if(!['GET','POST'].includes(method))throw new HttpError(405,'method_not_allowed');
+    if(path==='/v1/conversations'&&method==='GET')return s.supervision.conversations(principal,{q:q.get('q')??'',after:q.get('after')??'',limit:limit(q.get('limit'),50,100)});
+    if(path==='/v1/conversations/context'&&method==='GET')return s.supervision.context(principal,q.get('space')??'');
+    if(path==='/v1/decisions'&&method==='GET')return s.supervision.decisions(principal,{kind:q.get('kind')??'',after:q.get('after')??'',limit:limit(q.get('limit'),50,100)});
+    const decision=path.match(/^\/v1\/decisions\/(controlled_action|telegram_action|memory_access|entity|knowledge)\/([a-f0-9]{64})$/);
+    if(decision&&method==='GET')return s.supervision.decision(principal,decision[1]!,decision[2]!);
+    if(path==='/v1/organization/delegations')return method==='GET'?s.knowledge.delegations(principal,q.get('after')??''):s.knowledge.saveDelegation(principal,input);
+    if(path==='/v1/knowledge/proposals'&&method==='GET')return s.knowledge.proposals(principal,q.get('after')??'');
+    const knowledge=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})(?:\/(decide|undo))?$/);
+    if(knowledge){
+      if(method==='GET'&&!knowledge[2])return s.knowledge.proposal(principal,knowledge[1]!);
+      if(method==='POST'&&knowledge[2]==='decide')return s.knowledge.decide(principal,knowledge[1]!,input);
+      if(method==='POST'&&knowledge[2]==='undo')return s.knowledge.undo(principal,knowledge[1]!,input);
+    }
+    const projectContext=path.match(/^\/v1\/projects\/([a-f0-9]{64})\/context$/);
+    if(projectContext&&method==='GET')return s.supervision.projectContext(principal,projectContext[1]!);
     if(path==='/v1/imports/legacy'&&method==='POST')return s.legacyImports.record(principal,input,q.get('restore_guarded')==='true');
     if(path==='/v1/memory-map'&&method==='GET')return s.memoryMap.read(principal,{after:q.get('after')??'',limit:limit(q.get('limit'),100,250),focus:q.get('focus')??'',query:q.get('q')??'',kind:q.get('kind')??'',state:q.get('state')??''});
     if(path==='/v1/memory-access/settings')return method==='GET'?(q.has('destination')?s.memoryAccess.settings(principal,q.get('destination')!):s.memoryAccess.settings(principal)):s.memoryAccess.saveSettings(principal,input);

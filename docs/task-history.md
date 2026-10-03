@@ -1063,6 +1063,49 @@ provider call. Broad storage and remaining fixture checks continue separately.
 
 </entry>
 
+<entry date="2026-10-03" task="Bounded organization authority and application foundation">
+
+The accepted agent-led knowledge-management plan now has durable delegation,
+proposal, decision, and receipt schemas. Exact scope and assignment baselines,
+inherited-topic effects, explicit resumption, capture watermarks, guarded
+dependencies, deferred atomic batches, no-op replay, cancellation, and checked
+undo have synthetic Node 24/PostgreSQL coverage. Existing project commands share
+transaction-level mutations. Portable authority is retained as inactive history,
+including through the control-record restore path. Owner read models cover named
+conversations, independent authorities, complete decision totals, and exact lookup.
+[ADR-0091](adr/0091-bounded-agent-knowledge-organization.md),
+[application checks](../test/store-knowledge-management.test.ts),
+[read-model checks](../test/store-owner-supervision.test.ts),
+[workflow controls](../test/store-workflow-owner.test.ts).
+Runtime and dashboard integration follow separately. No live state or existing
+recall evidence was changed; remote publication retains its sanitized-history gate.
+
+
+</entry>
+
+<entry date="2026-10-03" task="Conversational knowledge tools and live-learning follow-up">
+
+Hermes receives typed inspection, proposal, and status tools over fixed scoped
+broker routes. Owner CLI commands inspect and manage delegation and proposal
+decisions without making an arbitrary runtime administration proxy. The existing
+learning request accepts an optional organization result; malformed optional
+organization does not disrupt ordinary learning. Both completion paths save the
+organization workflow request in the same control transaction. Historical jobs
+and imported evidence remain outside automatic authority.
+
+TypeScript compilation and affected broker/learning fixtures pass. After reconciling
+concurrent delivery changes, isolated pinned native checks pass 85 of 86 tests;
+the explicit nested Docker security boundary test remains skipped, requiring its
+opt-in fixture. A further 11 tools/CLI checks pass after aligning tool descriptions.
+[Broker checks](../test/knowledge-broker.test.ts),
+[learning checks](../test/store-learning-engine.test.ts),
+[native checks](../services/hermes/test_knowledge_tools.py).
+The foundation is integrated locally as `b002f78`, reconciled with concurrent work
+in `2fe9ab0`. No deployment, operating delegation, live acceptance, or remote
+publication occurred.
+
+</entry>
+
 <entry date="2026-10-03" task="Verify inactive portable access history">
 
 The broad storage rehearsal failed complete bundle import when historical access

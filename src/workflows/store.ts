@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import {HttpError} from '../http.js';
 
-export const families=['preparation','telegram','imports','memory_review','honcho','browser','schedules','actions','tools'] as const;
+export const families=['preparation','telegram','imports','memory_review','honcho','browser','schedules','actions','tools','organization'] as const;
 export type WorkflowFamily=typeof families[number];
 export type ExecutionAuthority={owner:'inngest';epoch:number};
 export const closedStates=['completed','failed','skipped','cancelled','ambiguous','denied'] as const;
@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS workflow_owners (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE workflow_owners ALTER COLUMN owner SET DEFAULT 'inngest';
+-- Existing installations have the original closed family CHECK. Replace it
+-- before inserting newly supported owners; CREATE TABLE IF NOT EXISTS cannot.
+ALTER TABLE workflow_owners DROP CONSTRAINT IF EXISTS workflow_owners_family_check;
+ALTER TABLE workflow_owners ADD CONSTRAINT workflow_owners_family_check CHECK(family IN (${families.map(f=>`'${f}'`).join(',')}));
 INSERT INTO workflow_owners(family) VALUES ${families.map(f=>`('${f}')`).join(',')} ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS workflow_worker_registrations (
   family text PRIMARY KEY REFERENCES workflow_owners(family),version integer NOT NULL,

@@ -24,8 +24,8 @@ export interface BrokerStorage {
 }
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
 const relayRoutes:[string,RegExp][]=[
-  ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|tools\/actions\/[a-f0-9]{64})$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|action-requests)$/],
+  ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|tools\/actions\/[a-f0-9]{64})$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|knowledge\/proposals|action-requests)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 export function providerTarget(transport:Record<string,unknown>,path:string):string {
@@ -106,10 +106,14 @@ export function brokerServer(options:BrokerOptions) {
         relay='/v1/artifacts/'+artifact+'/bytes';
       }
       if(scopedRoute(req.method??'',relay)) {
+        const knowledge=relay.startsWith('/v1/knowledge/');
+        // Fixed scoped routes keep runtime tools away from owner credentials.
+        // Storage independently verifies a current live owner-private turn.
+        if(knowledge&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
         const body=req.method==='POST'?JSON.stringify(await readJson(req,1024*1024)):undefined;
         // Context preparation and proposals have their own enforcement. Read policies
         // apply to retrieval; native memory remains writable within the owned profile.
-        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests'].includes(relay))await authorizeEffect(relay.includes('/memory/')?'memory.read':'archive.read',{relay,query:url.search});
+        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals'].includes(relay))await authorizeEffect(relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok){await response.body?.cancel();throw new HttpError(response.status,'scoped_archive_unavailable');}
         await stream(response,principal,res,file?26*1024*1024:8*1024*1024);

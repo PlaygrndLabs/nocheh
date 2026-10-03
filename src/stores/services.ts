@@ -46,6 +46,8 @@ import {MemoryAccessRepository} from './memory-access.js';
 import {MemoryMapRepository} from './memory-map.js';
 import {SourceRetirementRepository} from './source-retirement.js';
 import {ReactionStateRepository} from './reaction-state.js';
+import {KnowledgeManagementRepository} from './knowledge-management.js';
+import {OwnerSupervisionRepository} from './owner-supervision.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -82,6 +84,10 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
+  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect);
+  const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
+  const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
+  const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge});
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
@@ -93,9 +99,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
-    memory:new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect),
+    memory,knowledge,supervision,
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),
-    shared:new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??''),
+    shared,
     detectorVersion:options.detectorVersion,detect};
 }
 export type StorageServices=ReturnType<typeof storageServices>;

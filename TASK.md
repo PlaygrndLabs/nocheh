@@ -8,6 +8,25 @@ retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
 reasons for carrying historical evidence forward.
 
+The agent-led knowledge management foundation is verified in isolated Node 24
+and PostgreSQL fixtures. It adds disabled-by-default, exact-scope organization
+delegation, preserved proposals, deferred atomic application, correction
+suspension, explicit resume, revision-checked undo, and inactive portable history.
+Stored owner directory, context, and decision projections are available for the
+supervision interface. [Decision](docs/adr/0091-bounded-agent-knowledge-organization.md),
+[authority/application checks](test/store-knowledge-management.test.ts),
+[owner read checks](test/store-owner-supervision.test.ts),
+[inactive restore checks](test/knowledge-portability.test.ts).
+The runtime exposes typed knowledge inspection, proposal, and status tools through
+the scoped broker. Consented live learning can include organization in its existing
+result; normal completion and publication recovery atomically enqueue the follow-up.
+The affected learning and broker fixtures pass. Combined native checks pass 85 tests;
+the opt-in nested Docker security boundary check is unrun. Dashboard supervision is
+the next integration increment. No operating delegation, runtime activation, or
+release is implied; the existing recall failures and remote-publication gate remain
+open. [Runtime checks](services/hermes/test_knowledge_tools.py),
+[learning checks](test/store-learning-engine.test.ts).
+
 Nocheh is pre-release. The operating local installation runs one source-watched
 `make dev` Compose stack from the release session worktree. All 17 services are
 healthy after the release checkout restart. The earlier unexplained Inngest exit

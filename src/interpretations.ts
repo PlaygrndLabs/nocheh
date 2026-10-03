@@ -24,7 +24,7 @@ export function triggeredInterpretations(input:unknown,trigger:string,ruleIds:st
 /** A model can propose interpretations, never administration or privacy policy. */
 export function parseInterpretations(input:unknown,evidence:LearningEvidence[],space:string,projects:{id:string;name:string}[],sessionId?:string):Interpretation[] {
   const result=object(input);
-  if(Object.keys(result).some(k=>!['interpretations','entity_suggestions','entity_claims'].includes(k))||!Array.isArray(result.interpretations)||result.interpretations.length>12)
+  if(Object.keys(result).some(k=>!['interpretations','entity_suggestions','entity_claims','organization'].includes(k))||!Array.isArray(result.interpretations)||result.interpretations.length>12)
     throw new HttpError(422,'invalid_interpretation_result');
   return result.interpretations.map(raw=>{
     const value=object(raw),allowed=['kind','subject','text','scope','uncertainty','evidence_ids','quote','conflicts'];

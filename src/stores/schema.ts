@@ -27,6 +27,7 @@ import {importWorkflowSchema} from '../workflows/imports.js';
 import {memoryAccessSchema} from './memory-access-schema.js';
 import {sourceRetirementSchema} from './source-retirement.js';
 import {reactionStateSchema} from './reaction-state.js';
+import {knowledgeManagementSchema} from './knowledge-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -135,6 +136,7 @@ ${sharingContentSchema}
 ${memoryAccessSchema}
 ${sourceRetirementSchema}
 ${reactionStateSchema}
+${knowledgeManagementSchema}
 CREATE TABLE IF NOT EXISTS attachment_retrievals (
  artifact_id text PRIMARY KEY,event_id text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),

@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
-               'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall'}
+               'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall',
+               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status'}
 
 
 class UnexpectedProfileTool(RuntimeError):
@@ -186,7 +187,10 @@ def run(body, emit=None):
             'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
             'Controlled tools create proposals for an independent executor. An action ID is not evidence of execution. '
             'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity. '
-            + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall for primary Honcho recall and authorized native profiles.' if body['owner'] else
+            + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall for primary Honcho recall and authorized native profiles. '
+               'Use nocheh_knowledge_inspect to inspect projects and exact current revisions before preparing changes with nocheh_knowledge_propose. '
+               'A proposal is not an applied change: check nocheh_knowledge_status. Organization within an active owner delegation runs after this turn finishes; other proposals require exact owner review in Activity Decisions. '
+               'Never claim that a proposal grants knowledge access or permission for external actions.' if body['owner'] else
                'This is a shared space. Use nocheh_memory_recall for this audience. Use only authorized context and tool results, including explicitly shared knowledge. Filtered material is a derived inference, not an original source. Never change settings or approve actions. '
                'When someone asks for private-DM content that is not shared with this space, explain the access boundary directly; do not search for or cite the private source. '
                'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '
