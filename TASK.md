@@ -8,30 +8,32 @@ retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
 reasons for carrying historical evidence forward.
 
-The agent-led knowledge management foundation is verified in isolated Node 24
-and PostgreSQL fixtures. It adds disabled-by-default, exact-scope organization
-delegation, preserved proposals, deferred atomic application, correction
-suspension, explicit resume, revision-checked undo, and inactive portable history.
-Stored owner directory, context, and decision projections are available for the
-supervision interface. [Decision](docs/adr/0091-bounded-agent-knowledge-organization.md),
+Agent-led knowledge management is implemented and verified locally. Organization
+delegation starts disabled, has exact conversation scopes, respects owner
+corrections, and applies saved proposals atomically after foreground work finishes.
+Receipts, explicit resumption, revision-checked undo, and inactive portable history
+are preserved. Typed runtime tools and the existing consented learning result feed
+the organization workflow, including learning publication recovery.
+[Decision](docs/adr/0091-bounded-agent-knowledge-organization.md),
 [authority/application checks](test/store-knowledge-management.test.ts),
 [owner read checks](test/store-owner-supervision.test.ts),
-[inactive restore checks](test/knowledge-portability.test.ts).
-The runtime exposes typed knowledge inspection, proposal, and status tools through
-the scoped broker. Consented live learning can include organization in its existing
-result; normal completion and publication recovery atomically enqueue the follow-up.
-The affected learning and broker fixtures pass. Combined native checks pass 85 tests;
-the opt-in nested Docker security boundary check is unrun. Dashboard supervision is
-the next integration increment. No operating delegation, runtime activation, or
-release is implied; the existing recall failures and remote-publication gate remain
-open. [Runtime checks](services/hermes/test_knowledge_tools.py),
+[inactive restore checks](test/knowledge-portability.test.ts),
+[runtime checks](services/hermes/test_knowledge_tools.py),
 [learning checks](test/store-learning-engine.test.ts).
-Final authority and owner-read regressions also pass: completed learning may
-advance an unrelated epoch without blocking a valid saved proposal; current
-sharing releases revalidate dependencies and guarded wording; unusual archived
-JSON retains exact conversation IDs through a name fallback. Cancellation saves
-the prior outcome and evidence for owner inspection. These checks use isolated
-synthetic stores, not operating memory.
+
+Activity Decisions provides complete server totals and exact-item links across
+approval families. Projects exposes delegation and preserved organization history;
+Projects and Sharing use the stored named-conversation selector. Context separates
+addressing, knowledge access, and external actions from organization. Overview
+distinguishes connection, synchronization, and usable memory. TypeScript and
+dashboard builds, affected Node 24/PostgreSQL suites, 85 native checks, and all
+33 dashboard checks pass. Synthetic desktop, phone, keyboard, deep-link, stale
+proposal dismissal, and retained-draft interactions are verified. The explicit
+nested Docker security boundary check remains unrun. No deployment, operating
+delegation, or live-memory-readiness claim is made; existing recall failures and
+the sanitized-history remote-publication gate remain open.
+[Dashboard checks](test/dashboard-supervision.test.mjs),
+[synthetic preview](test/dashboard-supervision-preview.mjs).
 
 Nocheh is pre-release. The operating local installation runs one source-watched
 `make dev` Compose stack from the release session worktree. All 17 services are
@@ -84,7 +86,7 @@ auth is absent; no duplicate login or refresh worker was introduced.
 
 The relationships and memory access UI now separates Explore, Review requests,
 and Shared memory, with a list-first explorer, optional map, direct fact sharing,
-and state-aware access explanations. The dashboard build and all 27 dashboard
+and state-aware access explanations. The dashboard build and all 33 dashboard
 checks pass; isolated synthetic browser checks cover desktop, phone, keyboard,
 failed approval drafts, successful approval, sharing, and revocation. See the
 [implementation](dashboard/pages/memory-map.tsx),

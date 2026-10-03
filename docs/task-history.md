@@ -1127,3 +1127,32 @@ The runtime integration is local as `4f888b9`; existing live acceptance and remo
 publication gates remain pending.
 
 </entry>
+
+<entry date="2026-10-03" task="Unified owner decisions and conversation context">
+
+Activity Decisions combines exact action, memory-access, identity, and knowledge
+reviews using server totals, cursor pagination, and exact lookup beyond the first
+100 records. Existing routes retain their reviewers. Projects exposes delegation,
+explicitly suspended scopes, recent results, project knowledge, and conversation
+context; Projects and Sharing use the same searchable named-conversation control.
+Context shows addressing, knowledge access, and external actions independently
+from assignment. Overview distinguishes connection, synchronization, and usable
+memory, retaining unavailable observations instead of showing an empty inbox.
+
+Dashboard build and all 33 checks pass. The synthetic preview verifies desktop
+and 390-pixel phone layout, keyboard dismissal, duplicate conversation names,
+inherited topic effects, exact deep links beyond 100 records, failed-save draft
+retention, unavailable state, and stale-proposal dismissal. Final interaction
+repairs reopen Decisions after tab changes and replace an older action review
+when a different decision owns the URL. Prior proposal outcomes are visible in
+the exact receipt details. The preview uses synthetic data only and remains a
+separate localhost process. The AST-only graph was refreshed with no model calls.
+[UI checks](../test/dashboard-supervision.test.mjs),
+[preview fixture](../test/dashboard-supervision-preview.mjs),
+[decision](adr/0091-bounded-agent-knowledge-organization.md).
+Backend review repairs are integrated locally as `a7bb937`. The native suite's
+explicit nested Docker security fixture remains unrun. Existing live acceptance,
+recall failures, operating configuration, and remote-publication gate are preserved;
+these synthetic checks do not establish production memory readiness.
+
+</entry>
