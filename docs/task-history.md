@@ -1105,3 +1105,25 @@ in `2fe9ab0`. No deployment, operating delegation, live acceptance, or remote
 publication occurred.
 
 </entry>
+
+<entry date="2026-10-03" task="Preserve organization handoff and exact supervision observations">
+
+Final review found that saved learning proposals matched delegation against the
+pre-completion epoch. Matching now uses the current binding; application still
+independently validates every relevant dependency. Owner context validates saved
+sharing dependencies and guarded output before describing a release as current.
+The synthetic fixture also exposed valid archived JSON that PostgreSQL JSONB
+cannot represent; directory reads retain the exact conversation and unknown-name
+fallback without rewriting source bytes. Proposal cancellation now retains the
+previous state, error, revision, and receipt in owner-only decision history.
+
+Full TypeScript compilation, ten focused contract/read-model unit checks, and
+both Node 24/PostgreSQL application and owner-supervision suites pass, with no
+skips. These cover actual learning-driven epoch advancement, guarded source and
+output edits, cancellation replay, and preserved evidence.
+[Application regressions](../test/store-knowledge-management.test.ts),
+[supervision regressions](../test/store-owner-supervision.test.ts).
+The runtime integration is local as `4f888b9`; existing live acceptance and remote
+publication gates remain pending.
+
+</entry>
