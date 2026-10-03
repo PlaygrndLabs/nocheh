@@ -65,6 +65,41 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     const repaired=await services.prepared.prepare(await principal(next.id),interrupted,async()=>{throw Error('completed detector work must not repeat');});
     assert.ok(!String(repaired).includes('saffronpass'));assert.equal(calls,afterFault);
 
+    // A failed sibling cannot release the audience queue while other durable
+    // publications are still running. Completed detector work remains reusable.
+    const prepare=services.guards.prepare.bind(services.guards);
+    let active=0,peak=0,started=0,release!:()=>void,fail!:()=>void,entered!:()=>void;
+    const held=new Promise<void>(resolve=>{release=resolve;}),failFirst=new Promise<void>(resolve=>{fail=resolve;}),
+      allEntered=new Promise<void>(resolve=>{entered=resolve;});
+    services.guards.prepare=async(...args)=>{
+      active++;peak=Math.max(peak,active);const order=++started;
+      if(started===4)entered();
+      try {
+        if(order===1){await failFirst;throw Error('fixture_guard_publication_failed');}
+        await held;return await prepare(...args);
+      }
+      finally {active--;}
+    };
+    const siblings=Array.from({length:9},(_,i)=>'Parallel guarded fragment '+i+' saffronpass');
+    const rejected=services.prepared.prepare(reader,siblings,detect);
+    let settled=false;const failure=rejected.catch(error=>{settled=true;return error;});
+    await allEntered;fail();await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(settled,false);assert.equal(active,3);assert.equal(peak,4);
+    const queued=services.prepared.prepare(reader,'Queued after failed publication saffronpass',detect);
+    release();assert.match(String(await failure),/fixture_guard_publication_failed/);
+    services.guards.prepare=prepare;
+    assert.ok(!String(await queued).includes('saffronpass'));assert.equal(active,0);
+    const repairedSiblings=await services.prepared.prepare(reader,siblings,async()=>{throw Error('checkpointed detector work repeated');});
+    assert.equal((repairedSiblings as string[]).length,siblings.length);assert.ok(!JSON.stringify(repairedSiblings).includes('saffronpass'));
+
+    // Small native fields can hit the derivative count bound before the text
+    // size bound. Split them before checkpointing, with no dropped fragments.
+    let batches=0;
+    const many=Array.from({length:501},(_,i)=>'Many fresh context fields '+i+' saffronpass');
+    const manyResult=await services.prepared.prepare(reader,many,async text=>{batches++;return text.includes('saffronpass')?['saffronpass']:[];});
+    assert.equal(batches,2);assert.equal((manyResult as string[]).length,501);
+    assert.ok(!JSON.stringify(manyResult).includes('saffronpass'));
+
     const operation=await services.operations.record({key:key+':schedule',kind:'scheduled_trigger',scope:'123',input_hash:digest('Private scheduled prompt')});
     const scheduled=await services.prepared.prepare(await principal(operation.id),'Scheduled saffronpass',detect);
     assert.ok(!String(scheduled).includes('saffronpass'));
