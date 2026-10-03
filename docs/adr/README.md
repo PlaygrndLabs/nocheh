@@ -8,6 +8,7 @@ Atomic memory approval follow-ups: [0093](0093-atomic-memory-approval-followups.
 Current memory authority at delivery: [0094](0094-current-memory-authority-at-delivery.md).
 Unstarted memory handoff recovery: [0095](0095-recover-unstarted-memory-handoffs.md).
 Concurrent memory decision receipts: [0096](0096-serialize-memory-decision-replays.md).
+Durable native review handoff: [0097](0097-durable-native-review-handoff.md).
 Honcho service default: [0076](0076-honcho-enabled-local-default.md).
 Exhausted-pilot acceptance budget: [0077](0077-exhausted-pilot-honcho-acceptance-budget.md).
 Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).

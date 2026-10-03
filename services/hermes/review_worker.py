@@ -5,6 +5,8 @@ import re
 import subprocess
 import sys
 import time
+import threading
+from contextlib import ExitStack
 from pathlib import Path
 from .scopes import Scopes, Scope,verify_capability
 from .assistant_gateway import prepare_profile
@@ -29,10 +31,24 @@ def observe(root,policy,body):
         with lock.open('rb') as file:
             try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB);found.append('ambiguous')
             except BlockingIOError:found.append('running')
-    return {'state':'running' if 'running' in found else 'ambiguous' if 'ambiguous' in found else 'done' if found else 'not_found'}
+    native='running' if 'running' in found else 'ambiguous' if 'ambiguous' in found else 'done' if found else 'not_found'
+    directory=Path(root)/'nocheh-review-runs'
+    if directory.is_symlink():raise ValueError('review_receipt_path_denied')
+    started=directory/(body['id']+'.started');done=directory/(body['id']+'.done');lease=directory/(body['id']+'.lock')
+    if any(path.is_symlink() for path in (started,done,lease)):raise ValueError('review_receipt_path_denied')
+    # A child can finish after its supervisor disappeared. Its existing durable
+    # receipt still reconciles the same effect; a launch marker never overrides it.
+    if done.is_file() or native=='done':return {'state':'done'}
+    if started.is_file():
+        if lease.exists():
+            with lease.open('rb') as file:
+                try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError:return {'state':'running'}
+        return {'state':'running' if native=='running' else 'ambiguous'}
+    return {'state':native}
 
 
-def review(root, policy, model, credentials, body):
+def review_profile(root,policy,model,body):
     if not policy.owner or body.get('scope') != policy.owner:
         raise ValueError('owner_review_required')
     if not re.fullmatch(r'[a-f0-9]{64}',body.get('id','')) or not isinstance(body.get('content'),str) or len(body['content'])>12000:
@@ -42,7 +58,16 @@ def review(root, policy, model, credentials, body):
     claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
     if claims.get('generation') and claims.get('purpose')!='memory-review':raise ValueError('review_capability_required')
     scope=Scopes.apply_revision(scope,claims)
-    profile=prepare_profile(root,scope,model)
+    return prepare_profile(root,scope,model)
+
+
+def profile_recent(profile):
+    activity=profile/'.foreground'
+    return activity.exists() and time.time()-activity.stat().st_mtime<60
+
+
+def review(root, policy, model, credentials, body):
+    profile=review_profile(root,policy,model,body)
     import fcntl
     with (profile/'.turn.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -50,10 +75,53 @@ def review(root, policy, model, credentials, body):
         # Leave a short quiet interval for conversational follow-ups. This
         # parent-owned timestamp contains no content and is not agent-mounted.
         # Existing review receipts stay authoritative; no running work is killed.
-        activity=profile/'.foreground'
-        if activity.exists() and time.time()-activity.stat().st_mtime<60:
+        if profile_recent(profile):
             return {'state':'waiting','error_code':'profile_busy'}
         return _review(profile,policy,model,credentials,body)
+
+
+def start(root,policy,model,credentials,body):
+    """Handoff one native review without holding a workflow/pool slot for its run.
+
+    The supervisor journal contains only effect identities and state. Neither a
+    crash nor a missing child receipt authorizes launching that identity again.
+    """
+    import fcntl
+    from .capture import immutable_file
+    previous=observe(root,policy,body)
+    if previous['state']!='not_found':return previous
+    profile=review_profile(root,policy,model,body)
+    directory=Path(root)/'nocheh-review-runs'
+    if directory.is_symlink():raise ValueError('review_receipt_path_denied')
+    directory.mkdir(mode=0o700,exist_ok=True)
+    locks=ExitStack()
+    try:
+        # One native review across all profiles. No unbounded thread queue; busy
+        # calls have no start marker and retain the existing prerequisite wait.
+        for path in (directory/'worker.lock',profile/'.turn.lock',directory/(body['id']+'.lock')):
+            if path.is_symlink():raise ValueError('review_receipt_path_denied')
+            file=locks.enter_context(path.open('a'));path.chmod(0o600)
+            try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:return {'state':'waiting','error_code':'profile_busy'}
+        # A competing request may have completed between observation and locks.
+        previous=observe(root,policy,body)
+        if previous['state']!='not_found':return previous
+        if profile_recent(profile):return {'state':'waiting','error_code':'profile_busy'}
+        immutable_file(directory,body['id']+'.started',b'{}')
+        owned=locks.pop_all()
+        def execute():
+            with owned:
+                try:
+                    result=_review(profile,policy,model,credentials,body)
+                    if result.get('state')=='done':immutable_file(directory,body['id']+'.done',b'{}')
+                except Exception:
+                    # The start marker survives. Observation reports ambiguity
+                    # without saving protected input, credentials or exception text.
+                    pass
+        try:threading.Thread(target=execute,daemon=True,name='nocheh-memory-review').start()
+        except BaseException:owned.close();raise
+        return {'state':'running'}
+    finally:locks.close()
 
 
 def _review(profile,policy,model,credentials,body):

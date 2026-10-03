@@ -72,8 +72,10 @@ checks. The owner-authorized parallel synthetic installation starts all sixteen
 services after a fixture import repair. Capture, guarding, silent learning,
 duplicate handling and the native browser turn pass. An outage preserves its
 new source and recovers handoff, but memory ingestion misses its five-minute
-gate before completing later; background admission remains under investigation.
-The full run is failed, and the existing same-topic recall failure and live
+gate before completing later. The candidate now hands off bounded native review
+with durable receipts; 25 native and six PostgreSQL/workflow checks pass, including
+new ingestion during a running review. Coupled re-verification remains pending.
+The original full run is failed, and the existing same-topic recall failure and live
 release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
 
