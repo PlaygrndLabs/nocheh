@@ -1556,3 +1556,34 @@ model-quality or live conversational recall pass. The full HTTP Bot API polling
 and reply loop remains a separate pending increment.
 
 </entry>
+
+<entry date="2026-10-03" task="Verify ordinary Telegram traffic through the HTTP fixture">
+
+The owner-authorized parallel installation now uses a durable HTTP Bot API mock
+with the actual pinned SDK, native Hermes polling, Nocheh workflows/stores and
+Honcho. Only synthetic-token network transport is redirected, after the unchanged
+mandatory security boundary. Fixture-owned gateway locks account for cached-image
+UID differences; native fallback-IP discovery stays disabled. Unknown methods and
+unmodeled rich markup cannot silently pass. Fixture validation rejects operating
+state, networks, public ports and an unverified native image.
+
+Fourteen recorded gates pass: private/named-topic/General replies each complete on
+the first attempt, exact delivered originals and causal receipts are preserved,
+unselected private traffic stays silent, acknowledged updates remain absent after
+restart, and no reply repeats. Nine SDK contract checks and three host ownership
+checks pass without skips; the AST-only graph refresh passes without model calls.
+Reply gates take 26–47 seconds under parallel host load. All seventeen operating
+services remain healthy; their creation/start times precede the HTTP fixture work.
+
+Original failed runs remain in ignored evidence: a numeric-user lock path,
+pre-boundary URL redirection, a missing transport Host header, a previously
+unmodeled health method, unparsed Markdown response text, and an offset check
+incorrectly placed after SDK restart. One native attempt separately hit its
+230-second deadline before a model request; automatic retry delivered exactly
+once. The subsequent full run passes, but that timeout's cause remains unproven.
+Scripted inference establishes no new model-quality or live recall pass.
+[Procedure](telegram-simulation.md), [runner](../tools/acceptance/telegram_rehearsal.py),
+[SDK checks](../services/hermes/test_telegram_http_fixture.py),
+[ownership checks](../test/test_telegram_rehearsal.py).
+
+</entry>

@@ -65,6 +65,9 @@ def provider():
 
     chat._response_content = answer
     app = FastAPI()
+    if os.environ.get('NOCHEH_TELEGRAM_FIXTURE_STATE'):
+        from tools.acceptance.telegram_mock import TelegramMock
+        TelegramMock(os.environ['NOCHEH_TELEGRAM_FIXTURE_STATE']).install(app)
 
     @app.middleware('http')
     async def audit(request: Request, call_next):

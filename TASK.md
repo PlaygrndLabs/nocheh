@@ -153,8 +153,19 @@ this UI verification does not establish live recall or release readiness.
   five-minute gate. Its current Honcho generation is ready, and three current
   native reviews have confirmed completion. All seventeen operating services
   retain their identities and healthy state. The original failed run remains
-  recorded. The full HTTP Telegram polling/reply loop is the next simulation
-  increment; current coupled traffic enters the ingestion and browser APIs.
+  recorded. The HTTP Bot API extension now passes fourteen recorded gates:
+  real native polling, private/named-topic/General replies on the first attempt,
+  exact archived delivery and causal receipts, unselected-private silence,
+  acknowledgment and restart without repeated sends. Nine pinned-SDK contract
+  checks and three fixture-ownership checks pass. The fixture redirects only
+  Telegram transport after the unchanged security boundary; scripted inference
+  remains explicit. Initial fixture setup, parsed-text and offset-oracle failures
+  are retained. One earlier native turn hit its 230-second deadline before a
+  model request; automatic retry delivered once. Its cause remains unproven,
+  although the later full run passed with reply times of 26–47 seconds.
+  The operating seventeen services remain healthy and were not restarted.
+  [HTTP runner](tools/acceptance/telegram_rehearsal.py),
+  [SDK checks](services/hermes/test_telegram_http_fixture.py).
   Actual model quality and the existing same-topic recall failure remain open; no new live
   pass or operating activation is claimed. Detailed reports and identities stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
