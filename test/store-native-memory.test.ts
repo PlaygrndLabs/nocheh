@@ -104,6 +104,10 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const queued=await services.memory.queueSource(source);assert.equal(queued.length,2);assert.deepEqual(queued.map(q=>q.audience),['owner',group]);
     assert.deepEqual(queued.map(q=>q.receipts.length),[2,2],'speaker evidence and typed project evidence are separate receipts');
     assert.deepEqual(await services.memory.queueSource(source),queued,'duplicate queuing reuses receipts and derivatives');
+    const questionText='Recall the earlier recorded fact.';
+    const question=(await services.capture.capture({...event,key:key+':question',source_id:key+':question',text:questionText,
+      payload:{message:{...(event.payload.message as Record<string,unknown>),message_id:2,text:questionText}}})).source.reference;
+    await services.guards.prepare(question,'fixture',services.detect);
     const originalCount=(await stores.archive.query('SELECT count(*) FROM events')).rows[0].count;
     const receipt=queued[0]!.receipts[0]!,groupReceipt=queued[1]!.receipts[0]!,authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='honcho'")).rows[0].epoch};
     await assert.rejects(services.memory.syncReceipt(receipt,{...authority,epoch:authority.epoch+1}),{code:'workflow_owner_changed'});
@@ -138,7 +142,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     assert.equal(calls.filter(c=>c.path.endsWith('/representation')).length,fetched,'completed native results survive a lost control write');
     const recalledPeers=new Set(calls.filter(c=>c.path.endsWith('/representation')).map(c=>c.path.split('/peers/')[1]!.split('/')[0]));
     assert.ok([...recalledPeers].some(peer=>String(peer).startsWith('person_'))&&[...recalledPeers].some(peer=>String(peer).startsWith('project_')),'cached context includes authorized person and project peers');
-    const principal=await actor(source.id),context=await services.memory.context(principal);
+    const principal=await actor(question.id),context=await services.memory.context(principal);
     assert.equal(context.limited_memory,false);assert.ok(!JSON.stringify(context).includes('saffronpass'));assert.ok(JSON.stringify(context).includes('representation_has_no_exact_citations'));
     assert.ok(JSON.stringify(context).includes(ownerApproved),'native context preserves exact owner-approved guarded passages');
     const recalled=await services.memory.recall(principal,'Recall saffronpass');assert.equal(recalled.sources.length,1);assert.ok(!JSON.stringify(recalled).includes('saffronpass'));
@@ -170,5 +174,60 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       'an unrelated question cannot receive the correction');
     status=await services.memory.status();await services.memory.connection(owner,{attached:false,include_history:false,catch_up:false,expected_revision:status.connection.revision,operation_id:key+':detach'});
     const beforeDetached=calls.length;assert.equal(await services.memory.reconcileReceipt(rebuilt[0]!.receipts[0]!),false);assert.equal(calls.length,beforeDetached);
+  } finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await services.guards.setMode('off');await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('foreground recall requires independent source evidence while background context can learn the current question',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const adminDb=new pg.Pool(config);try{assert.equal((await adminDb.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await adminDb.end();}
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-current-question-')),key='current-question:'+Date.now(),group='-'+Date.now();
+  const calls:string[]=[];let sequence=0;
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+    runtime:async()=>({literals:[]}),honcho:async(path,body:any)=>{
+      calls.push(path);
+      if(path.endsWith('/messages/list'))return {items:[]};
+      if(path.endsWith('/messages'))return [{...body.messages[0],id:String(++sequence).padStart(21,'r')}];
+      if(path.endsWith('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
+      if(path.endsWith('/representation'))return {representation:'The current question asks for the meeting time.'};
+      if(path.endsWith('/chat'))return {content:'The independently recorded meeting time is 18:00.'};
+      return {};
+    }});
+  const capture=async(id:number,text:string)=>{
+    const event:Envelope={version:1,key:key+':'+id,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:key+':'+id,revision:'1',occurred_at:null,text,
+      payload:{message:{message_id:id,date:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:123},text}}};
+    const source=(await services.capture.capture(event)).source.reference;
+    await services.guards.prepare(source,'fixture',services.detect);return source;
+  };
+  try {
+    await services.guards.reconcile();await services.guards.setMode('off');await services.guards.setMode('on');
+    await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true,include_history=true,attached_at=now() WHERE singleton');
+    const earlier=await capture(1,'The meeting time is 18:00.'),question=await capture(2,'What was the meeting time?');
+    const queued=await services.memory.queueSource(question),current=queued.find(item=>item.audience===group)!;
+    const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='honcho'")).rows[0].epoch};
+    for(const receipt of current.receipts)assert.equal(await services.memory.syncReceipt(receipt,authority),true);
+    const binding=await services.guards.state(),principal:Reader={admin:false,scope:group,space:group,turnEvent:question.id,
+      generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const building=await services.memory.recall(principal,'What was the meeting time?');
+    assert.equal(building.limited_memory,true);assert.deepEqual(building.sources,[]);
+    assert.equal(calls.filter(path=>path.endsWith('/chat')).length,0,'ingesting the question cannot establish a prior fact');
+    assert.equal(await services.memory.observe(current.workspace),true);
+    assert.equal(await services.memory.refreshContext(current.workspace,key+':context'),true);
+    assert.ok(calls.some(path=>path.endsWith('/representation')),'background learning retains the current source');
+    assert.equal((await services.memory.context(principal)).limited_memory,false);
+    // Older receipts without the evidence array retain the same source boundary.
+    await stores.control.query("UPDATE memory_ingestion_receipts SET source_references='[]'::jsonb WHERE generation=$1",[current.workspace]);
+    const ready=await services.memory.recall(principal,'What was the meeting time?');
+    assert.equal(ready.limited_memory,true);assert.deepEqual(ready.sources,[]);
+    assert.equal(calls.filter(path=>path.endsWith('/chat')).length,0,'a ready question-only generation is still not historical memory');
+    const older=(await services.memory.queueSource(earlier)).find(item=>item.audience===group)!;
+    for(const receipt of older.receipts)assert.equal(await services.memory.syncReceipt(receipt,authority),true);
+    await stores.control.query("UPDATE memory_ingestion_receipts SET source_references='[]'::jsonb WHERE id=ANY($1::text[])",[older.receipts]);
+    assert.equal(await services.memory.observe(current.workspace),true);
+    const recalled=await services.memory.recall(principal,'What was the meeting time?');
+    assert.equal(recalled.limited_memory,false);assert.match(recalled.sources[0]!.text,/independently recorded meeting time is 18:00/);
+    assert.equal(calls.filter(path=>path.endsWith('/chat')).length,1,'completed independent source evidence enables historical reasoning');
   } finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await services.guards.setMode('off');await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
 });

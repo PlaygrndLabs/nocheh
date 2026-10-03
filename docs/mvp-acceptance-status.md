@@ -142,6 +142,12 @@ cap. Six relay checks pass for explicit additional allowance, retained accountin
 authentication, concurrency, streaming and redaction. This changes neither
 operating policy nor live acceptance status.
 
+Foreground recall now excludes peers whose only completed source evidence is
+the current question; independent history and background representations remain
+available. Four checks pass, including three PostgreSQL checks, with TypeScript
+compilation. The coupled real-model fresh-topic, restart and retirement checks
+remain pending. [Decision](adr/0099-independent-evidence-for-historical-recall.md).
+
 </simulation_impact>
 
 <checks>

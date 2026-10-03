@@ -145,6 +145,15 @@ this UI verification does not establish live recall or release readiness.
   partial passes do not establish cold ingestion or complete model quality.
   [Capture checks](test/stores.test.ts).
 
+  Foreground Honcho recall now requires completed evidence beyond the current
+  question. Background context still learns the first source; older receipts
+  and independent history remain usable. Four checks pass without skips,
+  including three PostgreSQL checks for access, guarded recovery and the new
+  question-only boundary. TypeScript compilation passes. Coupled real-model
+  verification of this candidate is pending.
+  [Decision](docs/adr/0099-independent-evidence-for-historical-recall.md),
+  [checks](test/store-native-memory.test.ts).
+
   A fresh empty-state installation of the latest guard/lease candidate passes
   all nineteen coupled checks, including actual Honcho ingestion, silent
   convention/reaction learning, native browser work and outage memory recovery
@@ -294,7 +303,8 @@ pass for reaction removal, corrected time and private isolation. Fresh-topic
 isolation fails with `assistant_runtime_unavailable`; restart recall and source
 retirement remain unrun. Diagnosis finds the fresh-topic Honcho peer supported
 only by the current question, yet foreground recall spends about 160 seconds
-reasoning over it. The fixture is stopped while this path is repaired.
+reasoning over it. The repaired path passes focused checks; the fixture is
+stopped while its candidate is prepared for a fresh-topic recheck.
 The runner now binds replies to both chat and message, retains pending source
 identities before waiting, and stops after a failed case. Three focused checks
 pass for late/unrelated replies, cross-chat message-number reuse, and duplicate

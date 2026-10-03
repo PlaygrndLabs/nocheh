@@ -1834,3 +1834,19 @@ claimed. Synthetic source identities and detailed answers remain ignored.
 [Procedure](telegram-simulation.md), [relay checks](../test/test_model_relay.py).
 
 </entry>
+
+<entry date="2026-10-03" area="Historical recall requires independent evidence">
+
+Foreground Honcho peer selection excludes completed receipts supported only by
+the current turn event. It checks every source reference and the legacy primary
+source fallback; independent evidence enables recall while first-source
+background representation remains available. Four focused/adjacent checks pass
+without skips, including three actual PostgreSQL checks. The existing guarded
+recovery test now uses distinct fact and question sources. An initial new-test
+failure came from a missing mock message-list response; the corrected fixture
+and its passing rerun are preserved separately. TypeScript compilation passes.
+Coupled model verification remains pending, and response deadlines are unchanged.
+[Decision](adr/0099-independent-evidence-for-historical-recall.md),
+[checks](../test/store-native-memory.test.ts).
+
+</entry>
