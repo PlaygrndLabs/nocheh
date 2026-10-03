@@ -91,6 +91,11 @@ passes ten SDK checks and seven coupled gates: a 429 waits before one safe topic
 delivery, and a failed file download recovers with exact original bytes/hash.
 The file's native reply hits the 230-second deadline before a model request;
 the extended run remains failed while guarded preparation is investigated.
+Its automatic retry eventually delivers once on attempt three. Content-free
+stacks also identify native admission waiting on a killed container's reused PID.
+A candidate reclaims those admission rows only under the existing exclusive
+profile file lock. Five focused recovery checks and eighteen adjacent native
+checks pass without skips; coupled candidate verification remains pending.
 The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.

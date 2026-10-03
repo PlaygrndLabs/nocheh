@@ -170,7 +170,16 @@ this UI verification does not establish live recall or release readiness.
   reply then hits the unchanged 230-second deadline before model dispatch, so
   this extended run is failed, not complete. Investigation has narrowed the
   repeated delay to guarded context preparation; content-free fixture stack
-  diagnostics are enabled. No operating runtime change has been made.
+  diagnostics identify a second delay: a replacement isolated child waits on
+  the killed child's native lease because container PIDs repeat. The original
+  file turn eventually delivers once on attempt three; that is not a pass.
+  A verified candidate reclaims only native admission rows after acquiring the
+  exclusive profile file lock, preserving history and native fencing. Five
+  crash/schema/mode checks and eighteen adjacent native checks pass without
+  skips. [Decision](docs/adr/0098-isolated-native-lease-recovery.md),
+  [recovery checks](services/hermes/test_native_leases.py).
+  Packaging, coupled recovery and cold guard preparation remain pending.
+  No operating runtime change has been made.
   The operating seventeen services remain healthy and were not restarted.
   [HTTP runner](tools/acceptance/telegram_rehearsal.py),
   [SDK checks](services/hermes/test_telegram_http_fixture.py).

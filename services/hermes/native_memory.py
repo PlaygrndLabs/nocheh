@@ -10,11 +10,14 @@ from pathlib import Path
 
 
 @contextmanager
-def memory_lock(profile):
+def memory_lock(profile, *, reclaim_native=False):
     profile = Path(profile)
     profile.mkdir(parents=True, exist_ok=True)
     with (profile / '.memory.lock').open('a') as file:
         fcntl.flock(file, fcntl.LOCK_EX)
+        if reclaim_native:
+            from services.hermes.native_leases import reclaim_isolated_leases
+            reclaim_isolated_leases(profile)
         yield
 
 

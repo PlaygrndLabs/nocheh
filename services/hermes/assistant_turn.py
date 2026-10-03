@@ -251,7 +251,7 @@ def main():
             (profile/'plugins').mkdir(exist_ok=True)
             (profile/'plugins'/'nocheh').symlink_to(Path(__file__).resolve().parent,target_is_directory=True)
         from .native_memory import memory_lock, save_receipt
-        with memory_lock(os.environ['HERMES_HOME']), contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+        with memory_lock(os.environ['HERMES_HOME'], reclaim_native=os.environ.get('NOCHEH_ISOLATED_TURN')=='1'), contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             if body.get('review'):
                 import re
                 if not re.fullmatch(r'[a-f0-9]{64}', body['review_id']): raise ValueError('invalid_review_id')
