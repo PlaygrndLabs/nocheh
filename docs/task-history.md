@@ -1475,3 +1475,19 @@ activation, model-quality result or new live pass is claimed.
 [behavior checks](../test/store-memory-followup.test.ts).
 
 </entry>
+
+<entry date="2026-10-03" task="Prepare the verified concurrent-decision candidate">
+
+Service, management and database images built from `92677f8` include the replay
+repair. The packaged Node runtime imports successfully. Native source dependencies
+and the native image are unchanged, preserving the exact equivalence evidence
+that carries the 22 packaged native checks from `63f9b99`.
+
+The new 16-service manifest validates with ten available image identities, only
+internal networks, no published ports and no operating-state mounts. No fixture
+containers exist. The component database is stopped with its volume retained;
+seventeen operating containers remain running. Coupled execution still awaits
+the owner's explicit single-stack exception. Model quality, live recall and
+release gates remain pending; no operating activation or new live pass is claimed.
+
+</entry>

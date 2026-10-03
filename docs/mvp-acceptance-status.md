@@ -29,15 +29,18 @@ traffic or operating activation was performed by the simulation session.
 
 Approved actions now retain the concrete topic in `current`, owner review and
 native delivery; General and deleted-topic fallback checks pass. The actual
-storage action suite passes. Eighteen memory lifecycle cases and adjacent grant/action suites now pass.
+storage action suite passes. Twenty-four memory lifecycle cases and adjacent
+grant/action/dispatch suites pass: 29 checks, with no skips.
 Complete approved wording retains its whitespace; long follow-ups use the native
 chunk boundary, and historical normalized grants still require their saved hash.
 Approval, its exact action and outbox work commit together; legacy command replay
 and confirmed receipt-link repair preserve authority and prevent repeated sends.
-The initial interrupted-handoff failure remains in the evidence history. The
-service/database/management/native images were rebuilt at `d626ba3`; their native
-filesystem layers and runtime configuration match `63f9b99`, carrying its 22
-packaged native checks forward. The candidate also rejects a memory
+Concurrent identical grants, approvals and rejections share a durable receipt;
+changed decisions or expiration bounds conflict. Four original failures and
+their focused repairs remain in the evidence history. Service, database and
+management images were rebuilt at `92677f8`. The unchanged native image and
+sources retain exact filesystem/runtime equivalence to `63f9b99`, carrying its
+22 packaged native checks forward. The candidate also rejects a memory
 follow-up after its fact changes, both before admission and at physical delivery;
 receipt observation still confirms an earlier send without repeating it. The
 unstarted-handoff repair is packaged, and the Node import check passes. The latest
@@ -55,9 +58,10 @@ recall observations retain their dates and do not verify this candidate's live b
 
 Exact owner replay now repairs an unstarted legacy action withheld for incomplete
 approval links. Automatic restaging leaves it cancelled; a security denial rolls
-the recovery back. The action/lifecycle run has 22 passes; its separate grant
+the recovery back. An earlier action/lifecycle run recorded 22 passes; its separate grant
 fixture failed because it assumed the requested row was on the first page.
-The pagination-aware grant check now passes. The original failure is retained,
+The pagination-aware grant check passes, including the latest combined run.
+The original failure is retained,
 and no live outcome is relabeled.
 
 Combined storage verification also reproduced inactive access-history import and
