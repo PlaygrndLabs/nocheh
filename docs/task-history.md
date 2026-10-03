@@ -1705,3 +1705,32 @@ empty-state candidate run is prepared. [Procedure](telegram-simulation.md),
 [lease decision](adr/0098-isolated-native-lease-recovery.md).
 
 </entry>
+
+<entry date="2026-10-03" task="Verify the final candidate from empty synthetic state">
+
+After the prior HTTP fixture is stopped, a new installation starts sixteen
+services with the exact verified native, service, database, management and Honcho
+images. All nineteen coupled checks pass: capture and original preservation,
+masking, native Honcho ingestion, silent convention/reaction learning, duplicate
+handling, the actual isolated browser turn, and database/workflow outage recovery.
+The browser turn completes in 24.5 seconds; outage memory recovery completes in
+100.2 seconds under the original five-minute gate. The literal canary reaches no
+inference outside the detector. The final current generation is ready, all seven
+current ingestion receipts and five native reviews are done, and no guarded
+publication remains pending. The original nineteen-check pass retains its own
+revision and 54.7-second observation.
+
+An initial preparation command mistyped a cached database image identity and
+failed its image preflight before any service or volume creation. That failed
+preparation remains preserved; the successful preparation obtains image IDs
+directly from the verified manifest. Prior baseline failures and fixture skips
+retain separate successful focused resolutions; they are not relabeled or
+counted twice as new checks. Synthetic receipts and executable manifests remain
+in ignored local state. This run uses deterministic inference, no real Telegram
+or provider traffic, and no operating activation. All sixteen fixture services are then stopped with their state preserved;
+all seventeen operating services retain their identities, start times and health.
+Real-model route selection is awaiting the owner; existing real recall and
+remote-history publication gates remain open. [Scenario matrix](telegram-simulation.md),
+[installation runner](../tools/acceptance/rehearsals/installation-rehearsal.py).
+
+</entry>
