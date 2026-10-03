@@ -1296,6 +1296,26 @@ pending. Earlier images, failed invocations and reports remain in ignored eviden
 
 </entry>
 
+<entry date="2026-10-03" task="Revalidate memory follow-ups at physical delivery">
+
+Two PostgreSQL cases reproduced delivery of previously approved wording after
+an automatic fact replacement that retained the guard epoch. Trusted follow-ups
+now recheck the linked grant and request, exact audience and source, current
+fact revision and guarded wording before admission and at physical delivery.
+A stale fact suspends its grant and cancels queued delivery. Observing a confirmed
+older receipt still reconciles without sending again.
+
+All 21 affected memory, action and dispatch checks pass with no skips, including
+the sixteen memory lifecycle cases. TypeScript compilation and the AST-only
+graph update pass. The original two failures and their failed parent remain in
+ignored evidence. Native transport code is unchanged; its recorded packaged
+checks are carried forward. Service images need this repair before coupled
+execution. The full fixture, model quality and live release gates remain pending.
+[Decision](adr/0094-current-memory-authority-at-delivery.md),
+[behavior checks](../test/store-memory-followup.test.ts).
+
+</entry>
+
 <entry date="2026-10-03" task="Commit memory approval and automatic follow-up atomically">
 
 Synthetic failure injection reproduced a committed approval with no follow-up;

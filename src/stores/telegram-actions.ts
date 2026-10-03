@@ -36,9 +36,36 @@ export class TelegramActionRepository {
     if(!row)throw new HttpError(404,'action_not_found');return row;
   }
   private effect(row:any):Effect {return {id:row.id,kind:'telegram.send',scope:row.scope,profile:row.profile,fingerprint:row.fingerprint};}
+  private async memoryAuthority(row:any,workflow:unknown) {
+    if(typeof workflow!=='string'||!workflow.startsWith('memory-access-followup:'))return;
+    const id=workflow.slice('memory-access-followup:'.length);
+    const grant=(await this.stores.control.query(`SELECT g.* FROM memory_fact_grants g JOIN memory_access_requests r ON r.id=g.request_id
+      WHERE g.id=$1 AND g.delivery_action_id=$2 AND r.followup_action_id=$2 AND r.grant_id=g.id
+      AND g.state='active' AND r.state='approved' AND (g.expires_at IS NULL OR g.expires_at>now())
+      AND g.destination=$3 AND r.destination=$3 AND g.binding=$4 AND r.binding=$4
+      AND g.text_hash=$5 AND r.source_reference=$6 AND g.fact_id=r.fact_id AND g.fact_revision=r.fact_revision`,
+      [id,row.id,row.destination,row.binding,row.text_hash,row.source_reference])).rows[0];
+    if(!grant)throw new HttpError(403,'action_delivery_denied');
+    let current=false;
+    try {
+      const guarded=await this.guards.read('derived_artifacts:'+grant.representation_reference.id,row.binding),raw=String((guarded.value as any).text??'');
+      const fact=(await this.stores.derived.query(`SELECT e.active_revision,v.retired FROM entity_claims e
+        JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[grant.fact_id])).rows[0];
+      current=!!fact&&!fact.retired&&fact.active_revision===grant.fact_revision&&guarded.revision===grant.guard_revision&&
+        (digest(raw)===grant.text_hash||digest(raw.trim())===grant.text_hash);
+    } catch(error) {if(!(error instanceof HttpError))throw error;}
+    if(!current) {
+      await this.stores.control.query(`UPDATE memory_fact_grants SET state='suspended',suspended_reason='followup_authority_changed',
+        revision=revision+1,updated_at=now() WHERE id=$1 AND state='active' AND revision=$2`,[id,grant.revision]);
+      throw new HttpError(403,'action_delivery_denied');
+    }
+    // A read or guard check can yield while the grant is consumed or expires.
+    if(!(await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE id=$1 AND state='active' AND revision=$2
+      AND (expires_at IS NULL OR expires_at>now())`,[id,grant.revision])).rowCount)throw new HttpError(403,'action_delivery_denied');
+  }
   private async text(row:any,current=true):Promise<string> {
     if(current)await this.guards.assertCurrent(row.binding);
-    const source=(await this.stores.derived.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[row.proposal_reference.id])).rows[0];
+    const source=(await this.stores.derived.query('SELECT content_hash,provenance FROM derived_artifacts WHERE id=$1',[row.proposal_reference.id])).rows[0];
     if(source?.content_hash!==row.proposal_reference.input_hash)throw new HttpError(409,'action_proposal_changed');
     let value:any;
     if(row.guard_revision===null) {
@@ -52,6 +79,7 @@ export class TelegramActionRepository {
     if(current) {
       const active=await this.guards.read('derived_artifacts:'+row.proposal_reference.id,row.binding);
       if(active.revision!==row.guard_revision||digest(String((active.value as any).text))!==row.text_hash)throw new HttpError(409,'action_proposal_changed');
+      await this.memoryAuthority(row,source.provenance?.trusted_workflow);
       await this.guards.assertCurrent(row.binding);
     }
     return value.text;
@@ -239,6 +267,10 @@ export class TelegramActionRepository {
       }
       if(!observe) {
         try{text=await this.text(row);}catch(error){
+          if(error instanceof HttpError&&error.code==='action_delivery_denied') {
+            await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='action_delivery_denied',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
+            return observation('cancelled','action',0,Date.now(),'action_delivery_denied');
+          }
           if(error instanceof HttpError&&error.code==='guard_context_changed') {
             await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='action_context_changed',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
             return observation('cancelled','action',0,Date.now(),'superseded');

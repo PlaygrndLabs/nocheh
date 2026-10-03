@@ -109,12 +109,15 @@ this UI verification does not establish live recall or release readiness.
   [rate-limit recovery](docs/adr/0090-durable-telegram-rate-limit-retries.md),
   [approved destinations](docs/adr/0092-exact-topic-action-destinations.md).
   Memory approvals now commit their grant, exact follow-up, links and outbox work
-  together. Fourteen lifecycle scenarios cover complete and whitespace-sensitive wording,
+  together. Sixteen lifecycle scenarios cover complete and whitespace-sensitive wording,
   current and historical approval identities, normal/topic delivery, interrupted
   staging, legacy handoff repair, uncertain receipts, revocation, expiry, disabled
-  follow-up and security denial. They and the existing memory grant suite pass;
+  follow-up and security denial. Automatic fact replacement now stops the queued
+  follow-up and the physical delivery check even when the guard epoch is unchanged;
+  previously confirmed receipts can still reconcile. They and the existing memory grant suite pass;
   adjacent real PostgreSQL action/dispatch checks also pass.
   [Atomic handoff](docs/adr/0093-atomic-memory-approval-followups.md),
+  [current delivery authority](docs/adr/0094-current-memory-authority-at-delivery.md),
   [failure-path checks](test/store-memory-followup.test.ts).
   The broad storage and combined-branch runs retain their original failures and
   focused repairs in ignored evidence. Portable history remains inactive; reset
@@ -127,7 +130,8 @@ this UI verification does not establish live recall or release readiness.
   Service, management, database and native images include the verified topic,
   handoff and complete-wording fixes at `63f9b99`. All 22 packaged native checks
   pass without source mounts or network access; the packaged Node runtime imports
-  successfully. The earlier candidate's evidence remains preserved.
+  successfully. Service images need the later memory-authority check before coupled
+  execution. The earlier candidate's evidence remains preserved.
   The updated 16-service synthetic installation has a validated manifest, verified
   images, internal networks and no host ports. It has not started because the
   operating stack is running and the owner's

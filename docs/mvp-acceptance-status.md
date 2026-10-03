@@ -29,7 +29,7 @@ traffic or operating activation was performed by the simulation session.
 
 Approved actions now retain the concrete topic in `current`, owner review and
 native delivery; General and deleted-topic fallback checks pass. The actual
-storage action suite passes. Fourteen memory lifecycle cases and adjacent grant/action suites now pass.
+storage action suite passes. Sixteen memory lifecycle cases and adjacent grant/action suites now pass.
 Complete approved wording retains its whitespace; long follow-ups use the native
 chunk boundary, and historical normalized grants still require their saved hash.
 Approval, its exact action and outbox work commit together; legacy command replay
@@ -37,7 +37,11 @@ and confirmed receipt-link repair preserve authority and prevent repeated sends.
 The initial interrupted-handoff failure remains in the evidence history. The refreshed
 service/database/management/native images include the topic, atomic handoff and
 complete-wording repairs at `63f9b99`; all 22 packaged native checks and the
-packaged Node import check pass. The updated full fixture remains unstarted.
+packaged Node import check pass. The later candidate also rejects a memory
+follow-up after its fact changes, both before admission and at physical delivery;
+receipt observation still confirms an earlier send without repeating it. Service
+images need this authority repair before coupled execution. The updated full
+fixture remains unstarted.
 
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority
