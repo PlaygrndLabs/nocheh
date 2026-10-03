@@ -115,7 +115,12 @@ preserves every earlier message hash and delivers once on the first attempt;
 private, named-topic and General routes and restart remain correct. The previous
 failed runs and unclassified early native exit remain historical failures.
 The seventeen operating services retain their identities, start times and health.
-A fresh empty-state installation check of this candidate remains pending.
+A fresh empty-state installation of this candidate also passes all nineteen
+coupled checks. Outage memory recovery takes 100.2 seconds within the unchanged
+five-minute gate; the native browser turn completes in 24.5 seconds. The current
+Honcho generation is ready, all seven current ingestion receipts and five native
+reviews are done, and no guarded publication remains pending. Earlier timings
+retain their original dates; neither run is a model-quality evaluation.
 The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.

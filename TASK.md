@@ -131,13 +131,16 @@ this UI verification does not establish live recall or release readiness.
   [Context checks](test/store-prepared-context.test.ts),
   [recovery checks](services/hermes/test_native_leases.py).
 
-  Earlier coupled evidence passes nineteen installation gates, including actual
-  Honcho ingestion, silent convention/reaction learning, native browser work and
-  outage memory recovery in 54.7 seconds under the unchanged five-minute gate.
-  Durable native review handoff has 25 native and six PostgreSQL/workflow passes,
-  with 47 packaged native checks. A fresh empty-state run with the latest guard
-  and lease candidate is pending. All original failed runs remain recorded,
-  including an unclassified early native exit; later passes do not explain it.
+  A fresh empty-state installation of the latest guard/lease candidate passes
+  all nineteen coupled checks, including actual Honcho ingestion, silent
+  convention/reaction learning, native browser work and outage memory recovery
+  in 100.2 seconds under the unchanged five-minute gate. Its current generation
+  is ready, all seven current ingestion receipts and five native reviews are
+  done, and no guarded publication remains pending. Earlier nineteen-check
+  evidence retains its original 54.7-second recovery observation. Durable native
+  review handoff has 25 native and six PostgreSQL/workflow passes, with 47
+  packaged native checks. All original failed runs remain recorded, including
+  an unclassified early native exit; later passes do not explain it.
   [Installation runner](tools/acceptance/rehearsals/installation-rehearsal.py),
   [handoff decision](docs/adr/0097-durable-native-review-handoff.md).
 
@@ -258,6 +261,14 @@ this UI verification does not establish live recall or release readiness.
 </verification>
 
 <pending>
+
+The simulation session has finished its deterministic coupled checks and stopped
+its synthetic stacks while preserving evidence. The owner's answer about an
+authorized real-model route is pending. That next evaluation keeps synthetic
+source data and mocked Telegram and targets reaction-removal recall, owner
+corrections/retirement, audience isolation and recall after restart. No provider
+login, spending-limit increase or operating activation has been authorized by
+the synthetic-fixture exception.
 
 1. Diagnose the October 2 same-topic recall failure using the saved event and
    CLI. One linked reply arrived on attempt two after about 384 seconds. It
