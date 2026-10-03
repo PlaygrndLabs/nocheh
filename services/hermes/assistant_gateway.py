@@ -304,7 +304,7 @@ class AssistantGateway:
         import re
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
         destination=re.fullmatch(r'(-?[1-9]\d{0,18})(?:/topic/([1-9]\d{0,15}))?',body['destination'])
-        if not re.fullmatch('[a-f0-9]{64}',body['id']) or not destination or not isinstance(body['text'],str) or not 0<len(body['text'])<=3500:raise ValueError('invalid_action')
+        if not re.fullmatch('[a-f0-9]{64}',body['id']) or not destination or not isinstance(body['text'],str) or not 0<len(body['text'].encode('utf-16-le'))//2<=12000:raise ValueError('invalid_action')
         chat_id,topic=destination.groups()
         if topic and int(topic)>9007199254740991:raise ValueError('invalid_action')
         name='action-'+body['id']

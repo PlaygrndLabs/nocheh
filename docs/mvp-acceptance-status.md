@@ -19,7 +19,7 @@ reliability or release approval.
 The personal-use [Telegram simulation](telegram-simulation.md) reproduced native
 fallback from a missing topic into General, continued delivery after a
 mid-response revocation, and permanently replayed rate-limit rejections. The
-candidate passes fifteen native scenarios and fourteen capture/gateway checks,
+candidate passes seventeen native scenarios and fourteen capture/gateway checks,
 including bounded, durable `429` recovery and authorization during its wait. This changes reply
 and approved-action delivery; their historical live passes remain dated evidence
 and do not verify the new candidate. Verify operating activation before any
@@ -29,12 +29,15 @@ traffic or operating activation was performed by the simulation session.
 
 Approved actions now retain the concrete topic in `current`, owner review and
 native delivery; General and deleted-topic fallback checks pass. The actual
-storage action suite passes. Eleven one-time memory lifecycle cases and the existing grant suite now pass.
+storage action suite passes. Fourteen memory lifecycle cases and adjacent grant/action suites now pass.
+Complete approved wording retains its whitespace; long follow-ups use the native
+chunk boundary, and historical normalized grants still require their saved hash.
 Approval, its exact action and outbox work commit together; legacy command replay
 and confirmed receipt-link repair preserve authority and prevent repeated sends.
 The initial interrupted-handoff failure remains in the evidence history. The refreshed
 service/database/management/native images include both repairs at `beed79b`; all
-twenty packaged native checks pass. The updated full fixture remains unstarted.
+twenty packaged native checks pass. Those images need the later wording repair
+before full execution. The updated full fixture remains unstarted.
 
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority

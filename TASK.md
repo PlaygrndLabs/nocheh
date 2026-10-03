@@ -101,7 +101,7 @@ this UI verification does not establish live recall or release readiness.
 
 - Personal-use Telegram simulation is in progress; see the
   [scenario matrix](docs/telegram-simulation.md) and dated
-  [completed increments](docs/task-history.md). Fifteen native Telegram scenarios
+  [completed increments](docs/task-history.md). Seventeen native Telegram scenarios
   and fourteen capture/gateway checks pass through the pinned Hermes adapter.
   Physical sends preserve current authority, exact chat/topic destinations and
   cancellation; bounded rate-limit retries retain immutable receipts.
@@ -109,7 +109,8 @@ this UI verification does not establish live recall or release readiness.
   [rate-limit recovery](docs/adr/0090-durable-telegram-rate-limit-retries.md),
   [approved destinations](docs/adr/0092-exact-topic-action-destinations.md).
   Memory approvals now commit their grant, exact follow-up, links and outbox work
-  together. Eleven lifecycle scenarios cover normal/topic delivery, interrupted
+  together. Fourteen lifecycle scenarios cover complete and whitespace-sensitive wording,
+  current and historical approval identities, normal/topic delivery, interrupted
   staging, legacy handoff repair, uncertain receipts, revocation, expiry, disabled
   follow-up and security denial. They and the existing memory grant suite pass;
   adjacent real PostgreSQL action/dispatch checks also pass.
@@ -124,7 +125,8 @@ this UI verification does not establish live recall or release readiness.
   vector portability, workflow provisioning, privacy and restart probes pass in
   their separate synthetic fixtures. These checks make no model-quality claim.
   Service, management, database and native images include the verified topic and
-  handoff fixes at `beed79b`. Twenty checks pass from the packaged native image.
+  handoff fixes at `beed79b`, with twenty packaged native checks passing. They need
+  the later complete-wording fix before coupled execution.
   The updated 16-service synthetic installation has a validated manifest, verified
   images, internal networks and no host ports. It has not started because the
   operating stack is running and the owner's
