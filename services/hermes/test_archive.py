@@ -1,6 +1,7 @@
 import json
 import io
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -35,6 +36,24 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(network.call_args.kwargs['timeout'],60)
                 with self.assertRaises(TimeoutError): archive_tools.request('/v1/search?q=synthetic')
                 self.assertEqual(network.call_args.kwargs['timeout'],15)
+        finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)
+
+    def test_foreground_recall_reserves_time_for_the_answer_and_skips_expired_calls(self):
+        token=archive_tools.ARCHIVE_CREDENTIAL.set('signed-synthetic-credential')
+        try:
+            with patch.object(archive_tools,'_PROCESS_CREDENTIAL',None),patch.object(
+                    archive_tools,'_PROCESS_DEADLINE',time.time()+100),patch(
+                    'urllib.request.urlopen',side_effect=lambda *args,**kwargs:io.BytesIO(b'{"sources":[]}')) as network:
+                archive_tools.request('/v1/memory/honcho/recall',{'query':'Synthetic recall'})
+                self.assertGreater(network.call_args.kwargs['timeout'],50)
+                self.assertLess(network.call_args.kwargs['timeout'],56)
+                archive_tools.request('/v1/search?q=synthetic')
+                self.assertEqual(network.call_args.kwargs['timeout'],15)
+            with patch.object(archive_tools,'_PROCESS_CREDENTIAL',None),patch.object(
+                    archive_tools,'_PROCESS_DEADLINE',time.time()+44),patch('urllib.request.urlopen') as network:
+                self.assertEqual(json.loads(archive_tools.recall_tool({'query':'Synthetic recall'})),
+                                 {'error':'owner_memory_unavailable'})
+                network.assert_not_called()
         finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)
 
     def test_archive_read_preserves_reaction_removal_and_bounded_current_source_links(self):

@@ -1863,3 +1863,35 @@ were rerun. [Runner](../tools/acceptance/model_rehearsal.py),
 [checks](../test/test_model_rehearsal.py).
 
 </entry>
+
+<entry date="2026-10-04" area="Real-model continuation and retirement oracle">
+
+A candidate with independent-source foreground recall started in the authorized
+16-service fixture. Fresh topic isolation delivered one correct, causally archived
+physical answer, but the dispatch completion arrived after the 300-second gate;
+the original failure is retained. A separate private recall after restarting
+Hermes passed in 172 seconds on the first attempt. Retirement of the original
+private message then led to a first-attempt runtime failure and a non-disclosing
+reply on retry. Honcho's later synthetic fact could not be attributed to
+the retired owner message: a still-active confirmed assistant reply also stated
+it. The fixture's retirement oracle needs to retire all captured private sources
+containing the same synthetic fact and record each decision, so the next test
+can distinguish source reuse from an independently permitted message. Four
+existing focused runner checks pass. The fixture was stopped after collecting the receipts; the operating stack was not
+changed by this fixture.
+
+</entry>
+
+<entry date="2026-10-04" area="Bound foreground Honcho recall to the native turn">
+
+The Hermes parent already stops a native turn after 230 seconds, while its
+Honcho recall HTTP tool could wait 615 seconds. A trusted per-turn deadline now
+travels to the isolated child; foreground recall stops early enough to reserve
+45 seconds for an answer and the final delivery check. Background reviews keep
+their own execution path. Twenty-six relevant Python tests pass, including a
+bounded call and an exhausted-budget failure path, and four runner checks pass.
+Four additional pinned-native formatter tests cannot import that dependency on
+the host and remain pending in the image. Coupled real-model timing and the
+existing 300-second workflow gate remain open.
+
+</entry>
