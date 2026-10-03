@@ -100,12 +100,22 @@ later cold-topic run has an unclassified early native failure, then delivers
 once on retry in 148.5 seconds, including 122.9 seconds of guard preparation.
 The separate bounded-publication candidate passes three PostgreSQL guard,
 context and broker checks, including a failed concurrent sibling and 501 input
-fragments, plus TypeScript compilation. Its coupled verification remains pending.
+fragments, plus TypeScript compilation. Its coupled verification is recorded below.
 The initial three-check record used an incorrect container mount root and is
 disqualified as candidate evidence. Replacement checks verify both runtime and
 test bytes in the actual image working directory. Two adjacent checks and the
 focused fresh-input check pass without skips; the initial batch-count oracle
 failure remains recorded. No acceptance deadline was extended.
+The byte-verified candidate now passes thirteen HTTP fault/file gates with cold
+context: both replies finish on the first attempt, a physical 429 waits before
+one exact-topic delivery, and a transient download failure preserves the original
+binary bytes/hash. A separate ordinary run passes fourteen gates after seeding
+two abandoned one-hour native leases. The same profile recovers both leases,
+preserves every earlier message hash and delivers once on the first attempt;
+private, named-topic and General routes and restart remain correct. The previous
+failed runs and unclassified early native exit remain historical failures.
+The seventeen operating services retain their identities, start times and health.
+A fresh empty-state installation check of this candidate remains pending.
 The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
