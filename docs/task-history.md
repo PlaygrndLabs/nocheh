@@ -1535,3 +1535,24 @@ coupled outage rerun remain pending; the original deadline failure is preserved.
 [workflow checks](../test/store-workflows.test.ts).
 
 </entry>
+
+<entry date="2026-10-03" task="Verify the coupled installation after native review handoff">
+
+The native candidate at `92a4297` passes 47 packaged review, Telegram and managed
+run checks. Reusing the verified service, management and database images from
+`92677f8`, a fresh isolated sixteen-service installation passes all nineteen
+rehearsal checks. Original capture, guarding, native Honcho ingestion, silent
+convention/reaction learning, duplicate handling and actual Hermes browser reply
+with archived delivery pass. The injected database/workflow outage preserves its
+source, recovers handoff and completes memory ingestion in 54.7 seconds, within
+the unchanged five-minute gate. Its current memory generation is ready; three
+current native reviews have confirmed completion. Seventeen operating container
+identities remain unchanged and healthy.
+
+The preceding timeout, later recovery and all original reports remain in ignored
+evidence. The observed browser completion is 35.6 seconds; this parallel fixture
+run is not an isolated performance benchmark. Scripted inference establishes no
+model-quality or live conversational recall pass. The full HTTP Bot API polling
+and reply loop remains a separate pending increment.
+
+</entry>

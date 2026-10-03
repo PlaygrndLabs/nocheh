@@ -74,9 +74,12 @@ duplicate handling and the native browser turn pass. An outage preserves its
 new source and recovers handoff, but memory ingestion misses its five-minute
 gate before completing later. The candidate now hands off bounded native review
 with durable receipts; 25 native and six PostgreSQL/workflow checks pass, including
-new ingestion during a running review. Coupled re-verification remains pending.
-The original full run is failed, and the existing same-topic recall failure and live
-release gates remain open. Detailed original
+new ingestion during a running review. Its packaged native image passes 47 checks,
+and a fresh coupled run passes nineteen checks with memory recovery in 54.7 seconds
+under the original five-minute gate. The original full run remains failed.
+This deterministic run enters ingestion/browser APIs; the HTTP Telegram polling
+and reply loop remains pending. The existing same-topic recall failure, actual
+model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
 
 </simulation_impact>
