@@ -14,6 +14,18 @@ from tools.paths import ROOT
 from tools.acceptance.telegram_rehearsal import archived_delivery
 
 
+def replies_to(snapshot, message_id, chat_id):
+    """A late response to another update cannot pass or fail this case."""
+    matched = []
+    for row in snapshot['sent']:
+        reference = row['parameters'].get('reply_parameters', {})
+        if isinstance(reference, str):
+            reference = json.loads(reference)
+        if reference.get('message_id') == message_id and row['message']['chat']['id'] == chat_id:
+            matched.append(row)
+    return matched
+
+
 class Fixture:
     def __init__(self, directory):
         self.directory = Path(directory).resolve()
@@ -71,6 +83,8 @@ def wait(label, fn, seconds=300):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--directory', required=True, type=Path)
+    parser.add_argument('--reuse-seeds', type=Path,
+                        help='Reuse the seven already captured sources from a prior observation in this fixture.')
     args = parser.parse_args()
     fixture = Fixture(args.directory)
     output = fixture.directory / ('quality-' + str(time.time_ns()))
@@ -102,22 +116,23 @@ def main():
                 'chat': message['chat'], 'user': message['from'], 'old_reaction': old, 'new_reaction': new}}
         fixture.telegram({'updates': [body]})
         event = wait('source_captured', lambda: fixture.query('nocheh_archive', "SELECT id FROM events WHERE source_key='telegram:123456:update:" + str(number) + "' AND scope='" + str(chat) + "'"))
-        wait('source_prepared', lambda: fixture.query('nocheh_control', "SELECT state FROM source_intakes WHERE event_id='" + event + "'") == 'ready')
+        wait('source_handoff_ready', lambda: fixture.query('nocheh_control', "SELECT state FROM source_intakes WHERE event_id='" + event + "'") == 'ready')
         row = {'event_id': event, 'update_id': number, 'message_id': message_id or number, 'input': body}
         results['sources'].append(row)
         save()
         return row
 
     def question(label, text, expected, *, chat=-10042, topic=7, forbidden=()):
-        before = len(fixture.telegram()['sent'])
         prompt = (('@synthetic_fixture_bot ' if chat < 0 else '') + text
                   + ' پاسخ را کوتاه و به صورت متن ساده، بدون قالب‌بندی مارک‌داون بنویس.')
-        row = {'case': label, 'expected': expected, 'delivery_pass': False}
+        row = {'case': label, 'expected': expected, 'delivery_pass': False, 'started_at': time.time()}
         results['cases'].append(row)
         save()
         try:
             source = inject(prompt, chat=chat, topic=topic)
             row['event_id'] = source['event_id']
+            row['update_id'] = source['update_id']
+            save()
             def done():
                 raw = fixture.query('nocheh_control', "SELECT json_build_object('state',state,'attempts',attempts,'error',error_code) FROM dispatches WHERE event_id='" + source['event_id'] + "'")
                 if not raw:
@@ -127,31 +142,57 @@ def main():
                     raise AssertionError('fixture_dispatch_failed:' + str(dispatch['error']))
                 return dispatch if dispatch['state'] == 'done' else False
             row['dispatch'] = wait(label + '_reply', done)
-            sent = fixture.telegram()['sent'][before:]
+            sent = replies_to(fixture.telegram(), source['message_id'], chat)
             assert len(sent) == 1 and row['dispatch']['attempts'] == 1, 'one_first_attempt_reply_required'
             message = sent[0]['message']
             assert message['chat']['id'] == chat and message.get('message_thread_id') == topic
             assert '[mock]' not in message['text'], 'scripted_model_response_denied'
             row['answer'] = message['text']
             wait(label + '_archived', lambda: archived_delivery(fixture.query, message, source['update_id']), 60)
-            assert not any(value in message['text'] for value in forbidden), 'forbidden_source_disclosed'
+            assert not any(re.search(r'(?<!\w)' + re.escape(value) + r'(?!\w)', message['text']) for value in forbidden), 'forbidden_source_disclosed'
             row['delivery_pass'] = True
         except Exception as error:
             row['error'] = str(error) if isinstance(error, AssertionError) else type(error).__name__
+            row['elapsed_seconds'] = round(time.time() - row['started_at'], 3)
+            save()
+            # Preserve the pending source and diagnose it before issuing another
+            # question. A timed-out turn may still deliver later.
+            raise
+        row['elapsed_seconds'] = round(time.time() - row['started_at'], 3)
         save()
         print(json.dumps({'case': label, 'delivery_pass': row['delivery_pass'], 'error': row.get('error')}), flush=True)
 
     wait('native_polling_connected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
     fixture.query('nocheh_control', "UPDATE memory_engine_connection SET attached=true,verified=true,include_history=true,attached_at=now(),acceptance='{\"fixture_only\":true,\"live_acceptance\":false}'::jsonb WHERE singleton")
     # Ordinary conversational sources; no test prefix or tool name is required.
-    private = inject('نام بادبادک من «پرستو نیلی ۷۲» است.', chat=123, topic=None, edited=True)
-    inject('در این موضوع علامت 🌟 یعنی تأییدشده.', edited=True)
-    target = inject('گزارش تحویل پروژهٔ «اورنگ» آمادهٔ بررسی است.', edited=True)
-    star = {'type': 'emoji', 'emoji': '🌟'}
-    inject(message_id=target['message_id'], reaction=([], [star]))
-    inject(message_id=target['message_id'], reaction=([star], []))
-    meeting = inject('جلسهٔ پروژهٔ «سپهر» ساعت ۱۶ است.', edited=True)
-    inject('اصلاح زمان: جلسهٔ پروژهٔ «سپهر» ساعت ۱۸ است.', edited=True, message_id=meeting['message_id'])
+    if args.reuse_seeds:
+        previous = args.reuse_seeds.resolve()
+        if not previous.is_relative_to(fixture.directory):
+            raise ValueError('same_fixture_seed_observations_required')
+        seeds = json.loads(previous.read_text())['sources'][:7]
+        if len(seeds) != 7:
+            raise ValueError('complete_seed_set_required')
+        for seed in seeds:
+            update_id = seed['update_id']
+            if type(update_id) is not int or not re.fullmatch('[a-f0-9]{64}', seed['event_id']):
+                raise ValueError('invalid_seed_identity')
+            observed = fixture.query('nocheh_archive', "SELECT id FROM events WHERE source_key='telegram:123456:update:" + str(update_id) + "'")
+            if observed != seed['event_id']:
+                raise ValueError('seed_source_mismatch')
+        results['sources'] = seeds
+        results['seed_observations'] = str(previous)
+        results['seed_capture_repeated'] = False
+        private = seeds[0]
+        save()
+    else:
+        private = inject('نام بادبادک من «پرستو نیلی ۷۲» است.', chat=123, topic=None, edited=True)
+        inject('در این موضوع علامت 🌟 یعنی تأییدشده.', edited=True)
+        target = inject('گزارش تحویل پروژهٔ «اورنگ» آمادهٔ بررسی است.', edited=True)
+        star = {'type': 'emoji', 'emoji': '🌟'}
+        inject(message_id=target['message_id'], reaction=([], [star]))
+        inject(message_id=target['message_id'], reaction=([star], []))
+        meeting = inject('جلسهٔ پروژهٔ «سپهر» ساعت ۱۶ است.', edited=True)
+        inject('اصلاح زمان: جلسهٔ پروژهٔ «سپهر» ساعت ۱۸ است.', edited=True, message_id=meeting['message_id'])
     question('reaction_removed', 'روی گزارش تحویل اورنگ چه واکنشی گذاشتم و بعد چه تغییری دادم؟ آیا الان تأییدشده است؟',
              'Identify the star addition and removal on the older target; do not call it currently approved.')
     question('corrected_fact', 'زمان نهایی جلسهٔ پروژهٔ سپهر چیست؟', 'Use the edited current time 18, with accessible evidence.')

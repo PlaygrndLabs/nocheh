@@ -1785,3 +1785,27 @@ questions. No real-model semantic or coupled timing pass is claimed.
 [Checks](../test/stores.test.ts), [adjacent preparation](../test/store-preparation.test.ts).
 
 </entry>
+
+<entry date="2026-10-03" area="Causal real-model observation and recovery">
+
+The model rehearsal saves each pending event before waiting, correlates physical
+replies by both chat and replied-to message, records elapsed time, and stops when
+a case fails. Three focused checks pass for unrelated/late responses, message
+numbers reused across chats, and duplicate sends. Its handoff observation no
+longer implies guarded preparation is complete. An explicit seed-reuse option
+verifies archived update identities in the same fixture and retains the original
+seed evidence instead of creating duplicate facts for a later retirement test.
+This does not repeat cold capture or ingestion acceptance.
+
+The authorized fixture meter admits a real Honcho reasoning request with shared
+accounting intact. The first post-allowance startup exceeds its health deadline
+after a temporary Honcho database connection timeout; a later health-only retry
+succeeds. The old correction execution and reaction retry fail before a confirmed
+Telegram reply. A Docker load average of 61.76 on eight CPUs is observed. The
+fixture alone is restarted with a 30-second health-probe interval to investigate
+resource contention, retaining its state and original response/startup deadlines.
+No conversational pass or explanation of every timeout is claimed.
+[Runner](../tools/acceptance/model_rehearsal.py),
+[causal checks](../test/test_model_rehearsal.py).
+
+</entry>

@@ -142,12 +142,23 @@ forwarded; Telegram requests stay in the local mock. A durable, content-free
 journal caps the fixture at 300 model attempts across restarts. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
+An explicit owner exception may increase the allowance in the synthetic
+fixture's meter process while retaining the same shared counter and embedding
+dollar cap. Record that temporary authorization and ceiling in ignored fixture
+evidence; do not change operating policy or reset the ledger.
 
 The [quality runner](../tools/acceptance/model_rehearsal.py) collects synthetic
 reaction-removal, correction, private/topic isolation, restart recall and
 retirement cases. It correlates incoming updates by their captured source key:
 a reaction's message ID identifies its target, not its update. Delivery checks
-require one first-attempt reply with a matching archived receipt. Saved answers
+require one first-attempt reply with a matching chat, replied-to message and
+archived receipt. The runner saves the pending source before waiting and stops
+on a failed case, so later replies cannot be confused with new questions. The
+handoff-ready observation does not establish completion of guarded preparation.
+After inspecting earlier pending executions, `--reuse-seeds` can use an existing
+seven-source observation from the same fixture without capturing duplicate
+facts. Such a run records the original seed evidence and is not a new cold
+capture or ingestion measurement. Saved answers
 remain pending semantic review against ground truth; successful delivery alone
 cannot pass recall. Budget exhaustion or degraded memory must be recorded as a
 limitation rather than substituted with scripted reasoning. These observations

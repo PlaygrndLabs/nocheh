@@ -286,6 +286,15 @@ after restart. The first reaction question exceeded its unchanged five-minute
 gate; its pending execution and the subsequent already-captured correction
 question must be reconciled before injecting more questions. No semantic pass
 has been established.
+The runner now binds replies to both chat and message, retains pending source
+identities before waiting, and stops after a failed case. Three focused checks
+pass for late/unrelated replies, cross-chat message-number reuse, and duplicate
+physical sends. Existing seeds can be reused with their original evidence;
+this does not repeat the cold capture measurement. Two previous executions ended
+with runtime failures. The first fixture restart exceeded its health deadline
+before a later health-only retry succeeded. A measured Docker load average of
+61.76 on eight CPUs prompted a fixture-only probe cadence experiment (30 seconds,
+with reply and startup deadlines unchanged); its effect remains under evaluation.
 The fixture relay has four focused admission/HTTP checks, including restart-safe
 limits, concurrency, streaming and error redaction. These are infrastructure
 checks, not conversational quality passes. Operating activation remains separate.
