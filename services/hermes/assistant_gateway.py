@@ -12,7 +12,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .capture import Capture, DISPATCH_KEY, canonical, digest, immutable_file, captured_adapter_class
+from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, canonical, digest, immutable_file, captured_adapter_class
 from .scopes import Scopes, verify_capability
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
@@ -23,6 +23,24 @@ SOURCE_ID = re.compile(r'nocheh:event:[a-f0-9]{64}')
 def render_reply_citations(text):
     """Keep internal archive identifiers out of Telegram-visible prose."""
     return SOURCE_ID.sub('the Archive', SOURCE_CITATION.sub('', text))
+
+
+def outbound_check(chat_id, space, authorized, cancelled=None):
+    """Bind every physical send to the authorized conversation, including retries."""
+    topic = int(space.split('/topic/', 1)[1]) if '/topic/' in space else None
+
+    def check(method, parameters):
+        if (method not in ('sendMessage', 'sendRichMessage', 'sendChatAction') or
+                str(parameters.get('chat_id')) != str(chat_id) or
+                parameters.get('message_thread_id') != topic or
+                parameters.get('direct_messages_topic_id') is not None or
+                parameters.get('ephemeral_message_parameters') is not None):
+            raise RuntimeError('telegram_delivery_audience_changed')
+        if cancelled is not None and cancelled.is_set():
+            raise RuntimeError('telegram_delivery_cancelled')
+        if not authorized():
+            raise RuntimeError('telegram_delivery_authority_revoked')
+    return check
 
 
 def prepare_profile(root,scope,model):
@@ -121,7 +139,12 @@ def committed_adapter_class():
             # Use native Telegram formatting/splitting and the durable
             # outbound journal, without implicit MEDIA/file/TTS delivery.
             turn['delivery_started']=True
-            delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=_thread_metadata_for_event(event))
+            scope=turn['scope']
+            check=OUTBOUND_CHECK.set(outbound_check(scope.chat_id,scope.space,
+                lambda:check_delivery_policy(turn['body']['archive_credential']),turn.get('cancelled')))
+            try:
+                delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=_thread_metadata_for_event(event))
+            finally:OUTBOUND_CHECK.reset(check)
             turn['delivery_success']=bool(delivered.success)
     return CommittedAdapter
 
@@ -292,11 +315,13 @@ class AssistantGateway:
                 return result
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
             token=DISPATCH_KEY.set('action:'+body['id'])
+            check=OUTBOUND_CHECK.set(outbound_check(body['destination'],body['destination'],
+                lambda:os.environ.get('NOCHEH_STORAGE_LAYOUT')!='original-only-v1' or check_action_policy(body)))
             try:
                 sent=await self.adapter.send(body['destination'],body['text'],metadata={'notify':True})
                 result={'state':'done' if sent.success else 'ambiguous'}
             except Exception:result={'state':'ambiguous'}
-            finally:DISPATCH_KEY.reset(token)
+            finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
             await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
             return result
 

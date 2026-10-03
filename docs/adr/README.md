@@ -1,6 +1,7 @@
 # Architecture decisions
 
 Current setup: [0075 — Clean development setup](0075-clean-development-setup.md).
+Physical Telegram delivery boundary: [0089](0089-physical-telegram-delivery-boundary.md).
 Honcho service default: [0076](0076-honcho-enabled-local-default.md).
 Exhausted-pilot acceptance budget: [0077](0077-exhausted-pilot-honcho-acceptance-budget.md).
 Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).
