@@ -76,6 +76,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Source-only exports preserve original observations, files, identities, and capture provenance. Complete portable exports also preserve generated records and guarded history in separately labeled domains. Reimport routes records to their proper stores. Accepting saved guarded copies requires an explicit trusted restore; ordinary imports prepare their own projections and divergent histories are conflicts.
 - Portable export also includes registered native profiles' notes, scope markers, and SQLite session snapshots including committed WAL state. Runtime-generated material is labeled separately. Per-file hashes and a completion manifest support verification; operational credentials and configuration are excluded.
 - Portable export does not activate an installation or imply one common recovery snapshot. A quiesced backup supplies a common recovery point.
+- Portable import retains access settings, requests, grants, and decisions as inspectable history. It does not create active grants or replace the destination's access settings, even when installation generation and authorization revisions match.
 
 <area name="Platform-independent source model">
 

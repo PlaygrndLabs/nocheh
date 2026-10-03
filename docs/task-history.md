@@ -1062,3 +1062,22 @@ supports repeated import, and leaves the execution queue inactive, without any
 provider call. Broad storage and remaining fixture checks continue separately.
 
 </entry>
+
+<entry date="2026-10-03" task="Verify inactive portable access history">
+
+The broad storage rehearsal failed complete bundle import when historical access
+settings collided with the target defaults. A focused regression then proved
+that a direct history import inserted live requests, grants and decisions even
+when restoration should be inactive. Historical control records are now retained
+without insertion into operational tables. The concurrently integrated knowledge
+organization foundation independently applies the same filter.
+
+Four real PostgreSQL checks pass: derivative/history transfer, complete owner-API
+bundle transfer, exact fact access, and source-only transfer. The added regression
+uses matching generation and epoch, verifies empty live authority tables and
+unchanged destination settings, and checks the retained history exactly. Existing
+owner edits, provenance, repeated import and rejection checks remain intact.
+The original failures and before/after results remain in ignored evidence; no
+operating import or activation was performed.
+
+</entry>
