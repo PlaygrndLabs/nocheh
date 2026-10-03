@@ -109,13 +109,15 @@ this UI verification does not establish live recall or release readiness.
   [Delivery boundary](docs/adr/0089-physical-telegram-delivery-boundary.md),
   [rate-limit recovery](docs/adr/0090-durable-telegram-rate-limit-retries.md),
   [approved destinations](docs/adr/0092-exact-topic-action-destinations.md).
-  Eighteen memory lifecycle scenarios cover complete approved wording, historical
-  hashes, atomic approval, current fact/grant checks, receipt reconciliation and
-  unstarted legacy recovery. Adjacent action/dispatch checks pass; the grant
-  fixture passes after following pagination.
+  Twenty-four memory lifecycle scenarios cover complete approved wording,
+  historical hashes, concurrent exact receipts, expiration conflicts, atomic
+  approval, current fact/grant checks, receipt reconciliation and unstarted
+  legacy recovery. All 29 affected PostgreSQL/action/dispatch checks pass without
+  skips; original failures remain in ignored evidence.
   [Atomic handoff](docs/adr/0093-atomic-memory-approval-followups.md),
   [current delivery authority](docs/adr/0094-current-memory-authority-at-delivery.md),
   [unstarted recovery](docs/adr/0095-recover-unstarted-memory-handoffs.md),
+  [concurrent receipts](docs/adr/0096-serialize-memory-decision-replays.md),
   [behavior checks](test/store-memory-followup.test.ts).
   Owner names, merged identities/Undo, corrected wording and retired facts survive
   automatic refresh. Ten focused entity and 23 adjacent learning, native-memory,
@@ -125,7 +127,8 @@ this UI verification does not establish live recall or release readiness.
   pinned Honcho migrations/vector transfer and native integration have separate
   component evidence. These checks make no model-quality claim.
   Service, management, database and native images include the verified repairs
-  at `d626ba3`; the packaged Node runtime imports successfully. Native filesystem
+  at `d626ba3`; they still need the latest replay repair. That packaged Node runtime
+  imports successfully. Native filesystem
   layers and runtime configuration match `63f9b99`, carrying its 22 packaged
   native checks forward. The latest 16-service manifest validates with internal
   networks, no host ports and no operating state mounts. No fixture containers
