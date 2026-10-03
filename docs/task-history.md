@@ -1850,3 +1850,16 @@ Coupled model verification remains pending, and response deadlines are unchanged
 [checks](../test/store-native-memory.test.ts).
 
 </entry>
+
+<entry date="2026-10-03" area="Focused continuation of synthetic model cases">
+
+The quality runner can continue from a selected case only with previously
+inspected seeds. It records selected and omitted cases, and requires an unused
+topic distinct from the seeded topic for cold-audience isolation. Four focused
+checks pass, including invalid continuation rejected before any fixture access.
+This supports the remaining topic, restart and retirement checks without
+repeating unaffected reaction and correction questions or claiming omitted cases
+were rerun. [Runner](../tools/acceptance/model_rehearsal.py),
+[checks](../test/test_model_rehearsal.py).
+
+</entry>

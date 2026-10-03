@@ -161,7 +161,11 @@ handoff-ready observation does not establish completion of guarded preparation.
 After inspecting earlier pending executions, `--reuse-seeds` can use an existing
 seven-source observation from the same fixture without capturing duplicate
 facts. Such a run records the original seed evidence and is not a new cold
-capture or ingestion measurement. Saved answers
+capture or ingestion measurement. `--start-at` requires these inspected seeds
+and records which earlier cases are omitted; their outcomes must be carried from
+their own evidence. `--isolation-topic` selects an unused synthetic topic,
+distinct from the seeded topic, so an earlier failed question cannot silently
+turn a cold-audience recheck into a warm one. Saved answers
 remain pending semantic review against ground truth; successful delivery alone
 cannot pass recall. Budget exhaustion or degraded memory must be recorded as a
 limitation rather than substituted with scripted reasoning. These observations
