@@ -1436,3 +1436,21 @@ The complete fixture remains unstarted; no operating activation is claimed.
 [behavior checks](../test/store-memory-followup.test.ts).
 
 </entry>
+
+<entry date="2026-10-03" task="Prepare the verified memory-authority and owner-correction candidate">
+
+Service, management, database and native images were rebuilt from `d626ba3`,
+including the unstarted-handoff recovery. The packaged Node runtime imports
+successfully. Native filesystem layers and runtime configuration equal `63f9b99`;
+its 22 packaged Telegram and knowledge-tool checks are carried forward rather
+than repeated.
+
+The latest 16-service synthetic manifest validates with ten available image
+identities, internal networks, no published host ports and no operating state
+mounts. No fixture containers exist. The small component database is stopped
+with its owned volume retained; all seventeen operating containers remain
+running. The owner's single-stack exception, coupled execution, actual model
+quality and live release gates remain pending. Earlier candidates and reports
+remain in ignored evidence.
+
+</entry>

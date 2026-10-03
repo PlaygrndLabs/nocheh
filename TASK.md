@@ -99,56 +99,40 @@ this UI verification does not establish live recall or release readiness.
 
 <verification>
 
-- Personal-use Telegram simulation is in progress; see the
-  [scenario matrix](docs/telegram-simulation.md) and dated
-  [completed increments](docs/task-history.md). Seventeen native Telegram scenarios
-  and fourteen capture/gateway checks pass through the pinned Hermes adapter.
-  Physical sends preserve current authority, exact chat/topic destinations and
-  cancellation; bounded rate-limit retries retain immutable receipts.
+- Personal-use Telegram simulation remains in progress. The
+  [scenario matrix](docs/telegram-simulation.md),
+  [completed increments](docs/task-history.md) and ignored evidence retain all
+  original failures, focused repairs and carried checks.
+  Seventeen native Telegram scenarios and fourteen capture/gateway checks pass
+  through the pinned Hermes adapter: exact chat/topic delivery, cancellation,
+  current authority and bounded durable rate-limit recovery are covered.
   [Delivery boundary](docs/adr/0089-physical-telegram-delivery-boundary.md),
   [rate-limit recovery](docs/adr/0090-durable-telegram-rate-limit-retries.md),
   [approved destinations](docs/adr/0092-exact-topic-action-destinations.md).
-  Memory approvals now commit their grant, exact follow-up, links and outbox work
-  together. Eighteen lifecycle scenarios cover complete and whitespace-sensitive wording,
-  current and historical approval identities, normal/topic delivery, interrupted
-  staging, legacy handoff repair, uncertain receipts, revocation, expiry, disabled
-  follow-up and security denial. Automatic fact replacement now stops the queued
-  follow-up and the physical delivery check even when the guard epoch is unchanged;
-  previously confirmed receipts can still reconcile. They and the existing memory grant suite pass;
-  adjacent real PostgreSQL action/dispatch checks also pass.
+  Eighteen memory lifecycle scenarios cover complete approved wording, historical
+  hashes, atomic approval, current fact/grant checks, receipt reconciliation and
+  unstarted legacy recovery. Adjacent action/dispatch checks pass; the grant
+  fixture passes after following pagination.
   [Atomic handoff](docs/adr/0093-atomic-memory-approval-followups.md),
   [current delivery authority](docs/adr/0094-current-memory-authority-at-delivery.md),
-  [failure-path checks](test/store-memory-followup.test.ts).
-  Exact owner replay can recover an unstarted legacy follow-up withheld for
-  incomplete links; automatic retries cannot resume it, and security denial rolls
-  recovery back. The 22 passing action/lifecycle checks are retained, and the
-  adjacent grant check passes after its fixture follows request, grant and map
-  pagination. [Recovery decision](docs/adr/0095-recover-unstarted-memory-handoffs.md).
-  Owner-chosen person names, merged identities and Undo, corrected fact wording,
-  and retired facts now survive automatic refresh. Ten focused entity checks and
-  23 adjacent learning, native-memory, organization, portability and sharing checks
-  pass without skips. Untouched platform names and automatic facts still update.
+  [unstarted recovery](docs/adr/0095-recover-unstarted-memory-handoffs.md),
+  [behavior checks](test/store-memory-followup.test.ts).
+  Owner names, merged identities/Undo, corrected wording and retired facts survive
+  automatic refresh. Ten focused entity and 23 adjacent learning, native-memory,
+  organization, portability and sharing checks pass without skips.
   [Owner correction checks](test/store-entity-owner-corrections.test.ts).
-  The broad storage and combined-branch runs retain their original failures and
-  focused repairs in ignored evidence. Portable history remains inactive; reset
-  inventory rejects unexpected real tables. The combined build and 52 affected
-  backend/dashboard checks pass. Concurrent organization and supervision through
-  `c994596` are reconciled; later changes need impact review. Host isolation,
-  subscription compatibility, Honcho SDK/contracts, pinned native migrations and
-  vector portability, workflow provisioning, privacy and restart probes pass in
-  their separate synthetic fixtures. These checks make no model-quality claim.
-  Service, management, database and native images were rebuilt at `1699716`,
-  including the delivery-authority and owner-entity repairs. The native filesystem
-  layers and runtime configuration match `63f9b99`, so its 22 packaged native
-  checks are carried forward. Service images need the later unstarted-handoff
-  repair before coupled execution. The earlier candidate's evidence remains preserved.
-  The 16-service synthetic installation has a previously validated manifest with
-  internal networks and no host ports; its image identities need refreshing.
-  It has not started because the
-  operating stack is running and the owner's
-  explicit single-stack exception remains pending. Real-provider semantic recall
-  is unrun for this candidate. No operating activation or new live pass is claimed.
-  Detailed original outcomes, image identities and limitations stay in ignored
+  Storage, workflow, inactive portability, host isolation, subscription contracts,
+  pinned Honcho migrations/vector transfer and native integration have separate
+  component evidence. These checks make no model-quality claim.
+  Service, management, database and native images include the verified repairs
+  at `d626ba3`; the packaged Node runtime imports successfully. Native filesystem
+  layers and runtime configuration match `63f9b99`, carrying its 22 packaged
+  native checks forward. The latest 16-service manifest validates with internal
+  networks, no host ports and no operating state mounts. No fixture containers
+  exist. Execution awaits the owner's explicit single-stack exception while the
+  operating stack remains active. Coupled execution, actual model quality and the
+  existing same-topic recall failure remain open; no new live pass or activation
+  is claimed. Detailed reports and image identities stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
 
 - Guarded reaction evidence now accompanies discovery with bounded target

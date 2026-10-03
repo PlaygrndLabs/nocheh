@@ -35,13 +35,15 @@ chunk boundary, and historical normalized grants still require their saved hash.
 Approval, its exact action and outbox work commit together; legacy command replay
 and confirmed receipt-link repair preserve authority and prevent repeated sends.
 The initial interrupted-handoff failure remains in the evidence history. The
-service/database/management/native images were rebuilt at `1699716`; their native
+service/database/management/native images were rebuilt at `d626ba3`; their native
 filesystem layers and runtime configuration match `63f9b99`, carrying its 22
 packaged native checks forward. The candidate also rejects a memory
 follow-up after its fact changes, both before admission and at physical delivery;
-receipt observation still confirms an earlier send without repeating it. Service
-images need the later unstarted-handoff recovery before coupled execution. The full
-fixture remains unstarted.
+receipt observation still confirms an earlier send without repeating it. The
+unstarted-handoff repair is packaged, and the Node import check passes. The latest
+16-service manifest validates with internal networks and no host ports; no
+fixture containers exist. Coupled execution remains pending the owner’s
+single-stack exception.
 
 Four synthetic entity cases also reproduced loss of an owner display name,
 failure to use a merged identity, replacement of owner-corrected wording, and
