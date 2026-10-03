@@ -67,6 +67,15 @@ the upstream pins, and a uniquely named fixture Compose project. The
 an internal network without published ports. Do not combine it with the operating
 Compose file. Native tests use no network and a temporary Hermes home.
 
+The separate [workflow fixture](../deploy/acceptance/inngest-compose.yml) uses a
+one-shot workflow database bootstrap, then the pinned Inngest and Redis services.
+It never starts an application process with administrator credentials. Its
+product pipeline, host-import, privacy and checkpoint probes use synthetic
+runtime responses and preserve permanent effect identities across failures and
+engine restart. The [native Honcho fixture](../deploy/acceptance/native-portability-compose.yml)
+checks actual pinned migrations, ORM records, vector data and inactive transfer
+without calling a provider or starting a deriver.
+
 Compile the current worktree with Node 24 before running its tests. Run storage
 tests sequentially because several use the same synthetic schema. Record test
 names, passes, failures, skips, image IDs, source revision, commands and elapsed

@@ -1124,3 +1124,22 @@ The original failures and before/after results remain in ignored evidence; no
 operating import or activation was performed.
 
 </entry>
+
+<entry date="2026-10-03" task="Restore isolated workflow acceptance bootstrap">
+
+The synthetic Inngest fixture attempted to start the application with database
+administrator credentials, which the runtime correctly rejects. It now runs the
+existing one-shot workflow database bootstrap before starting the engine. No
+application, Telegram poller, provider refresh, or operating state is started.
+
+Five real provisioning/inspection checks and the pipeline probe pass. The
+host-import probe preserves 103 synthetic messages across three batches and a
+lost receipt without replies or learning; the privacy probe finds no canary in
+engine history. Four workflow checkpoints each execute once across engine and
+Redis restart. Separate database-connection-loss and container-dashboard checks
+also pass. Fixture containers were stopped after completion; their owned volumes
+and original failure/repair evidence remain in ignored session state.
+[Fixture](../deploy/acceptance/inngest-compose.yml),
+[procedure](telegram-simulation.md). These checks establish no live acceptance.
+
+</entry>

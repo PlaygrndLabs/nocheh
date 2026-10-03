@@ -114,9 +114,10 @@ this UI verification does not establish live recall or release readiness.
   historical control records from active tables. The concurrent organization
   increment independently includes the same filter; the combined branch still
   requires affected verification. Two bounded
-  recovery fingerprint checks pass. The workflow fixture now uses the dedicated
-  database bootstrap; five provisioning/inspection checks and real pipeline,
-  host-import, privacy and restart-checkpoint probes pass. Concurrent changes
+  recovery fingerprint checks pass. The isolated workflow fixture now passes its
+  provisioning, inspection, pipeline, privacy and restart probes; see the
+  [completed fixture repair](docs/task-history.md) and
+  [rehearsal procedure](docs/telegram-simulation.md). Concurrent changes
   on `main` require reconciliation and affected reruns before the simulation is
   considered current. No operating activation
   or new live pass is claimed. Original failures, invocation errors, skipped
