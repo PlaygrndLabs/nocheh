@@ -1896,3 +1896,23 @@ the host and remain pending in the image. Coupled real-model timing and the
 existing 300-second workflow gate remain open.
 
 </entry>
+
+<entry date="2026-10-04" area="Packaged deadline and explicit retirement recheck">
+
+The isolated Hermes image contains byte-matched source changes and passes 30
+packaged Python checks, including the pinned memory formatter. The authorized
+16-service fixture starts within its unchanged health gate; all 17 operating
+container identities remain fixed. A focused real-model retirement case retires
+three independently captured synthetic sources and delivers one non-disclosing,
+causally archived first-attempt answer in about 233 seconds. Original sources
+remain. Its new Honcho generation has 26 completed ingestion receipts with no
+retired-source reference or synthetic name in their prepared inputs. The answer
+was produced while the generation was still building, so ready-memory semantic
+quality is pending. At the saved queue snapshot, 14 of 26 derivation units were
+complete and 12 were pending. The earlier first-attempt retirement failure is
+retained. A read-only timing comparison rules out the post-delivery suggestion
+as the observed workflow lag: dispatch and workflow closure were about 73 ms
+apart, after a long interval between physical delivery and dispatch closure.
+The specific cause of that interval remains unproven.
+
+</entry>

@@ -312,11 +312,17 @@ not establish reuse of the retired owner message. The fixture-only oracle now
 explicitly retires every captured private source containing that synthetic name
 before its next question; five focused runner checks pass. Hermes' parent
 turn limit is 230 seconds while its Honcho recall request allowed 615; a bounded
-foreground recall candidate passes 26 relevant Python checks and needs packaged
-and coupled verification. Four pinned-native memory formatter checks cannot run in
-the host Python environment and remain unverified here. The fixture remains
-stopped while the separately managed operating stack has stopped database and
-workflow services plus unhealthy app and security services.
+foreground recall candidate passes 30 checks in its verified pinned Hermes
+image; coupled timing remains open. The resumed fixture starts all 16 services
+within its unchanged health gate while all 17 operating container IDs stay fixed.
+A focused retirement recheck explicitly retires three independent synthetic
+sources, preserves the originals, and delivers one causally archived,
+non-disclosing first-attempt reply in 233 seconds. That answer is limited-memory
+evidence: all 26 Honcho ingestion receipts for the new owner generation are done,
+and none reference the retired sources or contain the synthetic fact, but the
+Honcho derivation queue is still processing and the generation is not ready.
+The ready-memory semantic recheck remains open. The operating stack still has
+stopped database/workflow services and unhealthy app/security services.
 The runner now binds replies to both chat and message, retains pending source
 identities before waiting, and stops after a failed case. Four focused checks
 pass for late/unrelated replies, cross-chat message-number reuse, duplicate

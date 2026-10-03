@@ -147,9 +147,15 @@ shared accounting and the $5 embedding cap. Six relay checks pass for explicit
 additional allowance, retained accounting, authentication, concurrency,
 streaming and redaction. This changes neither operating policy nor live
 acceptance status. The foreground Hermes turn now passes a trusted 230-second
-limit to its Honcho recall tool and reserves 45 seconds for answering; 26
-relevant Python checks pass. The pinned-native formatter checks require the
-packaged runtime, and the real-model timing effect remains unverified.
+limit to its Honcho recall tool and reserves 45 seconds for answering. The
+candidate image has matching source hashes and passes 30 packaged checks. A
+focused retirement recheck explicitly retires three synthetic sources, then
+returns one non-disclosing first-attempt reply with causal archive evidence in
+233 seconds. This remains a limited-memory observation: the current owner
+Honcho generation has 26 completed ingestion receipts without the retired fact,
+but its derivation queue has not finished and a ready-memory semantic recheck is
+pending. The earlier retirement timeout remains a failure, and the fresh-topic
+workflow timing gate remains failed.
 
 Foreground recall now excludes peers whose only completed source evidence is
 the current question; independent history and background representations remain
