@@ -147,9 +147,15 @@ this UI verification does not establish live recall or release readiness.
   [Decision](docs/adr/0097-durable-native-review-handoff.md),
   [native checks](services/hermes/test_review_handoff.py),
   [workflow checks](test/store-workflows.test.ts).
-  Packaging and coupled recovery verification remain pending. The failed gate
-  is retained, and the complete run has no pass. Actual model
-  quality and the existing same-topic recall failure remain open; no new live
+  The native image at `92a4297` passes all 47 packaged review, Telegram and
+  managed-run checks. A fresh coupled installation passes all nineteen checks,
+  including outage memory recovery in 54.7 seconds under the unchanged
+  five-minute gate. Its current Honcho generation is ready, and three current
+  native reviews have confirmed completion. All seventeen operating services
+  retain their identities and healthy state. The original failed run remains
+  recorded. The full HTTP Telegram polling/reply loop is the next simulation
+  increment; current coupled traffic enters the ingestion and browser APIs.
+  Actual model quality and the existing same-topic recall failure remain open; no new live
   pass or operating activation is claimed. Detailed reports and identities stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
 
