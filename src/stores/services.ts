@@ -87,7 +87,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
-  const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge});
+  const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared});
   return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),

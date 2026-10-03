@@ -6,6 +6,7 @@ import {initializeStoreDatabases,connectStores} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import type {OrganizationProposal} from '../src/stores/knowledge-contract.js';
 import type {SourceReference} from '../src/stores/archive.js';
+import type {Interpretation} from '../src/interpretations.js';
 
 test('delegated organization is exact, atomic, reversible, and independent from every access authority',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -147,7 +148,12 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    // A discovery is useful independently from the conversation's existing project assignment.
    knowledge.completed=completed;await save({scopes:[other],resume_scopes:[other]},'live-learning');
    const discoverySource=await capture(other),discovery={...proposal(discoverySource,'live-discovery',other),assignments:[]};
-   const discoveryJob=await savedLearning('discovery',discoverySource,discovery),beforeDiscovery=await s.guards.state();
+   const learnedId=digest(key+':discovery-meaning'),learningBinding=await s.guards.state(),learningDependencies=await knowledge.snapshot(owner,[discoverySource.id],learningBinding);
+   const learnedValue:Interpretation={kind:'meaning',subject:'Synthetic project discovery',text:'The project was mentioned',scope:{kind:'conversation',id:other},uncertainty:'supported',evidence:[discoverySource],conflicts:[]};
+   await s.learned.publishAutomatic(learnedId,learnedValue,null,key+':initial-discovery-meaning',learningDependencies.values,learningBinding,'fixture',s.detect);
+   const discoveryJob=await savedLearning('discovery',discoverySource,discovery),savedLearningBinding=await s.guards.state();
+   await s.learned.publishAutomatic(learnedId,{...learnedValue,text:'The project exists independently of this conversation'},1,key+':updated-discovery-meaning',learningDependencies.values,savedLearningBinding,'fixture',s.detect);
+   const beforeDiscovery=await s.guards.state();assert.equal(beforeDiscovery.epoch,savedLearningBinding.epoch+1,'completed learning can advance the epoch without changing proposal evidence');
    assert.equal((await s.knowledge.process('learning:'+discoveryJob)).state,'applied');
    const afterDiscovery=await s.guards.state();assert.equal(afterDiscovery.epoch,beforeDiscovery.epoch+1);
    assert.equal((await s.projects.effective(other)).project,null,'discovery never assigns the source conversation just because it mentions a project');
@@ -171,6 +177,12 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    await s.guards.edit('events:'+staleSource.id,prepared.revision,edited,key+':guard-correction');
    const staleOutcome=await s.knowledge.process('learning:'+staleJob);assert.equal(staleOutcome.state,'stale');assert.equal(staleOutcome.reason,'knowledge_dependencies_changed');
    assert.equal((await stores.control.query('SELECT 1 FROM projects WHERE name=$1',[staleDiscovery.creates[0]!.name])).rowCount,0);
+   const staleSaved=await s.knowledge.proposal(owner,staleProposal),cancelStale={decision:'cancel',expected_revision:staleSaved.revision,operation_id:key+':cancel-stale'};
+   const cancelledStale=await s.knowledge.decide(owner,staleProposal,cancelStale);assert.equal(cancelledStale.state,'cancelled');
+   assert.deepEqual(await s.knowledge.decide(owner,staleProposal,cancelStale),cancelledStale,'decision replay retains the same prior outcome receipt');
+   const staleHistory=await s.knowledge.proposal(owner,staleProposal),previous=staleHistory.decision_history.at(-1).result.previous;
+   assert.equal(previous.state,'stale');assert.equal(previous.error_code,'knowledge_dependencies_changed');assert.equal(previous.revision,staleSaved.revision);
+   assert.deepEqual(previous.result,staleSaved.result);assert.deepEqual(staleHistory.evidence,[staleSource]);assert.equal(staleHistory.error_code,'owner_cancel');
    for(const decision of ['reject','cancel'] as const){
     const rejectedSource=await capture(other),rejectedDiscovery={...proposal(rejectedSource,decision+'-learning',other),assignments:[]},job=await savedLearning(decision,rejectedSource,rejectedDiscovery);
     const proposalId=await knowledge.learning(job),saved=await s.knowledge.proposal(owner,proposalId);
