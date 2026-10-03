@@ -981,3 +981,19 @@ operating installation was not deployed; existing recall and release gates remai
 open. Remote publication remains subject to the existing sanitized-history gate.
 
 </entry>
+
+<entry date="2026-10-03" task="Give primary ingestion a first attempt before native notes">
+
+After reaction discovery and the bounded callback handoff were activated and
+verified, all four current memory generations still lacked readiness. Thirty-one
+current ingestion receipts had no first attempt while long native note reviews
+occupied the background slot. New pending reviews now yield to due current
+ingestion; completed, running, and uncertain reviews keep receipt reconciliation.
+Five affected workflow checks and one native-review recovery check pass without
+skips, with compilation and an AST-only graph update. Initial fixture failures
+exposed an overly global row-count assertion and missing receipt filtering in the
+synthetic Honcho service; the corrected workflow rerun passes. Runtime readiness
+and conversational recall remain open. Private evidence is under
+`data/acceptance/results/release-20261003/`.
+
+</entry>

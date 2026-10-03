@@ -7,6 +7,8 @@ Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).
 Separated Honcho budgets and settlement: [0079](0079-separated-honcho-budgets-and-settlement.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
 superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md).
+Primary ingestion before new native notes:
+[0088](0088-primary-ingestion-before-native-note-review.md).
 Reply admission and Honcho derivation: [0080](0080-reply-admission-and-honcho-derivation.md).
 Contextual learning deduplication: [0082](0082-evidence-based-learning-deduplication.md).
 Scoped reaction discovery: [0084](0084-scoped-reaction-discovery.md), extended with
