@@ -103,10 +103,17 @@ this UI verification does not establish live recall or release readiness.
   see the [scenario matrix](docs/telegram-simulation.md). The native Bot API
   rehearsal reproduced topic fallback into General, continued chunks after
   revocation, and a rate-limit rejection that permanently prevented recovery.
-  Eleven native scenarios and fourteen capture/gateway checks now pass, including
+  Fifteen native scenarios and fourteen capture/gateway checks now pass, including
   bounded rate-limit waits, revoked retries, crash recovery and no repeated sends.
   [Physical delivery](docs/adr/0089-physical-telegram-delivery-boundary.md) and
   [rate-limit receipts](docs/adr/0090-durable-telegram-rate-limit-retries.md).
+  Approved actions now preserve the concrete source topic for `current` and carry
+  it through review, fingerprints and native delivery. Real PostgreSQL action
+  checks and native General/topic/replay/fallback checks pass; see
+  [exact destinations](docs/adr/0092-exact-topic-action-destinations.md).
+  Independent one-time memory tests pass normal delivery, topic delivery and
+  revocation, but reproduce a lost follow-up after an interrupted approval
+  handoff. That recovery defect remains pending; it is not a passing gate.
   The official Honcho SDK check passes in its own dependency image; twenty-four
   integration contracts pass separately. Focused reruns resolve the baseline
   native-import and Redis timeouts, and subscription compatibility passes all
@@ -136,7 +143,8 @@ this UI verification does not establish live recall or release readiness.
   [rehearsal procedure](docs/telegram-simulation.md). Concurrent organization and
   supervision work through `c994596` is reconciled; later changes need their own
   impact review. Candidate service, database, management and native images are
-  built; sixteen packaged native checks pass. A complete 16-service synthetic
+  built; sixteen packaged native checks pass for the earlier candidate. Those
+  images need the later topic fix before coupled execution. A complete 16-service synthetic
   installation is prepared with verified images, internal networks and no host
   ports. It has not started: the existing operating stack is running, and the
   owner's explicit single-stack exception is pending. Real-provider semantic

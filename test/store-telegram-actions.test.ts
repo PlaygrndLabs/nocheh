@@ -67,6 +67,16 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
     await due(proposal.id);assert.equal((await actions.run(proposal.id,authority)).state,'completed');assert.equal(calls.length,2);assert.equal(calls[1]!.observe_only,true);
     assert.equal((await actions.run(proposal.id,authority)).state,'completed');assert.equal(calls.length,2);
     assert.equal(Number((await stores.archive.query('SELECT count(*) FROM events')).rows[0].count),before,'proposals, approval and runtime receipts create no originals');
+    const topicEvent=original('topic-source','Please follow up in this topic');
+    Object.assign((topicEvent.payload as any).message,{message_thread_id:17,is_topic_message:true});
+    (topicEvent.payload as any).message.chat.is_forum=true;
+    const topicSource=(await services.capture.capture(topicEvent)).source.reference;
+    await services.guards.prepare(topicSource,'fixture',services.detect);
+    const topicPrincipal=await actor(topicSource.id,group,group+'/topic/17');
+    const topicAction=await actions.request(topicPrincipal,{destination:'current',text:'Approved topic follow-up'});
+    assert.equal((await actions.inspect(owner,topicAction.id)).arguments.destination,group+'/topic/17','current preserves the exact source topic');
+    await approve(topicAction.id);await actions.run(topicAction.id,authority);
+    assert.equal(calls.at(-1)!.destination,group+'/topic/17');
     const columns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='telegram_action_requests'")).rows.map(row=>row.column_name);
     assert.ok(!columns.some(name=>['text','content','original_text','arguments','payload'].includes(name)));
     const second=await actions.request(principal,{destination:'123',text:'Second exact message'});await approve(second.id);loseCompletion=true;

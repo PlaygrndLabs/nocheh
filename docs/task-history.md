@@ -1259,3 +1259,25 @@ and verified image/preflight records remain in ignored simulation state.
 [procedure](telegram-simulation.md). No runtime activation or real provider use.
 
 </entry>
+
+<entry date="2026-10-03" task="Preserve approved Telegram topic destinations">
+
+Simulation reproduced rejection of concrete-topic actions and loss of the source
+topic when resolving `current`. Approved destinations now carry the full space
+through proposal identity, review, fingerprint and authorization. The native
+sender separates chat and thread only at delivery, blocks a deleted-topic
+fallback, and respects pinned Hermes's General convention. Existing approvals
+and receipts retain their identities.
+
+TypeScript compilation and the real PostgreSQL action suite pass. Fifteen native
+Telegram scenarios and fourteen capture/gateway checks pass. An initial General
+fixture used the wrong signed audience; the corrected source contract passes.
+A gateway module-name invocation error remains recorded with its successful
+focused rerun. Separate memory lifecycle probes pass normal/topic confirmation
+and revocation but expose an unresolved interrupted-handoff recovery defect.
+Those pending results are not counted as a passing suite. No operating activation
+or live acceptance was performed. [Decision](adr/0092-exact-topic-action-destinations.md),
+[storage checks](../test/store-telegram-actions.test.ts),
+[native checks](../services/hermes/test_telegram_simulation.py).
+
+</entry>
