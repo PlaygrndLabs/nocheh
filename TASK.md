@@ -126,11 +126,11 @@ this UI verification does not establish live recall or release readiness.
   Storage, workflow, inactive portability, host isolation, subscription contracts,
   pinned Honcho migrations/vector transfer and native integration have separate
   component evidence. These checks make no model-quality claim.
-  Service, management, database and native images include the verified repairs
-  at `d626ba3`; they still need the latest replay repair. That packaged Node runtime
-  imports successfully. Native filesystem
-  layers and runtime configuration match `63f9b99`, carrying its 22 packaged
-  native checks forward. The latest 16-service manifest validates with internal
+  Service, management and database images at `92677f8` include the verified replay
+  repair; the packaged Node runtime imports successfully. The unchanged native
+  image and sources retain their exact filesystem/runtime equivalence to
+  `63f9b99`, carrying its 22 packaged checks forward. The latest 16-service
+  manifest validates with internal
   networks, no host ports and no operating state mounts. No fixture containers
   exist. Execution awaits the owner's explicit single-stack exception while the
   operating stack remains active. Coupled execution, actual model quality and the
