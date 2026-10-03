@@ -111,3 +111,4 @@ records current implementation and activation.
 | [0095](0095-recover-unstarted-memory-handoffs.md) | Recover an unstarted withheld memory action on exact owner replay | Extends 0093 and 0094; current authority and atomic policy checks exclude automatic retries and prior effects |
 | [0096](0096-serialize-memory-decision-replays.md) | Serialize memory decision replays and preserve expiration | Extends 0057 and 0093; preserves existing receipt identities |
 | [0097](0097-durable-native-review-handoff.md) | Release workflow admission while a bounded native review runs | Extends 0087 and 0088; durable launch and completion receipts preserve the original effect identity |
+| [0098](0098-isolated-native-lease-recovery.md) | Reclaim abandoned native admission leases under the profile file lock | Extends 0028 and 0097; retains native transcript fencing and effect receipts |

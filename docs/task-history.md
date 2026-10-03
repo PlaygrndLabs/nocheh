@@ -1604,3 +1604,24 @@ failure reports remain in ignored state. [Procedure](telegram-simulation.md),
 [contract checks](../services/hermes/test_telegram_http_fixture.py).
 
 </entry>
+
+<entry date="2026-10-03" task="Recover abandoned isolated native admission leases">
+
+Content-free fixture stacks identify a second cause of slow retry: the pinned
+native lease checker treats a reused container PID as a living lease owner. The
+failed file turn eventually delivers once on attempt three, retaining its failed
+first-attempt gate. Isolated startup now reclaims only the session-turn and
+compression admission rows after taking the existing exclusive profile file lock.
+A live predecessor still blocks recovery; a killed predecessor releases that lock.
+History, compression lineage, native fencing and uncertain review receipts remain.
+
+Five focused recovery checks cover PID reuse, a competing live owner, crash
+recovery, exact history, schema rollback, missing state, symlinks and mode gates.
+Eighteen adjacent memory, turn-process and profile checks pass without skips. An
+initial candidate omitted the pinned acquired-at schema column; its failed report
+is retained and the corrected schema passes. Coupled candidate verification and
+cold guarded preparation remain pending. No operating runtime was changed.
+[Decision](adr/0098-isolated-native-lease-recovery.md),
+[checks](../services/hermes/test_native_leases.py).
+
+</entry>
