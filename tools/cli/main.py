@@ -63,7 +63,7 @@ def run_isolated_tests(rest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "reset", "admin", "deploy", "archive", "security", "security-profiles"))
+    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
     if args.command == 'admin':
         sys.path.insert(0, str(ROOT))
@@ -92,7 +92,7 @@ def main():
         sys.path.insert(0,str(ROOT))
         from tools.acceptance.reset_inventory import main as reset_inventory
         return reset_inventory(STATE,rest)
-    if args.command in ('sources','projects','learned','sharing'):
+    if args.command in ('sources','projects','learned','sharing','organization','knowledge'):
         sys.path.insert(0,str(ROOT))
         from tools.operations.archive.knowledge import main as knowledge
         return knowledge(args.command,rest)

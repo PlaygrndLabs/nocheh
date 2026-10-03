@@ -104,6 +104,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&entityHistory)return json(res,200,await s.entities.history(principal,entityHistory[1]!,url.searchParams.has('before')?Number(url.searchParams.get('before')):undefined));
     const entityRead=path.match(/^\/v1\/entities\/([a-f0-9]{64})$/);
     if(req.method==='GET'&&entityRead)return json(res,200,await s.entities.inspect(principal,entityRead[1]!));
+    // Runtime knowledge tools have their own bound owner-turn checks. They never proxy arbitrary owner routes.
+    if(req.method==='GET'&&path==='/v1/knowledge/context')return json(res,200,await s.knowledge.inspect(principal,Object.fromEntries(url.searchParams)));
+    if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
+    const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
+    if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
     if(await owner.handle(principal,req,res,url))return;
     if(path==='/v1/runtime/profiles'||path==='/v1/runtime/profiles/resolve') {
       admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);

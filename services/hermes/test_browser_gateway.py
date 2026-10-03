@@ -176,7 +176,7 @@ class BrowserGatewayTests(unittest.TestCase):
         created=next(row for row in rows if row.get('id')==1)
         self.assertIn('session_id',created.get('result',{}),created)
         self.assertEqual(created['result']['info']['managed_execution'],'isolated_per_turn')
-        self.assertEqual(set(created['result']['info']['tools']['Nocheh']),{'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request','nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall'})
+        self.assertEqual(set(created['result']['info']['tools']['Nocheh']),{'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request','nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall','nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status'})
         self.assertIn('error',next(row for row in rows if row.get('id')==2))
         self.assertFalse((home/'auth.json').exists())
 

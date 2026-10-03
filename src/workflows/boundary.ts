@@ -2,7 +2,7 @@ import {Middleware,NonRetriableError,RetryAfterError} from 'inngest';
 import {families} from './store.js';
 
 const states=new Set(['queued','waiting','running','retryable_failed','completed','failed','skipped','cancelled','ambiguous','denied','done','ready']);
-const stages=new Set(['admission','attachments','transcription','preparation','assistant','delivery','import','review','sync','reconcile','browser','schedule','action']);
+const stages=new Set(['admission','attachments','transcription','preparation','assistant','delivery','import','review','sync','reconcile','browser','schedule','action','organization']);
 const reasons=new Set(['owner_paused','prerequisite','refresh_interval','guard_pending','consent_required','approval_required','receipt_pending','runtime_unavailable','provider_unavailable','publication_unavailable','workflow_execution_failed','superseded']);
 /** Deliberately shallow and closed. Protected domain values cannot be serialized. */
 export function safeMetadata(value:unknown):void {

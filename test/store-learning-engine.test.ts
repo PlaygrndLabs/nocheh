@@ -51,7 +51,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const binding=await guards.state(),workspace=digest(key+':workspace');
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true');
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[workspace,binding.generation,binding.epoch,space]);
-    response={interpretations:[
+    response={organization:'malformed optional output must not prevent learning',interpretations:[
       {kind:'meaning',subject:'check',text:'A check means reviewed in this conversation.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[reaction.id,parent.id],conflicts:[]},
       {kind:'state',subject:'packet',text:'The packet may have been reviewed.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[reaction.id,parent.id],conflicts:[]},
     ]};
@@ -70,6 +70,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     learned.finish=realFinish;
     const ids=await learning.run(job,detect,authority);assert.equal(ids.length,2);assert.equal(calls,1,'a saved reasoning result is never rerun after preparation or publication failure');
     assert.deepEqual(await learning.run(job,detect,authority),ids);
+    assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='organization' AND job_id=$1",['learning:'+job])).rows[0].count,'1',
+      'publishing recovery commits completion and one deterministic organization follow-up');
     assert.equal(await learning.request(reaction,workspace,space),job,'learned output does not recursively create another learning request');
     for(const id of ids)assert.equal((await learned.read(access.principal(space),id,await guards.state(),r=>access.canRead(access.principal(space),r,binding))).revision,1);
     // Learning never schedules a dispatch, outbound action, or approval; the row above only simulates an active reply.
@@ -123,6 +125,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const withConvention=await learning.request(removed,nextWorkspace,space);
     assert.notEqual(withConvention,updateJob,'new original convention evidence must trigger fresh learning');
     response={interpretations:[]};await learning.run(withConvention,detect,authority);assert.equal(calls,3);
+    assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='organization' AND job_id=$1",['learning:'+withConvention])).rows[0].count,'1',
+      'normal completion also commits exactly one organization follow-up without another model request');
     const beforeRewrite=await contexts.prepare(removed,await guards.state());
     await learned.publishAutomatic(ruleId,{...rule,text:'A green mark signals readiness for review here.'},1,key+':rule-rephrased',
       ruleDependencies,await guards.state(),'fixture',detect);
