@@ -744,6 +744,8 @@ contains the historical private reports and has not been rewritten.
 
 </entry>
 
+
+
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -1732,5 +1734,28 @@ all seventeen operating services retain their identities, start times and health
 Real-model route selection is awaiting the owner; existing real recall and
 remote-history publication gates remain open. [Scenario matrix](telegram-simulation.md),
 [installation runner](../tools/acceptance/rehearsals/installation-rehearsal.py).
+
+</entry>
+
+<entry date="2026-10-03" area="Authorized synthetic model evaluation setup">
+
+The owner selected the existing model route for synthetic Telegram evaluation.
+The fixture relay uses distinct local credentials and read-only scoped upstream
+keys, retains the single operating OAuth owner, and journals at most 300 model
+admissions across restarts without source bodies or secrets. Four focused tests
+pass for authentication/model rejection, restart and concurrent limits, actual
+HTTP streaming, Telegram separation and upstream error redaction. The AST-only
+graph refresh covers 610 files with zero model calls.
+
+The shared ledger preflight finds all 1,500 monthly Honcho reasoning attempts
+used, with $0.347020 counted toward its separate $5 embedding cap. Limits remain
+unchanged; full Honcho reasoning quality is pending. A fresh sixteen-service
+fixture starts with verified cached images and unused explicit subnets after the
+Docker automatic address pool is exhausted. The first scenario harness confuses
+reaction target message IDs with update IDs; its incomplete synthetic message
+set is retired through the owner API, original evidence remains, and the runner
+uses captured update source keys. Real-model semantic review remains in progress;
+no conversational quality or live release pass is claimed.
+[Procedure](telegram-simulation.md), [relay tests](../test/test_model_relay.py).
 
 </entry>
