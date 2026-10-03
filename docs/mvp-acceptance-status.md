@@ -35,9 +35,9 @@ chunk boundary, and historical normalized grants still require their saved hash.
 Approval, its exact action and outbox work commit together; legacy command replay
 and confirmed receipt-link repair preserve authority and prevent repeated sends.
 The initial interrupted-handoff failure remains in the evidence history. The refreshed
-service/database/management/native images include both repairs at `beed79b`; all
-twenty packaged native checks pass. Those images need the later wording repair
-before full execution. The updated full fixture remains unstarted.
+service/database/management/native images include the topic, atomic handoff and
+complete-wording repairs at `63f9b99`; all 22 packaged native checks and the
+packaged Node import check pass. The updated full fixture remains unstarted.
 
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority
