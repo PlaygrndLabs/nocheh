@@ -12,7 +12,8 @@ const exact=(value:unknown,keys:string[])=>{
   return value as Record<string,unknown>;
 };
 const same=(left:unknown,right:unknown)=>canonical(left)===canonical(right);
-const tables=(schema:string)=>[...schema.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)/g)].map(match=>match[1]!).sort();
+// Match declarations in the owned schema, not prose mentioning DDL in comments.
+const tables=(schema:string)=>[...schema.matchAll(/^\s*CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)\s*\(/gm)].map(match=>match[1]!).sort();
 const NAME=/^[a-z_][a-z0-9_]*$/;
 
 async function counts(pool:pg.Pool,schema:keyof typeof storeSchemas) {

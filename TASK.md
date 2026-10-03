@@ -120,14 +120,20 @@ this UI verification does not establish live recall or release readiness.
   are repaired and pass. Portable access-history import had a reproduced
   authority defect; four focused transfer/access checks pass after excluding
   historical control records from active tables. The concurrent organization
-  increment independently includes the same filter; the combined branch still
-  requires affected verification. Two bounded
+  increment independently includes the same filter. The combined branch ran 109
+  checks: 107 passed; a reset schema-inventory defect and a test startup race
+  were reproduced and repaired. The focused combined build and all 52 affected
+  backend/dashboard checks pass. The reset inventory now recognizes declarations
+  without treating SQL comment prose as a table; unexpected real tables still
+  block acceptance. Fixture expectation/readiness repairs remain a separate
+  integration increment. Two bounded
   recovery fingerprint checks pass. The isolated workflow fixture now passes its
   provisioning, inspection, pipeline, privacy and restart probes; see the
   [completed fixture repair](docs/task-history.md) and
-  [rehearsal procedure](docs/telegram-simulation.md). Concurrent changes
-  on `main` require reconciliation and affected reruns before the simulation is
-  considered current. No operating activation
+  [rehearsal procedure](docs/telegram-simulation.md). Concurrent organization and
+  supervision work through `c994596` is reconciled; later changes need their own
+  impact review. A complete installation rehearsal and real-provider semantic
+  recall remain unrun for this simulation candidate. No operating activation
   or new live pass is claimed. Original failures, invocation errors, skipped
   fixtures and focused outcomes stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
