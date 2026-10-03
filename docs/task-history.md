@@ -1194,3 +1194,23 @@ recall failures, operating configuration, and remote-publication gate are preser
 these synthetic checks do not establish production memory readiness.
 
 </entry>
+
+<entry date="2026-10-03" task="Recognize real schema declarations during reset verification">
+
+Combined acceptance after the organization merge reproduced a reset baseline
+failure. Its schema inventory extracted a fictitious table from a SQL comment
+mentioning a creation statement. The inventory now matches complete table
+declarations. The real PostgreSQL regression verifies a clean setup, rejection
+of an unexpected empty table, and the identical baseline after its removal;
+existing nonempty-source and changed-configuration rejection remain intact.
+
+The combined 109-check run originally passed 107 and failed reset inventory and
+an HTTP fixture startup race. Full TypeScript/dashboard build and 52 focused
+backend/dashboard checks pass after the separate repairs. This increment contains
+only reset verification and its regression; fixture readiness and stale
+expectations are recorded separately. Original failures and schema diagnostics
+remain in ignored simulation evidence. No operating reset was performed.
+[Baseline verification](../src/stores/reset-baseline.ts),
+[failure-path checks](../test/store-reset-setup.test.ts).
+
+</entry>

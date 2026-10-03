@@ -54,6 +54,15 @@ test('reset setup restores only current configuration under a new generation and
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM runtime_configuration_versions')).rows[0].count,1);
     const baseline=await verifyResetBaseline(stores,input);
     assert.equal(baseline.generation,input.generation);assert.equal(baseline.archive_rows,0);assert.equal(baseline.derived_rows,0);
+    // Schema comments are not tables, but an unexpected real table must still
+    // block acceptance even when it contains no data.
+    const extra=new pg.Client({...config,database:'nocheh_control'});await extra.connect();
+    try {
+      await extra.query(`SET search_path=${schema},pg_catalog; SET ROLE nocheh_control_owner; CREATE TABLE unexpected_history(id text)`);
+      await assert.rejects(verifyResetBaseline(stores,input),/reset_baseline_schema_changed/);
+      await extra.query('DROP TABLE unexpected_history');
+      assert.deepEqual(await verifyResetBaseline(stores,input),baseline);
+    }finally{await extra.end();}
     await stores.derived.query(`INSERT INTO derived_artifacts(id,kind,content,content_hash,provenance,source_revision,input_hash,
       producer,producer_version,configuration_hash,operation_id,operation_reference) VALUES($1,'runtime_context','x',$2,'{}','1',$2,'fixture','1',$2,'fixture',$3)`,
       ['e'.repeat(64),digest('x'),{store:'control',kind:'operation',id:'fixture',generation:input.generation,input_hash:digest('fixture')}]);
