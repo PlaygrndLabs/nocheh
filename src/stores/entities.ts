@@ -67,14 +67,20 @@ export class EntityRepository {
       JOIN source_objects o ON o.id=r.target_id JOIN events e ON e.id=r.event_id
       WHERE r.event_id=$1 AND r.kind='authored_by' ORDER BY o.id LIMIT 2`,[source.id])).rows;
     if(found.length!==1)return null;
-    const identity=found[0],id=digest(canonical([protocol,'person',identity.id]));
+    const identity=found[0],id=digest(canonical([protocol,'person',identity.id])),binding=digest(canonical([protocol,'source-binding',identity.id]));
+    const linked=(await this.stores.control.query('SELECT entity_id,state FROM memory_entity_bindings WHERE id=$1',[binding])).rows[0];
     const name=participantName(identity.payload,`${identity.platform} ${identity.kind} ${identity.external_id}`);
-    await this.stores.control.query(`INSERT INTO memory_entities(id,kind,name,state)
-      VALUES($1,'person',$2,'active') ON CONFLICT(id) DO UPDATE SET name=$2,updated_at=now()`,[id,name]);
-    const binding=digest(canonical([protocol,'source-binding',identity.id]));
-    await this.stores.control.query(`INSERT INTO memory_entity_bindings(id,entity_id,binding_kind,source_object_id,label,state)
+    // Only an untouched exact platform identity follows platform display names.
+    // Owner renames and confirmed or moved bindings retain their chosen identity.
+    if(!linked||linked.entity_id===id&&linked.state==='exact')await this.stores.control.query(`INSERT INTO memory_entities(id,kind,name,state)
+      VALUES($1,'person',$2,'active') ON CONFLICT(id) DO UPDATE SET name=$2,updated_at=now()
+      WHERE memory_entities.revision=1 AND memory_entities.state='active' AND NOT EXISTS
+        (SELECT 1 FROM memory_entity_bindings WHERE id=$3 AND (state<>'exact' OR entity_id<>$1))`,[id,name,binding]);
+    if(!linked)await this.stores.control.query(`INSERT INTO memory_entity_bindings(id,entity_id,binding_kind,source_object_id,label,state)
       VALUES($1,$2,'source_identity',$3,$4,'exact') ON CONFLICT(id) DO NOTHING`,[binding,id,identity.id,name]);
-    return this.row(id);
+    const current=(await this.stores.control.query(`SELECT e.* FROM memory_entity_bindings b JOIN memory_entities e ON e.id=b.entity_id
+      WHERE b.id=$1 AND b.state IN ('exact','confirmed') AND e.state='active'`,[binding])).rows[0];
+    return current??null;
   }
   async context(source:SourceReference,knownProjects:Project[],text=''):Promise<EntityContext> {
     const speaker=await this.ensureParticipant(source),space=await this.access.space(source),effective=space?await this.projects.effective(space):null;
@@ -197,6 +203,9 @@ export class EntityRepository {
     try {await db.query('BEGIN');const current=(await db.query('SELECT active_revision FROM entity_claims WHERE id=$1 FOR UPDATE',[claim])).rows[0];
       if(current) {
         const prior=(await db.query('SELECT * FROM entity_claim_versions WHERE claim_id=$1 AND revision=$2',[claim,current.active_revision])).rows[0];
+        if(prior?.author==='owner'&&author!=='owner') {
+          await db.query('COMMIT');return {id:claim,revision:Number(current.active_revision)};
+        }
         if(prior&&!prior.retired&&prior.content===content&&prior.relationship_kind===(input.relationship_kind??null)&&prior.attribution===input.attribution&&
           prior.speaker_entity_id===(input.speaker_entity_id??null)&&prior.uncertainty===input.uncertainty&&canonical(prior.evidence)===canonical(input.evidence)) {
           await db.query('COMMIT');return {id:claim,revision:Number(current.active_revision)};

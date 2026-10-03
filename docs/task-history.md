@@ -1316,6 +1316,8 @@ execution. The full fixture, model quality and live release gates remain pending
 
 </entry>
 
+
+
 <entry date="2026-10-03" task="Commit memory approval and automatic follow-up atomically">
 
 Synthetic failure injection reproduced a committed approval with no follow-up;
@@ -1386,5 +1388,25 @@ refreshing the packaged candidate; the full synthetic installation, actual model
 quality and existing live release gates remain pending.
 [Grant and delivery checks](../test/store-memory-followup.test.ts),
 [native checks](../services/hermes/test_telegram_simulation.py).
+
+</entry>
+
+<entry date="2026-10-03" task="Preserve owner entity decisions through automatic refresh">
+
+Four PostgreSQL scenarios reproduced automatic replacement of an owner-chosen
+person name, failure to follow an owner-merged identity, replacement of corrected
+fact wording, and resurrection of a retired fact. Platform names now refresh only
+for untouched exact identities. Incoming messages resolve the current confirmed
+binding, including merge and Undo. Automatic claim publication retains an active
+owner revision, including retirement; original evidence stays in the archive.
+
+Ten focused entity checks and 23 adjacent learning, native-memory, organization,
+inactive-portability and sharing checks pass without skips. TypeScript compilation
+and the AST-only graph update pass. Original failures remain in ignored evidence.
+Untouched platform names and automatic claims still update and deduplicate.
+The service images need this repair before coupled execution; no operating
+activation or live recall pass is claimed.
+[Owner correction checks](../test/store-entity-owner-corrections.test.ts),
+[entity decisions](adr/0056-connected-entity-memory.md).
 
 </entry>
