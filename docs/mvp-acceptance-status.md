@@ -44,9 +44,9 @@ sources retain exact filesystem/runtime equivalence to `63f9b99`, carrying its
 follow-up after its fact changes, both before admission and at physical delivery;
 receipt observation still confirms an earlier send without repeating it. The
 unstarted-handoff repair is packaged, and the Node import check passes. The latest
-16-service manifest validates with internal networks and no host ports; no
-fixture containers exist. Coupled execution remains pending the owner’s
-single-stack exception.
+16-service manifest validates with internal networks and no host ports. The owner
+authorized its parallel execution beside the operating stack; the coupled
+results below supersede the earlier preparation-only status.
 
 Four synthetic entity cases also reproduced loss of an owner display name,
 failure to use a merged identity, replacement of owner-corrected wording, and
@@ -77,8 +77,16 @@ with durable receipts; 25 native and six PostgreSQL/workflow checks pass, includ
 new ingestion during a running review. Its packaged native image passes 47 checks,
 and a fresh coupled run passes nineteen checks with memory recovery in 54.7 seconds
 under the original five-minute gate. The original full run remains failed.
-This deterministic run enters ingestion/browser APIs; the HTTP Telegram polling
-and reply loop remains pending. The existing same-topic recall failure, actual
+The HTTP extension additionally passes fourteen gates through native polling:
+private, named-topic and General replies on the first attempt; exact archived
+delivery/causal receipts; unselected-private silence; and acknowledgment followed
+by restart without repeat delivery. Nine pinned-SDK checks and three fixture
+ownership checks pass without skips. Unknown methods and rich markup outside the
+modeled escaped-plain-text subset fail explicitly. Original setup and oracle
+failures remain recorded. One earlier native attempt timed out before a model
+request; its automatic retry delivered once, and its cause is unproven. The later
+full run replies in 26–47 seconds under parallel host load. No operating service
+was restarted; all seventeen remain healthy. The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
 

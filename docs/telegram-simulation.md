@@ -10,9 +10,10 @@ provider login, volumes, or background workers. Current outcomes and unresolved
 gates belong in [TASK.md](../TASK.md); dated reports stay in ignored
 `data/acceptance/results/telegram-simulation/`.
 
-The native layer uses the pinned Hermes adapter and python-telegram-bot with an
-in-memory Bot API transport. The storage layer uses the real three PostgreSQL
-stores and Nocheh workflow operations. Scripted model/Honcho responses test
+The native layer uses the pinned Hermes adapter and python-telegram-bot with
+synthetic Bot API transports. The coupled HTTP fixture runs actual native polling,
+the three PostgreSQL stores, Nocheh workflows, Hermes and Honcho. Component tests
+also substitute selected runtime/Honcho responses. Scripted inference tests
 integration contracts and failure handling, not language-model intelligence or
 real provider quality. Real subscriptions, transcription quality, embeddings,
 and production recall retain their [separate gates](release-acceptance.md).
@@ -27,7 +28,10 @@ subscriptions, topic routing, message responses, and retry parameters. See
 [getUpdates](https://core.telegram.org/bots/api#getupdates),
 [sendMessage](https://core.telegram.org/bots/api#sendmessage), and
 [reaction updates](https://core.telegram.org/bots/api#messagereactionupdated).
-Unknown methods fail the test instead of silently succeeding. It cannot model
+Unknown methods fail the test instead of silently succeeding. The HTTP fixture
+returns parsed text for escaped plain MarkdownV2; unmodeled rich markup is an
+explicit failed gate. Rich native formatting and chunk behavior also have their
+separate component scenarios. The fixture cannot model
 Telegram delivery outages, permissions or undocumented behavior exhaustively.
 
 </telegram_contract>
@@ -36,7 +40,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 
 | Scenario family | Observable requirement | Primary automated coverage |
 | --- | --- | --- |
-| Capture and outages | Fsync before acknowledgment; duplicate updates, revisions and control-store failure lose no originals | `test_capture.py`, `archive.test.ts`, `stores.test.ts` |
+| Capture and outages | Fsync before acknowledgment; duplicate updates, revisions and control-store failure lose no originals | `test_capture.py`, `test_telegram_http_fixture.py`, `archive.test.ts`, `stores.test.ts` |
 | Native Telegram delivery | Persian/emoji and long replies retain routing; replay adds no send; rate-limit waits and bounded retries preserve receipts; Markdown rejection and lost replies retain the audience | `test_telegram_simulation.py`, `test_capture.py`, `test_gateway.py`, `store-telegram-dispatch.test.ts` |
 | Access and topics | Owner/private, granted/denied participants, General and named topics remain distinct; stale capabilities fail closed | `test_scopes.py`, `assistant.test.ts`, `store-retrieval.test.ts` |
 | Files and voice | Original bytes and hashes survive download/transcription failures; generated transcripts are separate; blank speech is terminal | `store-preparation.test.ts`, `worker.test.ts`, `test_speech_gateway.py` |
@@ -86,6 +90,25 @@ evidence even when the scripted installation rehearsal passes.
 Use `--prepare-only` to render and retain the dedicated manifest, synthetic state
 and owned empty volumes before starting any service. Preparation and Compose
 validation are distinct from execution and cannot pass the installation gate.
+
+The [HTTP Telegram extension](../tools/acceptance/telegram_rehearsal.py) reuses an
+owned prepared installation. Its [Bot API fixture](../tools/acceptance/telegram_mock.py)
+persists queued updates and delivery receipts. The
+[transport bootstrap](../tools/acceptance/telegram_runtime.py) changes the network
+destination only after the unchanged mandatory request boundary; native capture,
+SDK parsing, policy checks and delivery remain active. Only the exact synthetic
+token can use that redirect. Native fallback-IP discovery is disabled, and the
+gateway lock uses the fixture's own writable state when cached-image and host
+user IDs differ. No public port or external network is added.
+
+Run `python -m tools.acceptance.telegram_rehearsal --directory <prepared-directory>`
+after that installation is running. It recreates only its provider and Hermes
+services, preserving state; `--verify-only` skips those setup changes. Timestamped
+reports retain each attempt, including startup and protocol failures. The ordinary
+private/topic/General reply checks, exact archived originals and causal delivery
+receipts, unselected-chat silence and restart receipts
+are separate from the ingestion/browser rehearsal. Parallel execution beside an
+operating stack requires the owner's explicit single-stack exception.
 
 Compile the current worktree with Node 24 before running its tests. Run storage
 tests sequentially because several use the same synthetic schema. Record test
