@@ -26,6 +26,12 @@ the next integration increment. No operating delegation, runtime activation, or
 release is implied; the existing recall failures and remote-publication gate remain
 open. [Runtime checks](services/hermes/test_knowledge_tools.py),
 [learning checks](test/store-learning-engine.test.ts).
+Final authority and owner-read regressions also pass: completed learning may
+advance an unrelated epoch without blocking a valid saved proposal; current
+sharing releases revalidate dependencies and guarded wording; unusual archived
+JSON retains exact conversation IDs through a name fallback. Cancellation saves
+the prior outcome and evidence for owner inspection. These checks use isolated
+synthetic stores, not operating memory.
 
 Nocheh is pre-release. The operating local installation runs one source-watched
 `make dev` Compose stack from the release session worktree. All 17 services are
