@@ -42,13 +42,15 @@ turn used the verified packaged helper. Conversational recall remains failed.
 The bounded background handoff is active. Long native-note reviews still occupied
 its only background slot ahead of primary ingestion. A verified candidate now
 gives due, unattempted current ingestion priority before starting new native
-reviews; operating compilation and its effect remain to be verified.
+reviews. Operating compiled bytes now match that candidate, and three more
+ingestion receipts completed. Current memory readiness remains pending.
 
 Restarting the cached development database image reinstated an older, slow
 workflow view. The tested view was reapplied under its owner role and catalog
 verified; workflow health then completed in 0.8 seconds with nine connected
-worker families. A rebuilt database image contains the corrected schema;
-isolated restart verification is pending. Development still has automatic
+worker families. A rebuilt database image preserves the corrected schema and
+installation generation across an isolated fresh start and restart. Recreating
+the operating database from that image is still pending. Development has automatic
 service restarts disabled and is not the unattended release configuration.
 
 The existing embedding spending cap and subscription request safety limit remain
@@ -83,8 +85,8 @@ this UI verification does not establish live recall or release readiness.
   their identity and reconciliation. Two initial fixture failures were corrected:
   the global sweep may include older synthetic jobs, and Honcho list responses
   must filter by the requested receipt. [Decision](docs/adr/0088-primary-ingestion-before-native-note-review.md).
-  TypeScript compilation and the AST-only graph update pass; operating readiness
-  remains pending.
+  TypeScript compilation, the AST-only graph update and operating compiled-byte
+  verification pass; current memory readiness remains pending.
 
 - The October 2 General check has one captured message, one linked reply, and one
   execution attempt. The owner confirmed one sensible reply. Elapsed time was

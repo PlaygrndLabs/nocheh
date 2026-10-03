@@ -220,13 +220,16 @@ active; current memory readiness and the failed recall gate stay open.
 New native note reviews now wait behind due current ingestion receipts that have
 not had a first attempt or recorded a failure. Five workflow checks and one
 native-review recovery check pass without skips. Running and uncertain reviews
-retain receipt reconciliation. Operating compilation and memory progress remain
-to be verified. This admission change does not invalidate the carried speech,
+retain receipt reconciliation. Operating compiled bytes match the repair, and
+three further ingestion receipts completed; memory is still limited. This
+admission change does not invalidate the carried speech,
 approval, isolation, or backup evidence.
 
 The development database restart restored an old workflow view from its cached
 image. Reapplying the tested indexed view restored workflow-health inspection to
-0.8 seconds. The database image has been rebuilt; restart verification is pending.
+0.8 seconds. The rebuilt database image preserves the corrected view and
+installation generation across fresh startup and restart in an isolated fixture.
+The operating database recreation remains pending.
 Honcho's 195 packaged source files match its pin, and Hermes, speech, provider and
 monitor image revision labels match their locks. These checks do not pass recall
 or the unattended release gate.

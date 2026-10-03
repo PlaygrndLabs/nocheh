@@ -997,3 +997,16 @@ and conversational recall remain open. Private evidence is under
 `data/acceptance/results/release-20261003/`.
 
 </entry>
+
+<entry date="2026-10-03" task="Preserve the indexed workflow view across database restart">
+
+The release checkout restart exposed a cached database image whose bundled
+bootstrap reinstated the older workflow view. The live query plan proved the
+receipt join had reverted. Reapplying the tested view restored owner workflow
+health inspection to 0.8 seconds with nine connected families. The rebuilt image
+then passed isolated fresh-start and restart checks: the indexed view and
+installation generation were unchanged. No operating volume entered the fixture.
+The deployment guide now requires checking the bundled schema as well as the
+live catalog. The operating image replacement remains a separate pending step.
+
+</entry>

@@ -84,6 +84,10 @@ view definitions. Activate a tested database change separately under the owned
 installation's database owner role, preserve its previous definition in ignored
 local evidence, and verify the actual catalog definition and affected read path.
 Compiled source and a healthy service alone do not establish schema activation.
+The database image runs its bundled store bootstrap again on startup. Rebuild
+that image from the verified source after a schema or view change; otherwise a
+later restart can restore an older definition over a manually activated repair.
+Check both the image's bundled schema and the live catalog after restart.
 
 Isolated native turns load code from the image selected when their launcher
 starts. After changing a helper used inside those turns, verify the exact image
