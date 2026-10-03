@@ -1214,3 +1214,24 @@ remain in ignored simulation evidence. No operating reset was performed.
 [failure-path checks](../test/store-reset-setup.test.ts).
 
 </entry>
+
+<entry date="2026-10-03" task="Reconcile acceptance fixtures with current contracts">
+
+The broad storage rehearsal exposed two obsolete expectations: saved participant
+policy includes an explicit empty access map, and a full supergroup message with
+no topic markers is General. The sharing fixture now represents an incomplete
+topic explicitly and asserts it has no authorized space. The HTTP outage fixture
+waits for initial policy configuration before binding credentials, removing the
+observed startup epoch race. Existing denial, stale revision, outage durability,
+approved execution and inactive-restore assertions are retained.
+
+The reconciled candidate builds, and all 52 focused backend/dashboard checks pass
+without skips. These include the latest organization application and supervision
+regressions, reset repair, three corrected fixtures, and all 33 dashboard checks.
+The earlier combined native run passes 83 of 84 checks; its explicit nested Docker
+test is covered by the separate host isolation pass, not counted as newly rerun.
+The 109-check combined storage/workflow run and its two original failures remain
+recorded alongside their focused repairs in ignored evidence. No live readiness
+or production model-quality pass is inferred from these deterministic fixtures.
+
+</entry>

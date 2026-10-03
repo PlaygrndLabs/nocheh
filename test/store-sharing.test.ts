@@ -39,7 +39,7 @@ test('sharing publishes exact prepared text with private provenance, revocation 
   const api=new OwnerStorageApi(services),request=(path:string,body?:unknown)=>api.request(owner,body===undefined?'GET':'POST',new URL(path,'http://fixture'),body) as Promise<any>;
   const source=async(scope:string,n:number,unknown=false,voice=false)=>{
     const event:Envelope={version:1,key:key+':source:'+n,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(n),revision:'1',occurred_at:null,
-      text:'copperbridge Planning saffronpass',payload:{message:{message_id:n,date:1,chat:{id:Number(scope),type:unknown?'supergroup':scope==='123'?'private':'group'},text:'copperbridge Planning saffronpass',...(voice?{voice:{file_id:key+':voice'}}:{})}}};
+      text:'copperbridge Planning saffronpass',payload:{message:{message_id:n,date:1,chat:{id:Number(scope),type:unknown?'supergroup':scope==='123'?'private':'group'},text:'copperbridge Planning saffronpass',...(unknown?{is_topic_message:true}:{}),...(voice?{voice:{file_id:key+':voice'}}:{})}}};
     const reference=(await services.capture.capture(event)).source.reference;await services.guards.prepare(reference,'fixture',services.detect);return reference;
   };
   const principal=async(space:string,turn:string):Promise<Reader>=>{
@@ -108,6 +108,9 @@ test('sharing publishes exact prepared text with private provenance, revocation 
     }
     mode='safe';
     await assert.rejects(services.shared.preview({...owner,admin:false},filterPreview),{code:'owner_required'});
+    // A full General message omits topic fields. An explicit topic marker
+    // without its thread identity is incomplete and cannot authorize sharing.
+    assert.equal(await services.access.space(unknown),null);
     const unknownRule=await request('/v1/sharing/rules',{name:key+':unknown',sources:[other],destination:group,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':unknown-rule'});
     await assert.rejects(services.shared.preview(owner,{...initial,rule_id:unknownRule.id,source_ids:[unknown.id],operation_id:key+':unknown'}),{code:'sharing_source_not_selected'});
     const beforeDisable=await principal(group,destination.id);

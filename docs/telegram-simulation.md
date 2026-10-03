@@ -46,6 +46,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | Honcho ingestion | One writer; uncertain writes reconcile by receipt; rebuilds and owner corrections preserve evidence | `store-native-memory.test.ts`, `store-workflows.test.ts` |
 | Recall and entities | Current scoped memory, bounded paths, attribution and explicit identity decisions; no private names or provenance leak | `store-entities.test.ts`, `store-relationships.test.ts`, `store-native-memory.test.ts` |
 | Sharing | Exact approved revisions, one-time delivery consumption, expiry and revocation; project membership grants no access | `store-memory-access.test.ts`, `store-sharing.test.ts`, `store-projects.test.ts` |
+| Knowledge organization | Exact delegated scope and capture watermark; deferred atomic application, owner review, revocation and checked undo; imported authority stays inactive | `store-knowledge-management.test.ts`, `store-owner-supervision.test.ts`, `knowledge-portability.test.ts`, `test_knowledge_tools.py` |
 | Actions and tools | Live owner authority; exact proposal; deny/revoke blocks execution; uncertain effects never repeat | `store-telegram-actions.test.ts`, `store-controlled-execution.test.ts`, `test_controlled_tools.py` |
 | Scheduling and browser | Stable identities, locks, cancellation and reconnection; missed schedules do not silently replay | `store-scheduled-runs.test.ts`, `store-browser-runs.test.ts`, `test_scheduler.py` |
 | Workflow recovery | Independent capture, bounded admission, leases, outbox and protected completion receipts | `store-workflows.test.ts`, `workflow-store.test.ts`, `test_workflow_recovery.py` |
@@ -75,6 +76,13 @@ runtime responses and preserve permanent effect identities across failures and
 engine restart. The [native Honcho fixture](../deploy/acceptance/native-portability-compose.yml)
 checks actual pinned migrations, ORM records, vector data and inactive transfer
 without calling a provider or starting a deriver.
+
+The [complete installation rehearsal](../tools/acceptance/rehearsals/installation-rehearsal.py)
+connects the pinned native services using new synthetic state and deterministic
+inference transports. It requires its own verified images and the repository's
+single-stack ownership preflight; component passes do not substitute for this
+coupled run. Actual provider reasoning and conversational recall require separate
+evidence even when the scripted installation rehearsal passes.
 
 Compile the current worktree with Node 24 before running its tests. Run storage
 tests sequentially because several use the same synthetic schema. Record test
