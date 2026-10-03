@@ -125,8 +125,10 @@ this UI verification does not establish live recall or release readiness.
   were reproduced and repaired. The focused combined build and all 52 affected
   backend/dashboard checks pass. The reset inventory now recognizes declarations
   without treating SQL comment prose as a table; unexpected real tables still
-  block acceptance. Fixture expectation/readiness repairs remain a separate
-  integration increment. Two bounded
+  block acceptance. Saved policy, incomplete-topic and HTTP startup fixtures now
+  follow current contracts without weakening their privacy or recovery checks.
+  The combined native run passes 83 checks; its skipped Docker-isolation check
+  retains the separate real-host pass. Two bounded
   recovery fingerprint checks pass. The isolated workflow fixture now passes its
   provisioning, inspection, pipeline, privacy and restart probes; see the
   [completed fixture repair](docs/task-history.md) and

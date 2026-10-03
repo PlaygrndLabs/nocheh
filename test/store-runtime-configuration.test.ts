@@ -31,7 +31,7 @@ test('saved allowlist admission revokes old capabilities atomically and stale se
     assert.equal(restored.revision,next.revision+1,'returning to an older policy cannot reuse its previous authority');
     assert.equal(restored.epoch,next.epoch+1);assert.equal((await guards.state()).mode,'off');
     const history=(await stores.control.query("SELECT document FROM runtime_configuration_versions WHERE name='assistant' AND revision=$1",[next.revision])).rows[0];
-    assert.deepEqual(history.document,removed);
+    assert.deepEqual(history.document,{...removed,group_access:{}},'saved policy includes the explicit empty participant-access map');
     await assert.rejects(configuration.configure({...first,owner_id:'invalid'},'on'),{code:'invalid_assistant_policy'});
     // A failure during handoff rolls back the new policy and epoch together.
     const proxy=new Proxy(stores.control,{get(target,key){

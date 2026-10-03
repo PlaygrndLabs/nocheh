@@ -48,6 +48,9 @@ test('separated application captures through control outages, exposes owner repo
   };
   const until=async(check:()=>Promise<boolean>)=>{for(let i=0;i<400;i++){if(await check())return;await new Promise(r=>setTimeout(r,25));}assert.fail('fixture progress timeout');};
   try {
+    // Initial policy configuration changes the guard epoch. Let startup finish
+    // before injecting outages or creating credentials bound to that epoch.
+    await until(async()=>worker.status().guards==='ready');
     assert.deepEqual((await request('/health')).databases,{archive:'ready',derived:'ready',control:'ready'});
     const initialStatus=await request('/v1/status');
     assert.equal(initialStatus.guard_mode,'on');assert.equal(initialStatus.storage_layout,'original-only-v1');
