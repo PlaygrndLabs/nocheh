@@ -1809,3 +1809,28 @@ No conversational pass or explanation of every timeout is claimed.
 [causal checks](../test/test_model_rehearsal.py).
 
 </entry>
+
+<entry date="2026-10-03" area="Additional synthetic model allowance and partial quality evidence">
+
+The owner's authorization for all further requests needed by this evaluation
+permits a configurable fixture relay allowance. Nondefault increases require an
+explicit authorization flag, remain bounded to 10,000 admissions, and retain the
+durable journal across restarts. Six admission/HTTP checks pass in the packaged
+Python environment. The prepared fixture selects 3,000 admissions for its next
+start; its existing shared Honcho reasoning ceiling and separate $5 embedding
+cap are not changed by this relay setting.
+
+With only the fixture's health probes changed to a 30-second cadence, startup
+passes its original deadline. A later seed-reusing real-model run passes reaction
+removal, corrected meeting time and private isolation in 118.2, 131.6 and 89.4
+seconds on the first attempt, with exact destinations and causal archive
+receipts. The older failed reaction/correction turns eventually deliver correct
+answers on attempts four and three; their original gates remain failed.
+Fresh-topic isolation fails in the new run. Its sole ingested source is the
+question itself, yet foreground Honcho recall takes about 160 seconds during the
+failed turn. The fixture is stopped for diagnosis; restart recall and retirement
+remain unrun, and no complete semantic, cold-ingestion or live-release pass is
+claimed. Synthetic source identities and detailed answers remain ignored.
+[Procedure](telegram-simulation.md), [relay checks](../test/test_model_relay.py).
+
+</entry>

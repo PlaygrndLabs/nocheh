@@ -6,10 +6,34 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
-from tools.acceptance.model_relay import Admission, create_app
+from tools.acceptance.model_relay import Admission, create_app, request_limit
 
 
 class ModelRelayAdmissionTests(unittest.TestCase):
+    def test_additional_allowance_requires_explicit_authorization_and_stays_bounded(self):
+        self.assertEqual(request_limit({}), 300)
+        with self.assertRaisesRegex(ValueError, 'additional_request_authorization_required'):
+            request_limit({'NOCHEH_FIXTURE_MODEL_REQUEST_LIMIT': '301'})
+        authorized = {'NOCHEH_ADDITIONAL_MODEL_REQUESTS_AUTHORIZED': '1'}
+        self.assertEqual(request_limit({**authorized, 'NOCHEH_FIXTURE_MODEL_REQUEST_LIMIT': '3000'}), 3000)
+        for invalid in ('0', '-1', '10001', 'unlimited'):
+            with self.assertRaises(ValueError):
+                request_limit({**authorized, 'NOCHEH_FIXTURE_MODEL_REQUEST_LIMIT': invalid})
+
+    def test_increased_allowance_preserves_all_previous_admissions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'calls.jsonl'
+            credentials = {'hermes': ('local', 'existing')}
+            first = Admission(path, credentials, limit=1)
+            payload = {'model': 'gpt-5.6-sol', 'messages': []}
+            first.reserve('Bearer local', payload)
+            previous = path.read_bytes()
+            increased = Admission(path, credentials, limit=400)
+            self.assertEqual(increased.summary()['requests'], 1)
+            increased.reserve('Bearer local', payload)
+            self.assertTrue(path.read_bytes().startswith(previous))
+            self.assertEqual([json.loads(row)['number'] for row in path.read_text().splitlines()], [1, 2])
+
     def test_auth_model_and_restart_limit_fail_closed_without_sensitive_journal(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'calls.jsonl'
