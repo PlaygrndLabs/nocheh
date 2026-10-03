@@ -101,6 +101,11 @@ once on retry in 148.5 seconds, including 122.9 seconds of guard preparation.
 The separate bounded-publication candidate passes three PostgreSQL guard,
 context and broker checks, including a failed concurrent sibling and 501 input
 fragments, plus TypeScript compilation. Its coupled verification remains pending.
+The initial three-check record used an incorrect container mount root and is
+disqualified as candidate evidence. Replacement checks verify both runtime and
+test bytes in the actual image working directory. Two adjacent checks and the
+focused fresh-input check pass without skips; the initial batch-count oracle
+failure remains recorded. No acceptance deadline was extended.
 The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.

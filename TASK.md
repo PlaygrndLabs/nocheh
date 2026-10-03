@@ -187,6 +187,14 @@ this UI verification does not establish live recall or release readiness.
   at 500 fragments. Three PostgreSQL guard/context/broker checks pass without
   skips, covering failed-sibling recovery and all 501 input fragments; TypeScript
   compilation passes. Coupled verification of this candidate remains pending.
+  Verification records explicitly disqualify the initial test run that mounted
+  compiled files at the wrong image root. The replacement checks verify runtime
+  and test hashes inside `/app` before execution: two adjacent checks pass, and
+  the corrected fresh-input context check passes in 255 seconds under its
+  unchanged component deadline. The first batch-count assertion incorrectly
+  assumed previously authorized numeric fragments were fresh; its failed report
+  is retained. The correct service overlay passes the packaged module/hash
+  preflight before any fixture change.
   [Context checks](test/store-prepared-context.test.ts).
   No operating runtime change has been made.
   The operating seventeen services remain healthy and were not restarted.

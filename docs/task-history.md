@@ -1650,3 +1650,26 @@ operating code or provider configuration was changed.
 [broker checks](../test/store-security-broker.test.ts).
 
 </entry>
+
+<entry date="2026-10-03" task="Correct guarded-context verification paths and fresh inputs">
+
+A packaged-source hash preflight rejected a service overlay written to the
+native image's path instead of the service image's `/app` root, before any
+fixture mutation. The same path error meant the original three PostgreSQL
+passes executed the previous service code; that candidate-evidence claim is
+explicitly disqualified. The rejected overlay and original reports are retained.
+
+Replacement checks compare runtime and test hashes inside the container before
+running. Both adjacent guard and broker checks pass. The context test initially
+expected two detector batches, but previously authorized numeric metadata
+legitimately split and deduplicated its space-separated inputs. Fresh indivisible
+identifiers and a fresh fixture guard epoch make the 501-item boundary explicit.
+The focused check now passes in 255 seconds, preserving every ordered identifier,
+masking every canary and exercising failed-sibling draining/recovery. Its original
+300-second component deadline is unchanged; no native reply deadline changed.
+The test-only correction passes TypeScript compilation and the AST-only update.
+Coupled response acceptance remains pending.
+[Check](../test/store-prepared-context.test.ts),
+[procedure](telegram-simulation.md).
+
+</entry>

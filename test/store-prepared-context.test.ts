@@ -27,7 +27,7 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     const binding=await services.guards.state();return {admin:false,scope:null,space:'123',turnEvent,generation:binding.generation,guard_epoch:binding.epoch,...extra};
   };
   try {
-    await services.guards.reconcile();await services.guards.setMode('on');
+    await services.guards.reconcile();await services.guards.setMode('off');await services.guards.setMode('on');
     const source=(await services.capture.capture(event)).source.reference;
     await services.guards.prepare(source,'fixture',async()=>[]);
     let reader=await principal(source.id),calls=0;
@@ -95,9 +95,12 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     // Small native fields can hit the derivative count bound before the text
     // size bound. Split them before checkpointing, with no dropped fragments.
     let batches=0;
-    const many=Array.from({length:501},(_,i)=>'Many fresh context fields '+i+' saffronpass');
+    // Keep each identifier one word: authorized numeric source metadata must
+    // not split and deduplicate the deliberately fresh batch-boundary inputs.
+    const many=Array.from({length:501},(_,i)=>'bounded_native_field_'+i+'_saffronpass');
     const manyResult=await services.prepared.prepare(reader,many,async text=>{batches++;return text.includes('saffronpass')?['saffronpass']:[];});
     assert.equal(batches,2);assert.equal((manyResult as string[]).length,501);
+    assert.ok((manyResult as string[]).every((value,index)=>value.startsWith('bounded_native_field_'+index+'_')));
     assert.ok(!JSON.stringify(manyResult).includes('saffronpass'));
 
     const operation=await services.operations.record({key:key+':schedule',kind:'scheduled_trigger',scope:'123',input_hash:digest('Private scheduled prompt')});
