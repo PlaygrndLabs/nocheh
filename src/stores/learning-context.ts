@@ -17,6 +17,7 @@ export interface PreparedLearningContext {
   // Older persisted contexts predate rule_inputs; fresh preparation always supplies it.
   rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];rule_inputs?:LearningRuleInput[];projects:{id:string;name:string}[];
   entities:EntityContext;
+  organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean};projects:{id:string;name:string;revision:number}[]};
   limitations:string[];
 }
 export class LearningContextRepository {
@@ -67,18 +68,18 @@ export class LearningContextRepository {
       }
       observations.push({source:reference,value:scoped,derivatives});evidence.push({reference,text:texts.join('\n'),space});
     }
-    const project=(await this.projects.effective(space)).project,projects=[];
+    const effective=await this.projects.effective(space),project=effective.project,projects=[];
     if(project?.state==='active') {
-      projects.push({id:project.id,name:project.name});
-      const duplicate=(await this.access.stores.control.query("SELECT id FROM projects WHERE id<>$1 AND name=$2 AND state='active' LIMIT 1",[project.id,project.name])).rows[0];
-      if(duplicate)projects.push({id:duplicate.id,name:project.name});
+      projects.push({id:project.id,name:project.name,revision:project.revision});
+      const duplicate=(await this.access.stores.control.query("SELECT id,revision FROM projects WHERE id<>$1 AND name=$2 AND state='active' LIMIT 1",[project.id,project.name])).rows[0];
+      if(duplicate)projects.push({id:duplicate.id,name:project.name,revision:duplicate.revision});
     }
     const all=(await this.access.stores.control.query("SELECT id,name,description,state,revision FROM projects WHERE state='active' ORDER BY id LIMIT 101")).rows;
     if(all.length>100)limitations.push('project_catalog_limit');
     const corpus=(evidence.find(item=>item.reference.id===source.id)?.text??'').toLocaleLowerCase(),mentioned=[];
     for(const candidate of all.slice(0,100))if(candidate.id!==project?.id&&candidate.name.trim()&&corpus.includes(candidate.name.toLocaleLowerCase())) {
       const matches=all.filter(other=>other.name.toLocaleLowerCase()===candidate.name.toLocaleLowerCase());
-      if(matches.length===1){projects.push({id:candidate.id,name:candidate.name});mentioned.push(candidate);}
+      if(matches.length===1){projects.push({id:candidate.id,name:candidate.name,revision:candidate.revision});mentioned.push(candidate);}
       else limitations.push('ambiguous_project_reference');
     }
     const entities=await this.entities.context(source,mentioned,corpus);
@@ -109,6 +110,7 @@ export class LearningContextRepository {
     }
     await this.guards.assertCurrent(binding);
     return {source,source_object:observed.object_id,space,binding,evidence,dependencies,observations,
+      organization_context:{assignment:{space_id:space,project_id:project?.id??null,revision:effective.own_assignment?.revision??0,inherited:effective.inherited},projects:projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))},
       rules:applicableInterpretations(versions),rule_ids:versions.map(v=>v.id),rule_inputs:[...ruleInputs.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([,v])=>v),projects,entities,limitations:[...new Set(limitations)]};
   }
 }

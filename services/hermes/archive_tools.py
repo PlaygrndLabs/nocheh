@@ -101,6 +101,8 @@ def read_tool(args, **kwargs):
 
 
 def register(ctx):
+    from .knowledge_tools import register as register_knowledge
+    register_knowledge(ctx)
     for name,description,properties,required,handler in (
         ('nocheh_archive_search','Find permitted archive evidence in your authorized scope. For reaction questions without a known note ID, use mode=current_reactions with no query. Results include the guarded reaction observation and bounded target text; read source references for further detail. An individual empty new_reaction list records that actor removing their reaction; it does not prove task completion or that nobody else reacted. This captured evidence is incomplete; empty search results do not prove no reactions. For mode=text (default), query is required and every query word must match; try one or two distinctive words when a longer search misses. Cite returned source references.',
          {'mode':{'type':'string','enum':['text','current_reactions']},'query':{'type':'string','description':'Required for text mode; omitted for current_reactions.'},'limit':{'type':'integer','minimum':1,'maximum':10}},[],search_tool),

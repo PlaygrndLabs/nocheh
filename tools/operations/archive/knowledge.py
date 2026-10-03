@@ -10,7 +10,7 @@ from tools.operations.archive.archive import API
 def allowed_path(path):
     parsed=urlsplit(path)
     if parsed.scheme or parsed.netloc or parsed.fragment:return False
-    return bool(re.fullmatch(r'/v1/(?:memory-map|memory-access/(?:settings|requests(?:/[a-f0-9]{64}/decide)?|grants(?:/[a-f0-9]{64}/revoke)?)|entities(?:/suggestions|/claims/[a-f0-9]{64}/correct|/[a-f0-9]{64}(?:/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:/assignments|/effective)?|sharing/(?:rules|preview|previews(?:/[a-f0-9]{64}(?:/approve)?)?|releases(?:/[a-f0-9]{64}/revoke)?)|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
+    return bool(re.fullmatch(r'/v1/(?:conversations(?:/context)?|decisions(?:/(?:controlled_action|telegram_action|memory_access|entity|knowledge)/[a-f0-9]{64})?|organization/delegations(?:/[a-f0-9]{64}/resume)?|knowledge/proposals(?:/[a-f0-9]{64}(?:/(?:decide|undo))?)?|memory-map|memory-access/(?:settings|requests(?:/[a-f0-9]{64}/decide)?|grants(?:/[a-f0-9]{64}/revoke)?)|entities(?:/suggestions|/claims/[a-f0-9]{64}/correct|/[a-f0-9]{64}(?:/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:/assignments|/effective|/[a-f0-9]{64}/context)?|sharing/(?:rules|preview|previews(?:/[a-f0-9]{64}(?:/approve)?)?|releases(?:/[a-f0-9]{64}/revoke)?)|learned(?:/[a-f0-9]{64}(?:/history|/correct)?)?|sources/[a-f0-9]{64}/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives/[a-f0-9]{64}(?:/activate)?|derivation-engines|reprocessing/[a-f0-9]{64}|guards/(?:events|artifacts|derived_artifacts)/[a-f0-9]{64}(?:/history|/revisions/\d+)?|memory/provenance)',parsed.path))
 
 
 def parse(command,arguments):
@@ -38,6 +38,15 @@ def parse(command,arguments):
             commands.add_parser(name).add_argument('--after',default='')
         commands.add_parser('effective').add_argument('--space',required=True)
         for name in ('save','assign'):commands.add_parser(name).add_argument('--file',type=Path,required=True)
+    elif command=='organization':
+        commands.add_parser('list').add_argument('--after',default='')
+        commands.add_parser('save').add_argument('--file',type=Path,required=True)
+    elif command=='knowledge':
+        commands.add_parser('list').add_argument('--after',default='')
+        commands.add_parser('decisions').add_argument('--after',default='')
+        commands.add_parser('show').add_argument('id')
+        for name in ('decide','undo'):
+            item=commands.add_parser(name);item.add_argument('id');item.add_argument('--file',type=Path,required=True)
     elif command=='learned':
         item=commands.add_parser('list');item.add_argument('--after',default='');item.add_argument('--scope-kind',choices=('conversation','project'));item.add_argument('--scope-id')
         for name in ('show','history'):commands.add_parser(name).add_argument('id')
@@ -86,6 +95,15 @@ def operation(command,args):
         if action in ('save','assign'):path='/v1/projects'+('/assignments' if action=='assign' else '');body=json.loads(args.file.read_text())
         elif action=='effective':path='/v1/projects/effective?'+urlencode({'space':args.space})
         else:path='/v1/projects'+('/assignments' if action=='assignments' else '')+'?'+urlencode({'after':args.after})
+    elif command=='organization':
+        path='/v1/organization/delegations'
+        if action=='save':body=json.loads(args.file.read_text())
+        else:path+='?'+urlencode({'after':args.after})
+    elif command=='knowledge':
+        if action in ('list','decisions'):path=('/v1/knowledge/proposals' if action=='list' else '/v1/decisions')+'?'+urlencode({'after':args.after})
+        else:
+            path='/v1/knowledge/proposals/'+args.id
+            if action in ('decide','undo'):path+='/'+action;body=json.loads(args.file.read_text())
     elif command=='learned':
         if action=='list':path='/v1/learned?'+urlencode({k:v for k,v in {'after':args.after,'scope_kind':args.scope_kind,'scope_id':args.scope_id}.items() if v is not None})
         else:

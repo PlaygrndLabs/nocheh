@@ -17,9 +17,15 @@ supervision interface. [Decision](docs/adr/0091-bounded-agent-knowledge-organiza
 [authority/application checks](test/store-knowledge-management.test.ts),
 [owner read checks](test/store-owner-supervision.test.ts),
 [inactive restore checks](test/knowledge-portability.test.ts).
-Runtime learning/tool delivery and dashboard supervision are the next integration
-increments. No operating delegation, runtime activation, or release is implied;
-the existing recall failures and remote-publication gate remain open.
+The runtime exposes typed knowledge inspection, proposal, and status tools through
+the scoped broker. Consented live learning can include organization in its existing
+result; normal completion and publication recovery atomically enqueue the follow-up.
+The affected learning and broker fixtures pass. Combined native checks pass 85 tests;
+the opt-in nested Docker security boundary check is unrun. Dashboard supervision is
+the next integration increment. No operating delegation, runtime activation, or
+release is implied; the existing recall failures and remote-publication gate remain
+open. [Runtime checks](services/hermes/test_knowledge_tools.py),
+[learning checks](test/store-learning-engine.test.ts).
 
 Nocheh is pre-release. The operating local installation runs one source-watched
 `make dev` Compose stack from the release session worktree. All 17 services are

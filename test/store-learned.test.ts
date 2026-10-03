@@ -43,6 +43,17 @@ test('reaction learning ignores unrelated conclusions and keeps strict original-
   assert.throws(()=>parseInterpretations(triggeredInterpretations({interpretations:[{...base,evidence_ids:[trigger,unknown]}]},trigger,[rule]),
     evidence,'-42',[]),{code:'unavailable_interpretation_evidence'});
 });
+test('optional organization output cannot change or prevent ordinary interpretation validation',()=>{
+  const source=digest('organization-trigger'),evidence=[{reference:{store:'archive' as const,kind:'event' as const,id:source,revision:'1',input_hash:digest(source)},text:'Synthetic source',space:'-42'}];
+  const interpretation={kind:'state',subject:'item',text:'Under review',scope:{kind:'conversation',id:'-42'},uncertainty:'supported',conflicts:[],evidence_ids:[source]};
+  const expected=parseInterpretations({interpretations:[interpretation]},evidence,'-42',[]);
+  for(const organization of [null,'malformed',42,[],{approved:true,owner:true},{creates:[],assignments:[]}]){
+    const raw={interpretations:[interpretation],organization};
+    assert.deepEqual(parseInterpretations(triggeredInterpretations(raw,source,[]),evidence,'-42',[]),expected);
+    assert.deepEqual(raw.organization,organization,'organization is retained for its separate trusted workflow');
+  }
+  assert.throws(()=>parseInterpretations({interpretations:[interpretation],permissions:{approved:true}},evidence,'-42',[]),{code:'invalid_interpretation_result'});
+});
 test('conventions are quoted evidence, general meanings stay contextual and explicit conflicts remain visible',()=>{
   const reference={store:'archive' as const,kind:'event' as const,id:digest('evidence'),revision:'1',input_hash:digest('original')};
   const evidence=[{reference,text:'For project Atlas, a check means reviewed, not completed.',space:'-42'}];
