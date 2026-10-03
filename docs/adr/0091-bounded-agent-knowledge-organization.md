@@ -1,6 +1,6 @@
 <adr>
 
-# ADR-0090: Bounded agent organization with deferred application and owner supervision
+# ADR-0091: Bounded agent organization with deferred application and owner supervision
 
 <status>
 Accepted by the owner's request to implement agent-led knowledge management.

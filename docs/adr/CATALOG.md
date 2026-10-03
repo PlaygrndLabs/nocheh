@@ -69,7 +69,7 @@ records current implementation and activation.
 | [0053](0053-original-only-archive.md) | Original-only archive, derived guarded records, separate control database | Current storage boundary; supersedes 0052 guarded placement |
 | [0054](0054-postgres-owned-store-bootstrap.md) | Provision separated owned stores in PostgreSQL startup | Implements 0053 packaging |
 | [0055](0055-concise-core-service-names.md) | `hermes`, `hermes-agent-sb`, and `nocheh-db` service identities | Current service names |
-| [0056](0056-connected-entity-memory.md) | Stable people and project peers with attributed entity evidence | Current connected-memory direction; 0090 permits bounded delegation for discovered project creation, preserving identity review |
+| [0056](0056-connected-entity-memory.md) | Stable people and project peers with attributed entity evidence | Current connected-memory direction; 0091 permits bounded delegation for discovered project creation, preserving identity review |
 | [0057](0057-memory-relationship-access-map.md) | Human relationship map with fact-level conversation access | Current access model; relationships never grant access |
 | [0058](0058-semantic-react-flow-memory-map-editing.md) | React Flow Memory map with semantic revision-checked editing | Current Memory map interaction model |
 | [0059](0059-elk-layered-memory-map-layout.md) | ELK layered positioning for the Memory map | Current Memory map layout |
@@ -102,4 +102,6 @@ records current implementation and activation.
 | [0086](0086-reaction-discovery-evidence.md) | Include guarded reaction observations and bounded target excerpts in discovery | Extends 0084; a separate model-selected read is no longer required to inspect the observation |
 | [0087](0087-live-background-admission-handoff.md) | Hand a free background slot to one bounded live callback | Supersedes 0085 retry-order hints; retains 0080 operation and foreground-capacity limits |
 | [0088](0088-primary-ingestion-before-native-note-review.md) | Give primary-memory writes a first attempt before starting new native note reviews | Extends 0080 and 0087; running and uncertain reviews keep their receipt-reconciliation paths |
-| [0090](0090-bounded-agent-knowledge-organization.md) | Typed knowledge proposals, bounded organization authority, deferred application, and one owner decision inbox | Extends 0041, 0053, 0057, and 0083; narrowly supersedes 0056 on confirmation of delegated discovered project creation |
+| [0089](0089-physical-telegram-delivery-boundary.md) | Bind every physical Telegram request to its authorized audience and current authority | Extends 0029 and 0030; native fallback cannot widen a topic and partial delivery keeps its receipts |
+| [0090](0090-durable-telegram-rate-limit-retries.md) | Preserve rejected rate-limit attempts while permitting bounded native recovery | Extends 0018 and 0089; confirmed and uncertain sends retain their no-resend boundary |
+| [0091](0091-bounded-agent-knowledge-organization.md) | Typed knowledge proposals, bounded organization authority, deferred application, and one owner decision inbox | Extends 0041, 0053, 0057, and 0083; narrowly supersedes 0056 on confirmation of delegated discovered project creation |

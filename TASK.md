@@ -13,7 +13,7 @@ and PostgreSQL fixtures. It adds disabled-by-default, exact-scope organization
 delegation, preserved proposals, deferred atomic application, correction
 suspension, explicit resume, revision-checked undo, and inactive portable history.
 Stored owner directory, context, and decision projections are available for the
-supervision interface. [Decision](docs/adr/0090-bounded-agent-knowledge-organization.md),
+supervision interface. [Decision](docs/adr/0091-bounded-agent-knowledge-organization.md),
 [authority/application checks](test/store-knowledge-management.test.ts),
 [owner read checks](test/store-owner-supervision.test.ts),
 [inactive restore checks](test/knowledge-portability.test.ts).
@@ -55,13 +55,15 @@ turn used the verified packaged helper. Conversational recall remains failed.
 The bounded background handoff is active. Long native-note reviews still occupied
 its only background slot ahead of primary ingestion. A verified candidate now
 gives due, unattempted current ingestion priority before starting new native
-reviews; operating compilation and its effect remain to be verified.
+reviews. Operating compiled bytes now match that candidate, and three more
+ingestion receipts completed. Current memory readiness remains pending.
 
 Restarting the cached development database image reinstated an older, slow
 workflow view. The tested view was reapplied under its owner role and catalog
 verified; workflow health then completed in 0.8 seconds with nine connected
-worker families. A rebuilt database image contains the corrected schema;
-isolated restart verification is pending. Development still has automatic
+worker families. A rebuilt database image preserves the corrected schema and
+installation generation across an isolated fresh start and restart. Recreating
+the operating database from that image is still pending. Development has automatic
 service restarts disabled and is not the unattended release configuration.
 
 The existing embedding spending cap and subscription request safety limit remain
@@ -82,6 +84,28 @@ this UI verification does not establish live recall or release readiness.
 
 <verification>
 
+- Personal-use Telegram simulation is in progress in an isolated session fixture;
+  see the [scenario matrix](docs/telegram-simulation.md). The native Bot API
+  rehearsal reproduced topic fallback into General, continued chunks after
+  revocation, and a rate-limit rejection that permanently prevented recovery.
+  Eleven native scenarios and fourteen capture/gateway checks now pass, including
+  bounded rate-limit waits, revoked retries, crash recovery and no repeated sends.
+  [Physical delivery](docs/adr/0089-physical-telegram-delivery-boundary.md) and
+  [rate-limit receipts](docs/adr/0090-durable-telegram-rate-limit-retries.md).
+  The official Honcho SDK check passes in its own dependency image; twenty-four
+  integration contracts pass separately. Focused reruns resolve the baseline
+  native-import and Redis timeouts, and subscription compatibility passes all
+  twenty-one checks. Real container isolation and Compose configuration pass.
+  Honcho's packaged source matches its pin; its real migrations, ORM, eight-table
+  vector-data transfer and inactive restore pass with synthetic data and no
+  provider calls. The native composer test now waits for the ready prompt and
+  rendered input before Enter; its original capture-failure assertions pass.
+  Broad PostgreSQL checks are still running; fingerprint and real workflow
+  engine fixtures remain pending. No operating activation
+  or new live pass is claimed. Original failures, invocation errors, skipped
+  fixtures and focused outcomes stay in ignored
+  `data/acceptance/results/telegram-simulation/` in the simulation worktree.
+
 - Guarded reaction evidence now accompanies discovery with bounded target
   excerpts. Five storage/route/retirement checks and six networkless native
   archive checks pass; TypeScript compilation and the AST-only graph update
@@ -96,8 +120,8 @@ this UI verification does not establish live recall or release readiness.
   their identity and reconciliation. Two initial fixture failures were corrected:
   the global sweep may include older synthetic jobs, and Honcho list responses
   must filter by the requested receipt. [Decision](docs/adr/0088-primary-ingestion-before-native-note-review.md).
-  TypeScript compilation and the AST-only graph update pass; operating readiness
-  remains pending.
+  TypeScript compilation, the AST-only graph update and operating compiled-byte
+  verification pass; current memory readiness remains pending.
 
 - The October 2 General check has one captured message, one linked reply, and one
   execution attempt. The owner confirmed one sensible reply. Elapsed time was
