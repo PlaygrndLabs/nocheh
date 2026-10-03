@@ -1282,6 +1282,20 @@ or live acceptance was performed. [Decision](adr/0092-exact-topic-action-destina
 
 </entry>
 
+<entry date="2026-10-03" task="Package the complete-wording candidate for the coupled rehearsal">
+
+Service, management, database and native images were rebuilt from `63f9b99`.
+All 22 packaged native Telegram and knowledge-tool checks pass without source
+mounts or network access, and the pruned Node runtime imports successfully.
+The new 16-service manifest validates with ten available image identities,
+internal networks, no host ports and no operating state mounts. Its containers
+have not started. The focused database fixture is stopped with its volume retained;
+all seventeen operating services remain running. The owner's single-stack
+exception, coupled execution, actual model quality and live release gates remain
+pending. Earlier images, failed invocations and reports remain in ignored evidence.
+
+</entry>
+
 <entry date="2026-10-03" task="Commit memory approval and automatic follow-up atomically">
 
 Synthetic failure injection reproduced a committed approval with no follow-up;

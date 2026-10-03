@@ -124,9 +124,10 @@ this UI verification does not establish live recall or release readiness.
   subscription compatibility, Honcho SDK/contracts, pinned native migrations and
   vector portability, workflow provisioning, privacy and restart probes pass in
   their separate synthetic fixtures. These checks make no model-quality claim.
-  Service, management, database and native images include the verified topic and
-  handoff fixes at `beed79b`, with twenty packaged native checks passing. They need
-  the later complete-wording fix before coupled execution.
+  Service, management, database and native images include the verified topic,
+  handoff and complete-wording fixes at `63f9b99`. All 22 packaged native checks
+  pass without source mounts or network access; the packaged Node runtime imports
+  successfully. The earlier candidate's evidence remains preserved.
   The updated 16-service synthetic installation has a validated manifest, verified
   images, internal networks and no host ports. It has not started because the
   operating stack is running and the owner's
