@@ -95,11 +95,10 @@ def provider():
 def meter():
     # Exercise the production guard callback, ledger and payload validation.
     # Only the paid transport's destination changes inside this fixture process.
-    sys.path.insert(0, '/experiment')
     from dataclasses import replace
     from pathlib import Path
     from http.server import ThreadingHTTPServer
-    from meter import Egress, Ledger, ArchivePreparation, handler, embeddings
+    from services.honcho.meter import Egress, Ledger, ArchivePreparation, handler, embeddings
     token = Path('/state/internal_token').read_text().strip()
     service = Egress(Ledger('/ledger/budget.sqlite'), token, 'synthetic-no-provider',
         prepare=ArchivePreparation('http://nocheh-app:8780', token),
