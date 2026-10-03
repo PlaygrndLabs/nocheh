@@ -71,6 +71,25 @@ if(!r.ok)throw Error('fixture_http_'+r.status);console.log(JSON.stringify(await 
         return self.http('/fixture/telegram', body, host='cliproxy-api', port=8317)
 
 
+def retire_synthetic_name_sources(fixture, private_event_id, operation_prefix):
+    """Retire each independent captured source of the synthetic name."""
+    named_sources = fixture.query('nocheh_archive', "SELECT id FROM events WHERE scope='123' "
+        "AND kind IN ('telegram_update','telegram_delivered_message') "
+        "AND search_text LIKE '%پرستو نیلی%' ORDER BY capture_sequence").splitlines()
+    if private_event_id not in named_sources:
+        raise AssertionError('private_fact_source_missing')
+    decisions = []
+    for event_id in named_sources:
+        current = fixture.http('/v1/sources/' + event_id + '/retirement')
+        if current['retired']:
+            decisions.append(current)
+            continue
+        decisions.append(fixture.http('/v1/sources/' + event_id + '/retirement',
+            {'retired': True, 'expected_revision': current['revision'],
+             'operation_id': operation_prefix + '-' + event_id}))
+    return named_sources, decisions
+
+
 def wait(label, fn, seconds=300):
     start = time.monotonic()
     while time.monotonic() - start < seconds:
@@ -229,10 +248,16 @@ def main():
         wait('polling_reconnected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
         question('recall_after_restart', 'قبلاً اسم بادبادکم را گفته بودم؛ اسمش چیست؟',
                  'Recall the synthetic private fact after restart using authorized evidence.', chat=123, topic=None)
-    results['retirement'] = fixture.http('/v1/sources/' + private['event_id'] + '/retirement',
-        {'retired': True, 'expected_revision': 0, 'operation_id': 'model-rehearsal-' + str(base)})
+    # A confirmed reply is its own source observation. Retiring only the
+    # owner's original message leaves that reply as evidence of the same fact.
+    named_sources, results['retirements'] = retire_synthetic_name_sources(
+        fixture, private['event_id'], 'model-rehearsal-' + str(base))
+    results['retirement'] = next(row for row in results['retirements'] if row['event_id'] == private['event_id'])
+    results['retired_fact_source_ids'] = named_sources
+    save()
     question('retired_fact', 'اسم بادبادکم چیست؟ فقط اگر در حافظهٔ قابل استفاده‌ات موجود است بگو.',
-             'Do not reuse the retired source in future context.', chat=123, topic=None, forbidden=('پرستو', 'نیلی', '۷۲'))
+             'Do not reuse any explicitly retired synthetic name source in future context.',
+             chat=123, topic=None, forbidden=('پرستو', 'نیلی', '۷۲', '72'))
     results['original_preserved'] = fixture.query('nocheh_archive', "SELECT count(*) FROM events WHERE id='" + private['event_id'] + "'") == '1'
     results['provider'] = fixture.http('/fixture/stats', host='cliproxy-api', port=8317)
     results['memory'] = fixture.http('/v1/memory/honcho')

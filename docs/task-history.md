@@ -1874,10 +1874,11 @@ Hermes passed in 172 seconds on the first attempt. Retirement of the original
 private message then led to a first-attempt runtime failure and a non-disclosing
 reply on retry. Honcho's later synthetic fact could not be attributed to
 the retired owner message: a still-active confirmed assistant reply also stated
-it. The fixture's retirement oracle needs to retire all captured private sources
-containing the same synthetic fact and record each decision, so the next test
-can distinguish source reuse from an independently permitted message. Four
-existing focused runner checks pass. The fixture was stopped after collecting the receipts; the operating stack was not
+it. The fixture's retirement oracle now retires all captured private sources
+containing the same synthetic fact and records each decision, so the next test
+can distinguish source reuse from an independently permitted message. Five
+focused runner checks pass, including the independent reply and missing original
+failure path. The fixture was stopped after collecting the receipts; the operating stack was not
 changed by this fixture.
 
 </entry>
