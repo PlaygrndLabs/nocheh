@@ -4,8 +4,9 @@ Reuses the installation's stores, Hermes, Honcho and deterministic inference.
 Only Telegram's transport URL changes; no public port or external network opens.
 """
 import argparse
+import base64
+import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -44,7 +45,8 @@ def archived_delivery(query,message,update_id):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--directory',type=Path,required=True)
-    parser.add_argument('--verify-only',action='store_true');args=parser.parse_args()
+    parser.add_argument('--verify-only',action='store_true')
+    parser.add_argument('--scenario',choices=('ordinary','faults-and-files'),default='ordinary');args=parser.parse_args()
     directory=args.directory.resolve()
     if not directory.is_relative_to(ROOT/'data/acceptance/results'):raise ValueError('owned_fixture_directory_required')
     info=json.loads((directory/'fixture.json').read_text());manifest=json.loads((directory/'compose.json').read_text())
@@ -106,7 +108,9 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait','hermes')
         wait('native_polling_connected',lambda:http('/health',service='hermes',port=8781)['telegram']=='connected',120)
         initial=http('/fixture/telegram');sent_before=len(initial['sent']);base=int(time.time())
+        assert not initial['faults'],'previous fixture faults remain pending'
         probes=[('owner_private',123,None),('named_topic',-10042,7),('general_topic',-10042,None)]
+        if args.scenario=='faults-and-files':probes=[('rate_limited_topic',-10042,7),('file_retry',123,None)]
         for index,(label,chat,topic) in enumerate(probes):
             number=base+index;text='سلام، یک جواب کوتاه بده.'
             if chat<0:text='@synthetic_fixture_bot '+text
@@ -114,8 +118,25 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
                 'from':{'id':123,'is_bot':False,'first_name':'Synthetic Owner'},'text':text}
             if chat<0:message['chat'].update(title='Synthetic Forum',is_forum=True);message['entities']=[{'type':'mention','offset':0,'length':len('@synthetic_fixture_bot')}]
             if topic is not None:message.update(message_thread_id=topic,is_topic_message=True)
+            if label=='rate_limited_topic':
+                http('/fixture/telegram/control',{'faults':[{'method':'sendMessage','code':429,
+                    'description':'Too Many Requests: retry after 2','parameters':{'retry_after':2}}]})
+            if label=='file_retry':
+                content=b'\x00synthetic-file\xff\nfixture-secret-ORCHID-2718\n'
+                file_id='document-'+str(number)
+                metadata={'file_id':file_id,'file_unique_id':'unique-'+str(number),'file_size':len(content)}
+                http('/fixture/telegram/control',{'files':[{**metadata,'file_path':'documents/'+file_id+'.bin',
+                    'bytes_base64':base64.b64encode(content).decode()}],'faults':[{'method':'getFile','code':503,
+                    'description':'Internal Server Error: synthetic file outage'}]})
+                message.pop('text');message['caption']=text
+                message['document']={**metadata,'file_name':'synthetic.bin','mime_type':'application/octet-stream'}
             http('/fixture/telegram',{'updates':[{'update_id':number,'message':message}]})
             event_id=wait(label+'_captured',lambda:query('nocheh_archive',"SELECT id FROM events WHERE kind='telegram_update' AND source_id='"+str(number)+"' AND scope='"+str(chat)+"'"))
+            if label=='file_retry':
+                wait('file_retry_completed',lambda:query('nocheh_control',"SELECT count(*) FROM attachment_retrievals WHERE event_id='"+event_id+"' AND state='done' AND attempts=2")=='1')
+                expected=hashlib.sha256(content).hexdigest()
+                assert query('nocheh_archive',"SELECT file_hash FROM artifacts WHERE event_id='"+event_id+"'")==expected
+                assert (directory/'state/files'/expected).read_bytes()==content,'original file bytes changed'
             def done():
                 raw=query('nocheh_control',"SELECT json_build_object('state',state,'attempts',attempts,'error',error_code) FROM dispatches WHERE event_id='"+event_id+"'")
                 if not raw:return False
@@ -128,6 +149,16 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
             assert new[0]['message']['chat']['id']==chat and new[0]['message'].get('message_thread_id')==topic
             assert '[mock]' in new[0]['message']['text']
             wait(label+'_delivery_archived',lambda:archived_delivery(query,new[0]['message'],number),60)
+            if label=='rate_limited_topic':
+                def rate_receipts():
+                    calls=[row for row in http('/fixture/telegram')['calls'] if row['method']=='sendMessage'
+                        and json.loads(row['parameters'].get('reply_parameters','{}')).get('message_id')==number]
+                    assert [row.get('status') for row in calls]==[429,200],'rate limit did not produce exactly one safe retry'
+                    assert calls[1]['at']-calls[0]['at']>=2,'retry_after was not honored'
+                    assert all(int(row['parameters']['chat_id'])==chat and int(row['parameters']['message_thread_id'])==topic for row in calls)
+                    return query('nocheh_control',"SELECT count(*) FROM content_operations o JOIN capture_effect_receipts r ON r.operation_id=o.id "
+                        +"WHERE o.kind='outbound_result' AND r.state IN ('rejected','delivered') AND o.operation_key LIKE 'outbound:123456:telegram:123456:update:"+str(number)+":sendMessage:%'")=='2'
+                wait('rate_limit_wait_and_durable_receipts',rate_receipts,60)
             sent_before=len(sent)
         number=base+len(probes)
         denied={'update_id':number,'message':{'message_id':number,'date':base,'chat':{'id':456,'type':'private'},
@@ -147,8 +178,9 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
         wait('polling_reconnected',lambda:http('/health',service='hermes',port=8781)['telegram']=='connected',120)
         after=http('/fixture/telegram');assert len(after['sent'])==sent_before and after['unknown']==prior_unknown
         assert not after['updates'],'acknowledged updates reappeared after restart'
+        assert not after['faults'],'fixture fault was not exercised'
         stats=http('/fixture/stats');assert stats['chat']>0 and stats['raw_canary_outside_detector']==0
-        (report_directory/'result.json').write_text(json.dumps({'passed':True,'live_acceptance':False,'gates':gates,
+        (report_directory/'result.json').write_text(json.dumps({'passed':True,'live_acceptance':False,'scenario':args.scenario,'gates':gates,
             'new_replies':len(after['sent'])-len(initial['sent']),'unknown_methods':after['unknown'][len(prior_unknown):],
             'prior_unknown_methods':prior_unknown,'stats':stats},indent=2)+'\n')
         print(json.dumps({'passed':True,'report':str(report_directory/'result.json')}),flush=True)

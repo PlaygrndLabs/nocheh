@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import time
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -46,14 +47,45 @@ class TelegramMock:
         self.state['updates']=sorted(known.values(),key=lambda item:item['update_id'])
         self.save();self.changed.set();return {'queued':len(self.state['updates'])}
 
+    def configure(self,body):
+        """Bounded synthetic files/faults; reject malformed control atomically."""
+        if not isinstance(body,dict) or set(body)-{'files','faults'}:raise ValueError('invalid_fixture_control')
+        files=dict(self.state['files']);faults=list(self.state['faults'])
+        for row in body.get('files',[]):
+            if (not isinstance(row,dict) or set(row)!={'file_id','file_unique_id','file_path','file_size','bytes_base64'}
+                    or not isinstance(row['file_id'],str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',row['file_id'])
+                    or not isinstance(row['file_path'],str) or not re.fullmatch(r'documents/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}',row['file_path'])
+                    or not isinstance(row['file_unique_id'],str) or not row['file_unique_id']):raise ValueError('invalid_fixture_file')
+            raw=base64.b64decode(row['bytes_base64'],validate=True)
+            if type(row['file_size']) is not int or len(raw)!=row['file_size'] or len(raw)>1024*1024:raise ValueError('invalid_fixture_file')
+            if row['file_id'] in files and files[row['file_id']]!=row:raise ValueError('fixture_file_conflict')
+            files[row['file_id']]=row
+        for row in body.get('faults',[]):
+            if (not isinstance(row,dict) or set(row)-{'method','code','description','parameters'}
+                    or row.get('method') not in ('sendMessage','getFile','getUpdates')
+                    or type(row.get('code')) is not int or not 400<=row['code']<=599
+                    or not isinstance(row.get('description'),str) or len(row['description'])>200):raise ValueError('invalid_fixture_fault')
+            parameters=row.get('parameters',{})
+            if not isinstance(parameters,dict) or set(parameters)-{'retry_after'}:raise ValueError('invalid_fixture_fault')
+            if row['code']==429:
+                delay=parameters.get('retry_after')
+                if type(delay) is not int or not 0<=delay<=10:raise ValueError('invalid_fixture_fault')
+            elif parameters:raise ValueError('invalid_fixture_fault')
+            faults.append(row)
+        if len(files)>100 or len(faults)>20:raise ValueError('fixture_control_limit')
+        self.state.update(files=files,faults=faults);self.save()
+        return {'files':len(files),'faults':len(faults)}
+
     @staticmethod
     def error(code,description,**extra):return code,{'ok':False,'error_code':code,'description':description,**extra}
 
     async def call(self,method,data):
         # Operational polling metadata is bounded; confirmed send receipts persist.
-        self.state['calls']=(self.state['calls']+[{'method':method,'parameters':data}])[-2000:]
+        trace={'method':method,'parameters':data,'at':time.time()}
+        self.state['calls']=(self.state['calls']+[trace])[-2000:]
         fault=next((item for item in self.state['faults'] if item['method']==method),None)
         if fault:
+            trace['status']=fault['code']
             self.state['faults'].remove(fault);self.save()
             return self.error(fault['code'],fault['description'],**({'parameters':fault['parameters']} if 'parameters' in fault else {}))
         if method=='getMe':result=BOT
@@ -119,6 +151,7 @@ class TelegramMock:
         else:
             self.state['unknown'].append(method);self.save()
             return self.error(400,'Bad Request: fixture method not implemented')
+        trace['status']=200
         self.save();return 200,{'ok':True,'result':result}
 
     def install(self,app):
@@ -149,3 +182,8 @@ class TelegramMock:
 
         @app.get('/fixture/telegram')
         async def snapshot():return self.state
+
+        @app.post('/fixture/telegram/control')
+        async def configure(request:Request):
+            try:return self.configure(await request.json())
+            except (ValueError,TypeError,KeyError):return JSONResponse({'error':'invalid_fixture_control'},status_code=400)

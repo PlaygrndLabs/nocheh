@@ -86,7 +86,12 @@ modeled escaped-plain-text subset fail explicitly. Original setup and oracle
 failures remain recorded. One earlier native attempt timed out before a model
 request; its automatic retry delivered once, and its cause is unproven. The later
 full run replies in 26–47 seconds under parallel host load. No operating service
-was restarted; all seventeen remain healthy. The existing same-topic recall failure, actual
+was restarted; all seventeen remain healthy. The subsequent fault/file extension
+passes ten SDK checks and seven coupled gates: a 429 waits before one safe topic
+delivery, and a failed file download recovers with exact original bytes/hash.
+The file's native reply hits the 230-second deadline before a model request;
+the extended run remains failed while guarded preparation is investigated.
+The existing same-topic recall failure, actual
 model quality and live release gates remain open. Detailed original
 failures, repairs, image identities and limitations stay in the ignored register.
 

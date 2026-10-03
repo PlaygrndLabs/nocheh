@@ -110,6 +110,14 @@ receipts, unselected-chat silence and restart receipts
 are separate from the ingestion/browser rehearsal. Parallel execution beside an
 operating stack requires the owner's explicit single-stack exception.
 
+Select `--scenario faults-and-files` to exercise a documented `429` response and
+one transient `getFile` failure. The run checks the physical retry delay and exact
+topic, both durable send receipts, one confirmed reply, a second attachment
+retrieval attempt, and the original binary bytes/hash. Its synthetic file includes
+the provider fixture's literal canary; inference outside detection must never see
+that raw value. Fault/file controls are bounded and reject invalid changes before
+mutating the saved fixture state.
+
 Compile the current worktree with Node 24 before running its tests. Run storage
 tests sequentially because several use the same synthetic schema. Record test
 names, passes, failures, skips, image IDs, source revision, commands and elapsed
