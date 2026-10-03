@@ -29,18 +29,18 @@ traffic or operating activation was performed by the simulation session.
 
 Approved actions now retain the concrete topic in `current`, owner review and
 native delivery; General and deleted-topic fallback checks pass. The actual
-storage action suite passes. Sixteen memory lifecycle cases and adjacent grant/action suites now pass.
+storage action suite passes. Eighteen memory lifecycle cases and adjacent grant/action suites now pass.
 Complete approved wording retains its whitespace; long follow-ups use the native
 chunk boundary, and historical normalized grants still require their saved hash.
 Approval, its exact action and outbox work commit together; legacy command replay
 and confirmed receipt-link repair preserve authority and prevent repeated sends.
-The initial interrupted-handoff failure remains in the evidence history. The refreshed
-service/database/management/native images include the topic, atomic handoff and
-complete-wording repairs at `63f9b99`; all 22 packaged native checks and the
-packaged Node import check pass. The later candidate also rejects a memory
+The initial interrupted-handoff failure remains in the evidence history. The
+service/database/management/native images were rebuilt at `1699716`; their native
+filesystem layers and runtime configuration match `63f9b99`, carrying its 22
+packaged native checks forward. The candidate also rejects a memory
 follow-up after its fact changes, both before admission and at physical delivery;
 receipt observation still confirms an earlier send without repeating it. Service
-images need this authority repair before coupled execution. The updated full
+images need the later unstarted-handoff recovery before coupled execution. The full
 fixture remains unstarted.
 
 Four synthetic entity cases also reproduced loss of an owner display name,
@@ -48,9 +48,15 @@ failure to use a merged identity, replacement of owner-corrected wording, and
 resurrection of an owner-retired fact. The repaired candidate passes ten focused
 entity checks and 23 adjacent learning, native-memory, organization, portability
 and sharing checks without skips. New messages use the current confirmed binding;
-automatic input preserves owner corrections. Service images need these changes
-before coupled execution. Historical owner-correction and recall observations
-retain their dates and do not verify this candidate's live behavior.
+automatic input preserves owner corrections. Historical owner-correction and
+recall observations retain their dates and do not verify this candidate's live behavior.
+
+Exact owner replay now repairs an unstarted legacy action withheld for incomplete
+approval links. Automatic restaging leaves it cancelled; a security denial rolls
+the recovery back. The action/lifecycle run has 22 passes; its separate grant
+fixture failed because it assumed the requested row was on the first page.
+The pagination-aware grant check now passes. The original failure is retained,
+and no live outcome is relabeled.
 
 Combined storage verification also reproduced inactive access-history import and
 reset schema-inventory defects. Their focused repairs preserve inactive authority

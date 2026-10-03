@@ -1410,3 +1410,29 @@ activation or live recall pass is claimed.
 [entity decisions](adr/0056-connected-entity-memory.md).
 
 </entry>
+
+<entry date="2026-10-03" task="Recover a withheld unstarted legacy memory handoff">
+
+A PostgreSQL case reproduced permanent cancellation when an old partial handoff
+reached the worker before the owner retried its approval. Exact saved-decision
+replay now resumes only an action cancelled before admission with no execution
+decision or result. Current grant, fact, wording and security checks still apply.
+Automatic restaging cannot resume it; security denial rolls resumption and link
+repair back together. Eighteen lifecycle scenarios and adjacent action/dispatch
+checks pass.
+
+The combined run recorded 22 passes and one grant-fixture failure: a lookup
+assumed its synthetic request was in the first page. The repaired fixture follows
+request, grant and map cursors and checks the exact created grant. Its focused
+rerun passes. Original failures and their distinct causes remain in ignored
+reports. TypeScript compilation and the final AST-only graph update pass.
+
+Images built at `1699716` include the preceding delivery-authority and owner-entity
+repairs. Native filesystem layers and runtime configuration equal `63f9b99`, so
+its 22 packaged checks are carried rather than rerun. Service images and the
+prepared manifest still need this final recovery change before coupled execution.
+The complete fixture remains unstarted; no operating activation is claimed.
+[Recovery decision](adr/0095-recover-unstarted-memory-handoffs.md),
+[behavior checks](../test/store-memory-followup.test.ts).
+
+</entry>

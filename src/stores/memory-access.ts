@@ -163,7 +163,7 @@ export class MemoryAccessRepository {
       if(current.state!=='approved'||current.revision!==request.revision||current.expires_at<=new Date()||
         active.state!=='active'||active.revision!==grant.revision||active.expires_at&&active.expires_at<=new Date())throw new HttpError(409,'memory_access_request_changed');
       if(active.delivery_action_id&&active.delivery_action_id!==prepared.id)throw new HttpError(409,'memory_access_request_changed');
-      const action=await this.actions.stageSystem(db,prepared);
+      const action=await this.actions.stageSystem(db,prepared,{resumeUnstarted:true});
       await db.query('UPDATE memory_fact_grants SET delivery_action_id=$2,updated_at=now() WHERE id=$1',[grantId,action.id]);
       await db.query('UPDATE memory_access_requests SET followup_action_id=$2,updated_at=now() WHERE id=$1',[request.id,action.id]);
       await db.query('COMMIT');

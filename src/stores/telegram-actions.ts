@@ -171,14 +171,19 @@ export class TelegramActionRepository {
       fingerprint:digest(canonical({destination,text:preparedText})),text_hash:digest(preparedText),guard_revision:representation.revision};
   }
   /** Trusted callers commit this action and its workflow request with their own control decision. */
-  async stageSystem(db:pg.PoolClient,prepared:PreparedSystemAction) {
+  async stageSystem(db:pg.PoolClient,prepared:PreparedSystemAction,options:{resumeUnstarted?:boolean}={}) {
     const {id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision}=prepared;
     await this.fence(db,binding);
     await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,state,authority)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved','exact_owner_approval') ON CONFLICT DO NOTHING`,
         [id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision]);
-    const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    let row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
+    // Exact owner-command recovery may finish an older interrupted handoff.
+    // A native attempt or result permanently excludes this resumption path.
+    if(options.resumeUnstarted&&row.state==='cancelled'&&row.error_code==='action_delivery_denied'&&
+      row.security_decision===null&&row.result_reference===null)row=(await db.query(`UPDATE telegram_action_requests
+        SET state='approved',error_code=NULL,next_attempt=now(),revision=revision+1,updated_at=now() WHERE id=$1 RETURNING *`,[id])).rows[0];
     const effect=this.effect(row),decision=await evaluate(db,effect,row.authority,true);
     if(decision.outcome!=='allow')throw new HttpError(403,'action_delivery_denied');
     await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
