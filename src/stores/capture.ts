@@ -31,7 +31,11 @@ export class CaptureCoordinator {
     if(previous.source_revision!==source.reference.revision||previous.payload_hash!==source.reference.input_hash)
       throw new HttpError(409,'capture_handoff_conflict');
     if(intake.transport==='capture'&&source.origin==='live')await this.reactions.capture(client,source.reference);
-    await requestWorkflow(client,'preparation',source.reference.id);
+    // Wire batches retain exact transport evidence; their individual updates
+    // already enter preparation. Do not spend a detector call on every polling
+    // envelope ahead of the actual conversation. Explicit owner preparation
+    // remains available and unprepared sources still fail closed on retrieval.
+    if(source.kind!=='telegram_wire')await requestWorkflow(client,'preparation',source.reference.id);
     if(intake.transport==='capture'&&source.origin==='live'&&source.kind!=='telegram_wire') {
       await requestWorkflow(client,'memory_review','source:'+source.reference.id);
       if(source.channel==='telegram'&&source.kind==='telegram_update')await requestWorkflow(client,'telegram',source.reference.id);

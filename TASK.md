@@ -131,6 +131,16 @@ this UI verification does not establish live recall or release readiness.
   [Context checks](test/store-prepared-context.test.ts),
   [recovery checks](services/hermes/test_native_leases.py).
 
+  Real-model observation found transport envelopes entering the same detector
+  queue as their individual messages. Capture now preserves exact wire bytes,
+  original records and recovery receipts without automatically preparing each
+  envelope. Actual updates retain their preparation and dispatch workflows;
+  unprepared retrieval still fails closed. Three storage/recovery checks and
+  three adjacent preparation/generated-capture checks pass without skips.
+  TypeScript compilation and the candidate image's runtime/test hashes pass;
+  the coupled real-model timing and semantic recheck remains pending.
+  [Capture checks](test/stores.test.ts).
+
   A fresh empty-state installation of the latest guard/lease candidate passes
   all nineteen coupled checks, including actual Honcho ingestion, silent
   convention/reaction learning, native browser work and outage memory recovery
@@ -265,11 +275,17 @@ this UI verification does not establish live recall or release readiness.
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
 the existing provider, without another login or refresh owner. Its Honcho meter
-uses the authoritative shared spending ledger. That ledger has reached its
-1,500 monthly subscription reasoning attempts; the $5 embedding cap still has
-headroom. No limit increase is authorized. Real Hermes evaluation is in progress
-for reaction-removal recall, corrections/retirement, audience isolation and
-recall after restart; full Honcho reasoning quality remains blocked by capacity.
+uses the authoritative shared spending ledger. After its 1,500 monthly reasoning
+attempts were consumed, the owner authorized 200 additional fixture requests,
+then all additional requests needed for this evaluation. The temporary fixture
+starts with a shared ceiling of 1,700 and can increase its own allowance as
+needed; it does not reset accounting, alter the $5 embedding cap, or change the
+operating configuration. Real Hermes/Honcho evaluation remains in progress for
+reaction-removal recall, corrections/retirement, audience isolation and recall
+after restart. The first reaction question exceeded its unchanged five-minute
+gate; its pending execution and the subsequent already-captured correction
+question must be reconciled before injecting more questions. No semantic pass
+has been established.
 The fixture relay has four focused admission/HTTP checks, including restart-safe
 limits, concurrency, streaming and error redaction. These are infrastructure
 checks, not conversational quality passes. Operating activation remains separate.

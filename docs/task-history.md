@@ -1759,3 +1759,29 @@ no conversational quality or live release pass is claimed.
 [Procedure](telegram-simulation.md), [relay tests](../test/test_model_relay.py).
 
 </entry>
+
+<entry date="2026-10-03" area="Wire capture without duplicate model preparation">
+
+The first real-model reaction question exceeded its unchanged five-minute
+deadline. Investigation found raw Telegram transport envelopes queued for
+literal detection ahead of their actual updates; a synthetic route probe alone
+took 29.2 seconds. This is an observed source of unnecessary work, not yet a
+complete explanation of the failed turn. Capture now retains exact wire bytes,
+idempotent original records and handoff recovery without automatically preparing
+each envelope. Actual updates retain their normal workflows, and unprepared
+guarded retrieval remains closed. Three storage/recovery and three adjacent
+preparation/generated-capture checks pass without skips. TypeScript compilation
+and image runtime/test hashes pass. A macOS full build was unavailable because
+the copied esbuild dependency targets Linux; an initial overlay image build also
+failed because its base was expressed as an untagged image ID. The corrected
+build verifies the local base tag against that ID before building without network.
+
+The owner authorized 200 additional Honcho requests, then all further requests
+needed for this synthetic evaluation. A fixture-only meter wrapper initially
+uses a 1,700 shared request ceiling with the existing accounting ledger. The
+operating 1,500-request policy, OAuth owner and $5 embedding cap are unchanged.
+The pending reaction and correction turns require reconciliation before more
+questions. No real-model semantic or coupled timing pass is claimed.
+[Checks](../test/stores.test.ts), [adjacent preparation](../test/store-preparation.test.ts).
+
+</entry>
