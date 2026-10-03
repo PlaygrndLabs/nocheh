@@ -308,9 +308,9 @@ answer shows no other-topic disclosure, but neither failed timing gate is a pass
 A later retirement question first fails with `assistant_runtime_unavailable`,
 then physically receives a non-disclosing answer on retry. Honcho also returned the synthetic name while a separately captured,
 still-active assistant reply stated the same fact. This observation alone does
-not establish reuse of the retired owner message. The fixture-only oracle must
-explicitly retire every captured private source containing that synthetic name
-before its next question. Hermes' parent
+not establish reuse of the retired owner message. The fixture-only oracle now
+explicitly retires every captured private source containing that synthetic name
+before its next question; five focused runner checks pass. Hermes' parent
 turn limit is 230 seconds while its Honcho recall request allowed 615; a bounded
 foreground recall candidate passes 26 relevant Python checks and needs packaged
 and coupled verification. Four pinned-native memory formatter checks cannot run in

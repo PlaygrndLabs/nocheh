@@ -138,8 +138,8 @@ fresh-topic attempt failed before delivery. Private recall after a Hermes restar
 passes on its first attempt. A subsequent retirement question timed out on the
 first attempt and received a non-disclosing reply on retry. A separately captured assistant reply stating the same fact had not been
 retired, so Honcho’s later output is inconclusive about retired owner-source
-reuse. The fixture oracle needs explicit retirement of every captured synthetic source with
-that fact before retesting. Earlier timed-out reaction/correction turns later
+reuse. The fixture oracle now explicitly retires every captured synthetic source with
+that fact before retesting; five focused runner checks pass. Earlier timed-out reaction/correction turns later
 answered correctly on retries without passing their original gates. These
 observations do not repeat cold ingestion or pass operating recall. Additional
 model requests are owner-authorized for this synthetic fixture only, preserving

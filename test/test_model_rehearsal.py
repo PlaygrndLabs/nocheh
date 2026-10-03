@@ -1,7 +1,7 @@
 """Causal reply matching for real-model observations with late deliveries."""
 import unittest
 from unittest.mock import patch
-from tools.acceptance.model_rehearsal import main, replies_to
+from tools.acceptance.model_rehearsal import main, replies_to, retire_synthetic_name_sources
 
 
 class ModelRehearsalReplyTests(unittest.TestCase):
@@ -19,6 +19,33 @@ class ModelRehearsalReplyTests(unittest.TestCase):
     def test_duplicate_physical_replies_remain_visible(self):
         row = {'parameters': {'reply_parameters': '{"message_id":8}'}, 'message': {'text': 'answer', 'chat': {'id': 123}}}
         self.assertEqual(len(replies_to({'sent': [row, row]}, 8, 123)), 2)
+
+    def test_retirement_explicitly_includes_independent_delivered_answer(self):
+        original, answer = 'a'*64, 'b'*64
+        class Fixture:
+            def __init__(self): self.posts=[]
+            def query(self, database, sql):
+                self_database = database
+                assert self_database == 'nocheh_archive'
+                assert "kind IN ('telegram_update','telegram_delivered_message')" in sql
+                assert "scope='123'" in sql
+                return original + '\n' + answer
+            def http(self, path, body=None):
+                event_id = path.split('/')[3]
+                if body is None:
+                    return {'event_id':event_id,'retired':event_id==original,
+                            'revision':1 if event_id==original else 0}
+                self.posts.append((event_id,body))
+                return {'event_id':event_id,'retired':True,'revision':body['expected_revision']+1}
+        fixture=Fixture()
+        ids, decisions=retire_synthetic_name_sources(fixture,original,'synthetic-case')
+        self.assertEqual(ids,[original,answer])
+        self.assertEqual([decision['retired'] for decision in decisions],[True,True])
+        self.assertEqual(fixture.posts,[(answer,{'retired':True,'expected_revision':0,
+                                                'operation_id':'synthetic-case-'+answer})])
+        with patch.object(fixture,'query',return_value=answer):
+            with self.assertRaisesRegex(AssertionError,'private_fact_source_missing'):
+                retire_synthetic_name_sources(fixture,original,'synthetic-case')
 
     def test_invalid_continuation_stops_before_opening_a_fixture(self):
         for options in (['--start-at', 'retired_fact'], ['--isolation-topic', '0'], ['--isolation-topic', '7']):
