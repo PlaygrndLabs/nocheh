@@ -17,9 +17,10 @@ reliability or release approval.
 <simulation_impact>
 
 The personal-use [Telegram simulation](telegram-simulation.md) reproduced native
-fallback from a missing topic into General and continued delivery after a
-mid-response revocation. The candidate physical-request boundary passes nine
-synthetic scenarios and ten adjacent capture/gateway checks. This changes reply
+fallback from a missing topic into General, continued delivery after a
+mid-response revocation, and permanently replayed rate-limit rejections. The
+candidate passes eleven native scenarios and fourteen capture/gateway checks,
+including bounded, durable `429` recovery and authorization during its wait. This changes reply
 and approved-action delivery; their historical live passes remain dated evidence
 and do not verify the new candidate. Verify operating activation before any
 targeted live delivery check. Source capture, original voice bytes, subscription

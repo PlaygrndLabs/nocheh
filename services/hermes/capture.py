@@ -7,6 +7,7 @@ import contextvars
 import hashlib
 import json
 import os
+import time
 import uuid
 from time import perf_counter
 from datetime import datetime, timezone
@@ -110,15 +111,23 @@ class Capture:
             self.enqueue(value)
 
     def outbound(self, method, parameters, dispatch_key):
-        key = f"outbound:{self.bot_id}:{dispatch_key}:{method}:{digest(canonical(parameters))}"
+        base = f"outbound:{self.bot_id}:{dispatch_key}:{method}:{digest(canonical(parameters))}"
         journal = self.root / 'outbound'
-        intent = journal / (digest(key) + '.intent')
-        result = journal / (digest(key) + '.result')
-        if result.exists():
+        # A documented 429 is an explicit rejection, not an uncertain send.
+        # Retain every attempt and honor its wait; the pinned adapter bounds its
+        # own retries to three. All other results retain their existing behavior.
+        for attempt in range(3):
+            key = base if attempt == 0 else base + ':rate-retry:' + str(attempt)
+            intent = journal / (digest(key) + '.intent')
+            result = journal / (digest(key) + '.result')
+            if not result.exists():
+                break
             saved = json.loads(result.read_bytes())
             self.enqueue(saved['event'])
             if saved['state'] == 'ambiguous':
                 raise RuntimeError('outbound_delivery_ambiguous')
+            if attempt < 2 and self.rate_limit_elapsed(saved, result):
+                continue
             return key, (saved['status'], base64.b64decode(saved['wire']))
         if intent.exists():
             self.enqueue(json.loads(intent.read_bytes()))
@@ -129,6 +138,18 @@ class Capture:
             raise RuntimeError('outbound_delivery_ambiguous')
         self.enqueue(event)
         return key, None
+
+    @staticmethod
+    def rate_limit_elapsed(saved, path):
+        if saved['state'] != 'rejected' or saved['status'] != 429:
+            return False
+        try:
+            response = json.loads(base64.b64decode(saved['wire']))
+            delay = response['parameters']['retry_after']
+            return (response.get('ok') is False and response.get('error_code') == 429 and
+                    type(delay) is int and delay >= 0 and time.time() >= path.stat().st_mtime + delay)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return False
 
     def complete(self, key, method, parameters, response):
         status, raw = response if response else (0, b'')

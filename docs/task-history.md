@@ -1029,3 +1029,18 @@ local evidence. Broader simulation and existing live recall/release gates are
 still pending; this increment neither deploys nor activates the operating runtime.
 
 </entry>
+
+<entry date="2026-10-03" task="Durable Telegram rate-limit recovery">
+
+The synthetic Bot API returned one documented `429` followed by a successful
+send. The initial native rehearsal failed because the durable journal replayed
+the rejection on every retry. Each valid, elapsed rate-limit rejection can now
+advance to a separately receipted attempt, with a three-attempt bound. Confirmed
+and uncertain effects remain non-repeatable, and current authority is rechecked.
+Eleven native scenarios and fourteen capture/gateway checks pass, including
+restart, wait deadlines, malformed errors, orphan retries and revocation during
+the wait. One mistyped test-module invocation is retained beside the successful
+three-test gateway rerun. The original failure remains in ignored evidence.
+The repair does not activate the operating runtime or pass a live release gate.
+
+</entry>

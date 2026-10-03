@@ -198,6 +198,22 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.new_gateway().dispatch(envelope), result)
         self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), before)
 
+    async def test_rate_limit_rejection_recovers_without_duplicate_delivery(self):
+        rejected = False
+        def rate_limit(data):
+            nonlocal rejected
+            if not rejected:
+                rejected = True
+                return 429, canonical({'ok': False, 'error_code': 429,
+                    'description': 'Too Many Requests: retry after 1', 'parameters': {'retry_after': 1}})
+        self.request.respond = rate_limit
+        envelope = self.envelope()
+        self.assertEqual(await self.gateway.dispatch(envelope), {'state': 'done'})
+        self.assertEqual(len(self.request.delivered), 1)
+        self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), 2)
+        self.assertEqual(await self.new_gateway().dispatch(envelope), {'state': 'done'})
+        self.assertEqual(len(self.request.delivered), 1)
+
     async def test_cancel_between_chunks_keeps_partial_delivery_without_later_sends(self):
         self.answer = 'Synthetic long answer for cancellation. ' * 350
         cancelled = threading.Event()
@@ -208,6 +224,17 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.request.delivered), 1)
         self.assertEqual(await self.new_gateway().dispatch(envelope), result)
         self.assertEqual(len(self.request.delivered), 1)
+
+    async def test_revocation_during_rate_limit_wait_blocks_the_retry(self):
+        def revoke_and_reject(data):
+            self.allowed = False
+            return 429, canonical({'ok': False, 'error_code': 429,
+                'description': 'Too Many Requests: retry after 1', 'parameters': {'retry_after': 1}})
+        self.request.respond = revoke_and_reject
+        result = await self.gateway.dispatch(self.envelope())
+        self.assertNotEqual(result['state'], 'done')
+        self.assertEqual(self.request.delivered, [])
+        self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), 1)
 
     async def test_deleted_reply_anchor_may_change_without_changing_topic(self):
         self.request.respond = lambda data: (400, canonical({'ok': False, 'error_code': 400,
