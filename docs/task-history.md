@@ -1281,3 +1281,27 @@ or live acceptance was performed. [Decision](adr/0092-exact-topic-action-destina
 [native checks](../services/hermes/test_telegram_simulation.py).
 
 </entry>
+
+<entry date="2026-10-03" task="Commit memory approval and automatic follow-up atomically">
+
+Synthetic failure injection reproduced a committed approval with no follow-up;
+replaying the saved decision did not repair it. Guarded message preparation now
+precedes control locks, and the decision, grant, exact action, both links and
+workflow outbox commit together. Failed staging or security denial leaves the
+request pending. Expiry is checked again before commit, and delivery wording
+must retain the approved hash. Exact replay repairs a current older handoff with
+its original identity. Confirmed partial links repair history after revocation
+without reactivating a grant or sending again.
+
+TypeScript compilation and AST-only graph generation pass. The initial affected
+memory/action/dispatch run passes 13 checks. The final memory run passes 13 checks,
+including eleven lifecycle scenarios, their parent test and the existing grant
+suite, with no skips. It covers lost acknowledgments, old confirmed receipts,
+normal/topic delivery, interrupted staging, disabled follow-up, expiry, denial and
+revocation. Original failures and focused runs remain in ignored evidence. Native
+Telegram checks retain the preceding topic increment's pass; no native source
+changed in this increment. No operating activation or live pass is claimed.
+[Decision](adr/0093-atomic-memory-approval-followups.md),
+[behavior checks](../test/store-memory-followup.test.ts).
+
+</entry>

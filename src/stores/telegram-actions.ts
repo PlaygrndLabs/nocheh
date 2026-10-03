@@ -13,7 +13,7 @@ import type {SourceReference} from './archive.js';
 import {OperationRepository,type OperationReference} from './operations.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import type {SourceAccessRepository} from './access.js';
-import type {DerivedRepository} from './derived.js';
+import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {GuardRepository,GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
@@ -21,6 +21,8 @@ import type {RuntimeTurnRepository} from './turns.js';
 const protocol='telegram-action-v2';
 const validDestination=(value:string)=>/^-?[1-9]\d{0,18}(?:\/topic\/[1-9]\d{0,15})?$/.test(value)&&
   (!value.includes('/topic/')||Number.isSafeInteger(Number(value.split('/topic/')[1])));
+type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
+  scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null};
 export class TelegramActionRepository {
   constructor(readonly stores:StorePools,readonly access:SourceAccessRepository,readonly derived:DerivedRepository,
     readonly guards:GuardRepository,readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,
@@ -119,6 +121,12 @@ export class TelegramActionRepository {
    * supplies the durable source and audience; the normal guard, security,
    * delivery authorization, workflow, and receipt path still applies. */
   async approvedSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string) {
+    const prepared=await this.prepareSystem(principal,source,binding,destination,text,key),db=await this.stores.control.connect();
+    try {await db.query('BEGIN');const action=await this.stageSystem(db,prepared);await db.query('COMMIT');return action;}
+    catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  /** Prepare derived bytes before acquiring control locks; preparation can itself publish guard records. */
+  async prepareSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<PreparedSystemAction> {
     if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
     if(!validDestination(destination)||!text.trim()||text.length>3500)throw new HttpError(400,'invalid_action');
     await this.guards.assertCurrent(binding);await this.access.archive.verify(source);
@@ -128,19 +136,22 @@ export class TelegramActionRepository {
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,3500);
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
-    const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
-    try {
-      await db.query('BEGIN');await this.fence(db,binding);
-      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,state,authority)
+    return {id,source,proposal,binding,scope:principal.scope,space:principal.space,profile:principal.logical_profile,destination,
+      fingerprint:digest(canonical({destination,text:preparedText})),text_hash:digest(preparedText),guard_revision:representation.revision};
+  }
+  /** Trusted callers commit this action and its workflow request with their own control decision. */
+  async stageSystem(db:pg.PoolClient,prepared:PreparedSystemAction) {
+    const {id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision}=prepared;
+    await this.fence(db,binding);
+    await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,state,authority)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved','exact_owner_approval') ON CONFLICT DO NOTHING`,
-        [id,source,proposal,binding,principal.scope,principal.space,principal.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
-      const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];
-      if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
-      const effect=this.effect(row),decision=await evaluate(db,effect,row.authority,true);
-      if(decision.outcome!=='allow')throw new HttpError(403,'action_delivery_denied');
-      await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
-      await db.query('COMMIT');return {id,state:row.state,fingerprint};
-    } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+        [id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision]);
+    const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
+    const effect=this.effect(row),decision=await evaluate(db,effect,row.authority,true);
+    if(decision.outcome!=='allow')throw new HttpError(403,'action_delivery_denied');
+    await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
+    return {id,state:row.state,fingerprint};
   }
   async inspect(principal:Reader,id:string) {
     const row=await this.row(id);

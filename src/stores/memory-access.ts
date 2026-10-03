@@ -144,6 +144,31 @@ export class MemoryAccessRepository {
   async grants(principal:Reader,after='') {admin(principal);if(after)identity(after);await this.reconcile();const rows=(await this.stores.control.query('SELECT * FROM memory_fact_grants WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
     const page=rows.slice(0,100),artifacts=await this.artifacts(page,'representation_reference'),grants=page.map(row=>{const artifact=artifacts.get(row.representation_reference.id);return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null};});
     return {grants,next:rows.length>100?rows[99].id:null};}
+  /** Repair a pre-atomic handoff only on replay of its exact owner command, under current authority. */
+  private async recoverFollowup(request:any,grantId:string) {
+    if(request.state!=='approved'||request.followup_action_id||request.expires_at<=new Date()||!(await this.effective(request.destination)).effective.auto_followup)return;
+    const grant=(await this.stores.control.query('SELECT * FROM memory_fact_grants WHERE id=$1 AND request_id=$2',[grantId,request.id])).rows[0];
+    if(!grant||grant.state!=='active'||grant.expires_at&&grant.expires_at<=new Date())return;
+    const binding=await this.guards.state(),text=await this.validateGrant(grant,binding);
+    if(!text||canonical(request.binding)!==canonical(binding))return;
+    const fact=await this.fact(grant.fact_id),prepared=await this.actions.prepareSystem(this.principal(request),request.source_reference,binding,
+      request.destination,text,'memory-access-followup:'+grantId);
+    if(prepared.text_hash!==grant.text_hash)throw new HttpError(409,'memory_access_wording_changed');
+    const db=await this.stores.control.connect();
+    try {
+      await db.query('BEGIN');await this.fence(db,binding,fact);
+      const current=(await db.query('SELECT * FROM memory_access_requests WHERE id=$1 FOR UPDATE',[request.id])).rows[0];
+      const active=(await db.query('SELECT * FROM memory_fact_grants WHERE id=$1 FOR UPDATE',[grantId])).rows[0];
+      if(current.followup_action_id){await db.query('COMMIT');return;}
+      if(current.state!=='approved'||current.revision!==request.revision||current.expires_at<=new Date()||
+        active.state!=='active'||active.revision!==grant.revision||active.expires_at&&active.expires_at<=new Date())throw new HttpError(409,'memory_access_request_changed');
+      if(active.delivery_action_id&&active.delivery_action_id!==prepared.id)throw new HttpError(409,'memory_access_request_changed');
+      const action=await this.actions.stageSystem(db,prepared);
+      await db.query('UPDATE memory_fact_grants SET delivery_action_id=$2,updated_at=now() WHERE id=$1',[grantId,action.id]);
+      await db.query('UPDATE memory_access_requests SET followup_action_id=$2,updated_at=now() WHERE id=$1',[request.id,action.id]);
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
   async decide(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['decision','wording','expected_revision','operation_id']),decision=String(body.decision);
     if(!['one_time','persistent','reject'].includes(decision))throw new HttpError(400,'invalid_memory_access_decision');
@@ -151,7 +176,9 @@ export class MemoryAccessRepository {
     const request=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id=$1',[requestId])).rows[0];if(!request)throw new HttpError(404,'memory_access_request_not_found');
     const command={kind:'memory_access_decision',requestId,decision,wording:body.wording??null,expected},hash=digest(canonical(command));
     const prior=(await this.stores.control.query('SELECT request_hash,grant_id,decision,revision FROM memory_access_decisions WHERE operation_id=$1',[operation])).rows[0];
-    if(prior){if(prior.request_hash!==hash)throw new HttpError(409,'memory_access_decision_conflict');return {id:requestId,state:prior.decision==='reject'?'rejected':'approved',grant_id:prior.grant_id,revision:prior.revision};}
+    if(prior){if(prior.request_hash!==hash)throw new HttpError(409,'memory_access_decision_conflict');
+      if(prior.grant_id)await this.recoverFollowup(request,prior.grant_id);
+      return {id:requestId,state:prior.decision==='reject'?'rejected':'approved',grant_id:prior.grant_id,revision:prior.revision};}
     if(request.revision!==expected||request.state!=='pending')throw new HttpError(409,'memory_access_request_changed');
     if(request.expires_at<=new Date()){await this.stores.control.query("UPDATE memory_access_requests SET state='expired',revision=revision+1,updated_at=now() WHERE id=$1 AND state='pending'",[requestId]);throw new HttpError(409,'memory_access_request_expired');}
     if(decision==='reject') {const db=await this.stores.control.connect();try{await db.query('BEGIN');const current=(await db.query('SELECT * FROM memory_access_requests WHERE id=$1 FOR UPDATE',[requestId])).rows[0];
@@ -163,19 +190,22 @@ export class MemoryAccessRepository {
     if(fact.revision!==request.fact_revision){await this.suspendRequest(requestId,expected);throw new HttpError(409,'memory_fact_changed');}
     const binding=await this.guards.state();if(canonical(binding)!==canonical(request.binding)){await this.suspendRequest(requestId,expected);throw new HttpError(409,'memory_access_context_changed');}
     const wording=body.wording===undefined?fact.content:string(body.wording,12000),representation=await this.representation(fact,wording,binding,operation);
-    const grantId=digest(canonical([protocol,'grant',operation,requestId,decision,representation.hash])),db=await this.stores.control.connect();
+    const grantId=digest(canonical([protocol,'grant',operation,requestId,decision,representation.hash]));
+    const setting=(await this.effective(request.destination)).effective;
+    const followup=setting.auto_followup?await this.actions.prepareSystem(this.principal(request),request.source_reference,binding,
+      request.destination,representation.text,'memory-access-followup:'+grantId):null;
+    if(followup&&followup.text_hash!==representation.hash)throw new HttpError(409,'memory_access_wording_changed');
+    const db=await this.stores.control.connect();
     try {await db.query('BEGIN');await this.fence(db,binding,fact);const current=(await db.query('SELECT * FROM memory_access_requests WHERE id=$1 FOR UPDATE',[requestId])).rows[0];
       if(current.revision!==expected||current.state!=='pending')throw new HttpError(409,'memory_access_request_changed');
-      await db.query(`INSERT INTO memory_fact_grants(id,request_id,destination,fact_id,fact_revision,representation_reference,binding,guard_revision,text_hash,mode)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[grantId,requestId,request.destination,fact.id,fact.revision,representation.reference,binding,representation.guard_revision,representation.hash,decision]);
-      await db.query("UPDATE memory_access_requests SET state='approved',decision=$2,grant_id=$3,revision=revision+1,updated_at=now() WHERE id=$1",[requestId,decision,grantId]);
+      if(current.expires_at<=new Date())throw new HttpError(409,'memory_access_request_expired');
+      if(followup)await this.actions.stageSystem(db,followup);
+      await db.query(`INSERT INTO memory_fact_grants(id,request_id,destination,fact_id,fact_revision,representation_reference,binding,guard_revision,text_hash,mode,delivery_action_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[grantId,requestId,request.destination,fact.id,fact.revision,representation.reference,binding,representation.guard_revision,representation.hash,decision,followup?.id??null]);
+      await db.query("UPDATE memory_access_requests SET state='approved',decision=$2,grant_id=$3,followup_action_id=$4,revision=revision+1,updated_at=now() WHERE id=$1",[requestId,decision,grantId,followup?.id??null]);
       await db.query('INSERT INTO memory_access_decisions(operation_id,request_hash,request_id,grant_id,decision,revision) VALUES($1,$2,$3,$4,$5,$6)',[operation,hash,requestId,grantId,decision,expected+1]);
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
-    const setting=(await this.effective(request.destination)).effective;
-    if(setting.auto_followup)try {const action=await this.actions.approvedSystem(this.principal(request),request.source_reference,binding,request.destination,representation.text,'memory-access-followup:'+grantId);
-      await this.stores.control.query('UPDATE memory_fact_grants SET delivery_action_id=$2,updated_at=now() WHERE id=$1',[grantId,action.id]);
-      await this.stores.control.query('UPDATE memory_access_requests SET followup_action_id=$2,updated_at=now() WHERE id=$1',[requestId,action.id]);}catch{/* Approval remains active; the owner can retry delivery. */}
     return {id:requestId,state:'approved',grant_id:grantId,revision:expected+1};
   }
   async grant(principal:Reader,input:unknown) {
@@ -198,6 +228,13 @@ export class MemoryAccessRepository {
     return this.commands.run(principal,string(body.operation_id,200),{kind:'memory_fact_grant_revoke',grant,expected},async db=>{const row=(await db.query(`UPDATE memory_fact_grants SET state='revoked',revision=revision+1,revoked_at=now(),updated_at=now()
       WHERE id=$1 AND revision=$2 AND state IN ('active','suspended') RETURNING revision`,[grant,expected])).rows[0];if(!row)throw new HttpError(409,'memory_fact_grant_changed');return {id:grant,state:'revoked',revision:row.revision};});}
   async reconcile() {
+    // A pre-atomic handoff may have linked the grant but not the request before
+    // interruption. A confirmed, exactly bound receipt repairs bookkeeping only.
+    await this.stores.control.query(`UPDATE memory_access_requests r SET followup_action_id=a.id,updated_at=now()
+      FROM memory_fact_grants g JOIN telegram_action_requests a ON a.id=g.delivery_action_id
+      WHERE r.id=g.request_id AND r.grant_id=g.id AND r.state='approved' AND r.followup_action_id IS NULL AND a.state='done'
+      AND g.destination=r.destination AND a.destination=r.destination AND a.text_hash=g.text_hash
+      AND a.source_reference=r.source_reference AND a.binding=g.binding AND g.binding=r.binding`);
     await this.stores.control.query("UPDATE memory_access_requests SET state='expired',revision=revision+1,updated_at=now() WHERE state='pending' AND expires_at<=now()");
     await this.stores.control.query("UPDATE memory_fact_grants SET state='expired',revision=revision+1,updated_at=now() WHERE state='active' AND expires_at IS NOT NULL AND expires_at<=now()");
     await this.stores.control.query(`UPDATE memory_access_requests r SET state='delivered',revision=r.revision+1,updated_at=now() FROM telegram_action_requests a
