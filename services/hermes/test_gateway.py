@@ -153,17 +153,27 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     failures=[]
                     async def fail_before_delivery(event):
                         failures.append(event)
-                        TURN.get()['agent_result']={'state':'failed','error_code':'assistant_runtime_unavailable'}
+                        TURN.get()['agent_result']={'state':'failed','error_code':'assistant_runtime_unavailable',
+                            'error_type':'HTTPError','error_stage':'request','private_response':'do not persist'}
                         return None
                     adapter.set_message_handler(fail_before_delivery)
                     retry=envelope(23,'Retry a failed assistant turn')
-                    self.assertEqual(await gateway.dispatch(retry),{'state':'failed','error_code':'assistant_runtime_unavailable'})
+                    safe_failure={'state':'failed','error_code':'assistant_runtime_unavailable',
+                        'error_type':'HTTPError','error_stage':'request'}
+                    self.assertEqual(await gateway.dispatch(retry),safe_failure)
                     self.assertEqual(len(request.sent),before,'pre-delivery failure cannot send')
-                    self.assertEqual(await gateway.dispatch(retry),{'state':'failed','error_code':'assistant_runtime_unavailable'})
+                    self.assertEqual(await gateway.dispatch(retry),safe_failure)
                     self.assertEqual(len(failures),1,'same attempt reuses its failed receipt')
                     adapter.set_message_handler(message);retry['attempt']=2
                     self.assertEqual(await gateway.dispatch(retry),{'state':'done'})
                     self.assertEqual(len(request.sent),before+1,'fresh retry attempt sends exactly once')
+                    async def malformed_diagnostic(event):
+                        TURN.get()['agent_result']={'state':'failed','error_code':'assistant_runtime_unavailable',
+                            'error_type':'HTTPError:private','error_stage':'request:private'}
+                        return None
+                    adapter.set_message_handler(malformed_diagnostic)
+                    self.assertEqual(await gateway.dispatch(envelope(26,'Invalid diagnostic is excluded')),
+                                     {'state':'failed','error_code':'assistant_runtime_unavailable'})
                     async def unexpected_tool(event):
                         TURN.get()['agent_result']={'state':'failed','error_code':'unexpected_profile_tool',
                             'unexpected_tool_names':['foreign_tool','private:payload']}

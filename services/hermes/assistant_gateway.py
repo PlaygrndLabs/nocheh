@@ -275,6 +275,14 @@ class AssistantGateway:
                 elif agent['state']=='cancelled':result={'state':'cancelled'}
                 elif agent['state']!='done':
                     result={'state':'failed','error_code':agent.get('error_code','model_unavailable')}
+                    if result['error_code']=='assistant_runtime_unavailable':
+                        # The child emits only Python type/function identifiers.
+                        # Preserve those bounded identifiers, never exception text,
+                        # so a failed turn can be diagnosed from its receipt.
+                        for key in ('error_type','error_stage'):
+                            value=agent.get(key)
+                            if isinstance(value,str) and re.fullmatch(r'[A-Za-z_]{1,64}',value):
+                                result[key]=value
                     if result['error_code']=='unexpected_profile_tool':
                         names=agent.get('unexpected_tool_names')
                         if isinstance(names,list):

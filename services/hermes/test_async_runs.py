@@ -65,10 +65,13 @@ class AsyncRunTests(unittest.TestCase):
 
     def test_guard_change_reason_survives_durable_async_receipt_without_answer(self):
         with tempfile.TemporaryDirectory() as folder:
-            runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'guard_context_changed','text':'private answer'},lambda body:None)
+            runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'guard_context_changed',
+                'error_type':'HTTPError','error_stage':'request','text':'private answer'},lambda body:None)
             body=self.body();runs.start(body);result=self.wait(runs,body)
             self.assertEqual(result['error_code'],'guard_context_changed')
             self.assertEqual(result['state'],'failed')
+            self.assertNotIn('error_type',result)
+            self.assertNotIn('error_stage',result)
             self.assertNotIn('private',runs._path(identity(body),'.result').read_text())
             recovered=AsyncRuns(folder,lambda *args:self.fail('completed failure restarted'),lambda body:None)
             self.assertEqual(recovered.resume(body),result)

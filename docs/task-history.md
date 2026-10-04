@@ -1932,11 +1932,29 @@ socket for health and before journal admission; seven focused checks pass,
 including rejection without spending an admission. A socket check does not
 prove the provider login or model. The mounted candidate's actual relay returns
 HTTP 503 with the operating route absent, then stops cleanly. Positive route
-verification and a fresh
-ready-memory semantic pass remain pending. Automatic approval review rejected
+verification and a fresh ready-memory semantic pass remain pending. Automatic
+approval review rejected
 starting the operating provider container because the authorization to use its
 model route does not authorize changing the operating installation.
 [Procedure](telegram-simulation.md), [relay](../tools/acceptance/model_relay.py),
 [checks](../test/test_model_relay.py).
+
+</entry>
+
+<entry date="2026-10-04" area="Bound native failure diagnostics before model retest">
+
+A prior first-attempt Hermes failure retained timing for guarded context
+preparation but only the generic `assistant_runtime_unavailable` code; the
+child's safe Python error type and function stage had been discarded. Failed
+dispatch receipts now carry only those two bounded identifier fields when
+available. Exception messages, provider bodies and untrusted diagnostic strings
+are excluded, and the public asynchronous result retains its generic code.
+The existing native gateway and receipt suites pass nine networkless checks,
+including invalid-identifier exclusion. A local image built from the verified
+deadline candidate contains the exact source hash and passes those same nine
+packaged checks. Earlier failures cannot gain missing diagnostics retroactively;
+the new image has not yet run a coupled model turn.
+[Gateway](../services/hermes/assistant_gateway.py),
+[checks](../services/hermes/test_gateway.py).
 
 </entry>
