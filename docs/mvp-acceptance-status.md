@@ -164,7 +164,10 @@ the host had stopped the existing model route. Neither is a first-attempt
 ready-memory pass. The synthetic relay now has focused checks to reject a missing
 provider before admitting requests; its actual relay returns HTTP 503 with the
 provider absent and is stopped again. A positive model-route and semantic rerun
-remain pending. The fixture is stopped with its state preserved.
+remain pending. The fixture is stopped with its state preserved. A native
+diagnostic candidate keeps only bounded error type and stage identifiers in
+private dispatch receipts; nine packaged gateway/receipt checks pass with
+byte-matched image source. It has no coupled model-quality pass yet.
 
 Foreground recall now excludes peers whose only completed source evidence is
 the current question; independent history and background representations remain

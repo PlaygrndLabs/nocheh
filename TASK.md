@@ -215,6 +215,13 @@ this UI verification does not establish live recall or release readiness.
   delivery checks pass. The guard-change reason also survives durable native
   and workflow receipts; nine async/delivery and two storage-dispatch checks pass.
   Missing measurements in older receipts remain missing.
+- A native diagnostic candidate retains only bounded Python error type and
+  function-stage identifiers in a failed dispatch receipt. Exception messages
+  and provider bodies are excluded, and the asynchronous public receipt still
+  exposes only its generic error code. Nine networkless gateway/receipt checks
+  pass in a source-verified local Hermes image. This cannot reconstruct the
+  missing type from earlier failed receipts; the candidate is not yet exercised
+  in the coupled model fixture.
 - Archive reads now link a note to at most twenty currently captured reaction
   sources after access checks. The native tool retains guarded reaction changes,
   removals, and anonymous counts, and explains the all-word search behavior. Four
@@ -390,9 +397,10 @@ activation remains separate.
    historical material and remains blocked.
 5. Resume the real-model fixture only after the existing provider route is
    available. The stopped operating provider container cannot be started under
-   the current authorization. Build and verify the relay health candidate in
-   the fixture, inspect the pending guarded preparation and repeated detector
-   admissions, then repeat one fresh ready-memory retirement question. Preserve
-   both failed first-attempt outcomes and the earlier limited-memory pass.
+   the current authorization. Use the verified relay health and Hermes diagnostic
+   candidates in the fixture, inspect the pending guarded preparation and
+   repeated detector admissions, then repeat one fresh ready-memory retirement
+   question. Preserve both failed first-attempt outcomes and the earlier
+   limited-memory pass.
 
 </pending>
