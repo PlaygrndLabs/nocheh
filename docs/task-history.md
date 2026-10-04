@@ -1930,7 +1930,9 @@ its admission journal retained 2,665 of 3,000 allowed requests without source
 content or credentials. A candidate relay probes only the pinned provider
 socket for health and before journal admission; seven focused checks pass,
 including rejection without spending an admission. A socket check does not
-prove the provider login or model. Coupled image verification and a fresh
+prove the provider login or model. The mounted candidate's actual relay returns
+HTTP 503 with the operating route absent, then stops cleanly. Positive route
+verification and a fresh
 ready-memory semantic pass remain pending. Automatic approval review rejected
 starting the operating provider container because the authorization to use its
 model route does not authorize changing the operating installation.

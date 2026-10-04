@@ -330,7 +330,9 @@ restarted while its selected operating provider route remained stopped; the rela
 admitted repeated detector requests despite that unavailable upstream. The
 fixture is now stopped with its state preserved, with 2,665 retained admissions
 of its 3,000 allowance. A relay health/admission candidate fails closed when its
-existing provider socket is absent; seven focused tests pass. The ready-memory
+existing provider socket is absent; seven focused tests pass. The actual fixture
+relay returns HTTP 503 with that route stopped, then stops cleanly without a
+poller or model request. The ready-memory
 semantic and first-attempt gates remain open, and the earlier context-preparation
 failure still needs a route-available reproduction. The operating stack is stopped.
 The runner now binds replies to both chat and message, retains pending source
