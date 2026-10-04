@@ -142,7 +142,11 @@ forwarded; Telegram requests stay in the local mock. A durable, content-free
 journal defaults to 300 model attempts across restarts. An explicitly authorized
 increase uses `NOCHEH_FIXTURE_MODEL_REQUEST_LIMIT` together with
 `NOCHEH_ADDITIONAL_MODEL_REQUESTS_AUTHORIZED=1`; the fixture boundary accepts at
-most 10,000 admissions and retains every earlier journal entry. Honcho still
+most 10,000 admissions and retains every earlier journal entry. The relay
+requires the selected upstream socket to be available for health and
+admission. A missing route is a failed fixture preflight; it does not consume a
+journal entry or count as a model-quality outcome. Availability of the socket
+does not itself prove model or login readiness. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
 An explicit owner exception may increase the allowance in the synthetic

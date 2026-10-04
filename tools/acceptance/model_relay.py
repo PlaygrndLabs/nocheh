@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import socket
 import threading
 import time
 import urllib.error
@@ -37,7 +38,7 @@ class Admission:
         self.lock = threading.Lock()
         self.rows = [json.loads(line) for line in self.path.read_text().splitlines()] if self.path.exists() else []
 
-    def reserve(self, authorization, payload):
+    def reserve(self, authorization, payload, route_available=lambda: True):
         client = next((name for name, (local, _) in self.credentials.items()
                        if hmac.compare_digest(authorization, 'Bearer ' + local)), None)
         if client is None:
@@ -50,6 +51,8 @@ class Admission:
         with self.lock:
             if len(self.rows) >= self.limit:
                 raise PermissionError('fixture_request_limit_exhausted')
+            if not route_available():
+                raise ConnectionError('existing_provider_unavailable')
             row = {'number': len(self.rows) + 1, 'at': time.time(), 'client': client, 'category': category}
             # Persist admission before forwarding; restarting cannot reset it.
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -73,7 +76,16 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def create_app(admission, upstream, telegram_state, opener=None):
+def existing_route_available():
+    """Check only the pinned local provider socket; never refresh its login."""
+    try:
+        with socket.create_connection(('nocheh-cliproxy-api-1', 8317), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def create_app(admission, upstream, telegram_state, opener=None, route_probe=None):
     # A pinned container-name destination prevents a duplicate Compose service
     # alias from redirecting the operating provider back into this fixture.
     if upstream != 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions':
@@ -84,9 +96,12 @@ def create_app(admission, upstream, telegram_state, opener=None):
     app = FastAPI()
     TelegramMock(telegram_state).install(app)
     transport = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    route_available = route_probe or existing_route_available
 
     @app.get('/healthz')
     def health():
+        if not route_available():
+            return JSONResponse({'ok': False, 'error': 'existing_provider_unavailable'}, status_code=503)
         return {'ok': True, 'synthetic_telegram': True, 'real_model': True}
 
     @app.get('/fixture/stats')
@@ -103,9 +118,11 @@ def create_app(admission, upstream, telegram_state, opener=None):
         if len(raw) > 2 * 1024 * 1024:
             return JSONResponse({'error': {'message': 'fixture_request_bound'}}, status_code=413)
         try:
-            key = admission.reserve(request.headers.get('authorization', ''), json.loads(raw))
+            key = admission.reserve(request.headers.get('authorization', ''), json.loads(raw), route_available)
         except PermissionError as error:
             return JSONResponse({'error': {'message': str(error)}}, status_code=403)
+        except ConnectionError:
+            return JSONResponse({'error': {'message': 'existing_provider_unavailable'}}, status_code=503)
         except ValueError:
             return JSONResponse({'error': {'message': 'fixture_model_contract_denied'}}, status_code=400)
         # Opening the blocking transport in a worker keeps Telegram long polling

@@ -156,6 +156,14 @@ Honcho generation has 26 completed ingestion receipts without the retired fact,
 but its derivation queue has not finished and a ready-memory semantic recheck is
 pending. The earlier retirement timeout remains a failure, and the fresh-topic
 workflow timing gate remains failed.
+The queue later drained and Honcho reported the owner generation ready. A fresh
+question then failed in guarded context preparation on its first attempt; a
+second attempt delivered one non-disclosing reply. A later fresh question never
+reached Hermes within 300 seconds because guard preparation kept failing after
+the host had stopped the existing model route. Neither is a first-attempt
+ready-memory pass. The synthetic relay now has focused checks to reject a missing
+provider before admitting requests; its coupled image and semantic rerun remain
+pending. The fixture is stopped with its state preserved.
 
 Foreground recall now excludes peers whose only completed source evidence is
 the current question; independent history and background representations remain

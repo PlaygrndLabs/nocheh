@@ -83,7 +83,7 @@ class ModelRelayTransportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {'NOCHEH_INSTALLATION_FIXTURE': '1'}):
             folder = Path(folder)
             admission = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
-            app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', folder / 'telegram.json', Opener())
+            app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', folder / 'telegram.json', Opener(), lambda: True)
             with TestClient(app) as client:
                 payload = {'model': 'gpt-5.6-sol', 'messages': [], 'stream': True}
                 self.assertEqual(client.post('/v1/chat/completions', json=payload).status_code, 403)
@@ -107,7 +107,7 @@ class ModelRelayTransportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {'NOCHEH_INSTALLATION_FIXTURE': '1'}):
             folder = Path(folder)
             admission = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
-            app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', folder / 'telegram.json', Opener())
+            app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', folder / 'telegram.json', Opener(), lambda: True)
             with TestClient(app) as client:
                 reply = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
                                     json={'model': 'gpt-5.6-sol', 'messages': []})
@@ -115,6 +115,22 @@ class ModelRelayTransportTests(unittest.TestCase):
                 self.assertEqual(reply.json(), {'error': {'message': 'existing_provider_rejected', 'status': 429}})
                 self.assertNotIn('private', reply.text)
                 self.assertNotIn('secret', reply.headers)
+
+    def test_missing_existing_provider_fails_health_and_does_not_spend_admission(self):
+        from fastapi.testclient import TestClient
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {'NOCHEH_INSTALLATION_FIXTURE': '1'}):
+            folder = Path(folder)
+            admission = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
+            app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions',
+                             folder / 'telegram.json', route_probe=lambda: False)
+            with TestClient(app) as client:
+                self.assertEqual(client.get('/healthz').status_code, 503)
+                reply = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
+                                    json={'model': 'gpt-5.6-sol', 'messages': []})
+                self.assertEqual(reply.status_code, 503)
+                self.assertEqual(reply.json(), {'error': {'message': 'existing_provider_unavailable'}})
+                self.assertEqual(admission.summary()['requests'], 0)
+                self.assertFalse((folder / 'calls.jsonl').exists())
 
 
 if __name__ == '__main__':
