@@ -744,8 +744,6 @@ contains the historical private reports and has not been rewritten.
 
 </entry>
 
-
-
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -1914,5 +1912,29 @@ retained. A read-only timing comparison rules out the post-delivery suggestion
 as the observed workflow lag: dispatch and workflow closure were about 73 ms
 apart, after a long interval between physical delivery and dispatch closure.
 The specific cause of that interval remains unproven.
+
+</entry>
+
+<entry date="2026-10-04" area="Ready-memory retirement and missing-provider fixture diagnosis">
+
+The owner Honcho generation became ready after its derivation queue drained.
+The first fresh retirement question then failed in guarded context preparation
+on Hermes attempt one; attempt two delivered one non-disclosing reply and the
+workflow completed. The original first-attempt failure remains failed. A
+second fresh question timed out before Hermes admission while its guard source
+preparation retried. Docker had stopped both the operating stack and fixture;
+restarting only the fixture left its existing provider route unavailable. The
+fixture relay had a false-positive health check and admitted detector requests
+before discovering that outage. The fixture was stopped with its state preserved;
+its admission journal retained 2,665 of 3,000 allowed requests without source
+content or credentials. A candidate relay probes only the pinned provider
+socket for health and before journal admission; seven focused checks pass,
+including rejection without spending an admission. A socket check does not
+prove the provider login or model. Coupled image verification and a fresh
+ready-memory semantic pass remain pending. Automatic approval review rejected
+starting the operating provider container because the authorization to use its
+model route does not authorize changing the operating installation.
+[Procedure](telegram-simulation.md), [relay](../tools/acceptance/model_relay.py),
+[checks](../test/test_model_relay.py).
 
 </entry>

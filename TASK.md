@@ -296,8 +296,8 @@ then all additional requests needed for this evaluation. The temporary fixture
 starts with a shared ceiling of 1,700 and can increase its own allowance as
 needed; it does not reset accounting, alter the $5 embedding cap, or change the
 operating configuration. The relay's restart-safe admission journal has an
-explicitly authorized configurable allowance (six admission/HTTP checks pass);
-this fixture's next start uses 3,000 admissions and retains all prior entries.
+explicitly authorized configurable allowance (seven admission/HTTP checks pass);
+this fixture currently allows 3,000 admissions and retains all prior entries.
 Real Hermes/Honcho evaluation remains in progress. Four first-attempt cases
 pass for reaction removal, corrected time, private isolation and private recall
 after a Hermes restart. A fresh isolated topic receives a correct, single physical
@@ -319,10 +319,20 @@ A focused retirement recheck explicitly retires three independent synthetic
 sources, preserves the originals, and delivers one causally archived,
 non-disclosing first-attempt reply in 233 seconds. That answer is limited-memory
 evidence: all 26 Honcho ingestion receipts for the new owner generation are done,
-and none reference the retired sources or contain the synthetic fact, but the
-Honcho derivation queue is still processing and the generation is not ready.
-The ready-memory semantic recheck remains open. The operating stack still has
-stopped database/workflow services and unhealthy app/security services.
+and none reference the retired sources or contain the synthetic fact. The
+Honcho derivation queue later drained and the owner generation became ready.
+A fresh ready-memory question failed on its first Hermes attempt during guarded
+context preparation; its second attempt delivered one non-disclosing reply and
+the workflow completed. That is not a first-attempt pass. A second fresh question
+timed out after 300 seconds before any Hermes attempt because guarded source
+preparation failed. After a host-wide Docker stop, the isolated fixture had been
+restarted while its selected operating provider route remained stopped; the relay
+admitted repeated detector requests despite that unavailable upstream. The
+fixture is now stopped with its state preserved, with 2,665 retained admissions
+of its 3,000 allowance. A relay health/admission candidate fails closed when its
+existing provider socket is absent; seven focused tests pass. The ready-memory
+semantic and first-attempt gates remain open, and the earlier context-preparation
+failure still needs a route-available reproduction. The operating stack is stopped.
 The runner now binds replies to both chat and message, retains pending source
 identities before waiting, and stops after a failed case. Four focused checks
 pass for late/unrelated replies, cross-chat message-number reuse, duplicate
@@ -376,5 +386,11 @@ activation remains separate.
    origin/main is unchanged. Any additional source commits must be included in
    the final verified publication plan. Ordinary pushing would retain private
    historical material and remains blocked.
+5. Resume the real-model fixture only after the existing provider route is
+   available. The stopped operating provider container cannot be started under
+   the current authorization. Build and verify the relay health candidate in
+   the fixture, inspect the pending guarded preparation and repeated detector
+   admissions, then repeat one fresh ready-memory retirement question. Preserve
+   both failed first-attempt outcomes and the earlier limited-memory pass.
 
 </pending>
