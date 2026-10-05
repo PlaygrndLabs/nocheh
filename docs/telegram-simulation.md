@@ -179,7 +179,9 @@ capture or ingestion measurement. `--start-at` requires these inspected seeds
 and records which earlier cases are omitted; their outcomes must be carried from
 their own evidence. `--isolation-topic` selects an unused synthetic topic,
 distinct from the seeded topic, so an earlier failed question cannot silently
-turn a cold-audience recheck into a warm one. Saved answers
+turn a cold-audience recheck into a warm one. `--stop-after` ends a focused run
+after its selected case and rejects an end before `--start-at` prior to opening
+the fixture. Saved answers
 remain pending semantic review against ground truth; successful delivery alone
 cannot pass recall. Budget exhaustion or degraded memory must be recorded as a
 limitation rather than substituted with scripted reasoning. These observations

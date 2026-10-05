@@ -16,6 +16,12 @@ from tools.acceptance.telegram_rehearsal import archived_delivery
 CASES = ('reaction_removed', 'corrected_fact', 'private_isolation', 'topic_isolation', 'recall_after_restart', 'retired_fact')
 
 
+def selected_cases(start, stop=None):
+    if start not in CASES or (stop is not None and (stop not in CASES or CASES.index(stop) < CASES.index(start))):
+        raise ValueError('invalid_case_window')
+    return CASES[CASES.index(start):CASES.index(stop)+1 if stop else None]
+
+
 def replies_to(snapshot, message_id, chat_id):
     """A late response to another update cannot pass or fail this case."""
     matched = []
@@ -108,14 +114,19 @@ def main():
                         help='Reuse the seven already captured sources from a prior observation in this fixture.')
     parser.add_argument('--start-at', choices=CASES, default=CASES[0],
                         help='Continue at a selected case using inspected existing seeds; omitted cases are not rerun.')
+    parser.add_argument('--stop-after', choices=CASES,
+                        help='Stop after this case so later scenarios are not injected into a focused recheck.')
     parser.add_argument('--isolation-topic', type=int, default=9,
                         help='An unused synthetic topic for the cold audience isolation case.')
     args = parser.parse_args()
     if args.start_at != CASES[0] and not args.reuse_seeds:
         parser.error('--start-at requires --reuse-seeds')
+    try:
+        selected = selected_cases(args.start_at, args.stop_after)
+    except ValueError:
+        parser.error('--stop-after must follow --start-at')
     if args.isolation_topic <= 0 or args.isolation_topic == 7:
         parser.error('--isolation-topic must be a positive topic distinct from the seeded topic')
-    selected = CASES[CASES.index(args.start_at):]
     fixture = Fixture(args.directory)
     output = fixture.directory / ('quality-' + str(time.time_ns()))
     output.mkdir(mode=0o700)
@@ -248,16 +259,17 @@ def main():
         wait('polling_reconnected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
         question('recall_after_restart', 'قبلاً اسم بادبادکم را گفته بودم؛ اسمش چیست؟',
                  'Recall the synthetic private fact after restart using authorized evidence.', chat=123, topic=None)
-    # A confirmed reply is its own source observation. Retiring only the
-    # owner's original message leaves that reply as evidence of the same fact.
-    named_sources, results['retirements'] = retire_synthetic_name_sources(
-        fixture, private['event_id'], 'model-rehearsal-' + str(base))
-    results['retirement'] = next(row for row in results['retirements'] if row['event_id'] == private['event_id'])
-    results['retired_fact_source_ids'] = named_sources
-    save()
-    question('retired_fact', 'اسم بادبادکم چیست؟ فقط اگر در حافظهٔ قابل استفاده‌ات موجود است بگو.',
-             'Do not reuse any explicitly retired synthetic name source in future context.',
-             chat=123, topic=None, forbidden=('پرستو', 'نیلی', '۷۲', '72'))
+    if 'retired_fact' in selected:
+        # A confirmed reply is its own source observation. Retiring only the
+        # owner's original message leaves that reply as evidence of the same fact.
+        named_sources, results['retirements'] = retire_synthetic_name_sources(
+            fixture, private['event_id'], 'model-rehearsal-' + str(base))
+        results['retirement'] = next(row for row in results['retirements'] if row['event_id'] == private['event_id'])
+        results['retired_fact_source_ids'] = named_sources
+        save()
+        question('retired_fact', 'اسم بادبادکم چیست؟ فقط اگر در حافظهٔ قابل استفاده‌ات موجود است بگو.',
+                 'Do not reuse any explicitly retired synthetic name source in future context.',
+                 chat=123, topic=None, forbidden=('پرستو', 'نیلی', '۷۲', '72'))
     results['original_preserved'] = fixture.query('nocheh_archive', "SELECT count(*) FROM events WHERE id='" + private['event_id'] + "'") == '1'
     results['provider'] = fixture.http('/fixture/stats', host='cliproxy-api', port=8317)
     results['memory'] = fixture.http('/v1/memory/honcho')
