@@ -2105,3 +2105,30 @@ checks. The coupled cooldown path still awaits an actual upstream 429.
 [Relay](../tools/acceptance/model_relay.py), [checks](../test/test_model_relay.py).
 
 </entry>
+
+<entry date="2026-10-06" area="Fresh current-source cold quality and observed provider cooldown">
+
+An isolated current-source sixteen-service fixture delivered all six synthetic
+real-model quality replies on the first Hermes attempt, each within five
+minutes. Bounded semantic review passed reaction removal, corrected fact,
+private and topic isolation, recall after restart, and retirement
+non-disclosure. The two captured retired sources remained preserved. Honcho was
+attached and verified, but its owner and topic generations were building and
+the retirement answer had `limited_memory=true`; ready-memory deletion remains
+pending. All 57 ingestion receipts later finished. The existing $5 monthly
+embedding ledger had $4.998666 reserved and $0.001334 remaining, and thirteen
+Honcho queue errors matched budget rejection. No new memory question was sent.
+
+The provider journal retained 218 HTTP 200 and three HTTP 429 outcomes. The
+relay waited at least 60 then 120 seconds before the next admissions; a late
+success from a pre-429 admission did not erase the cooldown. The safety monitor
+stopped the fixture after its third upstream 429. A subsequent Honcho-only
+inspection confirmed the budget blocker, and all fixture services were stopped
+with their state and receipts preserved. This is a bounded fixture cooldown
+observation, not an unthrottled reliability or production acceptance pass. The
+content-free review, original observations, queue diagnosis and model journal
+remain in ignored local acceptance state. [Procedure](telegram-simulation.md),
+[runner](../tools/acceptance/model_rehearsal.py),
+[relay](../tools/acceptance/model_relay.py).
+
+</entry>
