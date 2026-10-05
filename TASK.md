@@ -196,7 +196,9 @@ this UI verification does not establish live recall or release readiness.
   This fails the first-attempt and latency gates. The fixture is stopped and
   preserves the original failure. The relay now blocks further upstream
   admissions during a restart-safe bounded cooldown after HTTP 429; eleven
-  networkless relay checks pass. Coupled cooldown behavior remains unverified;
+  networkless relay checks pass; a twelfth check confirms that a late success
+  from an already-running request cannot clear the cooldown. Coupled cooldown
+  behavior remains unverified;
   a fresh-topic first-attempt recheck was then run after provider recovery.
   After provider recovery, a different unused topic passed the focused
   first-attempt and timing gates in 176.4 seconds. One physical reply reached
