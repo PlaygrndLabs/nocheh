@@ -270,6 +270,12 @@ this UI verification does not establish live recall or release readiness.
   [Decision](docs/adr/0101-honcho-terminal-queue-errors-block-readiness.md),
   [API check](services/honcho/test_provenance.py),
   [Nocheh check](test/store-native-memory.test.ts).
+  A no-network runtime overlay for this locally integrated source is cached as
+  `sha256:3aa964edbc2f6cca8f81de023a641bc563e4b5cd9128ec39990092d7a6b691ac`;
+  its compiled readiness file matched the worktree byte-for-byte. The full
+  offline Dockerfile build stopped at apt DNS before producing an image. The
+  overlay has not run as a fixture or operating service; its preparation receipt
+  remains in ignored local state.
 
   A focused quality-runner window can stop after the selected scenario without
   injecting later restart or retirement questions. Invalid ordering is rejected
