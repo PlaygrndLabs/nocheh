@@ -154,6 +154,10 @@ headers/error. It does not record bodies, headers, credentials, or streaming
 completion; a 200 header entry alone is not a completed answer. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
+The ledger's conservative reserved amount can exceed estimated provider usage:
+failed embedding attempts retain their full holds. Diagnose repeated 5xx
+outcomes and the paid-egress cooldown before proposing extra budget; raising a
+cap does not repair a failing embedding route.
 For a capacity diagnosis only, `NOCHEH_FIXTURE_DETECTOR_INTERVAL_MS` can pace
 detector calls before admission (0-10,000 ms; default 0). Chat calls are not
 paced. Record the selected interval with the result: a pass under this fixture

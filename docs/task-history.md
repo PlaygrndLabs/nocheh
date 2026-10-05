@@ -744,6 +744,8 @@ contains the historical private reports and has not been rewritten.
 
 </entry>
 
+
+
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -2130,5 +2132,30 @@ content-free review, original observations, queue diagnosis and model journal
 remain in ignored local acceptance state. [Procedure](telegram-simulation.md),
 [runner](../tools/acceptance/model_rehearsal.py),
 [relay](../tools/acceptance/model_relay.py).
+
+</entry>
+
+<entry date="2026-10-06" area="Explain reserved-versus-reported embedding cost and bound failed egress">
+
+The owner challenged the apparent $5 embedding exhaustion after seeing about
+$0.12 of usage. Read-only October ledger reconciliation found 4,829 successful
+embedding requests with $0.118666 of settled holds and 488 HTTP 502 requests
+retaining $4.88 of conservative holds. Of those failures, 457 occurred in about
+eight minutes and typically returned in tens of milliseconds. The $4.998666
+admission total is therefore not a provider invoice. No existing hold, cap or
+operating setting was changed. The old 502 records do not identify whether the
+upstream returned 502 or transport failed before receiving a response.
+
+The Honcho egress source now persists a shared exponential cooldown after paid
+embedding 5xx outcomes. It returns HTTP 503 and numeric `Retry-After` without
+a new reservation during cooldown, survives restart, and ignores a late success
+from a call admitted before the failure. Reasoning remains independent and all
+failed holds remain unchanged. Thirteen focused meter checks pass, including
+HTTP behavior, recovery, restart and ordering; the AST-only code graph updated
+with zero model calls. This is a verified source candidate, not operating
+activation or a ready-memory semantic pass. The existing October reservations
+still prevent the fresh fixture's Honcho generation from completing under the
+unchanged $5 cap. [Decision](adr/0100-durable-embedding-egress-cooldown.md),
+[checks](../services/honcho/test_meter.py).
 
 </entry>
