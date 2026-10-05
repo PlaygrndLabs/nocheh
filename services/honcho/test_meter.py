@@ -7,7 +7,7 @@ import unittest
 import uuid
 from pathlib import Path
 from unittest.mock import patch
-from .meter import Egress, Ledger, Rejected, validate
+from .meter import CoolingDown, Egress, Ledger, Rejected, handler, validate
 
 
 class Response(io.BytesIO):
@@ -160,6 +160,74 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(ledger.report()['reserved_usd'],0);self.assertEqual(len(transport.calls),0)
             self.assertEqual(Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client').send('/v1/embeddings',payload)[0],502)
             self.assertEqual(ledger.report()['reserved_usd'],.01)
+
+    def test_embedding_transport_cooldown_preserves_holds_and_survives_restart(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path);transport=Transport(True)
+            payload={'model':'text-embedding-3-small','input':'fixture'}
+            with patch('services.honcho.meter.time.time',return_value=1_800_000_000):
+                egress=Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client')
+                self.assertEqual(egress.send('/v1/embeddings',payload)[0],502)
+                with self.assertRaises(CoolingDown) as first:
+                    egress.send('/v1/embeddings',payload)
+                self.assertEqual(first.exception.seconds,60)
+                def cooled(_):
+                    try: egress.send('/v1/embeddings',payload)
+                    except CoolingDown: return True
+                    return False
+                with concurrent.futures.ThreadPoolExecutor(8) as pool:
+                    self.assertEqual(list(pool.map(cooled,range(16))),[True]*16)
+                self.assertEqual(len(transport.calls),1)
+                self.assertEqual(ledger.report()['reserved_usd'],.01)
+                # A different route remains available while embeddings cool down.
+                self.assertEqual(egress.send('/v1/chat/completions',{'model':'gpt-5.6-sol','messages':[]})[0],502)
+            restored=Ledger(path)
+            with patch('services.honcho.meter.time.time',return_value=1_800_000_061):
+                egress=Egress(restored,'internal','temporary',transport,reasoning_key='honcho-client')
+                self.assertEqual(egress.send('/v1/embeddings',payload)[0],502)
+                with self.assertRaises(CoolingDown) as second:
+                    egress.send('/v1/embeddings',payload)
+                self.assertEqual(second.exception.seconds,120)
+                self.assertEqual(restored.report()['reserved_usd'],.02)
+            transport.fail=False
+            with patch('services.honcho.meter.time.time',return_value=1_800_000_182):
+                self.assertEqual(egress.send('/v1/embeddings',payload)[0],200)
+                self.assertEqual(egress.send('/v1/embeddings',payload)[0],200)
+                self.assertEqual(restored.report()['reserved_usd'],.020002)
+
+    def test_late_embedding_success_cannot_clear_new_transport_cooldown(self):
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite')
+            with patch('services.honcho.meter.time.time',return_value=1_800_000_000):
+                older=ledger.reserve('/v1/embeddings',b'older')
+            with patch('services.honcho.meter.time.time',return_value=1_800_000_001):
+                failed=ledger.reserve('/v1/embeddings',b'failed')
+                ledger.finish(failed,502,.1,None)
+            with patch('services.honcho.meter.time.time',return_value=1_800_000_002):
+                ledger.finish(older,200,.1,{'total_tokens':10})
+                with self.assertRaises(CoolingDown):ledger.reserve('/v1/embeddings',b'blocked')
+            self.assertEqual(ledger.summary()['embedding_requests'],2)
+
+    def test_embedding_http_cooldown_returns_retry_after_without_new_reservation(self):
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite');transport=Transport(True)
+            endpoint=handler(Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client'))
+            def post():
+                body=json.dumps({'model':'text-embedding-3-small','input':'fixture'}).encode()
+                request=object.__new__(endpoint);request.path='/v1/embeddings'
+                request.headers={'Authorization':'Bearer internal','Content-Length':str(len(body))}
+                request.rfile=io.BytesIO(body);request.wfile=io.BytesIO()
+                result={'headers':{}}
+                request.send_response=lambda status:result.update(status=status)
+                request.send_header=lambda key,value:result['headers'].update({key:value})
+                request.end_headers=lambda:None
+                request.do_POST()
+                return result['status'],result['headers'].get('Retry-After')
+            with patch('services.honcho.meter.time.time',return_value=1_800_000_000):
+                self.assertEqual(post(),(502,None))
+                self.assertEqual(post(),(503,'60'))
+                self.assertEqual(len(transport.calls),1)
+                self.assertEqual(ledger.report()['reserved_usd'],.01)
 
     def test_route_model_bounds_and_subscription_only_reasoning(self):
         for route,payload in [('/v1/responses',{}),('/v1/embeddings',{'model':'expensive','input':'x'}),('/v1/embeddings',{'model':'text-embedding-3-small','input':'x'*131073}),('/v1/chat/completions',{'model':'other','messages':[]})]:
