@@ -2,7 +2,7 @@
 
 <current>
 
-Last reconciled 2026-10-05. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-06. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
@@ -209,6 +209,32 @@ this UI verification does not establish live recall or release readiness.
   healthy. This result does not erase the failed topic-17 attempt, exercise the
   cooldown under an actual 429, or establish unthrottled reliability.
   [Procedure](docs/telegram-simulation.md).
+
+  A fresh current-source, isolated 16-service fixture then completed all six
+  cold real-model quality cases on their first Hermes dispatch attempts. Each
+  produced one physical and archived reply within the five-minute gate;
+  bounded semantic review passed reaction removal, correction, private and
+  topic isolation, restart recall, and non-disclosing retirement. The two
+  captured retired originals were preserved. Honcho was attached and verified,
+  but the answer at retirement had `limited_memory=true`, so this is not a
+  ready-memory deletion pass. After all 57 ingestion receipts finished, owner
+  and topic generations remained building. The shared monthly embedding ledger
+  had $4.998666 reserved under its unchanged $5 cap, leaving $0.001334; thirteen
+  Honcho queue errors matched budget rejection. A fresh ready-memory question
+  was therefore not issued.
+
+  This fresh run also exercised the relay cooldown against actual provider 429s:
+  218 upstream HTTP 200 outcomes and three HTTP 429 outcomes were recorded.
+  Subsequent admissions waited at least 60 and 120 seconds, respectively; a
+  previously admitted request finishing successfully after the first 429 did
+  not clear the cooldown. The safety monitor stopped the fixture at its third
+  429; a later Honcho-only inspection left all fixture services stopped with
+  state preserved. This verifies the bounded fixture relay under those observed
+  429s, not unthrottled provider reliability or operating activation. The
+  content-free summary and full synthetic receipts remain in ignored local
+  acceptance state. [Procedure](docs/telegram-simulation.md),
+  [runner](tools/acceptance/model_rehearsal.py),
+  [relay](tools/acceptance/model_relay.py).
 
   A focused quality-runner window can stop after the selected scenario without
   injecting later restart or retirement questions. Invalid ordering is rejected
@@ -472,10 +498,13 @@ activation remains separate.
    origin/main is unchanged. Any additional source commits must be included in
    the final verified publication plan. Ordinary pushing would retain private
    historical material and remains blocked.
-5. Verify the fixture-only 429 cooldown in a bounded coupled run when the
-   provider actually rate-limits; the recovered topic-18 pass does not exercise
-   that path. Preserve the topic-17 first-attempt failure, attempt-16 late reply,
-   topic-18 pass, prior retirement outcomes, and all original receipts. Finish
-   cold full-quality and unthrottled reliability gates separately.
+5. Preserve the new cold six-case pass and coupled 429 cooldown observation
+   alongside the topic-17 first-attempt failure, attempt-16 late reply, topic-18
+   pass, prior retirement outcomes, and all original receipts. The fresh cold
+   retirement answer used limited memory; finish owner/topic Honcho derivation
+   only with embedding budget headroom under an explicitly authorized cap, then
+   ask a fresh focused question after readiness and verify `limited_memory=false`.
+   Unthrottled provider reliability and operating release acceptance remain
+   separate gates.
 
 </pending>
