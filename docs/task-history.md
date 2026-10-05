@@ -2159,3 +2159,27 @@ unchanged $5 cap. [Decision](adr/0100-durable-embedding-egress-cooldown.md),
 [checks](../services/honcho/test_meter.py).
 
 </entry>
+
+<entry date="2026-10-06" area="Fail closed on terminal Honcho derivation errors">
+
+Offline inspection of the pinned Honcho worker and queue-status query showed
+that processed-with-error tasks count as completed and do not retry after their
+terminal mark. Nocheh's prior zero-pending/in-progress readiness check could
+therefore mark a generation ready despite failed representation work. An
+authenticated, workspace-scoped Honcho extension now returns only whether such
+failures exist; Nocheh keeps that generation building with
+`honcho_derivation_failed` and rejects malformed health data. No queue payload
+or error body crosses the API.
+
+The isolated Honcho API returned a failure flag for a preserved synthetic
+workspace with terminal errors and no flag for an empty workspace. Only its API
+and storage dependencies ran; deriver and Hermes remained stopped. The shared
+October ledger still held 5,317 embedding calls and the fixture model journal
+still held 221 outcomes after this read-only check. Nineteen focused Python
+checks passed. The pinned offline Linux Node 24 build passed; affected compiled
+Node tests passed five and skipped four database-dependent cases. A complete
+Nocheh-Honcho ready-memory pass remains pending. [Decision](adr/0101-honcho-terminal-queue-errors-block-readiness.md),
+[Honcho checks](../services/honcho/test_provenance.py),
+[Nocheh checks](../test/store-native-memory.test.ts).
+
+</entry>

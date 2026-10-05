@@ -150,6 +150,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       if(path.endsWith('/messages/list'))return {items:(remote.get(path.replace('/list',''))??[]).filter(record=>record.metadata.nocheh_receipt===body.filters.metadata.nocheh_receipt)};
       if(path.endsWith('/messages')){sends++;const record={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[...(remote.get(path)??[]),record]);if(loseReply){loseReply=false;throw Error('lost response');}return [record];}
       if(path.endsWith('/queue/status')){const run=duringObserve;duringObserve=undefined;await run?.();return {pending_work_units:0,in_progress_work_units:0};}
+      if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
       if(path.endsWith('/representation'))return {representation:'Synthetic review context'};
       if(path.endsWith('/chat')){reasoning++;return {content:JSON.stringify({interpretations:[{kind:'meaning',subject:'blue star',text:'A blue star may indicate review.',scope:{kind:'conversation',id:group},uncertainty:'uncertain',evidence_ids:targetIds,conflicts:[]}]})};}
       return {};
