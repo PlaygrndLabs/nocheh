@@ -34,6 +34,27 @@ test('unchanged ready memory revalidates its context without another paid repres
   assert.equal(calls.length,before,'building refresh does not request a new representation');
 });
 
+test('terminal Honcho derivation errors cannot mark a generation ready',async()=>{
+  const id=digest('failed-derivation'),updates:{sql:string;values:unknown[]}[]=[];
+  let failed=true,valid=true;
+  const control={query:async(sql:string,values:unknown[]=[])=>{
+    if(sql.startsWith('SELECT 1 FROM memory_ingestion_receipts'))return {rowCount:0};
+    if(sql.startsWith('UPDATE memory_generations')){updates.push({sql,values});return {rowCount:1};}
+    throw Error('unexpected_control_query');
+  }};
+  const memory=new NativeMemoryRepository({access:{stores:{control}}} as any,{} as any,{} as any,{} as any,
+    async(path:string)=>path.endsWith('/queue/status')?{pending_work_units:0,in_progress_work_units:0}:
+      {failed_items:valid?failed:undefined},async()=>[]);
+  (memory as any).current=async()=>({row:{work_revision:3}});
+  assert.equal(await memory.observe(id),false);
+  assert.deepEqual(updates[0]!.values,[id,'building',3,true]);
+  assert.match(updates[0]!.sql,/honcho_derivation_failed/);
+  failed=false;assert.equal(await memory.observe(id),true);
+  assert.deepEqual(updates[1]!.values,[id,'ready',3,false]);
+  valid=false;await assert.rejects(memory.observe(id),{code:'honcho_queue_health_invalid'});
+  assert.equal(updates.length,2,'invalid health cannot change readiness');
+});
+
 test('native memory keeps content derived, reconciles uncertain writes and rebuilds corrected guarded generations',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -53,6 +74,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
         if(loseReply){loseReply=false;throw Error('synthetic_lost_acknowledgment');}return [message];
       }
       if(path.endsWith('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
+      if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
       if(path.endsWith('/representation'))return {representation:'Stored conclusion saffronpass. '+ownerApproved};
       if(path.endsWith('/chat'))return {content:'Recalled conclusion saffronpass.'};
       return {};
@@ -191,6 +213,7 @@ test('foreground recall requires independent source evidence while background co
       if(path.endsWith('/messages/list'))return {items:[]};
       if(path.endsWith('/messages'))return [{...body.messages[0],id:String(++sequence).padStart(21,'r')}];
       if(path.endsWith('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
+      if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
       if(path.endsWith('/representation'))return {representation:'The current question asks for the meeting time.'};
       if(path.endsWith('/chat'))return {content:'The independently recorded meeting time is 18:00.'};
       return {};

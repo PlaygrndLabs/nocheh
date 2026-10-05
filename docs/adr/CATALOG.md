@@ -114,3 +114,4 @@ records current implementation and activation.
 | [0098](0098-isolated-native-lease-recovery.md) | Reclaim abandoned native admission leases under the profile file lock | Extends 0028 and 0097; retains native transcript fencing and effect receipts |
 | [0099](0099-independent-evidence-for-historical-recall.md) | Require independent source evidence for foreground historical recall | Extends 0044 and 0056; background learning retains the current source |
 | [0100](0100-durable-embedding-egress-cooldown.md) | Bound paid embedding admissions after provider failure | Extends 0079; preserves failed holds and separate subscription reasoning |
+| [0101](0101-honcho-terminal-queue-errors-block-readiness.md) | Reject processed-with-error Honcho work as ready memory | Extends 0044 and 0100; keeps failure details inside the workspace boundary |

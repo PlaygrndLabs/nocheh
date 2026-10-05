@@ -5,6 +5,16 @@ import re
 NATIVE_ID = re.compile(r'^[A-Za-z0-9_-]{21}$')
 
 
+async def failed_queue_items(workspace_id, db):
+    """Report only whether current-workspace derivation has terminal failures."""
+    from sqlalchemy import text
+    result = await db.execute(text('''SELECT EXISTS(
+        SELECT 1 FROM queue WHERE workspace_name=:workspace
+        AND task_type IN ('representation','summary','dream')
+        AND processed AND error IS NOT NULL)'''), {'workspace': workspace_id})
+    return bool(result.scalar_one())
+
+
 async def ancestry(roots, load_documents, load_messages, max_nodes=128, max_depth=8, max_messages=256):
     if (not isinstance(roots, list) or not 1 <= len(roots) <= 32
             or any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in roots)
@@ -82,6 +92,10 @@ def install(app):
     from src.security import require_auth
 
     router = APIRouter(prefix='/v3/workspaces/{workspace_id}/nocheh', dependencies=[Depends(require_auth(workspace_name='workspace_id'))])
+
+    @router.get('/queue-health')
+    async def queue_health(workspace_id: str, db: AsyncSession = read_db):
+        return {'failed_items': await failed_queue_items(workspace_id, db)}
 
     @router.post('/provenance')
     async def read(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):
