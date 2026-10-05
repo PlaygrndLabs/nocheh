@@ -1975,3 +1975,18 @@ container was changed. Positive provider and fresh ready-memory checks remain
 pending.
 
 </entry>
+
+<entry date="2026-10-05" area="Retain bounded model-route outcomes for fixture diagnosis">
+
+The isolated model relay now appends a second journal entry for every admitted
+request that reaches an upstream header, upstream HTTP error, or transport
+error. Entries contain only the admission number, category, HTTP status, and
+time to headers or error. Responses, request bodies, headers, and credentials
+remain absent. Nine networkless checks pass, including scoped transport,
+missing route, provider HTTP rejection, generic transport failure, admission
+accounting across restart, and journal privacy. This candidate has not run in
+the coupled fixture and cannot reconstruct the outcomes of previous requests.
+[Procedure](telegram-simulation.md), [relay](../tools/acceptance/model_relay.py),
+[checks](../test/test_model_relay.py).
+
+</entry>
