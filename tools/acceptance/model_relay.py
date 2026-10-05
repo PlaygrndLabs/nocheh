@@ -33,6 +33,7 @@ class Admission:
         if type(limit) is not int or not 1 <= limit <= MAX_REQUEST_LIMIT:
             raise ValueError('invalid_rehearsal_limit')
         self.path = Path(journal)
+        self.outcomes = self.path.with_name(self.path.stem + '-outcomes.jsonl')
         self.credentials = credentials
         self.limit = limit
         self.lock = threading.Lock()
@@ -62,7 +63,22 @@ class Admission:
                 file.flush()
                 os.fsync(file.fileno())
             self.rows.append(row)
-        return self.credentials[client][1]
+        return self.credentials[client][1], row['number']
+
+    def record_outcome(self, number, result, status, elapsed_ms):
+        if (type(number) is not int or number < 1 or number > len(self.rows)
+                or result not in ('upstream_headers', 'upstream_http', 'transport_error')
+                or type(status) is not int or not 100 <= status <= 599
+                or type(elapsed_ms) is not int or elapsed_ms < 0):
+            raise ValueError('invalid_fixture_outcome')
+        row = {'number': number, 'result': result, 'status': status, 'elapsed_ms': elapsed_ms}
+        with self.lock:
+            self.outcomes.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with self.outcomes.open('a') as file:
+                self.outcomes.chmod(0o600)
+                file.write(json.dumps(row) + '\n')
+                file.flush()
+                os.fsync(file.fileno())
 
     def summary(self):
         with self.lock:
@@ -118,7 +134,7 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
         if len(raw) > 2 * 1024 * 1024:
             return JSONResponse({'error': {'message': 'fixture_request_bound'}}, status_code=413)
         try:
-            key = admission.reserve(request.headers.get('authorization', ''), json.loads(raw), route_available)
+            key, number = admission.reserve(request.headers.get('authorization', ''), json.loads(raw), route_available)
         except PermissionError as error:
             return JSONResponse({'error': {'message': str(error)}}, status_code=403)
         except ConnectionError:
@@ -128,13 +144,18 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
         # Opening the blocking transport in a worker keeps Telegram long polling
         # responsive while the real model is generating response headers.
         import asyncio
+        started = time.monotonic()
         try:
             response = await asyncio.to_thread(transport.open, urllib.request.Request(upstream, data=raw,
                 headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}), timeout=180)
         except urllib.error.HTTPError as error:
+            admission.record_outcome(number, 'upstream_http', error.code, round((time.monotonic() - started) * 1000))
             return JSONResponse({'error': {'message': 'existing_provider_rejected', 'status': error.code}}, status_code=error.code)
         except Exception:
+            admission.record_outcome(number, 'transport_error', 502, round((time.monotonic() - started) * 1000))
             return JSONResponse({'error': {'message': 'existing_provider_unavailable'}}, status_code=502)
+
+        admission.record_outcome(number, 'upstream_headers', response.status, round((time.monotonic() - started) * 1000))
 
         def chunks():
             total = 0
