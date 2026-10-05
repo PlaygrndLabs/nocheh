@@ -2182,4 +2182,11 @@ Nocheh-Honcho ready-memory pass remains pending. [Decision](adr/0101-honcho-term
 [Honcho checks](../services/honcho/test_provenance.py),
 [Nocheh checks](../test/store-native-memory.test.ts).
 
+A no-network runtime overlay was built on the previously byte-verified pinned
+services image, carrying the current compiled readiness code. Its compiled file
+hash matched the worktree. A full offline Dockerfile build could not pass its
+apt DNS step and created no image. The overlay was not activated; the fixture
+and operating services remained unchanged. The local image ID and build
+limitation are saved in ignored synthetic acceptance state.
+
 </entry>
