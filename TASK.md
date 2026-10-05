@@ -36,11 +36,13 @@ the sanitized-history remote-publication gate remain open.
 [Dashboard checks](test/dashboard-supervision.test.mjs),
 [synthetic preview](test/dashboard-supervision-preview.mjs).
 
-Nocheh is pre-release. The operating local installation runs one source-watched
-`make dev` Compose stack from the release session worktree. All 17 services are
-healthy after the release checkout restart. The earlier unexplained Inngest exit
+Nocheh is pre-release. The operating local installation was last verified as one
+source-watched `make dev` Compose stack from the release session worktree, with
+all 17 services healthy after the release checkout restart. On 2026-10-05 the
+Docker socket was unavailable during this simulation session, so current
+operating service health is unverified. The earlier unexplained Inngest exit
 remains recorded. The pinned native candidate includes empty-completion rejection; the
-running TypeScript services include event-bound provider timings, dependency
+last verified TypeScript services include event-bound provider timings, dependency
 patches, and protected workflow receipt reconciliation. The prior source checkout
 and its three local edits remain preserved.
 
@@ -187,10 +189,10 @@ this UI verification does not establish live recall or release readiness.
   retired facts. The matrix and history link their focused and adjacent checks.
   The deterministic fixtures use internal networks and synthetic state; the
   authorized model fixture adds only its scoped relay to the existing provider
-  network, without a public port or another OAuth owner. The
-  the operating seventeen services retain their identities, start times and
-  healthy state. No operating activation, real Telegram traffic or new live
-  acceptance pass is claimed. Actual model quality and the existing same-topic
+  network, without a public port or another OAuth owner. The operating
+  seventeen services retained their identities, start times and healthy state
+  at that observation. No operating activation, real Telegram traffic or new
+  live acceptance pass is claimed. Actual model quality and the existing same-topic
   recall failure remain open. Detailed reports stay in ignored
   `data/acceptance/results/telegram-simulation/` in the simulation worktree.
 
