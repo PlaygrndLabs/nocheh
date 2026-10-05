@@ -2021,3 +2021,23 @@ recheck is pending. [Procedure](telegram-simulation.md),
 [relay](../tools/acceptance/model_relay.py), [checks](../test/test_model_relay.py).
 
 </entry>
+
+<entry date="2026-10-05" area="Fresh ready-memory retirement passes under paced model route">
+
+The fixture restarted with a five-second interval between detector admissions.
+All sixteen services passed health, the owner Honcho generation was ready, and
+its guarded snapshot had caught up before a fresh retirement question. That
+question completed in 64.2 seconds on one dispatch attempt with one physical
+reply and a matching archived delivery. Content-free review confirms an
+explicit unavailable-memory answer, no retired name or number, three retired
+independent named sources, preserved originals, guard on, and
+`limited_memory=false`. The watched paced run recorded 114 upstream HTTP 200
+headers and no 5xx outcome; all fixture services were stopped afterward.
+Earlier first-attempt failures and the late reply retain their separate
+outcomes. This paced pass establishes the scenario's semantics under controlled
+model traffic, not unthrottled provider reliability or production acceptance.
+The original 503 burst's cause and a fresh cold full-quality rehearsal remain
+open. The detailed answer and receipts remain in ignored fixture state.
+[Procedure](telegram-simulation.md), [runner](../tools/acceptance/model_rehearsal.py).
+
+</entry>
