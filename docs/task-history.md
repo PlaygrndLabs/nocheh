@@ -2077,3 +2077,19 @@ quality remain pending. All sixteen fixture services are stopped.
 [procedure](telegram-simulation.md).
 
 </entry>
+
+<entry date="2026-10-05" area="Fresh topic reply passes after provider recovery">
+
+With the already-authorized isolated fixture restarted and all sixteen services
+healthy, a different unused synthetic topic received one answer on the first
+Hermes dispatch attempt in 176.4 seconds. The physical reply stayed in topic 18
+and had a matching archived original and outbound receipt. Content-free review
+found no forbidden time from the other topic and no private synthetic name in
+the answer. The watched run and shutdown interval recorded 41 new upstream
+HTTP 200 outcomes and no 429. The fixture was stopped; the existing provider
+remained healthy. This focused semantic and timing pass does not erase the
+earlier topic-17 failure or exercise the new 429 cooldown in coupled traffic.
+Detailed answer and receipt identifiers remain in ignored fixture state.
+[Procedure](telegram-simulation.md), [runner](../tools/acceptance/model_rehearsal.py).
+
+</entry>
