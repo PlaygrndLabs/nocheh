@@ -94,6 +94,26 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             self.assertEqual([json.loads(row)['number'] for row in restarted.outcomes.read_text().splitlines()], [1, 2])
             self.assertEqual(restarted.outcomes.stat().st_mode & 0o777, 0o600)
 
+    def test_older_inflight_success_does_not_clear_rate_limit_cooldown(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'calls.jsonl'
+            credentials = {'hermes': ('local', 'existing')}
+            admission = Admission(path, credentials)
+            payload = {'model': 'gpt-5.6-sol', 'messages': []}
+            _, older = admission.reserve('Bearer local', payload)
+            _, limited = admission.reserve('Bearer local', payload)
+            admission.record_outcome(limited, 'upstream_http', 429, 1)
+            admission.record_outcome(older, 'upstream_headers', 200, 100)
+            self.assertGreater(admission.cooldown_until, time.time())
+            restarted = Admission(path, credentials)
+            with self.assertRaises(ProviderCooldown):
+                restarted.reserve('Bearer local', payload)
+            restarted.cooldown_until = 0
+            _, recovered = restarted.reserve('Bearer local', payload)
+            restarted.record_outcome(recovered, 'upstream_headers', 200, 1)
+            self.assertEqual(restarted.cooldown_until, 0)
+            self.assertEqual(Admission(path, credentials).cooldown_until, 0)
+
 
 class ModelRelayTransportTests(unittest.TestCase):
     def test_detector_calls_are_paced_before_admission(self):

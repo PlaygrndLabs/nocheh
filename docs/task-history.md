@@ -2093,3 +2093,15 @@ Detailed answer and receipt identifiers remain in ignored fixture state.
 [Procedure](telegram-simulation.md), [runner](../tools/acceptance/model_rehearsal.py).
 
 </entry>
+
+<entry date="2026-10-05" area="Keep provider cooldown despite late in-flight success">
+
+The fixture relay compares each successful request's admission time with the
+latest upstream 429 outcome. A request already in flight when rate limiting
+begins cannot clear the shared cooldown by completing later. This holds across
+relay restarts because the content-free admission and outcome journals are
+replayed. A focused concurrency-order check passes with the other eleven relay
+checks. The coupled cooldown path still awaits an actual upstream 429.
+[Relay](../tools/acceptance/model_relay.py), [checks](../test/test_model_relay.py).
+
+</entry>

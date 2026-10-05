@@ -60,6 +60,7 @@ class Admission:
         self.rows = [json.loads(line) for line in self.path.read_text().splitlines()] if self.path.exists() else []
         self.cooldown_until = 0.0
         self.rate_limit_streak = 0
+        self.last_rate_limit_at = 0.0
         if self.outcomes.exists():
             outcomes = [json.loads(line) for line in self.outcomes.read_text().splitlines() if line.strip()]
             for outcome in sorted(outcomes, key=lambda row: row.get('at', self.rows[row['number'] - 1]['at']
@@ -67,8 +68,9 @@ class Admission:
                 at = outcome.get('at', self.rows[outcome['number'] - 1]['at'] + outcome['elapsed_ms'] / 1000)
                 if outcome['status'] == 429:
                     self.rate_limit_streak += 1
+                    self.last_rate_limit_at = at
                     self.cooldown_until = max(self.cooldown_until, at + min(3600, 60 * 2 ** min(self.rate_limit_streak - 1, 6)))
-                elif 200 <= outcome['status'] < 300:
+                elif 200 <= outcome['status'] < 300 and self.rows[outcome['number'] - 1]['at'] > self.last_rate_limit_at:
                     self.rate_limit_streak = 0
                     self.cooldown_until = 0.0
 
@@ -109,11 +111,12 @@ class Admission:
         with self.lock:
             if status == 429:
                 self.rate_limit_streak += 1
+                self.last_rate_limit_at = row['at']
                 delay = min(3600, 60 * 2 ** min(self.rate_limit_streak - 1, 6))
                 if type(retry_after) is int and 0 < retry_after <= 3600:
                     delay = max(delay, retry_after)
                 self.cooldown_until = max(self.cooldown_until, row['at'] + delay)
-            elif 200 <= status < 300:
+            elif 200 <= status < 300 and self.rows[number - 1]['at'] > self.last_rate_limit_at:
                 self.rate_limit_streak = 0
                 self.cooldown_until = 0.0
             self.outcomes.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
