@@ -2,7 +2,7 @@
 
 <current>
 
-Last reconciled 2026-10-03. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-05. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
@@ -144,6 +144,19 @@ this UI verification does not establish live recall or release readiness.
   matching archived delivery. A fresh-topic case fails before delivery; these
   partial passes do not establish cold ingestion or complete model quality.
   [Capture checks](test/stores.test.ts).
+
+  A read-only inspection of the isolated model fixture found that from
+  2026-10-03 21:36 UTC, 78 new Honcho memory-context artifacts contained only
+  eight distinct content hashes. All 78 guard sources remain pending, with no
+  staged guard revision, fragment, or guard publication. Detector admissions
+  rose from 2-8 to 31-60 per minute at that boundary, before the operating
+  provider container stopped at 22:09 UTC. The fixture scheduler recorded
+  worker-capacity errors during the same period. These observations locate the
+  stall before guard publication but do not prove the first detector failure's
+  cause. Positive provider and first-attempt ready-memory verification remain
+  pending. On 2026-10-05 the local Docker socket was absent; no fixture or
+  operating container was changed. Aggregate evidence is in ignored fixture
+  state; [history](docs/task-history.md) retains the observation.
 
   Foreground Honcho recall now requires completed evidence beyond the current
   question. Background context still learns the first source; older receipts
