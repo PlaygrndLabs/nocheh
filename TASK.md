@@ -190,6 +190,13 @@ this UI verification does not establish live recall or release readiness.
   rehearsal remain pending.
   [Procedure](docs/telegram-simulation.md).
 
+  A focused quality-runner window can stop after the selected scenario without
+  injecting later restart or retirement questions. Invalid ordering is rejected
+  before opening a fixture. Six networkless runner checks pass. This prepares an
+  unused-topic recheck; its actual model result remains pending.
+  [Runner](tools/acceptance/model_rehearsal.py),
+  [checks](test/test_model_rehearsal.py).
+
   Foreground Honcho recall now requires completed evidence beyond the current
   question. Background context still learns the first source; older receipts
   and independent history remain usable. Four checks pass without skips,
