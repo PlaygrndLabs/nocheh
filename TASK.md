@@ -188,12 +188,23 @@ this UI verification does not establish live recall or release readiness.
   services are stopped with state preserved. This does not prove unthrottled
   provider reliability; the cause of the earlier 503 burst and cold full-quality
   rehearsal remain pending.
+  A subsequent unused-topic question failed on its first Hermes attempt with
+  `model_unavailable`. During its retry window the provider returned 769 HTTP
+  429 results, all on detector calls. The workflow ultimately delivered one
+  non-disclosing reply in the correct topic on attempt 16, about 69 minutes
+  after the question, with one archived original and one outbound receipt.
+  This fails the first-attempt and latency gates. The fixture is stopped and
+  preserves the original failure. The relay now blocks further upstream
+  admissions during a restart-safe bounded cooldown after HTTP 429; eleven
+  networkless relay checks pass. The next coupled recheck must establish that
+  the cooldown limits rejected provider traffic and that a fresh topic reply
+  meets the acceptance deadline.
   [Procedure](docs/telegram-simulation.md).
 
   A focused quality-runner window can stop after the selected scenario without
   injecting later restart or retirement questions. Invalid ordering is rejected
   before opening a fixture. Six networkless runner checks pass. This prepares an
-  unused-topic recheck; its actual model result remains pending.
+  unused-topic recheck; that actual model result failed as recorded above.
   [Runner](tools/acceptance/model_rehearsal.py),
   [checks](test/test_model_rehearsal.py).
 
@@ -356,7 +367,7 @@ starts with a shared ceiling of 1,700 and can increase its own allowance as
 needed; it does not reset accounting, alter the $5 embedding cap, or change the
 operating configuration. The relay's restart-safe admission journal has an
 explicitly authorized configurable allowance (seven admission/HTTP checks pass);
-this fixture currently allows 3,000 admissions and retains all prior entries.
+this fixture currently allows 10,000 admissions and retains all prior entries.
 Real Hermes/Honcho evaluation remains in progress. Four first-attempt cases
 pass for reaction removal, corrected time, private isolation and private recall
 after a Hermes restart. A fresh isolated topic receives a correct, single physical
@@ -447,12 +458,10 @@ activation remains separate.
    origin/main is unchanged. Any additional source commits must be included in
    the final verified publication plan. Ordinary pushing would retain private
    historical material and remains blocked.
-5. Resume the real-model fixture only after the existing provider route is
-   available. The stopped operating provider container cannot be started under
-   the current authorization. Use the verified relay health and Hermes diagnostic
-   candidates in the fixture, inspect the pending guarded preparation and
-   repeated detector admissions, then repeat one fresh ready-memory retirement
-   question. Preserve both failed first-attempt outcomes and the earlier
-   limited-memory pass.
+5. With the operating provider route available, verify the fixture-only 429
+   cooldown in a bounded coupled run and repeat one unused-topic question after
+   provider recovery. Preserve the failed first attempt, attempt-16 late reply,
+   prior retirement outcomes, and all original receipts. Do not infer production
+   reliability from fixture pacing or scripted tests.
 
 </pending>

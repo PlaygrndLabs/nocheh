@@ -8,7 +8,7 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
-from tools.acceptance.model_relay import Admission, create_app, detector_interval_ms, request_limit
+from tools.acceptance.model_relay import Admission, ProviderCooldown, create_app, detector_interval_ms, request_limit
 
 
 class ModelRelayAdmissionTests(unittest.TestCase):
@@ -180,6 +180,20 @@ class ModelRelayTransportTests(unittest.TestCase):
                                  [(1, 'upstream_http', 429)])
                 self.assertNotIn('private', admission.outcomes.read_text())
                 self.assertNotIn('existing-provider-key', admission.outcomes.read_text())
+                blocked = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
+                                      json={'model': 'gpt-5.6-sol', 'messages': []})
+                self.assertEqual(blocked.status_code, 429)
+                self.assertGreaterEqual(int(blocked.headers['Retry-After']), 1)
+                self.assertEqual(admission.summary()['requests'], 1)
+                restarted = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
+                with self.assertRaises(ProviderCooldown):
+                    restarted.reserve('Bearer fixture-only', {'model': 'gpt-5.6-sol', 'messages': []})
+                restarted.cooldown_until = 0
+                _, number = restarted.reserve('Bearer fixture-only', {'model': 'gpt-5.6-sol', 'messages': []})
+                restarted.record_outcome(number, 'upstream_headers', 200, 1)
+                self.assertEqual(restarted.rate_limit_streak, 0)
+                self.assertEqual(restarted.cooldown_until, 0)
+                self.assertEqual(Admission(folder / 'calls.jsonl', restarted.credentials).cooldown_until, 0)
 
     def test_transport_failure_has_bounded_outcome_without_exception_content(self):
         from fastapi.testclient import TestClient
