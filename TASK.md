@@ -159,6 +159,13 @@ this UI verification does not establish live recall or release readiness.
   pending. On 2026-10-05 the local Docker socket was absent; no fixture or
   operating container was changed. Aggregate evidence is in ignored fixture
   state; [history](docs/task-history.md) retains the observation.
+  A relay candidate now records a separate, content-free result for each
+  admitted request: admission number, upstream header/error category, HTTP
+  status, and time to headers/error. Nine networkless checks pass, including
+  provider HTTP and transport failures without credential/body leakage. This
+  diagnostic cannot recover outcomes for the 2,665 earlier admissions and has
+  not yet run in the coupled fixture. [Relay](tools/acceptance/model_relay.py),
+  [checks](test/test_model_relay.py).
 
   Foreground Honcho recall now requires completed evidence beyond the current
   question. Background context still learns the first source; older receipts

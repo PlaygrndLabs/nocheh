@@ -146,7 +146,12 @@ most 10,000 admissions and retains every earlier journal entry. The relay
 requires the selected upstream socket to be available for health and
 admission. A missing route is a failed fixture preflight; it does not consume a
 journal entry or count as a model-quality outcome. Availability of the socket
-does not itself prove model or login readiness. Honcho still
+does not itself prove model or login readiness. The relay has a separate
+append-only outcome journal for admitted requests. It records
+only the admission number, whether upstream response headers, an upstream HTTP
+error, or a transport error occurred, the HTTP status, and elapsed time to
+headers/error. It does not record bodies, headers, credentials, or streaming
+completion; a 200 header entry alone is not a completed answer. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
 An explicit owner exception may increase the allowance in the synthetic

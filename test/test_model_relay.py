@@ -45,7 +45,7 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 admission.reserve('Bearer synthetic-local-token', {**payload, 'model': 'another-model'})
             self.assertFalse(path.exists())
-            self.assertEqual(admission.reserve('Bearer synthetic-local-token', payload), 'existing-provider-token')
+            self.assertEqual(admission.reserve('Bearer synthetic-local-token', payload), ('existing-provider-token', 1))
             restarted = Admission(path, credentials, limit=1)
             with self.assertRaises(PermissionError):
                 restarted.reserve('Bearer synthetic-local-token', payload)
@@ -67,6 +67,23 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=10) as pool:
                 self.assertEqual(sum(pool.map(attempt, range(20))), 3)
             self.assertEqual(admission.summary()['requests'], 3)
+
+    def test_outcomes_are_append_only_across_restart_and_reject_invalid_fields(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'calls.jsonl'
+            credentials = {'hermes': ('local', 'existing')}
+            first = Admission(path, credentials)
+            _, number = first.reserve('Bearer local', {'model': 'gpt-5.6-sol', 'messages': []})
+            first.record_outcome(number, 'upstream_http', 503, 12)
+            previous = first.outcomes.read_bytes()
+            restarted = Admission(path, credentials)
+            with self.assertRaises(ValueError):
+                restarted.record_outcome(number, 'private-error', 503, 12)
+            _, second = restarted.reserve('Bearer local', {'model': 'gpt-5.6-sol', 'messages': []})
+            restarted.record_outcome(second, 'upstream_headers', 200, 8)
+            self.assertTrue(restarted.outcomes.read_bytes().startswith(previous))
+            self.assertEqual([json.loads(row)['number'] for row in restarted.outcomes.read_text().splitlines()], [1, 2])
+            self.assertEqual(restarted.outcomes.stat().st_mode & 0o777, 0o600)
 
 
 class ModelRelayTransportTests(unittest.TestCase):
@@ -96,6 +113,12 @@ class ModelRelayTransportTests(unittest.TestCase):
                 self.assertEqual(calls[0].get_header('Authorization'), 'Bearer existing-provider-key')
                 self.assertEqual(json.loads(calls[0].data), payload)
                 self.assertEqual(admission.summary()['requests'], 1)
+                outcomes = [json.loads(row) for row in admission.outcomes.read_text().splitlines()]
+                self.assertEqual(len(outcomes), 1)
+                self.assertEqual(outcomes[0]['number'], 1)
+                self.assertEqual((outcomes[0]['result'], outcomes[0]['status']), ('upstream_headers', 200))
+                self.assertGreaterEqual(outcomes[0]['elapsed_ms'], 0)
+                self.assertNotIn('existing-provider-key', admission.outcomes.read_text())
 
     def test_upstream_errors_do_not_forward_provider_bodies_or_headers(self):
         import urllib.error
@@ -115,6 +138,30 @@ class ModelRelayTransportTests(unittest.TestCase):
                 self.assertEqual(reply.json(), {'error': {'message': 'existing_provider_rejected', 'status': 429}})
                 self.assertNotIn('private', reply.text)
                 self.assertNotIn('secret', reply.headers)
+                self.assertEqual([(row['number'], row['result'], row['status']) for row in
+                                  map(json.loads, admission.outcomes.read_text().splitlines())],
+                                 [(1, 'upstream_http', 429)])
+                self.assertNotIn('private', admission.outcomes.read_text())
+                self.assertNotIn('existing-provider-key', admission.outcomes.read_text())
+
+    def test_transport_failure_has_bounded_outcome_without_exception_content(self):
+        from fastapi.testclient import TestClient
+        class Opener:
+            def open(self, request, timeout):
+                raise RuntimeError('private upstream diagnostic existing-provider-key')
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {'NOCHEH_INSTALLATION_FIXTURE': '1'}):
+            folder = Path(folder)
+            admission = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
+            app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions',
+                             folder / 'telegram.json', Opener(), lambda: True)
+            with TestClient(app) as client:
+                reply = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
+                                    json={'model': 'gpt-5.6-sol', 'messages': []})
+                self.assertEqual(reply.status_code, 502)
+                saved = admission.outcomes.read_text()
+                self.assertEqual((json.loads(saved)['result'], json.loads(saved)['status']), ('transport_error', 502))
+                self.assertNotIn('private', saved)
+                self.assertNotIn('existing-provider-key', saved)
 
     def test_missing_existing_provider_fails_health_and_does_not_spend_admission(self):
         from fastapi.testclient import TestClient
@@ -131,6 +178,7 @@ class ModelRelayTransportTests(unittest.TestCase):
                 self.assertEqual(reply.json(), {'error': {'message': 'existing_provider_unavailable'}})
                 self.assertEqual(admission.summary()['requests'], 0)
                 self.assertFalse((folder / 'calls.jsonl').exists())
+                self.assertFalse(admission.outcomes.exists())
 
 
 if __name__ == '__main__':
