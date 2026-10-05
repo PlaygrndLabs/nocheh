@@ -148,7 +148,7 @@ admission. A missing route is a failed fixture preflight; it does not consume a
 journal entry or count as a model-quality outcome. Availability of the socket
 does not itself prove model or login readiness. The relay has a separate
 append-only outcome journal for admitted requests. It records
-only the admission number, whether upstream response headers, an upstream HTTP
+only the admission number, outcome time, whether upstream response headers, an upstream HTTP
 error, or a transport error occurred, the HTTP status, and elapsed time to
 headers/error. It does not record bodies, headers, credentials, or streaming
 completion; a 200 header entry alone is not a completed answer. Honcho still
@@ -159,6 +159,13 @@ detector calls before admission (0-10,000 ms; default 0). Chat calls are not
 paced. Record the selected interval with the result: a pass under this fixture
 throttle does not establish unthrottled provider reliability or production
 latency.
+After an upstream HTTP 429, the fixture relay applies a shared, restart-safe
+cooldown of at least 60 seconds, doubling on consecutive 429 responses up to
+one hour. A bounded numeric `Retry-After` from the provider can lengthen that
+cooldown. Calls during it receive a local 429 and numeric `Retry-After` without
+reserving another provider admission. A later successful upstream response
+clears the cooldown. Preserve the upstream 429 and any eventual reply as
+separate outcomes; a delayed retry does not satisfy a first-attempt gate.
 An explicit owner exception may increase the allowance in the synthetic
 fixture's meter process while retaining the same shared counter and embedding
 dollar cap. Record that temporary authorization and ceiling in ignored fixture
