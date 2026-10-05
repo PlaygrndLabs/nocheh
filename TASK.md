@@ -36,11 +36,13 @@ the sanitized-history remote-publication gate remain open.
 [Dashboard checks](test/dashboard-supervision.test.mjs),
 [synthetic preview](test/dashboard-supervision-preview.mjs).
 
-Nocheh is pre-release. The operating local installation was last verified as one
-source-watched `make dev` Compose stack from the release session worktree, with
-all 17 services healthy after the release checkout restart. On 2026-10-05 the
-Docker socket was unavailable during this simulation session, so current
-operating service health is unverified. The earlier unexplained Inngest exit
+Nocheh is pre-release. The operating local installation was previously verified
+as one source-watched `make dev` Compose stack from the release session worktree,
+with all 17 services healthy after the release checkout restart. Docker was
+unavailable during part of the 2026-10-05 simulation; when the owner started
+it, the existing CPA and several Honcho support services came up healthy while
+the operating app, Hermes and Inngest remained stopped. Current full-stack
+health is unverified. The earlier unexplained Inngest exit
 remains recorded. The pinned native candidate includes empty-completion rejection; the
 last verified TypeScript services include event-bound provider timings, dependency
 patches, and protected workflow receipt reconciliation. The prior source checkout
@@ -161,11 +163,24 @@ this UI verification does not establish live recall or release readiness.
   state; [history](docs/task-history.md) retains the observation.
   A relay candidate now records a separate, content-free result for each
   admitted request: admission number, upstream header/error category, HTTP
-  status, and time to headers/error. Nine networkless checks pass, including
+  status, and time to headers/error. Eleven networkless checks pass, including
   provider HTTP and transport failures without credential/body leakage. This
-  diagnostic cannot recover outcomes for the 2,665 earlier admissions and has
-  not yet run in the coupled fixture. [Relay](tools/acceptance/model_relay.py),
+  diagnostic cannot recover outcomes for the 2,665 earlier admissions; the
+  coupled fixture results are recorded below. [Relay](tools/acceptance/model_relay.py),
   [checks](test/test_model_relay.py).
+
+  With Docker restored by the owner, the 16-service fixture passed health
+  startup, but 45 new model admissions included 33 upstream HTTP 503 and one
+  HTTP 502 during a detector burst. The fixture was stopped with zero services
+  left running. Two isolated benign route probes then received HTTP 200, so a
+  healthy CPA socket and isolated success do not establish capacity under
+  coupled load. The previously timed-out retirement event delivered one
+  archived non-disclosing answer on one dispatch attempt after restart; its
+  original timeout remains failed and this is not a fresh first-attempt pass.
+  The owner Honcho generation is ready, but 81 generated memory contexts remain
+  unguarded. A fixture-only detector pacing option now has eleven networkless
+  checks; its coupled result and the underlying 503 cause remain pending.
+  [Procedure](docs/telegram-simulation.md).
 
   Foreground Honcho recall now requires completed evidence beyond the current
   question. Background context still learns the first source; older receipts
