@@ -113,3 +113,4 @@ records current implementation and activation.
 | [0097](0097-durable-native-review-handoff.md) | Release workflow admission while a bounded native review runs | Extends 0087 and 0088; durable launch and completion receipts preserve the original effect identity |
 | [0098](0098-isolated-native-lease-recovery.md) | Reclaim abandoned native admission leases under the profile file lock | Extends 0028 and 0097; retains native transcript fencing and effect receipts |
 | [0099](0099-independent-evidence-for-historical-recall.md) | Require independent source evidence for foreground historical recall | Extends 0044 and 0056; background learning retains the current source |
+| [0100](0100-durable-embedding-egress-cooldown.md) | Bound paid embedding admissions after provider failure | Extends 0079; preserves failed holds and separate subscription reasoning |

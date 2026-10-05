@@ -220,8 +220,14 @@ this UI verification does not establish live recall or release readiness.
   ready-memory deletion pass. After all 57 ingestion receipts finished, owner
   and topic generations remained building. The shared monthly embedding ledger
   had $4.998666 reserved under its unchanged $5 cap, leaving $0.001334; thirteen
-  Honcho queue errors matched budget rejection. A fresh ready-memory question
-  was therefore not issued.
+  Honcho queue errors matched budget rejection. The owner correctly noted that
+  reported spending was about $0.12: 4,829 successful October embeddings had
+  $0.118666 in settled holds, while 488 HTTP 502 embedding outcomes retained
+  $4.88 in conservative holds. Of those failures, 457 occurred within about
+  eight minutes with 28-309 ms durations, indicating a fast upstream failure
+  and repeated attempts rather than a $4.88 provider invoice. A fresh
+  ready-memory question was therefore not issued, and neither the cap nor
+  historical holds were changed.
 
   This fresh run also exercised the relay cooldown against actual provider 429s:
   218 upstream HTTP 200 outcomes and three HTTP 429 outcomes were recorded.
@@ -235,6 +241,18 @@ this UI verification does not establish live recall or release readiness.
   acceptance state. [Procedure](docs/telegram-simulation.md),
   [runner](tools/acceptance/model_rehearsal.py),
   [relay](tools/acceptance/model_relay.py).
+
+  The Honcho egress candidate now persists a shared, exponential 60-second to
+  one-hour cooldown after paid embedding 5xx outcomes. Blocked calls return
+  HTTP 503 with numeric `Retry-After` before making a new spending reservation;
+  a later admitted success clears the cooldown, while an older in-flight success
+  cannot. Reasoning is unaffected and failed holds remain. Thirteen focused
+  meter checks pass, including transport failure, restart, HTTP response and
+  late-success ordering. This source candidate has not been activated in the
+  operating installation or the previous cold fixture image. The existing
+  October holds still block ready-memory work at the $5 cap.
+  [Decision](docs/adr/0100-durable-embedding-egress-cooldown.md),
+  [checks](services/honcho/test_meter.py).
 
   A focused quality-runner window can stop after the selected scenario without
   injecting later restart or retirement questions. Invalid ordering is rejected
@@ -504,6 +522,10 @@ activation remains separate.
    retirement answer used limited memory; finish owner/topic Honcho derivation
    only with embedding budget headroom under an explicitly authorized cap, then
    ask a fresh focused question after readiness and verify `limited_memory=false`.
+   The owner observed about $0.12 actual estimated usage; the remaining cap is
+   blocked by $4.88 of retained HTTP 502 holds, not equivalent provider charges.
+   Diagnose the embedding outage before any cap adjustment; the candidate
+   cooldown protects future admissions but does not erase these holds.
    Unthrottled provider reliability and operating release acceptance remain
    separate gates.
 

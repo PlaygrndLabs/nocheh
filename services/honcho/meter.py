@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import math
 import os
 import sqlite3
 import time
@@ -29,6 +30,12 @@ class Rejected(Exception):
     pass
 
 
+class CoolingDown(Rejected):
+    def __init__(self, seconds):
+        self.seconds = seconds
+        super().__init__('embedding_route_cooling_down')
+
+
 class Ledger:
     def __init__(self, path):
         self.path = str(path)
@@ -41,6 +48,7 @@ class Ledger:
             if 'revision' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
             if 'last_operation_id' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN last_operation_id TEXT')
             db.execute('CREATE TABLE IF NOT EXISTS embedding_route(id INTEGER PRIMARY KEY CHECK(id=1),provider TEXT,model TEXT,dimensions INTEGER)')
+            db.execute('CREATE TABLE IF NOT EXISTS egress_cooldown(route TEXT PRIMARY KEY, until REAL NOT NULL, streak INTEGER NOT NULL, failed_at REAL NOT NULL)')
             if 'audit' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]: db.execute('ALTER TABLE calls ADD COLUMN audit TEXT')
             if 'settlement_version' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]:
                 db.execute('ALTER TABLE calls ADD COLUMN settlement_version INTEGER NOT NULL DEFAULT 0')
@@ -123,6 +131,10 @@ class Ledger:
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             if amount:
+                cooldown=db.execute('SELECT until FROM egress_cooldown WHERE route=?',(route,)).fetchone()
+                if cooldown and cooldown[0]>time.time():
+                    raise CoolingDown(math.ceil(cooldown[0]-time.time()))
+            if amount:
                 selected=(embedding.provider,embedding.model,embedding.dimensions)
                 previous=db.execute('SELECT provider,model,dimensions FROM embedding_route WHERE id=1').fetchone()
                 # Old ledgers used the fixed small model. Do not mix those vectors.
@@ -144,9 +156,20 @@ class Ledger:
 
     def finish(self, call, status, duration, usage):
         with self.connect() as db:
+            row=db.execute('SELECT route,started FROM calls WHERE id=?',(call,)).fetchone()
             db.execute('UPDATE calls SET status=?,duration_ms=?,usage=? WHERE id=?',
                 (status, round(duration*1000), json.dumps(usage), call))
             self._settle_call(db,call)
+            if row and row[0]=='/v1/embeddings':
+                previous=db.execute('SELECT until,streak,failed_at FROM egress_cooldown WHERE route=?',(row[0],)).fetchone()
+                if 500<=status<600:
+                    now=time.time();streak=(previous[1] if previous else 0)+1
+                    until=max(previous[0] if previous else 0,now+min(3600,60*2**min(streak-1,6)))
+                    db.execute('INSERT INTO egress_cooldown(route,until,streak,failed_at) VALUES(?,?,?,?) '
+                               'ON CONFLICT(route) DO UPDATE SET until=excluded.until,streak=excluded.streak,failed_at=excluded.failed_at',
+                               (row[0],until,streak,now))
+                elif 200<=status<300 and previous and row[1]>previous[2]:
+                    db.execute('DELETE FROM egress_cooldown WHERE route=?',(row[0],))
 
     def report(self):
         with self.connect() as db:
@@ -276,8 +299,9 @@ class Egress:
 def handler(egress):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args): pass
-        def respond(self,status,kind,body):
+        def respond(self,status,kind,body,retry_after=None):
             self.send_response(status);self.send_header('Content-Type',kind)
+            if retry_after is not None:self.send_header('Retry-After',str(retry_after))
             self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
         def do_GET(self):
             if self.path=='/health': return self.respond(200,'application/json',b'{"ok":true}')
@@ -290,6 +314,8 @@ def handler(egress):
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0 < length <= 1024*1024 or self.headers.get('Transfer-Encoding'): raise Rejected('request_bound_exceeded')
                 status,kind,body=egress.send(self.path,json.loads(self.rfile.read(length)),self.headers.get('X-Nocheh-Workspace'))
+            except CoolingDown as error:
+                return self.respond(503,'application/json',b'{"error":{"message":"embedding_route_cooling_down"}}',error.seconds)
             except (Rejected,ValueError) as error:
                 status,kind,body=403,'application/json',json.dumps({'error':{'message':str(error) if isinstance(error,Rejected) else 'invalid_json'}}).encode()
             self.respond(status,kind,body)
