@@ -2053,3 +2053,27 @@ isolation recheck; the coupled result remains pending.
 [checks](../test/test_model_rehearsal.py).
 
 </entry>
+
+<entry date="2026-10-05" area="Diagnose late topic reply and bound fixture rate-limit traffic">
+
+A fresh unused-topic question failed on its first Hermes attempt with
+`model_unavailable`. The isolated fixture stayed up for the pending workflow:
+the existing provider returned 769 HTTP 429 responses to detector calls,
+followed by recovery. The dispatch eventually completed on attempt 16 after
+about 69 minutes. Exactly one physical reply went to the requested topic,
+omitted the forbidden fact from the other topic, and had one archived original
+and one outbound receipt. This does not pass first-attempt or latency gates.
+The original failed observation remains in ignored fixture state.
+
+The fixture relay now records a bounded, restart-safe cooldown after an upstream
+429. During that cooldown it rejects local calls without reserving another
+provider admission and returns a numeric Retry-After. It respects a bounded
+numeric upstream Retry-After when supplied; no upstream headers, bodies or keys
+are forwarded or logged. Eleven networkless relay checks pass. This is a
+capacity guard for synthetic evaluation; coupled confirmation and actual model
+quality remain pending. All sixteen fixture services are stopped.
+[Relay](../tools/acceptance/model_relay.py),
+[checks](../test/test_model_relay.py),
+[procedure](telegram-simulation.md).
+
+</entry>
