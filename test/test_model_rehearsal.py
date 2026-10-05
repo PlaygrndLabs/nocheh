@@ -1,10 +1,14 @@
 """Causal reply matching for real-model observations with late deliveries."""
 import unittest
 from unittest.mock import patch
-from tools.acceptance.model_rehearsal import main, replies_to, retire_synthetic_name_sources
+from tools.acceptance.model_rehearsal import main, replies_to, retire_synthetic_name_sources, selected_cases
 
 
 class ModelRehearsalReplyTests(unittest.TestCase):
+    def test_focused_topic_window_excludes_restart_and_retirement(self):
+        self.assertEqual(selected_cases('topic_isolation', 'topic_isolation'), ('topic_isolation',))
+        self.assertNotIn('retired_fact', selected_cases('topic_isolation', 'topic_isolation'))
+
     def test_late_and_unrelated_replies_do_not_become_the_current_answer(self):
         late = {'parameters': {'reply_parameters': '{"message_id":7}'}, 'message': {'text': 'earlier answer', 'chat': {'id': 123}}}
         current = {'parameters': {'reply_parameters': {'message_id': 8}}, 'message': {'text': 'current answer', 'chat': {'id': 123}}}
@@ -48,7 +52,9 @@ class ModelRehearsalReplyTests(unittest.TestCase):
                 retire_synthetic_name_sources(fixture,original,'synthetic-case')
 
     def test_invalid_continuation_stops_before_opening_a_fixture(self):
-        for options in (['--start-at', 'retired_fact'], ['--isolation-topic', '0'], ['--isolation-topic', '7']):
+        for options in (['--start-at', 'retired_fact'], ['--isolation-topic', '0'], ['--isolation-topic', '7'],
+                        ['--reuse-seeds', '/unused/observations.json', '--start-at', 'retired_fact',
+                         '--stop-after', 'topic_isolation']):
             with self.subTest(options=options), patch('sys.argv', ['model-rehearsal', '--directory', '/unused', *options]), \
                     patch('sys.stderr'), patch('tools.acceptance.model_rehearsal.Fixture') as fixture:
                 with self.assertRaises(SystemExit) as stopped:

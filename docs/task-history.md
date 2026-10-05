@@ -2041,3 +2041,15 @@ open. The detailed answer and receipts remain in ignored fixture state.
 [Procedure](telegram-simulation.md), [runner](../tools/acceptance/model_rehearsal.py).
 
 </entry>
+
+<entry date="2026-10-05" area="Bound focused synthetic quality cases">
+
+The quality runner now accepts a final scenario and excludes later cases,
+including their synthetic source retirement and new Telegram questions. It
+rejects an end before the selected start prior to fixture access. Six
+networkless runner checks pass. This is preparation for an unused-topic
+isolation recheck; the coupled result remains pending.
+[Runner](../tools/acceptance/model_rehearsal.py),
+[checks](../test/test_model_rehearsal.py).
+
+</entry>
