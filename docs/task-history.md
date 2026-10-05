@@ -1958,3 +1958,20 @@ the new image has not yet run a coupled model turn.
 [checks](../services/hermes/test_gateway.py).
 
 </entry>
+
+<entry date="2026-10-05" area="Locate synthetic Honcho context-preparation stall">
+
+Read-only counts in the isolated fixture find 78 new memory-context artifacts
+from 2026-10-03 21:36 UTC, representing eight content hashes. Every associated
+guard source remains pending; none has a revision, fragment, or guard
+publication. Detector admissions changed from 2-8 to 31-60 per minute at the
+same boundary. This predates the operating provider's later stop at 22:09 UTC,
+so the later socket outage is not a complete explanation. Scheduler spans show
+9,097 all-workers-at-capacity and 451 requested-worker-at-capacity errors over
+the post-boundary interval. The underlying first detector failure remains
+unproven. Aggregate evidence stays in ignored fixture state without message
+content. A subsequent Docker status read found no local Docker socket; no
+container was changed. Positive provider and fresh ready-memory checks remain
+pending.
+
+</entry>
