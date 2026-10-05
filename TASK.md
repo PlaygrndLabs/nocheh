@@ -178,8 +178,16 @@ this UI verification does not establish live recall or release readiness.
   archived non-disclosing answer on one dispatch attempt after restart; its
   original timeout remains failed and this is not a fresh first-attempt pass.
   The owner Honcho generation is ready, but 81 generated memory contexts remain
-  unguarded. A fixture-only detector pacing option now has eleven networkless
-  checks; its coupled result and the underlying 503 cause remain pending.
+  unguarded. A fixture-only detector pacing option has eleven networkless
+  checks. With a five-second detector interval, the owner Honcho snapshot
+  caught up and a fresh retired-fact question passed semantic non-disclosure
+  on its first dispatch attempt in 64.2 seconds: one physical reply, matching
+  archived delivery, all three independent named sources retired, originals
+  preserved, guard on, and `limited_memory=false`. The watched paced run's 114
+  model outcomes all reached upstream HTTP 200 headers. All sixteen fixture
+  services are stopped with state preserved. This does not prove unthrottled
+  provider reliability; the cause of the earlier 503 burst and cold full-quality
+  rehearsal remain pending.
   [Procedure](docs/telegram-simulation.md).
 
   Foreground Honcho recall now requires completed evidence beyond the current
