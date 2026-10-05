@@ -5,6 +5,7 @@ route is forwarded, using read-only scoped client keys. Telegram stays local.
 The Honcho caller must retain its production preparation and shared budget meter.
 Request bodies, responses and credentials never enter the request journal.
 """
+import asyncio
 import hmac
 import json
 import os
@@ -28,6 +29,19 @@ def request_limit(environment):
     return limit
 
 
+def detector_interval_ms(environment):
+    interval = int(environment.get('NOCHEH_FIXTURE_DETECTOR_INTERVAL_MS', '0'))
+    if not 0 <= interval <= 10000:
+        raise ValueError('invalid_rehearsal_detector_interval')
+    return interval
+
+
+def is_detector(payload):
+    messages = payload.get('messages') if isinstance(payload, dict) else None
+    first = messages[0].get('content') if isinstance(messages, list) and messages and isinstance(messages[0], dict) else None
+    return isinstance(first, str) and first.startswith('Find secret values in the supplied data.')
+
+
 class Admission:
     def __init__(self, journal, credentials, limit=DEFAULT_REQUEST_LIMIT):
         if type(limit) is not int or not 1 <= limit <= MAX_REQUEST_LIMIT:
@@ -46,9 +60,7 @@ class Admission:
             raise PermissionError('fixture_client_denied')
         if not isinstance(payload, dict) or payload.get('model') != 'gpt-5.6-sol' or not isinstance(payload.get('messages'), list):
             raise ValueError('fixture_model_contract_denied')
-        messages = payload['messages']
-        first = messages[0].get('content') if messages and isinstance(messages[0], dict) else None
-        category = 'detector' if isinstance(first, str) and first.startswith('Find secret values in the supplied data.') else 'chat'
+        category = 'detector' if is_detector(payload) else 'chat'
         with self.lock:
             if len(self.rows) >= self.limit:
                 raise PermissionError('fixture_request_limit_exhausted')
@@ -101,7 +113,7 @@ def existing_route_available():
         return False
 
 
-def create_app(admission, upstream, telegram_state, opener=None, route_probe=None):
+def create_app(admission, upstream, telegram_state, opener=None, route_probe=None, detector_interval=0):
     # A pinned container-name destination prevents a duplicate Compose service
     # alias from redirecting the operating provider back into this fixture.
     if upstream != 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions':
@@ -113,6 +125,10 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
     TelegramMock(telegram_state).install(app)
     transport = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     route_available = route_probe or existing_route_available
+    if type(detector_interval) is not int or not 0 <= detector_interval <= 10000:
+        raise ValueError('invalid_rehearsal_detector_interval')
+    detector_lock = asyncio.Lock()
+    next_detector_at = 0.0
 
     @app.get('/healthz')
     def health():
@@ -130,11 +146,28 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
 
     @app.post('/v1/chat/completions')
     async def chat(request: Request):
+        nonlocal next_detector_at
         raw = await request.body()
         if len(raw) > 2 * 1024 * 1024:
             return JSONResponse({'error': {'message': 'fixture_request_bound'}}, status_code=413)
         try:
-            key, number = admission.reserve(request.headers.get('authorization', ''), json.loads(raw), route_available)
+            payload = json.loads(raw)
+        except ValueError:
+            return JSONResponse({'error': {'message': 'fixture_model_contract_denied'}}, status_code=400)
+        if is_detector(payload) and detector_interval:
+            # Delay before reservation so queued detector work does not spend a
+            # journal admission or touch the provider while another call runs.
+            async with detector_lock:
+                delay = next_detector_at - time.monotonic()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                next_detector_at = time.monotonic() + detector_interval / 1000
+                return await forward(request, raw, payload)
+        return await forward(request, raw, payload)
+
+    async def forward(request, raw, payload):
+        try:
+            key, number = admission.reserve(request.headers.get('authorization', ''), payload, route_available)
         except PermissionError as error:
             return JSONResponse({'error': {'message': str(error)}}, status_code=403)
         except ConnectionError:
@@ -143,7 +176,6 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
             return JSONResponse({'error': {'message': 'fixture_model_contract_denied'}}, status_code=400)
         # Opening the blocking transport in a worker keeps Telegram long polling
         # responsive while the real model is generating response headers.
-        import asyncio
         started = time.monotonic()
         try:
             response = await asyncio.to_thread(transport.open, urllib.request.Request(upstream, data=raw,
@@ -188,7 +220,8 @@ def main():
         credentials[name] = (local, existing)
     import uvicorn
     app = create_app(Admission('/fixture-state/model-requests.jsonl', credentials, request_limit(os.environ)),
-                     'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', '/fixture-state/telegram.json')
+                     'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', '/fixture-state/telegram.json',
+                     detector_interval=detector_interval_ms(os.environ))
     uvicorn.run(app, host='0.0.0.0', port=8317, log_level='warning', access_log=False)
 
 

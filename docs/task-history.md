@@ -1990,3 +1990,34 @@ the coupled fixture and cannot reconstruct the outcomes of previous requests.
 [checks](../test/test_model_relay.py).
 
 </entry>
+
+<entry date="2026-10-05" area="Observe provider failure burst and late synthetic retirement reply">
+
+After the owner started Docker, the existing CPA container became healthy
+without this session starting it. The isolated sixteen-service fixture passed
+its health gate with the verified Hermes image and unchanged synthetic data.
+Its new outcome journal recorded 45 admissions: eleven upstream HTTP 200
+headers, one 502 and 33 HTTP 503 responses, predominantly detector calls. The
+fixture was stopped before more retries. Two sequential benign probes through
+only the relay then received HTTP 200 (chat and detector), showing that socket
+health and light-load access cannot establish coupled-load reliability. The
+previously timed-out retirement event completed after restart with one archived
+non-disclosing reply and one dispatch attempt; the original timeout remains
+failed and no fresh first-attempt pass is claimed. Read-only inspection found
+one ready owner Honcho generation and 81 pending generated memory contexts with
+no guard revision. All sixteen fixture services were stopped after the probe.
+Content-free counts and receipt identifiers remain in ignored fixture state.
+
+</entry>
+
+<entry date="2026-10-05" area="Prepare paced detector-only fixture recheck">
+
+The model relay accepts a bounded fixture-only interval between detector calls
+before reserving an admission; ordinary chat is unaffected. Eleven networkless
+checks pass, including concurrent detector pacing and the existing provider
+failure/privacy cases. This is an experimental capacity diagnostic, not a
+production mitigation or an unthrottled acceptance pass. The paced coupled
+recheck is pending. [Procedure](telegram-simulation.md),
+[relay](../tools/acceptance/model_relay.py), [checks](../test/test_model_relay.py).
+
+</entry>

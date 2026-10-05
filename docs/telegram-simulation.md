@@ -154,6 +154,11 @@ headers/error. It does not record bodies, headers, credentials, or streaming
 completion; a 200 header entry alone is not a completed answer. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
+For a capacity diagnosis only, `NOCHEH_FIXTURE_DETECTOR_INTERVAL_MS` can pace
+detector calls before admission (0-10,000 ms; default 0). Chat calls are not
+paced. Record the selected interval with the result: a pass under this fixture
+throttle does not establish unthrottled provider reliability or production
+latency.
 An explicit owner exception may increase the allowance in the synthetic
 fixture's meter process while retaining the same shared counter and embedding
 dollar cap. Record that temporary authorization and ceiling in ignored fixture

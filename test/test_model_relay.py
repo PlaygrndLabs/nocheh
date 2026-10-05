@@ -3,13 +3,22 @@ import json
 import io
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
-from tools.acceptance.model_relay import Admission, create_app, request_limit
+from tools.acceptance.model_relay import Admission, create_app, detector_interval_ms, request_limit
 
 
 class ModelRelayAdmissionTests(unittest.TestCase):
+    def test_detector_pacing_is_fixture_only_and_bounded(self):
+        self.assertEqual(detector_interval_ms({}), 0)
+        self.assertEqual(detector_interval_ms({'NOCHEH_FIXTURE_DETECTOR_INTERVAL_MS': '5000'}), 5000)
+        for invalid in ('-1', '10001', 'unlimited'):
+            with self.assertRaises(ValueError):
+                detector_interval_ms({'NOCHEH_FIXTURE_DETECTOR_INTERVAL_MS': invalid})
+
     def test_additional_allowance_requires_explicit_authorization_and_stays_bounded(self):
         self.assertEqual(request_limit({}), 300)
         with self.assertRaisesRegex(ValueError, 'additional_request_authorization_required'):
@@ -87,6 +96,34 @@ class ModelRelayAdmissionTests(unittest.TestCase):
 
 
 class ModelRelayTransportTests(unittest.TestCase):
+    def test_detector_calls_are_paced_before_admission(self):
+        from fastapi.testclient import TestClient
+        starts = []
+        class Opener:
+            def open(self, request, timeout):
+                starts.append(time.monotonic())
+                response = io.BytesIO(b'{"choices":[]}')
+                response.status = 200
+                response.headers = {'Content-Type': 'application/json'}
+                return response
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {'NOCHEH_INSTALLATION_FIXTURE': '1'}):
+            folder = Path(folder)
+            admission = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
+            app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions',
+                             folder / 'telegram.json', Opener(), lambda: True, detector_interval=120)
+            payload = {'model': 'gpt-5.6-sol', 'messages': [{'role': 'system',
+                       'content': 'Find secret values in the supplied data. Synthetic fixture.'}]}
+            barrier = threading.Barrier(3)
+            with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
+                def send():
+                    barrier.wait()
+                    return client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'}, json=payload).status_code
+                results = [pool.submit(send) for _ in range(2)]
+                barrier.wait()
+                self.assertEqual([future.result() for future in results], [200, 200])
+            self.assertEqual(admission.summary()['requests'], 2)
+            self.assertGreaterEqual(max(starts) - min(starts), 0.10)
+
     def test_scoped_key_stream_and_telegram_stay_on_separate_transports(self):
         from fastapi.testclient import TestClient
         calls = []
