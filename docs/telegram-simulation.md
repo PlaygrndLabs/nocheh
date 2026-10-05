@@ -164,7 +164,8 @@ cooldown of at least 60 seconds, doubling on consecutive 429 responses up to
 one hour. A bounded numeric `Retry-After` from the provider can lengthen that
 cooldown. Calls during it receive a local 429 and numeric `Retry-After` without
 reserving another provider admission. A later successful upstream response
-clears the cooldown. Preserve the upstream 429 and any eventual reply as
+from a request admitted after the 429 clears the cooldown; a slower earlier
+request cannot clear it. Preserve the upstream 429 and any eventual reply as
 separate outcomes; a delayed retry does not satisfy a first-attempt gate.
 An explicit owner exception may increase the allowance in the synthetic
 fixture's meter process while retaining the same shared counter and embedding
