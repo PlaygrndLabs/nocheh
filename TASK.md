@@ -196,15 +196,23 @@ this UI verification does not establish live recall or release readiness.
   This fails the first-attempt and latency gates. The fixture is stopped and
   preserves the original failure. The relay now blocks further upstream
   admissions during a restart-safe bounded cooldown after HTTP 429; eleven
-  networkless relay checks pass. The next coupled recheck must establish that
-  the cooldown limits rejected provider traffic and that a fresh topic reply
-  meets the acceptance deadline.
+  networkless relay checks pass. Coupled cooldown behavior remains unverified;
+  a fresh-topic first-attempt recheck was then run after provider recovery.
+  After provider recovery, a different unused topic passed the focused
+  first-attempt and timing gates in 176.4 seconds. One physical reply reached
+  topic 18, its delivery was archived, and its text contained neither the
+  forbidden other-topic time nor the private synthetic name. The watched run
+  and shutdown interval recorded 41 new upstream HTTP 200 outcomes and no 429.
+  All sixteen fixture services are stopped, while the operating provider remains
+  healthy. This result does not erase the failed topic-17 attempt, exercise the
+  cooldown under an actual 429, or establish unthrottled reliability.
   [Procedure](docs/telegram-simulation.md).
 
   A focused quality-runner window can stop after the selected scenario without
   injecting later restart or retirement questions. Invalid ordering is rejected
   before opening a fixture. Six networkless runner checks pass. This prepares an
-  unused-topic recheck; that actual model result failed as recorded above.
+  unused-topic recheck; the first attempt failed, and the later focused topic-18
+  recheck passed as recorded above.
   [Runner](tools/acceptance/model_rehearsal.py),
   [checks](test/test_model_rehearsal.py).
 
@@ -363,8 +371,8 @@ the existing provider, without another login or refresh owner. Its Honcho meter
 uses the authoritative shared spending ledger. After its 1,500 monthly reasoning
 attempts were consumed, the owner authorized 200 additional fixture requests,
 then all additional requests needed for this evaluation. The temporary fixture
-starts with a shared ceiling of 1,700 and can increase its own allowance as
-needed; it does not reset accounting, alter the $5 embedding cap, or change the
+started with a shared ceiling of 1,700 and currently uses 4,000 for this fixture;
+it does not reset accounting, alter the $5 embedding cap, or change the
 operating configuration. The relay's restart-safe admission journal has an
 explicitly authorized configurable allowance (seven admission/HTTP checks pass);
 this fixture currently allows 10,000 admissions and retains all prior entries.
@@ -375,6 +383,10 @@ reply with an archived causal link, but workflow completion exceeds the 300-seco
 gate; the earlier fresh-topic attempt fails before delivery. The current-question
 only Honcho peer exclusion has focused PostgreSQL evidence and the fresh-topic
 answer shows no other-topic disclosure, but neither failed timing gate is a pass.
+A later unused-topic recheck passed in 176.4 seconds on one attempt after provider
+recovery; the intervening topic-17 run failed first attempt and reached delivery
+only on attempt 16 after a prolonged HTTP 429 period. The 429 cooldown and
+unthrottled provider reliability remain unverified in coupled traffic.
 A later retirement question first fails with `assistant_runtime_unavailable`,
 then physically receives a non-disclosing answer on retry. Honcho also returned the synthetic name while a separately captured,
 still-active assistant reply stated the same fact. This observation alone does
@@ -458,10 +470,10 @@ activation remains separate.
    origin/main is unchanged. Any additional source commits must be included in
    the final verified publication plan. Ordinary pushing would retain private
    historical material and remains blocked.
-5. With the operating provider route available, verify the fixture-only 429
-   cooldown in a bounded coupled run and repeat one unused-topic question after
-   provider recovery. Preserve the failed first attempt, attempt-16 late reply,
-   prior retirement outcomes, and all original receipts. Do not infer production
-   reliability from fixture pacing or scripted tests.
+5. Verify the fixture-only 429 cooldown in a bounded coupled run when the
+   provider actually rate-limits; the recovered topic-18 pass does not exercise
+   that path. Preserve the topic-17 first-attempt failure, attempt-16 late reply,
+   topic-18 pass, prior retirement outcomes, and all original receipts. Finish
+   cold full-quality and unthrottled reliability gates separately.
 
 </pending>
