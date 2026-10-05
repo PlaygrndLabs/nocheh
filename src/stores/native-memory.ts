@@ -277,10 +277,14 @@ export class NativeMemoryRepository {
   async observe(id:string):Promise<boolean> {
     const current=await this.current(id);
     const pending=(await this.control.query("SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND state<>'done' LIMIT 1",[id])).rowCount;
-    const queue=await this.call('/v3/workspaces/'+id+'/queue/status');await this.current(id);
-    const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0;
-    const changed=await this.control.query(`UPDATE memory_generations SET state=$2,error_code=NULL,last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END
-      WHERE id=$1 AND state<>'retired' AND work_revision=$3`,[id,ready?'ready':'building',current.row.work_revision]);return ready&&changed.rowCount===1;
+    const queue=await this.call('/v3/workspaces/'+id+'/queue/status');
+    const health=await this.call('/v3/workspaces/'+id+'/nocheh/queue-health');await this.current(id);
+    if(typeof health.failed_items!=='boolean')throw new HttpError(502,'honcho_queue_health_invalid');
+    const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0&&!health.failed_items;
+    const changed=await this.control.query(`UPDATE memory_generations SET state=$2,
+      error_code=CASE WHEN $4::boolean THEN 'honcho_derivation_failed' ELSE NULL END,
+      last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END
+      WHERE id=$1 AND state<>'retired' AND work_revision=$3`,[id,ready?'ready':'building',current.row.work_revision,health.failed_items]);return ready&&changed.rowCount===1;
   }
   async prepareRequest(input:unknown) {
     const body=object(input),current=await this.current(string(body.workspace,64)),payload=object(body.payload);

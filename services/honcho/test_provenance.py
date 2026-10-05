@@ -1,8 +1,24 @@
 import unittest
-from .provenance import ancestry
+from .provenance import ancestry, failed_queue_items
 
 
 class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_queue_items_is_scoped_and_returns_no_error_content(self):
+        class Result:
+            def __init__(self, failed): self.failed=failed
+            def scalar_one(self): return self.failed
+        class Database:
+            def __init__(self): self.calls=[];self.failed=True
+            async def execute(self, statement, values):
+                self.calls.append((str(statement),values));return Result(self.failed)
+        db=Database()
+        self.assertTrue(await failed_queue_items('owned-workspace',db))
+        sql,values=db.calls[-1]
+        self.assertEqual(values,{'workspace':'owned-workspace'})
+        self.assertIn('processed AND error IS NOT NULL',sql)
+        db.failed=False
+        self.assertFalse(await failed_queue_items('owned-workspace',db))
+
     async def test_ancestry_follows_parents_deduplicates_cycles_and_reports_missing_evidence(self):
         a, b, c = 'a'*21, 'b'*21, 'c'*21
         rows = {a: {'id': a, 'source_ids': [b,c]}, b: {'id': b, 'source_ids': [a], 'message_ids': [1,2]}}

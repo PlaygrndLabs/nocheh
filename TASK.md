@@ -254,6 +254,23 @@ this UI verification does not establish live recall or release readiness.
   [Decision](docs/adr/0100-durable-embedding-egress-cooldown.md),
   [checks](services/honcho/test_meter.py).
 
+  The pinned Honcho queue counts processed-with-error items as completed. A
+  Nocheh generation previously checked only zero pending/in-progress work, so
+  terminal derivation errors could falsely advance readiness. The candidate
+  now checks a read-only, workspace-scoped failure boolean before marking ready;
+  failed work keeps `honcho_derivation_failed` visible and invalid health cannot
+  advance the generation. The isolated Honcho API returned true for an existing
+  failed synthetic workspace and false for an empty one, with deriver and Hermes
+  stopped; no embedding or model admission was added. Nineteen focused Python
+  checks pass; the pinned Linux Node 24 build passes and affected compiled Node
+  tests have five passes and four database-fixture skips. Coupled Nocheh readiness
+  and a fresh successful derivation remain pending. Terminal upstream failures
+  require a new evidence-preserving generation; restarting the worker alone does
+  not retry its processed-with-error items.
+  [Decision](docs/adr/0101-honcho-terminal-queue-errors-block-readiness.md),
+  [API check](services/honcho/test_provenance.py),
+  [Nocheh check](test/store-native-memory.test.ts).
+
   A focused quality-runner window can stop after the selected scenario without
   injecting later restart or retirement questions. Invalid ordering is rejected
   before opening a fixture. Six networkless runner checks pass. This prepares an
@@ -526,6 +543,8 @@ activation remains separate.
    blocked by $4.88 of retained HTTP 502 holds, not equivalent provider charges.
    Diagnose the embedding outage before any cap adjustment; the candidate
    cooldown protects future admissions but does not erase these holds.
+   Preserve terminal queue errors as failed readiness; rebuild from owned
+   synthetic sources into a fresh generation after budget and route recovery.
    Unthrottled provider reliability and operating release acceptance remain
    separate gates.
 

@@ -198,6 +198,11 @@ remain pending semantic review against ground truth; successful delivery alone
 cannot pass recall. Budget exhaustion or degraded memory must be recorded as a
 limitation rather than substituted with scripted reasoning. These observations
 do not authorize operating activation or pass real Telegram release gates.
+Before claiming a ready-memory pass, verify the current Honcho workspace has no
+terminal processed-with-error derivation items as well as no pending work. A
+zero-pending queue status alone counts errored items as completed in the pinned
+Honcho version. A failed workspace requires a new evidence-preserving generation;
+restarting its worker does not retry terminal items.
 
 </real_model_evaluation>
 
