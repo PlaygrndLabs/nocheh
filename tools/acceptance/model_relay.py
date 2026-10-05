@@ -15,9 +15,15 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import math
 
 DEFAULT_REQUEST_LIMIT = 300
 MAX_REQUEST_LIMIT = 10_000
+
+
+class ProviderCooldown(Exception):
+    def __init__(self, seconds):
+        self.seconds = seconds
 
 
 def request_limit(environment):
@@ -52,6 +58,19 @@ class Admission:
         self.limit = limit
         self.lock = threading.Lock()
         self.rows = [json.loads(line) for line in self.path.read_text().splitlines()] if self.path.exists() else []
+        self.cooldown_until = 0.0
+        self.rate_limit_streak = 0
+        if self.outcomes.exists():
+            outcomes = [json.loads(line) for line in self.outcomes.read_text().splitlines() if line.strip()]
+            for outcome in sorted(outcomes, key=lambda row: row.get('at', self.rows[row['number'] - 1]['at']
+                                                        + row['elapsed_ms'] / 1000)):
+                at = outcome.get('at', self.rows[outcome['number'] - 1]['at'] + outcome['elapsed_ms'] / 1000)
+                if outcome['status'] == 429:
+                    self.rate_limit_streak += 1
+                    self.cooldown_until = max(self.cooldown_until, at + min(3600, 60 * 2 ** min(self.rate_limit_streak - 1, 6)))
+                elif 200 <= outcome['status'] < 300:
+                    self.rate_limit_streak = 0
+                    self.cooldown_until = 0.0
 
     def reserve(self, authorization, payload, route_available=lambda: True):
         client = next((name for name, (local, _) in self.credentials.items()
@@ -64,6 +83,9 @@ class Admission:
         with self.lock:
             if len(self.rows) >= self.limit:
                 raise PermissionError('fixture_request_limit_exhausted')
+            remaining = self.cooldown_until - time.time()
+            if remaining > 0:
+                raise ProviderCooldown(math.ceil(remaining))
             if not route_available():
                 raise ConnectionError('existing_provider_unavailable')
             row = {'number': len(self.rows) + 1, 'at': time.time(), 'client': client, 'category': category}
@@ -77,14 +99,23 @@ class Admission:
             self.rows.append(row)
         return self.credentials[client][1], row['number']
 
-    def record_outcome(self, number, result, status, elapsed_ms):
+    def record_outcome(self, number, result, status, elapsed_ms, retry_after=None):
         if (type(number) is not int or number < 1 or number > len(self.rows)
                 or result not in ('upstream_headers', 'upstream_http', 'transport_error')
                 or type(status) is not int or not 100 <= status <= 599
                 or type(elapsed_ms) is not int or elapsed_ms < 0):
             raise ValueError('invalid_fixture_outcome')
-        row = {'number': number, 'result': result, 'status': status, 'elapsed_ms': elapsed_ms}
+        row = {'number': number, 'result': result, 'status': status, 'elapsed_ms': elapsed_ms, 'at': time.time()}
         with self.lock:
+            if status == 429:
+                self.rate_limit_streak += 1
+                delay = min(3600, 60 * 2 ** min(self.rate_limit_streak - 1, 6))
+                if type(retry_after) is int and 0 < retry_after <= 3600:
+                    delay = max(delay, retry_after)
+                self.cooldown_until = max(self.cooldown_until, row['at'] + delay)
+            elif 200 <= status < 300:
+                self.rate_limit_streak = 0
+                self.cooldown_until = 0.0
             self.outcomes.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             with self.outcomes.open('a') as file:
                 self.outcomes.chmod(0o600)
@@ -172,6 +203,9 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
             return JSONResponse({'error': {'message': str(error)}}, status_code=403)
         except ConnectionError:
             return JSONResponse({'error': {'message': 'existing_provider_unavailable'}}, status_code=503)
+        except ProviderCooldown as error:
+            return JSONResponse({'error': {'message': 'existing_provider_rate_limited'}}, status_code=429,
+                                headers={'Retry-After': str(error.seconds)})
         except ValueError:
             return JSONResponse({'error': {'message': 'fixture_model_contract_denied'}}, status_code=400)
         # Opening the blocking transport in a worker keeps Telegram long polling
@@ -181,7 +215,9 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
             response = await asyncio.to_thread(transport.open, urllib.request.Request(upstream, data=raw,
                 headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}), timeout=180)
         except urllib.error.HTTPError as error:
-            admission.record_outcome(number, 'upstream_http', error.code, round((time.monotonic() - started) * 1000))
+            header = error.headers.get('Retry-After', '') if error.headers else ''
+            retry_after = int(header) if header.isdecimal() and len(header) <= 4 else None
+            admission.record_outcome(number, 'upstream_http', error.code, round((time.monotonic() - started) * 1000), retry_after)
             return JSONResponse({'error': {'message': 'existing_provider_rejected', 'status': error.code}}, status_code=error.code)
         except Exception:
             admission.record_outcome(number, 'transport_error', 502, round((time.monotonic() - started) * 1000))
