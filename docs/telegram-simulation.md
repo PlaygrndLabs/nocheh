@@ -158,7 +158,8 @@ The ledger's conservative counted amount can exceed estimated provider usage:
 transport failures, unfinished calls and successful calls without usage retain
 their holds. Definite HTTP errors release their holds; old errors without
 recorded response type remain visible as unverified exposure but do not count
-against the cap. Diagnose repeated 5xx
+against the monthly cap; the exhausted pilot's historical holds remain counted.
+Diagnose repeated 5xx
 outcomes and the paid-egress cooldown before proposing extra budget; raising a
 cap does not repair a failing embedding route.
 For a capacity diagnosis only, `NOCHEH_FIXTURE_DETECTOR_INTERVAL_MS` can pace

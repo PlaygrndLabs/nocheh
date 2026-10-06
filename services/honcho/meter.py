@@ -57,11 +57,13 @@ class Ledger:
             # Old 502 rows did not distinguish an HTTP response from a lost
             # response. Preserve that uncertainty in the audit, but do not
             # mistake their admission holds for confirmed provider spending.
-            db.execute("UPDATE calls SET outcome='legacy_error_unverified' WHERE outcome IS NULL AND status>=400")
+            monthly_since=db.execute('SELECT monthly_since FROM policy WHERE id=1').fetchone()[0]
+            if monthly_since is not None:
+                db.execute("UPDATE calls SET outcome='legacy_error_unverified' WHERE outcome IS NULL AND status>=400 AND started>=?",(monthly_since,))
+            db.execute("UPDATE calls SET outcome='legacy_pilot_error' WHERE outcome IS NULL AND status>=400")
             # Preserve the exhausted pilot's historical accounting. Reconcile
             # confirmed monthly calls once, without changing failed or unknown
             # reservations; a restart cannot repeatedly lower a reservation.
-            monthly_since=db.execute('SELECT monthly_since FROM policy WHERE id=1').fetchone()[0]
             if monthly_since is not None:
                 for (call,) in db.execute("SELECT id FROM calls WHERE route='/v1/embeddings' AND started>=? AND settlement_version=0 AND status IS NOT NULL",(monthly_since,)).fetchall():
                     self._settle_call(db,call)
