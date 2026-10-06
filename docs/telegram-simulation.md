@@ -154,8 +154,11 @@ headers/error. It does not record bodies, headers, credentials, or streaming
 completion; a 200 header entry alone is not a completed answer. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
-The ledger's conservative reserved amount can exceed estimated provider usage:
-failed embedding attempts retain their full holds. Diagnose repeated 5xx
+The ledger's conservative counted amount can exceed estimated provider usage:
+transport failures, unfinished calls and successful calls without usage retain
+their holds. Definite HTTP errors release their holds; old errors without
+recorded response type remain visible as unverified exposure but do not count
+against the cap. Diagnose repeated 5xx
 outcomes and the paid-egress cooldown before proposing extra budget; raising a
 cap does not repair a failing embedding route.
 For a capacity diagnosis only, `NOCHEH_FIXTURE_DETECTOR_INTERVAL_MS` can pace
