@@ -491,6 +491,18 @@ rose from about 1.0 to 4.2 GiB, and all 17 operating services stayed healthy.
 Monitor disk headroom during any focused fixture run; full-stack health and
 this cleanup alone do not establish personal-use release.
 
+A focused synthetic same-topic reaction recheck has not issued a question yet.
+The resumed 16-service fixture was healthy and left all operating container IDs
+unchanged, but the topic-7 generation stayed building through a 360-second
+readiness wait. Its 21 ingestion receipts were done; native Honcho still had
+four pending derivation units and no terminal error for that workspace. The
+fixture was stopped with state preserved. Read-only native queue inspection
+showed three pending representation units, one pending summary, one pending
+webhook and no active worker session for topic 7; other synthetic workspaces
+also have backlog. No new embedding 5xx was observed during that wait. This
+is an unrun reaction-quality gate, not an answer pass or failure. Drain the
+synthetic queue with disk and provider-error bounds before asking again.
+
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
 the existing provider, without another login or refresh owner. Its Honcho meter

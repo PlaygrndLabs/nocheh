@@ -2339,3 +2339,21 @@ and Spotify cache were not selected. Host free space rose from about 1.0 to
 fixture work remains bounded by disk monitoring and its own acceptance checks.
 
 </entry>
+
+<entry date="2026-10-06" area="Bound a same-topic reaction recheck on ready memory">
+
+The previously preserved real-model fixture restarted with 16/16 healthy
+services while all 17 operating container IDs remained unchanged. A focused
+question about an older synthetic reaction was deliberately held until topic 7
+could use ready Honcho memory. Its 21 ingestion receipts were done, but the
+generation stayed building through a 360-second wait. The native queue reported
+four pending derivation units and no terminal failure for that workspace.
+No new paid embedding 5xx occurred during the wait and host free space remained
+above the two-GiB stop threshold. The fixture was stopped with volumes and
+receipts preserved; its two synthetic databases were briefly started without
+poller or deriver for read-only queue inspection, then stopped again. That
+inspection found three pending representation units, one summary, one webhook,
+and no active worker session for topic 7. Other synthetic workspaces had pending
+work. The reaction-quality recheck remains unrun, not passed or failed.
+
+</entry>
