@@ -501,13 +501,25 @@ addition and removal and said the report was not currently approved. It was
 causally archived, and dispatch finished on attempt one about 430 seconds after
 the question began. The Hermes receipt measured about 142 seconds for the agent;
 its dispatch intent was written about 189 seconds after the question began,
-and control reconciliation completed later. Thus answer content passed review,
+and control reconciliation completed later. The workflow was admitted about
+two seconds after the question and preparation closed about 183 seconds after;
+saved outbox publication and run-seen timestamps are overwritten by later
+republication and claims, so they do not prove where the wait occurred.
+Synthetic Inngest emitted duplicate-span telemetry errors, but their causal
+impact is unproven. Thus answer content passed review,
 but the bounded first-attempt reply gate failed. The new question advanced the
 generation to building while retaining a prior ready snapshot. Diagnose the
 pre-intent and reconciliation delays and the transient preparation rejection
-before treating this as dependable ready-memory recall. The fixture is stopped
-with its volumes and receipts preserved; all 17 operating services remain
-healthy, and host free space is about 2.9 GiB.
+before treating this as dependable ready-memory recall. A second distinct
+synthetic question was sent while that generation rebuilt and retained its
+prior ready snapshot. Its preparation completed after about 43 seconds and
+Hermes intent was written after about 76 seconds. The edited meeting time was
+answered correctly in one attempt and one causally archived physical reply in
+174 seconds, but the answer explicitly reported limited memory. This passes
+delivery and corrected-fact content in a rebuilding audience, not the ready
+Honcho-memory quality gate. The fixture is stopped with its volumes and
+receipts preserved; all 17 operating services remain healthy, and host free
+space is about 5 GiB at this checkpoint.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
