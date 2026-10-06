@@ -2357,3 +2357,24 @@ and no active worker session for topic 7. Other synthetic workspaces had pending
 work. The reaction-quality recheck remains unrun, not passed or failed.
 
 </entry>
+
+<entry date="2026-10-06" area="Measure a ready-memory synthetic reaction reply">
+
+The isolated fixture restarted with 16 healthy services and its saved volumes.
+With one deriver worker, the topic-7 queue progressed through older synthetic
+work and the generation became ready. A transient embedding attempt received
+`memory_preparation_unavailable`; it retried without a terminal failure.
+One synthetic Telegram question about the older removed reaction was captured
+and handed off. The 300-second reply gate timed out while dispatch was still
+running on attempt one. A single linked answer arrived later, correctly stating
+that the star was added and then removed and that the report was not currently
+approved. It was causally archived; dispatch closed on attempt one at about
+430 seconds. The native agent receipt measured 142 seconds, while the dispatch
+intent file appeared about 189 seconds after the question began. The answer's
+content is positive evidence, but timely first-attempt delivery failed. The
+question started another memory build with its prior ready snapshot retained.
+The fixture was stopped without deleting state; 17/17 operating services stayed
+healthy and host free space remained above 2.8 GiB. Detailed source, reply,
+and native receipts remain in ignored local state.
+
+</entry>
