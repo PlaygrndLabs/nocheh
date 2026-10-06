@@ -744,8 +744,6 @@ contains the historical private reports and has not been rewritten.
 
 </entry>
 
-
-
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -2188,5 +2186,27 @@ hash matched the worktree. A full offline Dockerfile build could not pass its
 apt DNS step and created no image. The overlay was not activated; the fixture
 and operating services remained unchanged. The local image ID and build
 limitation are saved in ignored synthetic acceptance state.
+
+</entry>
+
+<entry date="2026-10-06" area="Separate embedding error holds from cap spending">
+
+The owner rejected raising the shared $5 embedding cap after observing about
+$0.12 of successful usage against $4.88 in failed admission holds. The meter
+now distinguishes definite HTTP errors from transport failures. It preserves
+each call and original reservation, releases HTTP-error holds from cap
+accounting, and retains uncertain transport and unfinished holds. Historical
+errors lack response-type evidence; they are labeled unverified and excluded
+from cap spending without deleting their records. The owner dashboard shows
+released and unverified amounts separately from estimated usage and cap
+headroom. [Decision](adr/0102-separate-embedding-error-holds-from-spending.md),
+[checks](../services/honcho/test_meter.py).
+
+On a read-only copy of the operating SQLite ledger, repeated migration left
+$0.118666 counted and $4.881334 admission headroom under the unchanged $5 cap;
+the original $4.88 error holds remained visible. Twenty focused Honcho Python
+checks passed, the isolated Linux dashboard build passed, and nine affected
+dashboard tests passed. The operating ledger and services were not changed.
+Actual provider billing and a fresh ready-memory fixture remain unverified.
 
 </entry>
