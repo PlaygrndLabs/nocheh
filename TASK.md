@@ -36,14 +36,11 @@ the sanitized-history remote-publication gate remain open.
 [Dashboard checks](test/dashboard-supervision.test.mjs),
 [synthetic preview](test/dashboard-supervision-preview.mjs).
 
-Nocheh is pre-release. The operating local installation was previously verified
-as one source-watched `make dev` Compose stack from the release session worktree,
-with all 17 services healthy after the release checkout restart. Docker was
-unavailable during part of the 2026-10-05 simulation; when the owner started
-it, the existing CPA and several Honcho support services came up healthy while
-the operating app, Hermes and Inngest remained stopped. Current full-stack
-health is unverified. The earlier unexplained Inngest exit
-remains recorded. The pinned native candidate includes empty-completion rejection; the
+Nocheh is pre-release. The operating local installation has 17/17 healthy
+services after the limited database and Inngest recovery and Hermes image-tag
+restoration documented below. This service-health checkpoint does not establish
+personal-use readiness or release acceptance. The earlier unexplained Inngest
+exit remains recorded. The pinned native candidate includes empty-completion rejection; the
 last verified TypeScript services include event-bound provider timings, dependency
 patches, and protected workflow receipt reconciliation. The prior source checkout
 and its three local edits remain preserved.
@@ -81,9 +78,11 @@ Restarting the cached development database image reinstated an older, slow
 workflow view. The tested view was reapplied under its owner role and catalog
 verified; workflow health then completed in 0.8 seconds with nine connected
 worker families. A rebuilt database image preserves the corrected schema and
-installation generation across an isolated fresh start and restart. Recreating
-the operating database from that image is still pending. Development has automatic
-service restarts disabled and is not the unattended release configuration.
+installation generation across an isolated fresh start and restart. The
+operating database was recreated from the tested image with its named volume
+preserved and recovered after 81 seconds of WAL replay. Development has
+automatic service restarts disabled and is not the unattended release
+configuration.
 
 The existing embedding spending cap and subscription request safety limit remain
 in force. The local provider route has one CPA login and one refresh owner. Native
@@ -491,17 +490,24 @@ rose from about 1.0 to 4.2 GiB, and all 17 operating services stayed healthy.
 Monitor disk headroom during any focused fixture run; full-stack health and
 this cleanup alone do not establish personal-use release.
 
-A focused synthetic same-topic reaction recheck has not issued a question yet.
-The resumed 16-service fixture was healthy and left all operating container IDs
-unchanged, but the topic-7 generation stayed building through a 360-second
-readiness wait. Its 21 ingestion receipts were done; native Honcho still had
-four pending derivation units and no terminal error for that workspace. The
-fixture was stopped with state preserved. Read-only native queue inspection
-showed three pending representation units, one pending summary, one pending
-webhook and no active worker session for topic 7; other synthetic workspaces
-also have backlog. No new embedding 5xx was observed during that wait. This
-is an unrun reaction-quality gate, not an answer pass or failure. Drain the
-synthetic queue with disk and provider-error bounds before asking again.
+The focused synthetic same-topic reaction recheck has now issued one question
+after the topic-7 generation reached ready. The single-worker native queue
+advanced slowly through older synthetic work; one transient embedding retry
+reported `memory_preparation_unavailable`, but the topic reached ready without
+a terminal derivation failure. The question was captured and handed off, then
+timed out after 311.5 seconds while dispatch remained running on attempt one.
+A later single physical reply correctly described the synthetic star reaction's
+addition and removal and said the report was not currently approved. It was
+causally archived, and dispatch finished on attempt one about 430 seconds after
+the question began. The Hermes receipt measured about 142 seconds for the agent;
+its dispatch intent was written about 189 seconds after the question began,
+and control reconciliation completed later. Thus answer content passed review,
+but the bounded first-attempt reply gate failed. The new question advanced the
+generation to building while retaining a prior ready snapshot. Diagnose the
+pre-intent and reconciliation delays and the transient preparation rejection
+before treating this as dependable ready-memory recall. The fixture is stopped
+with its volumes and receipts preserved; all 17 operating services remain
+healthy, and host free space is about 2.9 GiB.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
