@@ -2315,3 +2315,15 @@ increment. The synthetic fixture stayed stopped. Release and Telegram acceptance
 remain separate.
 
 </entry>
+
+<entry date="2026-10-06" area="Restore pinned Hermes launcher image identity">
+
+The owner authorized restoring only the missing `nocheh-hermes:local` tag from
+the exact image running the healthy Hermes service. Its OCI revision matched
+the pinned upstream lock. No isolated-turn container was orphaned and no
+container was recreated. The launcher became healthy five seconds after the
+tag was restored, bringing the observed operating stack to 17/17 healthy
+services. Host free space remained about 1.0 GiB. Health alone does not pass
+memory quality, subscription transcription, live Telegram, or release gates.
+
+</entry>
