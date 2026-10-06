@@ -537,8 +537,14 @@ stale, previously ready topic snapshot returned one scoped source with
 The same event bound to another topic was denied with `turn_source_denied`.
 Neither the model relay nor Honcho provider services ran, so the check made
 no paid request. The candidate is verified for this context-renewal behavior;
-a full Hermes reply with the candidate and operating activation are still
-pending. Git integration alone does not activate it.
+a full mocked-Telegram Hermes turn with the same one-file candidate also
+answered the corrected synthetic fact in 142 seconds on the first attempt,
+with one causally archived reply and no limited-memory notice. A background
+refresh may have renewed the deliberately stale snapshot before Hermes read
+it, so that turn does not isolate the foreground renewal path. The earlier
+scoped API check does isolate and verify that path. The 430-second reaction
+reply, Honcho queue latency, and operating activation remain open. Git
+integration alone does not activate this candidate.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through

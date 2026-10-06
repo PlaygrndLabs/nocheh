@@ -2433,3 +2433,20 @@ The non-identifying receipt is in ignored local acceptance state. This verifies
 the context endpoint, not a full Hermes reply or operating activation.
 
 </entry>
+
+<entry date="2026-10-06" area="Check a complete Hermes turn with the context candidate">
+
+The full 16-service synthetic fixture started with the same one-file read-only
+candidate overlay while all 17 operating services remained healthy. The
+previously ready topic snapshot was deliberately aged past its five-minute
+limit before one mocked-Telegram question about the edited meeting time. The
+snapshot became fresh during the turn. Hermes delivered one causally archived,
+factually correct reply in 142 seconds on its first attempt without the native
+limited-memory notice. Background renewal may have preceded Hermes' context
+read, so this turn confirms end-to-end behavior with the candidate but does
+not independently prove the foreground renewal branch. The separate scoped
+API check does prove that branch. The fixture was stopped without deleting
+its volumes or receipts; 17/17 operating services remained healthy. The
+non-identifying receipt is in ignored local acceptance state.
+
+</entry>
