@@ -2378,3 +2378,24 @@ healthy and host free space remained above 2.8 GiB. Detailed source, reply,
 and native receipts remain in ignored local state.
 
 </entry>
+
+<entry date="2026-10-06" area="Separate workflow wait from a rebuilding-memory follow-up">
+
+The reaction workflow was admitted about two seconds after the synthetic
+question, but its preparation completed about 183 seconds later. The saved
+outbox publication timestamp and run-seen timestamp are updated during
+republication and later claims, so they cannot establish the first publication
+or first execution time. Synthetic Inngest logged duplicate-span telemetry
+errors; no causal link to reply latency was established. During a subsequent
+four-minute wait the question-triggered generation stayed building with a prior
+ready snapshot and several pending derivation units, without terminal errors.
+A different synthetic question about the edited meeting time was then sent as
+a rebuilding-memory follow-up. Preparation completed at about 43 seconds,
+Hermes intent appeared at about 76 seconds, and a correct answer arrived in
+174 seconds on the first attempt. One linked physical reply was archived. The
+answer explicitly indicated limited memory, so it does not establish ready
+Honcho retrieval despite correct content. The isolated fixture was stopped
+with all receipts and volumes intact. The operating stack remained 17/17
+healthy, and host free space was about 5 GiB.
+
+</entry>
