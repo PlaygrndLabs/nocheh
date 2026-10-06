@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+import urllib.error
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -21,6 +22,11 @@ class Transport:
         self.calls.append(request)
         if self.fail: raise TimeoutError()
         return Response(b'{"data":[],"usage":{"prompt_tokens":10,"total_tokens":10}}')
+
+
+class HttpFailureTransport:
+    def open(self,request,timeout):
+        raise urllib.error.HTTPError(request.full_url,502,'upstream failure',{},io.BytesIO())
 
 
 class BudgetTests(unittest.TestCase):
@@ -73,8 +79,9 @@ class BudgetTests(unittest.TestCase):
             self.assertNotIn('calls',summary)
             self.assertEqual((summary['embedding_requests'],summary['reasoning_requests']),(2,1))
             self.assertEqual((summary['embedding_reported_requests'],summary['embedding_unreported_requests']),(1,1))
-            self.assertEqual(summary['reserved_usd'],.010186)
-            self.assertEqual(summary['counted_toward_cap_usd'],.010186)
+            self.assertEqual(summary['reserved_usd'],.000186)
+            self.assertEqual(summary['counted_toward_cap_usd'],.000186)
+            self.assertEqual(summary['legacy_error_exposure_unverified_usd'],.01)
             self.assertEqual(summary['estimated_embedding_cost_usd'],.0001856)
 
     def test_monthly_legacy_successes_settle_once_but_uncertain_and_pilot_calls_keep_their_holds(self):
@@ -92,9 +99,25 @@ class BudgetTests(unittest.TestCase):
                 db.execute('UPDATE calls SET status=200,usage=?,settlement_version=0 WHERE id=?',(json.dumps({'total_tokens':10}),pilot))
             first=Ledger(path).report()
             second=Ledger(path).report()
-            self.assertEqual(first['reserved_usd'],.020186)
+            self.assertEqual(first['reserved_usd'],.010186)
             self.assertEqual(second['reserved_usd'],first['reserved_usd'])
             self.assertEqual(first['lifetime_reserved_usd'],.030186)
+            self.assertEqual(first['legacy_error_exposure_unverified_usd'],.01)
+
+    def test_http_error_releases_cap_but_transport_failure_keeps_hold(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path);ledger.enable_monthly()
+            payload={'model':'text-embedding-3-small','input':'fixture'}
+            status=Egress(ledger,'internal','temporary',HttpFailureTransport(),reasoning_key='honcho-client').send('/v1/embeddings',payload)[0]
+            self.assertEqual(status,502)
+            report=Ledger(path).report()
+            self.assertEqual(report['reserved_usd'],0)
+            self.assertEqual(report['released_error_holds_usd'],.01)
+            self.assertEqual(report['calls'][0]['outcome'],'http_error')
+            with sqlite3.connect(path) as db:db.execute('DELETE FROM egress_cooldown')
+            status=Egress(ledger,'internal','temporary',Transport(True),reasoning_key='honcho-client').send('/v1/embeddings',payload)[0]
+            self.assertEqual(status,502)
+            self.assertEqual(Ledger(path).report()['reserved_usd'],.01)
 
     def test_embedding_cap_and_subscription_request_bound_are_independent(self):
         with tempfile.TemporaryDirectory() as root, patch('services.honcho.meter.REQUEST_LIMIT',2):

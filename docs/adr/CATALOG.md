@@ -115,3 +115,4 @@ records current implementation and activation.
 | [0099](0099-independent-evidence-for-historical-recall.md) | Require independent source evidence for foreground historical recall | Extends 0044 and 0056; background learning retains the current source |
 | [0100](0100-durable-embedding-egress-cooldown.md) | Bound paid embedding admissions after provider failure | Extends 0079; preserves failed holds and separate subscription reasoning |
 | [0101](0101-honcho-terminal-queue-errors-block-readiness.md) | Reject processed-with-error Honcho work as ready memory | Extends 0044 and 0100; keeps failure details inside the workspace boundary |
+| [0102](0102-separate-embedding-error-holds-from-spending.md) | Separate embedding error holds from cap spending | Supersedes 0079 failed-call hold and 0100 historical-hold consequence; retains pre-egress reservation and cooldown |

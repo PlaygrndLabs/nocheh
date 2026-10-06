@@ -246,13 +246,27 @@ this UI verification does not establish live recall or release readiness.
   one-hour cooldown after paid embedding 5xx outcomes. Blocked calls return
   HTTP 503 with numeric `Retry-After` before making a new spending reservation;
   a later admitted success clears the cooldown, while an older in-flight success
-  cannot. Reasoning is unaffected and failed holds remain. Thirteen focused
+  cannot. Reasoning is unaffected. Failed admissions remain recorded; the
+  accounting candidate below separates which holds count against the cap. Thirteen focused
   meter checks pass, including transport failure, restart, HTTP response and
   late-success ordering. This source candidate has not been activated in the
   operating installation or the previous cold fixture image. The existing
-  October holds still block ready-memory work at the $5 cap.
+  October holds blocked ready-memory work under the prior accounting.
   [Decision](docs/adr/0100-durable-embedding-egress-cooldown.md),
   [checks](services/honcho/test_meter.py).
+
+  The owner rejected increasing the $5 embedding cap and requested accurate
+  accounting. The candidate keeps every admission record, releases confirmed
+  HTTP-error holds, retains transport/unfinished/unreported holds, and labels
+  historical errors whose response type was never recorded. On a read-only
+  SQLite backup of the operating ledger, repeated migration produced the same
+  result: $0.118666 counted toward the unchanged $5 cap, $4.881334 headroom,
+  and $4.88 of original error holds released from cap accounting but preserved
+  as unverified exposure. This is not a provider invoice. The operating ledger
+  and running services were not changed. A fresh fixture run, provider billing
+  comparison, and operating activation remain pending.
+  [Decision](docs/adr/0102-separate-embedding-error-holds-from-spending.md),
+  [meter checks](services/honcho/test_meter.py).
 
   The pinned Honcho queue counts processed-with-error items as completed. A
   Nocheh generation previously checked only zero pending/in-progress work, so
@@ -543,12 +557,14 @@ activation remains separate.
    alongside the topic-17 first-attempt failure, attempt-16 late reply, topic-18
    pass, prior retirement outcomes, and all original receipts. The fresh cold
    retirement answer used limited memory; finish owner/topic Honcho derivation
-   only with embedding budget headroom under an explicitly authorized cap, then
+   only with verified embedding budget headroom under the unchanged $5 cap, then
    ask a fresh focused question after readiness and verify `limited_memory=false`.
-   The owner observed about $0.12 actual estimated usage; the remaining cap is
-   blocked by $4.88 of retained HTTP 502 holds, not equivalent provider charges.
-   Diagnose the embedding outage before any cap adjustment; the candidate
-   cooldown protects future admissions but does not erase these holds.
+   The owner observed about $0.12 of reported successful usage and rejected a
+   cap increase. A candidate accounting correction excludes $4.88 in old
+   unverified-error holds from the cap while preserving their records; it has
+   not been activated in the operating installation. Diagnose the embedding
+   outage before resuming paid fixture traffic; the candidate cooldown bounds
+   future admissions.
    Preserve terminal queue errors as failed readiness; rebuild from owned
    synthetic sources into a fresh generation after budget and route recovery.
    Unthrottled provider reliability and operating release acceptance remain

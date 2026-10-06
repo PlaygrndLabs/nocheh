@@ -52,6 +52,12 @@ class Ledger:
             if 'audit' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]: db.execute('ALTER TABLE calls ADD COLUMN audit TEXT')
             if 'settlement_version' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]:
                 db.execute('ALTER TABLE calls ADD COLUMN settlement_version INTEGER NOT NULL DEFAULT 0')
+            if 'outcome' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]:
+                db.execute('ALTER TABLE calls ADD COLUMN outcome TEXT')
+            # Old 502 rows did not distinguish an HTTP response from a lost
+            # response. Preserve that uncertainty in the audit, but do not
+            # mistake their admission holds for confirmed provider spending.
+            db.execute("UPDATE calls SET outcome='legacy_error_unverified' WHERE outcome IS NULL AND status>=400")
             # Preserve the exhausted pilot's historical accounting. Reconcile
             # confirmed monthly calls once, without changing failed or unknown
             # reservations; a restart cannot repeatedly lower a reservation.
@@ -143,7 +149,7 @@ class Ledger:
                 db.execute('INSERT OR IGNORE INTO embedding_route VALUES(1,?,?,?)',selected)
             start,mode=self.window(db)
             limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else db.execute('SELECT monthly_limit FROM policy WHERE id=1').fetchone()[0]
-            total = db.execute("SELECT coalesce(sum(reserved),0) FROM calls WHERE route='/v1/embeddings' AND started>=?",(start,)).fetchone()[0]
+            total = db.execute("SELECT coalesce(sum(CASE WHEN outcome IN ('http_error','legacy_error_unverified') THEN 0 ELSE reserved END),0) FROM calls WHERE route='/v1/embeddings' AND started>=?",(start,)).fetchone()[0]
             reasoning = db.execute("SELECT count(*) FROM calls WHERE route='/v1/chat/completions' AND started>=?",(start,)).fetchone()[0]
             if amount and total + amount > limit:
                 raise Rejected('pilot_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
@@ -154,11 +160,15 @@ class Ledger:
             return db.execute('INSERT INTO calls(route,digest,reserved,started,audit) VALUES(?,?,?,?,?)',
                 (route, hashlib.sha256(body).hexdigest(), amount, time.time(),json.dumps(audit))).lastrowid
 
-    def finish(self, call, status, duration, usage):
+    def finish(self, call, status, duration, usage, outcome=None):
         with self.connect() as db:
             row=db.execute('SELECT route,started FROM calls WHERE id=?',(call,)).fetchone()
-            db.execute('UPDATE calls SET status=?,duration_ms=?,usage=? WHERE id=?',
-                (status, round(duration*1000), json.dumps(usage), call))
+            if outcome not in (None,'response','http_error','transport_error'):
+                raise ValueError('invalid_egress_outcome')
+            if outcome is None:
+                outcome='legacy_error_unverified' if status>=400 else 'response'
+            db.execute('UPDATE calls SET status=?,duration_ms=?,usage=?,outcome=? WHERE id=?',
+                (status, round(duration*1000), json.dumps(usage), outcome, call))
             self._settle_call(db,call)
             if row and row[0]=='/v1/embeddings':
                 previous=db.execute('SELECT until,streak,failed_at FROM egress_cooldown WHERE route=?',(row[0],)).fetchone()
@@ -179,17 +189,22 @@ class Ledger:
             monthly_limit,revision=db.execute('SELECT monthly_limit,revision FROM policy WHERE id=1').fetchone()
             selected=db.execute('SELECT provider,model,dimensions FROM embedding_route WHERE id=1').fetchone()
         limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else monthly_limit
-        reserved=sum(c['reserved'] for c in calls if c['started']>=start)
+        active=[c for c in calls if c['started']>=start and c['route']=='/v1/embeddings']
+        released=sum(c['reserved'] for c in active if c['outcome'] in ('http_error','legacy_error_unverified'))
+        reserved=sum(c['reserved'] for c in active)-released
+        legacy=sum(c['reserved'] for c in active if c['outcome']=='legacy_error_unverified')
         embedding=embeddings({'NOCHEH_EMBEDDING_MODEL':selected['model']}) if selected else embeddings({})
         return {'limit_usd':limit/1e6,'limit_cents':limit//10_000,'max_limit_cents':MAX_MONTHLY_LIMIT_CENTS,
                 'revision':revision,'window_started_at':datetime.fromtimestamp(start,timezone.utc).isoformat(),
                 'mode':mode,'reserved_usd':reserved/1e6,'remaining_usd':max(0,limit-reserved)/1e6,
                 'counted_toward_cap_usd':reserved/1e6,
                 'lifetime_reserved_usd':sum(c['reserved'] for c in calls)/1e6,
+                'released_error_holds_usd':released/1e6,
+                'legacy_error_exposure_unverified_usd':legacy/1e6,
                 'embedding_route':dict(selected) if selected else None,
                 'embedding_hold_usd':embedding.reservation/1e6,
                 'pricing_usd_per_million_embedding_tokens':embedding.price_per_million,
-                'note': 'Confirmed reported embeddings settle to token-priced accounting; failed, unfinished, and unreported calls retain their hold. This is not a provider invoice.', 'calls': calls}
+                'note': 'Reported successes settle by tokens. Explicit HTTP errors do not count toward the cap; transport failures, unfinished and unreported calls retain their hold. Legacy error type and provider billing remain unverified; this is not an invoice.', 'calls': calls}
 
     def summary(self):
         report=self.report();start=datetime.fromisoformat(report['window_started_at']).timestamp()
@@ -269,7 +284,7 @@ class Egress:
         data=json.dumps(payload,ensure_ascii=False).encode()
         if len(data)>1024*1024: raise Rejected('request_too_large')
         call=self.ledger.reserve(route,data,self.embedding)  # fsync transaction BEFORE any egress
-        start=time.monotonic();status=502;usage=None
+        start=time.monotonic();status=502;usage=None;outcome='transport_error'
         url=self.embedding.url if paid else (self.reasoning_url+route.removeprefix('/v1'))
         try:
             request=urllib.request.Request(url,data=data,headers={'Authorization':'Bearer '+(self.paid_key if paid else self.reasoning_key),'Content-Type':'application/json'})
@@ -277,6 +292,7 @@ class Egress:
                 status=response.status;content=response.read(16*1024*1024+1)
                 if len(content)>16*1024*1024: raise Rejected('response_too_large')
                 kind=response.headers.get('Content-Type','application/json')
+            outcome='response' if 200<=status<300 else 'http_error'
             try:
                 if 'event-stream' in kind:
                     for line in content.splitlines():
@@ -287,13 +303,14 @@ class Egress:
             except (ValueError,AttributeError): pass
             return status,kind,content
         except urllib.error.HTTPError as error:
-            status=error.code
+            status=error.code;outcome='http_error'
+            error.close()
             return status,'application/json',json.dumps({'error':{'message':'honcho_upstream_rejected','code':status}}).encode()
         except Exception:
             status=502
             return 502,'application/json',b'{"error":{"message":"honcho_upstream_unavailable"}}'
         finally:
-            self.ledger.finish(call,status,time.monotonic()-start,usage)
+            self.ledger.finish(call,status,time.monotonic()-start,usage,outcome)
 
 
 def handler(egress):
