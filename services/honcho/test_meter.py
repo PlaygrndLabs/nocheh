@@ -88,6 +88,7 @@ class BudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'budget.sqlite';ledger=Ledger(path)
             pilot=ledger.reserve('/v1/embeddings',b'pilot')
+            pilot_error=ledger.reserve('/v1/embeddings',b'pilot-error')
             ledger.enable_monthly()
             good=ledger.reserve('/v1/embeddings',b'good')
             failed=ledger.reserve('/v1/embeddings',b'failed')
@@ -97,12 +98,14 @@ class BudgetTests(unittest.TestCase):
                 db.execute('UPDATE calls SET status=502,settlement_version=0 WHERE id=?',(failed,))
                 db.execute('UPDATE calls SET status=200,usage=NULL,settlement_version=0 WHERE id=?',(unknown,))
                 db.execute('UPDATE calls SET status=200,usage=?,settlement_version=0 WHERE id=?',(json.dumps({'total_tokens':10}),pilot))
+                db.execute('UPDATE calls SET status=502,settlement_version=0 WHERE id=?',(pilot_error,))
             first=Ledger(path).report()
             second=Ledger(path).report()
             self.assertEqual(first['reserved_usd'],.010186)
             self.assertEqual(second['reserved_usd'],first['reserved_usd'])
-            self.assertEqual(first['lifetime_reserved_usd'],.030186)
+            self.assertEqual(first['lifetime_reserved_usd'],.040186)
             self.assertEqual(first['legacy_error_exposure_unverified_usd'],.01)
+            self.assertEqual(first['calls'][pilot_error-1]['outcome'],'legacy_pilot_error')
 
     def test_http_error_releases_cap_but_transport_failure_keeps_hold(self):
         with tempfile.TemporaryDirectory() as root:

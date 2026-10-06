@@ -2196,8 +2196,9 @@ $0.12 of successful usage against $4.88 in failed admission holds. The meter
 now distinguishes definite HTTP errors from transport failures. It preserves
 each call and original reservation, releases HTTP-error holds from cap
 accounting, and retains uncertain transport and unfinished holds. Historical
-errors lack response-type evidence; they are labeled unverified and excluded
-from cap spending without deleting their records. The owner dashboard shows
+monthly errors lack response-type evidence; they are labeled unverified and excluded
+from monthly cap spending without deleting their records. Old pilot holds stay
+counted. The owner dashboard shows
 released and unverified amounts separately from estimated usage and cap
 headroom. [Decision](adr/0102-separate-embedding-error-holds-from-spending.md),
 [checks](../services/honcho/test_meter.py).
