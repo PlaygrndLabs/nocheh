@@ -13,18 +13,14 @@ stop_database() {
 }
 trap stop_database TERM INT
 
-attempt=0
 until pg_isready -h 127.0.0.1 -U nocheh -d nocheh >/dev/null 2>&1; do
   if ! kill -0 "$database_pid" 2>/dev/null; then
     wait "$database_pid"
     exit 1
   fi
-  attempt=$((attempt + 1))
-  if [ "$attempt" -ge 300 ]; then
-    stop_database
-    exit 1
-  fi
-  sleep 0.1
+  # WAL replay on an existing volume can outlast a fixed startup deadline.
+  # Keep the database alive while its own process is making recovery possible.
+  sleep 1
 done
 
 # An inactive restore must expose PostgreSQL to its recovery coordinator without

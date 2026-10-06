@@ -449,7 +449,9 @@ this UI verification does not establish live recall or release readiness.
 <pending>
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
-the operating gateway is healthy. The owner authorized the existing model route,
+the operating gateway is healthy. The operating Nocheh database and Inngest server
+are stopped; app and security report `storage_unavailable`, and the sandbox
+launcher is unhealthy. The owner authorized the existing model route,
 additional fixture reasoning requests, a parallel fixture, and a gateway-only
 restart, then explicitly authorized gateway-only source activation. No Telegram
 production traffic or release activation is authorized by those checks. The
@@ -463,6 +465,19 @@ A future `make dev` from the other session's older source may replace this
 override and revert the gateway, so coordinate source reconciliation before
 restarting the operating stack. Exact synthetic receipts and identifiers remain
 in ignored local state.
+
+The owner authorized starting only the two existing stopped containers. The
+database repeated its prior exit after about 48 seconds of WAL replay, before
+reaching a consistent recovery state; Inngest was therefore not started.
+The existing wrapper imposed about 30 seconds of readiness polling and sent a
+smart shutdown to the still-recovering database. A source candidate now waits
+while the PostgreSQL child lives and gives the Docker health check a ten-minute
+startup period. Two shell behavior tests pass, including recovery beyond the old
+300 polls and early database exit. A byte-verified offline image overlay was
+built from the exact stopped-container image; it is not activated. Host free
+space was about 2.1 GiB after preparing that candidate. Recreating the database
+with a new image or cleaning other sessions' Docker assets requires a separately
+reviewed operating action; no volume was reset or replaced.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
