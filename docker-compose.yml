@@ -456,6 +456,7 @@ services:
       interval: 3s
       timeout: 3s
       retries: 30
+      start_period: 10m
     restart: unless-stopped
     networks: [default, workflows]
 
