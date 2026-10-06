@@ -2416,3 +2416,20 @@ graph refreshed without model calls. Coupled fixture verification and separate
 operating activation remain pending.
 
 </entry>
+
+<entry date="2026-10-06" area="Verify foreground context renewal at the scoped API boundary">
+
+The candidate compiled JS differed from the fixture image in only the context
+renewal function. An ignored Compose overlay mounted that one file read-only
+into the isolated app. The resolved manifest changed no other service, port,
+or network. Only the synthetic app and database ran; no Telegram poller, Honcho
+gateway, or model relay was started. A topic generation was building with a
+previously ready snapshot older than fifteen minutes. Its scoped context API
+returned HTTP 200, `limited_memory=false`, `syncing=true`, and one source;
+the snapshot age fell below one minute. Binding the same synthetic event to a
+different topic returned HTTP 403 `turn_source_denied`. The two fixture services
+were stopped with volumes retained; the operating stack remained 17/17 healthy.
+The non-identifying receipt is in ignored local acceptance state. This verifies
+the context endpoint, not a full Hermes reply or operating activation.
+
+</entry>
