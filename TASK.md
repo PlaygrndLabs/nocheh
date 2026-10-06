@@ -448,6 +448,16 @@ this UI verification does not establish live recall or release readiness.
 
 <pending>
 
+Current isolated evaluation status: the synthetic 16-service fixture is stopped;
+the operating gateway is healthy. The owner authorized the existing model route,
+additional fixture reasoning requests, a parallel fixture, and a gateway-only
+restart. No Telegram production traffic or release activation is authorized by
+those checks. The shared embedding ledger now has the outcome-aware schema and
+retains every prior call under the unchanged $5 cap. The operating gateway still
+runs the older source mounted from a different session, so its accounting behavior
+needs coordinated activation and verification. Exact synthetic receipts and
+identifiers remain in ignored local state.
+
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
 the existing provider, without another login or refresh owner. Its Honcho meter
@@ -498,8 +508,9 @@ of its 3,000 allowance. A relay health/admission candidate fails closed when its
 existing provider socket is absent; seven focused tests pass. The actual fixture
 relay returns HTTP 503 with that route stopped, then stops cleanly without a
 poller or model request. The ready-memory
-semantic and first-attempt gates remain open, and the earlier context-preparation
-failure still needs a route-available reproduction. The operating stack is stopped.
+semantic and first-attempt gates were open at that checkpoint, and the earlier
+context-preparation failure still needs a route-available reproduction. The
+operating stack was stopped at that checkpoint.
 The runner now binds replies to both chat and message, retains pending source
 identities before waiting, and stops after a failed case. Four focused checks
 pass for late/unrelated replies, cross-chat message-number reuse, duplicate
@@ -556,18 +567,22 @@ activation remains separate.
 5. Preserve the new cold six-case pass and coupled 429 cooldown observation
    alongside the topic-17 first-attempt failure, attempt-16 late reply, topic-18
    pass, prior retirement outcomes, and all original receipts. The fresh cold
-   retirement answer used limited memory; finish owner/topic Honcho derivation
-   only with verified embedding budget headroom under the unchanged $5 cap, then
-   ask a fresh focused question after readiness and verify `limited_memory=false`.
-   The owner observed about $0.12 of reported successful usage and rejected a
-   cap increase. A candidate accounting correction excludes $4.88 in old
-   unverified-error holds from the cap while preserving their records; it has
-   not been activated in the operating installation. Diagnose the embedding
-   outage before resuming paid fixture traffic; the candidate cooldown bounds
-   future admissions.
-   Preserve terminal queue errors as failed readiness; rebuild from owned
-   synthetic sources into a fresh generation after budget and route recovery.
-   Unthrottled provider reliability and operating release acceptance remain
-   separate gates.
+   retirement answer used limited memory. A subsequent fresh-topic generation
+   reached ready, answered a synthetic fact on its first attempt with
+   `limited_memory=false`, then rebuilt after every independent source of that
+   fact was retired. A new first-attempt answer from the ready generation omitted
+   the fact and expressed uncertainty with `limited_memory=false`; both replies
+   were physically sent once and causally archived. The isolated fixture is
+   stopped with all state and receipts preserved. Its accidentally internal
+   embedding-egress network caused three new fast transport 502s; a repaired
+   gateway reached the paid endpoint and subsequent embedding calls succeeded.
+   The fixture preflight now rejects this network error and unintended external
+   bridges. The shared ledger migrated in place without resetting calls or
+   raising the $5 cap; historical error holds remain visible. The operating
+   gateway is healthy, but its development mount points at another session's
+   older meter source: the authorized gateway-only restart did not activate the
+   accounting implementation there. Coordinate that activation before claiming
+   operating budget behavior or personal-use readiness. Unthrottled provider
+   reliability and operating release acceptance remain separate gates.
 
 </pending>
