@@ -485,8 +485,11 @@ The isolated-turn launcher had failed before opening its health port because
 `nocheh-hermes:local` was absent. After an explicit owner authorization, that
 tag was restored from the running Hermes image whose upstream revision matches
 the lock. No isolated-turn container was orphaned and no service was recreated.
-Disk headroom remains about 1.0 GiB, so the full-stack health checkpoint does
-not yet justify disk-consuming traffic or personal-use release.
+The owner then authorized clearing only four regenerable host caches (uv,
+Puppeteer and two updater caches). Those exact caches were removed; free space
+rose from about 1.0 to 4.2 GiB, and all 17 operating services stayed healthy.
+Monitor disk headroom during any focused fixture run; full-stack health and
+this cleanup alone do not establish personal-use release.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
