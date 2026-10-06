@@ -2291,3 +2291,27 @@ a recovery attempt. [Wrapper](../deploy/store-postgres-entrypoint.sh),
 [checks](../test/test_store_postgres_entrypoint.py).
 
 </entry>
+
+<entry date="2026-10-06" area="Recover operating database and workflow server">
+
+The owner explicitly authorized removing unused Docker build cache and
+recreating only `nocheh-db` from the tested image while retaining its named
+volume. Docker reported zero active build-cache entries before pruning. After
+pruning, image and volume counts and the selected candidate image and data
+volume identities were unchanged. The one-service Compose override resolved
+to the candidate image, original logical volume, and ten-minute health start
+period; it performed no build. Only the database container ID changed. WAL
+recovery completed and the service became healthy after 81 seconds. The
+existing Inngest container then started and became healthy after eight seconds.
+App and security regained health without recreation. No data reset or paid
+provider request occurred.
+
+Host free space fell to about 1.0 GiB after recovery, so further traffic and
+disk-consuming work need a separate space assessment. The isolated-turn launcher
+remained unhealthy. Read-only diagnosis showed its required
+`nocheh-hermes:local` image tag absent; the running Hermes image's immutable
+revision matched the pinned upstream lock. The tag was not restored in this
+increment. The synthetic fixture stayed stopped. Release and Telegram acceptance
+remain separate.
+
+</entry>
