@@ -16,6 +16,30 @@ from tools.acceptance.telegram_rehearsal import archived_delivery
 CASES = ('reaction_removed', 'corrected_fact', 'private_isolation', 'topic_isolation', 'recall_after_restart', 'retired_fact')
 
 
+def validate_paid_egress(manifest):
+    """A real-model fixture needs one bounded embedding exit, never a public service."""
+    networks = manifest.get('networks', {})
+    services = manifest.get('services', {})
+    if networks.get('honcho-egress', {}).get('internal') is not False:
+        raise ValueError('paid_embedding_egress_network_required')
+    attached = {name for name, service in services.items()
+                if 'honcho-egress' in service.get('networks', {})}
+    if attached != {'honcho-provider-gateway'}:
+        raise ValueError('paid_embedding_egress_boundary_invalid')
+    if networks.get('existing-model', {}).get('external') is not True:
+        raise ValueError('existing_model_bridge_required')
+    bridged = {name for name, service in services.items()
+               if 'existing-model' in service.get('networks', {})}
+    if bridged != {'fixture-real-provider'}:
+        raise ValueError('existing_model_bridge_boundary_invalid')
+    if any(network.get('internal') is not True for name, network in networks.items()
+           if name not in ('honcho-egress', 'existing-model')):
+        raise ValueError('fixture_network_not_internal')
+    if any(service.get('ports') or service.get('network_mode') == 'host'
+           for service in services.values()):
+        raise ValueError('public_fixture_port_denied')
+
+
 def selected_cases(start, stop=None):
     if start not in CASES or (stop is not None and (stop not in CASES or CASES.index(stop) < CASES.index(start))):
         raise ValueError('invalid_case_window')
@@ -44,6 +68,7 @@ class Fixture:
         self.project = info['project']
         if not re.fullmatch(r'nocheh-installation-[a-f0-9]{12}', self.project) or manifest['name'] != self.project:
             raise ValueError('fixture_project_required')
+        validate_paid_egress(manifest)
         preflight = json.loads((self.directory / 'route-preflight.json').read_text())
         if preflight.get('project') != self.project or preflight.get('authorized_existing_model_route') is not True:
             raise ValueError('authorized_model_fixture_required')

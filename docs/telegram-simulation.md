@@ -154,6 +154,13 @@ headers/error. It does not record bodies, headers, credentials, or streaming
 completion; a 200 header entry alone is not a completed answer. Honcho still
 requires its production preparation callback and the existing shared spending
 ledger; a fresh fixture ledger must never reset real spending or request limits.
+The real-model fixture gives only `honcho-provider-gateway` a non-internal
+`honcho-egress` network for its bounded paid embedding route. The separately
+authorized existing-model bridge connects only the model relay; other
+fixture-owned networks remain internal, and no service publishes a port. Validate this
+network before starting model workers; an all-internal deterministic manifest
+cannot reach the paid embedding API and turns immediate connection failures
+into misleading $0.01 holds.
 The ledger's conservative counted amount can exceed estimated provider usage:
 transport failures, unfinished calls and successful calls without usage retain
 their holds. Definite HTTP errors release their holds; old errors without
