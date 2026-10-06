@@ -2327,3 +2327,15 @@ services. Host free space remained about 1.0 GiB. Health alone does not pass
 memory quality, subscription transcription, live Telegram, or release gates.
 
 </entry>
+
+<entry date="2026-10-06" area="Restore host space for bounded synthetic checks">
+
+The owner authorized deleting only the regenerable uv, Puppeteer, Notion
+updater, and ShipIt updater caches. The three directory targets were confirmed
+to be directories rather than symlinks; uv removed its own cache through its
+CLI. Nocheh state, Docker volumes and images, Codex caches, browser caches,
+and Spotify cache were not selected. Host free space rose from about 1.0 to
+4.2 GiB, and all 17 operating Compose services remained healthy. Further
+fixture work remains bounded by disk monitoring and its own acceptance checks.
+
+</entry>
