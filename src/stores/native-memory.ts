@@ -378,8 +378,15 @@ export class NativeMemoryRepository {
   async context(principal:Reader) {
     const id=await this.audienceGeneration(principal);if(!id)return limited;
     try {
-      const current=await this.current(id),cache=(await this.control.query(`SELECT *,refreshed_at>now()-interval '5 minutes' AS usable,
+      const current=await this.current(id);let cache=(await this.control.query(`SELECT *,refreshed_at>now()-interval '5 minutes' AS usable,
         refreshed_at>now()-interval '1 minute' AS fresh FROM memory_context_snapshots WHERE generation=$1`,[id])).rows[0];
+      // A prior ready snapshot can be revalidated locally while new work builds.
+      // Do this before the foreground turn gives up on a stale five-minute TTL;
+      // the guarded generation/revision checks in refreshContext still fence it.
+      if(cache&&!cache.usable&&current.row.state==='building'&&current.row.last_ready_at) {
+        if(await this.refreshContext(id))cache=(await this.control.query(`SELECT *,refreshed_at>now()-interval '5 minutes' AS usable,
+          refreshed_at>now()-interval '1 minute' AS fresh FROM memory_context_snapshots WHERE generation=$1`,[id])).rows[0];
+      }
       if(!cache?.fresh) {
         const db=await this.control.connect();try{await db.query('BEGIN');await requestWorkflow(db,'honcho','context:'+id);await db.query('COMMIT');}
         catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
