@@ -2247,3 +2247,22 @@ release gates remain open. [Procedure](telegram-simulation.md),
 [focused checks](../test/test_model_rehearsal.py).
 
 </entry>
+
+<entry date="2026-10-06" area="Activate corrected accounting in only the operating gateway">
+
+After reviewing the one-service plan, the owner explicitly authorized
+reconfiguring and restarting only the operating gateway. A non-secret Compose
+override in ignored local acceptance state replaced its older development
+source mount with the corrected Honcho source from main. The resolved 17-service
+configuration showed one gateway source mount and no gateway public port.
+Compose recreated only that gateway: it became healthy, and every other
+operating container ID stayed unchanged. Its mounted meter file hash matched
+main. Its local authenticated, read-only ledger report counted $0.149799 toward
+the unchanged $5 monthly cap, showed $4.88 of historical unverified error holds
+separately, and left $4.850201 of admission headroom at that observation. The
+fixture remained stopped. No model or embedding request was made in this
+activation check. A later development restart using the other session's older
+Compose source could replace the override; source reconciliation is still
+required before routine restarts. Product release gates remain separate.
+
+</entry>
