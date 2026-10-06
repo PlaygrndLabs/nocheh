@@ -2266,3 +2266,28 @@ Compose source could replace the override; source reconciliation is still
 required before routine restarts. Product release gates remain separate.
 
 </entry>
+
+<entry date="2026-10-06" area="Diagnose slow operating PostgreSQL recovery">
+
+After the gateway-only activation, operating `nocheh-db` and `inngest-server`
+were found stopped from about 20 hours earlier. App and security health returned
+`storage_unavailable`; the sandbox launcher was also unhealthy. The owner
+authorized starting only those two existing stopped containers. PostgreSQL
+again exited with code 1 before becoming healthy, so Inngest was not started.
+The database entered WAL replay, had not reached a consistent recovery state,
+and received a smart shutdown about 48 seconds after startup. The wrapper's
+fixed 300 fast readiness polls caused that premature shutdown. No database
+volume, source record, credential, or other service was changed by this attempt.
+
+The source candidate keeps waiting while the PostgreSQL child remains alive and
+extends the Docker health startup period to ten minutes. A shell behavior test
+passed after more than the old 300 failed readiness checks and a second test
+verified prompt failure when PostgreSQL itself exits. Shell syntax passed. A
+networkless image overlay from the exact stopped-container image changed only
+the wrapper script; its in-image checksum matched the source. This candidate
+has not been applied to the operating database. Host free space was about
+2.1 GiB after building it, so space and image replacement require review before
+a recovery attempt. [Wrapper](../deploy/store-postgres-entrypoint.sh),
+[checks](../test/test_store_postgres_entrypoint.py).
+
+</entry>
