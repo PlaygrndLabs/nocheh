@@ -19,8 +19,9 @@ Keep each call and its original admission reservation. A successful response
 with reported tokens settles to its priced usage. A definite HTTP error releases
 its hold from cap accounting; a transport failure without a response, unfinished
 call, or successful response without usage retains the hold. Label old failed
-calls whose response type was not stored as unverified, expose their historical
-hold separately, and exclude it from cap spending. Never present this estimate
+monthly calls whose response type was not stored as unverified, expose their historical
+hold separately, and exclude it from monthly cap spending. Keep the exhausted
+pilot's historical holds counted. Never present this estimate
 as a provider invoice. Retain the cooldown after either HTTP 5xx or transport
 failure.
 </decision>

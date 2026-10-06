@@ -261,8 +261,8 @@ this UI verification does not establish live recall or release readiness.
   historical errors whose response type was never recorded. On a read-only
   SQLite backup of the operating ledger, repeated migration produced the same
   result: $0.118666 counted toward the unchanged $5 cap, $4.881334 headroom,
-  and $4.88 of original error holds released from cap accounting but preserved
-  as unverified exposure. This is not a provider invoice. The operating ledger
+  and $4.88 of original monthly error holds released from cap accounting but preserved
+  as unverified exposure. Old pilot holds remain counted. This is not a provider invoice. The operating ledger
   and running services were not changed. A fresh fixture run, provider billing
   comparison, and operating activation remain pending.
   [Decision](docs/adr/0102-separate-embedding-error-holds-from-spending.md),
