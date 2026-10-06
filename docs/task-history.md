@@ -2399,3 +2399,20 @@ with all receipts and volumes intact. The operating stack remained 17/17
 healthy, and host free space was about 5 GiB.
 
 </entry>
+
+<entry date="2026-10-06" area="Validate stale context during an incremental build">
+
+The limited-memory notice in the synthetic follow-up was appended by Hermes
+after its protected context endpoint returned a limited status. The saved
+snapshot was renewed about 103 seconds after the question began, too late for
+that turn's context read. A candidate now tries the existing locally guarded
+snapshot validation in the foreground only when the same generation is building
+and has a previous ready timestamp. It does not call Honcho's model or embedding
+route and retains the limited-memory result when validation fails. An offline
+build in the pinned Linux app image and three focused unit checks pass,
+including refusal to expose context after a failed revalidation. Two
+PostgreSQL-dependent tests were skipped in that no-database run. The AST code
+graph refreshed without model calls. Coupled fixture verification and separate
+operating activation remain pending.
+
+</entry>
