@@ -530,9 +530,15 @@ revision check and no Honcho model or embedding call. It keeps limited memory
 on failed validation. The offline pinned Linux build and three focused
 native-memory tests pass; two PostgreSQL-dependent tests were skipped because
 that test database was not started. AST Graphify completed with zero model
-calls. Coupled synthetic verification of this candidate, followed by operating
-source/revision reconciliation, remains pending; Git integration alone will
-not activate it.
+calls. In a coupled check, the stopped fixture's app was recreated with only
+the candidate JS file mounted read-only; only its app and database ran. Its
+stale, previously ready topic snapshot returned one scoped source with
+`limited_memory=false` and `syncing=true`, and the snapshot was renewed.
+The same event bound to another topic was denied with `turn_source_denied`.
+Neither the model relay nor Honcho provider services ran, so the check made
+no paid request. The candidate is verified for this context-renewal behavior;
+a full Hermes reply with the candidate and operating activation are still
+pending. Git integration alone does not activate it.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
