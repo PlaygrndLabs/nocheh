@@ -1,10 +1,27 @@
 """Causal reply matching for real-model observations with late deliveries."""
 import unittest
 from unittest.mock import patch
-from tools.acceptance.model_rehearsal import main, replies_to, retire_synthetic_name_sources, selected_cases
+from tools.acceptance.model_rehearsal import main, replies_to, retire_synthetic_name_sources, selected_cases, validate_paid_egress
 
 
 class ModelRehearsalReplyTests(unittest.TestCase):
+    def test_real_embedding_fixture_requires_one_nonpublic_egress(self):
+        valid={'networks':{'honcho-egress':{'internal':False},'existing-model':{'external':True},
+                           'default':{'internal':True}},'services':{
+            'honcho-provider-gateway':{'networks':{'honcho-egress':None}},
+            'fixture-real-provider':{'networks':{'existing-model':None}},
+            'hermes':{'networks':{'default':None}}}}
+        validate_paid_egress(valid)
+        for changed in (
+            {**valid,'networks':{'honcho-egress':{'internal':True}}},
+            {**valid,'services':{**valid['services'],'hermes':{'networks':{'honcho-egress':None}}}},
+            {**valid,'services':{**valid['services'],'hermes':{'networks':{'existing-model':None}}}},
+            {**valid,'networks':{**valid['networks'],'default':{'internal':False}}},
+            {**valid,'services':{**valid['services'],'hermes':{'ports':['8781:8781']}}},
+        ):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                validate_paid_egress(changed)
+
     def test_focused_topic_window_excludes_restart_and_retirement(self):
         self.assertEqual(selected_cases('topic_isolation', 'topic_isolation'), ('topic_isolation',))
         self.assertNotIn('retired_fact', selected_cases('topic_isolation', 'topic_isolation'))

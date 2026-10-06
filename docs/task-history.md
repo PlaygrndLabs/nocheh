@@ -2211,3 +2211,39 @@ dashboard tests passed. The operating ledger and services were not changed.
 Actual provider billing and a fresh ready-memory fixture remain unverified.
 
 </entry>
+
+<entry date="2026-10-06" area="Repair isolated paid egress and verify ready-memory deletion">
+
+The owner authorized a gateway-only restart. An owner-private backup of the
+shared embedding ledger preceded it. The restart left the operating gateway
+healthy, but its development source mount belongs to another session and still
+contains the previous accounting implementation. The corrected isolated gateway
+did migrate the shared ledger: original calls and reservations remain, the
+outcome-aware schema is present, and the $5 monthly cap was not raised.
+
+The real-model fixture's embedding-egress network had been inherited from the
+all-internal deterministic manifest. Its external embedding calls failed in
+tens of milliseconds, producing three new transport 502 outcomes and conservative
+holds. After stopping the fixture, only its dedicated gateway egress network was
+made non-internal; the authorized model bridge remained relay-only and every
+other fixture network remained internal. A read-only upstream model endpoint
+check returned HTTP 200. The resumed fixture became 16/16 healthy and subsequent
+paid embedding requests returned HTTP 200. A pure manifest preflight now rejects
+the bad egress, widened bridges, non-internal fixture networks, and public ports.
+
+A fresh synthetic topic reached a ready Honcho generation and returned the seeded
+fact in one causally archived first-attempt reply with `limited_memory=false`.
+Every independent captured source of that fact was then revision-checked and
+retired without deleting originals. Once a replacement generation reached ready
+and its Honcho queue drained, a new first-attempt, single physical reply omitted
+the fact, expressed uncertainty, was archived, and again used
+`limited_memory=false`. The two replies took about 56 and 105 seconds. This
+closes the isolated ready-memory deletion check; earlier failed attempts and
+provider-throttling observations remain in their original receipts. The fixture
+is stopped with its volumes and receipts preserved, and the operating gateway
+is healthy. Operating activation, real Telegram and subscription-transcription
+release gates remain open. [Procedure](telegram-simulation.md),
+[preflight](../tools/acceptance/model_rehearsal.py),
+[focused checks](../test/test_model_rehearsal.py).
+
+</entry>
