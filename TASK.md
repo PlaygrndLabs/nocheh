@@ -452,9 +452,10 @@ Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
 tested wrapper after 81 seconds of WAL replay, and the existing Inngest server
 became healthy eight seconds after startup. App and security recovered without
-recreation. The sandbox launcher remains unhealthy because its required pinned
-Hermes image tag is missing, although the running Hermes image has the locked
-revision. The owner authorized the existing model route,
+recreation. The owner authorized restoring the missing local tag for the
+revision-checked running Hermes image; the sandbox launcher recovered in five
+seconds without a container restart. All 17 operating services are healthy at
+this checkpoint. The owner authorized the existing model route,
 additional fixture reasoning requests, a parallel fixture, and a gateway-only
 restart, then explicitly authorized gateway-only source activation. No Telegram
 production traffic or release activation is authorized by those checks. The
@@ -480,9 +481,12 @@ volumes. Only the database container ID changed; it became healthy after 81
 seconds, and the existing Inngest container was started afterward. No volume
 reset occurred. The host had about 1.0 GiB free after recovery, so free space
 is a current operating risk and additional paid/mock traffic should wait.
-The isolated-turn launcher still fails before opening its health port because
-`nocheh-hermes:local` is absent; its running Hermes image has the pinned upstream
-revision, but restoring the tag has not been performed.
+The isolated-turn launcher had failed before opening its health port because
+`nocheh-hermes:local` was absent. After an explicit owner authorization, that
+tag was restored from the running Hermes image whose upstream revision matches
+the lock. No isolated-turn container was orphaned and no service was recreated.
+Disk headroom remains about 1.0 GiB, so the full-stack health checkpoint does
+not yet justify disk-consuming traffic or personal-use release.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
