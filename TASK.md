@@ -449,9 +449,12 @@ this UI verification does not establish live recall or release readiness.
 <pending>
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
-the operating gateway is healthy. The operating Nocheh database and Inngest server
-are stopped; app and security report `storage_unavailable`, and the sandbox
-launcher is unhealthy. The owner authorized the existing model route,
+the operating gateway is healthy. The operating database recovered with the
+tested wrapper after 81 seconds of WAL replay, and the existing Inngest server
+became healthy eight seconds after startup. App and security recovered without
+recreation. The sandbox launcher remains unhealthy because its required pinned
+Hermes image tag is missing, although the running Hermes image has the locked
+revision. The owner authorized the existing model route,
 additional fixture reasoning requests, a parallel fixture, and a gateway-only
 restart, then explicitly authorized gateway-only source activation. No Telegram
 production traffic or release activation is authorized by those checks. The
@@ -466,18 +469,20 @@ override and revert the gateway, so coordinate source reconciliation before
 restarting the operating stack. Exact synthetic receipts and identifiers remain
 in ignored local state.
 
-The owner authorized starting only the two existing stopped containers. The
-database repeated its prior exit after about 48 seconds of WAL replay, before
-reaching a consistent recovery state; Inngest was therefore not started.
-The existing wrapper imposed about 30 seconds of readiness polling and sent a
-smart shutdown to the still-recovering database. A source candidate now waits
-while the PostgreSQL child lives and gives the Docker health check a ten-minute
-startup period. Two shell behavior tests pass, including recovery beyond the old
-300 polls and early database exit. A byte-verified offline image overlay was
-built from the exact stopped-container image; it is not activated. Host free
-space was about 2.1 GiB after preparing that candidate. Recreating the database
-with a new image or cleaning other sessions' Docker assets requires a separately
-reviewed operating action; no volume was reset or replaced.
+The owner first authorized starting only the two existing stopped containers.
+The database repeated its prior exit after about 48 seconds of WAL replay;
+Inngest was not started on that attempt. The old wrapper's 300 fast readiness
+polls sent a smart shutdown before recovery could complete. After two focused
+tests and an offline byte-verified image overlay, the owner explicitly authorized
+pruning only unused Docker build cache and recreating only the database with
+the same named volume. All build cache was removed without changing images or
+volumes. Only the database container ID changed; it became healthy after 81
+seconds, and the existing Inngest container was started afterward. No volume
+reset occurred. The host had about 1.0 GiB free after recovery, so free space
+is a current operating risk and additional paid/mock traffic should wait.
+The isolated-turn launcher still fails before opening its health port because
+`nocheh-hermes:local` is absent; its running Hermes image has the pinned upstream
+revision, but restoring the tag has not been performed.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
