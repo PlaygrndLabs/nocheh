@@ -451,12 +451,18 @@ this UI verification does not establish live recall or release readiness.
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The owner authorized the existing model route,
 additional fixture reasoning requests, a parallel fixture, and a gateway-only
-restart. No Telegram production traffic or release activation is authorized by
-those checks. The shared embedding ledger now has the outcome-aware schema and
-retains every prior call under the unchanged $5 cap. The operating gateway still
-runs the older source mounted from a different session, so its accounting behavior
-needs coordinated activation and verification. Exact synthetic receipts and
-identifiers remain in ignored local state.
+restart, then explicitly authorized gateway-only source activation. No Telegram
+production traffic or release activation is authorized by those checks. The
+shared embedding ledger has the outcome-aware schema and retains every prior
+call under the unchanged $5 cap. The active gateway now mounts the corrected
+main source through an ignored one-service Compose override. Its local authenticated
+report counts $0.149799 toward the $5 cap, shows $4.88 of unverified historical
+error holds separately, and leaves a $4.850201 admission balance; no paid
+request was used for this check. All other operating container IDs stayed fixed.
+A future `make dev` from the other session's older source may replace this
+override and revert the gateway, so coordinate source reconciliation before
+restarting the operating stack. Exact synthetic receipts and identifiers remain
+in ignored local state.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
@@ -578,11 +584,11 @@ activation remains separate.
    gateway reached the paid endpoint and subsequent embedding calls succeeded.
    The fixture preflight now rejects this network error and unintended external
    bridges. The shared ledger migrated in place without resetting calls or
-   raising the $5 cap; historical error holds remain visible. The operating
-   gateway is healthy, but its development mount points at another session's
-   older meter source: the authorized gateway-only restart did not activate the
-   accounting implementation there. Coordinate that activation before claiming
-   operating budget behavior or personal-use readiness. Unthrottled provider
+   raising the $5 cap; historical error holds remain visible. The authorized
+   gateway-only source override activated the corrected meter, and the active
+   gateway's read-only budget report verifies cap headroom. Reconcile the other
+   session's development source before any future full-stack restart; that older
+   Compose configuration can remove the override. Unthrottled provider
    reliability and operating release acceptance remain separate gates.
 
 </pending>
