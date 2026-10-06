@@ -34,6 +34,28 @@ test('unchanged ready memory revalidates its context without another paid repres
   assert.equal(calls.length,before,'building refresh does not request a new representation');
 });
 
+test('foreground context renews a stale previously ready snapshot during a build without model egress',async()=>{
+  const id=digest('building-context'),principal={admin:false,scope:'-100',space:'-100/topic/7'} as Reader;
+  let usable=false,refreshes=0,reads=0;
+  const control={query:async(sql:string)=>{
+    if(sql.includes('FROM memory_generations WHERE audience='))return {rows:[{id}]};
+    if(sql.includes('FROM memory_context_snapshots'))return {rows:[{derived_id:digest('context'),usable,fresh:usable,refreshed_at:new Date()}]};
+    throw Error('unexpected_control_query');
+  }};
+  const audience={assert:async()=>({generation:'fixture',epoch:1})};
+  const memory=new NativeMemoryRepository({access:{stores:{control}},guards:{read:async()=>{reads++;return {value:{text:'Synthetic saved fact'}};}}} as any,
+    {} as any,{audience,allow:async()=>{}} as any,{} as any,async()=>{throw Error('paid_honcho_call_denied');},async()=>[]);
+  (memory as any).current=async()=>({row:{state:'building',work_revision:7,last_ready_at:new Date()},binding:{}});
+  (memory as any).refreshContext=async()=>{refreshes++;usable=true;return true;};
+  const answer=await memory.context(principal);
+  assert.equal(answer.limited_memory,false);assert.equal('syncing' in answer&&answer.syncing,true);
+  assert.equal(answer.sources[0]?.text,'Synthetic saved fact');
+  assert.equal(refreshes,1);assert.equal(reads,1);
+  (memory as any).refreshContext=async()=>{throw Error('revision_changed');};usable=false;
+  const revoked=await memory.context(principal);
+  assert.equal(revoked.limited_memory,true);assert.deepEqual(revoked.sources,[],'failed revalidation cannot expose stale context');
+});
+
 test('terminal Honcho derivation errors cannot mark a generation ready',async()=>{
   const id=digest('failed-derivation'),updates:{sql:string;values:unknown[]}[]=[];
   let failed=true,valid=true;

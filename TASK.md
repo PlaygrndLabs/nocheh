@@ -521,6 +521,19 @@ Honcho-memory quality gate. The fixture is stopped with its volumes and
 receipts preserved; all 17 operating services remain healthy, and host free
 space is about 5 GiB at this checkpoint.
 
+The limited-memory suffix came from Hermes' explicit context-status handling,
+not from the model's prose. The saved protected snapshot was renewed about
+103 seconds after the second question began, after Hermes had read context.
+A focused source candidate now validates an expired snapshot synchronously
+when its already-ready generation is building, using the existing guarded
+revision check and no Honcho model or embedding call. It keeps limited memory
+on failed validation. The offline pinned Linux build and three focused
+native-memory tests pass; two PostgreSQL-dependent tests were skipped because
+that test database was not started. AST Graphify completed with zero model
+calls. Coupled synthetic verification of this candidate, followed by operating
+source/revision reconciliation, remains pending; Git integration alone will
+not activate it.
+
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
 the existing provider, without another login or refresh owner. Its Honcho meter
