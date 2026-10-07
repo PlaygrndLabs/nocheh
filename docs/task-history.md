@@ -744,6 +744,8 @@ contains the historical private reports and has not been rewritten.
 
 </entry>
 
+
+
 <entry date="2026-10-02" task="Bound workflow backup verification space">
 
 The release backup's full-row workflow fingerprint sort exhausted temporary
@@ -2448,5 +2450,40 @@ not independently prove the foreground renewal branch. The separate scoped
 API check does prove that branch. The fixture was stopped without deleting
 its volumes or receipts; 17/17 operating services remained healthy. The
 non-identifying receipt is in ignored local acceptance state.
+
+</entry>
+
+<entry date="2026-10-06" area="Measure warm reaction workflow stages">
+
+The full synthetic fixture restarted with the one-file context candidate.
+One repeated reaction question was observed live at the workflow and Hermes
+receipt boundaries. Both outbox events were published about two seconds after
+capture; preparation completed at six seconds, Hermes intent appeared at 20
+seconds, its native result at 68 seconds, and the workflow closed at 124
+seconds. One causally archived first-attempt reply arrived in 128 seconds and
+correctly described adding and removing the star and the current unapproved
+state, without a limited-memory notice. Earlier synthetic replies already
+stated the answer, so this is a warm delivery/context check rather than an
+independent recall discovery pass. It does not erase the earlier 430-second
+reply failure or identify its cause. The fixture stopped with state preserved;
+17/17 operating services remained healthy. The phase receipt is ignored local
+state.
+
+</entry>
+
+<entry date="2026-10-07" area="Diagnose database volume and remove obsolete Docker fixtures">
+
+The active PostgreSQL volume measured about 33 GB. PostgreSQL size metadata
+placed about 29 GB in `nocheh_inngest`, with `spans` at 23 GB (`15 GB` table,
+`8 GB` indexes), `history` at 3955 MB, and `traces` at 2479 MB. The three
+tables have millions of live rows; WAL was only about 320 MB. Nothing in the
+active database was deleted. Three older stopped fixtures owned by this session,
+four smaller stopped simulations, their unused volumes, one created-only
+isolated turn, and seven unreferenced simulation image tags were removed.
+A stopped release-restore database copy and Honcho volume were removed after
+confirming the separate backup and successful restore receipt remain. The
+current fixture, all 17 healthy operating services, and other projects were
+preserved. Host free space increased from about 10 to 30 GiB. Retention and
+safe compaction of operating Inngest history remain pending.
 
 </entry>
