@@ -2502,3 +2502,26 @@ failed first-attempt timing gate. The fixture database was stopped again and
 all 17 operating services remained healthy.
 
 </entry>
+
+<entry date="2026-10-08" area="Repeat warm delivery and investigate trace growth">
+
+After OrbStack resumed, both the operating stack and isolated fixture reached
+full health. A repeated mocked-Telegram reaction question published its two
+outbox items about one second after capture, first ran its reply workflow at
+about 24 seconds, and delivered one correct, causally archived reply on the
+first attempt in 116 seconds. The answer described adding and removing the
+synthetic star and the current unapproved state. Prior replies had already
+stated that fact, so this is warm delivery evidence, not fresh recall discovery;
+the earlier 430-second timing failure remains.
+
+[Inngest's self-hosting guide](https://www.inngest.com/docs/platform-and-operations/self-host-inngest)
+states that PostgreSQL event, run, and trace history is not automatically
+removed. A small, read-only sample of the active `spans` table was spread over
+multiple test days and dominated by `EXTEND` and executor step operations. One
+sampled `memory_review-v1` run had 4,066 spans, including 401 step-discovery
+spans; the source workflow loop can execute 400 wait cycles. This verifies a
+Nocheh-side amplification path alongside Inngest's unbounded default history,
+without establishing the share of total storage or an approved deletion policy.
+No operating database records were changed.
+
+</entry>
