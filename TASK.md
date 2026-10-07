@@ -689,5 +689,13 @@ activation remains separate.
    session's development source before any future full-stack restart; that older
    Compose configuration can remove the override. Unthrottled provider
    reliability and operating release acceptance remain separate gates.
+6. Investigate why the pre-MVP test installation has about 29 GB of Inngest
+   data inside the 33 GB PostgreSQL volume. Measure trace and workflow-write
+   rates by scenario and age, check whether Nocheh creates excess events or
+   spans, and compare the pinned Inngest version's intended persistence and
+   retention behavior. Determine which records are required for receipts,
+   recovery, inspection, and backup before proposing a bounded retention or
+   compaction policy. Verify any repair on an isolated copy with recovery and
+   failure-path checks; do not delete operating history merely to reduce size.
 
 </pending>
