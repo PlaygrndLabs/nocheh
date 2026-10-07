@@ -529,6 +529,15 @@ Honcho-memory quality gate. The fixture is stopped with its volumes and
 receipts preserved; all 17 operating services remain healthy, and host free
 space is about 5 GiB at this checkpoint.
 
+Read-only receipt inspection after Docker cleanup found the first recorded
+Inngest run for the 430-second reaction turn about 174 seconds after capture;
+preparation completed about six seconds later. The first four minutes contained
+258 duplicate-span log lines and two queue-operation warnings above one second.
+A successful warm comparison also had duplicate-span errors, so their causal
+role remains unproven. The next fixture check should measure first outbox
+publication to first run separately from native execution and reconciliation;
+overwritten outbox timestamps cannot prove first publication.
+
 The limited-memory suffix came from Hermes' explicit context-status handling,
 not from the model's prose. The saved protected snapshot was renewed about
 103 seconds after the second question began, after Hermes had read context.
