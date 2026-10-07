@@ -2,7 +2,7 @@
 
 <current>
 
-Last reconciled 2026-10-06. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-07. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
@@ -44,6 +44,14 @@ exit remains recorded. The pinned native candidate includes empty-completion rej
 last verified TypeScript services include event-bound provider timings, dependency
 patches, and protected workflow receipt reconciliation. The prior source checkout
 and its three local edits remain preserved.
+
+The active `nocheh_postgres_data` volume uses about 33 GB: about 29 GB is the
+Inngest database, led by 23 GB of live `spans` and about 6.4 GB of `history`
+and `traces`; WAL is about 320 MB. No active database rows were deleted. Old
+stopped synthetic stacks and a verified inactive restore copy were removed;
+the current synthetic fixture and operating installation remain intact. Host
+free space rose from about 10 to 30 GiB. A bounded Inngest history-retention
+policy and safe migration remain unresolved before shrinking the active volume.
 
 Honcho is attached and verified as primary memory; historical ingestion is off.
 Earlier four-generation readiness was a dated observation. Current generations
@@ -543,8 +551,17 @@ with one causally archived reply and no limited-memory notice. A background
 refresh may have renewed the deliberately stale snapshot before Hermes read
 it, so that turn does not isolate the foreground renewal path. The earlier
 scoped API check does isolate and verify that path. The 430-second reaction
-reply, Honcho queue latency, and operating activation remain open. Git
-integration alone does not activate this candidate.
+reply, Honcho queue latency, and operating activation remain open. A later
+instrumented warm-fixture reaction recheck published both workflows about two
+seconds after capture, completed preparation at six seconds, started Hermes
+at 20 seconds, produced its native result at 68 seconds, and closed the
+workflow at 124 seconds. One first-attempt reply arrived in 128 seconds,
+correctly described addition and removal of the star, and had no limited-memory
+notice. Earlier synthetic replies already held that fact, so this recheck
+measures warm delivery and context status rather than independent first
+discovery. The earlier 430-second failure remains evidence of cold or loaded
+latency, with its precise cause unresolved. Git integration alone does not
+activate this candidate.
 
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
@@ -672,5 +689,13 @@ activation remains separate.
    session's development source before any future full-stack restart; that older
    Compose configuration can remove the override. Unthrottled provider
    reliability and operating release acceptance remain separate gates.
+6. Investigate why the pre-MVP test installation has about 29 GB of Inngest
+   data inside the 33 GB PostgreSQL volume. Measure trace and workflow-write
+   rates by scenario and age, check whether Nocheh creates excess events or
+   spans, and compare the pinned Inngest version's intended persistence and
+   retention behavior. Determine which records are required for receipts,
+   recovery, inspection, and backup before proposing a bounded retention or
+   compaction policy. Verify any repair on an isolated copy with recovery and
+   failure-path checks; do not delete operating history merely to reduce size.
 
 </pending>
