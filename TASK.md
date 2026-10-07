@@ -572,6 +572,17 @@ discovery. The earlier 430-second failure remains evidence of cold or loaded
 latency, with its precise cause unresolved. Git integration alone does not
 activate this candidate.
 
+After Docker resumed, a second monitored warm reaction question on the same
+synthetic topic delivered one correct, causally archived first-attempt reply in
+116 seconds. Its outbox was published about one second after capture and the
+telegram workflow first ran about 24 seconds after capture. This confirms the
+earlier 174-second pre-run delay is intermittent, not resolved. Prior replies
+still contaminate independent recall assessment. Three synthetic sources in
+an unused topic now record a different reaction's addition and removal; its
+memory generation is building, so the first ready-memory question remains
+pending while the Honcho representation queue drains. No cold-topic reply has
+been scored.
+
 The owner authorized the existing model route for the synthetic Telegram
 evaluation. A fresh isolated fixture uses scoped read-only client keys through
 the existing provider, without another login or refresh owner. Its Honcho meter
@@ -706,5 +717,12 @@ activation remains separate.
    recovery, inspection, and backup before proposing a bounded retention or
    compaction policy. Verify any repair on an isolated copy with recovery and
    failure-path checks; do not delete operating history merely to reduce size.
+   [Inngest's self-hosting guide](https://www.inngest.com/docs/platform-and-operations/self-host-inngest)
+   confirms that PostgreSQL event, run, and trace rows are not automatically
+   removed. A bounded sample of the active database found one
+   `memory_review-v1` run with 4,066 spans, including 401 step-discovery spans;
+   Nocheh's workflow loop permits 400 wait cycles. This establishes a concrete
+   span-amplification path, but its fraction of total storage and the safe
+   retention horizon remain unmeasured.
 
 </pending>
