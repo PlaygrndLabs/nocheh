@@ -2487,3 +2487,18 @@ preserved. Host free space increased from about 10 to 30 GiB. Retention and
 safe compaction of operating Inngest history remain pending.
 
 </entry>
+
+<entry date="2026-10-07" area="Narrow the delayed reaction workflow window">
+
+The preserved synthetic database was started alone without a published port.
+For the previously failed 430-second reaction reply, its first recorded
+workflow run began about 174 seconds after capture, and preparation completed
+about six seconds later. Dispatch existed at roughly 181 seconds and closed
+roughly 246 seconds later. Inngest logs for the first four minutes contained
+258 duplicate-span lines and two queue-operation warnings above one second;
+the successful warm comparison also had duplicate-span errors. This locates
+the long pre-preparation wait but does not establish its cause or erase the
+failed first-attempt timing gate. The fixture database was stopped again and
+all 17 operating services remained healthy.
+
+</entry>
