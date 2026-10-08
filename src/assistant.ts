@@ -19,7 +19,7 @@ const TRANSCRIPTION_VERSION='codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4'
 async function dispatchReceipt(client:pg.PoolClient,eventId:string,result:Record<string,unknown>) {
   if(!['queued','running','done','failed','ambiguous','suppressed','cancelled'].includes(String(result.state)))throw Error('invalid_dispatch_receipt');
   const active=['queued','running'].includes(String(result.state));
-  const allowed=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence'];
+  const allowed=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected'];
   await client.query(`UPDATE dispatches SET state=$2,error_code=$3,next_attempt=now()+($4*interval '1 second'),updated_at=now(),
     runtime_stage=coalesce($5,runtime_stage) WHERE event_id=$1`,[eventId,active?'running':result.state,active?'awaiting_dispatch_receipt':allowed.includes(String(result.error_code))?result.error_code:null,
     active?5:result.state==='failed'?10:60,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:result.state==='done'?'delivery':null]);
