@@ -48,7 +48,11 @@ export class ProviderOAuth {
       this.state=undefined; // Consume before awaiting: the callback cannot replay.
       try {
         await this.call('oauth-callback',{provider:this.provider,state,...(code?{code}:{error:'access_denied'})});
-        res.writeHead(303,{location:`http://localhost:${this.ownerPort}/providers/management.html#/oauth`});res.end();
+        // A redirect would inherit the provider's cross-site navigation, which
+        // the dashboard rejects; a navigation started from this page is same-site.
+        const back=`http://localhost:${this.ownerPort}/providers/management.html#/oauth`;
+        res.writeHead(200,{'content-type':'text/html; charset=utf-8'});
+        res.end(`<!doctype html><html lang="en"><meta http-equiv="refresh" content="0;url=${back}"><title>Login complete</title><body><p>Provider login complete. <a href="${back}">Return to Nocheh</a></p></body></html>`);
       } catch {
         res.writeHead(502,{'content-type':'text/plain'});res.end('The provider could not finish this login. Start a fresh login in Nocheh.');
       } finally {this.close();}

@@ -29,7 +29,9 @@ test('host OAuth callback validates pending state, forwards once server-side and
     assert.equal((await fetch(base+'?state=wrong&code=secret')).status,400);assert.equal(callbacks,0);
     assert.equal((await fetch(base+'?state='+state+'&code=secret',{method:'POST'})).status,400);
     const response=await fetch(base+'?state='+state+'&code=synthetic-one-time-code',{redirect:'manual'});
-    assert.equal(response.status,303);assert.equal(response.headers.get('location'),'http://localhost:8783/providers/management.html#/oauth');
+    const page=await response.text();
+    assert.equal(response.status,200);assert.match(page,/href="http:\/\/localhost:8783\/providers\/management\.html#\/oauth"/);
+    assert.doesNotMatch(page,/synthetic-one-time-code/);
     assert.equal(response.headers.get('referrer-policy'),'no-referrer');assert.equal(callbacks,1);assert.equal(starts,1);
     await assert.rejects(fetch(base+'?state='+state+'&code=synthetic-one-time-code'));
   }finally{oauth.close();await close(monitor);}
@@ -56,7 +58,7 @@ test('maintenance waits for an admitted OAuth callback before declaring provider
   try{
     await oauth.start();const result=fetch(`http://127.0.0.1:${callback}/auth/callback?state=${state}&code=synthetic`,{redirect:'manual'});
     await started;const drain=oauth.quiesce().then(()=>{drained=true;});await Promise.resolve();assert.equal(drained,false);
-    release();assert.equal((await result).status,303);await drain;assert.equal(drained,true);
+    release();assert.equal((await result).status,200);await drain;assert.equal(drained,true);
     await assert.rejects(fetch(`http://127.0.0.1:${callback}/auth/callback?state=${state}&code=synthetic`));
   }finally{release();oauth.close();await close(monitor);}
 });
@@ -73,7 +75,7 @@ test('Claude login relays on its own callback path and rejects foreign authoriza
   try{
     await oauth.start();
     assert.equal((await fetch(`http://127.0.0.1:${callback}/auth/callback?state=${state}&code=synthetic`)).status,400);
-    assert.equal((await fetch(`http://127.0.0.1:${callback}/callback?state=${state}&code=synthetic`,{redirect:'manual'})).status,303);
+    assert.equal((await fetch(`http://127.0.0.1:${callback}/callback?state=${state}&code=synthetic`,{redirect:'manual'})).status,200);
     assert.deepEqual(bodies,[{provider:'anthropic',state,code:'synthetic'}]);
     origin='https://auth.openai.com';
     await assert.rejects(oauth.start(),{code:'provider_oauth_unavailable'});
