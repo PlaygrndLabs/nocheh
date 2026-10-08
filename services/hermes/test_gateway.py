@@ -20,7 +20,7 @@ from .scopes import Scopes
 
 
 class BotFixtureRequest(BaseRequest):
-    def __init__(self):self.sent=[];self.lost=0;self.transmitted=[]
+    def __init__(self):self.sent=[];self.lost=0;self.transmitted=[];self.reject=None;self.rejected=[]
     @property
     def read_timeout(self):return 1
     async def initialize(self):pass
@@ -28,6 +28,10 @@ class BotFixtureRequest(BaseRequest):
     async def do_request(self,url,method,request_data=None,**kwargs):
         operation=url.rsplit('/',1)[-1]
         if operation=='getMe':result={'id':123456,'is_bot':True,'first_name':'Nocheh','username':'nocheh_fixture_bot'}
+        elif operation=='sendMessage' and self.reject:
+            # Telegram answers with a definite error envelope: not delivered.
+            self.rejected.append(request_data.parameters)
+            return self.reject[0],canonical({'ok':False,'error_code':self.reject[0],'description':self.reject[1]})
         elif operation=='sendMessage' and self.lost:
             # The request reached the wire, but its response was lost.
             from telegram.error import NetworkError
@@ -72,6 +76,14 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(recovered.action({'id':second['id'],'observe_only':True})['state'],'ambiguous')
             self.assertEqual((await recovered.send_action(second))['state'],'ambiguous')
             self.assertEqual(len(calls),2,'an interrupted in-flight send cannot be repeated')
+            offline=gateway(send);offline.status='reconnecting'
+            third={'id':'f'*64,'destination':'123','text':'Sent after reconnect'}
+            self.assertEqual(await offline.send_action(third),{'state':'not_started','error_code':'telegram_not_connected'})
+            self.assertFalse((offline.receipts/('action-'+'f'*64+'.intent')).exists(),'a refusal records no send intent')
+            self.assertEqual(offline.action({'id':third['id'],'observe_only':True}),{'state':'not_found'})
+            self.assertEqual(await gateway(send).send_action(third),{'state':'done'})
+            self.assertEqual(len(calls),3,'the refused action is sent once after reconnect')
+            self.assertEqual((await offline.send_action(second))['state'],'ambiguous','an existing intent is never treated as a refusal')
 
     async def test_native_ptb_batching_and_send_finish_before_durable_receipt_and_commands_cannot_enter_admin_handlers(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -257,6 +269,14 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(request.transmitted,'fixture observed a transmitted request')
                     self.assertEqual(await gateway.dispatch(lost),uncertain)
                     self.assertEqual(len(request.sent),sent_before+2)
+                    # Definite Bot API rejections are terminal, not uncertain.
+                    request.reject=(403,'Forbidden: bot was blocked by the user');blocked=envelope(44,'Blocked bot')
+                    rejected={'state':'suppressed','error_code':'telegram_rejected'}
+                    self.assertEqual(await gateway.dispatch(blocked),rejected)
+                    self.assertEqual(len(request.rejected),1,'a definite rejection is not retried')
+                    self.assertEqual(await gateway.dispatch(blocked),rejected,'the receipt is reused')
+                    self.assertEqual(len(request.sent),sent_before+2)
+                    request.reject=None
                 finally:await app.shutdown()
 
 

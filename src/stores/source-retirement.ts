@@ -4,6 +4,13 @@ import {HttpError,object,string} from '../http.js';
 import type {StorePools} from './connections.js';
 import type {ArchiveRepository,SourceReference} from './archive.js';
 import {OwnerCommands} from './owner-commands.js';
+import {archiveReplyPreviews} from './archive-reply-links.js';
+
+/** Verbatim excerpts long enough to identify a reply that repeats a message. */
+export function quotedExcerpts(text:string):string[] {
+  const whole=text.trim(),parts=whole.split(/[\n.!?؟]+/).map(part=>part.trim()).filter(part=>part.length>=16);
+  return [...new Set([...(whole.length>=12?[whole]:[]),...parts])].map(part=>part.slice(0,500)).sort((a,b)=>b.length-a.length).slice(0,10);
+}
 
 export const sourceRetirementSchema=`
 CREATE TABLE IF NOT EXISTS source_retirements (
@@ -60,7 +67,42 @@ export class SourceRetirementRepository {
     const state=(await this.stores.control.query('SELECT retired,revision,event_id,decision_authority,updated_at FROM source_retirements WHERE object_id=$1',[id])).rows[0];
     const history=(await this.stores.control.query('SELECT revision,retired,event_id,decision_authority,created_at FROM source_retirement_history WHERE object_id=$1 ORDER BY revision DESC',[id])).rows;
     return {event_id:eventId,source_object_id:id,retired:state?.retired??false,revision:state?.revision??0,
-      authority:state?.decision_authority??'owner',observation:'not_observed',updated_at:state?.updated_at??null,history};
+      authority:state?.decision_authority??'owner',observation:'not_observed',updated_at:state?.updated_at??null,history,
+      related_replies:await this.relatedReplies(eventId)};
+  }
+  /**
+   * Delivered assistant replies the owner may also want to retire: the direct
+   * reply to any revision of this message, and later replies in the same
+   * conversation that repeat a substantial verbatim excerpt of it. Offered
+   * only; retiring a message never retires another implicitly.
+   */
+  async relatedReplies(eventId:string) {
+    const events=await this.events(eventId);
+    const rows=(await this.archive.pool.query(`SELECT id,kind,scope,received_at,original_text FROM events WHERE id=ANY($1::text[])`,[events])).rows;
+    if(!rows.length||rows[0].kind!=='telegram_update')return [];
+    const scope=rows[0].scope,since=rows.reduce((first,row)=>row.received_at<first?row.received_at:first,rows[0].received_at);
+    const related=new Map<string,'reply'|'quote'>();
+    for(const previews of (await archiveReplyPreviews(this.archive.pool,this.stores.control,rows)).values())
+      for(const preview of previews)related.set(preview.id,'reply');
+    const excerpts=[...new Set(rows.flatMap(row=>quotedExcerpts(row.original_text?.toString()??'')))].slice(0,10);
+    if(excerpts.length) {
+      const quotes=(await this.archive.pool.query(`SELECT id FROM events WHERE scope=$1 AND kind='telegram_delivered_message' AND received_at>=$2
+        AND EXISTS (SELECT 1 FROM unnest($3::text[]) AS excerpt WHERE strpos(search_text,excerpt)>0) ORDER BY received_at DESC LIMIT 50`,
+        [scope,since,excerpts])).rows;
+      for(const row of quotes)if(!related.has(row.id))related.set(row.id,'quote');
+    }
+    if(!related.size)return [];
+    const replies=(await this.archive.pool.query(`SELECT id,original_text,received_at FROM events WHERE id=ANY($1::text[]) ORDER BY received_at,id`,[[...related.keys()]])).rows;
+    const retired=await this.retiredEvents(replies.map(row=>row.id));
+    const result=[];
+    for(const reply of replies) {
+      let revision=0;
+      try{revision=(await this.stores.control.query('SELECT revision FROM source_retirements WHERE object_id=$1',[await this.identity(reply.id)])).rows[0]?.revision??0;}
+      catch(error){if(error instanceof HttpError&&error.status===404)continue;throw error;}
+      result.push({event_id:reply.id,relation:related.get(reply.id),text:reply.original_text?.toString().slice(0,300)??null,
+        received_at:reply.received_at.toISOString(),retired:retired.has(reply.id),revision});
+    }
+    return result;
   }
   async set(principal:Reader,eventId:string,input:unknown) {
     admin(principal);const body=object(input);

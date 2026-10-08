@@ -34,7 +34,7 @@ const conversationOrderWaitMs=120000;
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
 const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence']);
+  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected']);
 type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
 type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
 

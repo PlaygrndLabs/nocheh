@@ -79,18 +79,35 @@ export function Source({record,notify}){
 
 function SourceRetirement({eventId,notify}){
  const path='/sources/'+eventId+'/retirement',resource=useResource(path);
- const [saved,setSaved]=useState(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
+ const [saved,setSaved]=useState(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState(''),[chosen,setChosen]=useState([]);
  const state=saved&&(!resource.data||saved.revision>resource.data.revision)?saved:resource.data;
+ const offered=(state?.related_replies||[]).filter(reply=>!reply.retired),selected=offered.filter(reply=>chosen.includes(reply.event_id));
+ // Each selected reply is a separate owner decision with its own revision check.
+ async function retireReplies(){
+  let done=0;
+  for(const reply of selected){
+   await call('/sources/'+reply.event_id+'/retirement',{retired:true,expected_revision:reply.revision,operation_id:crypto.randomUUID()});done++;
+  }
+  setChosen([]);return done;
+ }
  async function change(){
   if(!state||busy)return;
   setBusy(true);setProblem('');
   try{
    const result=await call(path,{retired:!state.retired,expected_revision:state.revision,operation_id:crypto.randomUUID()});
    setSaved({...state,...result});
-   notify(result.retired?'Message retired from future use.':'Message restored for future use.');
+   const replies=result.retired?await retireReplies():0;
+   notify(result.retired?'Message retired from future use.'+(replies?` ${replies} related ${replies===1?'reply':'replies'} also retired.`:''):'Message restored for future use.');
    void refreshResources();
   }catch(error){setProblem(errorText(error));void refreshResources();}finally{setBusy(false);}
  }
+ async function retireSelected(){
+  if(busy||!selected.length)return;
+  setBusy(true);setProblem('');
+  try{const replies=await retireReplies();notify(`${replies} related ${replies===1?'reply':'replies'} retired from future use.`);void refreshResources();}
+  catch(error){setProblem(errorText(error));void refreshResources();}finally{setBusy(false);}
+ }
+ const toggle=id=>setChosen(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);
  if(resource.error?.includes('telegram_message_not_found'))return null;
  return h('section',{className:'n-panel source-retirement','aria-label':'Nocheh use of this message'},
   h('p',{className:'archive-kicker'},'Nocheh use'),
@@ -101,6 +118,13 @@ function SourceRetirement({eventId,notify}){
   h('p',{className:'n-muted source-retirement-note'},'The original stays in Archive. Retirement does not delete a Telegram message or recall a reply already sent.'),
   resource.error&&!state&&h(Alert,null,'Retirement status is unavailable. Refresh and try again.'),
   problem&&h('p',{className:'source-retirement-error',role:'alert'},'Change was not saved: '+problem+'. Check the current status and try again.'),
-  state&&button(busy?state.retired?'Restoring…':'Retiring…':state.retired?'Undo retirement':'Retire this message',change,busy,state.retired?'':'n-primary'),
+  offered.length>0&&h('fieldset',{className:'source-retirement-related'},
+   h('legend',null,'Assistant replies that repeat this message'),
+   h('p',{className:'n-muted'},'These delivered replies are separate messages and stay available unless you also retire them. Retirement does not recall them from Telegram.'),
+   offered.map(reply=>h('label',{key:reply.event_id,className:'source-retirement-reply'},
+    h('input',{type:'checkbox',checked:chosen.includes(reply.event_id),disabled:busy,onChange:()=>toggle(reply.event_id)}),
+    h('span',null,h('strong',null,reply.relation==='reply'?'Direct reply':'Quotes this message'),' ',h('span',{dir:'auto'},reply.text||'Reply without text'))))),
+  state&&button(busy?state.retired?'Restoring…':'Retiring…':state.retired?'Undo retirement':selected.length?`Retire this message and ${selected.length} ${selected.length===1?'reply':'replies'}`:'Retire this message',change,busy,state.retired?'':'n-primary'),
+  state?.retired&&selected.length>0&&button(busy?'Retiring…':`Retire ${selected.length} selected ${selected.length===1?'reply':'replies'}`,retireSelected,busy,''),
   state?.history?.length>0&&h('details',null,h('summary',null,'Owner action history'),h(Data,{value:state.history})));
 }
