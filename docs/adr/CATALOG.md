@@ -120,3 +120,4 @@ records current implementation and activation.
 | [0104](0104-telegram-update-order-and-untransmitted-sends.md) | Start turns in Telegram update order and retry untransmitted sends | Extends 0047 and 0089; transmitted requests remain uncertain and approved actions are unchanged |
 | [0105](0105-shared-background-engine-queue.md) | Queue background workflow steps in one shared Inngest concurrency key | Extends 0080 and 0087; existing Inngest rows remain until an approved retention policy |
 | [0106](0106-configurable-workflow-history-retention.md) | Configurable Inngest telemetry retention, off by default | Extends 0046 and 0105; receipts, registry and queue state are never expired |
+| [0107](0107-daily-workflow-history-retention.md) | Run workflow telemetry retention daily | Supersedes the hourly interval in 0106 |
