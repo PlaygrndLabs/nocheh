@@ -16,6 +16,9 @@ from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, canonical, digest, i
 from .scopes import Scopes, verify_capability
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
+# A native send can fail without any request, e.g. while polling reconnects.
+# Nothing reached Telegram, so the dispatcher may retry with a fresh attempt.
+NOT_TRANSMITTED = {'state':'failed','error_code':'assistant_runtime_unavailable','error_stage':'telegram_send_not_transmitted'}
 SOURCE_CITATION = re.compile(r'\s*【nocheh:event:[a-f0-9]{64}】')
 SOURCE_ID = re.compile(r'nocheh:event:[a-f0-9]{64}')
 
@@ -25,8 +28,12 @@ def render_reply_citations(text):
     return SOURCE_ID.sub('the Archive', SOURCE_CITATION.sub('', text))
 
 
-def outbound_check(chat_id, space, authorized, cancelled=None):
-    """Bind every physical send to the authorized conversation, including retries."""
+def outbound_check(chat_id, space, authorized, cancelled=None, requests=None):
+    """Bind every physical send to the authorized conversation, including retries.
+
+    ``requests`` records each message request admitted for transmission, so a
+    failed delivery with none admitted is known not to have reached Telegram.
+    """
     topic = int(space.split('/topic/', 1)[1]) if '/topic/' in space else None
 
     def check(method, parameters):
@@ -40,6 +47,8 @@ def outbound_check(chat_id, space, authorized, cancelled=None):
             raise RuntimeError('telegram_delivery_cancelled')
         if not authorized():
             raise RuntimeError('telegram_delivery_authority_revoked')
+        if requests is not None and method != 'sendChatAction':
+            requests.append(method)
     return check
 
 
@@ -139,9 +148,10 @@ def committed_adapter_class():
             # Use native Telegram formatting/splitting and the durable
             # outbound journal, without implicit MEDIA/file/TTS delivery.
             turn['delivery_started']=True
+            turn['send_requests']=[]
             scope=turn['scope']
             check=OUTBOUND_CHECK.set(outbound_check(scope.chat_id,scope.space,
-                lambda:check_delivery_policy(turn['body']['archive_credential']),turn.get('cancelled')))
+                lambda:check_delivery_policy(turn['body']['archive_credential']),turn.get('cancelled'),turn['send_requests']))
             try:
                 delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=_thread_metadata_for_event(event))
             finally:OUTBOUND_CHECK.reset(check)
@@ -290,13 +300,16 @@ class AssistantGateway:
                                 if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}',name)]
                 elif turn.get('delivery_skipped'):result={'state':'suppressed','error_code':'intentional_silence'}
                 elif turn.get('delivery_success'):result={'state':'done'}
+                elif turn.get('send_requests')==[]:
+                    result={'state':'cancelled'} if cancelled and cancelled.is_set() else dict(NOT_TRANSMITTED)
                 else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
             except Exception:
                 # Before native delivery starts, another attempt cannot
                 # duplicate a Telegram effect. Once sending has started, only
-                # reconciliation is safe because the remote outcome is unknown.
-                result={'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') else \
-                    {'state':'failed','error_code':'assistant_runtime_unavailable'}
+                # reconciliation is safe because the remote outcome is unknown,
+                # unless the outbound boundary admitted no message request.
+                result={'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') and turn.get('send_requests')!=[] else \
+                    dict(NOT_TRANSMITTED) if turn.get('delivery_started') else {'state':'failed','error_code':'assistant_runtime_unavailable'}
             finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
             from .timing import safe
             timings=safe(turn.get('agent_result',{}).get('timings'))
