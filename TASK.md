@@ -148,9 +148,12 @@ reasoning should also use providers other than ChatGPT.
   together arriving out of order; and for a blank voice transcription that
   left its dispatch waiting indefinitely. [Decision](docs/adr/0104-telegram-update-order-and-untransmitted-sends.md),
   [procedure](docs/telegram-simulation.md), [history](docs/task-history.md).
-  Running all Node test files against one shared database still fails
-  intermittently because earlier files leave guard and audience state; this
-  is a test-isolation gap, not a product failure.
+  A later fresh installation with the follow-up repairs passed the 19
+  coupled checks, both HTTP runs and every scenario, including terminal
+  Telegram rejections, retirement offers and no lingering turn containers; a
+  launcher stopped mid-turn left no container and the reply arrived once.
+  The per-file storage helper passes 270 Node checks; 440 native and 100
+  tooling Python checks pass.
 
 - Personal-use Telegram simulation has passing native, storage, workflow,
   portability, host-isolation and provider-contract evidence across the
@@ -497,14 +500,15 @@ reasoning should also use providers other than ChatGPT.
 
 <pending>
 
-Follow-ups from the personal-use simulation: a definite Bot API rejection
-after transmission (deleted topic, blocked bot) is labeled delivery uncertain
-rather than rejected; an approved action that fails because Hermes is
-disconnected stays uncertain and must be proposed again; retiring a message
-does not retire earlier assistant replies that quoted it (the owner can retire
-those replies separately); Node test files need per-file database isolation to
-pass in one shared run. Real-model quality, real transcription, live Telegram
-and release gates remain separate and pending.
+Personal-use simulation follow-ups are resolved and verified in the coupled
+fixture: definite Telegram rejections close as rejected by Telegram; an
+approved action Hermes refuses before any send intent returns to the approved
+queue; retirement offers the direct reply and replies that quote the message;
+storage tests run with per-file cluster resets
+(`python3 -m tools.development.store_tests`); turn containers are removed when
+their launcher stops. An approved action whose runtime is unreachable, or
+whose response is lost, remains uncertain by design. Real-model quality, real
+transcription, live Telegram and release gates remain separate and pending.
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
