@@ -296,6 +296,14 @@ export class TelegramActionRepository {
       let response:Record<string,unknown>;
       try {response=await this.call('action.execute',observe?{id,observe_only:true}:{id,destination:row.destination,text:text!},observe?10000:60000);}
       catch {response={state:'ambiguous'};}
+      if(!observe&&response.state==='not_started') {
+        // The runtime refused before recording any send intent: nothing was
+        // attempted. Return to the approved queue; authority is rechecked.
+        await db.query(`UPDATE telegram_action_requests SET state='approved',error_code='telegram_unavailable',next_attempt=now()+interval '30 seconds',
+          revision=revision+1,updated_at=now() WHERE id=$1 AND state='running'`,[id]);
+        if(decision)await recordEffect(db,effect,'failed',decision,row.source_reference);
+        return observation('waiting','action',1,Date.now()+30000,'runtime_unavailable');
+      }
       const state=response.state==='done'?'done':response.state==='denied'?'denied':'ambiguous',result=await this.derived.record({operation_id:'telegram-action-result:'+id+':'+(state==='ambiguous'?'uncertain':state),
         source:row.source_reference,parents:[row.proposal_reference],kind:'action_result',content:Buffer.from(canonical({state})),
         producer:'hermes',producer_version:protocol,configuration:{id},provenance:{binding:row.binding,native_receipt:id}});

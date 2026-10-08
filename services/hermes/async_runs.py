@@ -11,7 +11,7 @@ from .capture import canonical,immutable_file
 CLOSED={'done','failed','ambiguous','suppressed','cancelled'}
 STAGES={'admission','assistant','delivery'}
 CODES={'model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-       'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence'}
+       'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected'}
 
 
 def identity(body):

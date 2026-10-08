@@ -16,7 +16,7 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-telegram-action-')),key='telegram-action:'+Date.now(),group='-'+Date.now();
-  const owner:Reader={admin:true,scope:null},calls:Record<string,unknown>[]=[],native=new Map<string,string>();let loseReply=false,loseCompletion=false;
+  const owner:Reader={admin:true,scope:null},calls:Record<string,unknown>[]=[],native=new Map<string,string>();let loseReply=false,loseCompletion=false,refuseOnce=false;
   const connect=stores.control.connect.bind(stores.control);
   const wrapped=new Proxy(stores.control,{get(target,name){
     if(name==='connect')return async()=>{
@@ -34,6 +34,7 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
       if(operation==='guard.detect')return {literals:String(input.text).includes('fixture-secret')?['fixture-secret']:[]};
       assert.equal(operation,'action.execute');calls.push(input);
       const id=String(input.id);if(input.observe_only)return {state:native.get(id)??'not_found'};
+      if(refuseOnce){refuseOnce=false;return {state:'not_started',error_code:'telegram_not_connected'};}
       assert.equal(native.has(id),false,'same action must never execute twice');
       assert.deepEqual(await actions.authorizeDelivery(input),{valid:true});
       await assert.rejects(actions.authorizeDelivery({...input,text:'changed after approval'}),{code:'action_delivery_denied'});
@@ -82,6 +83,11 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
     const second=await actions.request(principal,{destination:'123',text:'Second exact message'});await approve(second.id);loseCompletion=true;
     await assert.rejects(actions.run(second.id,authority),/lost control completion/);const called=calls.length;
     assert.equal((await actions.run(second.id,authority)).state,'completed');assert.equal(calls.length,called,'durable completion repairs control without another runtime call');
+    const refused=await actions.request(principal,{destination:'123',text:'Refused while disconnected'});await approve(refused.id);refuseOnce=true;
+    const refusal=await actions.run(refused.id,authority);assert.equal(refusal.state,'waiting');assert.equal(refusal.waiting_reason,'runtime_unavailable');
+    assert.equal((await actions.inspect(owner,refused.id)).state,'approved','an explicit pre-intent refusal returns to the approved queue');
+    assert.equal(native.has(refused.id),false);await due(refused.id);
+    assert.equal((await actions.run(refused.id,authority)).state,'completed');assert.equal(native.get(refused.id),'done');
     const uncertain=await actions.request(principal,{destination:'123',text:'Uncertain preexisting execution'});await approve(uncertain.id);
     await stores.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[uncertain.id]);
     assert.equal((await actions.run(uncertain.id,authority)).state,'waiting');assert.equal(calls.at(-1)!.observe_only,true);
