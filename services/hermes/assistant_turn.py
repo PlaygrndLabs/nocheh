@@ -14,7 +14,7 @@ from pathlib import Path
 
 ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
                'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall',
-               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status'}
+               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read'}
 
 
 class UnexpectedProfileTool(RuntimeError):
@@ -185,10 +185,11 @@ def run(body, emit=None):
             'If asked about a retired message, do not treat the current question or other accessible messages as that retired source; say when its content is unavailable. '
             'Do not claim that the latest message you can access was chronologically immediately before the current one. '
             'If asked about exact message order, distinguish the latest accessible message from an unverified immediate predecessor. '
-            'You can maintain native memory and retrieve scoped sources. External actions require owner approval. '
+            'You can maintain native memory and retrieve scoped sources. External actions follow the owner approval setting: each tool result says whether an action is approved or waiting for the owner. '
             'Controlled tools create proposals for an independent executor. An action ID is not evidence of execution. '
             'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity. '
             + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall for primary Honcho recall and authorized native profiles. '
+               'The owner may see all of their own data: use nocheh_owner_read to list known groups, topics, people, projects and conversation context, and use its exact IDs as action destinations. '
                'Use nocheh_knowledge_inspect to inspect projects and exact current revisions before preparing changes with nocheh_knowledge_propose. '
                'A proposal is not an applied change: check nocheh_knowledge_status. Organization within an active owner delegation runs after this turn finishes; other proposals require exact owner review in Activity Decisions. '
                'Never claim that a proposal grants knowledge access or permission for external actions.' if body['owner'] else
