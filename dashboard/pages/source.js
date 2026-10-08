@@ -123,7 +123,7 @@ function SourceRetirement({eventId,notify}){
    h('p',{className:'n-muted'},'These delivered replies are separate messages and stay available unless you also retire them. Retirement does not recall them from Telegram.'),
    offered.map(reply=>h('label',{key:reply.event_id,className:'source-retirement-reply'},
     h('input',{type:'checkbox',checked:chosen.includes(reply.event_id),disabled:busy,onChange:()=>toggle(reply.event_id)}),
-    h('span',null,h('strong',null,reply.relation==='reply'?'Direct reply':'Quotes this message'),' ',h('span',{dir:'auto'},reply.text||'Reply without text'))))),
+    h('span',null,h('strong',null,reply.relation==='reply'?'Direct reply':'Quotes this message'),h('span',{dir:'auto'},reply.text||'Reply without text'))))),
   state&&button(busy?state.retired?'Restoring…':'Retiring…':state.retired?'Undo retirement':selected.length?`Retire this message and ${selected.length} ${selected.length===1?'reply':'replies'}`:'Retire this message',change,busy,state.retired?'':'n-primary'),
   state?.retired&&selected.length>0&&button(busy?'Retiring…':`Retire ${selected.length} selected ${selected.length===1?'reply':'replies'}`,retireSelected,busy,''),
   state?.history?.length>0&&h('details',null,h('summary',null,'Owner action history'),h(Data,{value:state.history})));
