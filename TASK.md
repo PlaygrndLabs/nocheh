@@ -514,7 +514,10 @@ delivered once each but retried because a first voice transcript revoked
 every in-flight turn; ADR-0108 removes that revocation. Owner-private turns
 now read the owner's directory, people and projects, and the owner freedom
 setting (approval required by default) is in Nocheh settings. Archive details
-open in a drawer. Pending owner rechecks on the repaired source: quick-message
+open in a drawer. In development, isolated turns now run the watched plugin code
+(read-only); topics are named from their root messages; and an owner refresh
+named the configured group with no captured messages. The owner listed all
+groups and topics in Telegram. Pending owner rechecks on the repaired source: quick-message
 ordering and first-attempt timing with a voice note, a group list followed by
 an exact approval, the owner freedom level, and restart during a model turn.
 Real-model quality, live Telegram release gates and release remain pending.
