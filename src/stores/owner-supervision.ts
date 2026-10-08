@@ -63,10 +63,14 @@ export class OwnerSupervisionRepository {
         SELECT *,scope AS space_id FROM observations
         UNION ALL SELECT *,scope||'/topic/'||(audience->>'topic_id') AS space_id FROM observations
           WHERE audience->>'topic_state'='known' AND audience->>'chat_id'=scope AND audience->>'topic_id' ~ '^[1-9][0-9]{0,15}$'
-      ), topics AS (SELECT DISTINCT ON (space_id) space_id,
-        coalesce(message#>>'{forum_topic_edited,name}',message#>>'{forum_topic_created,name}') AS topic_name FROM scopes
-        WHERE space_id LIKE '%/topic/%' AND coalesce(message#>>'{forum_topic_edited,name}',message#>>'{forum_topic_created,name}') IS NOT NULL
-        ORDER BY space_id,capture_sequence DESC,id DESC)
+      ), topics AS (SELECT DISTINCT ON (space_id) space_id,topic_name FROM (
+        -- A topic's name comes from its creation or edit service message. Every
+        -- forum topic message also carries that root message as reply_to_message.
+        SELECT space_id,capture_sequence,id,coalesce(message#>>'{forum_topic_edited,name}',message#>>'{forum_topic_created,name}',
+          CASE WHEN message#>>'{reply_to_message,message_id}'=message#>>'{message_thread_id}'
+            THEN coalesce(message#>>'{reply_to_message,forum_topic_edited,name}',message#>>'{reply_to_message,forum_topic_created,name}') END) AS topic_name
+        FROM scopes WHERE space_id LIKE '%/topic/%') named
+        WHERE topic_name IS NOT NULL ORDER BY space_id,(topic_name IS NOT NULL) DESC,capture_sequence DESC,id DESC)
       SELECT DISTINCT ON (s.space_id) s.space_id,s.message->'chat' AS chat,t.topic_name,s.received_at AS observed_at
         FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id ORDER BY s.space_id,s.capture_sequence DESC,s.id DESC`),
       this.stores.control.query(`SELECT space_id FROM project_assignments
