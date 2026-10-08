@@ -5,9 +5,11 @@ ready=/tmp/nocheh-stores-ready
 rm -f "$ready"
 docker-entrypoint.sh "$@" &
 database_pid=$!
+retention_pid=
 
 stop_database() {
   trap - TERM INT
+  if [ -n "$retention_pid" ]; then kill -TERM "$retention_pid" 2>/dev/null || true; wait "$retention_pid" 2>/dev/null || true; fi
   kill -TERM "$database_pid" 2>/dev/null || true
   wait "$database_pid" 2>/dev/null || true
 }
@@ -34,4 +36,9 @@ if [ ! -e /data/spool/.restore-inactive ]; then
 fi
 
 touch "$ready"
+# Optional workflow telemetry expiry; off unless the owner configures days.
+if [ ! -e /data/spool/.restore-inactive ]; then
+  node /app/dist/src/workflows/retention.js &
+  retention_pid=$!
+fi
 wait "$database_pid"
