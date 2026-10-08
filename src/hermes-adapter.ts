@@ -13,6 +13,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
     'memory.review':'/internal/memory/review', 'memory.recall':'/internal/memory/recall',
     'memory.filter':'/internal/memory/filter',
     'schedule.advance':'/internal/schedule/advance',
+    'telegram.chat':'/internal/telegram/chat',
     'run.resume':'/internal/run/resume','run.events':'/internal/run/events','run.cancel':'/internal/run/cancel',
   };
   const actions: Partial<Record<RuntimeOperation, string>> = {

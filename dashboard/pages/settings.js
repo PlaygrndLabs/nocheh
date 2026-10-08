@@ -43,7 +43,15 @@ export function Settings({notify}) {
   }
   function NochehSettings({notify}) {
     const [refresh,setRefresh]=useState(0),[data,error]=useLoad('/settings',refresh);
-    const [identityDirectory,identityError]=useLoad('/telegram/identities');
+    const [identityTick,setIdentityTick]=useState(0),[identityDirectory,identityError]=useLoad('/telegram/identities',identityTick);
+    const [chatRefresh,setChatRefresh]=useState(null),[refreshingChats,setRefreshingChats]=useState(false);
+    // Reads Telegram only when the owner asks; saved names then serve every directory view.
+    const refreshChats=async()=>{setRefreshingChats(true);
+      try{const result=await call('/telegram/chats/refresh',{});setChatRefresh(result.chats||[]);setIdentityTick(v=>v+1);void refreshResources();notify('Group information refreshed from Telegram.');}
+      catch(e){notify(errorText(e),true);}finally{setRefreshingChats(false);}};
+    const chatState=chat=>chat.state==='available'?(chat.title||'No title')+(chat.is_forum?' · forum':''):chat.state==='migrated'?
+      'Upgraded to a supergroup with ID '+chat.migrate_to_chat_id+'. Replace the old ID in Selected groups.':chat.state==='not_member'?
+      'Nocheh’s bot is not a member of this group.':'Telegram does not know this ID.';
     const [changes,setChanges,editRevision]=useRevisionDraft(data?.revision),[busy,setBusy]=useState(false),[review,setReview]=useState(false);
     const [accessGroup,setAccessGroup]=useState(''),[accessUser,setAccessUser]=useState(''),[manualDecision,setManualDecision]=useState('deny');
     const save=async()=>{setBusy(true);try{await call('/settings',{revision:editRevision,changes});setChanges({});setReview(false);setRefresh(v=>v+1);notify('Nocheh settings saved. Apply saved settings when you are ready to update running services.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
@@ -108,6 +116,10 @@ export function Settings({notify}) {
       h('p',{className:'n-muted'},'Everyone except you is denied by default. Switch a person to Allowed to let them address Nocheh; Denied blocks them. Telegram supplies group administrators; other people appear after Nocheh observes them. Save and Apply for changes to take effect.'),
       !identityDirectory&&!identityError&&h('p',{role:'status'},'Looking up Telegram group names and visible people…'),
       identityError&&h('p',{role:'status'},'Observed Telegram names are unavailable. You can still enter numeric IDs.'),
+      h('div',{className:'n-actions'},button(refreshingChats?'Refreshing…':'Refresh group names from Telegram',refreshChats,refreshingChats||busy)),
+      chatRefresh&&h('ul',{className:'n-telegram-refresh','aria-label':'Telegram group information'},chatRefresh.length?chatRefresh.map(chat=>
+        h('li',{key:chat.chat_id},h('code',null,chat.chat_id),' ',chat.state==='available'?h('span',{dir:'auto'},chatState(chat)):h('strong',null,chatState(chat)))):
+        h('li',null,'No groups are selected.')),
       observed.some(group=>!groups.includes(group.id))&&h('div',{className:'n-field'},h('label',{htmlFor:'observed-group'},'Add an observed group'),
         h('select',{id:'observed-group',value:'',disabled:busy,onChange:e=>addObservedGroup(e.target.value)},h('option',{value:''},'Choose a group…'),
           ...observed.filter(group=>!groups.includes(group.id)).map(group=>h('option',{value:group.id,key:group.id},groupLabel(group.id))))),

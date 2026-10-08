@@ -115,7 +115,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&ownerView) {
       await s.knowledge.ownerTurn(principal);
       const reader={admin:true,scope:null},view=ownerView[1]!;
-      if(view==='telegram-identities')return json(res,200,await telegramDirectory(s.stores.archive,reader));
+      if(view==='telegram-identities')return json(res,200,await telegramDirectory(s.stores.archive,reader,await s.telegramChats.observations()));
       if(view==='people')return json(res,200,await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
         after:url.searchParams.get('after')??'',state:'active'}));
       const target=({conversations:'/v1/conversations','conversation-context':'/v1/conversations/context',projects:'/v1/projects',
@@ -269,7 +269,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.reviews.controlJob(principal,string(body.id,64),{action:body.action,expected_revision:body.expected_revision}));
     }
     if(req.method==='GET') {
-      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.archive,principal));
+      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.archive,principal,await s.telegramChats.observations()));
       if(path==='/v1/search') {
         const mode=url.searchParams.get('mode')??'text';
         if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);

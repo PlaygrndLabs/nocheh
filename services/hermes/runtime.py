@@ -5,6 +5,7 @@ from services.hermes.environment import secret as environment_secret
 
 import base64
 import asyncio
+import re
 import contextlib
 import hmac
 import json
@@ -228,6 +229,30 @@ class Handler(BaseHTTPRequestHandler):
             if len(raw) > 50*1024*1024:
                 raise ValueError('attachment_size_limit')
             return {'bytes_base64': base64.b64encode(raw).decode()}
+        if self.path == '/internal/telegram/chat':
+            # Owner-requested presentation refresh: getChat only, never a send
+            # or a poll, so the single polling authority is unaffected.
+            from telegram import Bot
+            from telegram.error import BadRequest, ChatMigrated, Forbidden
+            bot_token = environment_secret('TELEGRAM_BOT_TOKEN', required=False)
+            if not bot_token:
+                raise RuntimeError('telegram_not_configured')
+            chat = body.get('chat_id')
+            if not isinstance(chat, str) or not re.fullmatch(r'-?[1-9][0-9]{0,18}', chat):
+                raise ValueError('invalid_chat_id')
+            async def read_chat():
+                async with Bot(bot_token) as bot:
+                    try:
+                        found = await bot.get_chat(int(chat))
+                    except ChatMigrated as error:
+                        return {'chat_id': chat, 'state': 'migrated', 'migrate_to_chat_id': str(error.new_chat_id)}
+                    except Forbidden:
+                        return {'chat_id': chat, 'state': 'not_member'}
+                    except BadRequest:
+                        return {'chat_id': chat, 'state': 'not_found'}
+                    return {'chat_id': str(found.id), 'state': 'available', 'type': found.type, 'title': found.title,
+                            'username': found.username, 'is_forum': bool(getattr(found, 'is_forum', False))}
+            return asyncio.run(read_chat())
         if self.path == "/internal/refresh":
             return {"refreshed": refresh_credentials(), "owner": "cliproxy" if reasoning_route() == "shared" else "hermes"}
         if self.path in ("/internal/chat", "/internal/detect"):
