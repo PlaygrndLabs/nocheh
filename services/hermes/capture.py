@@ -151,7 +151,9 @@ class Capture:
         except (ValueError, TypeError, KeyError, AttributeError):
             return False
 
-    def complete(self, key, method, parameters, response):
+    @staticmethod
+    def outcome(response):
+        """Classify a Bot API response: delivered, a definite rejection, or ambiguous."""
         status, raw = response if response else (0, b'')
         state = 'ambiguous' if not response or status >= 500 else 'delivered' if 200 <= status < 300 else 'rejected'
         if state == 'delivered':
@@ -159,11 +161,17 @@ class Capture:
                 state = 'delivered' if json.loads(raw).get('ok') is True else 'rejected'
             except (ValueError, AttributeError):
                 state = 'ambiguous'
+        return state
+
+    def complete(self, key, method, parameters, response):
+        status, raw = response if response else (0, b'')
+        state = self.outcome(response)
         event = self.event(key + ':result', 'outbound_result', {'intent_key': key + ':intent', 'method': method,
                            'state': state, 'status': status, 'wire_base64': base64.b64encode(raw).decode()}, parameters.get('chat_id', 'system'))
         saved = {'state':state, 'status':status, 'wire':base64.b64encode(raw).decode(), 'event':event}
         immutable_file(self.root / 'outbound', digest(key) + '.result', canonical(saved))
         self.enqueue(event)
+        return state
 
 
 def instrument_request(request, capture: Capture, polling=False):
@@ -205,15 +213,23 @@ def instrument_request(request, capture: Capture, polling=False):
                 await asyncio.to_thread(check, method, parameters)
             # Parent context is inherited by PTB's background reply tasks.
             dispatch = DISPATCH_KEY.get() or 'control:' + uuid.uuid4().hex
-            key, saved = await asyncio.to_thread(capture.outbound, method, parameters, dispatch)
+            # The bound check may record each admitted request's journal outcome.
+            observe = getattr(check, 'observe', None) or (lambda *_: None)
+            try:
+                key, saved = await asyncio.to_thread(capture.outbound, method, parameters, dispatch)
+            except BaseException:
+                observe(method, 'ambiguous', 0)
+                raise
             if saved is not None:
+                observe(method, capture.outcome(saved), saved[0])
                 return saved
             try:
                 result = await super().do_request(*args, **kwargs)
             except BaseException:
                 await asyncio.shield(asyncio.to_thread(capture.complete, key, method, parameters, None))
+                observe(method, 'ambiguous', 0)
                 raise
-            await asyncio.to_thread(capture.complete, key, method, parameters, result)
+            observe(method, await asyncio.to_thread(capture.complete, key, method, parameters, result), result[0])
             return result
 
     request.__class__ = CapturedRequest

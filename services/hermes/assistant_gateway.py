@@ -48,8 +48,29 @@ def outbound_check(chat_id, space, authorized, cancelled=None, requests=None):
         if not authorized():
             raise RuntimeError('telegram_delivery_authority_revoked')
         if requests is not None and method != 'sendChatAction':
-            requests.append(method)
+            requests.append({'method': method, 'state': None, 'status': None})
+
+    def observe(method, state, status):
+        # Record the journal's outcome for the most recent admitted request.
+        for entry in reversed(requests or []):
+            if entry['method'] == method and entry['state'] is None:
+                entry.update(state=state, status=status)
+                break
+    check.observe = observe
     return check
+
+
+def delivery_failure(requests):
+    """Classify a failed native send from its admitted requests and their outcomes."""
+    if requests == []:
+        return dict(NOT_TRANSMITTED)
+    if requests and all(entry['state'] == 'rejected' for entry in requests):
+        # Telegram answered every attempt with a definite error, so nothing was
+        # delivered. A rate limit stays retryable; other errors are terminal.
+        if all(entry['status'] == 429 for entry in requests):
+            return {**NOT_TRANSMITTED, 'error_stage': 'telegram_rate_limited'}
+        return {'state': 'suppressed', 'error_code': 'telegram_rejected'}
+    return None
 
 
 def prepare_profile(root,scope,model):
@@ -300,16 +321,17 @@ class AssistantGateway:
                                 if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}',name)]
                 elif turn.get('delivery_skipped'):result={'state':'suppressed','error_code':'intentional_silence'}
                 elif turn.get('delivery_success'):result={'state':'done'}
-                elif turn.get('send_requests')==[]:
-                    result={'state':'cancelled'} if cancelled and cancelled.is_set() else dict(NOT_TRANSMITTED)
+                elif (failure:=delivery_failure(turn.get('send_requests'))) is not None:
+                    result={'state':'cancelled'} if failure['state']=='failed' and cancelled and cancelled.is_set() else failure
                 else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
             except Exception:
                 # Before native delivery starts, another attempt cannot
                 # duplicate a Telegram effect. Once sending has started, only
                 # reconciliation is safe because the remote outcome is unknown,
                 # unless the outbound boundary admitted no message request.
-                result={'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') and turn.get('send_requests')!=[] else \
-                    dict(NOT_TRANSMITTED) if turn.get('delivery_started') else {'state':'failed','error_code':'assistant_runtime_unavailable'}
+                failure=delivery_failure(turn.get('send_requests')) if turn.get('delivery_started') else None
+                result=failure if failure is not None else {'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') else \
+                    {'state':'failed','error_code':'assistant_runtime_unavailable'}
             finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
             from .timing import safe
             timings=safe(turn.get('agent_result',{}).get('timings'))
@@ -323,7 +345,6 @@ class AssistantGateway:
 
     async def send_action(self,body):
         import re
-        if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
         destination=re.fullmatch(r'(-?[1-9]\d{0,18})(?:/topic/([1-9]\d{0,15}))?',body['destination'])
         if not re.fullmatch('[a-f0-9]{64}',body['id']) or not destination or not isinstance(body['text'],str) or not 0<len(body['text'].encode('utf-16-le'))//2<=12000:raise ValueError('invalid_action')
         chat_id,topic=destination.groups()
@@ -333,6 +354,9 @@ class AssistantGateway:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
+            # No intent exists for this action, so a refusal now proves that no
+            # send was attempted. The caller may retry while approval is current.
+            if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
             if os.environ.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1' and not await asyncio.to_thread(check_action_policy,body):
                 result={'state':'denied'}
                 await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))

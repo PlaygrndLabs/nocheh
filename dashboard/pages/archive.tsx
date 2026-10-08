@@ -21,6 +21,9 @@ const replyState=(row:RecordRow):{label:string;state:string;note?:string}|null=>
  if(row.kind?.endsWith('_delivered_message'))return {label:'Delivered',state:'ready'};
  if(row.kind!=='telegram_update')return null;
  const values:Record<string,{label:string;state:string;note?:string}>={done:{label:'Reply sent',state:'ready'},running:{label:'Processing',state:'running'},pending:{label:'Waiting',state:'queued'},failed:{label:'Retry scheduled',state:'retryable_failed',note:'Inngest will retry'},ambiguous:{label:'Delivery uncertain',state:'ambiguous',note:'Not auto-retried'},suppressed:{label:'No reply needed',state:'skipped'},cancelled:{label:'Cancelled',state:'cancelled'}};
+ // Some closed outcomes are not replies that were unnecessary; name their cause.
+ if(row.assistant_state==='suppressed'&&row.assistant_error==='telegram_rejected')return {label:'Rejected by Telegram',state:'failed',note:'Not auto-retried'};
+ if(row.assistant_state==='suppressed'&&row.assistant_error==='invalid_transcription_response')return {label:'Speech not recognized',state:'failed',note:'Original audio kept'};
  return values[row.assistant_state||'']||{label:'Not queued',state:'unknown'};
 };
 const actionLabels:Record<string,string>={proposed:'Approval pending',approved:'Approved · awaiting send',running:'Sending approved action',ambiguous:'Action delivery uncertain',done:'Action sent',rejected:'Action denied',cancelled:'Action cancelled'};
