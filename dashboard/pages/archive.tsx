@@ -3,7 +3,7 @@ import {CornerDownRight,Eye,Paperclip,Search,X} from 'lucide-react';
 import {sourceContentLabel} from '../../src/source-content.js';
 import {useLiveResources,useResource} from '../lib/resource';
 import {CursorButtons} from '../lib/owner-controls';
-import {Button,Badge,EmptyState,Alert,Skeleton,Table} from '../components/ui/primitives';
+import {Button,Badge,EmptyState,Alert,Skeleton,Table,Sheet} from '../components/ui/primitives';
 import {StatusBadge} from '../components/status';
 import {Source} from './source.js';
 
@@ -31,7 +31,7 @@ const actionLabels:Record<string,string>={proposed:'Approval pending',approved:'
 export function Archive({notify}:{notify:(message:string,error?:boolean)=>void}){
  const [draft,setDraft]=useState(''),[query,setQuery]=useState(''),[pages,setPages]=useState(['']),[selected,setSelected]=useState<string|null>(sourceFromHash);
  const [direction,setDirection]=useState('all'),[scope,setScope]=useState(''),[replyFilter,setReplyFilter]=useState('');
- const detail=useRef<HTMLElement>(null);
+ const opener=useRef<HTMLElement|null>(null);
  useEffect(()=>{const changed=()=>setSelected(sourceFromHash());addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
  const after=pages.at(-1)||'',parameters=new URLSearchParams({...(query?{q:query}:{}),...(after&&!query?{after}:{}),...(direction!=='all'?{kind:direction}:{}),...(scope?{scope}:{}),...(replyFilter?{reply:replyFilter}:{})});
  const path=(query?'/search':'/data')+(parameters.size?'?'+parameters:'');
@@ -46,7 +46,8 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
   setSelected(id);
   const suffix=id?'?source='+encodeURIComponent(id):'';
   if(location.hash!=='#archive'+suffix)location.hash='archive'+suffix;
-  if(scroll)requestAnimationFrame(()=>detail.current?.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}));
+  // Details open in a side drawer; remember the row control for focus return.
+  if(scroll&&document.activeElement instanceof HTMLElement)opener.current=document.activeElement;
  };
  const resetSelection=()=>choose(null);
  const submit=(event:FormEvent)=>{event.preventDefault();setQuery(draft.trim());setPages(['']);resetSelection();};
@@ -86,14 +87,12 @@ export function Archive({notify}:{notify:(message:string,error?:boolean)=>void})
     </tbody></Table>}
     {!query&&<CursorButtons pages={pages} next={next} onChange={changePage}/>}
    </section>
-   <section ref={detail} className="archive-detail" aria-labelledby={selected?'archive-detail-title':undefined} aria-label={selected?undefined:'Message details'}>
-    {selected?<>
-     <div className="detail-heading"><div><p className="archive-kicker">Selected message</p><h2 id="archive-detail-title">Message details</h2><p>Read the original or edit the separate copy agents use.</p></div><Button size="sm" onClick={resetSelection}>Close</Button></div>
-     {source.error&&<Alert>The message is unavailable. Choose it again or refresh to retry.</Alert>}
-     {!source.data&&!source.error&&<Skeleton className="chart-skeleton"/>}
-     {source.data&&<Source record={source.data} notify={notify}/>}
-    </>:<div className="n-panel archive-empty-detail"><EmptyState title="Choose a message">Select Open to read the original message and, when needed, edit the separate agent copy.</EmptyState></div>}
-   </section>
+   <Sheet open={!!selected} onOpenChange={open=>{if(!open)resetSelection();}} title="Message details"
+    description="Read the original or edit the separate copy agents use." className="archive-detail-sheet" returnFocus={opener.current}>
+    {source.error&&<Alert>The message is unavailable. Choose it again or refresh to retry.</Alert>}
+    {!source.data&&!source.error&&<Skeleton className="chart-skeleton"/>}
+    {selected&&source.data&&<Source record={source.data} notify={notify}/>}
+   </Sheet>
   </div>
  </div>;
 }
