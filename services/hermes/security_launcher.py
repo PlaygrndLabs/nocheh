@@ -5,6 +5,7 @@ import json
 import os
 import re
 import select
+import signal
 import socket
 import threading
 import uuid
@@ -48,7 +49,9 @@ def container_spec(profile,host_root,image,network,uid,gid):
         'NetworkMode':network,'Dns':['127.0.0.1'],'Mounts':mounts,'PidsLimit':128,'Memory':2*1024**3,'NanoCpus':2*10**9,
         'Tmpfs':{'/tmp':f'rw,nosuid,nodev,size=128m,uid={uid},gid={gid}',
                  '/profile':f'rw,nosuid,nodev,size=32m,uid={uid},gid={gid}'},
-        'LogConfig':{'Type':'none'},'Init':True},
+        'LogConfig':{'Type':'none'},'Init':True,
+        # Docker removes an exited turn even if this launcher stopped mid-turn.
+        'AutoRemove':True},
     }
 
 def validate_local_profile(profile,root=Path('/profiles')):
@@ -80,6 +83,15 @@ def attach(identifier,body):
 SLOTS=threading.BoundedSemaphore(4)
 ACTIVE=set()
 ACTIVE_LOCK=threading.Lock()
+CONTAINERS=set()
+
+def stop_active_turns(*_):
+    """A stopping launcher cannot stream results, so its running turns must end too."""
+    with ACTIVE_LOCK:identifiers=list(CONTAINERS)
+    for identifier in identifiers:
+        try:docker('POST','/containers/'+identifier+'/kill')
+        except Exception:pass
+    raise SystemExit(0)
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass
     def do_GET(self):
@@ -107,6 +119,7 @@ class Handler(BaseHTTPRequestHandler):
             body['model_context_length']=binding['model_context_length']
             spec=container_spec(profile,self.server.host_profiles,self.server.image,self.server.network,int(os.environ['NOCHEH_UID']),int(os.environ['NOCHEH_GID']))
             identifier=docker('POST','/containers/create?name=nocheh-turn-'+uuid.uuid4().hex,spec)['Id']
+            with ACTIVE_LOCK:CONTAINERS.add(identifier)
             self.send_response(200);self.send_header('Content-Type','application/x-ndjson');self.send_header('Cache-Control','no-store');self.end_headers()
             def watch():
                 while not closed.wait(.2):
@@ -124,6 +137,7 @@ class Handler(BaseHTTPRequestHandler):
             if identifier:
                 try:docker('DELETE','/containers/'+identifier+'?force=true')
                 except Exception:pass
+                with ACTIVE_LOCK:CONTAINERS.discard(identifier)
             if reserved:
                 with ACTIVE_LOCK:ACTIVE.discard(profile)
             SLOTS.release();self.close_connection=True
@@ -140,6 +154,7 @@ def main():
     for container in docker('GET','/containers/json?all=true'):
         if container.get('Labels',{}).get('nocheh.role')=='isolated-turn' and network in container.get('NetworkSettings',{}).get('Networks',{}):docker('DELETE','/containers/'+container['Id']+'?force=true')
     server=ThreadingHTTPServer(('0.0.0.0',8787),Handler);server.image=image;server.network=network;server.host_profiles=inventory['Source']
+    signal.signal(signal.SIGTERM,stop_active_turns)
     server.serve_forever()
 
 if __name__=='__main__':main()

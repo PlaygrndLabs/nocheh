@@ -28,6 +28,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(host['CapDrop'],['ALL']);self.assertTrue(host['ReadonlyRootfs']);self.assertEqual(host['Dns'],['127.0.0.1'])
         self.assertEqual([Path(m['Source']).name for m in host['Mounts'] if not m['ReadOnly']],list(DATA_DIRS+DATA_FILES))
         self.assertFalse(any(m['Target']=='/profile' for m in host['Mounts']))
+        self.assertTrue(host['AutoRemove'],'an exited turn is removed even if the launcher stopped')
         with self.assertRaises(ValueError):container_spec('../private','/owned','sha256:'+'b'*64,'nocheh-agent',1000,1000)
         with self.assertRaises(ValueError):container_spec('nocheh-'+'a'*24,'relative','tag','nocheh-agent',0,0)
     def test_data_preservation_and_symlink_rejection(self):
@@ -58,6 +59,16 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(model_metadata.get_model_context_length('different-model'),12345)
             self.assertEqual(aux._CODEX_AUX_BASE_URL,credentials.base_url)
         with self.assertRaises(ValueError):install_isolated_route(credentials,'same-model',None)
+
+    def test_stopping_launcher_kills_running_turns(self):
+        from . import security_launcher
+        calls=[]
+        with patch.object(security_launcher,'docker',side_effect=lambda method,path,body=None:calls.append((method,path)) or {}):
+            security_launcher.CONTAINERS.update({'first','second'})
+            try:
+                with self.assertRaises(SystemExit):security_launcher.stop_active_turns()
+            finally:security_launcher.CONTAINERS.clear()
+        self.assertEqual(sorted(calls),[('POST','/containers/first/kill'),('POST','/containers/second/kill')])
 
     @unittest.skipUnless(os.environ.get('NOCHEH_TEST_DOCKER')=='1','explicit isolated Docker fixture required')
     def test_real_container_cannot_reach_secrets_siblings_or_internet(self):
@@ -93,7 +104,9 @@ print(json.dumps({'state':'done','text':'isolated'}))
                 self.assertEqual(json.loads(result)['text'],'isolated')
                 self.assertEqual((profile/'memories'/'MEMORY.md').read_text(),'Exact memory 😃\n')
             finally:
-                if identifier:docker('DELETE','/containers/'+identifier+'?force=true')
+                if identifier:
+                    try:docker('DELETE','/containers/'+identifier+'?force=true')
+                    except RuntimeError:pass  # AutoRemove may already have removed it.
                 if created:docker('DELETE','/networks/'+network)
 
 if __name__=='__main__':unittest.main()
