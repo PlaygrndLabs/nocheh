@@ -115,6 +115,9 @@ services:
     restart: "no"
     entrypoint: [python, -m, tools.development.dev_reload]
     command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.security_launcher]
+    environment:
+      # Isolated turns read the watched checkout's plugin code, read-only.
+      NOCHEH_DEV_TURN_SOURCE: ${NOCHEH_DEV_SOURCE_ROOT:?}
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
