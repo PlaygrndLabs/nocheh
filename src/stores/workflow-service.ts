@@ -9,7 +9,7 @@ import {registerWorker,type WorkflowFamily} from '../workflows/store.js';
 import {superviseConnection} from '../workflows/supervisor.js';
 import {assertGuardConfiguration,restoredInactive,storageHeartbeat} from './lifecycle.js';
 import type {StorageServices} from './services.js';
-import {storageWorkflowOperations} from './workflow-operations.js';
+import {backgroundFamilies,storageWorkflowOperations} from './workflow-operations.js';
 
 export function startStorageWorkflows(s:StorageServices,config:Settings,call:RuntimeCall) {
   const inactive=()=>restoredInactive(config.dataDir)||existsSync(join(config.dataDir,'workflows/inactive'));
@@ -22,7 +22,7 @@ export function startStorageWorkflows(s:StorageServices,config:Settings,call:Run
   };
   const service=superviseConnection(async()=>{
     const client=workflowClient('pipeline');
-    return connectWorkflows('pipeline',client,workflowFunctions(client,s.stores.control,operations));
+    return connectWorkflows('pipeline',client,workflowFunctions(client,s.stores.control,operations,backgroundFamilies(Object.keys(operations) as WorkflowFamily[])));
   },async()=>{
     await registerWorker(s.stores.control,'pipeline',Object.keys(operations) as WorkflowFamily[]);
     await storageHeartbeat(s.stores,'workflow-pipeline');

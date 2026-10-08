@@ -2578,3 +2578,20 @@ ignored local state, and a local pre-push guard blocks the 743 rewritten
 commits. Third-party clones and server caches are not erased.
 
 </entry>
+
+<entry date="2026-10-08" area="Inngest storage amplification">
+
+With owner approval, only the operating database was started without a
+network and with read-only sessions, measured, and stopped; no row changed.
+The volume was 36.9 GB, the Inngest database 35 GB. Joining 16,139 runs to
+the workflow registry attributed 99.5% of 13.4 million spans to Honcho
+(generation, source) and native memory review (native, source, interpret)
+jobs. A 2% step-output sample showed about 86% of their steps were waits for
+the single busy background admission slot. Background families now share one
+Inngest concurrency key, and a Honcho source waiting for an unready
+generation rechecks every 30 seconds. A synthetic probe against the pinned
+Inngest reduced spans from 888 to 153 with zero wait polls; the registration
+check and all five workflow storage checks pass on a fresh synthetic
+database. [Decision](adr/0105-shared-background-engine-queue.md).
+
+</entry>
