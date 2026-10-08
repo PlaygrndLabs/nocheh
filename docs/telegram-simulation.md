@@ -151,8 +151,12 @@ contract; synthetic audio names its transcript as `SPEECH:<text>`, and `BLANK`
 returns no usable text. Directive-driven tool use and substituted speech test
 pipeline, isolation and effects, not model judgement or recognition quality.
 
-Compile the current worktree with Node 24 before running its tests. Run storage
-tests sequentially because several use the same synthetic schema. Record test
+Compile the current worktree with Node 24 before running its tests. Storage
+tests share installation singletons such as guard state and audience policy,
+so run them with `python3 -m tools.development.store_tests --project
+nocheh-stores-<name> --image <development-target image>`: it resets the
+synthetic cluster before every compiled test file and fails on any failed
+file. Running every file against one shared database can fail intermittently. Record test
 names, passes, failures, skips, image IDs, source revision, commands and elapsed
 times. Preserve failed runs before repairs. A skipped fixture-dependent test is
 pending until its separate fixture succeeds; a green process exit is insufficient.
