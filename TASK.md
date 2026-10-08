@@ -31,8 +31,8 @@ dashboard builds, affected Node 24/PostgreSQL suites, 85 native checks, and all
 proposal dismissal, and retained-draft interactions are verified. The explicit
 Docker security boundary passes in the simulation session's separate host fixture.
 No deployment, operating
-delegation, or live-memory-readiness claim is made; existing recall failures and
-the sanitized-history remote-publication gate remain open.
+delegation, or live-memory-readiness claim is made; existing recall failures
+remain open.
 [Dashboard checks](test/dashboard-supervision.test.mjs),
 [synthetic preview](test/dashboard-supervision-preview.mjs).
 
@@ -720,13 +720,12 @@ activation remains separate.
 3. Finish release evidence and runtime revision reconciliation against
    [release acceptance](docs/release-acceptance.md). Service health, Git integration,
    and historical readiness do not establish current recall or release approval.
-4. Publish sanitized history only after the pending explicit one-time exception
-   to the prohibition on force-pushing main. The isolated cleaned history has
-   the same current source tree, removes historical private reports and known
-   identifiers, and preserves original history locally. Remote fetch succeeded;
-   origin/main is unchanged. Any additional source commits must be included in
-   the final verified publication plan. Ordinary pushing would retain private
-   historical material and remains blocked.
+4. Sanitized history is published on `origin/main` (see
+   [history](docs/task-history.md)). Before the next push from any other
+   session or worktree, rebase or cherry-pick its own commits onto the new
+   `main`; the local pre-push guard rejects branches that still contain
+   rewritten pre-sanitization commits. Earlier third-party clones and GitHub
+   caches of the old commits are not erased by the rewrite.
 5. Preserve the new cold six-case pass and coupled 429 cooldown observation
    alongside the topic-17 first-attempt failure, attempt-16 late reply, topic-18
    pass, prior retirement outcomes, and all original receipts. The fresh cold
