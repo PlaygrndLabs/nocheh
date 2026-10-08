@@ -25,6 +25,7 @@ import {controlledActionSchema} from './controlled-action-schema.js';
 import {storageImportSchema} from './imports.js';
 import {importWorkflowSchema} from '../workflows/imports.js';
 import {memoryAccessSchema} from './memory-access-schema.js';
+import {ownerAutonomySchema} from './owner-autonomy.js';
 import {sourceRetirementSchema} from './source-retirement.js';
 import {reactionStateSchema} from './reaction-state.js';
 import {knowledgeManagementSchema} from './knowledge-schema.js';
@@ -134,6 +135,7 @@ ${securityCoreSchema}
 ${nativeReviewSchema}
 ${sharingContentSchema}
 ${memoryAccessSchema}
+${ownerAutonomySchema}
 ${sourceRetirementSchema}
 ${reactionStateSchema}
 ${knowledgeManagementSchema}
