@@ -23,6 +23,7 @@ test('stored owner directory and decisions span every page without turning reads
         return (await services.capture.capture(event)).source.reference;
       };
       const source=await capture(group,1);await capture(second,2);await capture(group,3,{message_thread_id:19,forum_topic_created:{name:'Synthetic named topic'}});await capture(group,4,{message_thread_id:19});
+      await capture(group,6,{message_thread_id:21,is_topic_message:true,reply_to_message:{message_id:21,date:1,chat:{id:Number(group),type:'supergroup'},forum_topic_created:{name:'Root reply topic'}}});
       const unrepresentableScope=String(Number(group)-2);await capture(unrepresentableScope,5,{text:'Original\u0000message'});
       const suggestions=Array.from({length:131},(_,index)=>({id:digest(key+':suggestion:'+index),name:'Suggestion '+index}));
       await stores.control.query(`INSERT INTO memory_entity_suggestions(id,kind,name,source_reference,reason)
@@ -38,6 +39,7 @@ test('stored owner directory and decisions span every page without turning reads
       assert.equal((await view.decisions(owner,{kind:'entity',limit:100})).total,first.total-1);
       const directory=await view.conversations(owner,{q:group,limit:100}),topic=directory.items.find(item=>item.space_id===group+'/topic/19');
       assert.equal(topic?.name,'Synthetic named topic','later ordinary messages retain the observed topic name');
+      assert.equal(directory.items.find(item=>item.space_id===group+'/topic/21')?.name,'Root reply topic','an ordinary topic message names its topic through its root reply');
       assert.equal(topic?.parent_name,'Repeated synthetic name');assert.equal(topic?.kind,'topic');
       assert.equal((await view.conversations(owner,{q:'Repeated synthetic name'})).items.filter(item=>[group,second].includes(item.space_id)).length,2);
       assert.ok(!JSON.stringify(directory).includes('PRIVATE_FIXTURE_BODY'));

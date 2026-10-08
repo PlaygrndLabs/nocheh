@@ -21,14 +21,14 @@ function person(value:unknown,id:string):Person|null {
   return {id,name,username:username?'@'+username:null};
 }
 
-export async function telegramDirectory(archive:pg.Pool,principal:Reader):Promise<{groups:Group[];truncated:boolean}> {
+export async function telegramDirectory(archive:pg.Pool,principal:Reader,refreshed=new Map<string,{title:string|null}>()):Promise<{groups:Group[];truncated:boolean}> {
   admin(principal);
   const groupRows=(await archive.query<Row>(`SELECT DISTINCT ON (e.scope) e.scope,e.payload FROM events e
     WHERE e.channel='telegram' AND e.origin='live' AND e.kind='telegram_update'
       AND e.scope ~ '^-[1-9][0-9]{0,18}$'
       AND convert_from(e.payload,'UTF8')::jsonb ?| ARRAY['message','edited_message','channel_post','edited_channel_post']
     ORDER BY e.scope,e.received_at DESC,e.id DESC LIMIT 101`)).rows;
-  const groups=groupRows.slice(0,100).map(row=>({id:row.scope,name:graphGroupLabel(row.payload,row.scope)??null,users:[] as Person[]}));
+  const groups=groupRows.slice(0,100).map(row=>({id:row.scope,name:graphGroupLabel(row.payload,row.scope)??refreshed.get(row.scope)?.title??null,users:[] as Person[]}));
   if(!groups.length)return {groups,truncated:groupRows.length>100};
   const byGroup=new Map(groups.map(group=>[group.id,group]));
   const authors=(await archive.query<Row>(`SELECT DISTINCT ON (e.scope,o.external_id) e.scope,o.external_id AS user_id,e.payload

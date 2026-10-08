@@ -4,6 +4,7 @@ import type {AssistantPolicy} from '../assistant-policy.js';
 import {graphChatType,graphGroupLabel} from '../graph-labels.js';
 import {HttpError} from '../http.js';
 import {parentSpace,validateSpace} from '../spaces.js';
+import type {TelegramChatRepository} from './telegram-chats.js';
 import type {StorePools} from './connections.js';
 import type {ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
@@ -16,11 +17,13 @@ export type DecisionKind=typeof decisionKinds[number];
 export interface ConversationDirectoryItem {
   space_id:string;name:string|null;kind:'private'|'group'|'topic'|'unknown';
   parent_space:string|null;parent_name:string|null;observed_at:string|null;configured:boolean;
+  /** The owner's last explicit refresh from Telegram, when one exists. */
+  telegram?:{state:string;migrate_to_chat_id:string|null;observed_at:string};
 }
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
   telegramActions:Pick<TelegramActionRepository,'inspect'>;memory:Pick<NativeMemoryRepository,'status'>;
-  shared:Pick<SharingContentRepository,'inspect'>;
+  shared:Pick<SharingContentRepository,'inspect'>;telegramChats?:Pick<TelegramChatRepository,'observations'>;
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
 }
 type PageInput={q?:string;after?:string;limit?:number};
@@ -63,10 +66,14 @@ export class OwnerSupervisionRepository {
         SELECT *,scope AS space_id FROM observations
         UNION ALL SELECT *,scope||'/topic/'||(audience->>'topic_id') AS space_id FROM observations
           WHERE audience->>'topic_state'='known' AND audience->>'chat_id'=scope AND audience->>'topic_id' ~ '^[1-9][0-9]{0,15}$'
-      ), topics AS (SELECT DISTINCT ON (space_id) space_id,
-        coalesce(message#>>'{forum_topic_edited,name}',message#>>'{forum_topic_created,name}') AS topic_name FROM scopes
-        WHERE space_id LIKE '%/topic/%' AND coalesce(message#>>'{forum_topic_edited,name}',message#>>'{forum_topic_created,name}') IS NOT NULL
-        ORDER BY space_id,capture_sequence DESC,id DESC)
+      ), topics AS (SELECT DISTINCT ON (space_id) space_id,topic_name FROM (
+        -- A topic's name comes from its creation or edit service message. Every
+        -- forum topic message also carries that root message as reply_to_message.
+        SELECT space_id,capture_sequence,id,coalesce(message#>>'{forum_topic_edited,name}',message#>>'{forum_topic_created,name}',
+          CASE WHEN message#>>'{reply_to_message,message_id}'=message#>>'{message_thread_id}'
+            THEN coalesce(message#>>'{reply_to_message,forum_topic_edited,name}',message#>>'{reply_to_message,forum_topic_created,name}') END) AS topic_name
+        FROM scopes WHERE space_id LIKE '%/topic/%') named
+        WHERE topic_name IS NOT NULL ORDER BY space_id,(topic_name IS NOT NULL) DESC,capture_sequence DESC,id DESC)
       SELECT DISTINCT ON (s.space_id) s.space_id,s.message->'chat' AS chat,t.topic_name,s.received_at AS observed_at
         FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id ORDER BY s.space_id,s.capture_sequence DESC,s.id DESC`),
       this.stores.control.query(`SELECT space_id FROM project_assignments
@@ -91,6 +98,12 @@ export class OwnerSupervisionRepository {
       let space:string;try{space=validateSpace(raw);}catch{continue;}
       const value=items.get(space)??item(space);value.configured=true;items.set(space,value);
       if(value.parent_space&&!items.has(value.parent_space))items.set(value.parent_space,item(value.parent_space));
+    }
+    // A group with no captured message is named by the owner's last Telegram refresh.
+    const refreshed=await this.services.telegramChats?.observations()??new Map();
+    for(const value of items.values()) {
+      const chat=value.parent_space?undefined:refreshed.get(value.space_id);if(!chat)continue;
+      value.name??=chat.title;value.telegram={state:chat.state,migrate_to_chat_id:chat.migrate_to_chat_id,observed_at:chat.observed_at};
     }
     for(const value of items.values())if(value.parent_space)value.parent_name=items.get(value.parent_space)?.name??null;
     return [...items.values()].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0);
