@@ -428,10 +428,12 @@ uncertain effects, disconnected workers and unhealthy services remain visible
 without expanding details. A healthy container does not certify model access or
 Telegram reception. **Inspect original** opens the archived evidence.
 
-The provider panel's **OAuth Login → Codex** uses a temporary callback listener on
-the host at port 1455. Start a fresh login after an expired attempt. If that port
-is busy with another login, finish it first or use `./bin/nocheh provider login`
-for device authentication. Once the shared login is present, run
+The provider panel's **OAuth Login** uses a temporary host callback listener for
+each redirect provider: Codex on port 1455, Claude on 54545 and Antigravity on
+51121. Kimi and xAI use device codes and need no callback. Each provider accepts
+one login. Start a fresh login after an expired attempt. If a callback port is
+busy with another login, finish it first; for Codex,
+`./bin/nocheh provider login` also offers device authentication. Once the shared login is present, run
 `./bin/nocheh provider cutover` to validate and switch the active route.
 
 The three API keys shown in the provider panel are generated local access keys

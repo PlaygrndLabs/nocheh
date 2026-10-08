@@ -17,7 +17,7 @@ SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
             'cliproxy-monitor', 'inngest-redis', 'inngest-server',
             'chatgpt-speech', 'hermes', 'honcho-postgres', 'honcho-redis',
             'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
-PORTS = (8780, 8783, 8785, 1455, 18317)
+PORTS = (8780, 8783, 8785, 1455, 54545, 51121, 18317)
 
 
 def port_available(port):
