@@ -1,4 +1,5 @@
 import {blockingPublications} from './publications.js';
+import {ownerAutonomyGrant} from './owner-autonomy.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -125,7 +126,7 @@ export class TelegramActionRepository {
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
     return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text});
   }
-  private async propose(principal:Reader,turn:{scope:string;logical_profile:string},binding:GuardBinding,
+  private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
     source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string){
     const requested=string(input.destination,64),destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:requested,text=string(input.text,3500);
     if(!validDestination(destination)||!text.trim())throw new HttpError(400,'invalid_action');
@@ -143,7 +144,20 @@ export class TelegramActionRepository {
         [id,source,proposal,binding,turn.scope,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
-      const effect=this.effect(row),decision=await evaluate(db,effect);await recordEffect(db,effect,'proposed',decision,source);
+      const effect=this.effect(row);let decision=await evaluate(db,effect);
+      // The owner freedom setting lets the owner's own live private request
+      // approve itself. Deny rules are evaluated first and still block it.
+      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?await ownerAutonomyGrant(db,principal,turn):null;
+      if(autonomy)decision=await evaluate(db,effect,autonomy);
+      await recordEffect(db,effect,'proposed',decision,source);
+      if(autonomy&&decision.outcome==='allow') {
+        const revision=row.revision+1,hash=digest(canonical({id,fingerprint:row.fingerprint,decision:'approve',source,authority:autonomy}));
+        await db.query("UPDATE telegram_action_requests SET state='approved',revision=$2,decision_reference=$3,updated_at=now() WHERE id=$1 AND state='proposed'",[id,revision,source]);
+        await db.query(`INSERT INTO telegram_action_decisions(operation_id,request_hash,action_id,decision,revision,source_reference)
+          VALUES($1,$2,$3,'approve',$4,$5) ON CONFLICT DO NOTHING`,['owner-autonomy:'+id,hash,id,revision,source]);
+        await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
+        await db.query('COMMIT');return {id,state:'approved',fingerprint,message:'Approved by your own request under the owner freedom setting; sending now.'};
+      }
       await recordEffect(db,effect,decision.outcome==='deny'?'blocked':'awaiting_approval',decision,source);
       await db.query('COMMIT');return {id,state:row.state,fingerprint,message:'Owner approval is required for this exact message and destination.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}

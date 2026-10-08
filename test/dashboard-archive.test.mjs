@@ -43,7 +43,10 @@ test('archive presents one accessible table-to-agent-copy workflow',async()=>{
   assert.match(source,/saved\.revision>resource\.data\.revision/);
   assert.match(guarded,/What agents can use/);
   assert.match(guarded,/Advanced agent-copy fields/);
-  assert.match(archive,/aria-label=\{selected\?undefined:'Message details'\}/);
+  assert.match(archive,/<Sheet open=\{!!selected\}[\s\S]{0,120}title="Message details"/);
+  assert.match(archive,/returnFocus=\{opener\.current\}/);
+  assert.doesNotMatch(archive,/scrollIntoView/,'details open in a drawer instead of scrolling the page');
+  assert.match(style,/\.ui-sheet\.archive-detail-sheet\{width:min\(920px,100vw\)\}/);
   assert.ok(source.indexOf('original,')<source.indexOf('h(GuardedEditor'));
   assert.match(guarded,/Wording for agents/);
   assert.match(guarded,/Saving changes only the agent copy\. The original above remains unchanged\./);

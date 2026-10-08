@@ -145,9 +145,31 @@ def register(ctx):
         ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
             handler=lambda args,_kind=kind,**kwargs:controlled_tool(_kind,args))
+    name='nocheh_owner_read';description=('Read the owner\'s own directory: known Telegram conversations with names and IDs (conversations, '
+        'telegram-identities), one conversation\'s context (conversation-context with space), people, projects, project-assignments and the '
+        'memory-map. Available only in the owner\'s private conversation. Use exact IDs from here as action destinations.')
+    ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
+        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
+            'view':{'type':'string','enum':list(OWNER_VIEWS)},'space':{'type':'string'},'q':{'type':'string'},'after':{'type':'string'}},
+            'required':['view'],'additionalProperties':False}},handler=owner_read)
     name='nocheh_action_status';description='Read a proposed controlled action and its separate execution result in your authorized scope.'
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'required':['id'],'additionalProperties':False}},handler=controlled_status)
+
+
+OWNER_VIEWS=('conversations','conversation-context','telegram-identities','people','projects','project-assignments','memory-map')
+
+
+def owner_read(args,**kwargs):
+    from urllib.parse import urlencode
+    try:
+        view=args.get('view')
+        if view not in OWNER_VIEWS:raise ValueError('invalid_owner_view')
+        query={key:str(args[key]) for key in ('space','q','after') if args.get(key)}
+        value=json.dumps(request('/v1/owner/'+view+('?'+urlencode(query) if query else '')),ensure_ascii=False)
+        # Bound tool context; the dashboard keeps the complete owner views.
+        return value if len(value)<=24000 else json.dumps({'view':view,'excerpt':value[:22000],'truncated':True},ensure_ascii=False)
+    except Exception:return json.dumps({'error':'owner_read_unavailable','note':'Available only in the owner private conversation.'})
 
 
 def controlled_tool(kind,args):

@@ -109,6 +109,19 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
     if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
+    // The owner may read all of their own data from a live owner-private turn.
+    // Fixed read views map onto existing owner handlers; no mutation is reachable.
+    const ownerView=path.match(/^\/v1\/owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)$/);
+    if(req.method==='GET'&&ownerView) {
+      await s.knowledge.ownerTurn(principal);
+      const reader={admin:true,scope:null},view=ownerView[1]!;
+      if(view==='telegram-identities')return json(res,200,await telegramDirectory(s.stores.archive,reader));
+      if(view==='people')return json(res,200,await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
+        after:url.searchParams.get('after')??'',state:'active'}));
+      const target=({conversations:'/v1/conversations','conversation-context':'/v1/conversations/context',projects:'/v1/projects',
+        'project-assignments':'/v1/projects/assignments','memory-map':'/v1/memory-map'} as Record<string,string>)[view]!;
+      return json(res,200,await owner.request(reader,'GET',new URL(target+url.search,url)));
+    }
     if(await owner.handle(principal,req,res,url))return;
     if(path==='/v1/runtime/profiles'||path==='/v1/runtime/profiles/resolve') {
       admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);

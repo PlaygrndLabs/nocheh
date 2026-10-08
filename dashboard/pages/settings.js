@@ -5,8 +5,31 @@ import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText
 export function Settings({notify}) {
  const [defaultsRevision,setDefaultsRevision]=useState(0);
  return h(Tabs,{defaultValue:'nocheh',className:'settings-page'},h(TabsList,{'aria-label':'Settings category'},h(TabsTrigger,{value:'nocheh'},'Nocheh settings'),h(TabsTrigger,{value:'hermes'},'Hermes preferences')),
-  h(TabsContent,{value:'nocheh',forceMount:true},h(NochehSettings,{notify})),h(TabsContent,{value:'hermes',forceMount:true},h(HermesPreferences,{notify,defaultsRevision}),h(PolicySettings,{notify,onSaved:()=>setDefaultsRevision(v=>v+1)})));
+  h(TabsContent,{value:'nocheh',forceMount:true},h(NochehSettings,{notify}),h(OwnerFreedom,{notify})),h(TabsContent,{value:'hermes',forceMount:true},h(HermesPreferences,{notify,defaultsRevision}),h(PolicySettings,{notify,onSaved:()=>setDefaultsRevision(v=>v+1)})));
 }
+  function OwnerFreedom({notify}) {
+    const [tick,setTick]=useState(0),[data,error]=useLoad('/owner-autonomy',tick),[choice,setChoice]=useState(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
+    const selected=choice??data?.mode??'approval_required',changed=!!data&&selected!==data.mode;
+    const options=[
+      ['approval_required','Ask me first (default)','Every Telegram message Nocheh sends for you and every shell, browser and MCP tool waits for your approval in Activity or your private chat.'],
+      ['owner_requests_execute','Do what I ask','When you ask in your own private chat, Nocheh sends messages and runs tools without a separate approval. Requests from groups, schedules and background work still wait for approval, and explicit deny rules still block.']];
+    const save=async e=>{
+      e.preventDefault();if(!changed||busy)return;setBusy(true);setProblem('');
+      try{const result=await call('/owner-autonomy',{mode:selected,expected_revision:data.revision,operation_id:crypto.randomUUID()});setChoice(null);setTick(v=>v+1);
+        notify(result.mode==='owner_requests_execute'?'Your private requests now run without a separate approval.':'Every external action now waits for your approval.');}
+      catch(error){setProblem(errorText(error));setTick(v=>v+1);}finally{setBusy(false);}
+    };
+    return h(Panel,{title:'Owner freedom',note:'How much Nocheh may do on your behalf without asking. Applies immediately; no restart is needed.'},
+      error&&!data&&h(Alert,null,'The owner freedom setting is unavailable. Refresh and try again.'),!data&&!error&&h('p',{role:'status'},'Loading owner freedom…'),
+      data&&h('form',{onSubmit:save,className:'owner-freedom'},
+        h('fieldset',null,h('legend',{className:'sr-only'},'Owner freedom level'),
+          options.map(([value,label,text])=>h('label',{key:value,className:'owner-freedom-option'},
+            h('input',{type:'radio',name:'owner-freedom',value,checked:selected===value,disabled:busy,onChange:()=>setChoice(value)}),
+            h('span',null,h('strong',null,label),h('span',{className:'n-muted'},text))))),
+        problem&&h('p',{role:'alert',className:'source-retirement-error'},'Not saved: '+problem+'. Check the current setting and try again.'),
+        h('p',{role:'status',className:'n-muted'},'Current: '+(data.mode==='owner_requests_execute'?'Do what I ask':'Ask me first')+(data.updated_at&&data.revision?' · changed '+new Date(data.updated_at).toLocaleString():'')),
+        h('div',{className:'n-actions'},h('button',{className:'n-primary',disabled:busy||!changed},busy?'Saving…':'Save owner freedom'),changed&&button('Discard',()=>setChoice(null),busy))));
+  }
   function PolicySettings({notify,onSaved}) {
     const [tick,setTick]=useState(0),[data,error]=useLoad('/policy',tick),[changes,setChanges,editRevision]=useRevisionDraft(data?.revision),[busy,setBusy]=useState(false);
     const save=async e=>{e.preventDefault();setBusy(true);try{await call('/policy',{changes,revision:editRevision});setChanges({});setTick(v=>v+1);onSaved();notify('Global preferences saved. Profiles that inherit them use them on the next turn.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
@@ -16,7 +39,7 @@ export function Settings({notify}) {
         const name=({'nocheh_tools.shell':'Controlled shell','nocheh_tools.browser':'Controlled browser','nocheh_tools.mcp':'Controlled MCP','agent.reasoning_effort':'Reasoning effort','agent.max_iterations':'Maximum agent steps','agent.run_budget_seconds':'Time per turn (seconds)','memory.memory_char_limit':'General memory limit (characters)','memory.user_char_limit':'User profile limit (characters)'})[key]||key;
         return h('div',{className:'n-field n-settings-preference',key},h('label',{htmlFor:input.id},name),h('div',{className:'n-preference-control'},spec.choices?h('select',input,...spec.choices.map(v=>h('option',{value:v,key:v},v))):h('input',{...input,type:'number',min:spec.min,max:spec.max,required:true}),h(Button,{type:'button',variant:'outline',size:'icon',title:'Reset '+name+' to the built-in default','aria-label':'Reset '+name+' to the built-in default',disabled:busy||changes[key]===null||(changes[key]===undefined&&data.origins[key]==='default'),onClick:()=>setChanges({...changes,[key]:null})},h(RotateCcw,{size:16,'aria-hidden':true}))),h('small',null,changes[key]===null?'Built-in default will apply after saving.':'Source: '+data.origins[key]));
       })),h('div',{className:'n-actions'},h('button',{className:'n-primary',disabled:busy||!Object.keys(changes).length},busy?'Saving…':'Save global preferences'),button('Discard edits',()=>setChanges({}),busy))),
-      h('p',{className:'n-muted'},'External actions currently require owner review. Broader tool policies become available with the tools phase; job overrides are stored for the scheduling phase.'));
+      h('p',{className:'n-muted'},'Whether external actions wait for your review is set under Owner freedom in Nocheh settings. Job overrides are stored for the scheduling phase.'));
   }
   function NochehSettings({notify}) {
     const [refresh,setRefresh]=useState(0),[data,error]=useLoad('/settings',refresh);

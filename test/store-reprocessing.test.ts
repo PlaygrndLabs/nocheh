@@ -54,8 +54,10 @@ test('original-byte reprocessing preserves both versions, owner guards, selectio
     assert.equal(firstCalls,1);
     const first=await reprocess.run(firstJob,'fixture',async()=>[],authority);assert.ok(first);assert.equal(firstCalls,1);
     assert.deepEqual(await reprocess.run(firstJob,'fixture',async()=>{throw Error('already prepared');},authority),first);
+    const beforeFirst=await guards.state();
     const initial=await selections.activate(first,null,digest(key+':activate-one'),'automatic');
     const firstBinding=await guards.state();
+    assert.equal(firstBinding.epoch,beforeFirst.epoch,'a first selection has no authorized content to revoke');
     assert.equal(((await selections.current(file.event.id,file.id,'transcript',firstBinding)).value as any).text,'First reading');
     const firstGuardId='derived_artifacts:'+first.id;
     const firstGuard=(await guards.read(firstGuardId,firstBinding)).revision!;
