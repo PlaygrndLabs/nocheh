@@ -29,7 +29,7 @@ def docker(method,path,body=None):
         return json.loads(raw) if raw else {}
     finally:client.close()
 
-def container_spec(profile,host_root,image,network,uid,gid):
+def container_spec(profile,host_root,image,network,uid,gid,source_root=None):
     if not re.fullmatch(r'nocheh-[a-f0-9]{24}',profile):raise ValueError('invalid_isolated_profile')
     root=Path(host_root)
     if not root.is_absolute() or any(c in str(root) for c in '\r\n,:'):raise ValueError('invalid_host_profile_root')
@@ -39,6 +39,12 @@ def container_spec(profile,host_root,image,network,uid,gid):
     mounts=[{'Type':'bind','Source':str(root/profile/'config.yaml'),'Target':'/profile/config.yaml','ReadOnly':True}]
     mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_DIRS]
     mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_FILES]
+    if source_root is not None:
+        # Source-watched development only: turns use the checkout's plugin code,
+        # read-only, instead of the code baked into the pinned runtime image.
+        source=Path(source_root)
+        if not source.is_absolute() or any(c in str(source) for c in '\r\n,:'):raise ValueError('invalid_development_source')
+        mounts += [{'Type':'bind','Source':str(source/name),'Target':'/workspace/'+name,'ReadOnly':True} for name in ('services','tools')]
     return {'Image':image,'User':f'{uid}:{gid}','WorkingDir':'/workspace',
       'Cmd':['python','-m','services.hermes.assistant_turn'],
       'Env':['HOME=/tmp/home','HERMES_HOME=/profile','NOCHEH_CAPTURE_ENABLED=0','NOCHEH_ISOLATED_TURN=1',
@@ -118,7 +124,8 @@ class Handler(BaseHTTPRequestHandler):
             from .security_transport import scoped_transport
             body.update(scoped_transport(credential,body['api_mode']))
             body['model_context_length']=binding['model_context_length']
-            spec=container_spec(profile,self.server.host_profiles,self.server.image,self.server.network,int(os.environ['NOCHEH_UID']),int(os.environ['NOCHEH_GID']))
+            spec=container_spec(profile,self.server.host_profiles,self.server.image,self.server.network,int(os.environ['NOCHEH_UID']),int(os.environ['NOCHEH_GID']),
+                                os.environ.get('NOCHEH_DEV_TURN_SOURCE') or None)
             identifier=docker('POST','/containers/create?name=nocheh-turn-'+uuid.uuid4().hex,spec)['Id']
             with ACTIVE_LOCK:CONTAINERS.add(identifier)
             self.send_response(200);self.send_header('Content-Type','application/x-ndjson');self.send_header('Cache-Control','no-store');self.end_headers()
