@@ -507,8 +507,18 @@ queue; retirement offers the direct reply and replies that quote the message;
 storage tests run with per-file cluster resets
 (`python3 -m tools.development.store_tests`); turn containers are removed when
 their launcher stops. An approved action whose runtime is unreachable, or
-whose response is lost, remains uncertain by design. Real-model quality, real
-transcription, live Telegram and release gates remain separate and pending.
+whose response is lost, remains uncertain by design.
+
+Live owner session (October 8, operating stack, source-watched): replies were
+delivered once each but retried because a first voice transcript revoked
+every in-flight turn; ADR-0108 removes that revocation. Owner-private turns
+now read the owner's directory, people and projects, and the owner freedom
+setting (approval required by default) is in Nocheh settings. Archive details
+open in a drawer. Pending owner rechecks on the repaired source: quick-message
+ordering and first-attempt timing with a voice note, a group list followed by
+an exact approval, the owner freedom level, and restart during a model turn.
+Real-model quality, live Telegram release gates and release remain pending.
+[Live summary](docs/mvp-acceptance-status.md).
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the

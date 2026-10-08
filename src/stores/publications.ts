@@ -4,10 +4,11 @@ import {requestWorkflow} from '../workflows/store.js';
 import {canonical} from '../archive.js';
 import type {GuardBinding} from './guards.js';
 
-// Preparing the first guarded copy cannot revoke an unrelated authorized
-// context. Its own reads still require a ready derived pointer. Replacements,
-// selections and learned publications retain the global authorization barrier.
-export const blockingPublications="state='pending' AND (operation_kind<>'guard' OR expected_revision IS NOT NULL)";
+// Preparing the first guarded copy or first derivative selection cannot revoke
+// an unrelated authorized context. Their own reads still require a ready
+// derived pointer. Replacements and learned publications retain the global
+// authorization barrier.
+export const blockingPublications="state='pending' AND (operation_kind NOT IN ('guard','selection') OR expected_revision IS NOT NULL)";
 
 export interface RepresentationChange {
   kind:'guard'|'selection'|'memory';source_id:string;revision:number;expected_revision:number|null;operation_id:string;
@@ -27,9 +28,11 @@ export async function revokeBeforePublication(control:pg.Pool,change:Representat
     } else {
       if(change.input_binding&&canonical(change.input_binding)!==canonical({generation:state.generation,epoch:Number(state.epoch),mode:state.mode}))
         throw new HttpError(409,'guard_context_changed');
-      // A first representation has no previously authorized content to revoke.
-      // Changing existing content (and every selected engine) revokes before visibility.
-      const changed=change.expected_revision!==null||change.kind==='selection';
+      // A first representation or first derivative selection has no previously
+      // authorized content to revoke. Replacing existing content revokes before
+      // visibility. Revoking on a first transcript would interrupt every
+      // in-flight turn in the installation for content none of them used.
+      const changed=change.expected_revision!==null;
       const epoch=changed?Number((await client.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch):Number(state.epoch);
       await client.query(`INSERT INTO guard_publications(id,operation_kind,source_id,revision,expected_revision,epoch) VALUES($1,$2,$3,$4,$5,$6)`,
         [change.operation_id,change.kind,change.source_id,change.revision,change.expected_revision,epoch]);
