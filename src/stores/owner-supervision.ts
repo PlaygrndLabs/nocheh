@@ -4,6 +4,7 @@ import type {AssistantPolicy} from '../assistant-policy.js';
 import {graphChatType,graphGroupLabel} from '../graph-labels.js';
 import {HttpError} from '../http.js';
 import {parentSpace,validateSpace} from '../spaces.js';
+import type {TelegramChatRepository} from './telegram-chats.js';
 import type {StorePools} from './connections.js';
 import type {ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
@@ -16,11 +17,13 @@ export type DecisionKind=typeof decisionKinds[number];
 export interface ConversationDirectoryItem {
   space_id:string;name:string|null;kind:'private'|'group'|'topic'|'unknown';
   parent_space:string|null;parent_name:string|null;observed_at:string|null;configured:boolean;
+  /** The owner's last explicit refresh from Telegram, when one exists. */
+  telegram?:{state:string;migrate_to_chat_id:string|null;observed_at:string};
 }
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
   telegramActions:Pick<TelegramActionRepository,'inspect'>;memory:Pick<NativeMemoryRepository,'status'>;
-  shared:Pick<SharingContentRepository,'inspect'>;
+  shared:Pick<SharingContentRepository,'inspect'>;telegramChats?:Pick<TelegramChatRepository,'observations'>;
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
 }
 type PageInput={q?:string;after?:string;limit?:number};
@@ -95,6 +98,12 @@ export class OwnerSupervisionRepository {
       let space:string;try{space=validateSpace(raw);}catch{continue;}
       const value=items.get(space)??item(space);value.configured=true;items.set(space,value);
       if(value.parent_space&&!items.has(value.parent_space))items.set(value.parent_space,item(value.parent_space));
+    }
+    // A group with no captured message is named by the owner's last Telegram refresh.
+    const refreshed=await this.services.telegramChats?.observations()??new Map();
+    for(const value of items.values()) {
+      const chat=value.parent_space?undefined:refreshed.get(value.space_id);if(!chat)continue;
+      value.name??=chat.title;value.telegram={state:chat.state,migrate_to_chat_id:chat.migrate_to_chat_id,observed_at:chat.observed_at};
     }
     for(const value of items.values())if(value.parent_space)value.parent_name=items.get(value.parent_space)?.name??null;
     return [...items.values()].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0);
