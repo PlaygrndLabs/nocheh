@@ -2626,4 +2626,15 @@ normally, also after full truncation.
 At the owner's request, enabled retention now checks at database startup and
 then daily instead of hourly. [Decision](adr/0107-daily-workflow-history-retention.md).
 
+<entry date="2026-10-08" area="Resolve personal-use simulation follow-ups">
+
+The owner chose explicit-refusal retries for approved actions and opt-in
+retirement of the direct reply plus replies quoting a message. Definite Bot
+API rejections now close as `telegram_rejected`; Archive names them and
+unrecognized speech. A development helper resets the synthetic cluster for
+every storage test file. Turn containers use Docker AutoRemove and are killed
+when their launcher stops. A fresh coupled installation passed every check;
+one runner gate first failed because it searched a 300-character preview
+instead of the stored reply and was corrected.
+
 </entry>
