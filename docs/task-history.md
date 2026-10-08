@@ -2525,3 +2525,35 @@ without establishing the share of total storage or an approved deletion policy.
 No operating database records were changed.
 
 </entry>
+
+<entry date="2026-10-08" area="Personal-use Telegram scenario suite and reply ordering repairs">
+
+The owner asked for every scenario to be tested on a mocked Telegram before
+personal use. On the current source, Node 24 compilation passed, and every
+Node test file passed against its own fresh synthetic database; the same
+files run against one shared database fail intermittently (different files on
+each run) because earlier files leave guard and audience state. All Hermes,
+Honcho and tooling Python suites passed. A fresh 16-service installation passed
+its 19 coupled checks and both HTTP Telegram scenarios.
+
+A new [scenario runner](../tools/acceptance/telegram_scenarios.py) adds a
+scripted fixture brain that drives real Nocheh tool calls, a lost-response
+Bot API fault and a substituted speech service. It found two defects. A reply
+ready while the native adapter reconnected polling was never transmitted but
+was recorded as uncertain, so it was never delivered; it is now retried. Three
+messages sent together could be answered out of order, because one poll's
+updates are captured in spool order and prepared independently; turns now
+start in Telegram update order with a bounded hold.
+[Decision](adr/0104-telegram-update-order-and-untransmitted-sends.md),
+[gateway checks](../services/hermes/test_gateway.py),
+[ordering check](../test/store-telegram-dispatch.test.ts). Three initial
+scenario failures were runner errors (a marker in the group's own history, a
+blank answer retried inside one native attempt, and the bot's own earlier reply
+quoting a retired fact) and were corrected in the runner. A blank voice
+transcription had left its dispatch waiting indefinitely; it now closes as
+suppressed with `invalid_transcription_response`. On a second fresh
+installation from the final source, the 19 coupled checks, both HTTP runs and
+all 31 scenarios (288 gates) passed; 269 Node, 439 native and 100 tooling
+Python checks passed.
+
+</entry>
