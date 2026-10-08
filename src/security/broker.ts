@@ -24,7 +24,7 @@ export interface BrokerStorage {
 }
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
 const relayRoutes:[string,RegExp][]=[
-  ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|tools\/actions\/[a-f0-9]{64})$/],
+  ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)|tools\/actions\/[a-f0-9]{64})$/],
   ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|knowledge\/proposals|action-requests)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
@@ -106,7 +106,7 @@ export function brokerServer(options:BrokerOptions) {
         relay='/v1/artifacts/'+artifact+'/bytes';
       }
       if(scopedRoute(req.method??'',relay)) {
-        const knowledge=relay.startsWith('/v1/knowledge/');
+        const knowledge=relay.startsWith('/v1/knowledge/')||relay.startsWith('/v1/owner/');
         // Fixed scoped routes keep runtime tools away from owner credentials.
         // Storage independently verifies a current live owner-private turn.
         if(knowledge&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');

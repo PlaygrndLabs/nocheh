@@ -87,7 +87,8 @@ export class KnowledgeManagementRepository {
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
  }
 
- private async ownerTurn(principal:Reader) {
+ /** A current live owner-private turn; never a group, job, review or admin caller. */
+ async ownerTurn(principal:Reader) {
   if(principal.admin||principal.scope!==null||(principal.purpose??'assistant')!=='assistant')throw new HttpError(403,'owner_private_turn_required');
   const turn=await this.s.turns.binding(principal);
   if(!turn.owner||turn.job||turn.reference?.store!=='archive')throw new HttpError(403,'owner_private_turn_required');
