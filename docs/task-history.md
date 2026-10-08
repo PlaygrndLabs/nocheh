@@ -2595,3 +2595,14 @@ check and all five workflow storage checks pass on a fresh synthetic
 database. [Decision](adr/0105-shared-background-engine-queue.md).
 
 </entry>
+
+<entry date="2026-10-08" area="Inngest test telemetry deletion">
+
+The owner directed full deletion of the accumulated test telemetry. With only
+the database running and no network, Inngest `spans`, `history` and `traces`
+were truncated; Inngest fell from 35 GB to 70 MB, the PostgreSQL volume from
+36.9 to 1.6 GB, and host free space from 38 to 71 GiB. Inngest events and run
+records, Redis queue state, Nocheh stores and the 14,644-row workflow registry
+were kept.
+
+</entry>
