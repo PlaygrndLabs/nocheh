@@ -29,6 +29,11 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual([Path(m['Source']).name for m in host['Mounts'] if not m['ReadOnly']],list(DATA_DIRS+DATA_FILES))
         self.assertFalse(any(m['Target']=='/profile' for m in host['Mounts']))
         self.assertTrue(host['AutoRemove'],'an exited turn is removed even if the launcher stopped')
+        self.assertFalse(any(m['Target'].startswith('/workspace') for m in host['Mounts']),'production turns use the pinned image code')
+        development=container_spec('nocheh-'+'a'*24,'/owned/profiles','sha256:'+'b'*64,'nocheh-agent',1000,1000,'/owned/checkout')['HostConfig']['Mounts']
+        self.assertEqual([(m['Source'],m['Target'],m['ReadOnly']) for m in development if m['Target'].startswith('/workspace')],
+                         [('/owned/checkout/services','/workspace/services',True),('/owned/checkout/tools','/workspace/tools',True)])
+        with self.assertRaises(ValueError):container_spec('nocheh-'+'a'*24,'/owned/profiles','sha256:'+'b'*64,'nocheh-agent',1000,1000,'relative')
         with self.assertRaises(ValueError):container_spec('../private','/owned','sha256:'+'b'*64,'nocheh-agent',1000,1000)
         with self.assertRaises(ValueError):container_spec('nocheh-'+'a'*24,'relative','tag','nocheh-agent',0,0)
     def test_data_preservation_and_symlink_rejection(self):
