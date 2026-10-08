@@ -409,9 +409,8 @@ or the unattended release gate.
    Honcho checks cover part of this; they do not by themselves prove every
    provider-cutover criterion. Inspect retained evidence first and rerun only a
    missing or invalidated criterion. No provider cutover is authorized here.
-4. The cleaned history is prepared with an identical current tree. Await the
-   explicit one-time force-with-lease exception, reconcile later source commits,
-   and verify before publication. Remote synchronization remains blocked.
+4. Sanitized history is published with an identical current tree; remote
+   synchronization is available again for branches rebased onto it.
 
 Historical ingestion is unapproved and is not required to repeat this test set.
 The deliberate-reset journal validator is not applicable to the clean development

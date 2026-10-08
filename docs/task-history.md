@@ -2557,3 +2557,24 @@ all 31 scenarios (288 gates) passed; 269 Node, 439 native and 100 tooling
 Python checks passed.
 
 </entry>
+
+<entry date="2026-10-08" area="Sanitized history publication">
+
+The owner asked why private reports would be pushed, then directed a full
+history cleanup including unused logs. `origin/main` (a public repository)
+already matched local `main`, so the old private reports were remotely
+published. A fresh rewrite of `main` removed the historical
+`compatibility/results/` and `docs/evaluation/results/` report and log
+directories, replaced the 111 known private identifiers in contents and
+messages, and replaced the owner's home-directory path. The current source tree
+is identical. A scan of every reachable object found zero private markers or
+source-content samples; the only credential-shaped matches are the reviewed
+synthetic test fixtures, and the Telegram chat ID matches are the documented
+placeholder. The current tree contained no tracked logs or generated output.
+With owner approval, `main` was replaced with a force-with-lease against the
+expected old value, published in chunks after a single large push timed out.
+A verified bundle of the original history and a private local ref remain in
+ignored local state, and a local pre-push guard blocks the 743 rewritten
+commits. Third-party clones and server caches are not erased.
+
+</entry>
