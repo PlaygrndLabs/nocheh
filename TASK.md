@@ -56,6 +56,11 @@ the operating installation. Because these rows were test telemetry, the owner
 directed their full deletion: `spans`, `history` and `traces` were truncated
 with the database isolated, leaving Inngest at 70 MB and the volume at 1.6 GB.
 Nocheh stores, receipts and the workflow registry were untouched.
+Telemetry retention is now a configurable setting,
+`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, off (`0`) by default.
+[Decision](docs/adr/0106-configurable-workflow-history-retention.md),
+[retention checks](test/workflow-retention.test.ts),
+[shutdown check](test/test_store_postgres_entrypoint.py).
 [Decision](docs/adr/0105-shared-background-engine-queue.md),
 [registration check](test/workflow-foundation.test.ts),
 [probe](test/workflow-background-probe.ts).
@@ -758,8 +763,9 @@ activation remains separate.
    with the next authorized operating restart, then compare span growth per day
    against the 2026-10-08 measurement in ignored
    `data/acceptance/results/inngest-storage/`. The existing telemetry was deleted on owner
-   direction. Inngest still never expires these rows, so a retention horizon
-   is needed before real personal use accumulates history. Remaining real prerequisite polls
+   direction. Configurable retention is implemented and off by default; the
+   owner chooses whether to set days. The rebuilt `nocheh-db` image is needed
+   for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh) were about six percent of
    sampled background steps.
