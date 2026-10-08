@@ -131,3 +131,30 @@ test('reaction state rejects superseded and delayed observations while keeping a
     assert.equal(await s.access.canLearn(counts,await s.guards.state()),false);
   }finally{await stores.close();}
 });
+
+test('retirement offers delivered replies that repeat the message without retiring them',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),chat=String(Date.now()%1000000000+1000),owner={admin:true,scope:null};
+  const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-related',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
+    runtime:async()=>{throw Error('runtime_not_expected');},honcho:async()=>{throw Error('honcho_not_expected');}});
+  const prefix='related:'+Date.now();
+  const capture=async(label:string,id:number,text:string,kind='telegram_update')=>(await s.capture.capture({version:1,key:prefix+':'+label,origin:'live',bot_id:'fixture',
+    kind,scope:chat,source_id:String(id),revision:String(id),occurred_at:null,text,
+    payload:{update_id:id,message:{message_id:id,chat:{id:Number(chat),type:'private'},from:kind==='telegram_update'?{id:Number(chat)}:{id:99,is_bot:true},text}}} as Envelope)).source.reference;
+  try{
+    const fact=await capture('fact',1,'My sister\'s favourite colour is turquoise. Remember it.');
+    const quoting=await capture('quote',2,'Search result: "My sister\'s favourite colour is turquoise" from earlier.','telegram_delivered_message');
+    await capture('other',3,'Unrelated answer about the weather.','telegram_delivered_message');
+    const short=await capture('short',4,'ok');await capture('short-reply',5,'ok, noted','telegram_delivered_message');
+    const related=(await s.retirements.get(owner,fact.id)).related_replies;
+    assert.deepEqual(related.map(reply=>[reply.event_id,reply.relation,reply.retired,reply.revision]),[[quoting.id,'quote',false,0]]);
+    assert.deepEqual((await s.retirements.get(owner,short.id)).related_replies,[],'short text is not treated as a quotation');
+    await s.retirements.set(owner,fact.id,{retired:true,expected_revision:0,operation_id:prefix+':fact'});
+    assert.equal(await s.retirements.isRetired(quoting),false,'retiring a message never retires a reply implicitly');
+    await s.retirements.set(owner,quoting.id,{retired:true,expected_revision:0,operation_id:prefix+':quote'});
+    assert.equal((await s.retirements.get(owner,fact.id)).related_replies[0]?.retired,true);
+  }finally{await stores.close();}
+});
