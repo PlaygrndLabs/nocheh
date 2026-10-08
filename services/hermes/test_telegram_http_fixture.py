@@ -90,6 +90,19 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r['status'] for r in calls],[429,200]);self.assertTrue(all(r['at']>0 for r in calls))
         self.assertEqual(await (await self.bot.get_file('controlled')).download_as_bytearray(),content)
 
+    async def test_lost_response_delivers_once_and_reports_only_a_gateway_failure(self):
+        from telegram.error import NetworkError
+        for invalid in ({'method':'getFile','code':502,'description':'x','parameters':{'deliver':True}},
+                        {'method':'sendMessage','code':400,'description':'x','parameters':{'deliver':True}},
+                        {'method':'sendMessage','code':502,'description':'x','parameters':{'deliver':False}}):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):self.mock.configure({'faults':[invalid]})
+        self.mock.configure({'faults':[{'method':'sendMessage','code':502,'description':'Bad Gateway','parameters':{'deliver':True}}]})
+        with self.assertRaises(NetworkError):await self.bot.send_message(123,'accepted but unobserved')
+        self.assertEqual([row['message']['text'] for row in self.mock.state['sent']],['accepted but unobserved'])
+        calls=[row for row in self.mock.state['calls'] if row['method']=='sendMessage']
+        self.assertEqual([(row['status'],row['delivered']) for row in calls],[(502,True)],'one physical delivery, one observed failure')
+        self.assertEqual(self.mock.state['faults'],[])
+
     async def test_delivery_receipt_contains_parsed_text_and_rich_markup_fails_explicitly(self):
         text='[mock] سلام 🔭. '
         from telegram.helpers import escape_markdown

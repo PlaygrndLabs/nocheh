@@ -66,10 +66,14 @@ class TelegramMock:
                     or type(row.get('code')) is not int or not 400<=row['code']<=599
                     or not isinstance(row.get('description'),str) or len(row['description'])>200):raise ValueError('invalid_fixture_fault')
             parameters=row.get('parameters',{})
-            if not isinstance(parameters,dict) or set(parameters)-{'retry_after'}:raise ValueError('invalid_fixture_fault')
+            if not isinstance(parameters,dict) or set(parameters)-{'retry_after','deliver'}:raise ValueError('invalid_fixture_fault')
             if row['code']==429:
                 delay=parameters.get('retry_after')
-                if type(delay) is not int or not 0<=delay<=10:raise ValueError('invalid_fixture_fault')
+                if type(delay) is not int or not 0<=delay<=10 or 'deliver' in parameters:raise ValueError('invalid_fixture_fault')
+            elif 'deliver' in parameters:
+                # A lost response: Telegram accepted the message, but the bot
+                # observes only a gateway failure and cannot know the outcome.
+                if parameters!={'deliver':True} or row['method']!='sendMessage' or row['code']<500:raise ValueError('invalid_fixture_fault')
             elif parameters:raise ValueError('invalid_fixture_fault')
             faults.append(row)
         if len(files)>100 or len(faults)>20:raise ValueError('fixture_control_limit')
@@ -84,6 +88,12 @@ class TelegramMock:
         trace={'method':method,'parameters':data,'at':time.time()}
         self.state['calls']=(self.state['calls']+[trace])[-2000:]
         fault=next((item for item in self.state['faults'] if item['method']==method),None)
+        if fault and fault.get('parameters',{}).get('deliver'):
+            self.state['faults'].remove(fault)
+            status,_=await self.call(method,data)
+            self.state['calls'].pop()
+            trace['status']=fault['code'];trace['delivered']=status==200;self.save()
+            return fault['code'],'Bad Gateway'
         if fault:
             trace['status']=fault['code']
             self.state['faults'].remove(fault);self.save()
@@ -167,6 +177,7 @@ class TelegramMock:
                 data=dict(request.query_params) if request.method=='GET' else json.loads(raw) if 'application/json' in request.headers.get('content-type','') else {key:values[-1] for key,values in parse_qs(raw.decode(),keep_blank_values=True).items()}
                 status,body=await self.call(method,data)
             except (TypeError,ValueError):status,body=self.error(400,'Bad Request: malformed parameters')
+            if isinstance(body,str):return Response(body,status_code=status,media_type='text/plain')
             return JSONResponse(body,status_code=status)
 
         @app.get('/file/bot{token}/{file_path:path}')
