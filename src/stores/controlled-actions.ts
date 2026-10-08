@@ -1,4 +1,5 @@
 import {blockingPublications} from './publications.js';
+import {ownerAutonomyGrant} from './owner-autonomy.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -71,10 +72,17 @@ export class ControlledActionRepository {
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
-      const grant=(await this.grants(row,db))[0],decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
+      const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
+      // The owner freedom setting lets the owner's own live private request
+      // approve itself. Deny rules are evaluated first and still block it.
+      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?await ownerAutonomyGrant(db,principal,turn):null;
+      if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
+      if(autonomy&&decision.outcome==='allow')
+        await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source]);
       await recordEffect(db,this.effect(row),'proposed',decision,source);
       await recordEffect(db,this.effect(row),decision.outcome==='deny'?'blocked':decision.outcome==='allow'?'allowed':'awaiting_approval',decision,source,grant?.id);
       await requestWorkflow(db,'tools',id);await db.query('COMMIT');
+      if(autonomy&&decision.outcome==='allow')return {id,state:'approved',fingerprint,message:'Approved by your own request under the owner freedom setting; it will run now.'};
       return {id,state:row.state,fingerprint,message:'Review the exact operation. Execution requires owner approval or a current bounded permission.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }

@@ -1,3 +1,4 @@
+import {OwnerAutonomyRepository} from './owner-autonomy.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {HonchoCall} from '../honcho.js';
@@ -79,6 +80,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
+  const ownerAutonomy=new OwnerAutonomyRepository(stores.control);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions);
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
@@ -88,7 +90,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared});
-  return {stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {ownerAutonomy,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,
