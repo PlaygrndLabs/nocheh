@@ -57,8 +57,9 @@ directed their full deletion: `spans`, `history` and `traces` were truncated
 with the database isolated, leaving Inngest at 70 MB and the volume at 1.6 GB.
 Nocheh stores, receipts and the workflow registry were untouched.
 Telemetry retention is now a configurable setting,
-`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, off (`0`) by default.
+`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, off (`0`) by default and checked daily.
 [Decision](docs/adr/0106-configurable-workflow-history-retention.md),
+[daily interval](docs/adr/0107-daily-workflow-history-retention.md),
 [retention checks](test/workflow-retention.test.ts),
 [shutdown check](test/test_store_postgres_entrypoint.py).
 [Decision](docs/adr/0105-shared-background-engine-queue.md),
