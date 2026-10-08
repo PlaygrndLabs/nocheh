@@ -2606,3 +2606,17 @@ records, Redis queue state, Nocheh stores and the 14,644-row workflow registry
 were kept.
 
 </entry>
+
+<entry date="2026-10-08" area="Configurable workflow telemetry retention">
+
+The owner asked for retention to be configurable and off by default.
+`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS` (0 = off) is validated in the shared
+settings path and passed to `nocheh-db`, whose entrypoint runs an hourly,
+batched expiry as the Inngest role and stops it before PostgreSQL. Two Node
+retention checks pass on a fresh synthetic database, three entrypoint checks
+pass, and on the pinned synthetic Inngest an old cutoff removed nothing, a
+future cutoff removed all 153/85/102 telemetry rows, and later runs completed
+normally, also after full truncation.
+[Decision](adr/0106-configurable-workflow-history-retention.md).
+
+</entry>

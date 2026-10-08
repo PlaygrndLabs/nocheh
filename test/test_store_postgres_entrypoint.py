@@ -46,5 +46,32 @@ class StorePostgresEntrypointTests(unittest.TestCase):
         self.assertLess(checks, 10000)
 
 
+    def test_stop_ends_retention_before_the_database(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary); order = directory / 'order'
+
+            def executable(name, body):
+                path = directory / name
+                path.write_text('#!/bin/sh\n' + body + '\n')
+                path.chmod(0o700)
+
+            executable('docker-entrypoint.sh', 'trap \'echo database >> "$ORDER"; exit 0\' TERM; while :; do sleep 0.1; done')
+            executable('pg_isready', 'exit 0')
+            # Bootstrap returns at once; the retention worker stays running until stopped.
+            executable('node', 'case "$1" in *retention.js) trap \'echo retention >> "$ORDER"; exit 0\' TERM; '
+                               'touch "$ORDER.started"; while :; do sleep 0.1; done;; esac; exit 0')
+            environment = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'],
+                           'ORDER': str(order), 'POSTGRES_PASSWORD': 'synthetic'}
+            wrapper = subprocess.Popen(['/bin/sh', str(ENTRYPOINT), 'postgres'], env=environment)
+            try:
+                for _ in range(100):
+                    if Path(str(order) + '.started').exists(): break
+                    subprocess.run(['sleep', '0.1'])
+                wrapper.terminate(); wrapper.wait(timeout=10)
+            finally:
+                if wrapper.poll() is None: wrapper.kill()
+            self.assertEqual(order.read_text().split(), ['retention', 'database'])
+
+
 if __name__ == '__main__':
     unittest.main()
