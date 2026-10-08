@@ -2638,3 +2638,18 @@ one runner gate first failed because it searched a 300-character preview
 instead of the stored reply and was corrected.
 
 </entry>
+
+<entry date="2026-10-08" area="Live owner session and owner authority">
+
+The operating stack started in source-watched development with 17 healthy
+services, connected polling, one provider refresh owner and ready Honcho
+memory. Live owner messages exposed epoch churn from a first transcript
+selection (ADR-0108), a missing owner directory view, and Archive layout
+problems. The owner chose full owner read access and one owner freedom
+setting covering every external effect, approval required by default.
+Stale development output volumes from another checkout were recreated, and
+a host-side dashboard build that detached nested dev mounts was corrected by
+restarting the two affected containers; `make dev-build` refreshed the cached
+database image so new control schemas apply.
+
+</entry>

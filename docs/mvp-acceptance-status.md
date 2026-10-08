@@ -199,6 +199,20 @@ the retirement gate remains pending after an inconclusive source test. [Decision
 
 <impact_review>
 
+The October 8 owner session ran on the source-watched operating stack after
+the simulation repairs. Three quick private texts, a voice note and two
+follow-ups were each answered exactly once, but four attempts were rejected
+with `space_policy_changed`, `guard_context_changed` or a stale-context HTTP
+error, delaying one reply about six and a half minutes and reversing two
+reply orders. The epoch advances matched the first transcript selection of
+the voice note; ADR-0108 removes that revocation. The approval step could not
+start because the agent had no owner directory view; owner read access and
+the owner freedom setting (approval by default) now exist. The owner saw the
+retirement offer, whose layout was corrected, and message details now open
+in a drawer. These observations pass no new gate: owner text timing, ordering,
+exact approval and restart during model execution require a recheck on the
+repaired source.
+
 The October 3 relationships and memory access UI change has a passing dashboard
 build, 27 dashboard checks, and isolated synthetic browser coverage for approval,
 revocation, sharing, conflict draft retention, keyboard access, and phone layout.
