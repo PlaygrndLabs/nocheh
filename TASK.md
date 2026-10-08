@@ -106,6 +106,15 @@ failed approval drafts, successful approval, sharing, and revocation. See the
 [completed increment](docs/task-history.md). Operating activation remains pending;
 this UI verification does not establish live recall or release readiness.
 
+Provider login now relays every redirect-based CLIProxyAPI provider (Codex,
+Claude, Antigravity) through its own temporary host callback; Kimi and xAI use
+device codes. Each provider keeps one credential, and shared ChatGPT login status
+counts only Codex files. Build, [relay checks](test/provider-oauth.test.ts),
+[login-state checks](services/hermes/test_provider.py), and live-dev checks pass.
+[Decision](docs/adr/0103-relay-every-provider-oauth-login.md). Pending: a live
+owner Claude login through the dev dashboard, and the owner's answer on whether
+reasoning should also use providers other than ChatGPT.
+
 </current>
 
 <verification>

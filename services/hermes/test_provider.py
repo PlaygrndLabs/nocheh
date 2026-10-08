@@ -71,6 +71,16 @@ class SharedProviderTests(unittest.TestCase):
             current=login_state(state)
             self.assertFalse(current['login_present']);self.assertEqual(current['invalid_login_files'],1)
 
+    def test_other_provider_logins_neither_satisfy_nor_block_the_codex_login(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize(state);auth=state/'provider/auth'
+            (auth/'claude-owner.json').write_text(json.dumps({'type':'claude','access_token':'c','refresh_token':'r'}))
+            current=login_state(state)
+            self.assertFalse(current['login_present']);self.assertEqual(current['login_files'],0);self.assertEqual(current['other_provider_logins'],1)
+            (auth/'codex-owner.json').write_text(json.dumps({'type':'codex','access_token':'token','refresh_token':'refresh'}))
+            current=login_state(state)
+            self.assertTrue(current['login_present']);self.assertEqual(current['login_files'],1)
+
     def test_cutover_stays_native_without_fresh_provider_login(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize_configuration(state)

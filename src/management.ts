@@ -10,7 +10,7 @@ import {DashboardSessions} from './dashboard-auth.js';
 import type {Duplex} from 'node:stream';
 import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 import {proxyProviderMonitor} from './provider-monitor-proxy.js';
-import {ProviderOAuth} from './provider-oauth.js';
+import {OAUTH_PROVIDERS,ProviderOAuth,type OAuthProvider} from './provider-oauth.js';
 import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
@@ -174,7 +174,8 @@ export async function startManagement() {
   if(monitorKey.length<32)throw new Error('provider_monitor_key_missing');
   const sessions=new DashboardSessions();
   const archiveConnection=object(await python({operation:'archive.connection'}));
-  const providerOAuth=new ProviderOAuth(MONITOR,monitorKey,PORT,1455,MONITOR_HOST,CONTAINER?'0.0.0.0':'127.0.0.1');
+  const providerOAuth=Object.fromEntries((Object.keys(OAUTH_PROVIDERS) as OAuthProvider[]).map(provider=>
+    [provider,new ProviderOAuth(MONITOR,monitorKey,PORT,OAUTH_PROVIDERS[provider].port,MONITOR_HOST,CONTAINER?'0.0.0.0':'127.0.0.1',provider)])) as Record<OAuthProvider,ProviderOAuth>;
   const sockets=new Set<Duplex>();
   const live=new DashboardLiveUpdates();
   for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
@@ -262,7 +263,7 @@ export async function startManagement() {
             const draining=maintenance.begin(job.id,tracked.id);
             live.closeAll();
             coordinator=await draining;
-            for(const socket of sockets)socket.destroy();await providerOAuth.quiesce();maintenance.ready(coordinator);
+            for(const socket of sockets)socket.destroy();await Promise.all(Object.values(providerOAuth).map(oauth=>oauth.quiesce()));maintenance.ready(coordinator);
           }
           launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}},coordinator);return json(res,202,job);
         }catch(error){operationBusy=false;if(coordinator)maintenance.end(coordinator);throw error;}
@@ -370,11 +371,14 @@ export async function startManagement() {
       const page=req.method==='GET'&&path==='/providers/management.html';
       const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
       if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
-      if(req.method==='GET'&&path==='/providers/v0/management/codex-auth-url') {
+      const login=req.method==='GET'?path.match(/^\/providers\/v0\/management\/([a-z]+)-auth-url$/)?.[1]:undefined;
+      if(login&&Object.hasOwn(OAUTH_PROVIDERS,login)) {
         sessions.authorize(req,true);
+        const provider=login as OAuthProvider;
+        // One credential per provider: a second login would add quota switching.
         const credentials=await readdir(join(STATE,'provider/auth')).catch(()=>[] as string[]);
-        if(credentials.some(name=>name.endsWith('.json')))throw new HttpError(409,'provider_login_already_exists');
-        return json(res,200,await providerOAuth.start());
+        if(credentials.some(name=>OAUTH_PROVIDERS[provider].credential.test(name)))throw new HttpError(409,'provider_login_already_exists');
+        return json(res,200,await providerOAuth[provider].start());
       }
       proxyProviderMonitor(req,res,MONITOR,monitorKey,session.csrf,MONITOR_HOST);return;
     }
@@ -417,7 +421,7 @@ export async function startManagement() {
     live.closeAll();
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
-    providerOAuth.close();
+    for(const oauth of Object.values(providerOAuth))oauth.close();
     // A partial request or stalled stream must not hold a reload open forever.
     // Closing its transport does not cancel admitted owner writes or lifecycle jobs.
     const admitted=maintenance.drain();

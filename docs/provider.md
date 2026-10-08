@@ -26,7 +26,7 @@ cutover:
 ./bin/nocheh provider cutover
 ```
 
-`provider login` refuses to start when any provider login file already exists.
+`provider login` refuses to start when a ChatGPT (Codex) login file already exists. Logins for other providers, made from the provider dashboard, can sit beside it and do not count as the shared login.
 `provider cutover` also requires exactly one active Codex credential. It switches
 the saved reasoning route to `shared`, recreates the affected services, and uses
 synthetic inputs to verify:

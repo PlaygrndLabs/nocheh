@@ -198,6 +198,9 @@ services:
     ports:
       - "127.0.0.1:${NOCHEH_DASHBOARD_PORT:-8783}:${NOCHEH_DASHBOARD_PORT:-8783}"
       - "127.0.0.1:${NOCHEH_OAUTH_PORT:-1455}:1455"
+      # Claude and Antigravity redirect URIs fix these host ports.
+      - "127.0.0.1:54545:54545"
+      - "127.0.0.1:51121:51121"
     healthcheck:
       test: [CMD, python3, -m, tools.runtime.container_service, dashboard-health]
       interval: 10s
