@@ -65,12 +65,17 @@ export async function continueWorkflow(pool:pg.Pool,id:string,dispatch:number):P
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 
-export function workflowFunctions(client:Inngest,pool:pg.Pool,operations:Partial<Record<WorkflowFamily,WorkflowOperation>>) {
+export function workflowFunctions(client:Inngest,pool:pg.Pool,operations:Partial<Record<WorkflowFamily,WorkflowOperation>>,background:ReadonlySet<WorkflowFamily>=new Set()) {
   return coordinatedFunctions(client,Object.keys(operations) as WorkflowFamily[],(id,dispatch,family,runId)=>advanceWorkflow(pool,id,dispatch,family,runId,operations[family]!),
-    (id,dispatch)=>continueWorkflow(pool,id,dispatch));
+    (id,dispatch)=>continueWorkflow(pool,id,dispatch),background);
 }
-export function coordinatedFunctions(client:Inngest,families:WorkflowFamily[],advance:(id:string,dispatch:number,family:WorkflowFamily,runId:string)=>Promise<Observation>,continuation:(id:string,dispatch:number)=>Promise<void>) {
+/** One shared Inngest queue for work that the worker admits to a single background slot. */
+export const backgroundConcurrency={limit:1,key:'"nocheh-pipeline-background"',scope:'env'} as const;
+export function coordinatedFunctions(client:Inngest,families:WorkflowFamily[],advance:(id:string,dispatch:number,family:WorkflowFamily,runId:string)=>Promise<Observation>,continuation:(id:string,dispatch:number)=>Promise<void>,background:ReadonlySet<WorkflowFamily>=new Set()) {
+  // Without this, every waiting background run polls the busy slot and each
+  // poll persists engine spans and history. Sleeping runs hold no slot.
   return families.map(family=>client.createFunction({id:family+'-v1',retries:20,
+    ...(background.has(family)?{concurrency:[backgroundConcurrency]}:{}),
     triggers:[{event:'nocheh/workflow.requested',if:`event.data.family == '${family}'`}]},async({event,step,runId})=>{
       const id=workflowIdentity(event.data.workflow_id),dispatch=Number(event.data.dispatch);
       if(!Number.isSafeInteger(dispatch)||dispatch<1)throw Error('invalid_workflow_dispatch');

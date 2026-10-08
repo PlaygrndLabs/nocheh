@@ -118,3 +118,4 @@ records current implementation and activation.
 | [0102](0102-separate-embedding-error-holds-from-spending.md) | Separate embedding error holds from cap spending | Supersedes 0079 failed-call hold and 0100 historical-hold consequence; retains pre-egress reservation and cooldown |
 | [0103](0103-relay-every-provider-oauth-login.md) | Relay every provider OAuth login | Extends 0038 from Codex to all redirect providers; reasoning stays on the ChatGPT login |
 | [0104](0104-telegram-update-order-and-untransmitted-sends.md) | Start turns in Telegram update order and retry untransmitted sends | Extends 0047 and 0089; transmitted requests remain uncertain and approved actions are unchanged |
+| [0105](0105-shared-background-engine-queue.md) | Queue background workflow steps in one shared Inngest concurrency key | Extends 0080 and 0087; existing Inngest rows remain until an approved retention policy |

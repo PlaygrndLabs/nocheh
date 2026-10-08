@@ -10,6 +10,10 @@ const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation
 const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found']);
 const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','honcho_sync_busy']);
 
+/** Initial replies and their prerequisites; every other storage family shares the background slot. */
+export const foregroundFamilies:ReadonlySet<WorkflowFamily>=new Set(['preparation','telegram','browser','schedules','actions']);
+export const backgroundFamilies=(families:Iterable<WorkflowFamily>)=>new Set([...families].filter(family=>!foregroundFamilies.has(family)));
+
 /** Bound admission before borrowing any pool connection, including nested publication work. */
 export function boundStorageOperations(operations:Partial<Record<WorkflowFamily,WorkflowOperation>>,maximum=2) {
   if(!Number.isSafeInteger(maximum)||maximum<1||maximum>2)throw Error('invalid_storage_workflow_concurrency');
@@ -17,11 +21,10 @@ export function boundStorageOperations(operations:Partial<Record<WorkflowFamily,
   // At most one live callback waits for the background slot. A historical
   // retry hint cannot reserve an idle slot while its Inngest step is asleep.
   let backgroundWaiter:{start:()=>void}|null=null;
-  const foreground=new Set<WorkflowFamily>(['preparation','telegram','browser','schedules','actions']);
   return Object.fromEntries(Object.entries(operations).map(([family,operation])=>[family,async(...args:Parameters<WorkflowOperation>)=>{
     // Initial replies must retain one admission slot while memory derivation
     // and reviews run in the background. No pool connection is held while waiting.
-    const immediate=foreground.has(family as WorkflowFamily),limit=immediate?maximum:Math.max(1,maximum-1);
+    const immediate=foregroundFamilies.has(family as WorkflowFamily),limit=immediate?maximum:Math.max(1,maximum-1);
     const run=async()=>{
       active++;try{return await operation(...args);}finally{
         active--;
@@ -175,7 +178,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         const space=await s.access.space(ready.source.reference),audience=space===s.access.policy().owner_id?'owner':space;
         const selected=queued.find(value=>value.audience===audience);if(!selected)return observation('failed','sync');
         const generation=(await s.memory.current(selected.workspace)).row;
-        if(generation.state!=='ready')return waiting('sync','prerequisite',1000);
+        if(generation.state!=='ready')return waiting('sync','prerequisite');
         await s.learning.request(ready.source.reference,selected.workspace,selected.audience);return observation('completed','sync');
       });
       if(kind==='projection')return fenced('honcho',authority,async()=>{await s.memory.queueProjection(id);return observation('completed','sync');});

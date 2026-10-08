@@ -45,13 +45,18 @@ last verified TypeScript services include event-bound provider timings, dependen
 patches, and protected workflow receipt reconciliation. The prior source checkout
 and its three local edits remain preserved.
 
-The active `nocheh_postgres_data` volume uses about 33 GB: about 29 GB is the
-Inngest database, led by 23 GB of live `spans` and about 6.4 GB of `history`
-and `traces`; WAL is about 320 MB. No active database rows were deleted. Old
-stopped synthetic stacks and a verified inactive restore copy were removed;
-the current synthetic fixture and operating installation remain intact. Host
-free space rose from about 10 to 30 GiB. A bounded Inngest history-retention
-policy and safe migration remain unresolved before shrinking the active volume.
+The active `nocheh_postgres_data` volume measured 36.9 GB on 2026-10-08; the
+Inngest database is 35 GB (`spans` 27 GB, `history` 4.8 GB, `traces` 3.3 GB).
+Honcho and native memory review produced 99.5% of 13.4 million spans, mostly
+background runs repeatedly polling one busy admission slot. Background families
+now wait in one shared Inngest concurrency key; a synthetic probe against the
+pinned Inngest cut spans for the same contended workload from 888 to 153 with
+zero wait polls and unchanged reply latency. This source is not yet active in
+the operating installation. No database rows were deleted; a bounded retention
+policy for existing rows remains an owner decision.
+[Decision](docs/adr/0105-shared-background-engine-queue.md),
+[registration check](test/workflow-foundation.test.ts),
+[probe](test/workflow-background-probe.ts).
 
 Honcho is attached and verified as primary memory; historical ingestion is off.
 Earlier four-generation readiness was a dated observation. Current generations
@@ -746,20 +751,18 @@ activation remains separate.
    session's development source before any future full-stack restart; that older
    Compose configuration can remove the override. Unthrottled provider
    reliability and operating release acceptance remain separate gates.
-6. Investigate why the pre-MVP test installation has about 29 GB of Inngest
-   data inside the 33 GB PostgreSQL volume. Measure trace and workflow-write
-   rates by scenario and age, check whether Nocheh creates excess events or
-   spans, and compare the pinned Inngest version's intended persistence and
-   retention behavior. Determine which records are required for receipts,
-   recovery, inspection, and backup before proposing a bounded retention or
-   compaction policy. Verify any repair on an isolated copy with recovery and
-   failure-path checks; do not delete operating history merely to reduce size.
-   [Inngest's self-hosting guide](https://www.inngest.com/docs/platform-and-operations/self-host-inngest)
-   confirms that PostgreSQL event, run, and trace rows are not automatically
-   removed. A bounded sample of the active database found one
-   `memory_review-v1` run with 4,066 spans, including 401 step-discovery spans;
-   Nocheh's workflow loop permits 400 wait cycles. This establishes a concrete
-   span-amplification path, but its fraction of total storage and the safe
-   retention horizon remain unmeasured.
+6. Inngest storage: the amplification cause is measured and repaired in source
+   ([decision](docs/adr/0105-shared-background-engine-queue.md)). Activate it
+   with the next authorized operating restart, then compare span growth per day
+   against the 2026-10-08 measurement in ignored
+   `data/acceptance/results/inngest-storage/`. Nocheh reads no Inngest `spans`,
+   `history` or `traces` rows for receipts or recovery; they serve inspection
+   and backups, and Inngest never expires them. Propose a retention horizon for
+   completed-run telemetry, verify deletion and `VACUUM FULL` or
+   dump/restore on an isolated copy with backup and recovery checks, and delete
+   operating rows only with explicit owner approval. Remaining real prerequisite polls
+   (native reconciliation, review prerequisites, retryable failures and the
+   perpetual 120-second Honcho context refresh) were about six percent of
+   sampled background steps.
 
 </pending>
