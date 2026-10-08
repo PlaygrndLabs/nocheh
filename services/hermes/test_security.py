@@ -68,7 +68,7 @@ class SecurityTests(unittest.TestCase):
             try:
                 with self.assertRaises(SystemExit):security_launcher.stop_active_turns()
             finally:security_launcher.CONTAINERS.clear()
-        self.assertEqual(sorted(calls),[('POST','/containers/first/kill'),('POST','/containers/second/kill')])
+        self.assertEqual(sorted(calls),[('DELETE','/containers/first?force=true'),('DELETE','/containers/second?force=true')])
 
     @unittest.skipUnless(os.environ.get('NOCHEH_TEST_DOCKER')=='1','explicit isolated Docker fixture required')
     def test_real_container_cannot_reach_secrets_siblings_or_internet(self):

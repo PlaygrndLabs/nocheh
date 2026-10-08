@@ -88,8 +88,9 @@ CONTAINERS=set()
 def stop_active_turns(*_):
     """A stopping launcher cannot stream results, so its running turns must end too."""
     with ACTIVE_LOCK:identifiers=list(CONTAINERS)
+    # Force removal also covers a turn created but not yet started.
     for identifier in identifiers:
-        try:docker('POST','/containers/'+identifier+'/kill')
+        try:docker('DELETE','/containers/'+identifier+'?force=true')
         except Exception:pass
     raise SystemExit(0)
 class Handler(BaseHTTPRequestHandler):
