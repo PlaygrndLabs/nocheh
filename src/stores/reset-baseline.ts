@@ -73,7 +73,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
   const configuration=snapshot.configuration,profileCount=configuration.runtime_profiles.length;
   const [archive,derived,control]=await Promise.all([counts(stores.archive,'archive'),counts(stores.derived,'derived'),counts(stores.control,'control')]);
   only(archive,{});only(derived,{});
-  only(control,{installation:1,guard_state:1,capture_reconciliation:1,memory_engine_connection:1,
+  only(control,{installation:1,guard_state:1,capture_reconciliation:1,memory_engine_connection:1,owner_autonomy:1,
     security_policy:1,security_policy_versions:[1,2],runtime_configuration:1,runtime_configuration_versions:1,
     workflow_owners:families.length,projects:configuration.projects.length,
     project_assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,
