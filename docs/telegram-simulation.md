@@ -43,7 +43,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | Scenario family | Observable requirement | Primary automated coverage |
 | --- | --- | --- |
 | Capture and outages | Fsync before acknowledgment; duplicate updates, revisions and control-store failure lose no originals | `test_capture.py`, `test_telegram_http_fixture.py`, `archive.test.ts`, `stores.test.ts` |
-| Native Telegram delivery | Persian/emoji and long replies retain routing; replay adds no send; rate-limit waits and bounded retries preserve receipts; Markdown rejection and lost replies retain the audience | `test_telegram_simulation.py`, `test_capture.py`, `test_gateway.py`, `store-telegram-dispatch.test.ts` |
+| Native Telegram delivery | Persian/emoji and long replies retain routing; replay adds no send; rate-limit waits and bounded retries preserve receipts; Markdown rejection and lost replies retain the audience; a send never transmitted, for example during a polling reconnect, retries under a fresh attempt while a transmitted request with a lost response stays uncertain | `test_telegram_simulation.py`, `test_capture.py`, `test_gateway.py`, `store-telegram-dispatch.test.ts` |
 | Access and topics | Owner/private, granted/denied participants, General and named topics remain distinct; stale capabilities fail closed | `test_scopes.py`, `assistant.test.ts`, `store-retrieval.test.ts` |
 | Files and voice | Original bytes and hashes survive download/transcription failures; generated transcripts are separate; blank speech is terminal | `store-preparation.test.ts`, `worker.test.ts`, `test_speech_gateway.py` |
 | Guarding | Literal masking preserves other content; owner edits survive; stale representation has no original fallback; bounded concurrent publication drains failed work and checkpoints more than 500 small fragments in separate batches | `store-guards.test.ts`, `store-prepared-context.test.ts`, `test_boundary.py` |
@@ -119,6 +119,37 @@ retrieval attempt, and the original binary bytes/hash. Its synthetic file includ
 the provider fixture's literal canary; inference outside detection must never see
 that raw value. Fault/file controls are bounded and reject invalid changes before
 mutating the saved fixture state.
+
+The [personal-use scenario runner](../tools/acceptance/telegram_scenarios.py)
+extends the same owned HTTP installation after `telegram_rehearsal` has run:
+`python -m tools.acceptance.telegram_scenarios --directory <prepared-directory>`
+(`--only <scenario>...` selects a subset). Each scenario is recorded separately
+and later scenarios still run after a failure; most use their own topic or chat
+so one failure cannot hold another conversation's queue. Its first scenario
+recreates the fixture endpoint, which loads current fixture code and makes the
+native adapter reconnect polling while a reply is ready. Families covered:
+polling reconnect, edits and reactions over polling, General and named topics,
+ordered bursts, chunked long replies, intentional silence, blank answers,
+owner-private archive search, model context and Honcho recall against group
+and other-group isolation, literal guarding, exact Telegram approvals and
+denials with stale fingerprints and repeated decisions, `current` destinations,
+denied, unselected and granted/revoked participants, retirement, voice capture
+with speech unavailable, recovery, transcript-driven turns and blank speech,
+deleted topics, polling 5xx, lost send responses, a blocked bot, and restart.
+
+The fixture provider's scripted brain acts only on an explicit directive in
+the current user turn of a request that offers Nocheh tools: `[[search:q]]`,
+`[[recall:q]]` and `[[action:destination|text]]` request that real tool and
+answer from its actual result; `[[context:marker]]` reports whether a marker
+appears anywhere in the request except the current turn; `[[long:n]]`,
+`[[silent]]` and `[[empty-once:key]]` produce long, `[NO_REPLY]` and one blank
+answer. Other model traffic keeps the deterministic behaviour above. The mock's
+`sendMessage` fault may set `parameters: {"deliver": true}` with a 5xx code:
+the message is accepted but the bot observes only a gateway failure. Voice
+scenarios replace `chatgpt-speech` with a fixture service with the same HTTP
+contract; synthetic audio names its transcript as `SPEECH:<text>`, and `BLANK`
+returns no usable text. Directive-driven tool use and substituted speech test
+pipeline, isolation and effects, not model judgement or recognition quality.
 
 Compile the current worktree with Node 24 before running its tests. Run storage
 tests sequentially because several use the same synthetic schema. Record test

@@ -14,6 +14,7 @@ import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {observedSource} from '../src/observed-source.js';
+import {HttpError} from '../src/http.js';
 
 test('guarded representations cannot change Telegram routing or embed unobserved reply snapshots',()=>{
   const original={update_id:1,message:{message_id:2,date:3,chat:{id:-4,type:'supergroup',is_forum:true},from:{id:5,is_bot:false},message_thread_id:6,is_topic_message:true}};
@@ -174,5 +175,63 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const columns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='dispatches'")).rows.map(r=>r.column_name);
     assert.ok(!columns.some(name=>['text','content','payload','transcripts'].includes(name)));
     assert.equal((await stores.archive.query("SELECT count(*)::int AS n FROM events WHERE kind IN ('runtime_context','runtime_result')")).rows[0].n,0);
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('conversation messages start in Telegram update order while an earlier message has not started',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-order-')),base=Date.now(),group='-'+base,token=digest('order:'+base);
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:string[]=[];let serial=base;
+  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    assert.equal(operation,'run.start');started.push(String(input.event_id));return {state:'done',stage:'delivery'};
+  };
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');},
+    transcription:{name:'fixture-asr',version:'1',outputKind:'transcript',async run(){throw new HttpError(422,'invalid_transcription_response');}}});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  const capture=async(text:string,topic?:number,update=++serial,extra:any={})=>{
+    const message:any={message_id:update,date:1700000000,chat:{id:Number(group),type:'supergroup',is_forum:true},from:{id:123,is_bot:false,first_name:'Owner'},text};
+    if(topic)Object.assign(message,{message_thread_id:topic,is_topic_message:true});
+    Object.assign(message,extra);
+    return (await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
+      source_id:String(update),revision:'1',occurred_at:null,text,payload:{update_id:update,message}})).source.reference.id;
+  };
+  const prepare=async(id:string)=>services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'));
+  const run=async(id:string)=>services.telegram.run(id,await authority('telegram'));
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const first=await capture('First message',7),second=await capture('Second message',7),other=await capture('Other topic',8);
+    await prepare(second);await prepare(other);
+    const held=await run(second);
+    assert.equal(held.state,'waiting');assert.equal(held.stage,'admission');assert.equal(started.length,0,'a later message waits for an unstarted earlier one');
+    assert.equal((await run(other)).state,'completed','another topic is a separate conversation');
+    assert.equal((await run(first)).state,'waiting','the earlier message still needs its own preparation');
+    await prepare(first);
+    assert.equal((await run(first)).state,'completed');assert.equal((await run(second)).state,'completed');
+    assert.deepEqual(started,[other,first,second]);
+    const slow=await capture('Slow prerequisite',9),later=await capture('Later message',9);await prepare(later);
+    assert.equal((await run(later)).state,'waiting');
+    await stores.control.query("UPDATE dispatches SET created_at=now()-interval '3 minutes' WHERE event_id=$1",[later]);
+    assert.equal((await run(later)).state,'completed','the wait is bounded for a slow earlier prerequisite');
+    assert.equal(started.at(-1),later);assert.ok(!started.includes(slow));
+    // One poll can return several updates that the spool commits in any order.
+    serial+=2;const newer=await capture('Captured first',10,serial),older=await capture('Sent first',10,serial-1);
+    await prepare(newer);await prepare(older);
+    assert.equal((await run(newer)).state,'waiting','Telegram order, not capture order, decides');
+    assert.equal((await run(older)).state,'completed');assert.equal((await run(newer)).state,'completed');
+    assert.deepEqual(started.slice(-2),[older,newer]);
+    // Unrecognized speech closes visibly without a reply and holds nothing.
+    const voice=await capture('',11,++serial,{text:undefined,voice:{file_id:'order-voice-'+base,file_unique_id:'order-voice-'+base,duration:1}});
+    const [artifact]=(await stores.archive.query('SELECT id FROM artifacts WHERE event_id=$1',[voice])).rows.map(row=>row.id as string);
+    await services.attachments.commit(artifact!,Buffer.from([79,103,103,0,1]));await assert.rejects(prepare(voice),/invalid_transcription_response/);
+    const after=await capture('After unrecognized speech',11);await prepare(after);
+    const closed=await run(voice);assert.equal(closed.state,'skipped');
+    const row=(await stores.control.query('SELECT state,error_code,attempts FROM dispatches WHERE event_id=$1',[voice])).rows[0];
+    assert.deepEqual(row,{state:'suppressed',error_code:'invalid_transcription_response',attempts:0});
+    assert.equal((await run(after)).state,'completed');assert.ok(!started.includes(voice));
+    assert.equal(started.at(-1),after,'a closed unrecognized voice does not hold the conversation');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

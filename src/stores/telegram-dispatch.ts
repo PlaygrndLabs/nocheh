@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS dispatches (
 ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS reconciliation_checked_at timestamptz;
 `;
 const protocol='telegram-dispatch-v2';
+const conversationOrderWaitMs=120000;
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
 const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
@@ -131,13 +132,40 @@ export class TelegramDispatchRepository {
     if(!row||canonical({generation:row.generation,epoch:Number(row.epoch),mode:row.mode})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
     if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
+  /**
+   * Conversation messages start in Telegram update order. Updates from one
+   * poll can be captured in any order, so local capture order is not used.
+   * Native execution serializes started turns; only an earlier update that has
+   * not started can reorder replies, for example when its preparation finishes
+   * later. The bound keeps a slow prerequisite such as transcription from
+   * holding later messages.
+   */
+  private async heldByEarlier(source:SourceReference,space:string):Promise<boolean> {
+    const current=(await this.control.query('SELECT created_at FROM dispatches WHERE event_id=$1',[source.id])).rows[0];
+    if(!current||Date.now()-current.created_at.getTime()>conversationOrderWaitMs)return false;
+    const own=(await this.archive.pool.query(`SELECT scope,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE id=$1`,[source.id])).rows[0];
+    if(!own||!/^\d{1,19}$/.test(String(own.update_id)))return false;
+    const earlier=(await this.archive.pool.query(`SELECT id FROM (SELECT id,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events
+      WHERE scope=$1 AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live' AND received_at>now()-interval '10 minutes') recent
+      WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$3::numeric ORDER BY update_id::numeric DESC LIMIT 20`,
+      [own.scope,source.id,own.update_id])).rows.map(row=>row.id as string);
+    if(!earlier.length)return false;
+    const started=new Set((await this.control.query(`SELECT event_id FROM dispatches WHERE event_id=ANY($1::text[])
+      AND state NOT IN ('pending','failed')`,[earlier])).rows.map(row=>row.event_id as string));
+    const live=new Set((await this.control.query(`SELECT event_id FROM source_intakes WHERE event_id=ANY($1::text[])
+      AND transport='capture' AND state='ready'`,[earlier])).rows.map(row=>row.event_id as string));
+    for(const id of earlier)
+      if(live.has(id)&&!started.has(id)&&await this.access.space((await this.archive.captured(id)).reference)===space)return true;
+    return false;
+  }
   private async build(source:SourceReference,attempt:number):Promise<{reference:DerivativeReference;input:Input}|Observation> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
     if(!scope)return observation('skipped','admission');
     const space=await this.access.space(source);if(!space)return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
-    const ready=await this.preparation.status(source.id);if(ready.state!=='completed')return ready.state==='retryable_failed'?ready:
+    const ready=await this.preparation.status(source.id);if(ready.state!=='completed')return ['retryable_failed','failed'].includes(ready.state)?ready:
       observation('waiting',ready.stage,0,ready.next_attempt,ready.waiting_reason);
+    if(await this.heldByEarlier(source,space))return observation('waiting','admission',0,Date.now()+2000,'prerequisite');
     const binding=await this.guards.state(),principal:Reader={admin:false,scope:scope.owner?null:scope.chat_id,space,turnEvent:source.id,
       generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
     await this.turns.binding(principal);
@@ -265,6 +293,13 @@ export class TelegramDispatchRepository {
         const attempt=row.attempts+1,built=await this.build(captured.reference,attempt);
         if('state' in built) {
           if(built.state==='skipped')await db.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[id]);
+          // Speech without usable text is a terminal preparation outcome. The
+          // original stays archived; no reply is sent as if it were transcribed.
+          if(built.state==='failed'&&built.stage==='transcription') {
+            await db.query(`UPDATE dispatches SET state='suppressed',error_code='invalid_transcription_response',revision=revision+1,updated_at=now()
+              WHERE event_id=$1 AND state IN ('pending','failed')`,[id]);
+            return this.observation(await this.row(id));
+          }
           return built;
         }
         input=built.input;
