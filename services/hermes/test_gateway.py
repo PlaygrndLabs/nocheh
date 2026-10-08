@@ -20,7 +20,7 @@ from .scopes import Scopes
 
 
 class BotFixtureRequest(BaseRequest):
-    def __init__(self):self.sent=[]
+    def __init__(self):self.sent=[];self.lost=0;self.transmitted=[]
     @property
     def read_timeout(self):return 1
     async def initialize(self):pass
@@ -28,6 +28,11 @@ class BotFixtureRequest(BaseRequest):
     async def do_request(self,url,method,request_data=None,**kwargs):
         operation=url.rsplit('/',1)[-1]
         if operation=='getMe':result={'id':123456,'is_bot':True,'first_name':'Nocheh','username':'nocheh_fixture_bot'}
+        elif operation=='sendMessage' and self.lost:
+            # The request reached the wire, but its response was lost.
+            from telegram.error import NetworkError
+            self.lost-=1;self.transmitted.append(request_data.parameters)
+            raise NetworkError('httpx.RemoteProtocolError: Server disconnected without sending a response.')
         elif operation=='sendMessage':
             data=request_data.parameters;self.sent.append(data)
             result={'message_id':100+len(self.sent),'date':1700000000,'chat':{'id':int(data['chat_id']),'type':'group','title':'Fixture'},'text':data['text']}
@@ -232,6 +237,26 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(await gateway.dispatch(silent),suppressed)
                     self.assertEqual(len(model_calls),3)
                     self.assertEqual(len(request.sent),sent_before+1,'silence adds no delivery')
+                    # A native send can fail before any request, for example
+                    # while polling reconnects. That outcome is not uncertain.
+                    completion['final_response']='Reply after reconnect'
+                    unsent=envelope(42,'Native send unavailable before transmission')
+                    adapter._send_path_degraded=True
+                    not_sent={'state':'failed','error_code':'assistant_runtime_unavailable','error_stage':'telegram_send_not_transmitted'}
+                    self.assertEqual(await gateway.dispatch(unsent),not_sent)
+                    self.assertEqual(await gateway.dispatch(unsent),not_sent,'same attempt reuses its receipt')
+                    self.assertEqual(len(request.sent),sent_before+1,'no request was transmitted')
+                    adapter._send_path_degraded=False;unsent['attempt']=2
+                    self.assertEqual(await gateway.dispatch(unsent),{'state':'done'})
+                    self.assertEqual(len(request.sent),sent_before+2,'a fresh attempt delivers exactly once')
+                    # Once a request is admitted for transmission, a lost
+                    # response remains uncertain and is never resent.
+                    request.lost=3;lost=envelope(43,'Lost Telegram response')
+                    uncertain={'state':'ambiguous','error_code':'delivery_unconfirmed'}
+                    self.assertEqual(await gateway.dispatch(lost),uncertain)
+                    self.assertTrue(request.transmitted,'fixture observed a transmitted request')
+                    self.assertEqual(await gateway.dispatch(lost),uncertain)
+                    self.assertEqual(len(request.sent),sent_before+2)
                 finally:await app.shutdown()
 
 
