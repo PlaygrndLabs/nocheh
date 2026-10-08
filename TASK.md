@@ -119,6 +119,26 @@ reasoning should also use providers other than ChatGPT.
 
 <verification>
 
+- Personal-use mocked-Telegram evaluation (2026-10-08, current source): every
+  Node test file passes on its own fresh synthetic database (269 passes, four
+  fixture-dependent skips); all 439 Hermes/Honcho and 100 tooling Python
+  checks pass. A fresh 16-service installation passes its 19 coupled checks,
+  the ordinary and faults-and-files HTTP Telegram runs, and the
+  [personal-use scenario suite](tools/acceptance/telegram_scenarios.py):
+  all 31 scenarios and 288 gates pass with no unmodeled Bot API method, and
+  the raw synthetic secret never reached a model call. The suite drives real
+  Hermes polling, three stores, Inngest, Honcho and Nocheh tools through a
+  scripted fixture brain and a substituted speech service; it does not
+  measure model judgement, real transcription or real Telegram. It found and
+  verified repairs for a reply never transmitted during a polling reconnect,
+  which had been recorded as uncertain and lost; for replies to messages sent
+  together arriving out of order; and for a blank voice transcription that
+  left its dispatch waiting indefinitely. [Decision](docs/adr/0104-telegram-update-order-and-untransmitted-sends.md),
+  [procedure](docs/telegram-simulation.md), [history](docs/task-history.md).
+  Running all Node test files against one shared database still fails
+  intermittently because earlier files leave guard and audience state; this
+  is a test-isolation gap, not a product failure.
+
 - Personal-use Telegram simulation has passing native, storage, workflow,
   portability, host-isolation and provider-contract evidence across the
   [scenario matrix](docs/telegram-simulation.md). These are synthetic checks;
@@ -463,6 +483,15 @@ reasoning should also use providers other than ChatGPT.
 </verification>
 
 <pending>
+
+Follow-ups from the personal-use simulation: a definite Bot API rejection
+after transmission (deleted topic, blocked bot) is labeled delivery uncertain
+rather than rejected; an approved action that fails because Hermes is
+disconnected stays uncertain and must be proposed again; retiring a message
+does not retire earlier assistant replies that quoted it (the owner can retire
+those replies separately); Node test files need per-file database isolation to
+pass in one shared run. Real-model quality, real transcription, live Telegram
+and release gates remain separate and pending.
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
