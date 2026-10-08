@@ -58,6 +58,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
       console.log(JSON.stringify({event:'workflow_history_retention',state:'pruned',days,...pruned}));
     } catch {console.error(JSON.stringify({event:'workflow_history_retention',state:'unavailable'}));}
     finally {await client.end().catch(()=>{});}
-    await delay(3600000);
+    // Expiry is measured in days, so one check per day is enough.
+    await delay(86400000);
   }
 }
