@@ -117,3 +117,4 @@ records current implementation and activation.
 | [0101](0101-honcho-terminal-queue-errors-block-readiness.md) | Reject processed-with-error Honcho work as ready memory | Extends 0044 and 0100; keeps failure details inside the workspace boundary |
 | [0102](0102-separate-embedding-error-holds-from-spending.md) | Separate embedding error holds from cap spending | Supersedes 0079 failed-call hold and 0100 historical-hold consequence; retains pre-egress reservation and cooldown |
 | [0103](0103-relay-every-provider-oauth-login.md) | Relay every provider OAuth login | Extends 0038 from Codex to all redirect providers; reasoning stays on the ChatGPT login |
+| [0104](0104-telegram-update-order-and-untransmitted-sends.md) | Start turns in Telegram update order and retry untransmitted sends | Extends 0047 and 0089; transmitted requests remain uncertain and approved actions are unchanged |
