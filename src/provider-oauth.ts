@@ -2,12 +2,20 @@ import {createServer,type Server} from 'node:http';
 import {HttpError} from './http.js';
 
 // The browser is on the host; the OAuth client and PKCE verifier are in Docker.
-// Hold port 1455 only while an owner-initiated login is pending. Never log URLs.
+// Hold a provider's fixed redirect port only while an owner-initiated login is
+// pending. Never log URLs. Device-code providers (Kimi, xAI) need no relay.
+export const OAUTH_PROVIDERS={
+  codex:{port:1455,path:'/auth/callback',origin:'https://auth.openai.com',credential:/^codex-.*\.json$/},
+  anthropic:{port:54545,path:'/callback',origin:'https://claude.ai',credential:/^claude-.*\.json$/},
+  antigravity:{port:51121,path:'/oauth-callback',origin:'https://accounts.google.com',credential:/^antigravity(-.*)?\.json$/},
+} as const;
+export type OAuthProvider=keyof typeof OAUTH_PROVIDERS;
+
 export class ProviderOAuth {
   private server:Server|undefined;
   private state:string|undefined;
   private timer?:ReturnType<typeof setTimeout>;
-  constructor(private monitor:number,private key:string,private ownerPort:number,private callbackPort=1455,private monitorHost='127.0.0.1',private bindHost='127.0.0.1') {}
+  constructor(private monitor:number,private key:string,private ownerPort:number,private callbackPort=1455,private monitorHost='127.0.0.1',private bindHost='127.0.0.1',private provider:OAuthProvider='codex') {}
   close() {
     this.state=undefined;
     if(this.timer)clearTimeout(this.timer);
@@ -33,13 +41,13 @@ export class ProviderOAuth {
       const url=new URL(req.url??'/',`http://localhost:${this.callbackPort}`);
       const host=req.headers.host;
       const state=url.searchParams.get('state'),code=url.searchParams.get('code'),error=url.searchParams.get('error');
-      if(req.method!=='GET'||url.pathname!=='/auth/callback'||![`localhost:${this.callbackPort}`,`127.0.0.1:${this.callbackPort}`].includes(host??'')||
+      if(req.method!=='GET'||url.pathname!==OAUTH_PROVIDERS[this.provider].path||![`localhost:${this.callbackPort}`,`127.0.0.1:${this.callbackPort}`].includes(host??'')||
         !state||!this.state||state!==this.state||(!code&&!error)||(code?.length??0)>4096) {
         res.writeHead(400,{'content-type':'text/plain'});res.end('This login is unknown or expired. Start a fresh login from Nocheh.');return;
       }
       this.state=undefined; // Consume before awaiting: the callback cannot replay.
       try {
-        await this.call('oauth-callback',{provider:'codex',state,...(code?{code}:{error:'access_denied'})});
+        await this.call('oauth-callback',{provider:this.provider,state,...(code?{code}:{error:'access_denied'})});
         res.writeHead(303,{location:`http://localhost:${this.ownerPort}/providers/management.html#/oauth`});res.end();
       } catch {
         res.writeHead(502,{'content-type':'text/plain'});res.end('The provider could not finish this login. Start a fresh login in Nocheh.');
@@ -53,10 +61,10 @@ export class ProviderOAuth {
     try {
       // No is_webui: our host listener relays the callback via the authenticated
       // management API; the container's loopback forwarder is not reachable.
-      const result=await this.call('codex-auth-url');
+      const result=await this.call(`${this.provider}-auth-url`);
       if(typeof result.state!=='string'||!/^[a-zA-Z0-9_-]{16,256}$/.test(result.state)||typeof result.url!=='string')throw Error();
       const url=new URL(result.url);
-      if(url.origin!=='https://auth.openai.com'||url.searchParams.get('state')!==result.state)throw Error();
+      if(url.origin!==OAUTH_PROVIDERS[this.provider].origin||url.searchParams.get('state')!==result.state)throw Error();
       this.state=result.state;
       return result;
     } catch {this.close();throw new HttpError(503,'provider_oauth_unavailable');}

@@ -28,21 +28,25 @@ def _secret(path):
 
 
 def login_state(state):
-    _,auth,_,_=paths(state);files=active=invalid=0
+    # Other providers' logins (Claude, Antigravity, ...) may sit beside the one
+    # shared ChatGPT login; they neither satisfy nor block it.
+    _,auth,_,_=paths(state);files=active=invalid=others=0
     for path in auth.glob('*.json'):
-        files+=1
         try:
             if path.is_symlink() or not path.is_file() or path.stat().st_size>1024*1024:
                 raise ValueError()
             body=json.loads(path.read_text())
             if not isinstance(body,dict):raise ValueError()
-            if (body.get('type')=='codex' and body.get('disabled') is not True
+            if body.get('type')!='codex':
+                others+=1;continue
+            files+=1
+            if (body.get('disabled') is not True
                     and isinstance(body.get('access_token'),str) and body['access_token'].strip()
                     and isinstance(body.get('refresh_token'),str) and body['refresh_token'].strip()):
                 active+=1
         except (OSError,ValueError,UnicodeError):invalid+=1
     return {'login_present':active==1 and files==1 and invalid==0,'login_count':active,
-            'login_files':files,'invalid_login_files':invalid}
+            'login_files':files,'invalid_login_files':invalid,'other_provider_logins':others}
 
 
 def initialize(state):
@@ -131,8 +135,8 @@ def verify(state):
 def login(state):
     ensure_source();initialize(state);command,env=compose(state)
     current=login_state(state)
-    if current['login_files']:
-        raise SystemExit('A provider login already exists; refusing to create a second refresh owner.')
+    if current['login_files'] or current['invalid_login_files']:
+        raise SystemExit('A ChatGPT provider login already exists; refusing to create a second refresh owner.')
     was_running='cliproxy-api' in subprocess.check_output(command+['ps','--services','--status','running'],cwd=ROOT,env=env,text=True).split()
     if was_running:subprocess.run(command+['stop','cliproxy-api'],cwd=ROOT,env=env,check=True)
     try:

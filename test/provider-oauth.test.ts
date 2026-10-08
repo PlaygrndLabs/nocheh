@@ -60,3 +60,22 @@ test('maintenance waits for an admitted OAuth callback before declaring provider
     await assert.rejects(fetch(`http://127.0.0.1:${callback}/auth/callback?state=${state}&code=synthetic`));
   }finally{release();oauth.close();await close(monitor);}
 });
+
+test('Claude login relays on its own callback path and rejects foreign authorization origins',async()=>{
+  const state='synthetic-state-claude-123456';let origin='https://claude.ai';const bodies:unknown[]=[];
+  const monitor=createServer(async(req,res)=>{
+    let body='';for await(const part of req)body+=part;res.setHeader('content-type','application/json');
+    if(req.url==='/v0/management/anthropic-auth-url')res.end(JSON.stringify({state,url:`${origin}/oauth/authorize?state=${state}`}));
+    else{bodies.push(JSON.parse(body));res.end('{"status":"ok"}');}
+  });
+  const port=await listen(monitor),probe=createServer(),callback=await listen(probe);await close(probe);
+  const oauth=new ProviderOAuth(port,'fixture',8783,callback,'127.0.0.1','127.0.0.1','anthropic');
+  try{
+    await oauth.start();
+    assert.equal((await fetch(`http://127.0.0.1:${callback}/auth/callback?state=${state}&code=synthetic`)).status,400);
+    assert.equal((await fetch(`http://127.0.0.1:${callback}/callback?state=${state}&code=synthetic`,{redirect:'manual'})).status,303);
+    assert.deepEqual(bodies,[{provider:'anthropic',state,code:'synthetic'}]);
+    origin='https://auth.openai.com';
+    await assert.rejects(oauth.start(),{code:'provider_oauth_unavailable'});
+  }finally{oauth.close();await close(monitor);}
+});
