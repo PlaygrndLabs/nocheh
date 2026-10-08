@@ -52,8 +52,10 @@ background runs repeatedly polling one busy admission slot. Background families
 now wait in one shared Inngest concurrency key; a synthetic probe against the
 pinned Inngest cut spans for the same contended workload from 888 to 153 with
 zero wait polls and unchanged reply latency. This source is not yet active in
-the operating installation. No database rows were deleted; a bounded retention
-policy for existing rows remains an owner decision.
+the operating installation. Because these rows were test telemetry, the owner
+directed their full deletion: `spans`, `history` and `traces` were truncated
+with the database isolated, leaving Inngest at 70 MB and the volume at 1.6 GB.
+Nocheh stores, receipts and the workflow registry were untouched.
 [Decision](docs/adr/0105-shared-background-engine-queue.md),
 [registration check](test/workflow-foundation.test.ts),
 [probe](test/workflow-background-probe.ts).
@@ -755,12 +757,9 @@ activation remains separate.
    ([decision](docs/adr/0105-shared-background-engine-queue.md)). Activate it
    with the next authorized operating restart, then compare span growth per day
    against the 2026-10-08 measurement in ignored
-   `data/acceptance/results/inngest-storage/`. Nocheh reads no Inngest `spans`,
-   `history` or `traces` rows for receipts or recovery; they serve inspection
-   and backups, and Inngest never expires them. Propose a retention horizon for
-   completed-run telemetry, verify deletion and `VACUUM FULL` or
-   dump/restore on an isolated copy with backup and recovery checks, and delete
-   operating rows only with explicit owner approval. Remaining real prerequisite polls
+   `data/acceptance/results/inngest-storage/`. The existing telemetry was deleted on owner
+   direction. Inngest still never expires these rows, so a retention horizon
+   is needed before real personal use accumulates history. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh) were about six percent of
    sampled background steps.
