@@ -2620,3 +2620,10 @@ normally, also after full truncation.
 [Decision](adr/0106-configurable-workflow-history-retention.md).
 
 </entry>
+
+<entry date="2026-10-08" area="Daily workflow telemetry retention">
+
+At the owner's request, enabled retention now checks at database startup and
+then daily instead of hourly. [Decision](adr/0107-daily-workflow-history-retention.md).
+
+</entry>
