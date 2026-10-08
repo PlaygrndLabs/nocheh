@@ -329,6 +329,11 @@ class Scenarios:
     def retirement_hides_fact(self):
         event_id = self.state['fact_event']
         current = self.f.app('/v1/sources/'+event_id+'/retirement')
+        quoting = [reply for reply in current['related_replies'] if reply['relation'] == 'quote' and not reply['retired']]
+        # Offered text is a short preview; verify each offered reply against its stored original.
+        repeats = [self.f.query('nocheh_archive', "SELECT strpos(search_text,'فیروزه')>0 FROM events WHERE id='"+reply['event_id']+"'") == 't'
+                   for reply in quoting]
+        self.gate('replies_quoting_fact_offered', bool(quoting) and all(repeats), offered=len(quoting))
         result = self.f.app('/v1/sources/'+event_id+'/retirement', {'retired': True, 'expected_revision': current['revision'],
             'operation_id': 'scenario-retire-'+event_id[:16]})
         self.gate('retired', result.get('retired') is True, revision=result.get('revision'))
@@ -338,6 +343,15 @@ class Scenarios:
         sources = json.loads(final['result'])['sources']
         self.gate('retired_source_not_retrieved', all(row['id'] != event_id for row in sources),
                   returned=[row['kind'] for row in sources])
+        self.gate('offered_replies_not_retired_implicitly', all(not reply['retired'] for reply in
+                  self.f.app('/v1/sources/'+event_id+'/retirement')['related_replies'] if reply['relation'] == 'quote'))
+        for reply in quoting:
+            self.f.app('/v1/sources/'+reply['event_id']+'/retirement', {'retired': True, 'expected_revision': reply['revision'],
+                       'operation_id': 'scenario-retire-reply-'+reply['event_id'][:16]})
+        _, again = self.turn(self.f.message(OWNER, 'یک بار دیگر [[search:PRIVFACT91]]'), OWNER)
+        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_archive_search' and event['phase'] == 'final'][-1]
+        retired = {reply['event_id'] for reply in quoting}
+        self.gate('retired_replies_not_retrieved', all(row['id'] not in retired for row in json.loads(final['result'])['sources']))
         # Assistant replies that quoted the fact are separate delivered sources;
         # retirement never implicitly retires another message.
         self.current['observed'] = {'other_sources_quoting_fact': [row['kind'] for row in sources if 'فیروزه' in (row.get('text') or '')]}
@@ -427,7 +441,7 @@ class Scenarios:
         calls = [call for call in self.f.telegram()['calls'] if call['method'] == 'sendMessage' and call['parameters'].get('message_thread_id') is not None
                  and int(call['parameters']['message_thread_id']) == topic]
         self.gate('every_attempt_kept_topic', bool(calls) and all(int(call['parameters']['chat_id']) == GROUP for call in calls), attempts=len(calls))
-        self.gate('outcome_recorded', row['state'] in ('failed', 'ambiguous', 'done'), state=row['state'], error=row['error'])
+        self.gate('rejected_by_telegram', row['state'] == 'suppressed' and row['error'] == 'telegram_rejected', state=row['state'], error=row['error'])
 
     def polling_outage(self):
         self.f.control({'faults': [{'method': 'getUpdates', 'code': 502, 'description': 'Bad Gateway'},
@@ -456,7 +470,8 @@ class Scenarios:
         blocked = self.f.message(OWNER, 'این پاسخ به خاطر مسدودی نمی‌رسد')
         self.f.inject(blocked)
         row = self.finished(self.captured(blocked), seconds=400)
-        self.gate('blocked_outcome_recorded', row['state'] != 'done' or len(self.replies(before, OWNER)) == 1, state=row['state'], error=row['error'])
+        self.gate('blocked_is_rejected_by_telegram', row['state'] == 'suppressed' and row['error'] == 'telegram_rejected'
+                  and not self.replies(before, OWNER), state=row['state'], error=row['error'])
         self.turn(self.f.message(OWNER, 'حالا دوباره در دسترسم'), OWNER)
 
     def voice(self, content):
@@ -588,6 +603,13 @@ def main():
     for name in args.only or ORDER:
         scenarios.execute(name, getattr(scenarios, name))
     final = fixture.telegram()
+    project_networks = {value['name'] for value in fixture.manifest['networks'].values()}
+    listed = subprocess.check_output(['docker', 'ps', '-a', '--format', '{{json .}}', '--filter', 'label=nocheh.role=isolated-turn'], text=True)
+    lingering = [row for row in map(json.loads, filter(None, listed.splitlines()))
+                 if set(row.get('Networks', '').split(',')) & project_networks]
+    scenarios.current = {'scenario': 'no_lingering_isolated_turns', 'gates': [], 'passed': not lingering}
+    scenarios.current['observed'] = {'containers': len(lingering)}
+    scenarios.results.append(scenarios.current)
     summary = {'passed': all(row['passed'] for row in scenarios.results), 'live_acceptance': False,
                'provider': 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
                'unknown_methods': final['unknown'][len(initial['unknown']):], 'stats': fixture.http('/fixture/stats')}
