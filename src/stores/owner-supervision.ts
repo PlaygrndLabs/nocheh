@@ -5,6 +5,7 @@ import {graphChatType,graphGroupLabel} from '../graph-labels.js';
 import {HttpError} from '../http.js';
 import {parentSpace,validateSpace} from '../spaces.js';
 import type {TelegramChatRepository} from './telegram-chats.js';
+import type {TelegramTopicRepository} from './telegram-topics.js';
 import type {StorePools} from './connections.js';
 import type {ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
@@ -19,11 +20,16 @@ export interface ConversationDirectoryItem {
   parent_space:string|null;parent_name:string|null;observed_at:string|null;configured:boolean;
   /** The owner's last explicit refresh from Telegram, when one exists. */
   telegram?:{state:string;migrate_to_chat_id:string|null;observed_at:string};
+  /** Present for topics: whether its latest captured service message closed it. */
+  closed?:boolean;
+  /** The owner added this topic because the Bot API cannot list topics. */
+  registered?:boolean;
 }
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
   telegramActions:Pick<TelegramActionRepository,'inspect'>;memory:Pick<NativeMemoryRepository,'status'>;
   shared:Pick<SharingContentRepository,'inspect'>;telegramChats?:Pick<TelegramChatRepository,'observations'>;
+  telegramTopics?:Pick<TelegramTopicRepository,'registrations'>;
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
 }
 type PageInput={q?:string;after?:string;limit?:number};
@@ -73,9 +79,12 @@ export class OwnerSupervisionRepository {
           CASE WHEN message#>>'{reply_to_message,message_id}'=message#>>'{message_thread_id}'
             THEN coalesce(message#>>'{reply_to_message,forum_topic_edited,name}',message#>>'{reply_to_message,forum_topic_created,name}') END) AS topic_name
         FROM scopes WHERE space_id LIKE '%/topic/%') named
-        WHERE topic_name IS NOT NULL ORDER BY space_id,(topic_name IS NOT NULL) DESC,capture_sequence DESC,id DESC)
-      SELECT DISTINCT ON (s.space_id) s.space_id,s.message->'chat' AS chat,t.topic_name,s.received_at AS observed_at
-        FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id
+        WHERE topic_name IS NOT NULL ORDER BY space_id,(topic_name IS NOT NULL) DESC,capture_sequence DESC,id DESC),
+      states AS (SELECT DISTINCT ON (space_id) space_id,(message ? 'forum_topic_closed') AS closed FROM scopes
+        WHERE space_id LIKE '%/topic/%' AND (message ? 'forum_topic_closed' OR message ? 'forum_topic_reopened')
+        ORDER BY space_id,capture_sequence DESC,id DESC)
+      SELECT DISTINCT ON (s.space_id) s.space_id,s.message->'chat' AS chat,t.topic_name,s.received_at AS observed_at,st.closed
+        FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id LEFT JOIN states st ON st.space_id=s.space_id
         ORDER BY s.space_id,(s.message->'chat' ? 'title') DESC,s.capture_sequence DESC,s.id DESC`),
       this.stores.control.query(`SELECT space_id FROM project_assignments
         UNION SELECT destination FROM sharing_rules UNION SELECT jsonb_array_elements_text(sources) FROM sharing_rules
@@ -92,12 +101,18 @@ export class OwnerSupervisionRepository {
       const value=item(space),parent=value.parent_space??space,type=graphChatType({chat:row.chat},parent);
       value.name=value.parent_space?clean(row.topic_name):graphGroupLabel({chat:row.chat},space)??null;
       value.kind=value.parent_space?'topic':type==='private'?'private':type?'group':value.kind;
-      value.observed_at=iso(row.observed_at);items.set(space,value);
+      value.observed_at=iso(row.observed_at);if(value.parent_space)value.closed=row.closed===true;items.set(space,value);
     }
     const configuredIds=[...configured.rows.map(row=>row.space_id),...(configuration?.policy.group_ids??[]),configuration?.policy.owner_id].filter(Boolean);
     for(const raw of configuredIds) {
       let space:string;try{space=validateSpace(raw);}catch{continue;}
       const value=items.get(space)??item(space);value.configured=true;items.set(space,value);
+      if(value.parent_space&&!items.has(value.parent_space))items.set(value.parent_space,item(value.parent_space));
+    }
+    // Topics the owner added: the Bot API cannot list topics without a message.
+    for(const topic of await this.services.telegramTopics?.registrations()??[]) {
+      let space:string;try{space=validateSpace(topic.chat_id+'/topic/'+topic.topic_id);}catch{continue;}
+      const value=items.get(space)??item(space);value.name??=topic.name;value.registered=true;items.set(space,value);
       if(value.parent_space&&!items.has(value.parent_space))items.set(value.parent_space,item(value.parent_space));
     }
     // A group with no captured message is named by the owner's last Telegram refresh.
