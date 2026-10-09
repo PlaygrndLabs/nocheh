@@ -40,6 +40,10 @@ test('stored owner directory and decisions span every page without turning reads
       const directory=await view.conversations(owner,{q:group,limit:100}),topic=directory.items.find(item=>item.space_id===group+'/topic/19');
       assert.equal(topic?.name,'Synthetic named topic','later ordinary messages retain the observed topic name');
       assert.equal(directory.items.find(item=>item.space_id===group+'/topic/21')?.name,'Root reply topic','an ordinary topic message names its topic through its root reply');
+      await services.capture.capture({version:1,key:key+':delivered',origin:'live',kind:'telegram_delivered_message',bot_id:key,scope:second,source_id:'99',revision:'1',occurred_at:null,text:'Reply',
+        payload:{message:{message_id:99,date:2,chat:{id:Number(second),type:'supergroup'},from:{id:1,is_bot:true},text:'Reply'}}});
+      const named=(await view.conversations(owner,{q:second,limit:100})).items.find(item=>item.space_id===second);
+      assert.equal(named?.name,'Repeated synthetic name','a later observation without a title keeps the observed name');
       assert.equal(topic?.parent_name,'Repeated synthetic name');assert.equal(topic?.kind,'topic');
       assert.equal((await view.conversations(owner,{q:'Repeated synthetic name'})).items.filter(item=>[group,second].includes(item.space_id)).length,2);
       assert.ok(!JSON.stringify(directory).includes('PRIVATE_FIXTURE_BODY'));
