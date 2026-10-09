@@ -75,7 +75,8 @@ export class OwnerSupervisionRepository {
         FROM scopes WHERE space_id LIKE '%/topic/%') named
         WHERE topic_name IS NOT NULL ORDER BY space_id,(topic_name IS NOT NULL) DESC,capture_sequence DESC,id DESC)
       SELECT DISTINCT ON (s.space_id) s.space_id,s.message->'chat' AS chat,t.topic_name,s.received_at AS observed_at
-        FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id ORDER BY s.space_id,s.capture_sequence DESC,s.id DESC`),
+        FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id
+        ORDER BY s.space_id,(s.message->'chat' ? 'title') DESC,s.capture_sequence DESC,s.id DESC`),
       this.stores.control.query(`SELECT space_id FROM project_assignments
         UNION SELECT destination FROM sharing_rules UNION SELECT jsonb_array_elements_text(sources) FROM sharing_rules
         UNION SELECT jsonb_array_elements_text(scopes) FROM organization_delegations

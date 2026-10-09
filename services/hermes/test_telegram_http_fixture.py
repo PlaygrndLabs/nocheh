@@ -90,6 +90,18 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r['status'] for r in calls],[429,200]);self.assertTrue(all(r['at']>0 for r in calls))
         self.assertEqual(await (await self.bot.get_file('controlled')).download_as_bytearray(),content)
 
+    async def test_get_chat_answers_configured_chats_and_reports_upgraded_groups(self):
+        from telegram.error import BadRequest,ChatMigrated
+        with self.assertRaises(ValueError):self.mock.configure({'chats':[{'id':'-1','type':'group'}]})
+        self.mock.configure({'chats':[{'id':-10042,'type':'supergroup','title':'گروه مصنوعی','is_forum':True},
+                                      {'id':-4242,'type':'group','migrate_to_chat_id':-1004242}]})
+        chat=await self.bot.get_chat(-10042)
+        self.assertEqual((chat.title,chat.type,chat.is_forum),('گروه مصنوعی','supergroup',True))
+        with self.assertRaises(ChatMigrated) as moved:await self.bot.get_chat(-4242)
+        self.assertEqual(moved.exception.new_chat_id,-1004242)
+        with self.assertRaises(BadRequest):await self.bot.get_chat(-1)
+        self.assertEqual(self.mock.state['sent'],[],'getChat sends nothing')
+
     async def test_lost_response_delivers_once_and_reports_only_a_gateway_failure(self):
         from telegram.error import NetworkError
         for invalid in ({'method':'getFile','code':502,'description':'x','parameters':{'deliver':True}},
@@ -114,9 +126,9 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.mock.state['sent']),1)
 
     async def test_unknown_method_fails_loudly_and_is_preserved_for_gate(self):
-        with self.assertRaises(BadRequest):await self.bot.get_chat(123)
-        self.assertEqual(self.mock.state['unknown'],['getChat'])
-        self.assertEqual(TelegramMock(self.path).state['unknown'],['getChat'])
+        with self.assertRaises(BadRequest):await self.bot.get_chat_administrators(123)
+        self.assertEqual(self.mock.state['unknown'],['getChatAdministrators'])
+        self.assertEqual(TelegramMock(self.path).state['unknown'],['getChatAdministrators'])
 
     async def test_fixture_transport_keeps_operational_boundary_and_rejects_other_tokens(self):
         from tools.acceptance.telegram_runtime import install_transport
