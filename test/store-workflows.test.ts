@@ -146,11 +146,15 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
         return {state:reviewRunning?'running':'done'};
       }
       throw Error('unexpected runtime operation');
-    },transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){engines++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Improved synthetic reading';}},honcho:async(path,body:any)=>{
+    },transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){engines++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Improved synthetic reading';}},honcho:async(path,body:any,method)=>{
+      if(method==='DELETE')return {deleted:true};
       if(path.endsWith('/messages/list'))return {items:(remote.get(path.replace('/list',''))??[]).filter(record=>record.metadata.nocheh_receipt===body.filters.metadata.nocheh_receipt)};
       if(path.endsWith('/messages')){sends++;const record={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[...(remote.get(path)??[]),record]);if(loseReply){loseReply=false;throw Error('lost response');}return [record];}
+      if(path.includes('/queue/status?'))return {pending_work_units:0,in_progress_work_units:0};
       if(path.endsWith('/queue/status')){const run=duringObserve;duringObserve=undefined;await run?.();return {pending_work_units:0,in_progress_work_units:0};}
       if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
+      if(path.endsWith('/nocheh/session-descendants'))return {ids:[],truncated:false};
+      if(path.includes('/context?'))return {summary:{content:'Synthetic review context'}};
       if(path.endsWith('/representation'))return {representation:'Synthetic review context'};
       if(path.endsWith('/chat')){reasoning++;return {content:JSON.stringify({interpretations:[{kind:'meaning',subject:'blue star',text:'A blue star may indicate review.',scope:{kind:'conversation',id:group},uncertainty:'uncertain',evidence_ids:targetIds,conflicts:[]}]})};}
       return {};
@@ -179,19 +183,19 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.ok(reviews>0);assert.ok(runtimeCalls.every(operation=>['guard.detect','memory.review'].includes(operation)),'learning never acknowledges or invokes an action');
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true,include_history=true,attached_at=now() WHERE singleton');
     assert.equal((await advance('honcho','source:'+reaction.id)).state,'waiting');
-    const receipts=(await stores.control.query("SELECT id,generation FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1",[reaction.id])).rows;assert.equal(receipts.length,2);
+    const receipts=(await stores.control.query("SELECT id,generation,session_id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1",[reaction.id])).rows;
+    assert.equal(receipts.length,1,'a group reaction is written once, to its own audience');
     const first=receipts[0]!;assert.equal((await advance('honcho','receipt:'+first.id)).state,'waiting');
     assert.equal((await stores.control.query('SELECT state FROM memory_ingestion_receipts WHERE id=$1',[first.id])).rows[0].state,'uncertain');
     await stores.control.query('UPDATE memory_ingestion_receipts SET next_attempt=now() WHERE id=$1',[first.id]);
     assert.equal((await advance('honcho','receipt:'+first.id)).state,'completed');assert.equal(sends,1,'lost delivery response reconciles instead of sending twice');
-    assert.equal((await advance('honcho','receipt:'+receipts[1]!.id)).state,'completed');
-    const generations=(await stores.control.query("SELECT w.job_id,w.generation FROM workflow_registry w WHERE w.family='honcho' AND w.job_id=ANY($1::text[]) ORDER BY w.generation",[receipts.map(r=>'generation:'+r.generation)])).rows;
+    const generations=(await stores.control.query("SELECT w.job_id,w.generation FROM workflow_registry w WHERE w.family='honcho' AND w.job_id=$1 ORDER BY w.generation",['generation:'+first.generation])).rows;
     for(const job of generations)assert.equal((await advance('honcho',job.job_id,job.generation)).state,'completed');
-    for(const job of generations) {
-      const context=await advance('honcho','context:'+job.job_id.slice('generation:'.length));
-      assert.equal(context.state,'completed','context is rebuilt once when Honcho finishes, with no refresh timer');
-      assert.notEqual(context.waiting_reason,'refresh_interval');
-    }
+    const prefetch=(await stores.control.query("SELECT job_id,generation FROM workflow_registry WHERE family='honcho' AND job_id=$1",['context:'+first.session_id])).rows;
+    assert.equal(prefetch.length,1,'Honcho finishing new work requests one prefetch for the changed conversation');
+    const context=await advance('honcho',prefetch[0].job_id,prefetch[0].generation);
+    assert.equal(context.state,'completed','context is prefetched once when Honcho finishes, with no refresh timer');
+    assert.notEqual(context.waiting_reason,'refresh_interval');
     assert.equal((await advance('honcho','source:'+reaction.id)).state,'completed');
     const learning=(await stores.control.query("SELECT id FROM interpretation_jobs WHERE source_reference->>'id'=$1",[reaction.id])).rows;assert.equal(learning.length,1);
     targetIds=[reaction.id,parent.id];assert.equal((await advance('memory_review','interpret:'+learning[0].id)).state,'completed');assert.equal(reasoning,1);
@@ -200,7 +204,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal(learned.length,1);assert.equal((await stores.derived.query('SELECT count(*)::int AS count FROM learned_versions WHERE entry_id=$1',[learned[0]])).rows[0].count,1);
     const next=(await services.capture.capture(event('next',{message:{message_id:2,date:1700000030,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Second package'}}))).source.reference;
     assert.equal((await advance('preparation',next.id)).state,'completed');
-    const workspace=(await stores.control.query('SELECT id,work_revision FROM memory_generations WHERE audience=$1 AND guard_epoch=$2',[group,(await services.guards.state()).epoch])).rows[0];
+    const workspace=(await stores.control.query('SELECT id,work_revision FROM memory_generations WHERE id=$1',[first.generation])).rows[0];
     duringObserve=async()=>{await services.memory.queueSource(next);};
     assert.equal(await services.memory.observe(workspace.id),false,'new ingestion cannot race a stale ready observation');
     const changed=(await stores.control.query('SELECT state,work_revision FROM memory_generations WHERE id=$1',[workspace.id])).rows[0];
@@ -219,7 +223,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal((await advance('preparation',duringReview.id)).state,'completed');
     assert.equal((await advance('honcho','source:'+duringReview.id)).state,'waiting');
     const duringReceipts=(await stores.control.query("SELECT id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='pending'",[duringReview.id])).rows;
-    assert.equal(duringReceipts.length,2);
+    assert.equal(duringReceipts.length,1);
     for(const receipt of duringReceipts)assert.equal((await advance('honcho','receipt:'+receipt.id)).state,'completed','primary ingestion progresses while native work is still running');
     await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[nextNative]);
     assert.equal((await advance('memory_review','native:'+nextNative)).state,'running');
@@ -234,14 +238,31 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal((await advance('preparation','reprocess:'+reprocess)).state,'completed');
     assert.equal((await advance('preparation','reprocess:'+reprocess)).state,'completed');assert.equal(engines,1);
     assert.deepEqual(await services.attachments.bytes(file),Buffer.from([79,103,103,0,255]));
-    const binding=await services.guards.state(),before=await services.guards.read('events:'+parent.id,binding);
-    await services.guards.edit('events:'+parent.id,before.revision,{text:'Owner correction',payload:{}},key+':guard-edit');
-    const epoch=(await services.guards.state()).epoch;
-    const swept=await advance('honcho','refresh',epoch);assert.ok(['waiting','completed'].includes(swept.state));
-    const sweep=(await stores.control.query("SELECT * FROM learning_refresh_sweeps WHERE guard_epoch=$1 AND family='honcho'",[epoch])).rows[0];assert.ok(Number(sweep.source_after_sequence)>0);
-    assert.equal((await stores.control.query('SELECT state FROM memory_generations WHERE id=$1',[workspace.id])).rows[0].state,'retired');
-    const count=(await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id LIKE 'source:%' AND generation=$1",[epoch])).rows[0].count;assert.ok(count<=25,'refresh stores bounded progress instead of loading the archive');
-    assert.equal((await advance('honcho','context:'+workspace.id,2)).state,'skipped','revoked generations never run native reasoning');
+    const ingest=async()=>{
+      for(const row of (await stores.control.query("SELECT job_id,generation FROM workflow_registry WHERE family='honcho' AND job_id LIKE 'receipt:%' AND state IN ('queued','waiting')")).rows)
+        await advance('honcho',row.job_id,row.generation);
+    };
+    await ingest();
+    const nextLive=(await stores.control.query("SELECT id,session_id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND retired_at IS NULL",[next.id])).rows;
+    assert.equal(nextLive.length,1);
+    const binding=await services.guards.state(),before=await services.guards.read('events:'+next.id,binding);
+    await services.guards.edit('events:'+next.id,before.revision,{text:'Owner correction',payload:{}},key+':guard-edit');
+    const epoch=(await services.guards.state()).epoch;assert.ok(epoch>binding.epoch);
+    const sweptPages=[await advance('honcho','refresh',epoch)];
+    while(sweptPages.at(-1)!.state==='waiting')sweptPages.push(await advance('honcho','refresh',epoch));
+    assert.equal(sweptPages.at(-1)!.state,'completed');
+    assert.equal((await stores.control.query('SELECT state FROM memory_generations WHERE id=$1',[workspace.id])).rows[0].state==='retired',false,'a guard epoch never retires the workspace');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id LIKE 'source:%' AND generation=$1",[epoch])).rows[0].count,0,
+      'an epoch never re-ingests the archive into Honcho');
+    assert.ok((await stores.control.query('SELECT retired_at FROM memory_ingestion_receipts WHERE id=$1',[nextLive[0].id])).rows[0].retired_at,'the edited source leaves its session');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE id=$1 AND retired_at IS NULL",[first.id])).rows[0].count,0,
+      'other writes in the rebuilt conversation move to its new session revision');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND retired_at IS NULL",[reaction.id])).rows[0].count,1);
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id=$1",['delete:'+nextLive[0].session_id])).rows[0].count,1);
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id=$1",['ingest:'+next.id])).rows[0].count,1,
+      'the corrected source is written again');
+    assert.equal((await advance('honcho','delete:'+nextLive[0].session_id)).state,'completed');
+    assert.equal((await stores.control.query('SELECT state FROM memory_session_deletions WHERE session_id=$1',[nextLive[0].session_id])).rows[0].state,'done');
     assert.equal((await stores.archive.query("SELECT count(*)::int AS count FROM events WHERE source_key LIKE $1",[key+':%'])).rows[0].count,5);
   }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });

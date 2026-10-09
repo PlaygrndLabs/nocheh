@@ -73,7 +73,7 @@ export function Honcho({notify}) {
         h('p',{className:'n-muted honcho-attachment-note'},'Previously learned sources rebuild in the current mode. These options do not approve learning from any new import.'),
         connectionCommand.error&&h(Alert,null,connectionCommand.error),
         button(memory.connection.attached?'Detach memory':'Attach memory',()=>connect(!memory.connection.attached),connectionCommand.busy||!!memoryError||!memory.connection.attached&&!memory.connection.verified),
-        h(Details,{value:{generations:memory.generations,receipts:memory.receipts},label:'Preparation and ingestion receipts'}))),
+        h(Details,{value:{workspace:memory.workspace,sessions:memory.sessions,receipts:memory.receipts,deletions:memory.deletions},label:'Workspace, sessions and ingestion receipts'}))),
       h(HonchoBudget,{notify,editable:!!memory?.connection?.attached&&!!memory?.connection?.verified}),
       h(Panel,{title:'Connection checks',note:'Pinned local Honcho services use subscription reasoning and a dedicated, capped embeddings route.'},
       error&&h('p',{role:'alert'},error),!status&&!error&&h('p',{role:'status'},'Checking Honcho…'),status&&h('div',null,

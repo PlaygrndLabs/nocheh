@@ -34,7 +34,14 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     calls++;assert.match(path,/\/peers\/person_[a-f0-9]{64}\/chat$/,'the only effect is bounded Honcho reasoning for the actual speaker');
     assert.ok(body.query.includes('message_reaction'));assert.ok(!body.query.includes('fixture-secret'));
     assert.ok(!body.query.includes('nested-unverified-target'));
+    assert.ok(Array.isArray(body.filters?.session_id)&&body.filters.session_id.length>0,'topic learning reasons only over that topic\'s own sessions');
     return {content:JSON.stringify(response)};
+  };
+  const readable=async(workspace:string,label:string)=>{
+    const session=digest(key+':session:'+label);
+    await stores.control.query(`INSERT INTO memory_sessions(workspace,key,audience,kind,session_id) VALUES($1,$2,$3,'conversation',$4)`,[workspace,session,space,session]);
+    await stores.control.query(`INSERT INTO memory_ingestion_receipts(id,generation,audience,source_reference,guard_source_id,prepared_id,content_hash,state,session_id)
+      VALUES($1,$2,$3,'{}','fixture','fixture',$4,'done',$5)`,[digest(key+':receipt:'+label),workspace,space,digest('fixture'),session]);
   };
   const provenance=new HonchoProvenanceRepository(stores,archive,guards,call),learning=new ContextualLearningRepository(contexts,derived,guards,learned,provenance,call);
   try {
@@ -51,6 +58,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const binding=await guards.state(),workspace=digest(key+':workspace');
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true');
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[workspace,binding.generation,binding.epoch,space]);
+    await readable(workspace,'first');
     response={organization:'malformed optional output must not prevent learning',interpretations:[
       {kind:'meaning',subject:'check',text:'A check means reviewed in this conversation.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[reaction.id,parent.id],conflicts:[]},
       {kind:'state',subject:'packet',text:'The packet may have been reviewed.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[reaction.id,parent.id],conflicts:[]},
@@ -110,6 +118,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     for(const id of updated)assert.equal((await learned.read(access.principal(space),id,currentBinding,r=>access.canRead(access.principal(space),r,currentBinding))).revision,2);
     const nextWorkspace=digest(key+':next-workspace');
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[nextWorkspace,currentBinding.generation,currentBinding.epoch,space]);
+    await readable(nextWorkspace,'next');
     assert.equal(await learning.request(removed,nextWorkspace,space),updateJob,'an unrelated generation refresh reuses identical authorized inputs');
     assert.equal(calls,2);
     // A convention's generated wording is guidance, not independent new evidence.
@@ -132,7 +141,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
       ruleDependencies,await guards.state(),'fixture',detect);
     const workspaceNow=async(label:string)=>{
       const state=await guards.state(),id=digest(key+':'+label);
-      await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[id,state.generation,state.epoch,space]);return id;
+      await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[id,state.generation,state.epoch,space]);
+      await readable(id,label);return id;
     };
     const rephrasedWorkspace=await workspaceNow('rephrased');
     const afterRewrite=await contexts.prepare(removed,await guards.state());
@@ -167,6 +177,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await access.setConsent({admin:true,scope:null},parent,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
     await assert.rejects(guards.assertCurrent(stale),{code:'guard_context_changed'});
     assert.equal(await access.canLearn(parent,await guards.state()),false);
+    assert.ok(!(await contexts.prepare(reaction,await guards.state())).evidence.some(item=>item.reference.id===parent.id),'withdrawn evidence never reaches reasoning');
+    await stores.control.query("UPDATE memory_generations SET state='retired' WHERE id=$1",[workspace]);
     await assert.rejects(learning.request(reaction,workspace,space),{code:'memory_context_retired'});
     assert.equal(calls,5);
   } finally {

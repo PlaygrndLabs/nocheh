@@ -1,5 +1,5 @@
 import unittest
-from .provenance import ancestry, failed_queue_items
+from .provenance import DESCENDANTS_SQL, ancestry, failed_queue_items, session_descendants
 
 
 class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
@@ -64,3 +64,26 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class SessionDescendantTests(unittest.IsolatedAsyncioTestCase):
+    async def test_descendants_are_bounded_and_report_more(self):
+        calls = []
+        async def load(session, limit):
+            calls.append((session, limit))
+            return [str(i).zfill(21) for i in range(limit)]
+        result = await session_descendants({'session_id': 'a'*64, 'limit': 2}, load)
+        self.assertEqual(calls, [('a'*64, 3)])
+        self.assertEqual(result, {'ids': ['0'*21, '0'*20+'1'], 'truncated': True})
+
+    async def test_invalid_requests_never_reach_the_store(self):
+        async def load(session, limit): self.fail('invalid request reached the store')
+        for body in [{'session_id': 'short'}, {'session_id': 'a'*64, 'limit': 101}, {'session_id': 'a'*64, 'limit': True},
+                     {'session_id': 'a'*64, 'other': 1}, []]:
+            with self.assertRaises(ValueError):
+                await session_descendants(body, load)
+
+    async def test_query_excludes_the_session_itself_and_deleted_conclusions(self):
+        self.assertIn('session_name IS DISTINCT FROM :session', DESCENDANTS_SQL)
+        self.assertIn('deleted_at IS NULL', DESCENDANTS_SQL)
+        self.assertIn('tree.depth<8', DESCENDANTS_SQL)

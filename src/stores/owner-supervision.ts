@@ -202,9 +202,11 @@ export class OwnerSupervisionRepository {
     const currentBinding=(binding:any)=>binding?.generation===guard.generation&&Number(binding?.epoch)===Number(guard.epoch);
     const factIds=grants.rows.map(row=>row.fact_id),facts=factIds.length?(await this.stores.derived.query('SELECT id,active_revision FROM entity_claims WHERE id=ANY($1::text[])',[factIds])).rows:[];
     const factRevisions=new Map(facts.map(row=>[row.id,row.active_revision]));
-    const generations=memory.generations.filter(g=>g.audience===(owner?'owner':space)),connection=memory.connection;
+    // One Honcho workspace serves every audience; a conversation reads only its own sessions unless it is the owner's.
+    const sessions=memory.sessions.filter(item=>owner||item.audience===space),connection=memory.connection,workspace=memory.workspace;
     const attached=connection?.attached===true&&connection?.verified===true;
-    const ready=attached&&generations.some(g=>g.state==='ready'||!!g.last_ready_at),syncing=generations.some(g=>g.state==='building');
+    const ready=attached&&!!workspace&&(workspace.state==='ready'||!!workspace.last_ready_at)&&(owner||sessions.length>0);
+    const syncing=attached&&sessions.some(item=>item.pending>0);
     const sharingReleases=[];
     for(const row of releases.rows){
       let current=row.state==='active'&&row.generation===guard.generation&&row.guard_mode===guard.mode&&row.rule_enabled&&row.rule_revision===row.current_rule_revision&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now());
@@ -225,7 +227,7 @@ export class OwnerSupervisionRepository {
         note:'External actions require exact approval or a matching unexpired permission, and remain subject to the security policy. Authorization is not evidence of execution.'},
       organization:{effective,delegations:delegations.rows,note:'Organization affects project context only. It grants no knowledge access, participant permission, or external-action authority.'},
       memory:{connection:{attached:connection?.attached??false,verified:connection?.verified??false,revision:connection?.revision??null},
-        availability:ready?'available':attached?'limited':'unavailable',syncing,generations,note:'Stored readiness is not a live retrieval test. Current context and permitted archive search remain separate.'}};
+        availability:ready?'available':attached?'limited':'unavailable',syncing,workspace,sessions,note:'Stored readiness is not a live retrieval test. Current context and permitted archive search remain separate.'}};
   }
 
   async projectContext(principal:Reader,idValue:string) {

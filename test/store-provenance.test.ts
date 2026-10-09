@@ -35,9 +35,13 @@ test('Honcho ancestry maps only verified ingestion receipts and current authoriz
     const result=await provenance.read(workspace,'owner',[conclusion],binding);
     assert.deepEqual(result.evidence,[source,related]);assert.equal(result.exact_citations,false,'ancestry never claims exact citation precision');
     assert.ok(result.limitations.includes('ingestion_reference_unavailable'));
-    await assert.rejects(provenance.read(workspace,'-42',[conclusion],binding),{code:'memory_context_retired'});
+    const group=await provenance.read(workspace,'-42',[conclusion],binding);
+    assert.deepEqual(group.evidence,[],'another audience cannot trace owner-private receipts');assert.ok(group.limitations.includes('ingestion_reference_unavailable'));
     mutate=true;
     await assert.rejects(provenance.read(workspace,'owner',[conclusion],binding),{code:'guard_context_changed'});
+    mutate=false;
+    assert.deepEqual((await provenance.read(workspace,'owner',[conclusion],await guards.state())).evidence,[source,related],'a guard epoch never retires the workspace');
+    await stores.control.query("UPDATE memory_generations SET state='retired' WHERE id=$1",[workspace]);
     await assert.rejects(provenance.read(workspace,'owner',[conclusion],await guards.state()),{code:'memory_context_retired'});
   } finally {
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');

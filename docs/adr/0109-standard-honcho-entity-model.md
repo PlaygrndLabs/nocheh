@@ -1,10 +1,12 @@
 # ADR-0109: Use Honcho through its documented entity model
 
 <status>
-Proposed by owner direction on 2026-10-09; the owner chose plan-only review
-before implementation. When accepted, this supersedes the per-generation
-workspace and timer-refreshed context parts of ADR-0033, ADR-0044, ADR-0056
-and ADR-0072. Audience isolation from ADR-0030 is retained.
+Accepted by the owner on 2026-10-09 ("Start H1–H4"), after plan-only review.
+Supersedes the per-generation workspace and timer-refreshed context parts of
+ADR-0033, ADR-0044, ADR-0056 and ADR-0072. Audience isolation from ADR-0030 is
+retained. [ADR-0115](0115-honcho-session-revisions.md) records how steps H1–H4
+implement it. The fresh start (H5) and live acceptance (H6) keep their own
+owner gates.
 </status>
 
 <context>
