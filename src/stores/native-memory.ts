@@ -319,29 +319,16 @@ export class NativeMemoryRepository {
       ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null])).rows.map(row=>String(row.peer_id)));
     return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial,clarification:undefined};
   }
-  async refreshContext(id:string,requestId=String(Math.floor(Date.now()/120000))):Promise<boolean> {
-    const current=await this.current(id);if(!current.row.last_ready_at&&current.row.state!=='ready')return false;
-    string(requestId,200);
+  /** Rebuild protected context once Honcho has finished the generation's work.
+   * A snapshot taken after the last ready transition is current; no timer renews it. */
+  async refreshContext(id:string):Promise<boolean> {
+    const current=await this.current(id);if(current.row.state!=='ready'||!current.row.last_ready_at)return false;
     const cached=(await this.control.query(`SELECT 1 FROM memory_context_snapshots
       WHERE generation=$1 AND refreshed_at>=(SELECT last_ready_at FROM memory_generations WHERE id=$1)`,[id])).rowCount;
-    if(cached) {
-      if(current.row.state==='building') {
-        const retained=await this.control.query(`UPDATE memory_context_snapshots s SET refreshed_at=now()
-          FROM memory_generations g WHERE s.generation=g.id AND g.id=$1 AND g.state='building' AND g.work_revision=$2
-          AND s.refreshed_at>=g.last_ready_at RETURNING s.generation`,[id,current.row.work_revision]);
-        return !!retained.rowCount;
-      }
-      if(current.row.state==='ready') {
-        const queue=await this.call('/v3/workspaces/'+id+'/queue/status');await this.current(id);
-        if(queue.pending_work_units!==0||queue.in_progress_work_units!==0)return false;
-        const touched=await this.control.query(`UPDATE memory_context_snapshots s SET refreshed_at=now()
-          FROM memory_generations g WHERE s.generation=g.id AND g.id=$1 AND g.state='ready' AND g.work_revision=$2
-          AND s.refreshed_at>=g.last_ready_at RETURNING s.generation`,[id,current.row.work_revision]);
-        return !!touched.rowCount;
-      }
-    }
-    if(current.row.state!=='ready')return false;
-    const key='native-context:'+id+':'+current.row.work_revision+':'+requestId;
+    if(cached)return true;
+    // Each ready transition has its own checkpoint, so recovery reuses only that transition's result.
+    const readyAt=new Date(current.row.last_ready_at).toISOString();
+    const key='native-context:'+id+':'+current.row.work_revision+':'+readyAt;
     let raw=await this.derived.checkpoint(key);
     if(!raw) {
       const connected=await this.connectedPeers(current,current.principal),parts=[];
@@ -351,7 +338,7 @@ export class NativeMemoryRepository {
       }
       const text=string(parts.join('\n\n'),2*1024*1024);
       const reference=await this.derived.record({operation_id:key,source:current.row.root_reference,kind:'memory_result',content:Buffer.from(text),
-        producer:'honcho',producer_version:protocol,configuration:{workspace:id,request_id:requestId,peers:connected.items,include_most_frequent:true,max_conclusions:50},
+        producer:'honcho',producer_version:protocol,configuration:{workspace:id,ready_at:readyAt,peers:connected.items,include_most_frequent:true,max_conclusions:50},
         provenance:{binding:current.binding,partial:connected.partial,limitations:['representation_has_no_exact_citations']}});
       raw={id:reference.id,content:Buffer.from(text),content_hash:reference.input_hash};
     }
@@ -375,23 +362,29 @@ export class NativeMemoryRepository {
     const row=(await this.control.query(`SELECT id FROM memory_generations WHERE audience=$1 AND installation_generation=$2 AND guard_epoch=$3
       AND representation_version=$4 AND state<>'retired'`,[audience,binding.generation,binding.epoch,protocol])).rows[0];return row?.id as string|undefined;
   }
+  private async snapshot(id:string) {
+    return (await this.control.query(`SELECT s.*,s.refreshed_at>=g.last_ready_at AS current FROM memory_context_snapshots s
+      JOIN memory_generations g ON g.id=s.generation WHERE s.generation=$1`,[id])).rows[0];
+  }
+  private async requestContext(id:string,revision:number) {
+    const db=await this.control.connect();try{await db.query('BEGIN');await requestWorkflow(db,'honcho','context:'+id,revision);await db.query('COMMIT');}
+    catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
   async context(principal:Reader) {
     const id=await this.audienceGeneration(principal);if(!id)return limited;
     try {
-      const current=await this.current(id);let cache=(await this.control.query(`SELECT *,refreshed_at>now()-interval '5 minutes' AS usable,
-        refreshed_at>now()-interval '1 minute' AS fresh FROM memory_context_snapshots WHERE generation=$1`,[id])).rows[0];
-      // A prior ready snapshot can be revalidated locally while new work builds.
-      // Do this before the foreground turn gives up on a stale five-minute TTL;
-      // the guarded generation/revision checks in refreshContext still fence it.
-      if(cache&&!cache.usable&&current.row.state==='building'&&current.row.last_ready_at) {
-        if(await this.refreshContext(id))cache=(await this.control.query(`SELECT *,refreshed_at>now()-interval '5 minutes' AS usable,
-          refreshed_at>now()-interval '1 minute' AS fresh FROM memory_context_snapshots WHERE generation=$1`,[id])).rows[0];
+      let current=await this.current(id);if(!current.row.last_ready_at)return {...limited,syncing:true};
+      let cache=await this.snapshot(id);
+      // Freshness is checked when a message arrives. Honcho finished work that the
+      // saved context does not reflect, so rebuild it before use. While new work
+      // builds, the context saved after the last ready transition stays usable;
+      // the guarded generation and revision checks still fence it.
+      if(!cache?.current&&current.row.state==='ready') {
+        if(await this.refreshContext(id))cache=await this.snapshot(id);
+        else await this.requestContext(id,current.row.work_revision);
+        current=await this.current(id);
       }
-      if(!cache?.fresh) {
-        const db=await this.control.connect();try{await db.query('BEGIN');await requestWorkflow(db,'honcho','context:'+id);await db.query('COMMIT');}
-        catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
-      }
-      if(!cache?.usable||!current.row.last_ready_at&&current.row.state!=='ready')return {...limited,syncing:true};
+      if(!cache?.current)return {...limited,syncing:true};
       const value=(await this.guards.read('derived_artifacts:'+cache.derived_id,current.binding)).value as {text:string};
       await this.current(id);await this.prepared.audience.assert(principal);await this.prepared.allow(principal,value);
       return {sources:value.text?[{source:'nocheh:honcho:'+id,kind:'memory_inference',text:value.text,exact_citations:false,

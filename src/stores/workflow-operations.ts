@@ -187,7 +187,10 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
           const ready=await s.memory.observe(id);if(!ready)return waiting('sync','prerequisite');
           await s.memory.refreshContext(id);return observation('completed','sync');
         }
-        const ready=await s.memory.refreshContext(id);return waiting('sync',ready?'refresh_interval':'prerequisite',ready?120000:30000);
+        // A one-shot rebuild requested when a message found context older than
+        // Honcho's finished work. A building generation is rebuilt by its own
+        // generation workflow when Honcho finishes; nothing refreshes on a timer.
+        await s.memory.refreshContext(id);return observation('completed','sync');
       });
       const load=async()=>{const row=(await control.query('SELECT state,attempts,next_attempt FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
         if(!row)throw new HttpError(404,'honcho_receipt_missing');return row;};

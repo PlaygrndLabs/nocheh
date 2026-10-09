@@ -187,6 +187,11 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal((await advance('honcho','receipt:'+receipts[1]!.id)).state,'completed');
     const generations=(await stores.control.query("SELECT w.job_id,w.generation FROM workflow_registry w WHERE w.family='honcho' AND w.job_id=ANY($1::text[]) ORDER BY w.generation",[receipts.map(r=>'generation:'+r.generation)])).rows;
     for(const job of generations)assert.equal((await advance('honcho',job.job_id,job.generation)).state,'completed');
+    for(const job of generations) {
+      const context=await advance('honcho','context:'+job.job_id.slice('generation:'.length));
+      assert.equal(context.state,'completed','context is rebuilt once when Honcho finishes, with no refresh timer');
+      assert.notEqual(context.waiting_reason,'refresh_interval');
+    }
     assert.equal((await advance('honcho','source:'+reaction.id)).state,'completed');
     const learning=(await stores.control.query("SELECT id FROM interpretation_jobs WHERE source_reference->>'id'=$1",[reaction.id])).rows;assert.equal(learning.length,1);
     targetIds=[reaction.id,parent.id];assert.equal((await advance('memory_review','interpret:'+learning[0].id)).state,'completed');assert.equal(reasoning,1);
@@ -236,7 +241,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     const sweep=(await stores.control.query("SELECT * FROM learning_refresh_sweeps WHERE guard_epoch=$1 AND family='honcho'",[epoch])).rows[0];assert.ok(Number(sweep.source_after_sequence)>0);
     assert.equal((await stores.control.query('SELECT state FROM memory_generations WHERE id=$1',[workspace.id])).rows[0].state,'retired');
     const count=(await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id LIKE 'source:%' AND generation=$1",[epoch])).rows[0].count;assert.ok(count<=25,'refresh stores bounded progress instead of loading the archive');
-    assert.equal((await advance('honcho','context:'+workspace.id)).state,'skipped','revoked generations never run native reasoning');
+    assert.equal((await advance('honcho','context:'+workspace.id,2)).state,'skipped','revoked generations never run native reasoning');
     assert.equal((await stores.archive.query("SELECT count(*)::int AS count FROM events WHERE source_key LIKE $1",[key+':%'])).rows[0].count,5);
   }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });
