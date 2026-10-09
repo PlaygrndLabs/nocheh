@@ -831,7 +831,10 @@ activation remains separate.
    service now rotates its Docker log (`NOCHEH_LOG_MAX_SIZE` 10m,
    `NOCHEH_LOG_MAX_FILES` 3, owner-adjustable;
    [check](services/hermes/test_configuration.py)); it takes effect when the
-   operating containers are next recreated.
+   operating containers are next recreated. `./bin/nocheh storage` reports
+   database, largest-table and state folder sizes read-only
+   ([check](services/hermes/test_storage_report.py)); a Monitoring view of it
+   is not built.
 10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
     Inngest function, an Inngest cron, or a required out-of-band safety path;
     Telegram polling and the Hermes turn stay inside Hermes.
