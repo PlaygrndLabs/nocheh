@@ -512,16 +512,18 @@ whose response is lost, remains uncertain by design.
 Live owner session (October 8, operating stack, source-watched): replies were
 delivered once each but retried because a first voice transcript revoked
 every in-flight turn; ADR-0108 removes that revocation. Owner-private turns
-now read the owner's directory, people and projects, and the owner freedom
-setting (approval required by default) is in Nocheh settings. Archive details
-open in a drawer. In development, isolated turns now run the watched plugin code
-(read-only); topics are named from their root messages; and an owner refresh
-named the configured group with no captured messages. The owner listed all
-groups and topics in Telegram. Pending owner rechecks on the repaired source: quick-message
-ordering and first-attempt timing with a voice note, a group list followed by
-an exact approval, the owner freedom level, and restart during a model turn.
-Real-model quality, live Telegram release gates and release remain pending.
-[Live summary](docs/mvp-acceptance-status.md).
+read the owner's directory, people and projects; the owner freedom setting
+(approval required by default) is in Nocheh settings; topics are named from
+their root message and selected groups can be named by an explicit Telegram
+refresh. Development turns now use the watched source. Archive details open
+in a drawer. On a fresh simulator installation (October 9) all scenarios pass,
+including the owner directory and its group denial, the refresh, owner
+freedom, a launcher stopped mid-turn, texts with a voice note in Telegram
+order, and an unparseable update that previously wedged polling; browser
+checks of the drawer, retirement offers and settings panels pass. Pending
+owner rechecks: a live exact approval to a topic and quick live messages with
+a voice note. Real-model quality, live Telegram release gates and release
+remain pending. [Live summary](docs/mvp-acceptance-status.md).
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the

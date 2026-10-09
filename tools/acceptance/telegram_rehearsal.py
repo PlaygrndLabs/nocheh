@@ -20,9 +20,19 @@ def validate_fixture(directory,info,manifest):
     project=info['project']
     if (not re.fullmatch(r'nocheh-installation-[a-f0-9]{12}',project) or manifest['name']!=project
             or Path(info['directory']).resolve()!=directory):raise ValueError('invalid_fixture_project')
-    if not manifest['networks'] or any(not value.get('internal') or value.get('external')
-            or not value.get('name','').startswith(project) for value in manifest['networks'].values()):raise ValueError('isolated_fixture_required')
-    if any(service.get('ports') or service.get('network_mode')=='host' for service in manifest['services'].values()):raise ValueError('isolated_fixture_required')
+    # The optional dashboard preview relay is the only allowed exception: its own
+    # network, used by no other service, publishing only on the loopback address.
+    preview=manifest['networks'].get('preview')
+    if preview is not None:
+        relay=manifest['services'].get('fixture-preview',{})
+        users=[name for name,service in manifest['services'].items() if 'preview' in (service.get('networks') or {})]
+        if (preview!={'name':project+'-preview'} or users!=['fixture-preview'] or set(relay.get('networks') or {})!={'default','preview'}
+                or any(port.get('host_ip')!='127.0.0.1' for port in relay.get('ports') or []) or relay.get('volumes')):raise ValueError('isolated_fixture_required')
+    networks={key:value for key,value in manifest['networks'].items() if key!='preview'}
+    if not networks or any(not value.get('internal') or value.get('external')
+            or not value.get('name','').startswith(project) for value in networks.values()):raise ValueError('isolated_fixture_required')
+    if any((service.get('ports') and name!='fixture-preview') or service.get('network_mode')=='host'
+           for name,service in manifest['services'].items()):raise ValueError('isolated_fixture_required')
     native=manifest['services']['hermes'];provider=manifest['services']['cliproxy-api']
     if native['image']!=info['images']['native'] or provider['environment'].get('NOCHEH_INSTALLATION_FIXTURE')!='1':raise ValueError('synthetic_fixture_required')
     homes=[v for v in native['volumes'] if v.get('target')=='/workspace/data/local/hermes']

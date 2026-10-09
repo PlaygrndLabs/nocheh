@@ -28,6 +28,20 @@ class TelegramRehearsalOwnershipTests(unittest.TestCase):
         self.manifest['services']['hermes']['ports']=['8781:8781']
         with self.assertRaisesRegex(ValueError,'isolated_fixture_required'):validate_fixture(self.directory,self.info,self.manifest)
 
+    def test_only_the_loopback_dashboard_preview_relay_may_leave_the_internal_networks(self):
+        manifest=copy.deepcopy(self.manifest)
+        manifest['networks']['preview']={'name':self.project+'-preview'}
+        manifest['services']['fixture-preview']={'networks':{'default':None,'preview':None},
+            'ports':[{'target':18793,'published':'18793','host_ip':'127.0.0.1','protocol':'tcp'}]}
+        self.assertEqual(validate_fixture(self.directory,self.info,manifest),self.project)
+        for change in (lambda m:m['services']['fixture-preview']['ports'][0].update(host_ip='0.0.0.0'),
+                       lambda m:m['services']['hermes'].update(networks={'preview':None}),
+                       lambda m:m['networks']['preview'].update(name='nocheh_default'),
+                       lambda m:m['services']['fixture-preview'].update(volumes=[{'type':'bind','source':'/'}])):
+            with self.subTest(change=change):
+                bad=copy.deepcopy(manifest);change(bad)
+                with self.assertRaisesRegex(ValueError,'isolated_fixture_required'):validate_fixture(self.directory,self.info,bad)
+
     def test_operating_native_state_or_unverified_image_is_rejected(self):
         manifest=copy.deepcopy(self.manifest)
         manifest['services']['hermes']['volumes'][0]['source']=str(ROOT/'data/local/hermes')

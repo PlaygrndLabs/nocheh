@@ -174,6 +174,38 @@ class Capture:
         return state
 
 
+def parseable_updates(result, polling):
+    """Keep one update the pinned SDK cannot parse from wedging polling.
+
+    The SDK rejects a whole getUpdates batch when any update fails to parse and
+    then retries the same offset forever. Each original is already durably
+    captured, so an unparseable update is passed on as its bare update_id: the
+    offset advances, no handler runs, and the count stays visible in health.
+    """
+    status, raw = result
+    try:
+        body = json.loads(raw)
+    except (ValueError, TypeError):
+        return result
+    if status != 200 or body.get('ok') is not True or not isinstance(body.get('result'), list):
+        return result
+    from telegram import Update
+    replaced = 0
+    for index, item in enumerate(body['result']):
+        try:
+            Update.de_json(item, None)
+        except Exception:
+            if not isinstance(item, dict) or type(item.get('update_id')) is not int:
+                return result
+            body['result'][index] = {'update_id': item['update_id']}
+            replaced += 1
+    if not replaced:
+        return result
+    polling['unparseable_updates'] = polling.get('unparseable_updates', 0) + replaced
+    polling['last_unparseable_at'] = datetime.now(timezone.utc).isoformat()
+    return status, json.dumps(body).encode()
+
+
 def instrument_request(request, capture: Capture, polling=False):
     class CapturedRequest(type(request)):
         __slots__ = ()
@@ -190,6 +222,7 @@ def instrument_request(request, capture: Capture, polling=False):
                         captured=perf_counter()
                         await asyncio.to_thread(capture.updates, result)
                         capture.polling['capture_ms']=round((perf_counter()-captured)*1000)
+                        result = parseable_updates(result, capture.polling)
                         status, raw = result
                         if status == 200 and json.loads(raw).get('ok'):
                             now = datetime.now(timezone.utc).isoformat()

@@ -22,8 +22,9 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|long|silent|empty-once|context)(?::([^\]]*))?\]\]')
-    TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request'}
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context)(?::([^\]]*))?\]\]')
+    TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
+             'owner': 'nocheh_owner_read'}
 
     def __init__(self, counts, canary):
         self.counts, self.canary, self.events, self.emptied = counts, canary, [], set()
@@ -63,11 +64,13 @@ class ScriptedBrain:
                 name = self.TOOLS[kind]
                 result = self.text(results[-1].content)
                 self.record(directive=kind, argument=argument, phase='final', tool=name, result=result[:20000])
-                return {'content': '[brain] ' + name + ': ' + ' '.join(result.split())[:1500]}
+                return {'content': '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
             if kind == 'search':
                 arguments = {'mode': 'text', 'query': argument, 'limit': 5}
             elif kind == 'recall':
                 arguments = {'query': argument}
+            elif kind == 'owner':
+                arguments = {'view': argument or 'conversations'}
             else:
                 destination, _, message = argument.partition('|')
                 arguments = {'destination': destination.strip(), 'text': message.strip()}
