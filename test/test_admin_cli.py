@@ -81,7 +81,7 @@ class AdminCliTests(unittest.TestCase):
                 return super().call(path, timeout)
         output = io.StringIO()
         with patch.object(admin, 'API', TimingAPI), contextlib.redirect_stdout(output):
-            self.assertEqual(admin.main(['timings', EVENT, '--json']), 0)
+            self.assertEqual(admin.main(['timings', EVENT, '--effects', '--json']), 0)
         result = json.loads(output.getvalue())
         self.assertEqual(result['effects']['events'][0]['timings'], {'provider_headers_ms': 45})
         self.assertNotIn('private', output.getvalue())
@@ -91,8 +91,35 @@ class AdminCliTests(unittest.TestCase):
 
     def test_old_api_cannot_silently_return_unfiltered_timing_evidence(self):
         with patch.object(admin, 'API', FakeAPI), contextlib.redirect_stderr(io.StringIO()) as error:
-            self.assertEqual(admin.main(['timings', EVENT, '--json']), 1)
+            self.assertEqual(admin.main(['timings', EVENT, '--effects', '--json']), 1)
         self.assertIn('lacks event-filtered timing evidence', error.getvalue())
+
+    def test_stage_breakdown_prints_categories_and_unmeasured_time_without_content(self):
+        class StageAPI(FakeAPI):
+            def call(self, path, timeout=30):
+                self.calls.append((path, timeout))
+                if path == '/v1/workflows/timings/' + EVENT:
+                    return {'event_id': EVENT, 'reply_ms': 12400, 'complete': True, 'attempts': 1, 'unmeasured_ms': 300, 'text': 'private',
+                            'stages': [{'stage': 'llm', 'label': 'provider wait', 'category': 'llm', 'ms': 9000, 'calls': 3, 'prompt': 'private'},
+                                       {'stage': 'unmeasured', 'label': 'unmeasured', 'category': 'unmeasured', 'ms': 300, 'calls': 0}]}
+                if path.startswith('/v1/workflows/timings?'):
+                    return {'messages': 2, 'reply_ms_p50': 1000, 'reply_ms_p95': 2000,
+                            'stages': [{'stage': 'llm', 'label': 'provider wait', 'category': 'llm', 'messages': 2, 'ms_p50': 700, 'ms_p95': 900}], 'recent': []}
+                return super().call(path, timeout)
+        output = io.StringIO()
+        with patch.object(admin, 'API', StageAPI), contextlib.redirect_stdout(output):
+            self.assertEqual(admin.main(['timings', EVENT]), 0)
+            self.assertEqual(admin.main(['timings', 'recent', '--limit', '20']), 0)
+        text = output.getvalue()
+        self.assertIn('reply 12.4 s · attempts 1', text)
+        self.assertRegex(text, r'llm\s+provider wait \(3 calls\)\s+9\.0 s')
+        self.assertRegex(text, r'unmeasured\s+unmeasured\s+0\.3 s')
+        self.assertIn('recent replies 2 · reply p50 1.0 s · p95 2.0 s', text)
+        self.assertNotIn('private', text)
+        self.assertEqual(StageAPI.calls[-1][0], '/v1/workflows/timings?limit=20')
+        with patch.object(admin, 'API', FakeAPI), contextlib.redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(admin.main(['timings', EVENT]), 1)
+        self.assertIn('lacks stage timing', error.getvalue())
 
     def test_invalid_id_does_not_call_api(self):
         with patch.object(admin, "API", FakeAPI), contextlib.redirect_stderr(io.StringIO()):
