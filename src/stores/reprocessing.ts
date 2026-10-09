@@ -8,6 +8,7 @@ import {ArchiveRepository,type FileReference} from './archive.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
 import {GuardRepository} from './guards.js';
 import type {StorePools} from './connections.js';
+import {timed} from './stage-timings.js';
 
 export interface DerivationEngine {
   readonly name:string;readonly version:string;readonly outputKind:'transcript'|'extracted_text';
@@ -91,7 +92,9 @@ export class ReprocessingRepository {
           throw new HttpError(409,'file_reference_conflict');
         const bytes=await readFile(join(this.dataDir,'files',file.input_hash));
         if(digest(bytes)!==file.input_hash||bytes.length!==file.byte_size)throw new HttpError(409,'original_file_integrity_failed');
-        const engine=this.engine(job.producer,job.producer_version),output=await engine.run(bytes,manifest,job.configuration);
+        const engine=this.engine(job.producer,job.producer_version),run=()=>engine.run(bytes,manifest,job.configuration);
+        // Speech recognition is an external service on the reply path; failures are timed too.
+        const output=engine.outputKind==='transcript'?await timed(this.stores.control,file.event.id,'transcription','nocheh',run):await run();
         if(typeof output!=='string'&&(engine.outputKind!=='extracted_text'||output.kind!=='extraction_status'||typeof output.text!=='string'))
           throw new HttpError(503,'invalid_derivation_result');
         result=await this.derived.record({operation_id:'reprocess:'+id,source:file.event,file,kind:typeof output==='string'?engine.outputKind:output.kind,content:Buffer.from(typeof output==='string'?output:output.text),
