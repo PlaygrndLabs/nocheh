@@ -1,7 +1,7 @@
 # Memory Backend Evidence Gate
 
 > Historical pre-rebuild research. These commands and privacy rules describe the
-> legacy implementation preserved on `codex/legacy-nocheh`; they are not active
+> legacy implementation preserved on `archive/pre-hermes-nocheh`; they are not active
 > runtime instructions. The optional comparison harness has been retired.
 
 Phase 0 compares memory behaviour; it does not alter production memory. The harness uses one

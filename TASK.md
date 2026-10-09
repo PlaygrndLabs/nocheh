@@ -754,11 +754,12 @@ activation remains separate.
    [release acceptance](docs/release-acceptance.md). Service health, Git integration,
    and historical readiness do not establish current recall or release approval.
 4. Sanitized history is published on `origin/main` (see
-   [history](docs/task-history.md)). Every local branch and worktree except
-   `codex/legacy-nocheh` is on the sanitized history; the legacy branch stays
-   unchanged and unpublished. The local pre-push guard rejects any branch that
-   still contains rewritten pre-sanitization commits. Earlier third-party
-   clones and GitHub caches of the old commits are not erased by the rewrite.
+   [history](docs/task-history.md)). The repository has only `main` and the
+   unpublished `archive/pre-hermes-nocheh` branch; the local pre-push guard
+   rejects any branch that still contains rewritten pre-sanitization commits.
+   The original history remains recoverable only from the ignored local
+   bundle. Earlier third-party clones and GitHub caches of the old commits are
+   not erased by the rewrite.
 5. Preserve the new cold six-case pass and coupled 429 cooldown observation
    alongside the topic-17 first-attempt failure, attempt-16 late reply, topic-18
    pass, prior retirement outcomes, and all original receipts. The fresh cold
