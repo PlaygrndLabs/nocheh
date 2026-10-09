@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {expireWorkflowHistory,retentionDays} from '../src/workflows/retention.js';
+import {expireWorkflowHistory,expireWorkflowRecords,retentionDays} from '../src/workflows/retention.js';
+import {hash,workflowSchema} from '../src/workflows/store.js';
 
 test('workflow history retention keeps 14 days by default and rejects invalid day counts',()=>{
   const saved=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS;delete process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS;
@@ -56,5 +57,37 @@ test('retention removes only history of runs idle past the cutoff',
     assert.deepEqual(await left('event_batches','id'),['new']);
     assert.deepEqual((await client.query("SELECT convert_from(id,'UTF8') AS id FROM worker_connections ORDER BY 1")).rows.map(row=>row.id),['closing','open'],'a connected worker stays');
     assert.ok(Object.values(await expireWorkflowHistory(client,at(14),0)).every(count=>count===0),'a repeated pass is a no-op');
+  } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
+});
+
+test('record retention removes only spent publication records and run links, never the registry or receipts',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:60000},async()=>{
+  const config:pg.ClientConfig={host:process.env.PGHOST!,port:Number(process.env.PGPORT??5432),user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const client=new pg.Client(config);await client.connect();const schema='records_'+Date.now();
+  try {
+    assert.equal((await client.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');
+    await client.query(`CREATE SCHEMA ${schema}`);await client.query(`SET search_path=${schema}`);await client.query(workflowSchema);
+    const ago=(days:number)=>new Date(Date.now()-days*86400000);
+    // name, state, current dispatch, registry update age, and per dispatch: [published age or null, run seen age]
+    const workflows=[['closed-old','completed',1,30,[[30,30]]],['closed-recent','failed',1,0.01,[[0.02,0.02]]],
+      ['continued','waiting',3,0.01,[[30,30],[null,20],[0.01,0.01]]],['open-old','waiting',1,30,[[30,30]]]] as const;
+    for(const [name,state,dispatch,age,dispatches] of workflows) {
+      const id=hash(name);
+      await client.query(`INSERT INTO workflow_registry(id,family,job_id,version,generation,state,dispatch,updated_at) VALUES($1,'telegram',$2,1,1,$3,$4,$5)`,[id,name,state,dispatch,ago(age)]);
+      await client.query(`INSERT INTO workflow_receipts(workflow_id,step,attempt,state,created_at) VALUES($1,'telegram',1,'done',$2)`,[id,ago(30)]);
+      for(const [index,[published,seen]] of dispatches.entries()) {
+        await client.query('INSERT INTO workflow_outbox(id,workflow_id,dispatch,published_at,created_at) VALUES($1,$2,$3,$4,$5)',
+          [hash(id+':'+(index+1)),id,index+1,published===null?null:ago(published),ago(published??seen)]);
+        await client.query('INSERT INTO workflow_runs(workflow_id,run_id,dispatch,owner_epoch,seen_at) VALUES($1,$2,$3,1,$4)',[id,name+(index+1),index+1,ago(seen)]);
+      }
+    }
+    assert.deepEqual(await expireWorkflowRecords(client,ago(14),0),{workflow_outbox:3,workflow_runs:3});
+    const left=async(table:string)=>(await client.query(`SELECT w.job_id||':'||t.dispatch AS key FROM ${table} t JOIN workflow_registry w ON w.id=t.workflow_id ORDER BY 1`)).rows.map(row=>row.key);
+    const kept=['closed-recent:1','continued:3','open-old:1'];
+    assert.deepEqual(await left('workflow_outbox'),kept,'the current dispatch of an open workflow and recently closed work stay');
+    assert.deepEqual(await left('workflow_runs'),kept);
+    assert.equal((await client.query('SELECT count(*)::int AS count FROM workflow_registry')).rows[0].count,4,'the registry is never pruned');
+    assert.equal((await client.query('SELECT count(*)::int AS count FROM workflow_receipts')).rows[0].count,4,'effect receipts are never pruned');
+    assert.deepEqual(await expireWorkflowRecords(client,ago(14),0),{workflow_outbox:0,workflow_runs:0},'a repeated pass is a no-op');
   } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
 });
