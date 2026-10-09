@@ -2653,3 +2653,19 @@ restarting the two affected containers; `make dev-build` refreshed the cached
 database image so new control schemas apply.
 
 </entry>
+
+<entry date="2026-10-09" area="Owner directory, group names and polling resilience">
+
+The owner found that private turns could not list groups. Isolated turns in
+development ran plugin code baked into the pinned image, so the new owner
+tool was absent; the launcher now mounts the watched source read-only.
+Topics are named from the root message every topic message carries, selected
+groups can be named by an explicit getChat refresh, and a later title-less
+observation no longer erases a name. With the operating stack stopped by the
+owner's choice, a fresh simulator installation found that one update the SDK
+could not parse wedged polling while health reported connected; unparseable
+updates now pass as bare IDs after durable capture. Browser checks in the
+synthetic dashboard found portal-rendered drawer styles scoped to the app
+root; they were rescoped.
+
+</entry>
