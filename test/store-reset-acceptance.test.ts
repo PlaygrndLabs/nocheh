@@ -54,7 +54,7 @@ function stores(eventTime=fresh) {
     if(sql.includes('FROM memory_engine_connection'))return {rows:[{attached:true,verified:true,acceptance:{format:'nocheh-honcho-live-v1',
       recorded_at:fresh.toISOString(),checks:Object.fromEntries(['subscription_reasoning','ingestion','retrieval','embedding_guarded','restart','provider_failure'].map(name=>[name,'passed']))}}]};
     if(sql.includes('FROM memory_generations g'))return {rows:[{state:'ready',installation_generation:'22222222-2222-4222-8222-222222222222',
-      last_ready_at:fresh,refreshed_at:fresh}]};
+      last_ready_at:fresh}]};
     if(sql.includes('FROM memory_ingestion_receipts'))return {rows:[sql.includes('projection_reference')?
       {state:'done',projection_reference:{id:ids.entry,revision:1},created_at:fresh}:
       {state:'done',attempts:1,created_at:fresh}]};
@@ -148,8 +148,6 @@ test('fresh reset acceptance queries the three real isolated PostgreSQL stores',
       VALUES($1,$2,1,'owner','ready',$3)`,[ids.memory,e.generation,when]);
     await control.query(`INSERT INTO memory_ingestion_receipts(id,generation,source_reference,guard_source_id,prepared_id,content_hash,state,remote_id,attempts,created_at,projection_reference)
       VALUES($1,$2,'{}','fixture','fixture',$3,'done','remote',1,$4,$5)`,[ids.receipt,ids.memory,digest('memory'),when,{id:ids.entry,revision:2}]);
-    await control.query("INSERT INTO memory_context_snapshots(generation,derived_id,content_hash,refreshed_at) VALUES($1,$2,$3,$4)",
-      [ids.memory,digest('context'),digest('context-content'),when]);
     for(const name of storeNames)await clients[name]!.query(`GRANT USAGE ON SCHEMA ${schema} TO nocheh_${name}; GRANT SELECT ON ALL TABLES IN SCHEMA ${schema} TO nocheh_${name}`);
     const connected=connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords);
     try {const result=await verifyFreshAcceptance(connected,e);assert.equal(result.live_only,true);assert.equal(result.source_events,11);}

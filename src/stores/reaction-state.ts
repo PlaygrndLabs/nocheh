@@ -34,7 +34,8 @@ export class ReactionStateRepository {
       WHERE reaction_states.update_id<$4 RETURNING event_id`,[row.target_id,row.actor_id,mode,sequence,reference.id,JSON.stringify(value)]);
     if(changed.rowCount){
       const epoch=Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);
-      await requestWorkflow(db,'honcho','refresh',epoch);await requestWorkflow(db,'memory_review','refresh',epoch);
+      // Honcho keeps earlier reactions as evidence, so a reaction change never rechecks Honcho writes.
+      await requestWorkflow(db,'memory_review','refresh',epoch);
     }
   }
   async isCurrent(reference:SourceReference):Promise<boolean> {

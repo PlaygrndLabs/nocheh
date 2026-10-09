@@ -11,7 +11,7 @@ function repository(query:(store:string,sql:string,params:unknown[])=>any) {
     projects:{effective:async(space:string)=>({space,own_assignment:null,assignment:null,project:null,inherited:false})},
     controlledActions:{inspect:async()=>{throw Error('unexpected action read');}},telegramActions:{inspect:async()=>{throw Error('unexpected Telegram read');}},
     knowledge:{proposal:async()=>{throw Error('unexpected proposal read');}},memory:{status:async()=>({guard:{generation:'generation',epoch:4,mode:'on'},
-      connection:{attached:true,verified:true,revision:2},generations:[],receipts:[],syncing:false,limited_memory:true})}} as unknown as OwnerSupervisionDependencies;
+      connection:{attached:true,verified:true,revision:2},workspace:null,sessions:[],receipts:[],syncing:false,limited_memory:true})}} as unknown as OwnerSupervisionDependencies;
   return {value:new OwnerSupervisionRepository(services),queries,services};
 }
 

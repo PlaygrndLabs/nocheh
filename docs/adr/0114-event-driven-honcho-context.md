@@ -1,11 +1,13 @@
-# ADR-0113: Rebuild Honcho context when Honcho finishes work, not on a timer
+# ADR-0114: Rebuild Honcho context when Honcho finishes work, not on a timer
 
 <status>
 Accepted implementation of the owner decision of 2026-10-09 recorded in
 SPECS.md. Supersedes the two-minute refresh workflow and five-minute
 usability limit of ADR-0044 and their renewal in ADR-0072. The cache key,
 guard, audience and revision checks of ADR-0044 and ADR-0072 are unchanged.
-ADR-0109, if accepted, later replaces the snapshot table itself.
+[ADR-0115](0115-honcho-session-revisions.md) replaces the snapshot table with
+live session context; the no-timer and arrival-time freshness decisions carry
+forward.
 </status>
 
 <context>

@@ -7,8 +7,8 @@ import type {StorageServices} from './services.js';
 import type {GuardBinding} from './guards.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
-const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found']);
-const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','honcho_sync_busy']);
+const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired']);
+const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','honcho_sync_busy','memory_session_rebuilt']);
 
 /** Initial replies and their prerequisites; every other storage family shares the background slot. */
 export const foregroundFamilies:ReadonlySet<WorkflowFamily>=new Set(['preparation','telegram','browser','schedules','actions']);
@@ -62,8 +62,39 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     try{held=await enterFamily(db,family,authority.owner,authority.epoch);return held?await run():waiting('admission','owner_paused');}
     finally{await releaseOperation(db,async()=>{if(held)await leaveFamily(db,family);});}
   };
+  /** Honcho keeps one workspace across guard epochs. After an epoch, a bounded sweep
+   * rechecks written evidence and rebuilds only the sessions holding writes that became invalid. */
+  const validate=async(authority:ExecutionAuthority)=>fenced('honcho',authority,async()=>{
+    const binding=await s.guards.state();
+    if((await control.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
+    await control.query("UPDATE memory_generations SET state='retired' WHERE installation_generation<>$1 AND state<>'retired'",[binding.generation]);
+    await control.query(`INSERT INTO learning_refresh_sweeps(installation_generation,guard_epoch,family) VALUES($1,$2,'honcho') ON CONFLICT DO NOTHING`,[binding.generation,binding.epoch]);
+    const row=(await control.query("SELECT * FROM learning_refresh_sweeps WHERE installation_generation=$1 AND guard_epoch=$2 AND family='honcho'",[binding.generation,binding.epoch])).rows[0];
+    if(row.stage==='done')return observation('completed','sync');
+    let stage=row.stage,after=row.learned_after;
+    if(stage==='sources') {
+      const page=await s.memory.sweep(after,binding);
+      after=page.done?'':page.after;if(page.done)stage='learned';
+    } else {
+      // Interpretations published while memory was detached are written once; existing ones are not rewritten.
+      const rows=(await s.stores.derived.query(`SELECT e.id,e.active_revision FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
+        WHERE NOT e.imported AND NOT v.retired AND e.id>$1 ORDER BY e.id LIMIT 25`,[after])).rows;
+      const versions=rows.map(entry=>entry.id+':'+entry.active_revision);
+      const written=new Set(rows.length?(await control.query(`SELECT DISTINCT (projection_reference->>'id')||':'||(projection_reference->>'revision') AS version
+        FROM memory_ingestion_receipts WHERE retired_at IS NULL AND (projection_reference->>'id')||':'||(projection_reference->>'revision')=ANY($1::text[])`,
+        [versions])).rows.map(item=>String(item.version)):[]);
+      for(const entry of rows.filter(entry=>!written.has(entry.id+':'+entry.active_revision)))await submit('honcho','projection:'+entry.id,binding.epoch);
+      after=rows.at(-1)?.id??after;if(rows.length<25)stage='done';
+    }
+    await s.guards.assertCurrent(binding);
+    const saved=await control.query(`UPDATE learning_refresh_sweeps SET stage=$3,learned_after=$4,updated_at=now()
+      WHERE installation_generation=$1 AND guard_epoch=$2 AND family='honcho' AND stage=$5 AND learned_after=$6`,
+      [binding.generation,binding.epoch,stage,after,row.stage,row.learned_after]);
+    if(!saved.rowCount)throw new HttpError(409,'honcho_sync_busy');
+    return stage==='done'?observation('completed','sync'):waiting('sync','prerequisite',100);
+  });
   /** Persist bounded sweep progress alongside deterministic requests in control. */
-  const refresh=async(family:'honcho'|'memory_review',authority:ExecutionAuthority)=>fenced(family,authority,async()=>{
+  const refresh=async(family:'memory_review',authority:ExecutionAuthority)=>fenced(family,authority,async()=>{
     const binding=await s.guards.state(),db=await control.connect();
     try {
       await db.query('BEGIN');
@@ -73,7 +104,6 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       await db.query(`INSERT INTO learning_refresh_sweeps(installation_generation,guard_epoch,family) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[binding.generation,binding.epoch,family]);
       const row=(await db.query('SELECT * FROM learning_refresh_sweeps WHERE installation_generation=$1 AND guard_epoch=$2 AND family=$3 FOR UPDATE',
         [binding.generation,binding.epoch,family])).rows[0];
-      if(family==='honcho')await db.query("UPDATE memory_generations SET state='retired' WHERE installation_generation<>$1 OR guard_epoch<>$2",[binding.generation,binding.epoch]);
       let stage=row.stage,after=row.source_after_sequence,learnedAfter=row.learned_after;
       if(stage==='sources') {
         const sources=await s.archive.page(String(after),25);
@@ -81,12 +111,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
           await requestWorkflow(db,'preparation',source.reference.id,binding.epoch);
           await requestWorkflow(db,family,'source:'+source.reference.id,binding.epoch);
         }
-        after=sources.at(-1)?.sequence??after;if(sources.length<25)stage=family==='honcho'?'learned':'done';
-      } else if(stage==='learned') {
-        const rows=(await s.stores.derived.query(`SELECT e.id FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
-          WHERE NOT e.imported AND NOT v.retired AND e.id>$1 ORDER BY e.id LIMIT 25`,[learnedAfter])).rows;
-        for(const entry of rows)await requestWorkflow(db,'honcho','projection:'+entry.id,binding.epoch);
-        learnedAfter=rows.at(-1)?.id??learnedAfter;if(rows.length<25)stage='done';
+        after=sources.at(-1)?.sequence??after;if(sources.length<25)stage='done';
       }
       await db.query(`UPDATE learning_refresh_sweeps SET stage=$4,source_after_sequence=$5,learned_after=$6,updated_at=now()
         WHERE installation_generation=$1 AND guard_epoch=$2 AND family=$3`,[binding.generation,binding.epoch,family,stage,after,learnedAfter]);
@@ -138,7 +163,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(kind==='source')return fenced('memory_review',authority,async()=>{
         const ready=await sourceReady(id);if('state' in ready)return ready;
         await s.reviews.queue(ready.source.reference);
-        await submit('honcho','source:'+id,ready.binding.epoch);
+        // Honcho writes each source once; a later guard epoch only asks for sources it never wrote.
+        if(!await s.memory.ingested(id))await submit('honcho','source:'+id,ready.binding.epoch);
         await s.guards.assertCurrent(ready.binding);return observation('completed','review');
       });
       if(kind==='interpret') {
@@ -155,9 +181,9 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         await s.guards.assertCurrent(row.binding);
         const initial=(await control.query(`SELECT 1 FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
           JOIN memory_engine_connection c ON c.singleton AND c.attached AND c.verified
-          WHERE g.installation_generation=$1 AND g.guard_epoch=$2 AND g.state<>'retired'
+          WHERE g.installation_generation=$1 AND g.state<>'retired' AND r.retired_at IS NULL
           AND r.state='pending' AND r.attempts=0 AND r.error_code IS NULL AND r.next_attempt<=now() LIMIT 1`,
-          [row.binding.generation,row.binding.epoch])).rowCount;
+          [row.binding.generation])).rowCount;
         if(initial)return waiting('review','prerequisite',10000);
       }
       if(row.next_attempt<=new Date()){await s.reviews.run(id,authority);row=await s.reviews.inspect(id);}
@@ -169,32 +195,30 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     honcho:async(job,authority)=>{
       const connection=(await control.query('SELECT attached,verified FROM memory_engine_connection WHERE singleton')).rows[0];
       if(!connection.attached||!connection.verified)return waiting('sync','prerequisite',60000);
-      if(job==='refresh')return refresh('honcho',authority);
-      const match=/^(source|projection|receipt|reconcile|generation|context):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');
+      if(job==='refresh')return validate(authority);
+      const match=/^(source|ingest|projection|receipt|reconcile|generation|context|delete):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');
       const kind=match[1],id=match[2]!;
-      if(kind==='source')return fenced('honcho',authority,async()=>{
+      if(kind==='source'||kind==='ingest')return fenced('honcho',authority,async()=>{
         const ready=await sourceReady(id);if('state' in ready)return ready;
         const queued=await s.memory.queueSource(ready.source.reference);if(!queued.length)return observation('skipped','sync',0,Date.now(),'consent_required');
         const space=await s.access.space(ready.source.reference),audience=space===s.access.policy().owner_id?'owner':space;
         const selected=queued.find(value=>value.audience===audience);if(!selected)return observation('failed','sync');
-        const generation=(await s.memory.current(selected.workspace)).row;
-        if(generation.state!=='ready')return waiting('sync','prerequisite');
+        // Learning waits for this source's own sessions, not for the whole workspace.
+        if(!await s.memory.settled(selected.receipts))return waiting('sync','prerequisite');
         await s.learning.request(ready.source.reference,selected.workspace,selected.audience);return observation('completed','sync');
       });
       if(kind==='projection')return fenced('honcho',authority,async()=>{await s.memory.queueProjection(id);return observation('completed','sync');});
-      if(kind==='context'||kind==='generation')return fenced('honcho',authority,async()=>{
-        if(kind==='generation') {
-          const ready=await s.memory.observe(id);if(!ready)return waiting('sync','prerequisite');
-          await s.memory.refreshContext(id);return observation('completed','sync');
-        }
-        // A one-shot rebuild requested when a message found context older than
-        // Honcho's finished work. A building generation is rebuilt by its own
-        // generation workflow when Honcho finishes; nothing refreshes on a timer.
-        await s.memory.refreshContext(id);return observation('completed','sync');
+      if(kind==='generation')return fenced('honcho',authority,async()=>{
+        const ready=await s.memory.observe(id);if(!ready)return waiting('sync','prerequisite');
+        await s.memory.requestPrefetch(id);return observation('completed','sync');
       });
-      const load=async()=>{const row=(await control.query('SELECT state,attempts,next_attempt FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
+      // A one-shot prefetch requested when Honcho finished new work for a conversation; nothing refreshes on a timer.
+      if(kind==='context')return fenced('honcho',authority,async()=>{await s.memory.prefetch(id);return observation('completed','sync');});
+      if(kind==='delete')return await s.memory.deleteSession(id,authority)?observation('completed','sync'):waiting('sync','prerequisite',1000);
+      const load=async()=>{const row=(await control.query('SELECT state,attempts,next_attempt,retired_at FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
         if(!row)throw new HttpError(404,'honcho_receipt_missing');return row;};
       let row=await load();if(row.state==='done')return observation('completed','sync',row.attempts);
+      if(row.retired_at&&row.state!=='uncertain')return observation('skipped','sync',row.attempts,Date.now(),'superseded');
       if(row.next_attempt>new Date())return observation('waiting','sync',row.attempts,row.next_attempt.getTime(),'prerequisite');
       try {
         if(kind==='reconcile'||row.state==='uncertain')await fenced('honcho',authority,async()=>{

@@ -2719,3 +2719,21 @@ request.
 
 </entry>
 
+
+<entry date="2026-10-09" area="Honcho standard entity model, steps H1 to H4">
+
+The owner asked why recall was unreliable and chose to start the ADR-0109
+redesign. ADR-0109 was accepted and steps H1 to H4 were implemented in source
+([ADR-0115](adr/0115-honcho-session-revisions.md)): one Honcho workspace per
+installation that guard epochs never retire; an assistant peer that Honcho does
+not observe; versioned sessions per conversation, entity evidence and learned
+interpretation, each in one audience; receipts that depend only on their own
+source, so a bounded sweep after an epoch rebuilds only sessions holding
+invalid writes; corrections that delete the affected sessions and their derived
+conclusions and re-add valid evidence; live session context on arrival with
+event-driven prefetch, replacing the context snapshot table; and session
+allowlists for group and topic recall. The event-driven context decision was
+renumbered ADR-0114. Fixture tests pass; H5 (fresh start) and H6 (live
+acceptance) are not run and need owner approval.
+
+</entry>
