@@ -30,7 +30,7 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         self.directory.cleanup()
 
     async def test_capture_before_return_and_duplicate_batches_preserve_originals(self):
-        update = {'update_id':1,'message':{'message_id':5,'date':1700000000,'chat':{'id':-20},'text':'Aws pass: 123456\r\n😃  '}}
+        update = {'update_id':1,'message':{'message_id':5,'date':1700000000,'chat':{'id':-20,'type':'supergroup'},'text':'Aws pass: 123456\r\n😃  '}}
         raw = json.dumps({'ok':True,'result':[update]}).encode()
         request = instrument_request(Request((200,raw)), self.capture, polling=True)
         self.assertEqual(await request.do_request(url='https://api.telegram.org/botredacted/getUpdates'),(200,raw))
@@ -41,6 +41,23 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(e for e in events if e['kind']=='telegram_wire')['origin'],'live')
         await request.do_request(url='https://api.telegram.org/botredacted/getUpdates')
         self.assertEqual(len(list((self.root/'pending').glob('*.json'))),2)
+
+    async def test_an_unparseable_update_is_captured_whole_and_cannot_wedge_polling(self):
+        broken={'update_id':4,'message':{'message_id':6,'date':1700000000,'chat':{'id':-20,'type':'supergroup'},'text':'Topic root',
+                'reply_to_message':{'message_id':9,'date':1,'chat':{'id':-20,'type':'supergroup'},'forum_topic_created':{'name':'No icon colour'}}}}
+        ordinary={'update_id':5,'message':{'message_id':7,'date':1700000000,'chat':{'id':-20,'type':'supergroup'},'text':'Next'}}
+        raw=json.dumps({'ok':True,'result':[broken,ordinary]}).encode()
+        request=instrument_request(Request((200,raw)),self.capture,polling=True)
+        status,returned=await request.do_request(url='https://api.telegram.org/botredacted/getUpdates')
+        sent=json.loads(returned)['result']
+        self.assertEqual(sent[0],{'update_id':4},'the SDK receives only the update ID for the unparseable update')
+        self.assertEqual(sent[1],ordinary)
+        from telegram import Update
+        self.assertEqual([Update.de_json(item,None).update_id for item in sent],[4,5],'the batch now parses, so the offset advances')
+        events=[json.loads(p.read_bytes()) for p in (self.root/'pending').glob('*.json')]
+        captured=next(e for e in events if e['kind']=='telegram_update' and e['payload']['update_id']==4)
+        self.assertEqual(captured['payload'],broken,'the original keeps every field')
+        self.assertEqual(self.capture.polling['unparseable_updates'],1)
 
     async def test_reaction_timestamps_and_unknown_fields_are_captured_without_message_context(self):
         changes=[{'update_id':2,'message_reaction':{'chat':{'id':-20},'message_id':5,'date':1700000001,
