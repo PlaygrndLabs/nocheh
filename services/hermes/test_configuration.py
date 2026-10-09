@@ -104,6 +104,21 @@ class ConfigurationTests(unittest.TestCase):
             values['NOCHEH_PORT'] = '8795'; write_env(env_path(state), values)
             self.assertEqual(compose_environment(state)['NOCHEH_NATIVE_ADMIN_PORT'], '8800')
 
+    def test_every_compose_service_rotates_its_log_with_owner_adjustable_limits(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT,validate
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())
+        for name,service in compose['services'].items():
+            self.assertEqual(service.get('logging'),{'driver':'json-file','options':{
+                'max-size':'${NOCHEH_LOG_MAX_SIZE:-10m}','max-file':'${NOCHEH_LOG_MAX_FILES:-3}'}},name)
+        with tempfile.TemporaryDirectory() as folder:
+            values=initialize(Path(folder))
+            self.assertEqual((values['NOCHEH_LOG_MAX_SIZE'],values['NOCHEH_LOG_MAX_FILES']),('10m','3'))
+            validate({**values,'NOCHEH_LOG_MAX_SIZE':'500k','NOCHEH_LOG_MAX_FILES':'10'})
+            for key,bad in [('NOCHEH_LOG_MAX_SIZE','0m'),('NOCHEH_LOG_MAX_SIZE','10'),('NOCHEH_LOG_MAX_SIZE','10mb'),
+                            ('NOCHEH_LOG_MAX_FILES','0'),('NOCHEH_LOG_MAX_FILES','1000'),('NOCHEH_LOG_MAX_FILES','')]:
+                with self.assertRaises(ValueError,msg=key+'='+bad):validate({**values,key:bad})
+
     def test_separate_storage_credentials_are_private_stable_and_explicitly_selected(self):
         from tools.operations.installation.configuration import compose_command,validate
         from tools.operations.installation.settings import view,save

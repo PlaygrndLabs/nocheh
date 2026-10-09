@@ -822,7 +822,11 @@ activation remains separate.
    per-message breakdown.
 9. Storage growth: re-examine every component for uncontrolled growth using the
    [findings](docs/operations-review-plan.md). Inngest telemetry retention now
-   defaults to 14 days; its other unbounded tables remain open.
+   defaults to 14 days; its other unbounded tables remain open. Every Compose
+   service now rotates its Docker log (`NOCHEH_LOG_MAX_SIZE` 10m,
+   `NOCHEH_LOG_MAX_FILES` 3, owner-adjustable;
+   [check](services/hermes/test_configuration.py)); it takes effect when the
+   operating containers are next recreated.
 10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
     Inngest function, an Inngest cron, or a required out-of-band safety path;
     Telegram polling and the Hermes turn stay inside Hermes.
