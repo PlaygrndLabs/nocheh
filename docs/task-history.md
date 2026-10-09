@@ -2576,6 +2576,12 @@ expected old value, published in chunks after a single large push timed out.
 A verified bundle of the original history and a private local ref remain in
 ignored local state, and a local pre-push guard blocks the 743 rewritten
 commits. Third-party clones and server caches are not erased.
+The owner then asked to move the remaining local work onto the new history.
+Four branches and one detached worktree without their own commits moved to
+their rewritten equivalents; three `codex/` branches with one unpublished
+commit each were replayed onto their rewritten parents with identical patches.
+Original tips remain under private local refs; `codex/legacy-nocheh` is
+unchanged. No worktree had uncommitted changes.
 
 </entry>
 
