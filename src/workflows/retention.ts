@@ -2,10 +2,12 @@ import pg from 'pg';
 import {pathToFileURL} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {secret} from '../config.js';
+import {closedStates} from './store.js';
 
 /**
- * Optional expiry of Inngest's own run history and telemetry. Nocheh receipts,
- * the workflow registry and Inngest's queue state never live in these tables.
+ * Optional expiry of Inngest's own run history and telemetry and of Nocheh's
+ * spent workflow publication records and run links. Nocheh receipts, the
+ * workflow registry and Inngest's queue state are never removed.
  * Fourteen days is the default; zero keeps every row.
  */
 export function retentionDays(value=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS??'14'):number {
@@ -45,16 +47,39 @@ export async function pruneWorkflowHistory(client:pg.ClientBase,cutoff:Date,batc
   return {spans,history,traces,function_runs,function_finishes,events,event_batches,trace_runs,worker_connections};
 }
 
-/** Drain everything past the cutoff, pausing between batches so live writes keep priority. */
-export async function expireWorkflowHistory(client:pg.ClientBase,cutoff:Date,pause=200):Promise<Pruned> {
-  const total=Object.fromEntries(prunedTables.map(table=>[table,0])) as Pruned;
+/** Repeat bounded batches until one removes nothing, pausing so live writes keep priority. */
+async function drain<T extends Record<string,number>>(prune:()=>Promise<T>,pause:number):Promise<T> {
+  let total:T|undefined;
   for(;;) {
-    const pruned=await pruneWorkflowHistory(client,cutoff);
-    for(const table of prunedTables)total[table]+=pruned[table];
-    if(prunedTables.every(table=>!pruned[table]))return total;
+    const pruned=await prune();
+    total=total?Object.fromEntries(Object.entries(total).map(([key,count])=>[key,count+pruned[key]!])) as T:pruned;
+    if(Object.values(pruned).every(count=>!count))return total;
     await delay(pause);
   }
 }
+/** Drain everything past the cutoff. */
+export const expireWorkflowHistory=(client:pg.ClientBase,cutoff:Date,pause=200)=>drain(()=>pruneWorkflowHistory(client,cutoff),pause);
+
+export type PrunedRecords={workflow_outbox:number;workflow_runs:number};
+/**
+ * Remove Nocheh's own publication records and Inngest run links that can no
+ * longer be used: those of a superseded dispatch, and those of a workflow closed
+ * before the cutoff. The publisher and run-receipt check read only the current
+ * dispatch of an open workflow, and every reopening moves to a new dispatch.
+ * The workflow registry and effect receipts are never removed; they carry
+ * permanent deduplication and exclude repeated effects.
+ */
+export async function pruneWorkflowRecords(client:pg.ClientBase,cutoff:Date,batch=2000):Promise<PrunedRecords> {
+  if(!Number.isSafeInteger(batch)||batch<1)throw Error('invalid_retention_batch');
+  const closed=closedStates.map(state=>`'${state}'`).join(',');
+  const outbox=await client.query(`DELETE FROM workflow_outbox WHERE ctid IN (SELECT o.ctid FROM workflow_outbox o JOIN workflow_registry w ON w.id=o.workflow_id
+    WHERE (o.dispatch<w.dispatch AND coalesce(o.published_at,o.created_at)<$1 OR w.state IN (${closed}) AND w.updated_at<$1)
+    AND (o.lease_until IS NULL OR o.lease_until<now()) LIMIT $2)`,[cutoff,batch]);
+  const runs=await client.query(`DELETE FROM workflow_runs WHERE ctid IN (SELECT r.ctid FROM workflow_runs r JOIN workflow_registry w ON w.id=r.workflow_id
+    WHERE (r.dispatch<w.dispatch AND r.seen_at<$1 OR w.state IN (${closed}) AND w.updated_at<$1) LIMIT $2)`,[cutoff,batch]);
+  return {workflow_outbox:outbox.rowCount??0,workflow_runs:runs.rowCount??0};
+}
+export const expireWorkflowRecords=(client:pg.ClientBase,cutoff:Date,pause=200)=>drain(()=>pruneWorkflowRecords(client,cutoff),pause);
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   let days=0;
@@ -63,15 +88,20 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   // Exit at once: PostgreSQL's shutdown waits for open sessions, and an
   // interrupted batch is its own transaction, so it simply rolls back.
   for(const signal of ['SIGTERM','SIGINT'] as const)process.on(signal,()=>process.exit(0));
-  for(;;) {
-    const client=new pg.Client({host:'127.0.0.1',user:'nocheh_inngest',database:'nocheh_inngest',password:secret('INNGEST_POSTGRES_PASSWORD'),
-      application_name:'nocheh-workflow-retention',options:'-c statement_timeout=60000 -c client_connection_check_interval=1000'});
+  // Each store connects with its own runtime role; one unavailable store does not stop the other.
+  const run=async(event:string,role:string,password:string,expire:(client:pg.Client,cutoff:Date)=>Promise<Record<string,number>>)=>{
+    let client:pg.Client|undefined;
     try {
+      client=new pg.Client({host:'127.0.0.1',user:role,database:role,password:secret(password),
+        application_name:'nocheh-workflow-retention',options:'-c statement_timeout=60000 -c client_connection_check_interval=1000'});
       await client.connect();
-      const pruned=await expireWorkflowHistory(client,new Date(Date.now()-days*86400000));
-      console.log(JSON.stringify({event:'workflow_history_retention',state:'pruned',days,...pruned}));
-    } catch {console.error(JSON.stringify({event:'workflow_history_retention',state:'unavailable'}));}
-    finally {await client.end().catch(()=>{});}
+      console.log(JSON.stringify({event,state:'pruned',days,...await expire(client,new Date(Date.now()-days*86400000))}));
+    } catch {console.error(JSON.stringify({event,state:'unavailable'}));}
+    finally {await client?.end().catch(()=>{});}
+  };
+  for(;;) {
+    await run('workflow_history_retention','nocheh_inngest','INNGEST_POSTGRES_PASSWORD',expireWorkflowHistory);
+    await run('workflow_record_retention','nocheh_control','NOCHEH_CONTROL_PASSWORD',expireWorkflowRecords);
     // Expiry is measured in days, so one check per day is enough.
     await delay(86400000);
   }
