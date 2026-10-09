@@ -17,6 +17,7 @@ Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).
 Separated Honcho budgets and settlement: [0079](0079-separated-honcho-budgets-and-settlement.md).
 Durable embedding outage cooldown: [0100](0100-durable-embedding-egress-cooldown.md).
 Honcho terminal-error readiness: [0101](0101-honcho-terminal-queue-errors-block-readiness.md).
+Proposed standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
 superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md).
 Primary ingestion before new native notes:

@@ -2,11 +2,25 @@
 
 <current>
 
-Last reconciled 2026-10-07. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-09. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
 reasons for carrying historical evidence forward.
+
+Owner architecture review (2026-10-09), plan only, no code changed: memory is
+swappable with Honcho as the current long-term memory; Inngest orchestrates the
+full Nocheh workflow with Hermes and Honcho as parts of it, without changing
+Hermes' internal workflow; slowness is diagnosed per stage with workflow,
+third-party and LLM time separated; uncontrolled storage growth is re-examined
+in every component; one reasoning provider and model is enough for the MVP.
+These are recorded in [SPECS.md](SPECS.md). The failing recall gate is in Honcho
+memory: Nocheh's per-generation workspaces are revoked by unrelated guard-epoch
+advances and refreshed by a perpetual 120-second timer, a non-standard usage the
+owner rejected. [Proposed ADR-0109](docs/adr/0109-standard-honcho-entity-model.md)
+and its [migration plan](docs/honcho-standard-memory-plan.md) await owner
+acceptance; [stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
+list the gaps with code references.
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
@@ -125,8 +139,8 @@ device codes. Each provider keeps one credential, and shared ChatGPT login statu
 counts only Codex files. Build, [relay checks](test/provider-oauth.test.ts),
 [login-state checks](services/hermes/test_provider.py), and live-dev checks pass.
 [Decision](docs/adr/0103-relay-every-provider-oauth-login.md). Pending: a live
-owner Claude login through the dev dashboard, and the owner's answer on whether
-reasoning should also use providers other than ChatGPT.
+owner Claude login through the dev dashboard. The owner answered that one
+reasoning provider and model is enough for the MVP phase.
 
 </current>
 
@@ -791,5 +805,23 @@ activation remains separate.
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh) were about six percent of
    sampled background steps.
+7. Honcho memory model: await owner acceptance of
+   [ADR-0109](docs/adr/0109-standard-honcho-entity-model.md) and the open
+   questions in its [plan](docs/honcho-standard-memory-plan.md). On acceptance,
+   revise the specs that still name per-audience workspaces, generations and
+   generation readiness (Honcho and native memory area), then implement steps
+   H1 to H6. Until then those specs stand and conflict with the owner's
+   direction to follow Honcho's documented model.
+8. Stage timing: persist Hermes phase timings with dispatch results, bind
+   Honcho, embedding and transcription durations to the source event, measure
+   Telegram send time, and report one per-event stage breakdown
+   ([gaps](docs/operations-review-plan.md)).
+9. Storage growth: re-examine every component for uncontrolled growth using the
+   [findings](docs/operations-review-plan.md). Clarification needed from the
+   owner: whether Inngest telemetry retention stays off by default now that the
+   specification forbids uncontrolled operational growth.
+10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
+    Inngest function, an Inngest cron, or a required out-of-band safety path;
+    Telegram polling and the Hermes turn stay inside Hermes.
 
 </pending>

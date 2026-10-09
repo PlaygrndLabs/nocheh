@@ -122,3 +122,4 @@ records current implementation and activation.
 | [0106](0106-configurable-workflow-history-retention.md) | Configurable Inngest telemetry retention, off by default | Extends 0046 and 0105; receipts, registry and queue state are never expired |
 | [0107](0107-daily-workflow-history-retention.md) | Run workflow telemetry retention daily | Supersedes the hourly interval in 0106 |
 | [0108](0108-first-derivative-selection-does-not-revoke.md) | A first derivative selection does not revoke authorized contexts | Extends the first-representation guard exemption; replacements keep the barrier |
+| [0109](0109-standard-honcho-entity-model.md) | Use Honcho through its documented entity model (proposed) | Would supersede per-generation workspaces in 0033, 0044, 0056 and timer refresh in 0072; retains 0030 audience isolation |

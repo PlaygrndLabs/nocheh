@@ -9,6 +9,7 @@ Telegram is an adapter; owned source data, useful memory, and reasoning are the 
 
 - Read [SPECS.md](SPECS.md) for the authoritative product requirements and [TASK.md](TASK.md) for current implementation status, blockers, and evidence links. [Task history](docs/task-history.md) summarizes older records; the prior full ledger is in Git history. Specifications do not claim implementation or activation.
 - Read the applicable code before relying on implementation descriptions. Plans under `docs/` provide execution order and acceptance procedures; [ADRs](docs/adr/README.md) explain decisions and their supersession history.
+- When referring to memory, point out which memory is meant: Honcho memory, Hermes native memory, etc.
 - Follow explicit user instructions. Record new durable requirements in `SPECS.md` and new working instructions here. Do not infer product changes from incidental code behavior or historical plans.
 
 </context>
