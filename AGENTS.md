@@ -35,7 +35,7 @@ Telegram is an adapter; owned source data, useful memory, and reasoning are the 
 
 <repository_workflow>
 
-- For each new task session, create and use a dedicated worktree on a `codex/` branch from `main`. Reuse that session's worktree on follow-ups; preserve other sessions' changes and `codex/legacy-nocheh`.
+- For each new task session, create and use a dedicated worktree on a `codex/` branch from `main`. Reuse that session's worktree on follow-ups; preserve other sessions' changes and the `archive/pre-hermes-nocheh` branch.
 - Inspect the applicable specifications, current status, code, and acceptance procedure before editing. Use repository commands and pinned upstream dependencies; retain npm, TypeScript services, thin Python integration, React, and Docker Compose.
 - Complete authorized work and continue independent work when a dependency is blocked. Do not ask for repeated permission for already authorized phase work.
 - Keep credentials, source conversations, and runtime data out of commits and logs. A worktree does not isolate Compose resources or grant access to another installation's credentials or state.

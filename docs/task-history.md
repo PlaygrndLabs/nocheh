@@ -2690,3 +2690,16 @@ installation has not activated this change.
 
 </entry>
 
+<entry date="2026-10-09" area="Branch and worktree cleanup">
+
+The owner asked for every open worktree and branch to be resolved so that only
+`main` remains, keeping the legacy branch under a better name. After the
+Monitoring port, every other session branch was merged or superseded and had no
+uncommitted changes. The owner-approved `make dev-stop` stopped the development
+stack with its Docker volumes retained. All session worktrees and branches and
+the private pre-rewrite refs were removed; the verified full-history bundle
+remains in ignored local state. `codex/legacy-nocheh` was renamed
+`archive/pre-hermes-nocheh`.
+
+</entry>
+

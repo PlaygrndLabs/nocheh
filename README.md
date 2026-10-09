@@ -21,7 +21,7 @@ service names. See [the service map and workflow](docs/services.md).
 [TASK.md](TASK.md) records actual activation, migration progress and release gates;
 specifications and healthy containers do not establish release acceptance.
 
-Legacy code is preserved on `codex/legacy-nocheh`.
+Legacy code is preserved on `archive/pre-hermes-nocheh`.
 
 ## Local development and automated startup
 
