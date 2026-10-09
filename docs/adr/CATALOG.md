@@ -57,7 +57,7 @@ records current implementation and activation.
 | [0041](0041-local-inngest-workflows.md) | Local Inngest product workflows with owned outbox and receipts | Current workflow baseline |
 | [0042](0042-host-workflow-archive-coordination.md) | Host Connect through the archive listener with protected checkpoints | Implements 0041 |
 | [0043](0043-owner-workflow-inspection.md) | Owner workflow controls and authenticated inspection-only history | Implements 0041 |
-| [0044](0044-automatic-honcho-context.md) | Automatic primary Honcho context with protected generation cache | Current memory-context direction |
+| [0044](0044-automatic-honcho-context.md) | Automatic primary Honcho context with protected generation cache | Current memory-context direction; its timed refresh and five-minute limit are superseded by 0113 |
 | [0045](0045-honcho-in-installation-compose.md) | Production Honcho in the installation Compose project | Current installation direction |
 | [0046](0046-consolidated-inngest-installation.md) | Consolidated applications and Inngest-only workflow execution | Extends 0041 installation design |
 | [0047](0047-receipted-event-handoff.md) | Retry one event identity until a fenced workflow records receipt | Durability implementation of 0041 |
@@ -85,7 +85,7 @@ records current implementation and activation.
 | [0069](0069-role-based-source-layout.md) | Role-based tooling, services, dashboard, and one owner launcher | Extends 0025 and 0067 on code ownership and launcher placement |
 | [0070](0070-single-agent-support-root.md) | One `.agent/` directory for project agent support | Extends 0069 on agent skill and support placement |
 | [0071](0071-local-only-acceptance-evidence.md) | Track source and synthetic fixtures; keep runtime output and live evidence local | Extends 0040 on evidence retention and privacy |
-| [0072](0072-validated-honcho-context-renewal.md) | Revalidate unchanged Honcho context without repeated representation calls | Supersedes 0044's unconditional representation refresh; retains five-minute freshness |
+| [0072](0072-validated-honcho-context-renewal.md) | Revalidate unchanged Honcho context without repeated representation calls | Supersedes 0044's unconditional representation refresh; its timed renewal is superseded by 0113 |
 | [0073](0073-live-data-source-watched-development.md) | Source-watched development reuses the operating Compose project, bot, data, and provider login | Supersedes 0066's separate project, state, and credential boundary |
 | [0074](0074-root-development-compose-layout.md) | Root development override and acceptance test overlay in their role-based locations | Refines 0073 on file placement; retires the isolated preview entrypoint |
 | [0075](0075-clean-development-setup.md) | Clean development reset with Compose-owned stores and one source-watched stack | Refines 0073 and 0074; release acceptance remains separate |
@@ -124,3 +124,4 @@ records current implementation and activation.
 | [0108](0108-first-derivative-selection-does-not-revoke.md) | A first derivative selection does not revoke authorized contexts | Extends the first-representation guard exemption; replacements keep the barrier |
 | [0110](0110-default-workflow-history-retention.md) | Inngest telemetry retention on by default with 14 days | Supersedes the off default in 0106; installations that set a value keep it |
 | [0109](0109-standard-honcho-entity-model.md) | Use Honcho through its documented entity model (proposed) | Would supersede per-generation workspaces in 0033, 0044, 0056 and timer refresh in 0072; retains 0030 audience isolation |
+| [0113](0113-event-driven-honcho-context.md) | Rebuild Honcho context when Honcho finishes work, not on a timer | Supersedes the two-minute refresh and five-minute limit in 0044 and 0072; keeps their guard and revision checks |

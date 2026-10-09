@@ -11,49 +11,56 @@ import {storageServices} from '../src/stores/services.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
 
-test('unchanged ready memory revalidates its context without another paid representation',async()=>{
-  const id=digest('stable-memory-workspace'),calls:string[]=[],queries:string[]=[];
-  let state='ready',pending=0,updated=true;
+test('protected context is rebuilt only after Honcho finishes new work, never on a timer',async()=>{
+  const id=digest('stable-memory-workspace'),calls:string[]=[];
+  let state='ready',cached=1;
   const control={query:async(sql:string)=>{
-    queries.push(sql);
-    if(sql.startsWith('SELECT 1 FROM memory_context_snapshots'))return {rowCount:1};
-    if(sql.startsWith('UPDATE memory_context_snapshots'))return {rowCount:updated?1:0};
+    if(sql.startsWith('SELECT 1 FROM memory_context_snapshots'))return {rowCount:cached};
     throw Error('unexpected_control_query');
   }};
   const memory=new NativeMemoryRepository({access:{stores:{control}}} as any,{} as any,{} as any,{} as any,
-    async(path:string)=>{calls.push(path);return {pending_work_units:pending,in_progress_work_units:0};},async()=>[]);
+    async(path:string)=>{calls.push(path);throw Error('paid_honcho_call_denied');},async()=>[]);
   (memory as any).current=async()=>({row:{state,work_revision:7,last_ready_at:new Date()},binding:{},principal:{}});
-  assert.equal(await memory.refreshContext(id,'first'),true);
-  assert.deepEqual(calls,['/v3/workspaces/'+id+'/queue/status']);
-  assert.deepEqual(queries.filter(sql=>sql.startsWith('UPDATE memory_context_snapshots')).length,1);
-  pending=1;assert.equal(await memory.refreshContext(id,'second'),false,'unfinished Honcho work cannot validate a stale snapshot');
-  assert.equal(queries.filter(sql=>sql.startsWith('UPDATE memory_context_snapshots')).length,1);
-  pending=0;updated=false;assert.equal(await memory.refreshContext(id,'third'),false,'a changed generation revision cannot renew the old snapshot');
-  state='building';updated=true;const before=calls.length;
-  assert.equal(await memory.refreshContext(id,'fourth'),true,'previously ready context stays available while new work builds');
-  assert.equal(calls.length,before,'building refresh does not request a new representation');
+  assert.equal(await memory.refreshContext(id),true,'context saved after the last ready transition is current');
+  assert.deepEqual(calls,[],'a current context needs no Honcho queue check or representation');
+  state='building';cached=0;
+  assert.equal(await memory.refreshContext(id),false,'unfinished Honcho work is rebuilt by its generation workflow when it finishes');
+  assert.deepEqual(calls,[]);
 });
 
-test('foreground context renews a stale previously ready snapshot during a build without model egress',async()=>{
+test('foreground context checks freshness on arrival without a time limit',async()=>{
   const id=digest('building-context'),principal={admin:false,scope:'-100',space:'-100/topic/7'} as Reader;
-  let usable=false,refreshes=0,reads=0;
+  let state='building',lastReady:Date|null=new Date(Date.now()-24*3600000),current:boolean|null=true,refreshes=0,reads=0,requested=0;
+  let refresh=async()=>{refreshes++;current=true;return true;};
   const control={query:async(sql:string)=>{
     if(sql.includes('FROM memory_generations WHERE audience='))return {rows:[{id}]};
-    if(sql.includes('FROM memory_context_snapshots'))return {rows:[{derived_id:digest('context'),usable,fresh:usable,refreshed_at:new Date()}]};
+    if(sql.includes('FROM memory_context_snapshots s'))return {rows:current===null?[]:[{derived_id:digest('context'),current,refreshed_at:new Date(Date.now()-24*3600000)}]};
     throw Error('unexpected_control_query');
-  }};
+  },connect:async()=>({query:async(sql:string)=>{if(sql.startsWith('INSERT INTO workflow_registry'))requested++;return {rowCount:1,rows:[]};},release:()=>{}})};
   const audience={assert:async()=>({generation:'fixture',epoch:1})};
   const memory=new NativeMemoryRepository({access:{stores:{control}},guards:{read:async()=>{reads++;return {value:{text:'Synthetic saved fact'}};}}} as any,
     {} as any,{audience,allow:async()=>{}} as any,{} as any,async()=>{throw Error('paid_honcho_call_denied');},async()=>[]);
-  (memory as any).current=async()=>({row:{state:'building',work_revision:7,last_ready_at:new Date()},binding:{}});
-  (memory as any).refreshContext=async()=>{refreshes++;usable=true;return true;};
-  const answer=await memory.context(principal);
-  assert.equal(answer.limited_memory,false);assert.equal('syncing' in answer&&answer.syncing,true);
-  assert.equal(answer.sources[0]?.text,'Synthetic saved fact');
-  assert.equal(refreshes,1);assert.equal(reads,1);
-  (memory as any).refreshContext=async()=>{throw Error('revision_changed');};usable=false;
+  (memory as any).current=async()=>({row:{state,work_revision:7,last_ready_at:lastReady},binding:{}});
+  (memory as any).refreshContext=async()=>refresh();
+  const building=await memory.context(principal);
+  assert.equal(building.limited_memory,false,'a day-old context from the last ready state stays usable while new work builds');
+  assert.equal('syncing' in building&&building.syncing,true);assert.equal(building.sources[0]?.text,'Synthetic saved fact');
+  assert.equal(refreshes,0);assert.equal(requested,0,'no refresh workflow is requested while the context is current');
+  state='ready';current=false;
+  const rebuilt=await memory.context(principal);
+  assert.equal(rebuilt.limited_memory,false);assert.equal('syncing' in rebuilt&&rebuilt.syncing,false);
+  assert.equal(refreshes,1,'context older than finished Honcho work is rebuilt when a message arrives');
+  current=false;refresh=async()=>{refreshes++;return false;};
+  const pending=await memory.context(principal);
+  assert.equal(pending.limited_memory,true);assert.deepEqual(pending.sources,[],'an outdated context is not usable memory');
+  assert.equal(requested,1,'an unfinished rebuild is handed to one workflow');
+  refresh=async()=>{throw Error('revision_changed');};const readsBefore=reads;
   const revoked=await memory.context(principal);
   assert.equal(revoked.limited_memory,true);assert.deepEqual(revoked.sources,[],'failed revalidation cannot expose stale context');
+  assert.equal(reads,readsBefore);
+  lastReady=null;state='building';current=null;
+  const never=await memory.context(principal);
+  assert.equal(never.limited_memory,true);assert.equal('syncing' in never&&never.syncing,true);
 });
 
 test('terminal Honcho derivation errors cannot mark a generation ready',async()=>{
@@ -180,9 +187,9 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       if(String(sql).startsWith('INSERT INTO memory_context_snapshots'))throw Error('synthetic_snapshot_completion_lost');
       return (originalQuery as any)(sql,...params);
     }) as typeof stores.control.query;
-    try{await assert.rejects(services.memory.refreshContext(groupWorkspace,key+':snapshot'),/synthetic_snapshot_completion_lost/);}finally{stores.control.query=originalQuery as typeof stores.control.query;}
+    try{await assert.rejects(services.memory.refreshContext(groupWorkspace),/synthetic_snapshot_completion_lost/);}finally{stores.control.query=originalQuery as typeof stores.control.query;}
     const fetched=calls.filter(c=>c.path.endsWith('/representation')).length;
-    assert.equal(await services.memory.refreshContext(groupWorkspace,key+':snapshot'),true);
+    assert.equal(await services.memory.refreshContext(groupWorkspace),true);
     assert.equal(calls.filter(c=>c.path.endsWith('/representation')).length,fetched,'completed native results survive a lost control write');
     const recalledPeers=new Set(calls.filter(c=>c.path.endsWith('/representation')).map(c=>c.path.split('/peers/')[1]!.split('/')[0]));
     assert.ok([...recalledPeers].some(peer=>String(peer).startsWith('person_'))&&[...recalledPeers].some(peer=>String(peer).startsWith('project_')),'cached context includes authorized person and project peers');
@@ -259,7 +266,7 @@ test('foreground recall requires independent source evidence while background co
     assert.equal(building.limited_memory,true);assert.deepEqual(building.sources,[]);
     assert.equal(calls.filter(path=>path.endsWith('/chat')).length,0,'ingesting the question cannot establish a prior fact');
     assert.equal(await services.memory.observe(current.workspace),true);
-    assert.equal(await services.memory.refreshContext(current.workspace,key+':context'),true);
+    assert.equal(await services.memory.refreshContext(current.workspace),true);
     assert.ok(calls.some(path=>path.endsWith('/representation')),'background learning retains the current source');
     assert.equal((await services.memory.context(principal)).limited_memory,false);
     // Older receipts without the evidence array retain the same source boundary.

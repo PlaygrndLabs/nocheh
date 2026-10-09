@@ -16,8 +16,13 @@ third-party and LLM time separated; uncontrolled storage growth is re-examined
 in every component; one reasoning provider and model is enough for the MVP.
 These are recorded in [SPECS.md](SPECS.md). The failing recall gate is in Honcho
 memory: Nocheh's per-generation workspaces are revoked by unrelated guard-epoch
-advances and refreshed by a perpetual 120-second timer, a non-standard usage the
-owner rejected. [Proposed ADR-0109](docs/adr/0109-standard-honcho-entity-model.md)
+advances, a non-standard usage the owner rejected. The perpetual 120-second
+context timer and five-minute context limit are replaced in source by a rebuild
+when Honcho finishes work and a freshness check on message arrival
+([decision](docs/adr/0113-event-driven-honcho-context.md),
+[context checks](test/store-native-memory.test.ts),
+[workflow check](test/store-workflows.test.ts)); it is not active in the
+operating installation, and no live recall check has run. [Proposed ADR-0109](docs/adr/0109-standard-honcho-entity-model.md)
 and its [migration plan](docs/honcho-standard-memory-plan.md) await owner
 acceptance; [stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
@@ -805,8 +810,8 @@ activation remains separate.
    owner decision; the operating `.env` must be checked for an explicit `0`. The rebuilt `nocheh-db` image is needed
    for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
-   perpetual 120-second Honcho context refresh) were about six percent of
-   sampled background steps.
+   perpetual 120-second Honcho context refresh, now one-shot in source) were
+   about six percent of sampled background steps.
 7. Honcho memory model: await owner acceptance of
    [ADR-0109](docs/adr/0109-standard-honcho-entity-model.md). The owner chose
    projects as peer plus session, group recall of the chat plus approved facts,
@@ -815,7 +820,11 @@ activation remains separate.
    revise the specs that still name per-audience workspaces, generations and
    generation readiness (Honcho and native memory area), then implement steps
    H1 to H6. Until then those specs stand and conflict with the owner's
-   direction to follow Honcho's documented model.
+   direction to follow Honcho's documented model. Recall still loses ready
+   Honcho memory whenever a reaction, schedule, publication or learned-rule
+   change advances the guard epoch; the replacement generation starts empty, so
+   Hermes' `nocheh_memory_recall` finds no completed receipts. Only H1 to H4
+   remove that.
 8. Stage timing: the owner chose plan first. Review the
    [stage timing plan](docs/stage-timing-plan.md) (steps T1 to T6) with the
    owner before code. Monitoring shows both per-stage averages and the
