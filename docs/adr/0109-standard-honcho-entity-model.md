@@ -42,12 +42,20 @@ by timer. Neither recommends rebuilding workspaces when permissions change.
 - Every entity is a peer with a stable Nocheh-derived ID: the owner, each
   person, each confirmed project, and the assistant. The assistant peer is not
   observed (`observe_me: false`) but its messages are saved.
+- A project is both an entity peer and a session (owner decision). Nocheh adds
+  extracted project facts to the project peer as Honcho conclusions, because a
+  project never authors messages; the project session holds its conversations
+  and evidence.
 - Sessions bound conversations: each Telegram private chat, group, topic,
   import, and project-evidence stream. Observation is directional.
 - Audience isolation is enforced by Nocheh at query time: a turn may query only
   the sessions and peers its audience is authorized for (`session`/`sessions`
   filters, `limit_to_session`, `peer_target`). Owner-private evidence is never
   written into a session that a group or topic audience may query.
+- Owner private turns recall across the whole workspace. Group and topic turns
+  recall that chat's own session plus facts the owner approved for sharing
+  with that audience (owner decision), never a person's unrestricted
+  representation.
 - Guard epochs, policy changes and learned-rule replacements do not create new
   workspaces or re-ingest every source. Corrections and retractions delete the
   affected Honcho session or conclusions and re-add the corrected evidence.
@@ -69,8 +77,9 @@ by timer. Neither recommends rebuilding workspaces when permissions change.
   leaves workspace-level conclusions; targeted correction must delete those
   conclusions explicitly. Session layout must keep owner-private material out of
   shared sessions because deletion is coarse.
-- Requires a one-time re-ingest into the new workspace, then deletion of the
-  old generation workspaces, under the existing attachment and acceptance gates.
+- Fresh start (owner decision): the new workspace learns from new messages
+  only, and the old generation workspaces are deleted. Original messages stay in
+  Nocheh's archive, so a later owner-approved re-ingest remains possible.
 - Specifications that name per-audience workspaces and generations need
   revision when this ADR is accepted. See the
   [migration plan](../honcho-standard-memory-plan.md).
