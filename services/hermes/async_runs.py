@@ -36,11 +36,26 @@ class AsyncRuns:
         with path.open('ab') as file:
             path.chmod(0o600);file.write(canonical(value)+b'\n');file.flush();os.fsync(file.fileno())
 
+    def _window(self,run,finished):
+        # Journal times place the run on the message timeline: queued, native
+        # processing started, delivery started, and the closed receipt.
+        path=self._path(run,'.events');window={}
+        for line in path.read_bytes().splitlines() if path.exists() else []:
+            event=json.loads(line)
+            key='queued' if event['state']=='queued' else event['stage'] if event['state']=='running' and event['stage'] in ('assistant','delivery') else None
+            if key and key not in window:window[key]=event['at']
+        window['finished']=finished
+        return window
+
     def _finish(self,run,result):
         state=result.get('state')
         if state not in CLOSED:state='ambiguous'
         receipt={'state':state}
         if result.get('error_code') in CODES:receipt['error_code']=result['error_code']
+        from .timing import safe
+        # Durations only: no content, identifiers or exception text.
+        timings=safe(result.get('timings'))
+        if timings:receipt.update(timings=timings,window=self._window(run,int(time.time()*1000)))
         immutable_file(self.directory,run+'.result',canonical(receipt))
         self._observe(run,state,'delivery' if state=='done' else 'assistant')
 

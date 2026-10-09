@@ -816,10 +816,15 @@ activation remains separate.
    generation readiness (Honcho and native memory area), then implement steps
    H1 to H6. Until then those specs stand and conflict with the owner's
    direction to follow Honcho's documented model.
-8. Stage timing: the owner chose plan first. Review the
-   [stage timing plan](docs/stage-timing-plan.md) (steps T1 to T6) with the
-   owner before code. Monitoring shows both per-stage averages and the
-   per-message breakdown.
+8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
+   are implemented and pass focused synthetic checks: the `stage_timings` table with
+   14-day retention, Hermes phases and window kept from the run receipt, Inngest
+   step and queue timing, transcription, Honcho recall and Telegram send timers,
+   `./bin/nocheh admin timings <event|recent>`, and Monitoring › Reply timing.
+   Pending: T6 synthetic Telegram simulation (needs Docker), the Hermes gateway
+   component test (needs the pinned Hermes image), a live reply inspected with the
+   new breakdown after the next authorized restart, and tagging Honcho embedding
+   meter rows by event.
 9. Storage growth: re-examine every component for uncontrolled growth using the
    [findings](docs/operations-review-plan.md). Inngest telemetry retention now
    defaults to 14 days and covers every Inngest run history table

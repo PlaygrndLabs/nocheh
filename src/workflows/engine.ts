@@ -4,8 +4,22 @@ import {claimWorkflow,closedStates,hash,type WorkflowFamily} from './store.js';
 import {executionFailure,type Observation,type WorkflowOperation} from './pipeline.js';
 import {workflowIdentity} from './client.js';
 import {safeMetadata} from './boundary.js';
+import {recordStages} from '../stores/stage-timings.js';
 
 const waiting=(reason='owner_paused'):Observation=>({state:'waiting',stage:'admission',attempts:0,next_attempt:Date.now()+30000,waiting_reason:reason});
+/** Message workflows whose steps form part of a reply's stage timing. */
+const timedFamilies=new Set<WorkflowFamily>(['preparation','telegram']);
+async function recordStep(pool:pg.Pool,row:any,family:WorkflowFamily,started:Date,duration:number) {
+  const event=row.job_id as string,base={event_id:event,attempt:0,source:'workflow'};
+  await recordStages(pool,[{...base,stage:'step:'+family,started_at:started,duration_ms:Math.max(0,duration)}]);
+  try {
+    // Only the first step can know its own queue time; later writes keep it.
+    const published=(await pool.query('SELECT first_published_at AS at FROM workflow_outbox WHERE workflow_id=$1 AND dispatch=1',[row.id])).rows[0]?.at as Date|undefined;
+    const requested=row.created_at as Date,queue=[{...base,stage:'queue:'+family,started_at:requested,duration_ms:Math.max(0,started.getTime()-requested.getTime())}];
+    if(published&&published>=requested&&published<=started)queue.push({...base,stage:'outbox:'+family,started_at:requested,duration_ms:published.getTime()-requested.getTime()});
+    await recordStages(pool,queue,true);
+  } catch {/* Queue timing stays unmeasured. */}
+}
 export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,family:WorkflowFamily,runId:string,operation:WorkflowOperation):Promise<Observation> {
   const row=(await pool.query('SELECT w.*,f.owner,f.epoch,f.admission FROM workflow_registry w JOIN workflow_owners f USING(family) WHERE w.id=$1',[id])).rows[0];
   if(!row||row.family!==family||row.dispatch!==dispatch)return {...waiting(),state:'skipped',waiting_reason:null};
@@ -26,9 +40,10 @@ export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,fam
   if(!claim)return waiting('receipt_pending');
   const renew=setInterval(()=>{void pool.query("UPDATE workflow_registry SET lease_until=now()+interval '2 minutes' WHERE id=$1 AND lease_token=$2",[id,claim.lease_token]).catch(()=>{});},15000);
   try {
-    let result:Observation;
+    let result:Observation;const started=new Date(),clock=performance.now();
     try{result=await operation(row.job_id,{owner:'inngest',epoch:row.epoch});}
     catch(error){result=executionFailure(error,row.attempts);}
+    if(timedFamilies.has(family)&&/^[a-f0-9]{64}$/.test(row.job_id))await recordStep(pool,row,family,started,Math.round(performance.now()-clock));
     if((family==='memory_review'||family==='honcho')&&row.job_id.startsWith('source:')&&!(closedStates as readonly string[]).includes(result.state)) {
       const newer=await pool.query(`SELECT 1 FROM workflow_registry WHERE family=$1 AND job_id=$2 AND version=$3 AND generation>$4
         AND NOT EXISTS (SELECT 1 FROM workflow_receipts receipt WHERE receipt.workflow_id=$5

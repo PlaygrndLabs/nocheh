@@ -17,6 +17,7 @@ import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
+import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -96,6 +97,8 @@ export class TelegramDispatchRepository {
     const output=await this.derived.record({operation_id:`telegram-dispatch-result:${row.event_id}:${row.attempts}`,
       source:row.source_reference,parents:[row.input_reference],kind:'runtime_result',content:Buffer.from(canonical(result)),
       producer:'hermes',producer_version:protocol,configuration:{attempt:row.attempts},provenance:{binding:row.binding}});
+    // Timings are diagnostics outside the durable result; a malformed set is dropped whole.
+    const timings=hermesTimings(response);if(timings)await recordHermesAttempt(this.control,row.event_id,row.attempts,timings);
     return this.finish(row,result,output);
   }
   private async finish(row:any,result:{state:string;error_code?:string},reference:DerivativeReference) {
