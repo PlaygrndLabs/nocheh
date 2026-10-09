@@ -1,9 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {expireMemorySummaries,expireWorkflowHistory,expireWorkflowRecords,retentionDays,servedSummaries} from '../src/workflows/retention.js';
+import {expireMemorySummaries,expireTelemetry,expireWorkflowHistory,expireWorkflowRecords,retentionDays,servedSummaries} from '../src/workflows/retention.js';
 import {hash,workflowSchema} from '../src/workflows/store.js';
-import {derivedGuardSchema} from '../src/stores/guard-schema.js';
+import {controlGuardSchema,derivedGuardSchema} from '../src/stores/guard-schema.js';
+import {securityCoreSchema} from '../src/security/store.js';
 
 test('workflow history retention keeps 14 days by default and rejects invalid day counts',()=>{
   const saved=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS;delete process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS;
@@ -90,6 +91,29 @@ test('record retention removes only spent publication records and run links, nev
     assert.equal((await client.query('SELECT count(*)::int AS count FROM workflow_registry')).rows[0].count,4,'the registry is never pruned');
     assert.equal((await client.query('SELECT count(*)::int AS count FROM workflow_receipts')).rows[0].count,4,'effect receipts are never pruned');
     assert.deepEqual(await expireWorkflowRecords(client,ago(14),0),{workflow_outbox:0,workflow_runs:0},'a repeated pass is a no-op');
+  } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
+});
+
+test('telemetry retention removes only old model-call events and invalidation notes, never action effects',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:60000},async()=>{
+  const config:pg.ClientConfig={host:process.env.PGHOST!,port:Number(process.env.PGPORT??5432),user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const client=new pg.Client(config);await client.connect();const schema='telemetry_'+Date.now();
+  try {
+    assert.equal((await client.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');
+    await client.query(`CREATE SCHEMA ${schema}`);await client.query(`SET search_path=${schema}`);
+    await client.query(securityCoreSchema);await client.query(controlGuardSchema);
+    const ago=(days:number)=>new Date(Date.now()-days*86400000);
+    const effects=[['model-old','model.request','completed',30],['model-recent','model.request','completed',1],
+      ['action-old','telegram.send','ambiguous',30],['action-old-done','controlled_action_result','completed',30]] as const;
+    for(const [id,kind,state,age] of effects)await client.query(`INSERT INTO security_events(effect_id,state,kind,scope,profile,policy_revision,origin,rule,created_at)
+      SELECT $1,$2,$3,'owner','owner',max(revision),'default','default',$4 FROM security_policy_versions`,[id,state,kind,ago(age)]);
+    for(const [source,epoch,age] of [['old',1,30],['recent',2,1]] as const)
+      await client.query('INSERT INTO guard_invalidations(source_id,epoch,created_at) VALUES($1,$2,$3)',[source,epoch,ago(age)]);
+    assert.deepEqual(await expireTelemetry(client,ago(14),0),{model_effects:1,guard_invalidations:1});
+    assert.deepEqual((await client.query('SELECT effect_id FROM security_events ORDER BY effect_id')).rows.map(row=>row.effect_id),
+      ['action-old','action-old-done','model-recent'],'action effects are the owner audit and stay');
+    assert.deepEqual((await client.query('SELECT source_id FROM guard_invalidations')).rows.map(row=>row.source_id),['recent']);
+    assert.deepEqual(await expireTelemetry(client,ago(14),0),{model_effects:0,guard_invalidations:0},'a repeated pass is a no-op');
   } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
 });
 
