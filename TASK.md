@@ -843,7 +843,16 @@ activation remains separate.
    operating containers are next recreated. `./bin/nocheh storage` reports
    database, largest-table and state folder sizes read-only
    ([check](services/hermes/test_storage_report.py)), and Monitoring › Storage
-   shows the same report.
+   shows the same report. Broker model-call security events and guard
+   invalidation notes now follow the same setting; action and tool security
+   events stay as the owner's audit
+   ([decision](docs/adr/0121-operational-telemetry-retention.md)). Still
+   unbounded: guarded prepared copies (`runtime_prepared_values` and
+   `runtime_prepared_inputs`) of superseded guard epochs, which ADR-0109's
+   single-workspace model changes; finished Hermes journals (outbound, dispatch,
+   async-run and managed-run files), which boot recovery also rescans; the
+   Honcho meter's call rows, which budget accounting sums and need a roll-up
+   rather than deletion; and spool files that fail permanently.
 10. Inngest orchestration: every Nocheh loop outside Inngest is classified
     ([decision](docs/adr/0120-loops-outside-inngest.md)). Product workflows,
     including the Hermes turn and its reply send, run as Inngest functions;
