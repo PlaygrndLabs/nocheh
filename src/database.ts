@@ -19,6 +19,7 @@ import {importWorkflowSchema} from './workflows/imports.js';
 import {approvalWorkflowSchema} from './workflows/approvals.js';
 import {toolWorkflowSchema} from './workflows/host-tools.js';
 import {migrateSourceModel} from './source-model.js';
+import {stageTimingSchema} from './stores/stage-timings.js';
 
 export function connectDatabase(config: Settings): pg.Pool {
   if(config.storageLayout==='original-only-v1')throw Error('separated_storage_repositories_required');
@@ -65,6 +66,7 @@ export async function initialize(pool: pg.Pool): Promise<void> {
     await client.query(scheduleWorkflowSchema);
     await client.query(workflowOwnerSchema);
     await client.query(migrationSchema);
+    await client.query(stageTimingSchema);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

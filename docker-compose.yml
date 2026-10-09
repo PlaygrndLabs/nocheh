@@ -1,6 +1,14 @@
 name: nocheh
 
+x-logging: &logging
+  # Every container's Docker log is rotated so a looping service cannot fill the disk.
+  driver: json-file
+  options:
+    max-size: ${NOCHEH_LOG_MAX_SIZE:-10m}
+    max-file: ${NOCHEH_LOG_MAX_FILES:-3}
+
 x-service: &service
+  logging: *logging
   image: nocheh-services:local
   build:
     context: .
@@ -42,6 +50,7 @@ x-service: &service
     start_period: 10s
 
 x-honcho-runtime: &honcho-runtime
+  logging: *logging
   image: nocheh-honcho:be543555
   build:
     context: ./data/compat/upstreams/honcho
@@ -53,6 +62,7 @@ x-honcho-runtime: &honcho-runtime
   stop_grace_period: 120s
 
 x-management: &management
+  logging: *logging
   image: nocheh-management:local
   build: {context: ., target: management}
   user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -79,6 +89,7 @@ x-management: &management
 
 services:
   nocheh-reset-setup:
+    logging: *logging
     image: nocheh-services:local
     build:
       context: .
@@ -111,6 +122,7 @@ services:
     depends_on:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-baseline:
+    logging: *logging
     image: nocheh-services:local
     build:
       context: .
@@ -139,6 +151,7 @@ services:
     depends_on:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-state:
+    logging: *logging
     image: nocheh-services:local
     build:
       context: .
@@ -165,6 +178,7 @@ services:
     depends_on:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-acceptance:
+    logging: *logging
     image: nocheh-services:local
     build:
       context: .
@@ -218,6 +232,7 @@ services:
       start_period: 15s
 
   honcho-postgres:
+    logging: *logging
     profiles: [honcho]
     restart: unless-stopped
     image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
@@ -233,6 +248,7 @@ services:
       interval: 3s
       retries: 30
   honcho-redis:
+    logging: *logging
     volumes: [honcho_redis:/data]
     profiles: [honcho]
     restart: unless-stopped
@@ -273,6 +289,7 @@ services:
     depends_on:
       honcho-api: {condition: service_healthy}
   honcho-provider-gateway:
+    logging: *logging
     init: true
     environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780"}
     profiles: [honcho]
@@ -294,6 +311,7 @@ services:
       interval: 5s
       retries: 15
   honcho-cli:
+    logging: *logging
     image: nocheh-honcho-cli:0.1.4
     build: {context: ./services/honcho/cli, dockerfile: Dockerfile}
     profiles: [honcho-tools]
@@ -322,6 +340,7 @@ services:
       nocheh-app: {condition: service_healthy}
 
   hermes-agent-sb:
+    logging: *logging
     image: nocheh-hermes:local
     command: [python, -m, services.hermes.security_launcher]
     user: "0:0"
@@ -348,6 +367,7 @@ services:
       timeout: 5s
       retries: 12
   cliproxy-api:
+    logging: *logging
     image: nocheh-cliproxy:c76dfd4e
     build:
       context: ./data/compat/upstreams/CLIProxyAPI
@@ -376,6 +396,7 @@ services:
       start_period: 10s
 
   cliproxy-monitor:
+    logging: *logging
     image: nocheh-cpamp:1ae656c
     build:
       context: ./data/compat/upstreams/cpa-manager-plus
@@ -420,6 +441,7 @@ services:
       start_period: 10s
 
   pgweb-archive:
+    logging: *logging
     image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
     profiles: [tools]
     restart: unless-stopped
@@ -436,6 +458,7 @@ services:
       retries: 12
 
   nocheh-db:
+    logging: *logging
     image: nocheh-store-postgres:local
     build:
       context: .
@@ -465,6 +488,7 @@ services:
     networks: [default, workflows]
 
   inngest-redis:
+    logging: *logging
     image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
     restart: unless-stopped
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -478,6 +502,7 @@ services:
       retries: 20
 
   inngest-server:
+    logging: *logging
     image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
     restart: unless-stopped
     command: [inngest, start]
@@ -515,6 +540,7 @@ services:
       nocheh-db: {condition: service_healthy}
 
   chatgpt-speech:
+    logging: *logging
     image: nocheh-hermes:local
     command: [python, -m, services.hermes.speech_gateway]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -539,6 +565,7 @@ services:
       start_period: 10s
 
   hermes:
+    logging: *logging
     image: nocheh-hermes:local
     build:
       context: .

@@ -778,10 +778,11 @@ activation remains separate.
 3. Finish release evidence and runtime revision reconciliation against
    [release acceptance](docs/release-acceptance.md). Service health, Git integration,
    and historical readiness do not establish current recall or release approval.
-4. Sanitized history is published on a recreated `devbymak/nocheh` public
-   repository, so GitHub no longer serves pre-sanitization commits (see
-   [history](docs/task-history.md)). The repository has only `main` and the
-   unpublished `archive/pre-hermes-nocheh` branch; the local pre-push guard
+4. Sanitized history is published on the public `PlaygrndLabs/nocheh`
+   repository (recreated, then transferred), so GitHub no longer serves
+   pre-sanitization commits (see [history](docs/task-history.md)). The
+   sanitized `archive/pre-hermes-nocheh` branch is published and points into
+   `main`'s history; the local pre-push guard
    rejects any branch that still contains rewritten commits. The original
    history remains recoverable only from ignored local bundles. Earlier
    third-party clones are not erased.
@@ -814,8 +815,8 @@ activation remains separate.
    owner decision; the operating `.env` must be checked for an explicit `0`. The rebuilt `nocheh-db` image is needed
    for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
-   perpetual 120-second Honcho context refresh, now one-shot in source) were
-   about six percent of sampled background steps.
+   perpetual 120-second Honcho context refresh, removed in source) were about six percent of
+   sampled background steps.
 7. Honcho memory model: H1 to H4 of the
    [plan](docs/honcho-standard-memory-plan.md) are implemented in source and
    pass the fixture tests ([ADR-0115](docs/adr/0115-honcho-session-revisions.md)).
@@ -825,13 +826,33 @@ activation remains separate.
    isolation and timing checks. Until H5 runs, the operating installation still
    loses ready Honcho memory whenever a guard epoch advances. Peer cards are
    workspace-wide, so only owner turns read them.
-8. Stage timing: the owner chose plan first. Review the
-   [stage timing plan](docs/stage-timing-plan.md) (steps T1 to T6) with the
-   owner before code. Monitoring shows both per-stage averages and the
-   per-message breakdown.
+8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
+   are implemented and pass focused synthetic checks: the `stage_timings` table with
+   14-day retention, Hermes phases and window kept from the run receipt, Inngest
+   step and queue timing, transcription, Honcho recall and Telegram send timers,
+   `./bin/nocheh admin timings <event|recent>`, and Monitoring › Reply timing.
+   Pending: T6 synthetic Telegram simulation (needs Docker), the Hermes gateway
+   component test (needs the pinned Hermes image), a live reply inspected with the
+   new breakdown after the next authorized restart, and tagging Honcho embedding
+   meter rows by event.
 9. Storage growth: re-examine every component for uncontrolled growth using the
    [findings](docs/operations-review-plan.md). Inngest telemetry retention now
-   defaults to 14 days; its other unbounded tables remain open.
+   defaults to 14 days and covers every Inngest run history table
+   ([decision](docs/adr/0111-complete-workflow-history-retention.md)); a running
+   Inngest after pruning the newly covered tables is unverified. The same
+   setting expires Nocheh's spent workflow publication records and run links
+   ([decision](docs/adr/0112-spent-workflow-record-retention.md),
+   [checks](test/workflow-retention.test.ts)), and superseded Honcho context
+   summaries an hour after a newer one exists
+   ([decision](docs/adr/0113-superseded-memory-summary-retention.md)). Honcho
+   workspaces of retired guard epochs still remain until ADR-0109. Every Compose
+   service now rotates its Docker log (`NOCHEH_LOG_MAX_SIZE` 10m,
+   `NOCHEH_LOG_MAX_FILES` 3, owner-adjustable;
+   [check](services/hermes/test_configuration.py)); it takes effect when the
+   operating containers are next recreated. `./bin/nocheh storage` reports
+   database, largest-table and state folder sizes read-only
+   ([check](services/hermes/test_storage_report.py)); a Monitoring view of it
+   is not built.
 10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
     Inngest function, an Inngest cron, or a required out-of-band safety path;
     Telegram polling and the Hermes turn stay inside Hermes.

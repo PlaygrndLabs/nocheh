@@ -32,7 +32,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-')),base=Date.now(),key='dispatch:'+base,group='-'+base,token=digest(key);
   const policy={enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}},calls:{operation:string;input:any}[]=[],native=new Map<string,any>(),journals=new Map<string,any[]>();
-  let serial=base,mode='done',lostControl=false;const query=stores.control.query.bind(stores.control);
+  let serial=base,mode='done',lostControl=false,timingShape:'valid'|'malformed'='valid';const query=stores.control.query.bind(stores.control);
   const control=new Proxy(stores.control,{get(target,name){
     if(name==='query')return (sql:any,...args:any[])=>{
       if(lostControl&&String(sql).includes('UPDATE dispatches SET state=$2,result_reference')){lostControl=false;return Promise.reject(Error('lost control completion'));}
@@ -51,7 +51,9 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const prior=native.get(id);assert.ok(!prior||['queued','failed'].includes(prior.state),'only an explicitly failed pre-delivery attempt may launch a fresh execution');
     const state=['running','queued','suppressed','failed','ambiguous'].includes(mode)?mode:'done';native.set(id,{state});
     if(mode==='lost_ack'){mode='done';throw Error('native result acknowledgement lost');}
-    return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:state==='done'?'delivery':'assistant',private_output:'not copied into workflow metadata'};
+    const now=Date.now(),timing=state!=='done'?{}:{timings:timingShape==='valid'?{conversation:{ms:30,calls:1},telegram_send:{ms:5,calls:1}}:{conversation:{ms:30,calls:1,text:'private'}},
+      window:{queued:now-100,assistant:now-90,delivery:now-20,finished:now}};
+    return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:state==='done'?'delivery':'assistant',private_output:'not copied into workflow metadata',...timing};
   };
   const services=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Selected voice fixture-secret';}},
@@ -84,6 +86,11 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal(reader({headers:{authorization:'Bearer '+generalCalls[0]!.input.archive_credential}} as any,token).space,group);
     assert.equal((await advance(general.id)).state,'completed');
     assert.equal(calls.filter(c=>c.input.event_id===general.id&&c.operation==='run.start').length,1);
+    const timed=(id:string)=>stores.control.query('SELECT stage,attempt,category FROM stage_timings WHERE event_id=$1 ORDER BY stage',[id]).then(r=>r.rows);
+    assert.deepEqual((await timed(general.id)).filter(row=>row.attempt===1),[{stage:'conversation',attempt:1,category:'internal'},{stage:'hermes_delivery',attempt:1,category:'internal'},
+      {stage:'hermes_queue',attempt:1,category:'workflow'},{stage:'hermes_turn',attempt:1,category:'internal'},{stage:'telegram_send',attempt:1,category:'third_party'}],
+      'the dispatch result keeps Hermes phases and the Telegram send time');
+    assert.ok((await timed(general.id)).some(row=>row.stage==='step:telegram'));
     const initialCalls=calls.length;
     const first=await capture('Original fixture-secret');assert.equal((await advance(first.reference.id)).waiting_reason,'guard_pending');assert.equal(calls.length,initialCalls);
     await prepare(first.reference.id);
@@ -112,7 +119,8 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     await services.guards.setMode('on');
     const voice=await capture('',{text:undefined,voice:{file_id:key+':audio',file_unique_id:key,duration:1}});
     await services.attachments.commit(voice.artifact_ids[0]!,Buffer.from([79,103,103,0,255]));await prepare(voice.reference.id);
-    mode='done';assert.equal((await run(voice.reference.id)).state,'completed');const voiceInput=calls.at(-1)!.input;
+    mode='done';timingShape='malformed';assert.equal((await run(voice.reference.id)).state,'completed');const voiceInput=calls.at(-1)!.input;timingShape='valid';
+    assert.deepEqual((await timed(voice.reference.id)).map(row=>row.stage),['transcription'],'malformed Hermes timings are dropped whole; the reply is unaffected');
     assert.equal(voiceInput.transcripts.length,1);assert.ok(!voiceInput.transcripts[0].includes('fixture-secret'));
     assert.equal(voiceInput.payload.message.voice,undefined,'prepared media does not enter native download handlers');
     assert.deepEqual(await services.attachments.bytes(await services.attachments.file(voice.artifact_ids[0]!)),Buffer.from([79,103,103,0,255]));

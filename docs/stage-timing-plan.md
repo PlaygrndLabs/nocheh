@@ -100,4 +100,29 @@ data cannot grow unbounded.
 
 </decisions>
 
+<implementation_notes>
+
+- Reply time runs from Telegram's message date (one-second resolution; the
+  archive time when the date is missing or implausible) to the end of the last
+  Hermes attempt's delivery. `capture` therefore includes Bot API polling.
+- Each instant of the reply is attributed once: Hermes and transcription over
+  workflow steps, steps and outbox over queue and step waits. Duration-only
+  Hermes phases split the time of the Hermes stage that contains them, and
+  `conversation` keeps only what provider wait, model guard and Honcho recall do
+  not explain ("tools + agent"). Anything left is `unmeasured`.
+- Hermes `memory_recall` is shown as third-party "Honcho context"; it includes
+  Nocheh's request hop to the cached context. `context_prepare` is nested in other
+  phases and is not added.
+- The Hermes run journal supplies the attempt window (queued, processing,
+  delivery, finished); the run receipt keeps allowlisted durations only.
+- `workflow_outbox.first_published_at` keeps the first publication; republishing
+  still refreshes `published_at`, which drives the republish interval.
+- Stage rows follow `NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS` (default 14; `0`
+  keeps them) and are pruned hourly by the storage worker.
+- `./bin/nocheh admin timings <event>` prints the breakdown, `timings recent`
+  prints p50/p95 per stage, and `timings <event> --effects` keeps the raw
+  provider measurements and workflow receipts.
+
+</implementation_notes>
+
 </execution_plan>
