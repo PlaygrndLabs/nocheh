@@ -5,9 +5,10 @@ import {secret} from '../config.js';
 import {closedStates} from './store.js';
 
 /**
- * Optional expiry of Inngest's own run history and telemetry and of Nocheh's
- * spent workflow publication records and run links. Nocheh receipts, the
- * workflow registry and Inngest's queue state are never removed.
+ * Optional expiry of Inngest's own run history and telemetry, Nocheh's spent
+ * workflow publication records and run links, and superseded Honcho context
+ * summaries. Nocheh receipts, the workflow registry and Inngest's queue state
+ * are never removed.
  * Fourteen days is the default; zero keeps every row.
  */
 export function retentionDays(value=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS??'14'):number {
@@ -81,6 +82,40 @@ export async function pruneWorkflowRecords(client:pg.ClientBase,cutoff:Date,batc
 }
 export const expireWorkflowRecords=(client:pg.ClientBase,cutoff:Date,pause=200)=>drain(()=>pruneWorkflowRecords(client,cutoff),pause);
 
+export type PrunedSummaries={memory_contexts:number;memory_results:number};
+/** Honcho context summaries that current, non-retired memory generations still serve. */
+export async function servedSummaries(control:pg.ClientBase):Promise<string[]> {
+  return (await control.query(`SELECT s.derived_id FROM memory_context_snapshots s JOIN memory_generations g ON g.id=s.generation
+    WHERE g.state<>'retired'`)).rows.map(row=>String(row.derived_id));
+}
+/**
+ * Remove superseded Honcho context summaries from derived storage. Each rebuild
+ * records the full Honcho representation (`memory_result`) and its bounded
+ * `memory_context` with a guarded copy; only the summary a generation's snapshot
+ * points at is ever read again. A summary younger than `before` is kept, so a
+ * rebuild that has not yet saved its snapshot is never touched.
+ */
+export async function pruneMemorySummaries(derived:pg.ClientBase,served:string[],before:Date,batch=200):Promise<PrunedSummaries> {
+  if(!Number.isSafeInteger(batch)||batch<1)throw Error('invalid_retention_batch');
+  await derived.query('BEGIN');
+  try {
+    const ids=(await derived.query(`SELECT d.id FROM derived_artifacts d WHERE d.kind='memory_context' AND d.operation_id LIKE 'native-context:%:bounded'
+      AND d.created_at<$2 AND NOT d.id=ANY($1::text[])
+      AND NOT EXISTS (SELECT 1 FROM runtime_prepared_inputs p WHERE p.source_id='derived_artifacts:'||d.id) LIMIT $3 FOR UPDATE`,[served,before,batch])).rows.map(row=>String(row.id));
+    const sources=ids.map(id=>'derived_artifacts:'+id);
+    for(const table of ['guard_activations','guard_fragments','guard_revisions','guard_sources'])
+      await derived.query(`DELETE FROM ${table} WHERE ${table==='guard_sources'?'id':'source_id'}=ANY($1::text[])`,[sources]);
+    const contexts=await derived.query('DELETE FROM derived_artifacts WHERE id=ANY($1::text[])',[ids]);
+    // A full representation goes with its bounded summary, or alone when no summary was saved from it.
+    const results=await derived.query(`DELETE FROM derived_artifacts WHERE ctid IN (SELECT d.ctid FROM derived_artifacts d
+      WHERE d.kind='memory_result' AND d.operation_id LIKE 'native-context:%' AND d.created_at<$1
+      AND NOT EXISTS (SELECT 1 FROM derived_artifacts b WHERE b.operation_id=d.operation_id||':bounded') LIMIT $2)`,[before,batch]);
+    await derived.query('COMMIT');
+    return {memory_contexts:contexts.rowCount??0,memory_results:results.rowCount??0};
+  } catch(error){await derived.query('ROLLBACK').catch(()=>{});throw error;}
+}
+export const expireMemorySummaries=(derived:pg.ClientBase,served:string[],before:Date,pause=200)=>drain(()=>pruneMemorySummaries(derived,served,before),pause);
+
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   let days=0;
   try{days=retentionDays();}catch{console.error(JSON.stringify({event:'workflow_history_retention',state:'invalid'}));process.exit(1);}
@@ -88,20 +123,27 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   // Exit at once: PostgreSQL's shutdown waits for open sessions, and an
   // interrupted batch is its own transaction, so it simply rolls back.
   for(const signal of ['SIGTERM','SIGINT'] as const)process.on(signal,()=>process.exit(0));
-  // Each store connects with its own runtime role; one unavailable store does not stop the other.
-  const run=async(event:string,role:string,password:string,expire:(client:pg.Client,cutoff:Date)=>Promise<Record<string,number>>)=>{
-    let client:pg.Client|undefined;
+  // Each store connects with its own role; one unavailable store does not stop the others.
+  const connect=async(role:string,database:string,password:string)=>{
+    const client=new pg.Client({host:'127.0.0.1',user:role,database,password:secret(password),
+      application_name:'nocheh-workflow-retention',options:'-c statement_timeout=60000 -c client_connection_check_interval=1000'});
+    await client.connect();return client;
+  };
+  const run=async(event:string,expire:(clients:pg.Client[])=>Promise<Record<string,number>>,...stores:[string,string,string][])=>{
+    const clients:pg.Client[]=[];
     try {
-      client=new pg.Client({host:'127.0.0.1',user:role,database:role,password:secret(password),
-        application_name:'nocheh-workflow-retention',options:'-c statement_timeout=60000 -c client_connection_check_interval=1000'});
-      await client.connect();
-      console.log(JSON.stringify({event,state:'pruned',days,...await expire(client,new Date(Date.now()-days*86400000))}));
+      for(const [role,database,password] of stores)clients.push(await connect(role,database,password));
+      console.log(JSON.stringify({event,state:'pruned',days,...await expire(clients)}));
     } catch {console.error(JSON.stringify({event,state:'unavailable'}));}
-    finally {await client?.end().catch(()=>{});}
+    finally {for(const client of clients)await client.end().catch(()=>{});}
   };
   for(;;) {
-    await run('workflow_history_retention','nocheh_inngest','INNGEST_POSTGRES_PASSWORD',expireWorkflowHistory);
-    await run('workflow_record_retention','nocheh_control','NOCHEH_CONTROL_PASSWORD',expireWorkflowRecords);
+    const cutoff=new Date(Date.now()-days*86400000);
+    await run('workflow_history_retention',([client])=>expireWorkflowHistory(client!,cutoff),['nocheh_inngest','nocheh_inngest','INNGEST_POSTGRES_PASSWORD']);
+    await run('workflow_record_retention',([client])=>expireWorkflowRecords(client!,cutoff),['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD']);
+    // The derived runtime role cannot delete, so this local worker uses the administrator role.
+    await run('memory_summary_retention',async([control,derived])=>expireMemorySummaries(derived!,await servedSummaries(control!),new Date(Date.now()-3600000)),
+      ['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD'],['nocheh','nocheh_derived','POSTGRES_PASSWORD']);
     // Expiry is measured in days, so one check per day is enough.
     await delay(86400000);
   }

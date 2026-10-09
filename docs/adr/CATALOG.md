@@ -126,3 +126,4 @@ records current implementation and activation.
 | [0109](0109-standard-honcho-entity-model.md) | Use Honcho through its documented entity model (proposed) | Would supersede per-generation workspaces in 0033, 0044, 0056 and timer refresh in 0072; retains 0030 audience isolation |
 | [0111](0111-complete-workflow-history-retention.md) | Inngest retention covers every run history table | Extends 0107 and 0110; supersedes 0106 on keeping events and run records |
 | [0112](0112-spent-workflow-record-retention.md) | Expire spent workflow publication records and run links | Extends 0047 and 0111; the registry and effect receipts are never expired |
+| [0113](0113-superseded-memory-summary-retention.md) | Remove superseded Honcho context summaries | Extends 0112; independent of the context refresh trigger in 0072 and 0109 |

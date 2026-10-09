@@ -827,7 +827,10 @@ activation remains separate.
    Inngest after pruning the newly covered tables is unverified. The same
    setting expires Nocheh's spent workflow publication records and run links
    ([decision](docs/adr/0112-spent-workflow-record-retention.md),
-   [checks](test/workflow-retention.test.ts)). Every Compose
+   [checks](test/workflow-retention.test.ts)), and superseded Honcho context
+   summaries an hour after a newer one exists
+   ([decision](docs/adr/0113-superseded-memory-summary-retention.md)). Honcho
+   workspaces of retired guard epochs still remain until ADR-0109. Every Compose
    service now rotates its Docker log (`NOCHEH_LOG_MAX_SIZE` 10m,
    `NOCHEH_LOG_MAX_FILES` 3, owner-adjustable;
    [check](services/hermes/test_configuration.py)); it takes effect when the
