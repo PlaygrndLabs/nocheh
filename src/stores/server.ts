@@ -19,6 +19,7 @@ import type {StorageServices} from './services.js';
 import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHealth} from './lifecycle.js';
 import {listWorkflows,workflowDetail,workflowHealth} from '../workflows/owner.js';
 import {workflowMetrics} from '../workflows/metrics.js';
+import {eventBreakdown,stageSummary,timed} from './stage-timings.js';
 import {proxyInngestInspection} from '../workflows/inspection.js';
 import {controlStorageWorkflow} from './workflow-owner.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
@@ -198,6 +199,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(path==='/v1/workflows')return json(res,200,await listWorkflows(s.stores.control,Object.fromEntries(url.searchParams)));
         if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(s.stores.control));
         if(path==='/v1/workflows/metrics')return json(res,200,await workflowMetrics(s.stores.control,Object.fromEntries(url.searchParams)));
+        if(path==='/v1/workflows/timings')return json(res,200,await stageSummary(s.stores,Number(url.searchParams.get('limit')??50)));
+        const timing=path.match(/^\/v1\/workflows\/timings\/([a-f0-9]{64})$/);
+        if(timing)return json(res,200,await eventBreakdown(s.stores,timing[1]!));
         if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(s.stores.control,path.split('/').at(-1)!));
       }
       const control=path.match(/^\/v1\/workflows\/([a-f0-9]{64})\/(retry|cancel)$/);
@@ -249,7 +253,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(acceptanceSession&&req.method==='DELETE')return json(res,200,await s.memory.closeAcceptance(principal,acceptanceSession[1]!));
     if(req.method==='POST'&&['/v1/memory/honcho/context','/v1/memory/honcho/recall'].includes(path)) {
       if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
-      const body=object(await readJson(req));return result(path.endsWith('/context')?await s.memory.context(principal):await s.memory.recall(principal,string(body.query??'',2000)),true);
+      const body=object(await readJson(req));
+      return result(path.endsWith('/context')?await s.memory.context(principal):
+        await timed(s.stores.control,principal.turnEvent,'honcho_recall','nocheh',()=>s.memory.recall(principal,string(body.query??'',2000))),true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {
       const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
