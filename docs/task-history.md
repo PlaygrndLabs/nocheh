@@ -2703,3 +2703,19 @@ remains in ignored local state. `codex/legacy-nocheh` was renamed
 
 </entry>
 
+<entry date="2026-10-09" area="Public repository readiness">
+
+The owner asked whether the repository can be public. GitHub still served the
+pre-sanitization commits by SHA, and the public activity log exposed the
+force-push's previous SHA; an old live report was retrievable through the API.
+A comparison of every long number in history with ignored live state found the
+owner's Telegram user ID and two real group IDs in two tests and one quoted
+commit-message prompt. With owner approval, history was rewritten again to
+replace them with unused synthetic values, the affected topic test passed, and
+the privacy scan found zero private markers. The GitHub repository was then
+deleted and recreated as public with only the sanitized `main`, removing the
+cached objects and activity log. The author email was kept at the owner's
+request.
+
+</entry>
+

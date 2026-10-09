@@ -753,13 +753,13 @@ activation remains separate.
 3. Finish release evidence and runtime revision reconciliation against
    [release acceptance](docs/release-acceptance.md). Service health, Git integration,
    and historical readiness do not establish current recall or release approval.
-4. Sanitized history is published on `origin/main` (see
+4. Sanitized history is published on a recreated `devbymak/nocheh` public
+   repository, so GitHub no longer serves pre-sanitization commits (see
    [history](docs/task-history.md)). The repository has only `main` and the
    unpublished `archive/pre-hermes-nocheh` branch; the local pre-push guard
-   rejects any branch that still contains rewritten pre-sanitization commits.
-   The original history remains recoverable only from the ignored local
-   bundle. Earlier third-party clones and GitHub caches of the old commits are
-   not erased by the rewrite.
+   rejects any branch that still contains rewritten commits. The original
+   history remains recoverable only from ignored local bundles. Earlier
+   third-party clones are not erased.
 5. Preserve the new cold six-case pass and coupled 429 cooldown observation
    alongside the topic-17 first-attempt failure, attempt-16 late reply, topic-18
    pass, prior retirement outcomes, and all original receipts. The fresh cold
