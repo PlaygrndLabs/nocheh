@@ -808,8 +808,10 @@ activation remains separate.
    perpetual 120-second Honcho context refresh) were about six percent of
    sampled background steps.
 7. Honcho memory model: await owner acceptance of
-   [ADR-0109](docs/adr/0109-standard-honcho-entity-model.md) and the open
-   questions in its [plan](docs/honcho-standard-memory-plan.md). On acceptance,
+   [ADR-0109](docs/adr/0109-standard-honcho-entity-model.md). The owner chose
+   projects as peer plus session, group recall of the chat plus approved facts,
+   and a fresh start that deletes old workspaces; see its
+   [plan](docs/honcho-standard-memory-plan.md). On acceptance,
    revise the specs that still name per-audience workspaces, generations and
    generation readiness (Honcho and native memory area), then implement steps
    H1 to H6. Until then those specs stand and conflict with the owner's
