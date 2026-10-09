@@ -842,8 +842,8 @@ activation remains separate.
    [check](services/hermes/test_configuration.py)); it takes effect when the
    operating containers are next recreated. `./bin/nocheh storage` reports
    database, largest-table and state folder sizes read-only
-   ([check](services/hermes/test_storage_report.py)); a Monitoring view of it
-   is not built.
+   ([check](services/hermes/test_storage_report.py)), and Monitoring › Storage
+   shows the same report.
 10. Inngest orchestration: every Nocheh loop outside Inngest is classified
     ([decision](docs/adr/0120-loops-outside-inngest.md)). Product workflows,
     including the Hermes turn and its reply send, run as Inngest functions;

@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.operations.installation.configuration import initialize
-from tools.operations.installation.storage import directory_size, report
+from tools.operations.installation.storage import directory_size, measure, report
 
 
 class StorageReportTests(unittest.TestCase):
@@ -33,8 +33,19 @@ class StorageReportTests(unittest.TestCase):
             self.assertEqual(measured['nocheh_control']['largest_tables'], [{'table': 'workflow_registry', 'bytes': 1024, 'estimated_rows': 7}])
             self.assertEqual(measured['nocheh_archive']['role'], 'owned originals')
             self.assertEqual(measured['honcho_experiment']['state'], 'unavailable')
-            self.assertIn({'path': 'files', 'bytes': 1000}, result['state_folders'])
+            self.assertIn({'path': 'files', 'bytes': 1000, 'complete': True}, result['state_folders'])
             self.assertEqual(result['docker_logs'], {'max_size_per_file': '10m', 'max_files_per_container': 3})
+
+    @unittest.skipIf(os.geteuid() == 0, 'root reads every folder')
+    def test_unreadable_folder_is_reported_as_a_lower_bound(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); (root / 'open.bin').write_bytes(b'x' * 10)
+            (root / 'closed').mkdir(); (root / 'closed/hidden.bin').write_bytes(b'x' * 99)
+            (root / 'closed').chmod(0)
+            try:
+                self.assertEqual(measure(root), (10, False))
+            finally:
+                (root / 'closed').chmod(0o700)
 
 
 if __name__ == '__main__':
