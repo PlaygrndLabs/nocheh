@@ -41,6 +41,8 @@ class ScriptedBrainTests(unittest.TestCase):
         final=self.brain.respond(request(user,message('assistant',None),message('tool',result)))
         self.assertTrue(final['content'].startswith('[brain] nocheh_archive_search: ')
                         and 'fact PRIVFACT91' in final['content'])
+        owner=self.brain.respond(request(message('user','[[owner:conversations]]'),tools=('nocheh_owner_read',)))
+        self.assertEqual(owner,{'tool':'nocheh_owner_read','arguments':{'view':'conversations'}})
         action=self.brain.respond(request(message('user','[[action:-10042/topic/7|exact text]]')))
         self.assertEqual(action['arguments'],{'destination':'-10042/topic/7','text':'exact text'})
 

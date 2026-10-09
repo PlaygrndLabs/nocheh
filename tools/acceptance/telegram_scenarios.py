@@ -542,6 +542,107 @@ class Scenarios:
         self.turn(self.f.message(OWNER, 'بعد از ویس نامفهوم'), OWNER)
         self.gate('next_message_not_held', time.monotonic()-started < 90, seconds=round(time.monotonic()-started, 1))
 
+    # Owner authority ------------------------------------------------------------
+
+    def owner_directory_lists_conversations(self):
+        topic, name = 31, 'برنامه‌ریزی تیم'
+        root = {'message_id': topic, 'date': 1, 'chat': {'id': GROUP, 'type': 'supergroup', 'is_forum': True}, 'forum_topic_created': {'name': name, 'icon_color': 7322096}}
+        self.turn(self.f.message(GROUP, 'سلام از تاپیک برنامه‌ریزی', topic=topic, reply_to=root), GROUP, topic)
+        _, text = self.turn(self.f.message(OWNER, 'گروه‌ها و تاپیک‌هایم را فهرست کن [[owner:conversations]]'), OWNER)
+        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_owner_read' and event['phase'] == 'final'][-1]
+        items = json.loads(final['result'])['items']
+        named = {item['space_id']: item['name'] for item in items}
+        self.gate('owner_sees_groups', str(GROUP) in named and str(OTHER_GROUP) in named, groups=sorted(k for k in named if '/topic/' not in k))
+        self.gate('topic_named_from_root_message', named.get(str(GROUP)+'/topic/'+str(topic)) == name, name=named.get(str(GROUP)+'/topic/'+str(topic)))
+        self.turn(self.f.message(GROUP, 'فهرست گروه‌ها [[owner:conversations]]', topic=11), GROUP, 11)
+        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_owner_read' and event['phase'] == 'final'][-1]
+        self.gate('group_turn_cannot_read_owner_directory', 'owner_read_unavailable' in final['result'] and 'items' not in final['result'])
+
+    def unparseable_update_does_not_wedge_polling(self):
+        # An update the pinned SDK cannot parse (a required field is missing)
+        # must not stop polling; its original is still captured whole.
+        broken = self.f.message(GROUP, 'ریشهٔ ناقص', topic=32, reply_to={'message_id': 32, 'date': 1, 'chat': {'id': GROUP, 'type': 'supergroup'},
+                                                                         'forum_topic_created': {'name': 'بدون رنگ'}})
+        after = self.f.message(OWNER, 'پیام بعد از به‌روزرسانی ناقص')
+        before = len(self.f.sent())
+        self.f.inject(broken, after)
+        self.gate('broken_original_captured', bool(self.captured(broken)))
+        self.wait('queue_acknowledged', lambda: not [u for u in self.f.telegram()['updates'] if u['update_id'] <= after['update_id']], 120)
+        row = self.finished(self.captured(after))
+        self.gate('later_message_answered', row['state'] == 'done' and len(self.replies(before, OWNER)) == 1, state=row['state'])
+        health = self.f.http('/health', service='hermes', port=8781)
+        self.gate('unparseable_update_visible', (health.get('telegram_details') or {}).get('unparseable_updates', 0) >= 1, health=health.get('telegram_details'))
+
+    def telegram_refresh_names(self):
+        self.f.control({'chats': [{'id': GROUP, 'type': 'supergroup', 'title': 'Synthetic Forum Refreshed', 'is_forum': True},
+                                  {'id': OTHER_GROUP, 'type': 'group', 'migrate_to_chat_id': -1001234567890}]})
+        before = len(self.f.sent())
+        result = self.f.app('/v1/telegram/chats/refresh', {})
+        states = {chat['chat_id']: chat for chat in result['chats']}
+        self.gate('refresh_reads_telegram', states[str(GROUP)]['state'] == 'available' and states[str(GROUP)]['title'] == 'Synthetic Forum Refreshed')
+        self.gate('upgraded_group_reports_new_id', states[str(OTHER_GROUP)]['state'] == 'migrated' and states[str(OTHER_GROUP)]['migrate_to_chat_id'] == '-1001234567890')
+        self.gate('refresh_sends_nothing', len(self.f.sent()) == before)
+        directory = {item['space_id']: item for item in self.f.app('/v1/conversations?limit=100')['items']}
+        self.gate('directory_shows_migration', directory[str(OTHER_GROUP)].get('telegram', {}).get('migrate_to_chat_id') == '-1001234567890')
+
+    def owner_freedom_executes_owner_requests(self):
+        topic, wording = 17, 'پیام بدون تأیید از طرف مالک'
+        current = self.f.app('/v1/owner-autonomy')
+        self.gate('approval_required_by_default', current['mode'] == 'approval_required')
+        enabled = self.f.app('/v1/owner-autonomy', {'mode': 'owner_requests_execute', 'expected_revision': current['revision'],
+                                                    'operation_id': 'scenario-freedom-'+str(self.f.ids())})
+        try:
+            known = {row['id'] for row in self.proposals()}
+            before = len(self.f.sent())
+            self.turn(self.f.message(OWNER, 'بفرست [[action:'+str(GROUP)+'/topic/'+str(topic)+'|'+wording+']]'), OWNER)
+            created = [row for row in self.proposals() if row['id'] not in known]
+            self.gate('owner_request_approved_by_setting', len(created) == 1 and created[0]['state'] in ('approved', 'running', 'done'), state=created[0]['state'])
+            self.wait('sent_without_decision', lambda: [row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording], 180)
+            self.gate('sent_once', len([row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording]) == 1)
+            known = {row['id'] for row in self.proposals()}
+            self.turn(self.f.message(GROUP, 'اینجا بفرست [[action:current|درخواست گروهی]]', topic=18), GROUP, 18)
+            group = [row for row in self.proposals() if row['id'] not in known]
+            self.gate('group_request_still_waits', len(group) == 1 and group[0]['state'] == 'proposed')
+            self.f.app('/v1/tools/telegram-decision', {'id': group[0]['id'], 'fingerprint': group[0]['fingerprint'], 'decision': 'deny'})
+        finally:
+            self.f.app('/v1/owner-autonomy', {'mode': 'approval_required', 'expected_revision': enabled['revision'],
+                                              'operation_id': 'scenario-freedom-reset-'+str(self.f.ids())})
+
+    def launcher_stop_mid_turn(self):
+        before = len(self.f.sent())
+        update = self.f.message(OWNER, 'یک جواب طولانی‌تر [[long:3000]]')
+        self.f.inject(update)
+        event_id = self.captured(update)
+        listed = lambda: subprocess.check_output(['docker', 'ps', '-q', '--filter', 'label=nocheh.role=isolated-turn'], text=True).split()
+        self.wait('turn_container_running', listed, 120, 1)
+        self.f.run('stop', '-t', '30', 'hermes-agent-sb')
+        time.sleep(3)
+        self.gate('no_turn_container_left', not subprocess.check_output(['docker', 'ps', '-aq', '--filter', 'label=nocheh.role=isolated-turn'], text=True).split())
+        self.f.run('up', '-d', '--no-build', '--no-deps', '--wait', 'hermes-agent-sb')
+        row = self.finished(event_id, seconds=400)
+        self.gate('interrupted_turn_recovered', row['state'] == 'done', state=row['state'], attempts=row['attempts'])
+        self.gate('one_reply_after_recovery', len(self.replies(before, OWNER)) >= 1 and
+                  len({json.loads(r['parameters'].get('reply_parameters', '{}')).get('message_id') for r in self.replies(before, OWNER)}) == 1)
+
+    def burst_with_voice_in_order(self):
+        before = len(self.f.sent())
+        texts = [self.f.message(OWNER, 'پیام پشت‌سرهم '+str(index)) for index in range(1, 4)]
+        content = b'OggS\x00\x02SPEECH:'+'ویس وسط پیام‌ها'.encode()+b'\n\xff'
+        file_id = 'voice-'+str(self.f.ids())
+        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.oga',
+                                   'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
+        voice = self.f.message(OWNER, None, extra={'voice': {'file_id': file_id, 'file_unique_id': 'u'+file_id, 'duration': 2,
+                                                             'mime_type': 'audio/ogg', 'file_size': len(content)}})
+        last = self.f.message(OWNER, 'و پیام آخر')
+        updates = texts+[voice, last]
+        self.f.inject(*updates)
+        for update in updates:
+            row = self.finished(self.captured(update), seconds=600)
+            self.gate('burst_reply_done', row['state'] == 'done', state=row['state'], attempts=row['attempts'])
+        new = self.replies(before, OWNER)
+        targets = [json.loads(row['parameters'].get('reply_parameters', '{}')).get('message_id') for row in new]
+        self.gate('one_reply_each_in_telegram_order', targets == [update['message']['message_id'] for update in updates], targets=targets)
+
     def restart_preserves_receipts(self):
         sent = len(self.f.sent())
         self.wait('updates_acknowledged', lambda: not self.f.telegram()['updates'], 120)
@@ -576,7 +677,8 @@ ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'action_approval', 'action_denial', 'group_current_action', 'participant_not_permitted',
          'unselected_group', 'retirement_hides_fact', 'voice_waits_while_speech_unavailable', 'voice_recovers_when_speech_returns',
-         'voice_transcript_drives_turn', 'voice_blank_transcript_is_terminal', 'deleted_topic', 'polling_outage', 'lost_send_response',
+         'voice_transcript_drives_turn', 'burst_with_voice_in_order', 'voice_blank_transcript_is_terminal',
+         'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_executes_owner_requests', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant']
 
 
