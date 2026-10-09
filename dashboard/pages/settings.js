@@ -10,6 +10,22 @@ export function Settings({notify}) {
   function TelegramGroups({notify}) {
     const [tick,setTick]=useState(0),[data,error]=useLoad('/conversations?limit=100',tick),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
     const groups=(data?.items||[]).filter(item=>item.kind==='group'&&item.configured);
+    const topicsOf=group=>(data?.items||[]).filter(item=>item.kind==='topic'&&item.parent_space===group.space_id);
+    const forums=groups.filter(group=>/^-100/.test(group.space_id));
+    const [topicGroup,setTopicGroup]=useState(''),[topicRef,setTopicRef]=useState(''),[topicName,setTopicName]=useState('');
+    const changeTopic=async(body,message)=>{
+      setBusy(true);setProblem('');
+      try{await call('/telegram/topics',body);setTick(v=>v+1);notify(message);return true;}catch(error){setProblem(errorText(error));return false;}finally{setBusy(false);}
+    };
+    const addTopic=async event=>{
+      event.preventDefault();const ref=topicRef.trim(),group=topicGroup||forums[0]?.space_id;
+      const target=/^\d+$/.test(ref)?{chat_id:group,topic_id:Number(ref)}:{link:ref};
+      if(await changeTopic({action:'add',name:topicName,...target},'Topic added to the directory.')){setTopicRef('');setTopicName('');}
+    };
+    const topicLine=topic=>h('li',{key:topic.space_id},
+      h('span',{dir:'auto'},topic.name||'Name unknown'),h('code',null,topic.space_id.split('/topic/')[1]),
+      h('small',{className:'n-muted'},[topic.closed&&'closed',topic.registered&&'added by you',!topic.observed_at&&!topic.registered&&'no message yet'].filter(Boolean).join(' · ')),
+      topic.registered&&button('Remove',()=>changeTopic({action:'remove',chat_id:topic.parent_space,topic_id:Number(topic.space_id.split('/topic/')[1])},'Topic removed from the directory.'),busy,''));
     const status=item=>item.telegram?.state==='migrated'?'Upgraded to a supergroup. Its new ID is '+item.telegram.migrate_to_chat_id+'; update Selected groups.':
       item.telegram?.state==='not_member'?'The bot is not a member of this group.':item.telegram?.state==='not_found'?'Telegram did not find this group.':
       item.observed_at?'Messages received.':'No message received from this group yet.';
@@ -21,8 +37,16 @@ export function Settings({notify}) {
     return h(Panel,{title:'Telegram groups',note:'Names come from messages Nocheh received. Refresh asks Telegram for the selected groups\u2019 current names; it sends nothing.'},
       error&&!data&&h(Alert,null,'The group list is unavailable. Refresh and try again.'),!data&&!error&&h('p',{role:'status'},'Loading groups…'),
       data&&(groups.length?h('ul',{className:'telegram-groups'},groups.map(item=>h('li',{key:item.space_id},
-        h('strong',{dir:'auto'},item.name||'Name unknown'),h('code',null,item.space_id),h('span',{className:'n-muted'},status(item))))):
+        h('strong',{dir:'auto'},item.name||'Name unknown'),h('code',null,item.space_id),h('span',{className:'n-muted'},status(item)),
+        topicsOf(item).length>0&&h('ul',{className:'telegram-topics','aria-label':'Topics in '+(item.name||item.space_id)},topicsOf(item).map(topicLine))))):
         h('p',{className:'n-muted'},'No groups are selected. Owner private messages still work.')),
+      forums.length>0&&h('form',{className:'telegram-topic-form',onSubmit:addTopic},
+        h('p',{className:'n-muted'},'Telegram does not let bots list topics. New topics appear automatically when they are created or renamed; add an older topic with no messages here. In Telegram, open the topic and use Copy link.'),
+        forums.length>1&&h('label',null,'Group',h('select',{value:topicGroup||forums[0].space_id,disabled:busy,onChange:e=>setTopicGroup(e.target.value)},
+          forums.map(group=>h('option',{key:group.space_id,value:group.space_id},group.name||group.space_id)))),
+        h('label',null,'Topic link or number',h('input',{value:topicRef,disabled:busy,placeholder:'https://t.me/c/…/12',onChange:e=>setTopicRef(e.target.value)})),
+        h('label',null,'Topic name',h('input',{value:topicName,disabled:busy,dir:'auto',maxLength:128,onChange:e=>setTopicName(e.target.value)})),
+        h('div',{className:'n-actions'},h('button',{className:'n-primary',disabled:busy||!topicRef.trim()||!topicName.trim()},'Add topic'))),
       problem&&h('p',{role:'alert',className:'source-retirement-error'},'Refresh failed: '+problem+'. Telegram may be unavailable; try again.'),
       h('div',{className:'n-actions'},button(busy?'Checking with Telegram…':'Refresh from Telegram',refresh,busy||!groups.length,'')));
   }
