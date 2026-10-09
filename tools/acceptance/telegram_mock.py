@@ -45,12 +45,20 @@ class TelegramMock:
             known[item['update_id']]=item
         if len(known)>1000:raise ValueError('fixture_queue_limit')
         self.state['updates']=sorted(known.values(),key=lambda item:item['update_id'])
+        titles=self.state.setdefault('titles',{})
+        for item in updates:
+            chat=(item.get('message') or item.get('edited_message') or {}).get('chat') or {}
+            if isinstance(chat.get('title'),str) and type(chat.get('id')) is int:titles[str(chat['id'])]=chat['title']
         self.save();self.changed.set();return {'queued':len(self.state['updates'])}
 
     def configure(self,body):
         """Bounded synthetic files/faults; reject malformed control atomically."""
-        if not isinstance(body,dict) or set(body)-{'files','faults'}:raise ValueError('invalid_fixture_control')
-        files=dict(self.state['files']);faults=list(self.state['faults'])
+        if not isinstance(body,dict) or set(body)-{'files','faults','chats'}:raise ValueError('invalid_fixture_control')
+        files=dict(self.state['files']);faults=list(self.state['faults']);chats=dict(self.state.get('chats',{}))
+        for row in body.get('chats',[]):
+            if (not isinstance(row,dict) or set(row)-{'id','type','title','username','is_forum','migrate_to_chat_id'} or type(row.get('id')) is not int
+                    or row.get('type') not in ('group','supergroup','private','channel')):raise ValueError('invalid_fixture_chat')
+            chats[str(row['id'])]=row
         for row in body.get('files',[]):
             if (not isinstance(row,dict) or set(row)!={'file_id','file_unique_id','file_path','file_size','bytes_base64'}
                     or not isinstance(row['file_id'],str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',row['file_id'])
@@ -77,8 +85,9 @@ class TelegramMock:
             elif parameters:raise ValueError('invalid_fixture_fault')
             faults.append(row)
         if len(files)>100 or len(faults)>20:raise ValueError('fixture_control_limit')
-        self.state.update(files=files,faults=faults);self.save()
-        return {'files':len(files),'faults':len(faults)}
+        if len(chats)>50:raise ValueError('fixture_control_limit')
+        self.state.update(files=files,faults=faults,chats=chats);self.save()
+        return {'files':len(files),'faults':len(faults),'chats':len(chats)}
 
     @staticmethod
     def error(code,description,**extra):return code,{'ok':False,'error_code':code,'description':description,**extra}
@@ -147,10 +156,21 @@ class TelegramMock:
             if not 1<=len(text)<=4096:return self.error(400,'Bad Request: invalid message')
             if topic is not None and int(topic)<=0:return self.error(400,'Bad Request: message thread not found')
             chat=int(chat);self.state['next_message_id']+=1
+            # Like Telegram, the sent message carries the chat's current title.
             result={'message_id':self.state['next_message_id'],'date':int(time.time()),'from':BOT,
-                'chat':{'id':chat,'type':'private' if chat>0 else 'supergroup'},'text':text}
+                'chat':{'id':chat,'type':'private' if chat>0 else 'supergroup',**({'title':self.state.get('titles',{}).get(str(chat))} if self.state.get('titles',{}).get(str(chat)) else {})},'text':text}
             if topic is not None:result.update(message_thread_id=int(topic),is_topic_message=True)
             self.state['sent'].append({'parameters':data,'message':result})
+        elif method=='getChat':
+            # https://core.telegram.org/bots/api#getchat: presentation for a chat the
+            # bot belongs to. The fixture answers from configured synthetic chats.
+            chat=self.state.get('chats',{}).get(str(data.get('chat_id')))
+            if chat is None:return self.error(400,'Bad Request: chat not found')
+            if chat.get('migrate_to_chat_id'):
+                return self.error(400,'Bad Request: group chat was upgraded to a supergroup chat',
+                    parameters={'migrate_to_chat_id':chat['migrate_to_chat_id']})
+            # ChatFullInfo requires these fields; they carry no fixture meaning.
+            result={'accent_color_id':0,'max_reaction_count':11,**{key:value for key,value in chat.items() if key in ('id','type','title','username','is_forum')}}
         elif method=='sendChatAction':result=True
         elif method in ('setMyCommands','setChatMenuButton'):result=True
         elif method=='getMyCommands':result=[]
