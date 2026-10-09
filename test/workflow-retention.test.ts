@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {expireWorkflowHistory,retentionDays} from '../src/workflows/retention.js';
 
-test('workflow history retention is off by default and rejects invalid day counts',()=>{
+test('workflow history retention keeps 14 days by default and rejects invalid day counts',()=>{
+  const saved=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS;delete process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS;
+  try{assert.equal(retentionDays(),14);}finally{if(saved!==undefined)process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS=saved;}
   assert.equal(retentionDays('0'),0);assert.equal(retentionDays('14'),14);assert.equal(retentionDays('3650'),3650);
   for(const value of ['','-1','3651','1.5','14d',' 14'])assert.throws(()=>retentionDays(value),/invalid_workflow_history_retention/);
 });

@@ -451,7 +451,7 @@ services:
       NOCHEH_DERIVED_PASSWORD: ${NOCHEH_DERIVED_PASSWORD:?Derivative credential required}
       NOCHEH_CONTROL_PASSWORD: ${NOCHEH_CONTROL_PASSWORD:?Control credential required}
       INNGEST_POSTGRES_PASSWORD: ${INNGEST_POSTGRES_PASSWORD:?Workflow credential required}
-      NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS: ${NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS:-0}
+      NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS: ${NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS:-14}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro

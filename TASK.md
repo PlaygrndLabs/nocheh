@@ -71,7 +71,9 @@ directed their full deletion: `spans`, `history` and `traces` were truncated
 with the database isolated, leaving Inngest at 70 MB and the volume at 1.6 GB.
 Nocheh stores, receipts and the workflow registry were untouched.
 Telemetry retention is now a configurable setting,
-`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, off (`0`) by default and checked daily.
+`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, 14 days by default and checked daily
+([default decision](docs/adr/0110-default-workflow-history-retention.md)); an
+installation whose `.env` already sets `0` keeps retention off until the owner changes it.
 [Decision](docs/adr/0106-configurable-workflow-history-retention.md),
 [daily interval](docs/adr/0107-daily-workflow-history-retention.md),
 [retention checks](test/workflow-retention.test.ts),
@@ -799,8 +801,8 @@ activation remains separate.
    with the next authorized operating restart, then compare span growth per day
    against the 2026-10-08 measurement in ignored
    `data/acceptance/results/inngest-storage/`. The existing telemetry was deleted on owner
-   direction. Configurable retention is implemented and off by default; the
-   owner chooses whether to set days. The rebuilt `nocheh-db` image is needed
+   direction. Configurable retention defaults to 14 days by
+   owner decision; the operating `.env` must be checked for an explicit `0`. The rebuilt `nocheh-db` image is needed
    for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh) were about six percent of
@@ -817,9 +819,8 @@ activation remains separate.
    Telegram send time, and report one per-event stage breakdown
    ([gaps](docs/operations-review-plan.md)).
 9. Storage growth: re-examine every component for uncontrolled growth using the
-   [findings](docs/operations-review-plan.md). Clarification needed from the
-   owner: whether Inngest telemetry retention stays off by default now that the
-   specification forbids uncontrolled operational growth.
+   [findings](docs/operations-review-plan.md). Inngest telemetry retention now
+   defaults to 14 days; its other unbounded tables remain open.
 10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
     Inngest function, an Inngest cron, or a required out-of-band safety path;
     Telegram polling and the Hermes turn stay inside Hermes.
