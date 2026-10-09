@@ -2,11 +2,25 @@
 
 <current>
 
-Last reconciled 2026-10-07. [SPECS.md](SPECS.md) defines the product;
+Last reconciled 2026-10-09. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
 [MVP acceptance register](docs/mvp-acceptance-status.md) records live gates and
 reasons for carrying historical evidence forward.
+
+Owner architecture review (2026-10-09), plan only, no code changed: memory is
+swappable with Honcho as the current long-term memory; Inngest orchestrates the
+full Nocheh workflow with Hermes and Honcho as parts of it, without changing
+Hermes' internal workflow; slowness is diagnosed per stage with workflow,
+third-party and LLM time separated; uncontrolled storage growth is re-examined
+in every component; one reasoning provider and model is enough for the MVP.
+These are recorded in [SPECS.md](SPECS.md). The failing recall gate is in Honcho
+memory: Nocheh's per-generation workspaces are revoked by unrelated guard-epoch
+advances and refreshed by a perpetual 120-second timer, a non-standard usage the
+owner rejected. [Proposed ADR-0109](docs/adr/0109-standard-honcho-entity-model.md)
+and its [migration plan](docs/honcho-standard-memory-plan.md) await owner
+acceptance; [stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
+list the gaps with code references.
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
@@ -57,7 +71,9 @@ directed their full deletion: `spans`, `history` and `traces` were truncated
 with the database isolated, leaving Inngest at 70 MB and the volume at 1.6 GB.
 Nocheh stores, receipts and the workflow registry were untouched.
 Telemetry retention is now a configurable setting,
-`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, off (`0`) by default and checked daily.
+`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, 14 days by default and checked daily
+([default decision](docs/adr/0110-default-workflow-history-retention.md)); an
+installation whose `.env` already sets `0` keeps retention off until the owner changes it.
 [Decision](docs/adr/0106-configurable-workflow-history-retention.md),
 [daily interval](docs/adr/0107-daily-workflow-history-retention.md),
 [retention checks](test/workflow-retention.test.ts),
@@ -125,8 +141,8 @@ device codes. Each provider keeps one credential, and shared ChatGPT login statu
 counts only Codex files. Build, [relay checks](test/provider-oauth.test.ts),
 [login-state checks](services/hermes/test_provider.py), and live-dev checks pass.
 [Decision](docs/adr/0103-relay-every-provider-oauth-login.md). Pending: a live
-owner Claude login through the dev dashboard, and the owner's answer on whether
-reasoning should also use providers other than ChatGPT.
+owner Claude login through the dev dashboard. The owner answered that one
+reasoning provider and model is enough for the MVP phase.
 
 </current>
 
@@ -785,11 +801,30 @@ activation remains separate.
    with the next authorized operating restart, then compare span growth per day
    against the 2026-10-08 measurement in ignored
    `data/acceptance/results/inngest-storage/`. The existing telemetry was deleted on owner
-   direction. Configurable retention is implemented and off by default; the
-   owner chooses whether to set days. The rebuilt `nocheh-db` image is needed
+   direction. Configurable retention defaults to 14 days by
+   owner decision; the operating `.env` must be checked for an explicit `0`. The rebuilt `nocheh-db` image is needed
    for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh) were about six percent of
    sampled background steps.
+7. Honcho memory model: await owner acceptance of
+   [ADR-0109](docs/adr/0109-standard-honcho-entity-model.md). The owner chose
+   projects as peer plus session, group recall of the chat plus approved facts,
+   and a fresh start that deletes old workspaces; see its
+   [plan](docs/honcho-standard-memory-plan.md). On acceptance,
+   revise the specs that still name per-audience workspaces, generations and
+   generation readiness (Honcho and native memory area), then implement steps
+   H1 to H6. Until then those specs stand and conflict with the owner's
+   direction to follow Honcho's documented model.
+8. Stage timing: the owner chose plan first. Review the
+   [stage timing plan](docs/stage-timing-plan.md) (steps T1 to T6) with the
+   owner before code. Monitoring shows both per-stage averages and the
+   per-message breakdown.
+9. Storage growth: re-examine every component for uncontrolled growth using the
+   [findings](docs/operations-review-plan.md). Inngest telemetry retention now
+   defaults to 14 days; its other unbounded tables remain open.
+10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
+    Inngest function, an Inngest cron, or a required out-of-band safety path;
+    Telegram polling and the Hermes turn stay inside Hermes.
 
 </pending>
