@@ -36,7 +36,7 @@ if [ ! -e /data/spool/.restore-inactive ]; then
 fi
 
 touch "$ready"
-# Optional workflow telemetry expiry; off unless the owner configures days.
+# Workflow history expiry: 14 days unless the owner sets other days or 0 (off).
 if [ ! -e /data/spool/.restore-inactive ]; then
   node /app/dist/src/workflows/retention.js &
   retention_pid=$!
