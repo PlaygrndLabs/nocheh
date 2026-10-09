@@ -818,8 +818,8 @@ activation remains separate.
    direction to follow Honcho's documented model.
 8. Stage timing: the owner chose plan first. Review the
    [stage timing plan](docs/stage-timing-plan.md) (steps T1 to T6) with the
-   owner before code; its open question is whether Monitoring also shows
-   per-stage averages.
+   owner before code. Monitoring shows both per-stage averages and the
+   per-message breakdown.
 9. Storage growth: re-examine every component for uncontrolled growth using the
    [findings](docs/operations-review-plan.md). Inngest telemetry retention now
    defaults to 14 days; its other unbounded tables remain open.

@@ -88,16 +88,16 @@ data cannot grow unbounded.
 | T2 | Persist Hermes phases from the dispatch result | A dispatch result with timings is stored; malformed timings are rejected |
 | T3 | Workflow step and queue timing in `advanceWorkflow` | Wait and run durations recorded for a synthetic workflow |
 | T4 | Third-party timers: Honcho calls, transcription, Telegram send, embedding tagging | Each records `third_party` with the event; failures still record duration |
-| T5 | `./bin/nocheh admin timings <event>` stage breakdown and a Monitoring event view | Breakdown sums only non-overlapping stages; unmeasured shown explicitly |
+| T5 | `./bin/nocheh admin timings <event>` stage breakdown, a Monitoring event view, and Monitoring per-stage p50/p95 across recent messages | Breakdown sums only non-overlapping stages; unmeasured shown explicitly |
 | T6 | Synthetic Telegram simulation run | One breakdown per scenario message, no content in rows |
 
 </sequence>
 
-<open_questions>
+<decisions>
 
-- Whether the Monitoring view also shows averages (p50/p95 per stage) across
-  recent messages, or the per-message breakdown only.
+- Monitoring shows both per-stage averages (p50/p95) across recent messages and
+  a per-message breakdown (owner decision, 2026-10-09).
 
-</open_questions>
+</decisions>
 
 </execution_plan>
