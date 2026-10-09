@@ -46,9 +46,11 @@ def parser_for():
     trace = commands.add_parser("trace", help="Correlate an event with linked replies and workflows")
     trace.add_argument("id", help="Event ID, or 'latest' for the newest incoming event")
     trace.add_argument("--scope", default="", help="Exact conversation scope when using latest")
-    timings = commands.add_parser("timings", help="Event-bound provider measurements and workflow receipts")
-    timings.add_argument("id")
-    timings.add_argument("--after", default="0", help="Security event cursor from the previous page")
+    timings = commands.add_parser("timings", help="Per-stage reply timing for one event, or p50/p95 across recent replies")
+    timings.add_argument("id", help="Event ID, or 'recent' for per-stage averages across recent replies")
+    timings.add_argument("--limit", type=int, default=50, help="Recent replied messages to summarize (with 'recent')")
+    timings.add_argument("--effects", action="store_true", help="Show raw provider measurements and workflow receipts instead")
+    timings.add_argument("--after", default="0", help="Security event cursor from the previous page (with --effects)")
     workflows = commands.add_parser("workflows", help="Workflow list with source and receipt IDs")
     workflows.add_argument("--family")
     workflows.add_argument("--state")
@@ -81,6 +83,11 @@ def path_for(parser, args):
         if not args.query.strip(): parser.error("search query must not be empty")
         if not 1 <= args.limit <= 50: parser.error("--limit must be between 1 and 50")
         return "/v1/search?" + urlencode({"q": args.query, "scope": args.scope, "limit": args.limit})
+    if command == "timings" and args.id == "recent":
+        if args.effects: parser.error("--effects requires an event ID")
+        if not 1 <= args.limit <= 200: parser.error("--limit must be between 1 and 200")
+        return "/v1/workflows/timings?" + urlencode({"limit": args.limit})
+    if command == "timings" and not args.effects: return "/v1/workflows/timings/" + identity(parser, args.id)
     if command == "timings":
         if not re.fullmatch(r"\d{1,18}", args.after): parser.error("invalid security event cursor")
         return "/v1/security/effects?" + urlencode({"event": identity(parser, args.id), "after": args.after})
@@ -127,10 +134,12 @@ def redact(value):
         "total", "completed", "duplicates", "pending", "ready", "syncing", "limited_memory", "attached", "verified",
         "active_step", "can_retry", "can_cancel", "retired", "representation", "primary", "storage_layout", "guard_mode",
         "service", "mode", "admission", "dispatch", "format", "scope_kind", "truncated",
+        "started_at", "ended_at", "reply_ms", "complete", "label", "category", "ms", "calls", "unmeasured_ms",
+        "messages", "reply_ms_p50", "reply_ms_p95", "ms_p50", "ms_p95",
     }
     containers = {"records", "events", "workflows", "receipts", "event", "reply_messages", "runs", "outbox", "controls", "services",
                   "archive", "workers", "connection", "generations", "guard", "policy", "jobs", "artifacts", "derived",
-                  "actions", "permissions", "telegram", "versions", "items", "counts", "effects", "result"}
+                  "actions", "permissions", "telegram", "versions", "items", "counts", "effects", "result", "stages", "recent"}
     if isinstance(value, list): return [redact(item) for item in value]
     if isinstance(value, dict):
         return {key: (timing_metadata(item) if key == "timings" else item if key in safe and not isinstance(item, (dict, list)) else
@@ -138,11 +147,33 @@ def redact(value):
     return value
 
 
+def seconds(value):
+    return "—" if value is None else f"{value / 1000:.1f} s"
+
+
+def render_timings(value):
+    """One line per stage; categories never mix and unmeasured time is explicit."""
+    if "stages" not in value or not isinstance(value["stages"], list): return False
+    if "event_id" in value:
+        state = "" if value.get("complete") else " · incomplete: no delivery timing recorded"
+        print(f"event {value['event_id']} · reply {seconds(value.get('reply_ms'))} · attempts {value.get('attempts', 0)}{state}")
+        for stage in value["stages"]:
+            calls = f" ({stage['calls']} calls)" if stage.get("calls", 0) > 1 else ""
+            print(f"  {stage['category']:<12}{stage['label'] + calls:<36}{seconds(stage['ms']):>10}")
+        if not value["stages"]: print("  no stage timing recorded for this event")
+        return True
+    print(f"recent replies {value.get('messages', 0)} · reply p50 {seconds(value.get('reply_ms_p50'))} · p95 {seconds(value.get('reply_ms_p95'))}")
+    for stage in value["stages"]:
+        print(f"  {stage['category']:<12}{stage['label']:<36}p50 {seconds(stage['ms_p50']):>9}  p95 {seconds(stage['ms_p95']):>9}  in {stage['messages']}")
+    return True
+
+
 def render(value, command):
     if isinstance(value, list):
         for item in value: render(item, command)
         return
     if isinstance(value, dict):
+        if command == "timings" and render_timings(value): return
         if command == "events" and "records" in value:
             render(value["records"], command)
             if value.get("next"): print("next:", value["next"])
@@ -186,9 +217,11 @@ def main(arguments=None):
         value = api.call(path, timeout=30)
         if args.command in ("event", "trace") and (not isinstance(value, dict) or not isinstance(value.get("reply_messages"), list)):
             raise RuntimeCompatibilityError("running installation lacks linked event replies; activate the matching API before inspecting this event")
-        if args.command == "timings" and (not isinstance(value, dict) or value.get("event_filter") != args.id):
+        if args.command == "timings" and not args.effects and (not isinstance(value, dict) or not isinstance(value.get("stages"), list)):
+            raise RuntimeCompatibilityError("running installation lacks stage timing; activate the matching API before inspecting timings")
+        if args.command == "timings" and args.effects and (not isinstance(value, dict) or value.get("event_filter") != args.id):
             raise RuntimeCompatibilityError("running installation lacks event-filtered timing evidence; activate the matching API before inspecting timings")
-        if args.command in ("trace", "timings"):
+        if args.command == "trace" or args.command == "timings" and args.effects:
             workflows = api.call("/v1/workflows?" + urlencode({"event": args.id, "limit": 100}), timeout=30)
             if not isinstance(workflows, dict) or workflows.get("event_filter") != args.id:
                 raise RuntimeCompatibilityError("running installation lacks the event workflow filter; activate the matching API before tracing")
