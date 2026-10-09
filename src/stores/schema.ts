@@ -27,6 +27,7 @@ import {importWorkflowSchema} from '../workflows/imports.js';
 import {memoryAccessSchema} from './memory-access-schema.js';
 import {ownerAutonomySchema} from './owner-autonomy.js';
 import {telegramChatSchema} from './telegram-chats.js';
+import {telegramTopicSchema} from './telegram-topics.js';
 import {sourceRetirementSchema} from './source-retirement.js';
 import {reactionStateSchema} from './reaction-state.js';
 import {knowledgeManagementSchema} from './knowledge-schema.js';
@@ -138,6 +139,7 @@ ${sharingContentSchema}
 ${memoryAccessSchema}
 ${ownerAutonomySchema}
 ${telegramChatSchema}
+${telegramTopicSchema}
 ${sourceRetirementSchema}
 ${reactionStateSchema}
 ${knowledgeManagementSchema}
