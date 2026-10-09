@@ -33,6 +33,21 @@ class AsyncRunTests(unittest.TestCase):
             recovered=AsyncRuns(folder,lambda *args:self.fail('completed effect restarted'),lambda body:None)
             self.assertEqual(recovered.resume(body)['state'],'done')
 
+    def test_closed_receipt_keeps_only_allowlisted_timings_and_journal_window(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def execute(body,progress,cancelled):
+                progress('assistant');progress('delivery')
+                return {'state':'done','text':'private transcript canary','timings':{'conversation':{'ms':40,'calls':1},
+                    'telegram_send':{'ms':7,'calls':1},'private phrase':{'ms':1,'calls':1},'total':{'ms':3,'calls':1,'text':'private'}}}
+            runs=AsyncRuns(folder,execute,lambda body:None);body=self.body();runs.start(body)
+            result=self.wait(runs,body)
+            self.assertEqual(result['timings'],{'conversation':{'ms':40,'calls':1},'telegram_send':{'ms':7,'calls':1}})
+            window=result['window'];self.assertEqual(set(window),{'queued','assistant','delivery','finished'})
+            self.assertTrue(window['queued']<=window['assistant']<=window['delivery']<=window['finished'])
+            self.assertNotIn('private',(Path(folder)/(result['run_id']+'.result')).read_text())
+            runs=AsyncRuns(folder,lambda *args:{'state':'failed'},lambda body:None);body={**self.body(),'event_id':'b'*64};runs.start(body)
+            self.assertNotIn('window',self.wait(runs,body),'a run without timings stores no timing window')
+
     def test_queued_request_survives_before_execution_crash_and_unknown_resume_never_creates_work(self):
         with tempfile.TemporaryDirectory() as folder:
             calls=[];body=self.body()

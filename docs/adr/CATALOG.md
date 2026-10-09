@@ -124,5 +124,8 @@ records current implementation and activation.
 | [0108](0108-first-derivative-selection-does-not-revoke.md) | A first derivative selection does not revoke authorized contexts | Extends the first-representation guard exemption; replacements keep the barrier |
 | [0110](0110-default-workflow-history-retention.md) | Inngest telemetry retention on by default with 14 days | Supersedes the off default in 0106; installations that set a value keep it |
 | [0109](0109-standard-honcho-entity-model.md) | Use Honcho through its documented entity model | Supersedes per-generation workspaces in 0033, 0044, 0056 and timer refresh in 0072; retains 0030 audience isolation |
+| [0111](0111-complete-workflow-history-retention.md) | Inngest retention covers every run history table | Extends 0107 and 0110; supersedes 0106 on keeping events and run records |
+| [0112](0112-spent-workflow-record-retention.md) | Expire spent workflow publication records and run links | Extends 0047 and 0111; the registry and effect receipts are never expired |
+| [0113](0113-superseded-memory-summary-retention.md) | Remove superseded Honcho context summaries | Extends 0112; its served-summary exception is dropped by 0115, which keeps no context snapshot |
 | [0114](0114-event-driven-honcho-context.md) | Rebuild Honcho context when Honcho finishes work, not on a timer | Supersedes the two-minute refresh and five-minute limit in 0044 and 0072; its snapshot table is replaced by 0115 |
-| [0115](0115-honcho-session-revisions.md) | Versioned Honcho sessions with targeted rebuilds and live reply context | Implements 0109 steps H1–H4; replaces the context snapshot of 0044, 0072 and 0114 |
+| [0115](0115-honcho-session-revisions.md) | Versioned Honcho sessions with targeted rebuilds and live reply context | Implements 0109 steps H1–H4; replaces the context snapshot of 0044, 0072 and 0114 and the served-summary check of 0113 |

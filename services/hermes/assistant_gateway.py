@@ -173,9 +173,15 @@ def committed_adapter_class():
             scope=turn['scope']
             check=OUTBOUND_CHECK.set(outbound_check(scope.chat_id,scope.space,
                 lambda:check_delivery_policy(turn['body']['archive_credential']),turn.get('cancelled'),turn['send_requests']))
+            from time import perf_counter
+            sending=perf_counter()
             try:
                 delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=_thread_metadata_for_event(event))
-            finally:OUTBOUND_CHECK.reset(check)
+            finally:
+                OUTBOUND_CHECK.reset(check)
+                # A failed or uncertain send still waited on Telegram for this long.
+                turn['telegram_send_ms']=turn.get('telegram_send_ms',0)+max(0,round((perf_counter()-sending)*1000))
+                turn['telegram_sends']=turn.get('telegram_sends',0)+1
             turn['delivery_success']=bool(delivered.success)
     return CommittedAdapter
 
@@ -334,7 +340,9 @@ class AssistantGateway:
                     {'state':'failed','error_code':'assistant_runtime_unavailable'}
             finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
             from .timing import safe
-            timings=safe(turn.get('agent_result',{}).get('timings'))
+            timings=safe((turn.get('agent_result') or {}).get('timings'))
+            if 'telegram_send_ms' in turn:
+                timings.update(safe({'telegram_send':{'ms':min(turn['telegram_send_ms'],86400000),'calls':turn['telegram_sends']}}))
             if timings:result['timings']=timings
             await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
             return result

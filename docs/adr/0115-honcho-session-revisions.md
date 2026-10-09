@@ -4,7 +4,8 @@
 Accepted implementation of [ADR-0109](0109-standard-honcho-entity-model.md)
 steps H1–H4, authorized by the owner on 2026-10-09. Replaces the context
 snapshot table of ADR-0044, ADR-0072 and
-[ADR-0114](0114-event-driven-honcho-context.md). The fresh start (H5) and live
+[ADR-0114](0114-event-driven-honcho-context.md), and the served-summary check of
+[ADR-0113](0113-superseded-memory-summary-retention.md). The fresh start (H5) and live
 acceptance (H6) are not part of this decision.
 </status>
 
@@ -83,6 +84,11 @@ model; this record settles how Nocheh writes, reads and corrects it.
 - Owner-approved passages written in one epoch are preserved in reply context
   only while that epoch lasts; afterwards Honcho output is checked by the
   detector again, which fails safe.
+- Guarded context artifacts are used only by the read that records them, so
+  the daily summary retention of [ADR-0113](0113-superseded-memory-summary-retention.md)
+  no longer looks up served summaries: every summary older than an hour that no
+  prepared runtime input references is removed. A later identical read
+  recreates it.
 - Earlier per-audience workspaces are retired locally but stay in Honcho until
   the owner-gated fresh start (H5) deletes them.
 </consequences>

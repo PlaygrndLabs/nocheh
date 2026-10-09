@@ -2737,3 +2737,16 @@ renumbered ADR-0114. Fixture tests pass; H5 (fresh start) and H6 (live
 acceptance) are not run and need owner approval.
 
 </entry>
+
+<entry date="2026-10-10" area="Published legacy archive branch">
+
+After the owner transferred the repository to `PlaygrndLabs`, they asked why
+`archive/pre-hermes-nocheh` was missing. It had stayed local because it was
+built on the unsanitized history. The same removal and replacement rules were
+applied to it; no private marker, live Telegram ID, or home path remains. Its
+sanitized tip is already an ancestor of `main`, so publishing it added no new
+commits. The original branch is preserved in an ignored local bundle, and
+`origin` now points to `PlaygrndLabs/nocheh`.
+
+</entry>
+
