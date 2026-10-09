@@ -6,9 +6,9 @@ import {secret} from '../config.js';
 /**
  * Optional expiry of Inngest's own run telemetry. Nocheh receipts, the
  * workflow registry and Inngest's queue state never live in these tables.
- * Zero, the default, keeps every row.
+ * Fourteen days is the default; zero keeps every row.
  */
-export function retentionDays(value=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS??'0'):number {
+export function retentionDays(value=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS??'14'):number {
   if(!/^\d{1,4}$/.test(value)||Number(value)>3650)throw Error('invalid_workflow_history_retention');
   return Number(value);
 }
