@@ -26,7 +26,7 @@ third-party service time and LLM time measured separately.
 | Honcho and embeddings | `duration_ms` in the meter SQLite (`services/honcho/meter.py`) | Not bound to the event |
 | Telegram send | None | Missing |
 
-Next steps: persist Hermes phase timings with the dispatch result; bind Honcho
+The detailed design is in the [stage timing plan](stage-timing-plan.md). Next steps: persist Hermes phase timings with the dispatch result; bind Honcho
 and transcription calls to the source event; record send duration; expose one
 per-event stage breakdown in the admin CLI and Monitoring, using Inngest step
 timing for workflow execution.

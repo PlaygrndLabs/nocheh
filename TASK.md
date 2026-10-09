@@ -816,10 +816,10 @@ activation remains separate.
    generation readiness (Honcho and native memory area), then implement steps
    H1 to H6. Until then those specs stand and conflict with the owner's
    direction to follow Honcho's documented model.
-8. Stage timing: persist Hermes phase timings with dispatch results, bind
-   Honcho, embedding and transcription durations to the source event, measure
-   Telegram send time, and report one per-event stage breakdown
-   ([gaps](docs/operations-review-plan.md)).
+8. Stage timing: the owner chose plan first. Review the
+   [stage timing plan](docs/stage-timing-plan.md) (steps T1 to T6) with the
+   owner before code; its open question is whether Monitoring also shows
+   per-stage averages.
 9. Storage growth: re-examine every component for uncontrolled growth using the
    [findings](docs/operations-review-plan.md). Inngest telemetry retention now
    defaults to 14 days; its other unbounded tables remain open.
