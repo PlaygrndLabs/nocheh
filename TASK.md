@@ -844,8 +844,12 @@ activation remains separate.
    database, largest-table and state folder sizes read-only
    ([check](services/hermes/test_storage_report.py)); a Monitoring view of it
    is not built.
-10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
-    Inngest function, an Inngest cron, or a required out-of-band safety path;
-    Telegram polling and the Hermes turn stay inside Hermes.
+10. Inngest orchestration: every Nocheh loop outside Inngest is classified
+    ([decision](docs/adr/0120-loops-outside-inngest.md)). Product workflows,
+    including the Hermes turn and its reply send, run as Inngest functions;
+    the rest are adapter capture, the durable handoff and publisher, store
+    recovery, health, retention or the Inngest connection, and none becomes a
+    cron. The superseded single-database worker is removed; four older modules
+    remain only for their tests.
 
 </pending>

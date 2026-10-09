@@ -63,11 +63,10 @@ today: Telegram polling and capture (Hermes thread), the one-second
 `nocheh-app` loops for capture, reconciliation, guards, outbox and heartbeat
 (`src/stores/worker.ts:14-31`), the 5-second connection supervisor, the Hermes
 2-second scheduler loop, the native memory review thread, and the executor
-supervisor. Telegram polling and the Hermes turn stay in Hermes. Next step:
-classify each remaining Nocheh loop as an Inngest function, an Inngest cron,
-or a necessary out-of-band safety path (such as the outbox publisher that must
-work during Inngest outages), and remove superseded `src/worker.ts` and
-`src/workflows/service.ts` if unused.
+supervisor. Telegram polling and the Hermes turn stay in Hermes. Each
+remaining loop is now classified in
+[ADR-0120](adr/0120-loops-outside-inngest.md), and the superseded
+`src/worker.ts` and `src/workflows/service.ts` are removed.
 
 </inngest_orchestration>
 
