@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS workflow_outbox (
   created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(workflow_id,dispatch)
 );
 ALTER TABLE workflow_outbox ADD COLUMN IF NOT EXISTS failures integer NOT NULL DEFAULT 0 CHECK(failures>=0);
+-- Republishing refreshes published_at; the first publication stays for stage timing.
+ALTER TABLE workflow_outbox ADD COLUMN IF NOT EXISTS first_published_at timestamptz;
 CREATE INDEX IF NOT EXISTS workflow_outbox_due ON workflow_outbox(next_attempt) WHERE published_at IS NULL;
 CREATE TABLE IF NOT EXISTS workflow_runs (
   workflow_id text NOT NULL REFERENCES workflow_registry(id), run_id text NOT NULL,
@@ -184,7 +186,7 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
     const row=result.rows[0];if(!row)break;
     try {
       await send({name:'nocheh/workflow.requested',id:row.id,data:{workflow_id:row.workflow_id,dispatch:row.dispatch,family:row.family}});
-      await pool.query(`UPDATE workflow_outbox SET published_at=now(),lease_token=NULL,lease_until=NULL,error_code=NULL,failures=0,next_attempt=now() WHERE id=$1 AND lease_token=$2`,[row.id,token]);
+      await pool.query(`UPDATE workflow_outbox SET published_at=now(),first_published_at=coalesce(first_published_at,now()),lease_token=NULL,lease_until=NULL,error_code=NULL,failures=0,next_attempt=now() WHERE id=$1 AND lease_token=$2`,[row.id,token]);
       published++;
     }catch {
       // A lost acknowledgment republishes exactly this ID. Permanent execution
