@@ -515,7 +515,8 @@ every in-flight turn; ADR-0108 removes that revocation. Owner-private turns
 read the owner's directory, people and projects; the owner freedom setting
 (approval required by default) is in Nocheh settings; topics are named from
 their root message and selected groups can be named by an explicit Telegram
-refresh. Development turns now use the watched source. Archive details open
+refresh. Because the Bot API cannot list topics, topics also appear from their
+lifecycle messages and the owner can add older empty topics by link in Settings. Development turns now use the watched source. Archive details open
 in a drawer. On a fresh simulator installation (October 9) all scenarios pass,
 including the owner directory and its group denial, the refresh, owner
 freedom, a launcher stopped mid-turn, texts with a voice note in Telegram
