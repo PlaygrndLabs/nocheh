@@ -5,8 +5,27 @@ import {React,sdk,h,useState,useEffect,useRef,useMemo,base,call,button,errorText
 export function Settings({notify}) {
  const [defaultsRevision,setDefaultsRevision]=useState(0);
  return h(Tabs,{defaultValue:'nocheh',className:'settings-page'},h(TabsList,{'aria-label':'Settings category'},h(TabsTrigger,{value:'nocheh'},'Nocheh settings'),h(TabsTrigger,{value:'hermes'},'Hermes preferences')),
-  h(TabsContent,{value:'nocheh',forceMount:true},h(NochehSettings,{notify}),h(OwnerFreedom,{notify})),h(TabsContent,{value:'hermes',forceMount:true},h(HermesPreferences,{notify,defaultsRevision}),h(PolicySettings,{notify,onSaved:()=>setDefaultsRevision(v=>v+1)})));
+  h(TabsContent,{value:'nocheh',forceMount:true},h(NochehSettings,{notify}),h(TelegramGroups,{notify}),h(OwnerFreedom,{notify})),h(TabsContent,{value:'hermes',forceMount:true},h(HermesPreferences,{notify,defaultsRevision}),h(PolicySettings,{notify,onSaved:()=>setDefaultsRevision(v=>v+1)})));
 }
+  function TelegramGroups({notify}) {
+    const [tick,setTick]=useState(0),[data,error]=useLoad('/conversations?limit=100',tick),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
+    const groups=(data?.items||[]).filter(item=>item.kind==='group'&&item.configured);
+    const status=item=>item.telegram?.state==='migrated'?'Upgraded to a supergroup. Its new ID is '+item.telegram.migrate_to_chat_id+'; update Selected groups.':
+      item.telegram?.state==='not_member'?'The bot is not a member of this group.':item.telegram?.state==='not_found'?'Telegram did not find this group.':
+      item.observed_at?'Messages received.':'No message received from this group yet.';
+    const refresh=async()=>{
+      setBusy(true);setProblem('');
+      try{const result=await call('/telegram/chats/refresh',{});setTick(v=>v+1);notify(`Checked ${result.chats.length} ${result.chats.length===1?'group':'groups'} with Telegram.`);}
+      catch(error){setProblem(errorText(error));}finally{setBusy(false);}
+    };
+    return h(Panel,{title:'Telegram groups',note:'Names come from messages Nocheh received. Refresh asks Telegram for the selected groups\u2019 current names; it sends nothing.'},
+      error&&!data&&h(Alert,null,'The group list is unavailable. Refresh and try again.'),!data&&!error&&h('p',{role:'status'},'Loading groups…'),
+      data&&(groups.length?h('ul',{className:'telegram-groups'},groups.map(item=>h('li',{key:item.space_id},
+        h('strong',{dir:'auto'},item.name||'Name unknown'),h('code',null,item.space_id),h('span',{className:'n-muted'},status(item))))):
+        h('p',{className:'n-muted'},'No groups are selected. Owner private messages still work.')),
+      problem&&h('p',{role:'alert',className:'source-retirement-error'},'Refresh failed: '+problem+'. Telegram may be unavailable; try again.'),
+      h('div',{className:'n-actions'},button(busy?'Checking with Telegram…':'Refresh from Telegram',refresh,busy||!groups.length,'')));
+  }
   function OwnerFreedom({notify}) {
     const [tick,setTick]=useState(0),[data,error]=useLoad('/owner-autonomy',tick),[choice,setChoice]=useState(null),[busy,setBusy]=useState(false),[problem,setProblem]=useState('');
     const selected=choice??data?.mode??'approval_required',changed=!!data&&selected!==data.mode;
