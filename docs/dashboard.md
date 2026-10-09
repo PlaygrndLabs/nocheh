@@ -427,6 +427,10 @@ work and service diagnostics have their own expandable sections. Failures,
 uncertain effects, disconnected workers and unhealthy services remain visible
 without expanding details. A healthy container does not certify model access or
 Telegram reception. **Inspect original** opens the archived evidence.
+**Storage** shows the same read-only report as `./bin/nocheh storage`: each
+database's size and largest tables, local state folder sizes (a folder the
+dashboard cannot fully read is shown as "at least"), Docker log limits and the
+workflow history retention setting. It is measured only when expanded.
 
 The provider panel's **OAuth Login** uses a temporary host callback listener for
 each redirect provider: Codex on port 1455, Claude on 54545 and Antigravity on
