@@ -37,6 +37,7 @@ make dev-status           # inspect the development stack
 make dev-stop             # stop it; retain operating data
 ./bin/nocheh status
 ./bin/nocheh diagnose # health, credentials presence, and archive job states
+./bin/nocheh storage  # database, largest table and state folder sizes
 ./bin/nocheh db       # optional read-only pgweb browser at 127.0.0.1:8782
 ./bin/nocheh test     # PostgreSQL, TypeScript and native Python integration tests
 ./bin/nocheh verify   # live synthetic subscription checks; consumes quota

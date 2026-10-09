@@ -822,7 +822,22 @@ activation remains separate.
    per-message breakdown.
 9. Storage growth: re-examine every component for uncontrolled growth using the
    [findings](docs/operations-review-plan.md). Inngest telemetry retention now
-   defaults to 14 days; its other unbounded tables remain open.
+   defaults to 14 days and covers every Inngest run history table
+   ([decision](docs/adr/0111-complete-workflow-history-retention.md)); a running
+   Inngest after pruning the newly covered tables is unverified. The same
+   setting expires Nocheh's spent workflow publication records and run links
+   ([decision](docs/adr/0112-spent-workflow-record-retention.md),
+   [checks](test/workflow-retention.test.ts)), and superseded Honcho context
+   summaries an hour after a newer one exists
+   ([decision](docs/adr/0113-superseded-memory-summary-retention.md)). Honcho
+   workspaces of retired guard epochs still remain until ADR-0109. Every Compose
+   service now rotates its Docker log (`NOCHEH_LOG_MAX_SIZE` 10m,
+   `NOCHEH_LOG_MAX_FILES` 3, owner-adjustable;
+   [check](services/hermes/test_configuration.py)); it takes effect when the
+   operating containers are next recreated. `./bin/nocheh storage` reports
+   database, largest-table and state folder sizes read-only
+   ([check](services/hermes/test_storage_report.py)); a Monitoring view of it
+   is not built.
 10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
     Inngest function, an Inngest cron, or a required out-of-band safety path;
     Telegram polling and the Hermes turn stay inside Hermes.
