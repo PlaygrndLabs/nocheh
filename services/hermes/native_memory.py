@@ -38,7 +38,7 @@ def save_receipt(path, state):
     finally:os.close(directory)
 
 
-def recall(root, body):
+def recall(root, body, retirements=None):
     from hermes_state import SessionDB
     query = body.get('query', '')
     if not isinstance(query, str) or not 0 < len(query) <= 2000:
@@ -76,9 +76,14 @@ def recall(root, body):
         database = database_path(profile)
         if database.is_symlink(): raise ValueError('session_path_denied')
         if database.is_file():
+            # Read-only: a profile whose turns have not run since a retirement
+            # skips the rows its next turn will withhold.
+            from .retired_history import service_lookup, withheld_ids
+            withheld = withheld_ids(database, retirements or service_lookup)
             db = SessionDB(database, read_only=True)
             try:
                 for row in db.search_messages(query, limit=limit):
+                    if row.get('id') in withheld: continue
                     hits.append({'profile': profile.name, 'kind': 'native_session',
                                  'session': row.get('session_id'), 'text': str(row.get('content', ''))[:8000]})
             finally: db.close()

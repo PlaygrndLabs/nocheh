@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
@@ -156,5 +157,46 @@ test('retirement offers delivered replies that repeat the message without retiri
     assert.equal(await s.retirements.isRetired(quoting),false,'retiring a message never retires a reply implicitly');
     await s.retirements.set(owner,quoting.id,{retired:true,expected_revision:0,operation_id:prefix+':quote'});
     assert.equal((await s.retirements.get(owner,fact.id)).related_replies[0]?.retired,true);
+  }finally{await stores.close();}
+});
+
+test('native history learns which recorded turns are retired or answered by a retired reply',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),chat=String(Date.now()%1000000000+2000),owner={admin:true,scope:null};
+  const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-history',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
+    runtime:async()=>{throw Error('runtime_not_expected');},honcho:async()=>{throw Error('honcho_not_expected');}});
+  const prefix='history:'+Date.now(),base=Date.now()%1000000000,update=(id:number)=>'telegram:fixture:update:'+(base+id);
+  const capture=async(key:string,id:number,text:string,kind='telegram_update')=>(await s.capture.capture({version:1,key,origin:'live',bot_id:'fixture',
+    kind,scope:chat,source_id:String(id),revision:String(id),occurred_at:null,text,
+    payload:{update_id:base+id,message:{message_id:id,chat:{id:Number(chat),type:'private'},from:kind==='telegram_update'?{id:Number(chat)}:{id:99,is_bot:true},text}}} as Envelope)).source.reference;
+  try{
+    const fact=await capture(update(1),1,'My kite is named Synthetic Juniper.');
+    const question=await capture(update(2),2,'What is my kite called?');
+    const unrelated=await capture(update(3),3,'Will it rain?');
+    const answer=await capture(prefix+':answer',4,'It is Synthetic Juniper.','telegram_delivered_message');
+    const weather=await capture(prefix+':weather',5,'Rain is expected on Friday.','telegram_delivered_message');
+    for(const [parent,reply] of [[2,answer],[3,weather]] as const) {
+      const id=digest(prefix+':delivery:'+parent);
+      await stores.control.query(`INSERT INTO content_operations(id,generation,operation_key,kind,scope,input_hash)
+        VALUES($1,$2,$3,'outbound_result',$4,$5)`,[id,randomUUID(),'outbound:fixture:'+update(parent)+':sendMessage:'+id,chat,id]);
+      await stores.control.query(`INSERT INTO capture_effect_receipts(operation_id,derived_id,state,sources) VALUES($1,$1,'delivered',$2)`,
+        [id,JSON.stringify([{id:reply.id}])]);
+    }
+    const recorded=[fact.id,question.id,unrelated.id,'e'.repeat(64)];
+    const before=await s.retirements.historyRetirements(recorded);
+    assert.deepEqual([before.retired,before.answered],[[],[]]);
+    await s.retirements.set(owner,fact.id,{retired:true,expected_revision:0,operation_id:prefix+':fact'});
+    await s.retirements.set(owner,answer.id,{retired:true,expected_revision:0,operation_id:prefix+':answer'});
+    const after=await s.retirements.historyRetirements(recorded);
+    assert.notEqual(after.revision,before.revision,'every decision invalidates checked native history');
+    assert.deepEqual(after.retired,[fact.id]);
+    assert.deepEqual(after.answered,[question.id],'a turn whose delivered answer is retired is withheld');
+    assert.equal((await s.retirements.historyRetirements([])).revision,after.revision);
+    await s.retirements.set(owner,fact.id,{retired:false,expected_revision:1,operation_id:prefix+':restore'});
+    const restored=await s.retirements.historyRetirements(recorded);
+    assert.notEqual(restored.revision,after.revision);assert.deepEqual(restored.retired,[]);
   }finally{await stores.close();}
 });
