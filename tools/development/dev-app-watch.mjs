@@ -2,7 +2,7 @@
 import {readdir, stat, writeFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 
-const inputs = ['src', 'dashboard', 'services/hermes/dashboard', 'tools/build/build.mjs',
+const inputs = ['src', 'test', 'dashboard', 'services/hermes/dashboard', 'tools/build/build.mjs',
   'tools/build/build-dashboard.mjs', 'tsconfig.json', 'tsconfig.dashboard.json'];
 const excluded = new Set(['dist', '__pycache__', 'node_modules']);
 let stopping = false;
