@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT=Path(os.environ.get('NOCHEH_INSTALLATION_ROOT',REPO_ROOT)).resolve()
 PROVIDER_STATE=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local')).resolve()
-from tools.operations.installation.configuration import read_env,env_path
+from tools.operations.installation.configuration import DEFAULTS,read_env,env_path
 STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
            (PROVIDER_STATE/'honcho')).resolve()
 
@@ -53,10 +53,11 @@ def initialize(provider_state=PROVIDER_STATE):
          'EMBEDDING_MODEL_CONFIG__MODEL':embedding.model,
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL':'http://meter:8790/v1',
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'}
+    model=values.get('NOCHEH_MODEL') or DEFAULTS['NOCHEH_MODEL']
     prefixes=['DERIVER_MODEL_CONFIG','SUMMARY_MODEL_CONFIG','DREAM_DEDUCTION_MODEL_CONFIG','DREAM_INDUCTION_MODEL_CONFIG']
     prefixes += [f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG' for level in ('minimal','low','medium','high','max')]
     for prefix in prefixes:
-        env.update({prefix+'__TRANSPORT':'openai',prefix+'__MODEL':'gpt-5.6-sol',
+        env.update({prefix+'__TRANSPORT':'openai',prefix+'__MODEL':model,
                     prefix+'__OVERRIDES__BASE_URL':'http://meter:8790/v1',
                     prefix+'__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'})
     env['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
@@ -91,7 +92,7 @@ def sources():
 def provider_ready():
     from tools.operations.provider.provider import status
     result=status(PROVIDER_STATE)
-    return result['healthy'] and result['login_present']
+    return result['healthy'] and result['reasoning_login_present']
 
 
 def runtime_init(provider_state=PROVIDER_STATE):

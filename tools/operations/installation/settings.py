@@ -15,7 +15,9 @@ STORE_INTERNAL={'NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONT
 SECRETS = {'TELEGRAM_BOT_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','OPENAI_API_KEY'} | WORKFLOW_INTERNAL | STORE_INTERNAL
 # These settings belong to the separately managed Honcho stack, not main Apply.
 HONCHO_SETTINGS={'OPENAI_API_KEY','NOCHEH_EMBEDDING_PROVIDER','NOCHEH_EMBEDDING_MODEL'}
-EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - HONCHO_SETTINGS - WORKFLOW_INTERNAL - STORE_INTERNAL
+# The owner chooses both models in Settings; Apply also refreshes Honcho with them.
+MODEL_SETTINGS={'NOCHEH_MODEL','NOCHEH_EMBEDDING_MODEL'}
+EDITABLE = (set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - HONCHO_SETTINGS - WORKFLOW_INTERNAL - STORE_INTERNAL) | MODEL_SETTINGS
 
 
 def revision(values):
@@ -29,11 +31,34 @@ def view(state):
     active = json.loads(applied.read_text()).get('revision') if applied.exists() else None
     fields = [{'key': key, 'value': None if key in SECRETS else values[key],
                'configured': bool(values[key]), 'secret': key in SECRETS,
-               'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'Honcho stack restart' if key in HONCHO_SETTINGS else 'apply / service restart'}
+               'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'Honcho stack restart' if key in HONCHO_SETTINGS - MODEL_SETTINGS else 'apply / service restart'}
               for key in DEFAULTS]
+    from tools.operations.provider.embedding_config import MODELS
+    try:
+        from tools.operations.provider.provider import reasoning_choices
+        choices = reasoning_choices(state)
+    except Exception:
+        choices = {'provider_running': False, 'providers': []}
+    served = sorted({model for provider in choices['providers'] for model in provider['models']})
     return {'revision': saved_revision, 'applied_revision': active,
+            'models': {'reasoning': served, 'providers': choices['providers'], 'provider_running': choices['provider_running'],
+                       'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state)},
             'apply_state': 'current' if active == saved_revision else 'pending' if active else 'unverified',
             'fields': fields}
+
+
+def embedding_route(state):
+    """The embedding model Honcho's ledger has committed to, or None before any embedding."""
+    import sqlite3
+    try:
+        from tools.operations.memory.honcho_setup import state_for
+        ledger = state_for(state) / 'ledger/budget.sqlite'
+        if not ledger.is_file(): return None
+        with sqlite3.connect('file:' + str(ledger) + '?mode=ro', uri=True) as db:
+            row = db.execute('SELECT model FROM embedding_route WHERE id=1').fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
 
 
 def save(state, changes, expected):
@@ -45,6 +70,10 @@ def save(state, changes, expected):
         if not isinstance(changes, dict) or set(changes) - EDITABLE: raise ValueError('unsupported_setting')
         if any(not isinstance(v, str) for v in changes.values()): raise ValueError('settings_must_be_strings')
         updated = {**current, **changes}; validate(updated)
+        locked = embedding_route(state)
+        if locked and updated['NOCHEH_EMBEDDING_MODEL'] != current['NOCHEH_EMBEDDING_MODEL'] and updated['NOCHEH_EMBEDDING_MODEL'] != locked:
+            # Honcho's ledger already holds vectors from another model; mixing them is refused.
+            raise ValueError('embedding_model_change_requires_rebuild')
         # Preserve the last applied baseline across multiple un-applied saves.
         previous = directory / 'previous.env'
         if not previous.exists(): write_env(previous, current)
@@ -78,8 +107,26 @@ def apply(state):
                 try: rolled_back = run()
                 except subprocess.TimeoutExpired: pass
             return {'status': 'apply_failed', 'rolled_back': rolled_back}
+        honcho = refresh_honcho(state, values)
         temporary = directory / 'applied.tmp'
         temporary.write_text(json.dumps({'revision': revision(values)})); temporary.chmod(0o600)
         temporary.replace(directory / 'applied.json')
         previous.unlink(missing_ok=True)
-    return {'status': 'applied', **view(state)}
+    return {'status': 'applied', 'honcho': honcho, **view(state)}
+
+
+def refresh_honcho(state, values):
+    """Rewrite Honcho's generated settings from the saved models and restart it if it runs."""
+    if values.get('NOCHEH_HONCHO_ENABLED') != 'true': return 'disabled'
+    try:
+        from tools.operations.installation.configuration import read_env
+        from tools.operations.memory.honcho_setup import initialize, state_for
+        from tools.operations.memory.honcho_runtime import operate
+        honcho = state_for(state)
+        current = (read_env(honcho / 'honcho.env').get('DERIVER_MODEL_CONFIG__MODEL'),
+                   read_env(honcho / 'meter.env').get('NOCHEH_EMBEDDING_MODEL'))
+        if current == (values['NOCHEH_MODEL'], values['NOCHEH_EMBEDDING_MODEL']): return 'unchanged'
+        initialize(state)
+        return 'refreshed' if operate(state, 'up') == 0 else 'failed'
+    except Exception:
+        return 'failed'

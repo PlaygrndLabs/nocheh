@@ -191,6 +191,16 @@ class Scenarios:
                                                            'answered': new[0]['message']['text'][:4000]})
         return event_id, new[0]['message']['text']
 
+    def keep(self, updates, sent):
+        """With real answers, save each reply beside the message it answers, for review."""
+        if not self.real_model:
+            return
+        by_target = {json.loads(row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id'): row['message']['text'] for row in sent}
+        for update in updates:
+            message = update['message']
+            self.current.setdefault('answers', []).append({'asked': message.get('text') or message.get('caption') or '[voice]',
+                                                           'answered': (by_target.get(message['message_id']) or '')[:4000]})
+
     def execute(self, name, function):
         self.current = {'scenario': name, 'gates': [], 'passed': False, 'started': time.time()}
         self.results.append(self.current)
@@ -264,6 +274,7 @@ class Scenarios:
         new = self.replies(before, chat, topic)
         self.gate('one_reply_per_message', len(new) == 3, count=len(new))
         targets = [json.loads(row['parameters'].get('reply_parameters', '{}')).get('message_id') for row in new]
+        self.keep(updates, new)
         self.gate('replies_in_telegram_order', targets == [update['message']['message_id'] for update in updates], targets=targets)
 
     def private_burst_in_order(self):
@@ -478,7 +489,9 @@ class Scenarios:
         time.sleep(75)
         runs = self.f.query('nocheh_control', "SELECT count(*) FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"'")
         self.gate('repeat_limit_honored', runs == '1', runs=runs)
-        self.f.native('/api/cron/jobs/'+job['id']+'?profile=default', {}, 'DELETE')
+        # The owner can remove a schedule that has finished its runs.
+        self.gate('finished_schedule_removed', self.f.native('/api/cron/jobs/'+job['id']+'?profile=default', {}, 'DELETE') == {'ok': True}
+                  and all(row['id'] != job['id'] for row in self.f.native('/api/cron/jobs?profile=default')))
 
     # Audience policy ----------------------------------------------------------
 
@@ -593,8 +606,10 @@ class Scenarios:
 
     def voice_recovers_when_speech_returns(self):
         update, event_id = self.state['waiting_voice']
+        before = len(self.f.sent())
         self.speech(True)
         row = self.finished(event_id, seconds=900)
+        self.keep([update], self.replies(before, OWNER))
         self.gate('waiting_voice_answered_after_recovery', row['state'] == 'done', state=row['state'], error=row['error'], attempts=row['attempts'])
         transcripts = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'")
         self.current['observed'] = {'transcripts': transcripts}
@@ -722,6 +737,7 @@ class Scenarios:
             self.gate('burst_reply_done', row['state'] == 'done', state=row['state'], attempts=row['attempts'])
         new = self.replies(before, OWNER)
         targets = [json.loads(row['parameters'].get('reply_parameters', '{}')).get('message_id') for row in new]
+        self.keep(updates, new)
         self.gate('one_reply_each_in_telegram_order', targets == [update['message']['message_id'] for update in updates], targets=targets)
 
     def restart_preserves_receipts(self):
