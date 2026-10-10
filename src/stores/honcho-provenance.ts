@@ -9,12 +9,28 @@ const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za
 export class HonchoProvenanceRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository,readonly guards:GuardRepository,readonly call:HonchoCall){}
 
+  /** One Honcho workspace serves the installation; guard epochs never retire it.
+   * The audience only limits which sessions a read may use. */
   async current(workspace:string,audience:string,binding:GuardBinding):Promise<void> {
     await this.guards.assertCurrent(binding);
+    if(typeof audience!=='string'||!audience||audience.length>256)throw new HttpError(400,'invalid_memory_audience');
     const found=(await this.stores.control.query(`SELECT 1 FROM memory_generations g CROSS JOIN memory_engine_connection c
-      WHERE g.id=$1 AND g.audience=$2 AND g.installation_generation=$3 AND g.guard_epoch=$4 AND g.state<>'retired'
-      AND c.singleton AND c.attached AND c.verified`,[workspace,audience,binding.generation,binding.epoch])).rowCount;
+      WHERE g.id=$1 AND g.installation_generation=$2 AND g.state<>'retired'
+      AND c.singleton AND c.attached AND c.verified`,[workspace,binding.generation])).rowCount;
     if(!found)throw new HttpError(409,'memory_context_retired');
+  }
+  /** Sessions an audience may read: its own sessions with completed writes, newest first. */
+  async sessions(workspace:string,audience:string,limit=1000):Promise<string[]> {
+    return (await this.stores.control.query(`SELECT s.session_id FROM memory_sessions s WHERE s.workspace=$1 AND s.audience=$2
+      AND EXISTS(SELECT 1 FROM memory_ingestion_receipts r WHERE r.session_id=s.session_id AND r.retired_at IS NULL AND r.state='done')
+      ORDER BY s.updated_at DESC,s.session_id LIMIT $3`,[workspace,audience,limit])).rows.map(row=>String(row.session_id));
+  }
+  /** Owner reads span the workspace. Any other audience recalls only from its own sessions and fails closed. */
+  async chatScope(workspace:string,audience:string):Promise<{filters?:{session_id:string[]}}> {
+    if(audience==='owner')return {};
+    const sessions=await this.sessions(workspace,audience);
+    if(!sessions.length)throw new HttpError(409,'learning_context_pending');
+    return {filters:{session_id:sessions}};
   }
   async read(workspace:string,audience:string,conclusionIds:string[],binding:GuardBinding) {
     if(!/^[a-f0-9]{64}$/.test(workspace)||!Array.isArray(conclusionIds)||conclusionIds.length<1||conclusionIds.length>32||conclusionIds.some(id=>!nativeId(id)))
@@ -30,7 +46,7 @@ export class HonchoProvenanceRepository {
     for(const message of result.messages) {
       if(!nativeId(message.message_id)||typeof message.receipt_id!=='string'||!/^[a-f0-9]{64}$/.test(message.receipt_id))throw new HttpError(502,'invalid_honcho_provenance');
       const row=(await this.stores.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
-        WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done'`,[message.receipt_id,workspace,message.message_id])).rows[0];
+        WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done' AND ($4::text='owner' OR audience=$4)`,[message.receipt_id,workspace,message.message_id,audience])).rows[0];
       if(!row){limitations.add('ingestion_reference_unavailable');continue;}
       const references=row.source_references?.length?row.source_references:[row.source_reference];
       if(references.length>30)throw new HttpError(502,'invalid_ingestion_provenance');

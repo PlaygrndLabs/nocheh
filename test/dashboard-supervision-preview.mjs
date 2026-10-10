@@ -28,7 +28,7 @@ const server=createServer((req,res)=>{void(async()=>{
  if(req.method==='GET'){
   if(route==='/monitoring')return json(res,200,{application:{ok:true},runtime:{status:{telegram:'disabled'}},workflows:{counts:[],workers:[]},services:[]});
   if(route==='/status')return json(res,200,{archive:{events:142,artifacts:[{state:'ready',count:14}],managed_runs:[]},guard_mode:'on'});
-  if(route==='/memory/honcho')return json(res,200,{connection:{attached:true,verified:true},limited_memory:true,syncing:true,receipts:[],generations:[]});
+  if(route==='/memory/honcho')return json(res,200,{connection:{attached:true,verified:true},limited_memory:true,syncing:true,workspace:null,sessions:[],receipts:[],deletions:[]});
   if(route==='/conversations')return json(res,200,page(conversations.filter(item=>(item.name+' '+item.space_id).toLowerCase().includes((url.searchParams.get('q')??'').toLowerCase())),url,item=>item.space_id));
   if(route==='/conversations/context'){const space=url.searchParams.get('space');return json(res,200,{conversation:conversations.find(item=>item.space_id===space)??{space_id:space,name:null,kind:'unknown'},state:'current',observed_at:now,addressing:{state:'current',enabled:true,group_enabled:true,granted:['42','73'],denied:[]},knowledge_access:{owner_access:space==='42',sharing_rules:rules,fact_grants:[],note:'Only this scope’s permitted sources and explicitly shared facts may be used.'},external_actions:{permissions:[],note:'Actions require exact approval or a matching permission.'},organization:{effective:effective(space),delegations,note:'Organization does not grant knowledge access.'},memory:{availability:'limited',syncing:true,note:'Sources are still preparing.'}});}
   if(route==='/decisions')return json(res,200,decisionPage(url));

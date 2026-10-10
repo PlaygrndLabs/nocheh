@@ -84,6 +84,39 @@ async def ancestry(roots, load_documents, load_messages, max_nodes=128, max_dept
     return {'roots': roots, 'nodes': nodes, 'messages': references, 'limitations': sorted(limitations), 'exact_citations': False}
 
 
+SESSION_ID = re.compile(r'^[a-f0-9]{64}$')
+DESCENDANTS_SQL = '''WITH RECURSIVE seed AS (
+    SELECT id FROM documents WHERE workspace_name=:workspace AND session_name=:session
+), messages_seed AS (
+    SELECT id FROM messages WHERE workspace_name=:workspace AND session_name=:session
+), tree(id, depth) AS (
+    SELECT d.id, 1 FROM documents d
+    WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session
+    AND ((jsonb_typeof(d.source_ids)='array' AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(d.source_ids) parent(value) JOIN seed ON seed.id=parent.value))
+        OR (jsonb_typeof(d.internal_metadata->'message_ids')='array' AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(d.internal_metadata->'message_ids') link(value)
+            JOIN messages_seed m ON jsonb_typeof(link.value)='number' AND m.id=(link.value)::text::bigint)))
+    UNION
+    SELECT d.id, tree.depth+1 FROM documents d JOIN tree ON jsonb_typeof(d.source_ids)='array' AND d.source_ids ? tree.id
+    WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session AND tree.depth<8
+)
+SELECT DISTINCT id FROM tree ORDER BY id LIMIT :limit'''
+
+
+async def session_descendants(body, load):
+    """Conclusions outside a session that were derived from it, so deleting the session leaves none behind."""
+    if not isinstance(body, dict) or set(body) - {'session_id', 'limit'}:
+        raise ValueError('invalid_descendants_request')
+    session, limit = body.get('session_id'), body.get('limit', 100)
+    if not isinstance(session, str) or not SESSION_ID.fullmatch(session) or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError('invalid_descendants_request')
+    ids = await load(session, limit + 1)
+    if any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in ids):
+        raise ValueError('descendant_identity_invalid')
+    return {'ids': ids[:limit], 'truncated': len(ids) > limit}
+
+
 def install(app):
     from fastapi import APIRouter, Body, Depends, HTTPException
     from sqlalchemy import text
@@ -118,6 +151,17 @@ def install(app):
 
         try:
             return await ancestry(body.get('conclusion_ids'), documents, messages)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+
+    @router.post('/session-descendants')
+    async def descendants(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):
+        async def load(session, limit):
+            result = await db.execute(text(DESCENDANTS_SQL), {'workspace': workspace_id, 'session': session, 'limit': limit})
+            return [row[0] for row in result.all()]
+
+        try:
+            return await session_descendants(body, load)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from None
 

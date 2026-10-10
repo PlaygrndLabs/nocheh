@@ -15,11 +15,20 @@ Hermes' internal workflow; slowness is diagnosed per stage with workflow,
 third-party and LLM time separated; uncontrolled storage growth is re-examined
 in every component; one reasoning provider and model is enough for the MVP.
 These are recorded in [SPECS.md](SPECS.md). The failing recall gate is in Honcho
-memory: Nocheh's per-generation workspaces are revoked by unrelated guard-epoch
-advances and refreshed by a perpetual 120-second timer, a non-standard usage the
-owner rejected. [Proposed ADR-0109](docs/adr/0109-standard-honcho-entity-model.md)
-and its [migration plan](docs/honcho-standard-memory-plan.md) await owner
-acceptance; [stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
+memory: Nocheh's per-generation workspaces were revoked by unrelated guard-epoch
+advances, a non-standard usage the owner rejected. The owner accepted
+[ADR-0109](docs/adr/0109-standard-honcho-entity-model.md) on 2026-10-09 and
+authorized steps H1 to H4 of its [plan](docs/honcho-standard-memory-plan.md).
+They are implemented in source on a branch
+([decision](docs/adr/0115-honcho-session-revisions.md),
+[Honcho memory checks](test/store-native-memory.test.ts),
+[workflow checks](test/store-workflows.test.ts)): one Honcho workspace per
+installation, versioned sessions per conversation, entity evidence and learned
+interpretation, targeted session rebuilds instead of per-epoch re-ingestion,
+live session context read on arrival and prefetched when Honcho finishes work,
+and session allowlists for group and topic recall. Nothing is active in the
+operating installation, and no live recall check has run; the fresh start (H5)
+and live acceptance (H6) need separate owner approval. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
 Agent-led knowledge management is implemented and verified locally. Organization
@@ -806,17 +815,17 @@ activation remains separate.
    owner decision; the operating `.env` must be checked for an explicit `0`. The rebuilt `nocheh-db` image is needed
    for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
-   perpetual 120-second Honcho context refresh) were about six percent of
+   perpetual 120-second Honcho context refresh, removed in source) were about six percent of
    sampled background steps.
-7. Honcho memory model: await owner acceptance of
-   [ADR-0109](docs/adr/0109-standard-honcho-entity-model.md). The owner chose
-   projects as peer plus session, group recall of the chat plus approved facts,
-   and a fresh start that deletes old workspaces; see its
-   [plan](docs/honcho-standard-memory-plan.md). On acceptance,
-   revise the specs that still name per-audience workspaces, generations and
-   generation readiness (Honcho and native memory area), then implement steps
-   H1 to H6. Until then those specs stand and conflict with the owner's
-   direction to follow Honcho's documented model.
+7. Honcho memory model: H1 to H4 of the
+   [plan](docs/honcho-standard-memory-plan.md) are implemented in source and
+   pass the fixture tests ([ADR-0115](docs/adr/0115-honcho-session-revisions.md)).
+   Next, with owner approval: H5 attaches the new workspace in an isolated
+   fixture rehearsal and then the operating installation, and deletes the old
+   per-audience workspaces; H6 runs same-topic recall, private recall, group
+   isolation and timing checks. Until H5 runs, the operating installation still
+   loses ready Honcho memory whenever a guard epoch advances. Peer cards are
+   workspace-wide, so only owner turns read them.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
    are implemented and pass focused synthetic checks: the `stage_timings` table with
    14-day retention, Hermes phases and window kept from the run receipt, Inngest
