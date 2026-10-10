@@ -81,6 +81,17 @@ class SharedProviderTests(unittest.TestCase):
             current=login_state(state)
             self.assertTrue(current['login_present']);self.assertEqual(current['login_files'],1)
 
+    def test_reasoning_login_follows_the_configured_model(self):
+        from tools.operations.provider.provider import login_kind
+        self.assertEqual(login_kind('claude-sonnet-5-5'),'claude');self.assertEqual(login_kind('gpt-5.6-sol'),'codex')
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize_configuration(state);auth=state/'provider/auth'
+            (auth/'claude-owner.json').write_text(json.dumps({'type':'claude','access_token':'c','refresh_token':'r'}))
+            current=status(state)
+            # Claude reasons; the missing ChatGPT login stays visible for transcription.
+            self.assertEqual(current['reasoning_model'],'claude-sonnet-5-5')
+            self.assertTrue(current['reasoning_login_present']);self.assertFalse(current['login_present'])
+
     def test_cutover_stays_native_without_fresh_provider_login(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize_configuration(state)

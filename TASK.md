@@ -560,6 +560,15 @@ owner rechecks: a live exact approval to a topic and quick live messages with
 a voice note. Real-model quality, live Telegram release gates and release
 remain pending. [Live summary](docs/mvp-acceptance-status.md).
 
+Reasoning provider (October 10, owner: "why gpt? use claude provider."): the
+reasoning model is one `NOCHEH_MODEL` setting for Hermes, the guard, Honcho
+reasoning and the meter, defaulting to `claude-sonnet-5-5` through the Claude
+login in CLIProxyAPI; provider status reports the reasoning login separately
+from the ChatGPT login that transcription still needs. Pending: an installation
+whose `.env` pins `NOCHEH_MODEL` to a GPT model keeps it until changed; Honcho's
+JSON structured output and Hermes tool calls through CLIProxyAPI's Claude
+translation are unproven until a real-model run; no live acceptance.
+
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
 installation rehearsal and both HTTP Telegram rehearsals pass; the first

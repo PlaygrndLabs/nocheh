@@ -65,11 +65,11 @@ def _honcho_probe(env,state):
     code="""import json,urllib.request
 from pathlib import Path
 key=Path('/run/secrets/honcho.key').read_text().strip()
-body={'model':'gpt-5.6-sol','messages':[{'role':'user','content':'Reply exactly NOCHEH_HONCHO_ROUTE_OK with no other text.'}],'stream':False}
+body={'model':__MODEL__,'messages':[{'role':'user','content':'Reply exactly NOCHEH_HONCHO_ROUTE_OK with no other text.'}],'stream':False}
 request=urllib.request.Request('http://shared-provider:8317/v1/chat/completions',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
 with urllib.request.urlopen(request,timeout=120) as response:data=json.load(response)
 if data['choices'][0]['message']['content'].strip()!='NOCHEH_HONCHO_ROUTE_OK':raise SystemExit(1)
-"""
+""".replace('__MODEL__',repr(load(state)['NOCHEH_MODEL']))
     args=['docker','run','--rm','--network','nocheh-memory','--user',f'{os.getuid()}:{os.getgid()}',
           '--mount',f'type=bind,src={key},dst=/run/secrets/honcho.key,readonly',
           'nocheh-hermes:local','python','-c',code]
