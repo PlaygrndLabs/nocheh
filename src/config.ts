@@ -10,6 +10,13 @@ export function secret(name: string): string {
   return value;
 }
 
+/** Settings: guard checks at once. Events prepared side by side for the secret guard. */
+export function guardChecks():number {
+  const value=process.env.NOCHEH_PARALLEL_GUARD_CHECKS?.trim()||'3';
+  if(!/^[1-4]$/.test(value))throw new Error('Invalid NOCHEH_PARALLEL_GUARD_CHECKS');
+  return Number(value);
+}
+
 export type Service = 'nocheh-app';
 export function settings() {
   const layout=storageLayout();
@@ -18,6 +25,7 @@ export function settings() {
   const mode = process.env.GUARD_MODE === 'auto' ? 'on' : process.env.GUARD_MODE ?? 'on';
   if (!['off', 'on'].includes(mode)) throw new Error('Invalid guard mode');
   const trusted:unknown=JSON.parse(process.env.GUARD_TRUSTED_ENDPOINTS ?? JSON.stringify(DEFAULT_TRUSTED));
+  guardChecks(); // An invalid Settings value stops startup instead of the first preparation.
   if (!Array.isArray(trusted) || trusted.some(v=>typeof v!=='string' || !['http:','https:'].includes(new URL(v).protocol))) throw new Error('Invalid trusted endpoints');
   return {
     service: service as Service, host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 8780),

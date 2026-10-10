@@ -928,9 +928,14 @@ activation remains separate.
    ([status](docs/mvp-acceptance-status.md)). Open items:
    - Reply latency: the median was 88 s and the slowest 172 s. Most of it was the
      Hermes run queue (median 30 s), because Telegram dispatch held one lock
-     across all chats. Per-chat dispatch lanes with two shared slots
-     ([ADR-0125](docs/adr/0125-per-chat-telegram-dispatch-lanes.md)) are in
-     source; their Hermes unit tests and a live timing check are pending.
+     across all chats. Per-chat dispatch lanes
+     ([ADR-0125](docs/adr/0125-per-chat-telegram-dispatch-lanes.md)) run on the
+     development installation; their Hermes unit tests pass. The reply limit (3)
+     and parallel agent runs (4) are owner settings
+     ([ADR-0126](docs/adr/0126-owner-set-parallel-replies-and-runs.md)), and
+     secret-guard checks run three at a time instead of one
+     ([ADR-0127](docs/adr/0127-parallel-guard-checks.md)). A live timing check
+     with two chats at once is pending.
      Preparation took 12.3 s on an idle turn.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.

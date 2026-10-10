@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import Request,build_opener,ProxyHandler
 from .isolated_profile import DATA_DIRS,DATA_FILES
+from .environment import parallel
 
 class DockerConnection(http.client.HTTPConnection):
     def __init__(self):super().__init__('localhost',timeout=240)
@@ -86,7 +87,8 @@ def attach(identifier,body):
             yield content
     finally:client.close()
 
-SLOTS=threading.BoundedSemaphore(4)
+# Isolated containers running at once, set by the owner; each holds 2 GiB and 2 CPUs.
+SLOTS=threading.BoundedSemaphore(parallel('NOCHEH_PARALLEL_RUNS',4))
 ACTIVE=set()
 ACTIVE_LOCK=threading.Lock()
 CONTAINERS=set()
