@@ -26,9 +26,9 @@ They are implemented in source on a branch
 installation, versioned sessions per conversation, entity evidence and learned
 interpretation, targeted session rebuilds instead of per-epoch re-ingestion,
 live session context read on arrival and prefetched when Honcho finishes work,
-and session allowlists for group and topic recall. Nothing is active in the
-operating installation, and no live recall check has run; the fresh start (H5)
-and live acceptance (H6) need separate owner approval. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
+and session allowlists for group and topic recall. On 2026-10-10 the owner's
+MacBook development installation ran the fresh start (H5) and live acceptance
+(H6) on the Claude provider; see item 7. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
 Retired sources now leave Hermes' own stored history. The real-Claude simulator
@@ -919,19 +919,21 @@ activation remains separate.
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh, removed in source) were about six percent of
    sampled background steps.
-7. Honcho memory model: H1 to H4 of the
-   [plan](docs/honcho-standard-memory-plan.md) are on main
-   ([ADR-0115](docs/adr/0115-honcho-session-revisions.md)). The owner started H5
-   and H6 on 2026-10-10. The fresh-start command and workspace deletion
-   ([ADR-0122](docs/adr/0122-honcho-fresh-start.md)) pass the fixture rehearsal
-   ([check](test/store-native-memory.test.ts)). Pending: restart the operating
-   installation on current main, measure storage, run
-   `./bin/nocheh memory honcho fresh-start`, confirm `workspace_deletions` is
-   done and measure storage again; then H6 same-topic recall, private recall,
-   group isolation and timing checks with owner messages. Until the fresh start
-   runs, the operating installation still loses ready Honcho memory whenever a
-   guard epoch advances. Peer cards are workspace-wide, so only owner turns read
-   them.
+7. Honcho memory model: H1 to H6 of the
+   [plan](docs/honcho-standard-memory-plan.md) ran on 2026-10-10
+   ([ADR-0115](docs/adr/0115-honcho-session-revisions.md),
+   [ADR-0122](docs/adr/0122-honcho-fresh-start.md)) on the owner's MacBook
+   development installation, with the Claude provider. Same-topic recall, private
+   recall and group isolation passed
+   ([status](docs/mvp-acceptance-status.md)). Open items:
+   - Reply latency: the median was 88 s and the slowest 172 s. Most of it was the
+     Hermes run queue (median 30 s), because Telegram dispatch holds one lock
+     across all chats (`services/hermes/assistant_gateway.py` `dispatch`).
+     Preparation took 12.3 s on an idle turn.
+   - Honcho-only recall is unproven: the passing answer also had the fact from
+     chat history and a Nocheh learned rule.
+   - Voice transcription has no route on the Claude provider.
+   - Peer cards are workspace-wide, so only owner turns read them.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
    are implemented and pass focused synthetic checks: the `stage_timings` table with
    14-day retention, Hermes phases and window kept from the run receipt, Inngest

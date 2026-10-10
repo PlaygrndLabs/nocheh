@@ -2762,3 +2762,20 @@ the workspace itself, and Nocheh's records of it
 are deleted. The fixture rehearsal passes; the operating run and H6 are pending.
 
 </entry>
+
+
+<entry date="2026-10-10" area="Honcho fresh start and live acceptance (H5, H6)">
+
+The owner chose their MacBook as the installation, and the Claude provider
+instead of ChatGPT. The development stack started fresh; the fresh start moved
+Honcho to workspace revision 2 with no earlier workspaces to delete, and storage
+was unchanged. A simulator run had replaced the main stack's Honcho containers;
+the owner approved removing them with their volumes kept. On main 0c7263a
+Honcho passed its six synthetic live checks on Claude and was attached for new
+messages only. Owner Telegram messages passed same-topic recall, private recall
+and group isolation; Honcho had not finished its first work before those
+turns, so a later private question was added and also passed with Honcho's
+context present. Honcho spend was about $0.04 of the $5 cap. Reply time had a
+median of 88 s, mostly the Hermes run queue.
+
+</entry>
