@@ -98,7 +98,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 adapter._app=app;adapter._bot=bot;adapter._text_batch_delay_seconds=0.001
                 adapter._register_handlers(app)
                 gateway=AssistantGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
-                gateway.status='connected';gateway.adapter=adapter;gateway.lock=asyncio.Lock();gateway.action_lock=asyncio.Lock()
+                gateway.status='connected';gateway.adapter=adapter;gateway.capacity=asyncio.Semaphore(2);gateway.action_lock=asyncio.Lock()
                 handled=[]
                 async def message(event):
                     turn=TURN.get();handled.append(event)
@@ -142,8 +142,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len(handled),8)
                     # Fixture rejects getFile: none of these paths downloads or
                     # invokes the native sticker vision helper again.
-                    async with gateway.lock:
+                    lane={'lock':asyncio.Lock(),'users':0};gateway.lanes['-20']=lane
+                    async with lane['lock'],gateway.capacity,gateway.capacity:
                         action=await asyncio.wait_for(gateway.send_action({'id':'a'*64,'destination':'777','text':'Approved fixture'}),1)
+                    del gateway.lanes['-20']
                     self.assertEqual(action,{'state':'done'},'approved sends cannot wait behind a conversation lock')
                     with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}), patch('services.hermes.assistant_gateway.check_action_policy',return_value=False):
                         count=len(request.sent)
@@ -277,6 +279,74 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(await gateway.dispatch(blocked),rejected,'the receipt is reused')
                     self.assertEqual(len(request.sent),sent_before+2)
                     request.reject=None
+                finally:await app.shutdown()
+
+    async def test_turns_in_different_chats_run_side_by_side_and_one_chat_keeps_its_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);secret='synthetic-service-token-123456789'
+            policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20','-30','-40'],
+                           'group_access':{chat:{'granted':['456'],'denied':[]} for chat in ('-20','-30','-40')}})
+            with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN':secret}), patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+                adapter=committed_adapter_class()(PlatformConfig(enabled=True,token='123456:synthetic',typing_indicator=False))
+                request=BotFixtureRequest();instrument_request(request,adapter.capture)
+                bot=ExtBot('123456:synthetic',request=request,get_updates_request=BotFixtureRequest())
+                app=Application.builder().bot(bot).build();await app.initialize()
+                adapter._app=app;adapter._bot=bot;adapter._text_batch_delay_seconds=0.001
+                adapter._register_handlers(app)
+                gateway=AssistantGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
+                gateway.status='connected';gateway.adapter=adapter;gateway.capacity=asyncio.Semaphore(2);gateway.action_lock=asyncio.Lock()
+                gates={};started=[]
+                async def message(event):
+                    turn=TURN.get();text=turn['body']['payload']['message']['text']
+                    started.append(text)
+                    await gates.setdefault(text,asyncio.Event()).wait()
+                    turn['agent_result']={'state':'done','text':'Reply to '+text,'session_id':'fixture'}
+                    return 'Reply to '+text
+                adapter.set_message_handler(message)
+                def envelope(update_id,chat,text):
+                    key=f'telegram:123456:update:{update_id}';event=digest(key)
+                    claims={'scope':chat,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant'}
+                    body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+                    signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+                    return {'event_id':event,'source_key':key,'scope':chat,'attempt':1,'archive_credential':'turn.'+body+'.'+signature,
+                        'payload':{'update_id':update_id,'message':{'message_id':update_id,'date':1700000000,'chat':{'id':int(chat),'type':'group','title':'Fixture'},'from':{'id':456,'is_bot':False,'first_name':'User'},'text':text,'entities':[]}}}
+                async def until(condition):
+                    for _ in range(500):
+                        if condition():return
+                        await asyncio.sleep(0.005)
+                    self.fail('condition not reached')
+                try:
+                    progress={}
+                    def track(text):return lambda stage:progress.setdefault(text,[]).append(stage)
+                    slow=asyncio.create_task(gateway.dispatch(envelope(1,'-20','slow'),progress=track('slow')))
+                    await until(lambda:'slow' in started)
+                    later=asyncio.create_task(gateway.dispatch(envelope(2,'-20','later'),progress=track('later')))
+                    gates['other']=asyncio.Event();gates['other'].set()
+                    other=await asyncio.wait_for(gateway.dispatch(envelope(3,'-30','other'),progress=track('other')),2)
+                    self.assertEqual(other,{'state':'done'},'another chat does not wait for a running turn')
+                    self.assertEqual([m['text'] for m in request.sent],['Reply to other'])
+                    self.assertEqual([str(m['chat_id']) for m in request.sent],['-30'],'each reply goes to its own chat')
+                    held=asyncio.create_task(gateway.dispatch(envelope(4,'-30','held'),progress=track('held')))
+                    await until(lambda:'held' in started)
+                    third=asyncio.create_task(gateway.dispatch(envelope(5,'-40','third'),progress=track('third')))
+                    await asyncio.sleep(0.05)
+                    self.assertNotIn('later',started,'the same chat keeps its order')
+                    self.assertNotIn('third',progress,'a third chat waits for a free slot before its turn starts')
+                    gates['held'].set()
+                    self.assertEqual(await asyncio.wait_for(held,2),{'state':'done'})
+                    gates.setdefault('third',asyncio.Event()).set()
+                    self.assertEqual(await asyncio.wait_for(third,2),{'state':'done'})
+                    self.assertNotIn('later',started,'a free slot does not reorder one chat')
+                    gates.setdefault('later',asyncio.Event()).set();gates['slow'].set()
+                    self.assertEqual(await asyncio.wait_for(slow,2),{'state':'done'})
+                    self.assertEqual(await asyncio.wait_for(later,2),{'state':'done'})
+                    self.assertLess(started.index('slow'),started.index('later'))
+                    replies=[m['text'] for m in request.sent]
+                    self.assertLess(replies.index('Reply to slow'),replies.index('Reply to later'))
+                    self.assertEqual(len(replies),5,'every turn sends exactly once')
+                    self.assertEqual(gateway.lanes,{},'idle chats leave no lane behind')
+                    again=await gateway.dispatch(envelope(1,'-20','slow'))
+                    self.assertEqual(again,{'state':'done'});self.assertEqual(len(request.sent),5,'a replayed receipt does not resend')
                 finally:await app.shutdown()
 
 

@@ -117,7 +117,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
                                    '123456:synthetic', 'synthetic', lambda: None)
         gateway.status = 'connected'
         gateway.adapter = self.adapter
-        gateway.lock = asyncio.Lock()
+        gateway.capacity = asyncio.Semaphore(2)
         gateway.action_lock = asyncio.Lock()
         return gateway
 
