@@ -11,6 +11,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -58,6 +59,16 @@ console.log(JSON.stringify({status:response.status,body:text?JSON.parse(text):nu
 
     def app(self, path, body=None, allow_error=False):
         return self.http(path, body, service='nocheh-app', port=8780, allow_error=allow_error)
+
+    def native(self, path, body=None, method=None):
+        """The owner's native administration route, as `./bin/nocheh cron` calls it."""
+        script = """const [path,encoded,method]=process.argv.slice(1),body=JSON.parse(encoded);
+const response=await fetch('http://hermes:8785'+path,{method:method||(body===null?'GET':'POST'),
+headers:{'content-type':'application/json','X-Hermes-Session-Token':process.env.SERVICE_TOKEN},
+...(body===null?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(60000)});
+const text=await response.text();if(!response.ok)throw Error('native_http_'+response.status+':'+text.slice(0,300));console.log(text);"""
+        return json.loads(subprocess.check_output(self.command+['exec', '-T', 'nocheh-app', 'node', '--input-type=module', '-e', script,
+            path, json.dumps(body), method or ''], text=True))
 
     def telegram(self):
         return self.http('/fixture/telegram')
@@ -116,12 +127,17 @@ console.log(JSON.stringify({status:response.status,body:text?JSON.parse(text):nu
 class Scenarios:
     def __init__(self, fixture, report):
         self.f, self.report, self.results, self.current = fixture, report, [], None
+        # Every (scenario, event) whose single causal reply was verified; the
+        # stage timing scenario reads one breakdown for each of them.
+        self.replied = []
+        self.real_model = False
 
     def save(self):
         (self.report/'progress.json').write_text(json.dumps(self.results, indent=2, ensure_ascii=False)+'\n')
 
     def gate(self, label, value=True, **observed):
         if not value:
+            self.current['failed_gate'] = {'gate': label, **observed}
             raise Failed(label)
         self.current['gates'].append({'gate': label, **observed})
         print(json.dumps({'scenario': self.current['scenario'], 'gate': label, **observed}, ensure_ascii=False), flush=True)
@@ -169,6 +185,10 @@ class Scenarios:
         reply = json.loads(new[0]['parameters'].get('reply_parameters', '{}') or '{}')
         self.gate('reply_targets_source', reply.get('message_id') == update['message']['message_id'])
         self.wait('delivery_archived', lambda: archived_delivery(self.f.query, new[0]['message'], update['update_id']), 60)
+        self.replied.append((self.current['scenario'], event_id))
+        if self.real_model:  # Real answers are saved for review against the scenario's intent.
+            self.current.setdefault('answers', []).append({'asked': update['message'].get('text') or update['message'].get('caption'),
+                                                           'answered': new[0]['message']['text'][:4000]})
         return event_id, new[0]['message']['text']
 
     def execute(self, name, function):
@@ -360,6 +380,21 @@ class Scenarios:
             'operation_id': 'scenario-restore-'+event_id[:16]})
         self.gate('restore_available', restored.get('retired') is False)
 
+    def document_reply(self):
+        # An ordinary file with a caption: the original bytes are kept exactly
+        # and the owner still gets one causal reply.
+        content = b'%PDF-1.4\n% synthetic invoice DOCMARK55\n'+bytes(range(256))
+        file_id = 'doc-'+str(self.f.ids())
+        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.pdf',
+                                   'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
+        update = self.f.message(OWNER, None, extra={'caption': 'این فاکتور را نگه دار', 'document': {
+            'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_name': 'synthetic-invoice.pdf',
+            'mime_type': 'application/pdf', 'file_size': len(content)}})
+        event_id, _ = self.turn(update, OWNER)
+        expected = hashlib.sha256(content).hexdigest()
+        self.wait('document_bytes_archived', lambda: self.f.query('nocheh_archive', "SELECT file_hash FROM artifacts WHERE event_id='"+event_id+"'") == expected, 120)
+        self.gate('document_bytes_unchanged', (self.f.directory/'state/files'/expected).read_bytes() == content)
+
     # Approvals --------------------------------------------------------------
 
     def proposals(self):
@@ -416,6 +451,35 @@ class Scenarios:
         self.gate('group_proposal_waits_for_owner', len(self.replies(before, GROUP, topic)) == 1)
         self.f.app('/v1/tools/telegram-decision', {'id': created[0]['id'], 'fingerprint': created[0]['fingerprint'], 'decision': 'deny'})
 
+    def schedule_fires_and_waits_for_review(self):
+        # An owner-private schedule fires on its own cadence, runs once, and its
+        # Telegram result waits for exact owner approval before one delivery.
+        known = {row['id'] for row in self.proposals()}
+        before = len(self.f.sent())
+        started = self.f.query('nocheh_control', 'SELECT now()')
+        job = self.f.native('/api/cron/jobs?profile=default', {'name': 'Synthetic reminder', 'prompt': 'یادآوری: آب بخور SCHEDMARK',
+                                                             'schedule': 'every 1m', 'deliver': 'telegram', 'repeat': 1})
+        self.gate('schedule_created', job.get('deliver') == 'telegram' and job.get('delivery_policy') == 'review_each_result', job=job.get('id'))
+        self.wait('definition_captured', lambda: self.f.native('/api/cron/jobs/'+job['id']+'?profile=default').get('managed'), 120)
+        run = self.wait('scheduled_run_done', lambda: self.f.query('nocheh_control', "SELECT json_build_object('id',event_id,'state',state,'error',error_code) "
+            "FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"' AND state IN ('done','failed','cancelled','interrupted')"), 300)
+        run = json.loads(run)
+        self.gate('scheduled_run_completed', run['state'] == 'done', state=run['state'], error=run['error'])
+        proposal = self.wait('result_proposed', lambda: next((row for row in self.proposals() if row['id'] not in known), None), 120)
+        self.gate('result_addressed_to_owner_chat', proposal['state'] == 'proposed' and proposal['arguments']['destination'] == str(OWNER),
+                  state=proposal['state'], destination=proposal['arguments']['destination'])
+        time.sleep(5)
+        self.gate('nothing_sent_before_review', not self.replies(before, OWNER))
+        self.f.app('/v1/tools/telegram-decision', {'id': proposal['id'], 'fingerprint': proposal['fingerprint'], 'decision': 'approve',
+                                                   'operation_id': 'scenario-schedule-'+proposal['id'][:16]})
+        self.wait('result_delivered', lambda: next(row for row in self.proposals() if row['id'] == proposal['id'])['state'] in ('done', 'ambiguous'), 240)
+        new = self.replies(before, OWNER)
+        self.gate('delivered_once_with_exact_text', len(new) == 1 and new[0]['message']['text'] == proposal['arguments']['text'], count=len(new))
+        time.sleep(75)
+        runs = self.f.query('nocheh_control', "SELECT count(*) FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"'")
+        self.gate('repeat_limit_honored', runs == '1', runs=runs)
+        self.f.native('/api/cron/jobs/'+job['id']+'?profile=default', {}, 'DELETE')
+
     # Audience policy ----------------------------------------------------------
 
     def participant_not_permitted(self):
@@ -447,6 +511,15 @@ class Scenarios:
         self.f.control({'faults': [{'method': 'getUpdates', 'code': 502, 'description': 'Bad Gateway'},
                                    {'method': 'getUpdates', 'code': 500, 'description': 'Internal Server Error'}]})
         self.wait('polling_faults_consumed', lambda: not [fault for fault in self.f.telegram()['faults'] if fault['method'] == 'getUpdates'], 120)
+        # The adapter restarts polling after the faults. A reply ready before that
+        # restart is never transmitted and is retried by design, which is covered
+        # by reply_during_polling_reconnect; this scenario measures recovery after it.
+        def reconnected():
+            calls = self.f.telegram()['calls']
+            fault = max(call['at'] for call in calls if call['method'] == 'getUpdates' and call.get('status') in (500, 502))
+            restart = [call['at'] for call in calls if call['method'] in ('deleteWebhook', 'getMe') and call['at'] > fault]
+            return restart and any(call['method'] == 'getUpdates' and call.get('status') == 200 and call['at'] > restart[-1] for call in calls)
+        self.wait('polling_restarted_after_faults', reconnected, 120)
         self.turn(self.f.message(GROUP, 'بعد از قطعی دریافت', topic=20), GROUP, 20)
 
     def lost_send_response(self):
@@ -489,6 +562,13 @@ class Scenarios:
 
     def speech(self, synthetic):
         service = self.f.manifest['services']['chatgpt-speech']
+        if not synthetic:
+            # Restore the prepared, unavailable speech service so a later run on
+            # the same installation can repeat the speech-outage scenarios.
+            before = sorted(self.f.directory.glob('telegram-http-*/compose.before.json'))
+            if not before:
+                raise Failed('original_speech_definition_missing')
+            service = self.f.manifest['services']['chatgpt-speech'] = json.loads(before[0].read_text())['services']['chatgpt-speech']
         if synthetic:
             service['command'] = ['python', '/fixture/provider.py', 'speech']
             service['environment']['NOCHEH_INSTALLATION_FIXTURE'] = '1'
@@ -500,7 +580,8 @@ class Scenarios:
 
     def voice_waits_while_speech_unavailable(self):
         if self.f.manifest['services']['chatgpt-speech'].get('command') == ['python', '/fixture/provider.py', 'speech']:
-            raise Failed('speech_fixture_already_active')
+            self.speech(False)
+            self.gate('speech_made_unavailable_again')
         before = len(self.f.sent())
         update, event_id = self.voice(b'OggS\x00\x02synthetic-voice SPEECH:\xd9\xbe\xdb\x8c\xd8\xa7\xd9\x85 \xd9\x85\xd9\x86\xd8\xaa\xd8\xb8\xd8\xb1\n\xff'*4)
         self.state['waiting_voice'] = (update, event_id)
@@ -672,20 +753,96 @@ class Scenarios:
         apply({str(GROUP): {'granted': [], 'denied': [str(PARTICIPANT)]}})
         self.turn(self.f.message(GROUP, 'هنوز اجازه دارم؟', sender=PARTICIPANT, topic=22), GROUP, 22, expect_reply=False)
 
+    # Operations -------------------------------------------------------------------
+
+    def storage_report(self):
+        # The owner's `./bin/nocheh storage` report and the Monitoring Storage
+        # section read the same measurements; both must see every store.
+        from tools.operations.installation.storage import report
+        result = report(self.f.directory/'state', command=self.f.command, env=dict(os.environ))
+        measured = {row['database']: row for row in result['databases']}
+        expected = {'nocheh_archive', 'nocheh_derived', 'nocheh_control', 'nocheh_inngest', 'honcho_experiment'}
+        self.gate('every_store_measured', set(measured) == expected and all(row['state'] == 'measured' for row in measured.values()),
+                  states={name: row['state'] for name, row in measured.items()})
+        self.gate('archive_events_listed', any(table['table'] == 'events' for table in measured['nocheh_archive']['largest_tables']))
+        self.gate('state_folders_listed', {'files', 'spool'} <= {row['path'] for row in result['state_folders']},
+                  folders=[row['path'] for row in result['state_folders']])
+        self.gate('retention_reported', result['retention_days'] == 14 and result['docker_logs']['max_files_per_container'] >= 1)
+        self.current['observed'] = {'bytes': {name: row.get('bytes') for name, row in measured.items()},
+                                    'state_bytes': {row['path']: row['bytes'] for row in result['state_folders']}}
+        raw = subprocess.run(self.f.command+['exec', '-T', 'nocheh-dashboard', 'python3', '-m', 'tools.runtime.management'],
+                             input=json.dumps({'operation': 'storage.report'}), text=True, capture_output=True, timeout=180)
+        monitoring = json.loads(raw.stdout.strip().splitlines()[-1]) if raw.stdout.strip() else {'error': 'no_output'}
+        databases = {row['database']: row['state'] for row in (monitoring.get('result') or {}).get('databases', [])}
+        self.gate('monitoring_storage_measures_every_store', set(databases) == expected and set(databases.values()) == {'measured'},
+                  error=monitoring.get('error'), states=databases)
+
+    def stage_timings(self):
+        # T6 of the stage timing plan: one per-stage breakdown for every reply
+        # this run verified, stages that add up to the reply time, no content,
+        # and the same rows through the owner's `admin timings` rendering.
+        import contextlib
+        import io
+        from tools.cli.admin import redact, render_timings
+        seen, rows, incomplete, mismatched, leaked = set(), [], [], [], []
+        allowed = {'event_id', 'started_at', 'ended_at', 'reply_ms', 'complete', 'attempts', 'stages', 'unmeasured_ms'}
+        if not self.replied:  # A focused --only run measures the installation's recent replies instead.
+            self.replied = [('recent', row['event_id']) for row in self.f.app('/v1/workflows/timings?limit=50')['recent']]
+        for scenario, event_id in self.replied:
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+            value = self.f.app('/v1/workflows/timings/'+event_id)
+            if set(value) - allowed or any(set(stage) != {'stage', 'label', 'category', 'ms', 'calls'} for stage in value['stages']):
+                leaked.append(scenario)
+            if not value['complete']:
+                incomplete.append(scenario)
+            total = sum(stage['ms'] for stage in value['stages'])
+            if value['reply_ms'] is None or abs(total-value['reply_ms']) > len(value['stages']):
+                mismatched.append(scenario)
+            rows.append({'scenario': scenario, 'event': event_id[:12], 'reply_ms': value['reply_ms'], 'attempts': value['attempts'],
+                         'complete': value['complete'], 'stages': {stage['stage']: stage['ms'] for stage in value['stages']}})
+        summary = self.f.app('/v1/workflows/timings?limit=200')
+        (self.report/'timings.json').write_text(json.dumps({'replies': rows, 'summary': summary}, indent=2, ensure_ascii=False)+'\n')
+        self.current['observed'] = {'replies': len(rows), 'reply_ms_p50': summary['reply_ms_p50'], 'reply_ms_p95': summary['reply_ms_p95'],
+                                    'stages': {stage['stage']: [stage['ms_p50'], stage['ms_p95']] for stage in summary['stages']}}
+        self.gate('breakdown_for_every_reply', bool(rows), replies=len(rows))
+        self.gate('breakdowns_carry_no_content', not leaked, scenarios=leaked)
+        self.gate('every_breakdown_complete', not incomplete, scenarios=incomplete)
+        self.gate('stages_add_up_to_reply_time', not mismatched, scenarios=mismatched)
+        self.gate('summary_has_percentiles', summary['messages'] > 0 and summary['reply_ms_p50'] is not None, messages=summary['messages'])
+        output = io.StringIO()
+        sample = self.f.app('/v1/workflows/timings/'+self.replied[-1][1])
+        with contextlib.redirect_stdout(output):
+            rendered = render_timings(redact(sample)) and render_timings(redact(summary))
+        self.gate('admin_timings_renders_every_stage', rendered and '[redacted]' not in json.dumps(redact(sample))
+                  and all(stage['label'] in output.getvalue() for stage in sample['stages']))
+
 
 ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
-         'owner_recall', 'secret_is_guarded', 'action_approval', 'action_denial', 'group_current_action', 'participant_not_permitted',
+         'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
          'unselected_group', 'retirement_hides_fact', 'voice_waits_while_speech_unavailable', 'voice_recovers_when_speech_returns',
          'voice_transcript_drives_turn', 'burst_with_voice_in_order', 'voice_blank_transcript_is_terminal',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_executes_owner_requests', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
-         'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant']
+         'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
+
+
+# With real model answers (tools.acceptance.real_model_fixture) the scripted
+# directives mean nothing; these scenarios check delivery, order, audience,
+# recovery and effects only, and save each answer for review.
+REAL_MODEL_ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics',
+                    'burst_in_order', 'private_burst_in_order', 'document_reply', 'participant_not_permitted', 'unselected_group',
+                    'schedule_fires_and_waits_for_review', 'voice_waits_while_speech_unavailable',
+                    'voice_recovers_when_speech_returns', 'burst_with_voice_in_order', 'deleted_topic', 'polling_outage',
+                    'lost_send_response', 'blocked_private_then_recovery', 'restart_preserves_receipts', 'storage_report', 'stage_timings']
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--only', nargs='*', choices=ORDER)
+    parser.add_argument('--real-model', action='store_true', help='Run REAL_MODEL_ORDER after real_model_fixture switched the model route')
     args = parser.parse_args()
     directory = args.directory.resolve()
     if not directory.is_relative_to(ROOT/'data/acceptance/results'):
@@ -702,18 +859,40 @@ def main():
         raise ValueError('previous_fixture_faults_pending')
     scenarios = Scenarios(fixture, report)
     scenarios.state = {}
-    for name in args.only or ORDER:
+    real = (directory/'route-preflight.json').exists()
+    if args.real_model != real:
+        raise ValueError('real_model_fixture_required' if args.real_model else 'scripted_fixture_required')
+    scenarios.real_model = real
+    for name in args.only or (REAL_MODEL_ORDER if real else ORDER):
         scenarios.execute(name, getattr(scenarios, name))
     final = fixture.telegram()
     project_networks = {value['name'] for value in fixture.manifest['networks'].values()}
-    listed = subprocess.check_output(['docker', 'ps', '-a', '--format', '{{json .}}', '--filter', 'label=nocheh.role=isolated-turn'], text=True)
-    lingering = [row for row in map(json.loads, filter(None, listed.splitlines()))
-                 if set(row.get('Networks', '').split(',')) & project_networks]
+    def turns():
+        listed = subprocess.check_output(['docker', 'ps', '-a', '--format', '{{json .}}', '--filter', 'label=nocheh.role=isolated-turn'], text=True)
+        return [row for row in map(json.loads, filter(None, listed.splitlines())) if set(row.get('Networks', '').split(',')) & project_networks]
+    # Native memory reviews keep launching short isolated turns after a burst.
+    # They must drain on their own; a turn left behind after that is a leak.
+    # A review waiting for a receipt is reported separately: it launches no turn.
+    count = lambda states: fixture.query('nocheh_control', "SELECT count(*) FROM workflow_registry WHERE family='memory_review' "
+                                         "AND job_id LIKE 'native:%' AND "+states)
+    backlog = lambda: count("(state IN ('queued','running') OR state='waiting' AND waiting_reason IS DISTINCT FROM 'receipt_pending')")
+    started, quiet, pending = time.monotonic(), None, backlog()
+    while time.monotonic()-started < 1800:
+        if turns() or backlog() != '0':
+            quiet = None
+        elif quiet is None:
+            quiet = time.monotonic()
+        elif time.monotonic()-quiet >= 30:
+            break
+        time.sleep(5)
+    lingering = turns()
     scenarios.current = {'scenario': 'no_lingering_isolated_turns', 'gates': [], 'passed': not lingering}
-    scenarios.current['observed'] = {'containers': len(lingering)}
+    scenarios.current['observed'] = {'containers': len(lingering), 'native_reviews_pending_at_end': int(pending),
+                                     'native_reviews_left': int(backlog()),
+                                     'native_reviews_awaiting_receipt': int(count("state='waiting' AND waiting_reason='receipt_pending'")), 'drain_seconds': round(time.monotonic()-started, 1)}
     scenarios.results.append(scenarios.current)
     summary = {'passed': all(row['passed'] for row in scenarios.results), 'live_acceptance': False,
-               'provider': 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
+               'provider': 'existing-model-route' if real else 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
                'unknown_methods': final['unknown'][len(initial['unknown']):], 'stats': fixture.http('/fixture/stats')}
     (report/'result.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False)+'\n')
     print(json.dumps({'passed': summary['passed'], 'failed': [row['scenario'] for row in scenarios.results if not row['passed']],
