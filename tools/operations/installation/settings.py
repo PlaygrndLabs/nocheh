@@ -35,12 +35,14 @@ def view(state):
               for key in DEFAULTS]
     from tools.operations.provider.embedding_config import MODELS
     try:
-        from tools.operations.provider.provider import models
-        served = models(state)
+        from tools.operations.provider.provider import reasoning_choices
+        choices = reasoning_choices(state)
     except Exception:
-        served = []
+        choices = {'provider_running': False, 'providers': []}
+    served = sorted({model for provider in choices['providers'] for model in provider['models']})
     return {'revision': saved_revision, 'applied_revision': active,
-            'models': {'reasoning': served, 'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state)},
+            'models': {'reasoning': served, 'providers': choices['providers'], 'provider_running': choices['provider_running'],
+                       'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state)},
             'apply_state': 'current' if active == saved_revision else 'pending' if active else 'unverified',
             'fields': fields}
 
