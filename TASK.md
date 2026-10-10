@@ -573,6 +573,18 @@ delivers once (the scheduled-run fix on main holds), but removing the finished
 one-time schedule failed: removal paused it, which Hermes refuses for a
 terminal job. Removal now leaves a finished job terminal
 ([adapter](services/hermes/native_cron.py), [test](services/hermes/test_scheduler.py)).
+Real-Claude simulator run (October 10, fresh installation, Claude Sonnet 5.5
+through the operating provider, real Honcho embeddings): 14 of 16 scenarios
+passed before the fixture's 300-call cap; the schedule cleanup failure is fixed
+above and polling outage stopped at the cap. Of 300 model calls, 214 were
+literal-detection calls, 49 Honcho and 37 Hermes chat. Over 20 replies the
+reply time was p50 86 s and p95 176 s while provider wait was p50 2.2 s:
+preparation steps (p50 8.9 s), Hermes history (p50 5.7 s), model guard and
+step waits dominate, and detection calls are counted as internal steps rather
+than LLM time. Answers were natural Persian; while transcription was down the
+reply to a text after a voice note said no voice note was found, and a PDF
+caption reply said no text could be extracted. Pending: owner authorization
+to raise the cap for the remaining scenarios and the six memory cases.
 Settings now offers both models: a reasoning-model picker grouped by signed-in
 provider login, with a sign-in hint when none is signed in, and an embedding-model
 picker that saving refuses once Honcho's ledger has committed to another model;
