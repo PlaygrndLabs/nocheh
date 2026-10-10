@@ -956,7 +956,13 @@ activation remains separate.
      Preparation took 12.3 s on an idle turn.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.
-   - Voice transcription has no route on the Claude provider.
+   - Voice transcription has no route on the Claude provider. While a voice
+     note waits for its transcript, a later message in that chat starts after
+     the two-minute order bound and its turn is told that an earlier voice note
+     was received but is not transcribed yet, so the reply no longer says no
+     voice note was found ([dispatch check](test/store-telegram-dispatch.test.ts),
+     [turn check](services/hermes/test_turn_process.py)). Pending: a real-model
+     rerun of the simulator's speech-outage scenario.
    - Peer cards are workspace-wide, so only owner turns read them.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
    are implemented and pass focused synthetic checks: the `stage_timings` table with

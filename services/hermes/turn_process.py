@@ -66,6 +66,12 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # Retrieval uses the conversation content. The per-execution source hash
     # belongs in agent provenance, not in the semantic memory query/cache key.
     memory_query=text[:2000]
+    waiting=body.get('untranscribed_voice')
+    if type(waiting) is int and 0<waiting<=20:
+        # A later message may start before an earlier voice note's transcript exists.
+        text += ('\n\n[Earlier in this chat, ' + ('a voice note was' if waiting==1 else str(waiting)+' voice notes were') +
+                 ' received and archived but not transcribed yet. That content is not available to you and will be answered'
+                 ' separately once transcribed. Do not say that no voice note was received or found.]')
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
     transport = credentials.runtime() if hasattr(credentials, 'runtime') else {
         'api_key': credentials.access_token, 'base_url': 'https://chatgpt.com/backend-api/codex',
