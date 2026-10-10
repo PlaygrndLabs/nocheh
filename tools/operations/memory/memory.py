@@ -10,7 +10,7 @@ from tools.operations.archive.archive import API
 def main(arguments):
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest='action',required=True)
-    honcho=commands.add_parser('honcho');honcho.add_argument('mode',choices=('status','attach','detach'),default='status',nargs='?');honcho.add_argument('--include-history',action='store_true');honcho.add_argument('--catch-up',action='store_true')
+    honcho=commands.add_parser('honcho');honcho.add_argument('mode',choices=('status','attach','detach','fresh-start'),default='status',nargs='?');honcho.add_argument('--include-history',action='store_true');honcho.add_argument('--catch-up',action='store_true')
     spaces=commands.add_parser('spaces');spaces.add_argument('--after',default='')
     for name in ('policy','shares','preview'):
         command=commands.add_parser(name);command.add_argument('--space',required=True)
@@ -31,6 +31,9 @@ def main(arguments):
     args=parser.parse_args(arguments);api=API();prefix='/v1/memory/'
     if args.action=='honcho':
         if args.mode=='status':result=api.call(prefix+'honcho')
+        elif args.mode=='fresh-start':
+            status=api.call(prefix+'honcho')
+            result=api.call(prefix+'honcho/fresh-start',{'expected_revision':status['connection']['revision'],'operation_id':str(uuid.uuid4())})
         else:
             status=api.call(prefix+'honcho')
             result=api.call(prefix+'honcho',{'attached':args.mode=='attach','include_history':args.include_history,
