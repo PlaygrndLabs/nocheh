@@ -27,9 +27,14 @@ def _secret(path):
     return value
 
 
-def login_state(state):
-    # Other providers' logins (Claude, Antigravity, ...) may sit beside the one
-    # shared ChatGPT login; they neither satisfy nor block it.
+def login_kind(model):
+    """CLIProxyAPI credential type serving a reasoning model."""
+    return 'claude' if model.startswith('claude-') else 'codex'
+
+
+def login_state(state,kind='codex'):
+    # Other providers' logins may sit beside the one login of the selected
+    # kind (`codex` is the shared ChatGPT login); they neither satisfy nor block it.
     _,auth,_,_=paths(state);files=active=invalid=others=0
     for path in auth.glob('*.json'):
         try:
@@ -37,7 +42,7 @@ def login_state(state):
                 raise ValueError()
             body=json.loads(path.read_text())
             if not isinstance(body,dict):raise ValueError()
-            if body.get('type')!='codex':
+            if body.get('type')!=kind:
                 others+=1;continue
             files+=1
             if (body.get('disabled') is not True
@@ -104,7 +109,11 @@ def compose(state):
 
 
 def status(state):
-    info={'root':str(paths(state)[0]),**login_state(state),'clients':list(CLIENTS)};info.update(revision=LOCK['revision'],running=False,healthy=False,
+    from tools.operations.installation.configuration import DEFAULTS,env_path,read_env
+    model=read_env(env_path(state)).get('NOCHEH_MODEL') or DEFAULTS['NOCHEH_MODEL']
+    # The ChatGPT login stays reported: voice transcription uses it whatever the reasoning model.
+    info={'root':str(paths(state)[0]),**login_state(state),'clients':list(CLIENTS),'reasoning_model':model,
+          'reasoning_login_present':login_state(state,login_kind(model))['login_present']};info.update(revision=LOCK['revision'],running=False,healthy=False,
         monitor={'revision':MONITOR_LOCK['revision'],'running':False,'healthy':False})
     command,env=compose(state)
     try:

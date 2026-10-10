@@ -20,7 +20,7 @@ from .subscription import resolve_credentials
 
 async def main():
     secret=environment_secret('SERVICE_TOKEN')
-    model=os.environ.get('NOCHEH_MODEL','gpt-5.6-sol')
+    model=os.environ.get('NOCHEH_MODEL','claude-sonnet-5-5')
     root=Path(os.environ['HERMES_HOME'])/'synthetic-assistant-rehearsal'
     scopes=Scopes({'enabled':True,'owner_id':'9000000000123','group_ids':['-9000000000020','-9000000000030']})
     def archive(event):

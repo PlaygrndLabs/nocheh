@@ -30,7 +30,7 @@ x-service: &service
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
     HONCHO_URL: http://honcho-memory:8000
-    NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
+    NOCHEH_MODEL: ${NOCHEH_MODEL:-claude-sonnet-5-5}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
     GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]}
     TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
@@ -291,7 +291,7 @@ services:
   honcho-provider-gateway:
     logging: *logging
     init: true
-    environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780"}
+    environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MODEL:-claude-sonnet-5-5}"}
     profiles: [honcho]
     restart: unless-stopped
     image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
@@ -598,7 +598,7 @@ services:
       NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-evidence}
       CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
       SPEECH_URL: http://chatgpt-speech:8783
-      NOCHEH_MODEL: ${NOCHEH_MODEL:-gpt-5.6-sol}
+      NOCHEH_MODEL: ${NOCHEH_MODEL:-claude-sonnet-5-5}
       ARCHIVE_URL: http://nocheh-app:8780
       GUARD_URL: http://nocheh-security:8786
     volumes:
