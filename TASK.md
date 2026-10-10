@@ -539,6 +539,19 @@ reasoning provider and model is enough for the MVP phase.
 
 <pending>
 
+Silent learning (October 10): on the owner's development installation with
+Claude through Honcho, seven `interpret` jobs failed after 9 to 10 attempts
+with hourly retries still scheduled, because each retry re-validated the same
+saved reasoning result. Results are now read from fenced or wrapped JSON, an
+invalid item is dropped and recorded while valid items publish, and a result
+still unusable as a whole closes its workflow
+([decision](docs/adr/0128-learning-results-keep-valid-items.md),
+[learning checks](test/store-learning-engine.test.ts),
+[workflow checks](test/learning-workflow.test.ts)). Pending: the owner's
+confirmation of keeping valid items rather than failing the whole result, and
+a check on the development installation that the seven jobs complete or close
+on their next retry.
+
 Scheduled runs (October 10): the simulator found every scheduled run rejected
 before the agent started with `space_policy_changed`, because
 `/v1/memory/check` accepted only an archived turn source and schedule fires are

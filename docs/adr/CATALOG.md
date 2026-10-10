@@ -135,3 +135,4 @@ records current implementation and activation.
 | [0123](0123-retired-sources-leave-native-history.md) | Retired sources leave stored Hermes native history | Extends 0021; rewrites the profile's native rows before its next turn, Hermes' workflow unchanged |
 | [0124](0124-native-review-once-per-source.md) | Hermes native memory review runs once per source | Extends 0097 and 0088; later epochs review only unstarted sources and uncertain reviews have a bounded number of observations |
 | [0125](0125-per-chat-telegram-dispatch-lanes.md) | Telegram turns run per chat, two chats at a time | Replaces the gateway's single dispatch lock; per-chat order and receipts unchanged |
+| [0128](0128-learning-results-keep-valid-items.md) | Silent learning keeps valid items and closes on unusable results | Extends 0056 and 0082; invalid items are dropped and recorded, evidence and attribution checks unchanged |

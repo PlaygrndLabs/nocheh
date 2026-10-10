@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import type {HonchoCall} from '../honcho.js';
-import {parseInterpretations,triggeredInterpretations} from '../interpretations.js';
+import {learningResult,parseInterpretations,triggeredInterpretations,type LearningRejection} from '../interpretations.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
@@ -13,6 +13,8 @@ import {LearningContextRepository,type PreparedLearningContext} from './learning
 import {evidencePeerId,honchoPeerId} from './entities.js';
 
 const protocol='honcho-contextual-learning-v1';
+/** A saved reasoning result is never rerun, so a result that fails these checks fails identically on every retry. */
+export const terminalLearningCodes=new Set(['invalid_interpretation_result']);
 export class ContextualLearningRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly guards:GuardRepository,
     readonly learned:LearnedMemoryRepository,readonly provenance:HonchoProvenanceRepository,readonly call:HonchoCall){}
@@ -93,12 +95,16 @@ export class ContextualLearningRepository {
           result={id:output.id,content:Buffer.from(response.content)};
         }
         await this.provenance.current(job.workspace,job.audience,job.binding);
-        let parsed:unknown;try{parsed=JSON.parse(result.content.toString());}catch{throw new HttpError(422,'invalid_interpretation_result');}
-        const values=parseInterpretations(triggeredInterpretations(parsed,job.source_reference.id,context.rule_ids),context.evidence,
+        const parsed=learningResult(result.content.toString());
+        const parsedValues=parseInterpretations(triggeredInterpretations(parsed,job.source_reference.id,context.rule_ids),context.evidence,
           context.space,context.projects,context.entities.session_id),ids:string[]=[],versions:LearnedPublication[]=[];
-        await this.contexts.entities.publishDiscoveries(context,parsed,id);
-        if(values.some(v=>!v.evidence.some(e=>e.id===job.source_reference.id)))throw new HttpError(422,'interpretation_trigger_required');
-        if(values.some(v=>v.conflicts.some(ref=>!context.rule_ids.includes(ref))))throw new HttpError(422,'unknown_interpretation_conflict');
+        const rejected:LearningRejection[]=[...parsedValues.rejected,...(await this.contexts.entities.publishDiscoveries(context,parsed,id)).rejected];
+        const values=parsedValues.values.filter(v=>{
+          const code=!v.evidence.some(e=>e.id===job.source_reference.id)?'interpretation_trigger_required':
+            v.conflicts.some(ref=>!context.rule_ids.includes(ref))?'unknown_interpretation_conflict':null;
+          if(code)rejected.push({section:'interpretations',code});return !code;
+        });
+        await client.query('UPDATE interpretation_jobs SET rejected=$2 WHERE id=$1',[id,JSON.stringify(rejected)]);
         for(let index=0;index<values.length;index++) {
           const value=values[index]!,entryId=digest(canonical([value.scope,value.kind,value.subject,
             value.kind==='convention'||value.uncertainty==='explicit'?context.source_object:'inferred']));

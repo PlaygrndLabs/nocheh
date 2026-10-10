@@ -25,7 +25,7 @@ superseding the retry-order hints in [0085](0085-fair-background-workflow-admiss
 Primary ingestion before new native notes:
 [0088](0088-primary-ingestion-before-native-note-review.md).
 Reply admission and Honcho derivation: [0080](0080-reply-admission-and-honcho-derivation.md).
-Contextual learning deduplication: [0082](0082-evidence-based-learning-deduplication.md).
+Contextual learning deduplication: [0082](0082-evidence-based-learning-deduplication.md). Partial learning results: [0128](0128-learning-results-keep-valid-items.md).
 Scoped reaction discovery: [0084](0084-scoped-reaction-discovery.md), extended with
 guarded evidence in [0086](0086-reaction-discovery-evidence.md).
 Automatic publication during replies: [0083](0083-defer-automatic-memory-publication-during-replies.md).

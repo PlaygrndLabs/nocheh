@@ -6,6 +6,7 @@ import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionA
 import type {StorageServices} from './services.js';
 import type {GuardBinding} from './guards.js';
 import {nativeReconcileLimit} from './native-review.js';
+import {terminalLearningCodes} from './learning-engine.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
 const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','honcho_receipt_missing']);
@@ -169,8 +170,14 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         await s.guards.assertCurrent(ready.binding);return observation('completed','review');
       });
       if(kind==='interpret') {
-        await s.learning.run(id,s.detect,authority);
-        return observation('completed','review',Number((await control.query('SELECT attempts FROM interpretation_jobs WHERE id=$1',[id])).rows[0].attempts));
+        const attempts=async()=>Number((await control.query('SELECT attempts FROM interpretation_jobs WHERE id=$1',[id])).rows[0].attempts);
+        try{await s.learning.run(id,s.detect,authority);}
+        catch(error) {
+          // The saved reasoning result is reused on retry, so an unusable one closes the workflow.
+          if(error instanceof HttpError&&terminalLearningCodes.has(error.code))return observation('failed','review',await attempts(),Date.now(),'invalid_model_output');
+          throw error;
+        }
+        return observation('completed','review',await attempts());
       }
       let row=await s.reviews.inspect(id);
       if(row.paused)return waiting('review','owner_paused');
