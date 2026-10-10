@@ -65,7 +65,10 @@ correction can delete a whole Honcho session and re-add its still-valid writes
 under the next revision; Nocheh's Honcho plugin lists the conclusions derived
 from a session so they are deleted first. Reply context is read live from the
 conversation session on arrival and prefetched when Honcho finishes the
-workspace's work, rather than after each turn. H5 and H6 have not run.
+workspace's work, rather than after each turn. The owner started H5 and H6 on
+2026-10-10. H5's fresh-start command and workspace deletion
+([ADR-0122](adr/0122-honcho-fresh-start.md)) pass the fixture rehearsal; the
+operating run and H6 are pending.
 
 </implementation_status>
 

@@ -818,14 +818,18 @@ activation remains separate.
    perpetual 120-second Honcho context refresh, removed in source) were about six percent of
    sampled background steps.
 7. Honcho memory model: H1 to H4 of the
-   [plan](docs/honcho-standard-memory-plan.md) are implemented in source and
-   pass the fixture tests ([ADR-0115](docs/adr/0115-honcho-session-revisions.md)).
-   Next, with owner approval: H5 attaches the new workspace in an isolated
-   fixture rehearsal and then the operating installation, and deletes the old
-   per-audience workspaces; H6 runs same-topic recall, private recall, group
-   isolation and timing checks. Until H5 runs, the operating installation still
-   loses ready Honcho memory whenever a guard epoch advances. Peer cards are
-   workspace-wide, so only owner turns read them.
+   [plan](docs/honcho-standard-memory-plan.md) are on main
+   ([ADR-0115](docs/adr/0115-honcho-session-revisions.md)). The owner started H5
+   and H6 on 2026-10-10. The fresh-start command and workspace deletion
+   ([ADR-0122](docs/adr/0122-honcho-fresh-start.md)) pass the fixture rehearsal
+   ([check](test/store-native-memory.test.ts)). Pending: restart the operating
+   installation on current main, measure storage, run
+   `./bin/nocheh memory honcho fresh-start`, confirm `workspace_deletions` is
+   done and measure storage again; then H6 same-topic recall, private recall,
+   group isolation and timing checks with owner messages. Until the fresh start
+   runs, the operating installation still loses ready Honcho memory whenever a
+   guard epoch advances. Peer cards are workspace-wide, so only owner turns read
+   them.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
    are implemented and pass focused synthetic checks: the `stage_timings` table with
    14-day retention, Hermes phases and window kept from the run receipt, Inngest
