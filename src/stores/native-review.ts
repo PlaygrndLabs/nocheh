@@ -18,8 +18,12 @@ CREATE TABLE IF NOT EXISTS native_review_jobs (
  result_id text,error_code text,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS paused boolean NOT NULL DEFAULT false;
+ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS reconciliations integer NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS native_review_jobs_source ON native_review_jobs((source_reference->>'id'));
 `;
 const protocol='hermes-native-review-v3';
+/** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
+export const nativeReconcileLimit=8;
 
 /** Native notes remain in Hermes. Nocheh stores prepared inputs and execution receipts separately. */
 export class NativeReviewRepository {
@@ -31,7 +35,13 @@ export class NativeReviewRepository {
     return {admin:false,scope:null,space:owner,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,purpose:'memory-review'};
   }
   async queue(source:SourceReference):Promise<string[]> {
-    const binding=await this.contexts.guards.state(),context=await this.contexts.prepare(source,binding),actor=this.actor(source,binding);
+    const binding=await this.contexts.guards.state();
+    // Each source is reviewed once per installation generation. A later authorization epoch reviews
+    // only sources whose review never started; repeating a started one repeats its model calls.
+    const reviewed=(await this.control.query(`SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3
+      AND (state<>'pending' OR paused OR attempts>0 OR binding=$2::jsonb) ORDER BY created_at,id`,[source.id,JSON.stringify(binding),binding.generation])).rows;
+    if(reviewed.length)return reviewed.map(row=>String(row.id));
+    const context=await this.contexts.prepare(source,binding),actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
     const text=canonical({space:context.space,observations:context.observations,rules:context.rules,limitations:context.limitations});
     if(text.length>200000)throw new HttpError(413,'native_review_input_limit');
@@ -63,6 +73,7 @@ export class NativeReviewRepository {
       fenced=await enterFamily(db,'memory_review',authority.owner,authority.epoch);if(!fenced)throw new HttpError(409,'workflow_owner_changed');
       locked=(await db.query('SELECT pg_try_advisory_lock(803359) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'native_review_busy');
       const job=await this.inspect(id);if(job.paused)return 'paused';if(['done','paused'].includes(job.state))return job.state;
+      if(job.state==='ambiguous'&&job.reconciliations>=nativeReconcileLimit)return 'ambiguous';
       const operationId='native-review-result:'+id;
       const complete=async(resultId:string)=>{
         await db.query("UPDATE native_review_jobs SET state='done',result_id=$2,error_code=NULL,updated_at=now() WHERE id=$1",[id,resultId]);return 'done';
@@ -90,13 +101,16 @@ export class NativeReviewRepository {
         const claimed=await db.query("UPDATE native_review_jobs SET state='running',attempts=attempts+1,updated_at=now() WHERE id=$1 AND state='pending' AND NOT paused AND revision=$2 RETURNING id",[id,job.revision]);
         if(!claimed.rowCount)throw new HttpError(409,'native_review_changed');
       }
+      // An observation that cannot confirm the review counts toward the bound and waits longer next time.
+      const unconfirmed=async()=>{
+        await db.query(`UPDATE native_review_jobs SET state='ambiguous',error_code='native_review_unconfirmed',reconciliations=reconciliations+$2,
+          next_attempt=now()+interval '60 seconds'*power(2,least(greatest(reconciliations+$2-1,0),5)),updated_at=now() WHERE id=$1`,[id,uncertain?1:0]);return 'ambiguous';
+      };
       let result:Record<string,unknown>;
       try {
         result=await this.call('memory.review',uncertain?{id,scope:actor.space,observe_only:true}:{id,scope:actor.space,content:document.text,
           event_id:job.source_reference.id,guard_mode:job.binding.mode,archive_credential:credential},uncertain?10000:240000);
-      }catch {
-        await db.query("UPDATE native_review_jobs SET state='ambiguous',error_code='native_review_unconfirmed',next_attempt=now()+interval '60 seconds',updated_at=now() WHERE id=$1",[id]);return 'ambiguous';
-      }
+      }catch {return await unconfirmed();}
       if(!uncertain&&result.state==='waiting'&&result.error_code==='profile_busy') {
         await db.query("UPDATE native_review_jobs SET state='pending',attempts=greatest(0,attempts-1),error_code='waiting_for_profile',next_attempt=now()+interval '5 seconds',updated_at=now() WHERE id=$1",[id]);return 'pending';
       }
@@ -105,9 +119,8 @@ export class NativeReviewRepository {
           producer:'hermes',producer_version:protocol,configuration:{review_id:id},provenance:{binding:job.binding,native_receipt:id}});
         return await complete(output.id);
       }
-      const state=result.state==='running'?'running':'ambiguous';
-      await db.query('UPDATE native_review_jobs SET state=$2,error_code=$3,next_attempt=now()+interval \'60 seconds\',updated_at=now() WHERE id=$1',
-        [id,state,state==='running'?null:'native_review_unconfirmed']);return state;
+      if(result.state!=='running')return await unconfirmed();
+      await db.query("UPDATE native_review_jobs SET state='running',error_code=NULL,next_attempt=now()+interval '60 seconds',updated_at=now() WHERE id=$1",[id]);return 'running';
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803359)');if(fenced)await leaveFamily(db,'memory_review');});}
   }
   async list(principal:Reader,after='') {
@@ -123,8 +136,9 @@ export class NativeReviewRepository {
       const job=(await db.query('SELECT * FROM native_review_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!job||job.revision!==body.expected_revision||!['pending','paused','ambiguous'].includes(job.state))throw new HttpError(409,'review_not_controllable');
       const state=job.state==='ambiguous'?'ambiguous':body.action==='pause'?'paused':'pending';
-      const row=(await db.query('UPDATE native_review_jobs SET state=$2,paused=$3,revision=revision+1,next_attempt=now(),updated_at=now() WHERE id=$1 RETURNING *',[id,state,body.action==='pause'])).rows[0];
-      // Resuming an uncertain review can only reconcile its existing identity.
+      const row=(await db.query(`UPDATE native_review_jobs SET state=$2,paused=$3,revision=revision+1,next_attempt=now(),updated_at=now(),
+        reconciliations=CASE WHEN $3 THEN reconciliations ELSE 0 END WHERE id=$1 RETURNING *`,[id,state,body.action==='pause'])).rows[0];
+      // Resuming an uncertain review can only reconcile its existing identity, with a fresh observation bound.
       if(body.action==='resume')await requestWorkflow(db,'memory_review','native:'+id,row.revision);
       await db.query('COMMIT');return row;
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}

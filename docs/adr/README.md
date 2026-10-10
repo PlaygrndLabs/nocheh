@@ -8,7 +8,8 @@ Atomic memory approval follow-ups: [0093](0093-atomic-memory-approval-followups.
 Current memory authority at delivery: [0094](0094-current-memory-authority-at-delivery.md).
 Unstarted memory handoff recovery: [0095](0095-recover-unstarted-memory-handoffs.md).
 Concurrent memory decision receipts: [0096](0096-serialize-memory-decision-replays.md).
-Durable native review handoff: [0097](0097-durable-native-review-handoff.md).
+Durable native review handoff: [0097](0097-durable-native-review-handoff.md), reviewing each
+source once with bounded uncertain observation in [0124](0124-native-review-once-per-source.md).
 Isolated native lease recovery: [0098](0098-isolated-native-lease-recovery.md).
 Historical recall eligibility: [0099](0099-independent-evidence-for-historical-recall.md).
 Honcho service default: [0076](0076-honcho-enabled-local-default.md).
