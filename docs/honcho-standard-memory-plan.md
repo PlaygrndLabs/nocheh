@@ -67,8 +67,9 @@ from a session so they are deleted first. Reply context is read live from the
 conversation session on arrival and prefetched when Honcho finishes the
 workspace's work, rather than after each turn. The owner started H5 and H6 on
 2026-10-10. H5's fresh-start command and workspace deletion
-([ADR-0122](adr/0122-honcho-fresh-start.md)) pass the fixture rehearsal; the
-operating run and H6 are pending.
+([ADR-0122](adr/0122-honcho-fresh-start.md)) pass the fixture rehearsal. Both
+ran on the owner's development installation; results are in the
+[acceptance status](mvp-acceptance-status.md).
 
 </implementation_status>
 
