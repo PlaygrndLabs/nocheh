@@ -9,7 +9,7 @@ class ModelRehearsalReplyTests(unittest.TestCase):
         valid={'networks':{'honcho-egress':{'internal':False},'existing-model':{'external':True},
                            'default':{'internal':True}},'services':{
             'honcho-provider-gateway':{'networks':{'honcho-egress':None}},
-            'fixture-real-provider':{'networks':{'existing-model':None}},
+            'cliproxy-api':{'networks':{'existing-model':None}},
             'hermes':{'networks':{'default':None}}}}
         validate_paid_egress(valid)
         for changed in (

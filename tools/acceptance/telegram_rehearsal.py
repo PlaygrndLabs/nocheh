@@ -28,7 +28,14 @@ def validate_fixture(directory,info,manifest):
         users=[name for name,service in manifest['services'].items() if 'preview' in (service.get('networks') or {})]
         if (preview!={'name':project+'-preview'} or users!=['fixture-preview'] or set(relay.get('networks') or {})!={'default','preview'}
                 or any(port.get('host_ip')!='127.0.0.1' for port in relay.get('ports') or []) or relay.get('volumes')):raise ValueError('isolated_fixture_required')
-    networks={key:value for key,value in manifest['networks'].items() if key!='preview'}
+    if {'existing-model','honcho-egress'}&set(manifest['networks']):
+        # The owner-authorized real-model shape: one bridge for the relay, one
+        # paid-embedding exit for the meter; everything else stays internal.
+        from tools.acceptance.model_rehearsal import validate_paid_egress
+        preflight=directory/'route-preflight.json'
+        if not preflight.exists() or json.loads(preflight.read_text()).get('project')!=project:raise ValueError('authorized_model_fixture_required')
+        validate_paid_egress(manifest)
+    networks={key:value for key,value in manifest['networks'].items() if key not in ('preview','existing-model','honcho-egress')}
     if not networks or any(not value.get('internal') or value.get('external')
             or not value.get('name','').startswith(project) for value in networks.values()):raise ValueError('isolated_fixture_required')
     if any((service.get('ports') and name!='fixture-preview') or service.get('network_mode')=='host'
