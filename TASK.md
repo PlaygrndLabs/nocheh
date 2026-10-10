@@ -583,8 +583,15 @@ preparation steps (p50 8.9 s), Hermes history (p50 5.7 s), model guard and
 step waits dominate, and detection calls are counted as internal steps rather
 than LLM time. Answers were natural Persian; while transcription was down the
 reply to a text after a voice note said no voice note was found, and a PDF
-caption reply said no text could be extracted. Pending: owner authorization
-to raise the cap for the remaining scenarios and the six memory cases.
+caption reply said no text could be extracted. After the owner raised the cap
+to 1,000, every remaining real-Claude scenario passed. Memory cases with real
+Claude and Honcho: reaction removal, corrected fact, private isolation, topic
+isolation and recall after restart answered correctly; the retired-fact case
+failed. Thirty seconds after every source of the synthetic name was retired,
+the owner-private answer still gave the name. No memory result or archive
+search after the retirement contained it; Hermes' native session history,
+which `/v1/context/prepare` guards but does not filter for retirement, still
+held the earlier turns. Open: retired sources must leave native history.
 Settings now offers both models: a reasoning-model picker grouped by signed-in
 provider login, with a sign-in hint when none is signed in, and an embedding-model
 picker that saving refuses once Honcho's ledger has committed to another model;
