@@ -44,6 +44,12 @@ class BotFixtureRequest(BaseRequest):
         return 200,canonical({'ok':True,'result':result})
 
 
+class FixtureGateway(AssistantGateway):
+    # Receipts carry measured timings; these checks compare the outcome only.
+    async def dispatch(self,*args,**kwargs):
+        return {key:value for key,value in (await super().dispatch(*args,**kwargs)).items() if key!='timings'}
+
+
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_raw_archive_citations_are_removed_from_telegram_prose(self):
         source='a'*64
@@ -97,7 +103,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 app=Application.builder().bot(bot).build();await app.initialize()
                 adapter._app=app;adapter._bot=bot;adapter._text_batch_delay_seconds=0.001
                 adapter._register_handlers(app)
-                gateway=AssistantGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
+                gateway=FixtureGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
                 gateway.status='connected';gateway.adapter=adapter;gateway.capacity=asyncio.Semaphore(2);gateway.action_lock=asyncio.Lock()
                 handled=[]
                 async def message(event):
@@ -293,7 +299,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 app=Application.builder().bot(bot).build();await app.initialize()
                 adapter._app=app;adapter._bot=bot;adapter._text_batch_delay_seconds=0.001
                 adapter._register_handlers(app)
-                gateway=AssistantGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
+                gateway=FixtureGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
                 gateway.status='connected';gateway.adapter=adapter;gateway.capacity=asyncio.Semaphore(2);gateway.action_lock=asyncio.Lock()
                 gates={};started=[]
                 async def message(event):
