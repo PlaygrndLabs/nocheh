@@ -632,6 +632,18 @@ about one second in the preparation outbox; a text after a voice note waits
 about two minutes while transcription is unavailable.
 [Procedure](docs/telegram-simulation.md).
 
+Hermes native memory reviews after the real-Claude run (October 10): they kept
+calling the model after the scenarios ended with no new messages and spent
+most of the 1,000-call cap. Each authorization epoch swept the archive and
+queued a new native review for every source, because the review identity
+includes the guard binding; uncertain reviews were observed every minute with
+no end. A source is now reviewed once, later epochs queue only sources whose
+review never started, and an uncertain review gets at most eight observations
+with doubling gaps before its workflow closes as uncertain
+([decision](docs/adr/0124-native-review-once-per-source.md),
+[checks](test/store-native-review.test.ts)). Pending: the owner-Mac simulator
+rerun that confirms no model calls after the scenarios end.
+
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
 tested wrapper after 81 seconds of WAL replay, and the existing Inngest server

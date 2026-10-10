@@ -9,7 +9,8 @@ import {digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
-import {NativeReviewRepository} from '../src/stores/native-review.js';
+import {NativeReviewRepository,nativeReconcileLimit} from '../src/stores/native-review.js';
+import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 
 test('native review preserves profile waits, guarded inputs, durable completion and uncertain execution identity',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -83,5 +84,67 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     await assert.rejects(services.reviews.run(notStarted,authority),{code:'guard_context_changed'});assert.equal(requests,attempted);
     receipts.add(uncertain);assert.equal(await services.reviews.run(uncertain,authority),'done','old native receipts reconcile without granting old contexts');assert.equal(requests,attempted);
     assert.equal((await stores.archive.query("SELECT 1 FROM events WHERE kind='runtime_result'")).rowCount,0);
+  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('native review runs once per source across authorization epochs and stops observing an unconfirmed review',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-once-')),key='review-once:'+Date.now(),group='-'+Date.now();
+  const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null};
+  let mode:'done'|'missing'='done',starts=0,observations=0;
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+    runtime:async(operation,input)=>{
+      if(operation==='guard.detect')return {literals:[]};
+      assert.equal(operation,'memory.review');
+      if(input.observe_only){observations++;return {state:'ambiguous'};}
+      starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:'done'};
+    },honcho:async()=>{throw Error('no provider calls');}});
+  const makeSource=async(index:number)=>{
+    const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
+      text:'Synthetic note '+index,payload:{message:{message_id:index,date:1,chat:{id:Number(group),type:'group'},from:{id:123},text:'Synthetic note '+index}}};
+    const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
+  };
+  const jobs=async(source:{id:string})=>(await stores.control.query("SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1 ORDER BY id",[source.id])).rows.map(row=>row.id);
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='memory_review'")).rows[0].epoch};
+    const reviewed=await makeSource(1),waiting=await makeSource(2);
+    const [done]=await services.reviews.queue(reviewed);assert.equal(await services.reviews.run(done!,authority),'done');assert.equal(starts,1);
+    const [superseded]=await services.reviews.queue(waiting);
+
+    // Reactions, rule changes and guard transitions advance the epoch and sweep every archived source again.
+    const before=(await services.guards.state()).epoch;await services.guards.setMode('off');await services.guards.setMode('on');
+    assert.ok((await services.guards.state()).epoch>before);
+    assert.deepEqual(await services.reviews.queue(reviewed),[done],'a reviewed source is not reviewed again for a new epoch');
+    assert.deepEqual(await jobs(reviewed),[done]);
+    const [renewed]=await services.reviews.queue(waiting);
+    assert.notEqual(renewed,superseded,'a review that never started is queued under the current epoch');
+    assert.deepEqual(await services.reviews.queue(waiting),[renewed]);
+    assert.equal(await services.reviews.run(renewed!,authority),'done');assert.equal(starts,2);
+
+    // A review whose start was never confirmed is observed with growing gaps, never relaunched, then closed as uncertain.
+    const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});
+    const [uncertain]=await services.reviews.queue(await makeSource(3));mode='missing';
+    assert.equal(await services.reviews.run(uncertain!,authority),'ambiguous');assert.equal(starts,3);
+    const gaps:number[]=[];
+    for(let index=0;index<nativeReconcileLimit;index++) {
+      await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[uncertain]);
+      const result=await operations.memory_review!('native:'+uncertain,authority),row=await services.reviews.inspect(uncertain!);
+      gaps.push(row.next_attempt.getTime()-row.updated_at.getTime());
+      assert.equal(result.state,index<nativeReconcileLimit-1?'waiting':'ambiguous');
+    }
+    assert.equal(observations,nativeReconcileLimit);assert.equal(starts,3,'an unconfirmed review never starts again');
+    assert.ok(gaps.every((gap,index)=>index===0||gap>=gaps[index-1]!),'each unconfirmed observation waits at least as long as the last');
+    assert.ok(gaps.at(-1)!>=30*60000);
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[uncertain]);
+    const closed=await operations.memory_review!('native:'+uncertain,authority);
+    assert.deepEqual([closed.state,closed.waiting_reason],['ambiguous','native_review_unconfirmed']);assert.equal(observations,nativeReconcileLimit);
+    const row=await services.reviews.inspect(uncertain!);
+    await services.reviews.controlJob(owner,uncertain!,{action:'resume',expected_revision:row.revision});
+    assert.equal((await operations.memory_review!('native:'+uncertain,authority)).state,'waiting','an owner resume observes the same identity again');
+    assert.equal(observations,nativeReconcileLimit+1);assert.equal(starts,3);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

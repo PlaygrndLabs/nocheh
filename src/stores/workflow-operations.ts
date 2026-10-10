@@ -5,6 +5,7 @@ import {observation,type Observation,type WorkflowOperation} from '../workflows/
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority,type WorkflowFamily} from '../workflows/store.js';
 import type {StorageServices} from './services.js';
 import type {GuardBinding} from './guards.js';
+import {nativeReconcileLimit} from './native-review.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
 const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','honcho_receipt_missing']);
@@ -189,6 +190,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(row.next_attempt<=new Date()){await s.reviews.run(id,authority);row=await s.reviews.inspect(id);}
       // Uncertain native effects are observed under the same identity. Inngest
       // schedules reconciliation; no timer or fresh execution identity retries it.
+      // After a bounded number of observations the review stays uncertain and its workflow closes.
+      if(row.state==='ambiguous'&&row.reconciliations>=nativeReconcileLimit)return observation('ambiguous','reconcile',row.attempts,Date.now(),'native_review_unconfirmed');
       return observation(row.state==='done'?'completed':row.state==='running'?'running':'waiting',
         row.state==='ambiguous'?'reconcile':'review',row.attempts,Math.max(Date.now()+1000,row.next_attempt.getTime()),row.state==='done'?null:'receipt_pending');
     },
