@@ -79,7 +79,7 @@ export function Honcho({notify}) {
       error&&h('p',{role:'alert'},error),!status&&!error&&h('p',{role:'status'},'Checking Honcho…'),status&&h('div',null,
         h(StatusBadge,{state:status.running?'running':'disabled',label:status.running?'Honcho services running':'Honcho stopped'}),
         h('div',{className:'n-row'},h('b',null,'Live compatibility'),h(StatusBadge,{state:memory?.connection?.verified?'verified':'unverified'})),
-        h('div',{className:'n-row'},h('b',null,'Shared ChatGPT login'),h(StatusBadge,{state:status.subscription_login?'ready':'unverified',label:status.subscription_login?'Configured':'Not configured'})),
+        h('div',{className:'n-row'},h('b',null,'Shared reasoning login'),h(StatusBadge,{state:status.subscription_login?'ready':'unverified',label:status.subscription_login?'Configured':'Not configured'})),
         h('div',{className:'n-row'},h('b',null,'Embedding credential'),h('span',null,status.embedding_credential?'Configured':'Not configured')),
         !status.running&&h('p',{className:'n-empty'},'Stored-data browsing is available while Honcho is running. Use the Honcho CLI for setup and lifecycle controls.'),
         h(Details,{value:status,label:'Honcho version and technical status'}))),
