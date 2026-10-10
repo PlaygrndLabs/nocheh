@@ -139,6 +139,10 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[scheduled.event_id])).rowCount,0);
     const scheduledContext=await request('/v1/scheduler/workflow-context',{event_id:scheduled.event_id,owner_epoch:scheduleOwner.epoch});
     const scheduledClaim=await request('/v1/scheduler/claim',scheduledContext);assert.equal(scheduledClaim.claimed,true);
+    // Unarchived schedule fires pass the runtime's pre-run delivery check through their admitted run.
+    assert.equal((await request('/v1/memory/check',undefined,200,scheduledClaim.archive_credential)).valid,true);
+    const otherScope=await services.prepared.audience.turn(token,{scope:'-42',space:'-42',logical_profile:browserInput.profile},scheduled.event_id,Date.now()+60000);
+    assert.equal((await request('/v1/memory/check',undefined,200,otherScope)).valid,false);
     assert.equal((await request('/v1/scheduler/prepare',scheduledContext)).files.length,0);
     await request('/v1/scheduler/finish',{event_id:scheduled.event_id,actor:scheduledContext.actor,state:'done',session:scheduledContext.conversation,text:'Scheduled result'});
     assert.equal((await request('/v1/scheduler/delivery',{event_id:scheduled.event_id})).state,'local');
