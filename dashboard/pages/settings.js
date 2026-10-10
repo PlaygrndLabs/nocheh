@@ -101,20 +101,25 @@ export function Settings({notify}) {
     const apply=async()=>{setBusy(true);try{await call('/settings/apply',{});notify('Applying saved settings. Follow the result in Maintenance.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     if(error&&!data)return h(Alert,null,'Settings are unavailable.');
     if(!data)return h('p',{role:'status'},'Loading settings…');
-    const hints={TELEGRAM_ENABLED:'Start or stop Telegram message handling when settings are applied.',TELEGRAM_OWNER_ID:'Your numeric Telegram user ID. Only the owner can administer Nocheh.',TELEGRAM_GROUP_IDS:'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',TELEGRAM_BOT_TOKEN:'The token from BotFather for the bot used by the native Hermes Telegram adapter.',NOCHEH_MODEL:'One model for Hermes replies, Honcho memory and secret detection. The list shows the models your provider logins serve; Claude models use the Claude login, GPT models the ChatGPT login.',NOCHEH_EMBEDDING_MODEL:'The OpenAI model that turns memory into searchable vectors, paid from the embedding budget.',NOCHEH_GUARD_MODE:'On uses saved guarded copies for agents and memory. Off uses originals with the same access rules.',NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Explicit destinations for trusted preparation services. This does not bypass guarding for agents.',NOCHEH_PORT:'Local port used by the archive service.'};
+    const hints={TELEGRAM_ENABLED:'Start or stop Telegram message handling when settings are applied.',TELEGRAM_OWNER_ID:'Your numeric Telegram user ID. Only the owner can administer Nocheh.',TELEGRAM_GROUP_IDS:'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',TELEGRAM_BOT_TOKEN:'The token from BotFather for the bot used by the native Hermes Telegram adapter.',NOCHEH_MODEL:'One model for Hermes replies, Honcho memory and secret detection, grouped by the provider login that serves it.',NOCHEH_EMBEDDING_MODEL:'The OpenAI model that turns memory into searchable vectors, paid from the embedding budget.',NOCHEH_GUARD_MODE:'On uses saved guarded copies for agents and memory. Off uses originals with the same access rules.',NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Explicit destinations for trusted preparation services. This does not bypass guarding for agents.',NOCHEH_PORT:'Local port used by the archive service.'};
     const field=f=>{
       const value=changes[f.key]??f.value??'';
       const attrs={id:f.key,disabled:busy||!f.editable,value,type:f.secret?'password':'text',placeholder:f.secret&&f.configured?'****':undefined,autoComplete:'off','aria-describedby':f.key+'-help',onChange:e=>{const next={...changes};if(f.secret&&!e.target.value)delete next[f.key];else next[f.key]=e.target.value;setChanges(next);setReview(false);}};
       const served=data.models?.reasoning||[],locked=data.models?.embedding_locked;
-      const provider=model=>model.startsWith('claude-')?'Claude':model.startsWith('gpt-')?'ChatGPT':'Other';
       if(f.key==='NOCHEH_MODEL') {
-        // Models the running provider serves, grouped by login; the saved value stays selectable.
-        const known=served.includes(value)||!value?served:[value,...served];
-        const groups=['Claude','ChatGPT','Other'].map(name=>[name,known.filter(model=>provider(model)===name)]).filter(([,models])=>models.length);
+        // One group per provider login; providers without a login offer no models.
+        const providers=data.models?.providers||[],signedIn=providers.filter(p=>p.signed_in),missing=providers.filter(p=>!p.signed_in);
+        const running=data.models?.provider_running!==false,offered=signedIn.some(p=>p.models.length);
+        const cpa=h('a',{href:'/providers/management.html'},'CPA dashboard');
+        const hint=!signedIn.length?['No model provider is signed in. Sign in to Claude or ChatGPT in the ',cpa,', then reload this page.']:
+          !running?['The provider service is not running, so its models cannot be listed. Start Nocheh, then reload this page.']:
+          !offered?['Signed in to '+signedIn.map(p=>p.label).join(' and ')+', but the provider lists no models yet. Reload in a moment.']:
+          [hints[f.key],missing.length?' Not signed in: '+missing.map(p=>p.label+(p.id==='codex'?' (needed for voice transcription)':'')).join(', ')+'. Sign in from the ':'',missing.length?cpa:'',missing.length?'.':''];
+        const groups=signedIn.filter(p=>p.models.length).map(p=>h('optgroup',{key:p.id,label:p.label},...p.models.map(model=>h('option',{key:model,value:model},model))));
+        const stale=value&&!served.includes(value)?[h('option',{key:'saved',value},value+' · not served by a signed-in provider')]:[];
         return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]),
-          served.length?h('select',attrs,...groups.map(([name,models])=>h('optgroup',{key:name,label:name+' login'},
-            ...models.map(model=>h('option',{key:model,value:model},model+(served.includes(model)?'':' · not served by a current login')))))):h('input',attrs),
-          h('small',{id:f.key+'-help'},hints[f.key],served.length?'':' The provider is not running, so its model list is unavailable; type a model ID.'));
+          offered?h('select',attrs,...stale,...groups):h('input',{...attrs,disabled:true}),
+          h('small',{id:f.key+'-help',role:offered?undefined:'status'},...hint));
       }
       if(f.key==='NOCHEH_EMBEDDING_MODEL')
         return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]),

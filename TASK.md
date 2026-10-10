@@ -573,8 +573,8 @@ delivers once (the scheduled-run fix on main holds), but removing the finished
 one-time schedule failed: removal paused it, which Hermes refuses for a
 terminal job. Removal now leaves a finished job terminal
 ([adapter](services/hermes/native_cron.py), [test](services/hermes/test_scheduler.py)).
-Settings now offers both models: a reasoning-model picker filled from the
-models the running provider serves, grouped by login, and an embedding-model
+Settings now offers both models: a reasoning-model picker grouped by signed-in
+provider login, with a sign-in hint when none is signed in, and an embedding-model
 picker that saving refuses once Honcho's ledger has committed to another model;
 Apply rewrites Honcho's generated settings and restarts it when either model
 changed. Checked in the synthetic dashboard preview at desktop and phone width.

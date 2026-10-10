@@ -43,10 +43,13 @@ class SettingsTests(unittest.TestCase):
     def test_models_are_owner_settings_and_embeddings_never_mix(self):
         import sqlite3
         from tools.operations.memory.honcho_setup import state_for
-        with tempfile.TemporaryDirectory() as folder, patch('tools.operations.provider.provider.models', return_value=['claude-sonnet-5-5']):
+        choices = {'provider_running': True, 'providers': [{'id': 'claude', 'label': 'Claude', 'signed_in': True, 'models': ['claude-sonnet-5-5']},
+                                                            {'id': 'codex', 'label': 'ChatGPT', 'signed_in': False, 'models': []}]}
+        with tempfile.TemporaryDirectory() as folder, patch('tools.operations.provider.provider.reasoning_choices', return_value=choices):
             state = Path(folder); initialize(state)
             current = view(state)
             self.assertEqual(current['models']['reasoning'], ['claude-sonnet-5-5'])
+            self.assertEqual([provider['signed_in'] for provider in current['models']['providers']], [True, False])
             self.assertIn('text-embedding-3-large', current['models']['embedding'])
             editable = {field['key'] for field in current['fields'] if field['editable']}
             self.assertLessEqual({'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_MODEL'}, editable)

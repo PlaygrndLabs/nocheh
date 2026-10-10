@@ -101,20 +101,56 @@ def ensure_monitor_source(run=subprocess.run):
     return _ensure_source('cpa-manager-plus',MONITOR_LOCK,'provider_monitor',run)
 
 
-def models(state):
-    """Model IDs the running provider serves for the logins it holds; empty when unavailable.
+# CLIProxyAPI credential types and the model owners they serve.
+PROVIDERS={'claude':('Claude',{'anthropic'}),'codex':('ChatGPT',{'openai'}),'gemini':('Gemini',{'google'}),
+           'qwen':('Qwen',{'qwen'}),'antigravity':('Antigravity',{'antigravity'})}
+
+
+def signed_in(state):
+    """Credential types with one active login, without reading token values beyond presence."""
+    _,auth,_,_=paths(state);kinds=set()
+    for path in auth.glob('*.json'):
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size>1024*1024:continue
+            body=json.loads(path.read_text())
+            if isinstance(body,dict) and isinstance(body.get('type'),str) and login_state(state,body['type'])['login_present']:
+                kinds.add(body['type'])
+        except (OSError,ValueError,UnicodeError):continue
+    return kinds
+
+
+def served(state):
+    """(model, owner) pairs the running provider serves; None when it cannot be asked.
 
     The client key reaches curl on stdin, never in a command argument."""
     key=(paths(state)[2]/'hermes.key')
-    if not key.is_file():return []
+    if not key.is_file():return None
     command,env=compose(state)
     try:
         raw=subprocess.run(command+['exec','-T','cliproxy-api','curl','--silent','--fail','--max-time','10','-H','@-',
             'http://127.0.0.1:8317/v1/models'],input='Authorization: Bearer '+key.read_text().strip()+'\n',
             cwd=ROOT,env=env,capture_output=True,text=True,timeout=20)
-        data=json.loads(raw.stdout) if raw.returncode==0 else {}
-    except (OSError,subprocess.SubprocessError,ValueError):return []
-    return sorted({row['id'] for row in data.get('data',[]) if isinstance(row,dict) and isinstance(row.get('id'),str)})
+        if raw.returncode:return None
+        data=json.loads(raw.stdout)
+    except (OSError,subprocess.SubprocessError,ValueError):return None
+    return sorted({(row['id'],str(row.get('owned_by') or '')) for row in data.get('data',[])
+                   if isinstance(row,dict) and isinstance(row.get('id'),str)})
+
+
+def reasoning_choices(state):
+    """Models grouped by the provider login that serves them, for the Settings picker."""
+    logins=signed_in(state);rows=served(state)
+    providers=[]
+    for kind in sorted(logins|set(PROVIDERS),key=lambda kind:(kind not in logins,PROVIDERS.get(kind,(kind,))[0])):
+        label,owners=PROVIDERS.get(kind,(kind.title(),{kind}))
+        models=[model for model,owner in rows or [] if owner in owners or login_kind(model)==kind] if kind in logins else []
+        providers.append({'id':kind,'label':label,'signed_in':kind in logins,'models':sorted(set(models))})
+    return {'provider_running':rows is not None,'providers':providers}
+
+
+def models(state):
+    """Every model ID the running provider serves; empty when unavailable."""
+    return sorted({model for model,_ in served(state) or []})
 
 
 def compose(state):
