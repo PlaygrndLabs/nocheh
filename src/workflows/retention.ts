@@ -6,9 +6,9 @@ import {closedStates} from './store.js';
 
 /**
  * Optional expiry of Inngest's own run history and telemetry, Nocheh's spent
- * workflow publication records and run links, and superseded Honcho context
- * summaries. Nocheh receipts, the workflow registry and Inngest's queue state
- * are never removed.
+ * workflow publication records and run links, broker model-call events and
+ * guard invalidation notes, and superseded Honcho context summaries. Nocheh
+ * receipts, the workflow registry and Inngest's queue state are never removed.
  * Fourteen days is the default; zero keeps every row.
  */
 export function retentionDays(value=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS??'14'):number {
@@ -82,6 +82,24 @@ export async function pruneWorkflowRecords(client:pg.ClientBase,cutoff:Date,batc
 }
 export const expireWorkflowRecords=(client:pg.ClientBase,cutoff:Date,pause=200)=>drain(()=>pruneWorkflowRecords(client,cutoff),pause);
 
+export type PrunedTelemetry={model_effects:number;guard_invalidations:number};
+/**
+ * Remove operational telemetry nothing reads after the window: the broker's
+ * per-call `model.request` security events (their timings feed only the stage
+ * breakdown of replies inside the window) and guard invalidation notes, which
+ * record an epoch advance and are never read. Action and tool effects stay in
+ * the security log: they are the owner's audit of approvals and outcomes.
+ */
+export async function pruneTelemetry(client:pg.ClientBase,cutoff:Date,batch=5000):Promise<PrunedTelemetry> {
+  if(!Number.isSafeInteger(batch)||batch<1)throw Error('invalid_retention_batch');
+  const effects=await client.query(`DELETE FROM security_events WHERE ctid IN (SELECT ctid FROM security_events
+    WHERE kind='model.request' AND created_at<$1 LIMIT $2)`,[cutoff,batch]);
+  const invalidations=await client.query(`DELETE FROM guard_invalidations WHERE ctid IN (SELECT ctid FROM guard_invalidations
+    WHERE created_at<$1 LIMIT $2)`,[cutoff,batch]);
+  return {model_effects:effects.rowCount??0,guard_invalidations:invalidations.rowCount??0};
+}
+export const expireTelemetry=(client:pg.ClientBase,cutoff:Date,pause=200)=>drain(()=>pruneTelemetry(client,cutoff),pause);
+
 export type PrunedSummaries={memory_contexts:number;memory_results:number};
 /** Honcho context summaries that current, non-retired memory generations still serve. */
 export async function servedSummaries(control:pg.ClientBase):Promise<string[]> {
@@ -141,6 +159,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
     const cutoff=new Date(Date.now()-days*86400000);
     await run('workflow_history_retention',([client])=>expireWorkflowHistory(client!,cutoff),['nocheh_inngest','nocheh_inngest','INNGEST_POSTGRES_PASSWORD']);
     await run('workflow_record_retention',([client])=>expireWorkflowRecords(client!,cutoff),['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD']);
+    await run('telemetry_retention',([client])=>expireTelemetry(client!,cutoff),['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD']);
     // The derived runtime role cannot delete, so this local worker uses the administrator role.
     await run('memory_summary_retention',async([control,derived])=>expireMemorySummaries(derived!,await servedSummaries(control!),new Date(Date.now()-3600000)),
       ['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD'],['nocheh','nocheh_derived','POSTGRES_PASSWORD']);

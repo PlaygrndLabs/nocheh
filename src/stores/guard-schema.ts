@@ -45,4 +45,5 @@ CREATE TABLE IF NOT EXISTS guard_invalidations (
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','done')),
  created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(source_id,epoch)
 );
+CREATE INDEX IF NOT EXISTS guard_invalidations_created ON guard_invalidations(created_at);
 `;

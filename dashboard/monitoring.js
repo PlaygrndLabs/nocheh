@@ -4,6 +4,7 @@ import {useResource} from './lib/resource';
 import {Analytics} from './components/analytics';
 import {StatusBadge} from './components/status';
 import {ReplyTimings} from './timings.js';
+import {StorageUsage} from './storage.js';
 const {createElement:h,useState,useEffect}=React;
 const time=value=>value?new Date(value).toLocaleString():'Not observed';
 const names={pending:'Queued',running:'Running',failed:'Failed · will retry',done:'Completed',ambiguous:'Delivery uncertain',suppressed:'Skipped',ready:'Ready',connected:'Receiving',recovering:'Recovering',disabled:'Disabled',starting:'Starting',credentials_missing:'Login missing',connection_failed:'Connection failed',runtime_failed:'Runtime failed'};
@@ -43,6 +44,7 @@ export function Monitoring({call,compact=false,renderSource}){
     archive.spool_failures?.length>0&&h('p',{role:'alert'},archive.spool_failures.length+' archive spool failures require attention.'),
     h(Analytics,{counts:data.workflows?.unavailable?null:data.workflows?.counts}),
     h(Disclosure,{title:'Reply timing',note:'Where reply time goes, per stage: internal, workflow wait, third-party and LLM.'},h(ReplyTimings)),
+    h(Disclosure,{title:'Storage',note:'Database, table and local folder sizes, so growth is visible.'},h(StorageUsage)),
     h(Disclosure,{title:'Workflow details',note:'Filter history, inspect receipts, retry or cancel; check delivery and workers.'},
       h(Workflows,{call,health:data.workflows,onSource:open})),
     sourceError&&h('p',{role:'alert'},sourceError),record&&h('section',null,h('button',{type:'button',onClick:()=>setSourceId(null)},'Close original'),renderSource?.(record)),
