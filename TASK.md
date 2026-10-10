@@ -551,6 +551,30 @@ owner rechecks: a live exact approval to a topic and quick live messages with
 a voice note. Real-model quality, live Telegram release gates and release
 remain pending. [Live summary](docs/mvp-acceptance-status.md).
 
+Simulator run on main after the Honcho session, storage and timing merges
+(October 10, fresh synthetic installation, deterministic inference): the
+installation rehearsal and both HTTP Telegram rehearsals pass; the first
+scenario pass had 38 of 42. Its polling-outage, storage and lingering-turn
+failures and a second pass's rejected search reply came from the simulator;
+after those repairs the affected scenarios pass on rerun. The repeatable
+speech-outage restore and the review-drain wait before the lingering check
+are not yet exercised in a full pass. Open blocker: every scheduled run fails before the
+agent starts with `space_policy_changed`. `/v1/memory/check` accepts only an
+archived turn source (`telegramDeliveryAllowed` returns false without one),
+and scheduled fires are deliberately not archived, so `check_delivery_policy`
+in `services/hermes/turn_process.py` rejects each scheduler credential. Store
+tests never call that check with a scheduler credential. Observations for the
+storage and timing plans: one run of 180 archived events left 228,823 guard
+fragments (97 MB) and 8,713 `guard-context` runtime contexts with only 1,370
+distinct contents, none covered by retention; native memory reviews keep
+launching isolated turns for several minutes after a burst, and four reviews
+in flight when the launcher stopped or the provider was recreated stayed
+`waiting`/`receipt_pending` in `reconcile`, rechecked every minute for over
+40 minutes; every reply waits
+about one second in the preparation outbox; a text after a voice note waits
+about two minutes while transcription is unavailable.
+[Procedure](docs/telegram-simulation.md).
+
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
 tested wrapper after 81 seconds of WAL replay, and the existing Inngest server

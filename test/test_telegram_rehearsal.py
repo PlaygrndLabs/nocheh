@@ -51,3 +51,22 @@ class TelegramRehearsalOwnershipTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class TelegramMockMarkdownTests(unittest.TestCase):
+    """The Bot API mock answers MarkdownV2 like Telegram, so a valid reply is
+    never rejected by the fixture and a malformed one gets Telegram's error."""
+    def setUp(self):
+        import os
+        os.environ['NOCHEH_INSTALLATION_FIXTURE']='1'
+        from tools.acceptance.telegram_mock import markdown_v2
+        self.parse=markdown_v2
+
+    def test_entities_and_escapes_become_plain_text(self):
+        self.assertEqual(self.parse('سلام\\. *پررنگ* و `co\\`de`'),
+            ('سلام. پررنگ و co`de',[{'type':'bold','offset':6,'length':5},{'type':'code','offset':14,'length':5}]))
+        self.assertEqual(self.parse('Password: *\\*\\*\\**')[0],'Password: ***')
+
+    def test_malformed_markup_gets_telegram_wording(self):
+        with self.assertRaisesRegex(ValueError,"Can't find end of Bold entity at byte offset 10"):self.parse('Password: *\\*\\*')
+        with self.assertRaisesRegex(ValueError,"Character '.' is reserved"):self.parse('a.b')
