@@ -26,6 +26,13 @@ from services.hermes.capture import canonical, digest, instrument_request
 from services.hermes.scopes import Scopes
 
 
+class FixtureGateway(AssistantGateway):
+    # Receipts carry measured timings; these checks compare the outcome only.
+    async def dispatch(self, *args, **kwargs):
+        result = await super().dispatch(*args, **kwargs)
+        return {key: value for key, value in result.items() if key != 'timings'}
+
+
 class TelegramSimulationRequest(BaseRequest):
     """Documented JSON envelopes; no sockets, real bot token or Telegram traffic."""
     def __init__(self):
@@ -113,11 +120,11 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.gateway = self.new_gateway()
 
     def new_gateway(self):
-        gateway = AssistantGateway(self.root, self.root / 'spool', self.policy,
+        gateway = FixtureGateway(self.root, self.root / 'spool', self.policy,
                                    '123456:synthetic', 'synthetic', lambda: None)
         gateway.status = 'connected'
         gateway.adapter = self.adapter
-        gateway.lock = asyncio.Lock()
+        gateway.capacity = asyncio.Semaphore(2)
         gateway.action_lock = asyncio.Lock()
         return gateway
 

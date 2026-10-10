@@ -138,7 +138,7 @@ export class TelegramDispatchRepository {
   /**
    * Conversation messages start in Telegram update order. Updates from one
    * poll can be captured in any order, so local capture order is not used.
-   * Native execution serializes started turns; only an earlier update that has
+   * Native execution serializes started turns in each chat; only an earlier update that has
    * not started can reorder replies, for example when its preparation finishes
    * later. The bound keeps a slow prerequisite such as transcription from
    * holding later messages.
