@@ -51,3 +51,53 @@ class TelegramRehearsalOwnershipTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class TelegramMockMarkdownTests(unittest.TestCase):
+    """The Bot API mock answers MarkdownV2 like Telegram, so a valid reply is
+    never rejected by the fixture and a malformed one gets Telegram's error."""
+    def setUp(self):
+        import os
+        os.environ['NOCHEH_INSTALLATION_FIXTURE']='1'
+        from tools.acceptance.telegram_mock import markdown_v2
+        self.parse=markdown_v2
+
+    def test_entities_and_escapes_become_plain_text(self):
+        self.assertEqual(self.parse('سلام\\. *پررنگ* و `co\\`de`'),
+            ('سلام. پررنگ و co`de',[{'type':'bold','offset':6,'length':5},{'type':'code','offset':14,'length':5}]))
+        self.assertEqual(self.parse('Password: *\\*\\*\\**')[0],'Password: ***')
+
+    def test_malformed_markup_gets_telegram_wording(self):
+        with self.assertRaisesRegex(ValueError,"Can't find end of Bold entity at byte offset 10"):self.parse('Password: *\\*\\*')
+        with self.assertRaisesRegex(ValueError,"Character '.' is reserved"):self.parse('a.b')
+
+
+class RealModelFixtureTests(unittest.TestCase):
+    """Real answers keep Telegram mocked and open exactly two bounded routes."""
+    def test_transform_bridges_only_the_relay_and_the_meter(self):
+        import tempfile
+        from pathlib import Path
+        from tools.acceptance.model_rehearsal import validate_paid_egress
+        from tools.acceptance.real_model_fixture import transform
+        project='nocheh-installation-'+'c'*12
+        internal=lambda name:{'internal':True,'name':project+'-'+name}
+        manifest={'name':project,'networks':{'default':internal('default'),'memory':internal('memory')},'secrets':{'temporary_embedding_key':{'file':'/x'}},
+            'services':{'cliproxy-api':{'environment':{'NOCHEH_INSTALLATION_FIXTURE':'1'},'networks':{'default':None,'memory':None},
+                'volumes':[{'type':'bind','source':'/s','target':'/fixture-state'},{'type':'bind','source':'/p','target':'/fixture/provider.py'}]},
+                'honcho-provider-gateway':{'environment':{'NOCHEH_INSTALLATION_FIXTURE':'1'},'networks':{'memory':None},
+                'volumes':[{'type':'bind','source':'/l','target':'/ledger'},{'type':'bind','source':'/p','target':'/fixture/provider.py'}]},
+                'hermes':{'networks':{'default':None}}}}
+        with tempfile.TemporaryDirectory() as folder:
+            operating=Path(folder)
+            for real in (True,False):
+                with self.subTest(real=real):
+                    result=transform(copy.deepcopy(manifest),ROOT/'data/acceptance/results/x',operating/'keys',operating/'honcho','bridge',300,real)
+                    validate_paid_egress(result)
+                    relay=result['services']['cliproxy-api']
+                    self.assertEqual(relay['environment']['NOCHEH_INSTALLATION_FIXTURE'],'1')
+                    self.assertNotIn('NOCHEH_ADDITIONAL_MODEL_REQUESTS_AUTHORIZED',relay['environment'])
+                    self.assertIn('/fixture-state',[mount['target'] for mount in relay['volumes']])
+                    self.assertTrue(all(mount.get('read_only') for mount in relay['volumes'] if mount['target']!='/fixture-state'))
+                    meter=result['services']['honcho-provider-gateway']
+                    self.assertEqual(meter.get('command')==['python','/fixture/services/honcho/meter.py'],real)
+                    self.assertEqual('NOCHEH_INSTALLATION_FIXTURE' in meter['environment'],not real)

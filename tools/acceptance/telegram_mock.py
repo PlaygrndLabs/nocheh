@@ -17,6 +17,65 @@ BOT={'id':123456,'is_bot':True,'first_name':'Synthetic','username':'synthetic_fi
      'can_join_groups':True,'can_read_all_group_messages':True,'supports_inline_queries':False}
 
 
+MARKERS={'*':'bold','_':'italic','__':'underline','~':'strikethrough','||':'spoiler'}
+RESERVED='_*[]()~`>#+-=|{}.!'
+
+
+def markdown_v2(source):
+    """Parse MarkdownV2 like https://core.telegram.org/bots/api#markdownv2-style.
+
+    Returns the plain text and entities, or raises ValueError with Telegram's
+    own wording for an unescaped reserved character or an unclosed entity.
+    Custom emoji and expandable block quotes are outside this subset.
+    """
+    text,entities,stack,index=[],[],[],0
+    units=lambda:sum(2 if ord(char)>0xFFFF else 1 for char in text)
+    offset=lambda position:len(source[:position].encode('utf-8'))
+    while index<len(source):
+        char=source[index]
+        if char=='\\':
+            if index+1>=len(source) or not 1<=ord(source[index+1])<=126:
+                raise ValueError("Character '\\' is reserved and must be escaped with the preceding '\\'")
+            text.append(source[index+1]);index+=2;continue
+        if char=='`':
+            fence='```' if source.startswith('```',index) else '`'
+            start,body,index=units(),[],index+len(fence)
+            while not source.startswith(fence,index):
+                if index>=len(source):raise ValueError("Can't find end of "+('Pre' if len(fence)==3 else 'Code')+' entity at byte offset '+str(offset(index-len(fence))))
+                if source[index]=='\\' and index+1<len(source) and source[index+1] in '`\\':index+=1
+                body.append(source[index]);index+=1
+            if len(fence)==3 and '\n' in body:
+                first=''.join(body).split('\n',1)
+                if first[0] and ' ' not in first[0]:body=list(first[1])
+            text.extend(body);index+=len(fence)
+            entities.append({'type':'pre' if len(fence)==3 else 'code','offset':start,'length':units()-start});continue
+        marker=source[index:index+2] if source[index:index+2] in ('__','||') else char
+        if marker in MARKERS:
+            if stack and stack[-1][0]==marker:
+                kind,start,_=stack.pop();entities.append({'type':MARKERS[kind],'offset':start,'length':units()-start})
+            elif any(item[0]==marker for item in stack):raise ValueError("Can't find end of "+MARKERS[stack[-1][0]].capitalize()+' entity at byte offset '+str(stack[-1][2]))
+            else:stack.append((marker,units(),offset(index)))
+            index+=len(marker);continue
+        if char=='[':
+            stack.append(('[',units(),offset(index)));index+=1;continue
+        if char==']' and stack and stack[-1][0]=='[' and source[index+1:index+2]=='(':
+            close=source.find(')',index+2)
+            if close<0:raise ValueError("Can't find end of a URL at byte offset "+str(offset(index+1)))
+            _,start,_=stack.pop();entities.append({'type':'text_link','offset':start,'length':units()-start,'url':source[index+2:close].replace('\\)',')')})
+            index=close+1;continue
+        if char=='>' and (index==0 or source[index-1]=='\n'):
+            # A block quote runs to the end of its line.
+            end=source.find('\n',index);end=len(source) if end<0 else end
+            quoted,_=markdown_v2(source[index+1:end]);start=units();text.extend(quoted)
+            entities.append({'type':'blockquote','offset':start,'length':units()-start});index=end;continue
+        if char in RESERVED:raise ValueError("Character '"+char+"' is reserved and must be escaped with the preceding '\\'")
+        text.append(char);index+=1
+    if stack:
+        kind=stack[-1][0];name='TextUrl' if kind=='[' else MARKERS[kind].capitalize()
+        raise ValueError("Can't find end of "+name+' entity at byte offset '+str(stack[-1][2]))
+    return ''.join(text),sorted((entity for entity in entities if entity['length']>0),key=lambda entity:(entity['offset'],-entity['length']))
+
+
 class TelegramMock:
     def __init__(self,state):
         if os.environ.get('NOCHEH_INSTALLATION_FIXTURE')!='1':raise ValueError('explicit_fixture_required')
@@ -138,27 +197,23 @@ class TelegramMock:
         elif method=='sendMessage':
             text=data.get('text');chat=data.get('chat_id');topic=data.get('message_thread_id')
             if not isinstance(text,str) or chat is None:return self.error(400,'Bad Request: invalid message')
+            entities=[]
             if data.get('parse_mode'):
-                # Telegram returns parsed Message.text, not escaped request text.
-                # This fixture models escaped plain MarkdownV2. Rich markup is
-                # explicitly unmodeled and cannot silently pass the rehearsal.
-                parsed=[];index=0;unmodeled=data['parse_mode']!='MarkdownV2'
-                while not unmodeled and index<len(text):
-                    char=text[index]
-                    if char=='\\' and index+1<len(text) and 1<=ord(text[index+1])<=126:
-                        parsed.append(text[index+1]);index+=2;continue
-                    if char in '\\_*[]()~`>#+-=|{}.!':unmodeled=True;break
-                    parsed.append(char);index+=1
-                if unmodeled:
-                    self.state['unknown'].append('sendMessage:rich_markup');self.save()
+                # Telegram returns parsed Message.text and entities, not the
+                # escaped request text. Other parse modes stay unmodeled and
+                # cannot silently pass the rehearsal.
+                if data['parse_mode']!='MarkdownV2':
+                    self.state['unknown'].append('sendMessage:'+str(data['parse_mode']));self.save()
                     return self.error(400,'Bad Request: fixture markup not implemented')
-                text=''.join(parsed)
+                try:text,entities=markdown_v2(text)
+                except ValueError as error:return self.error(400,'Bad Request: can\'t parse entities: '+str(error))
             if not 1<=len(text)<=4096:return self.error(400,'Bad Request: invalid message')
             if topic is not None and int(topic)<=0:return self.error(400,'Bad Request: message thread not found')
             chat=int(chat);self.state['next_message_id']+=1
             # Like Telegram, the sent message carries the chat's current title.
             result={'message_id':self.state['next_message_id'],'date':int(time.time()),'from':BOT,
-                'chat':{'id':chat,'type':'private' if chat>0 else 'supergroup',**({'title':self.state.get('titles',{}).get(str(chat))} if self.state.get('titles',{}).get(str(chat)) else {})},'text':text}
+                'chat':{'id':chat,'type':'private' if chat>0 else 'supergroup',**({'title':self.state.get('titles',{}).get(str(chat))} if self.state.get('titles',{}).get(str(chat)) else {})},'text':text,
+                **({'entities':entities} if entities else {})}
             if topic is not None:result.update(message_thread_id=int(topic),is_topic_message=True)
             self.state['sent'].append({'parameters':data,'message':result})
         elif method=='getChat':

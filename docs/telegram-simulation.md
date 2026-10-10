@@ -31,9 +31,13 @@ subscriptions, topic routing, message responses, and retry parameters. See
 [sendMessage](https://core.telegram.org/bots/api#sendmessage), and
 [reaction updates](https://core.telegram.org/bots/api#messagereactionupdated).
 Unknown methods fail the test instead of silently succeeding. The HTTP fixture
-returns parsed text for escaped plain MarkdownV2; unmodeled rich markup is an
-explicit failed gate. Rich native formatting and chunk behavior also have their
-separate component scenarios. The fixture cannot model
+parses [MarkdownV2](https://core.telegram.org/bots/api#markdownv2-style) like
+Telegram: it returns the plain text with bold, italic, underline, strikethrough,
+spoiler, code, pre, link and block-quote entities, and rejects an unescaped
+reserved character or an unclosed entity with Telegram's `can't parse entities`
+wording, so the native plain-text fallback is exercised. Other parse modes are
+an explicit failed gate. Rich native formatting and chunk behavior also have
+their separate component scenarios. The fixture cannot model
 Telegram delivery outages, permissions or undocumented behavior exhaustively.
 
 </telegram_contract>
@@ -127,7 +131,9 @@ extends the same owned HTTP installation after `telegram_rehearsal` has run:
 and later scenarios still run after a failure; most use their own topic or chat
 so one failure cannot hold another conversation's queue. Its first scenario
 recreates the fixture endpoint, which loads current fixture code and makes the
-native adapter reconnect polling while a reply is ready. Families covered:
+native adapter reconnect polling while a reply is ready. A later run on the same
+installation restores the prepared, unavailable speech service before the
+speech-outage scenarios, so every scenario can be repeated. Families covered:
 polling reconnect, edits and reactions over polling, General and named topics,
 ordered bursts, chunked long replies, intentional silence, blank answers,
 owner-private archive search, model context and Honcho recall against group
@@ -135,7 +141,16 @@ and other-group isolation, literal guarding, exact Telegram approvals and
 denials with stale fingerprints and repeated decisions, `current` destinations,
 denied, unselected and granted/revoked participants, retirement, voice capture
 with speech unavailable, recovery, transcript-driven turns and blank speech,
-deleted topics, polling 5xx, lost send responses, a blocked bot, and restart.
+an ordinary file with a caption, an owner-private schedule that fires on its
+own cadence and waits for exact review before one delivery, deleted topics,
+polling 5xx (measured after the adapter restarts polling), lost send responses,
+a blocked bot, and restart. Two operations scenarios close the run: the
+`./bin/nocheh storage` report and the Monitoring Storage operation must measure
+every store, and `stage_timings` reads one breakdown per verified reply (no
+content fields, stages summing to the reply time, rendered by `admin timings`)
+and saves them with the p50/p95 summary in the report's `timings.json`. Before
+the final lingering-turn check the runner waits for native memory reviews to
+drain and records how long that took.
 
 The fixture provider's scripted brain acts only on an explicit directive in
 the current user turn of a request that offers Nocheh tools: `[[search:q]]`,
@@ -221,6 +236,24 @@ An explicit owner exception may increase the allowance in the synthetic
 fixture's meter process while retaining the same shared counter and embedding
 dollar cap. Record that temporary authorization and ceiling in ignored fixture
 evidence; do not change operating policy or reset the ledger.
+
+[`real_model_fixture`](../tools/acceptance/real_model_fixture.py) switches an
+owned installation that has passed the HTTP Telegram rehearsal to real answers:
+`python3 -m tools.acceptance.real_model_fixture --directory <prepared-directory>
+--installation <operating state> --authorized [--honcho real]`. It requires the
+operating installation's ChatGPT subscription login and running provider, and
+the owner's authorization to use that route beside the operating stack. The
+fixture's `cliproxy-api` becomes the model relay, still serving the Telegram
+mock, on one internal bridge network shared only with the operating provider.
+`--honcho real` runs the production meter with the operating installation's
+embedding key and shared ledger on its own egress network; the default keeps
+Honcho's scripted meter. The manifest before the switch and a
+`route-preflight.json` record are kept. Then run
+`python -m tools.acceptance.telegram_scenarios --directory <prepared-directory>
+--real-model`: it runs the scenarios that do not depend on scripted
+directives, checks delivery, order, audience, recovery and effects, and saves
+each real answer in the report for review. A group reply that a real model
+chooses to withhold is a judgement to review, not a transport failure.
 
 The [quality runner](../tools/acceptance/model_rehearsal.py) collects synthetic
 reaction-removal, correction, private/topic isolation, restart recall and
