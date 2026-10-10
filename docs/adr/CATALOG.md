@@ -134,4 +134,5 @@ records current implementation and activation.
 | [0122](0122-honcho-fresh-start.md) | Honcho fresh start deletes earlier Nocheh workspaces | Implements 0109 step H5 on top of 0115; deletes only workspaces Nocheh recorded |
 | [0123](0123-retired-sources-leave-native-history.md) | Retired sources leave stored Hermes native history | Extends 0021; rewrites the profile's native rows before its next turn, Hermes' workflow unchanged |
 | [0124](0124-native-review-once-per-source.md) | Hermes native memory review runs once per source | Extends 0097 and 0088; later epochs review only unstarted sources and uncertain reviews have a bounded number of observations |
-| [0125](0125-per-chat-telegram-dispatch-lanes.md) | Telegram turns run per chat, two chats at a time | Replaces the gateway's single dispatch lock; per-chat order and receipts unchanged |
+| [0125](0125-per-chat-telegram-dispatch-lanes.md) | Telegram turns run per chat, two chats at a time | Replaces the gateway's single dispatch lock; per-chat order and receipts unchanged; two-chat limit superseded by 0126 |
+| [0126](0126-owner-set-parallel-replies-and-runs.md) | The owner sets parallel replies and parallel agent runs | Supersedes ADR-0125's fixed limit; settings default to three chats and four runs |
