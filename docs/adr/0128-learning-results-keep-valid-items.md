@@ -11,15 +11,24 @@ can overrule it. Extends 0056 and 0082.
 <context>
 Contextual learning saves Honcho's reasoning result under
 `learning-result:<job>` before validating it, so a retry never asks the model
-again. Validation rejected the whole result for any problem: a result that was
-not bare JSON, one interpretation citing an observation outside the prepared
-evidence, or one entity claim naming a relationship kind without its object
-(or the reverse). The workflow treated those errors as retryable, so every
-retry re-validated the same saved result and failed the same way, and the
-dashboard showed failed workflows with retries scheduled indefinitely. A model
-`relationship_kind` outside the allowed values reached a database constraint
-instead of validation, and the native-review closing reason from 0124 was
-missing from the workflow data boundary.
+again. Validation rejected the whole result for any problem, and the workflow
+treated those errors as retryable, so every retry re-validated the same saved
+result and failed the same way. The dashboard showed failed workflows with
+retries scheduled indefinitely.
+
+The shapes of the seven saved results showed three causes:
+
+- Three results were valid JSON inside a Markdown fence.
+- Two results labelled direct claims with `relationship_kind` (or `null`)
+  without an `object_entity_id`.
+- Three results cited extra source IDs that were not in the prepared evidence,
+  also as `quote.source_id`. Honcho messages carry `[nocheh:event:<id>]`
+  markers, so its reasoning recalls IDs of earlier messages; one cited ID was a
+  learned rule dependency's event without its prefix.
+
+A model `relationship_kind` outside the allowed values reached a database
+constraint instead of validation, and the native-review closing reason from
+0124 was missing from the workflow data boundary.
 </context>
 
 <decision>
@@ -32,8 +41,13 @@ missing from the workflow data boundary.
   published. The job records each dropped item's section and validation code
   in `interpretation_jobs.rejected`; the saved result keeps the item itself.
   Items beyond a section's limit are dropped and recorded the same way.
-- Optional model fields set to `null` mean the field is absent. A relationship
-  needs both a known object entity and an allowed relationship kind.
+- Optional model fields set to `null` mean the field is absent. A claim with an
+  object needs an allowed relationship kind; a relationship kind on a claim
+  without an object links nothing and is ignored, keeping the claim.
+- The reasoning request lists the citable observation IDs and says that IDs
+  recalled from memory or rule dependencies are not citable. An interpretation
+  that still cites one is dropped, because its evidence would not cover the
+  cited source's consent, guard and retirement dependencies.
 - A result that is still unusable as a whole (`invalid_interpretation_result`)
   closes its `memory_review` workflow as `failed` with reason
   `invalid_model_output`. Provider, consent, guard and publication failures

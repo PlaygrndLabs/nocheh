@@ -542,7 +542,11 @@ reasoning provider and model is enough for the MVP phase.
 Silent learning (October 10): on the owner's development installation with
 Claude through Honcho, seven `interpret` jobs failed after 9 to 10 attempts
 with hourly retries still scheduled, because each retry re-validated the same
-saved reasoning result. Results are now read from fenced or wrapped JSON, an
+saved reasoning result. The saved results were fenced JSON (three), direct
+claims labelled with a relationship kind but no object (two), and
+interpretations citing source IDs that Honcho recalled from earlier messages
+(three). Results are now read from fenced or wrapped JSON, a relationship
+label without an object is ignored, the request lists the citable IDs, an
 invalid item is dropped and recorded while valid items publish, and a result
 still unusable as a whole closes its workflow
 ([decision](docs/adr/0128-learning-results-keep-valid-items.md),

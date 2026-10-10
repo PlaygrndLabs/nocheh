@@ -261,9 +261,9 @@ export class EntityRepository {
         if(!knownIds.has(subject)||objectId&&!knownIds.has(objectId)||suppliedSpeaker&&!knownIds.has(suppliedSpeaker)||!['direct','reported','inferred'].includes(String(row.attribution))||
           !['uncertain','supported','explicit'].includes(String(row.uncertainty))||!Array.isArray(row.evidence_ids)||!row.evidence_ids.length||row.evidence_ids.length>30)
           throw new HttpError(422,'invalid_entity_claim');
-        // A relationship needs both its object and its kind; publishClaim rechecks the pair.
-        if(!!objectId!==(row.relationship_kind!==undefined)||row.relationship_kind!==undefined&&!relationshipKinds.includes(String(row.relationship_kind)))
-          throw new HttpError(422,'invalid_entity_relationship');
+        // A relationship kind describes the link to an object. Models also label claims
+        // without an object; that label links nothing, so the claim stays and the label is ignored.
+        if(objectId&&!relationshipKinds.includes(String(row.relationship_kind)))throw new HttpError(422,'invalid_entity_relationship');
         const content=string(row.content,8000).trim(),predicate=string(row.predicate,100);if(!predicate||!content)throw new HttpError(422,'invalid_entity_claim');
         const speaker=attributedSpeaker(row.attribution as EntityClaimInput['attribution'],subject,suppliedSpeaker,context.entities.speaker?.id);
         const references=row.evidence_ids.map(id=>{const ref=evidence.get(String(id));if(!ref)throw new HttpError(422,'entity_evidence_unavailable');return ref;});

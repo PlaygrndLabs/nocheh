@@ -53,16 +53,17 @@ test('one invalid model entity item is dropped and recorded while valid items ar
       {kind:'person',name:'Dropped',reason:'synthetic',evidence_ids:[digest('unknown')]}],
     entity_claims:[
       {...claim,object_entity_id:null,relationship_kind:null,speaker_entity_id:null},
-      {...claim,predicate:'relationship without object',relationship_kind:'responsible'},
+      {...claim,predicate:'relationship without object',relationship_kind:'contextual'},
       {...claim,predicate:'object without relationship',object_entity_id:project},
       {...claim,predicate:'unknown relationship',object_entity_id:project,relationship_kind:'friend'},
       {...claim,predicate:'linked',object_entity_id:project,relationship_kind:'depends_on'},
     ]},'discoveries:partial');
   assert.deepEqual(suggested,['Kept']);
-  assert.deepEqual(claims.map(c=>c.predicate),['commitment','linked']);
-  assert.equal(claims[1].relationship_kind,'depends_on');
+  assert.deepEqual(claims.map(c=>c.predicate),['commitment','relationship without object','linked']);
+  assert.equal(claims[1].relationship_kind,undefined,'a relationship label without an object links nothing');
+  assert.equal(claims[2].relationship_kind,'depends_on');
   assert.deepEqual(result.rejected,[{section:'entity_suggestions',code:'entity_evidence_unavailable'},
-    ...Array(3).fill({section:'entity_claims',code:'invalid_entity_relationship'})]);
+    ...Array(2).fill({section:'entity_claims',code:'invalid_entity_relationship'})]);
 });
 
 test('people and projects keep stable identity, attributed evidence, connected recall paths and audience privacy',
