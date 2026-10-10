@@ -32,8 +32,34 @@ class SettingsTests(unittest.TestCase):
                 run.return_value.returncode = 1
                 self.assertEqual(apply(state), {'status': 'apply_failed', 'rolled_back': False})
             self.assertEqual(load(state), baseline)
-            with patch('tools.operations.installation.settings.subprocess.run') as run:
+            with patch('tools.operations.installation.settings.subprocess.run') as run, \
+                    patch('tools.operations.installation.settings.refresh_honcho', return_value='refreshed') as refresh:
                 run.return_value.returncode = 0
                 result = apply(state)
+                self.assertEqual(result['honcho'], 'refreshed'); refresh.assert_called_once()
                 self.assertEqual(result['apply_state'], 'current')
                 self.assertFalse((state / 'admin/previous.env').exists())
+
+    def test_models_are_owner_settings_and_embeddings_never_mix(self):
+        import sqlite3
+        from tools.operations.memory.honcho_setup import state_for
+        with tempfile.TemporaryDirectory() as folder, patch('tools.operations.provider.provider.models', return_value=['claude-sonnet-5-5']):
+            state = Path(folder); initialize(state)
+            current = view(state)
+            self.assertEqual(current['models']['reasoning'], ['claude-sonnet-5-5'])
+            self.assertIn('text-embedding-3-large', current['models']['embedding'])
+            editable = {field['key'] for field in current['fields'] if field['editable']}
+            self.assertLessEqual({'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_MODEL'}, editable)
+            self.assertNotIn('OPENAI_API_KEY', editable)
+            saved = save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-large'}, current['revision'])
+            # Once Honcho's ledger holds vectors from one model, another one is refused.
+            ledger = state_for(state) / 'ledger/budget.sqlite'
+            with sqlite3.connect(ledger) as db:
+                db.execute('CREATE TABLE embedding_route(id INTEGER PRIMARY KEY, provider TEXT, model TEXT, dimensions INTEGER)')
+                db.execute("INSERT INTO embedding_route VALUES(1,'openai','text-embedding-3-large',1536)")
+            self.assertEqual(view(state)['models']['embedding_locked'], 'text-embedding-3-large')
+            with self.assertRaisesRegex(ValueError, 'embedding_model_change_requires_rebuild'):
+                save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-small'}, saved['revision'])
+            self.assertEqual(load(state)['NOCHEH_EMBEDDING_MODEL'], 'text-embedding-3-large')
+            save(state, {'NOCHEH_MODEL': 'claude-opus-5-5'}, saved['revision'])
+            self.assertEqual(load(state)['NOCHEH_MODEL'], 'claude-opus-5-5')
