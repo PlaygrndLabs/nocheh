@@ -851,10 +851,23 @@ activation remains separate.
    [check](services/hermes/test_configuration.py)); it takes effect when the
    operating containers are next recreated. `./bin/nocheh storage` reports
    database, largest-table and state folder sizes read-only
-   ([check](services/hermes/test_storage_report.py)); a Monitoring view of it
-   is not built.
-10. Inngest orchestration: classify each Nocheh loop outside Inngest as an
-    Inngest function, an Inngest cron, or a required out-of-band safety path;
-    Telegram polling and the Hermes turn stay inside Hermes.
+   ([check](services/hermes/test_storage_report.py)), and Monitoring › Storage
+   shows the same report. Broker model-call security events and guard
+   invalidation notes now follow the same setting; action and tool security
+   events stay as the owner's audit
+   ([decision](docs/adr/0121-operational-telemetry-retention.md)). Still
+   unbounded: guarded prepared copies (`runtime_prepared_values` and
+   `runtime_prepared_inputs`) of superseded guard epochs, which ADR-0109's
+   single-workspace model changes; finished Hermes journals (outbound, dispatch,
+   async-run and managed-run files), which boot recovery also rescans; the
+   Honcho meter's call rows, which budget accounting sums and need a roll-up
+   rather than deletion; and spool files that fail permanently.
+10. Inngest orchestration: every Nocheh loop outside Inngest is classified
+    ([decision](docs/adr/0120-loops-outside-inngest.md)). Product workflows,
+    including the Hermes turn and its reply send, run as Inngest functions;
+    the rest are adapter capture, the durable handoff and publisher, store
+    recovery, health, retention or the Inngest connection, and none becomes a
+    cron. The superseded single-database worker is removed; four older modules
+    remain only for their tests.
 
 </pending>

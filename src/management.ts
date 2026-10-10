@@ -220,6 +220,7 @@ export async function startManagement() {
         ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
       if (req.method === 'GET' && route === '/changes')return live.open(res);
       if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
+      if(req.method==='GET'&&route==='/storage')return json(res,200,await python({operation:'storage.report'}));
       if(req.method==='GET'&&route==='/database-browser')return json(res,200,await python({operation:'database.browser',
         request:Object.fromEntries(url.searchParams)}));
       if(req.method==='GET'&&/^\/workflows(?:\/(?:health|metrics|timings(?:\/[a-f0-9]{64})?|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));

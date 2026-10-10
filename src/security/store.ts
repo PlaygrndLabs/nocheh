@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS security_events (
 CREATE INDEX IF NOT EXISTS security_events_effect ON security_events(effect_id,id);
 ALTER TABLE security_events ADD COLUMN IF NOT EXISTS source_reference jsonb;
 ALTER TABLE security_events ADD COLUMN IF NOT EXISTS timings jsonb;
+CREATE INDEX IF NOT EXISTS security_events_kind_created ON security_events(kind,created_at);
 `;
 export const securitySchema=securityCoreSchema+`ALTER TABLE action_requests ADD COLUMN IF NOT EXISTS security_decision jsonb;`;
 export async function policySnapshot(db:Db,lock=false):Promise<{revision:number;policy:Policy}> {

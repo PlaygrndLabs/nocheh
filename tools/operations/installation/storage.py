@@ -35,18 +35,29 @@ def database(command, env, service, user, name, role, limit):
             'largest_tables': [{'table': table, 'bytes': int(size), 'estimated_rows': int(rows)} for table, size, rows in tables]}
 
 
-def directory_size(path):
-    """Bytes under a directory without following symlinks out of it."""
-    total = 0
-    for folder, folders, files in os.walk(path):
+def measure(path):
+    """Bytes under a directory without following symlinks out of it, and
+    whether every entry could be read (another user's folder may not be)."""
+    total, unreadable = 0, []
+    for folder, folders, files in os.walk(path, onerror=unreadable.append):
         folders[:] = [name for name in folders if not os.path.islink(os.path.join(folder, name))]
         for name in files:
             try:
                 status = os.lstat(os.path.join(folder, name))
             except OSError:
+                unreadable.append(name)
                 continue
             total += status.st_size
-    return total
+    return total, not unreadable
+
+
+def directory_size(path):
+    return measure(path)[0]
+
+
+def folder(child):
+    size, complete = measure(child)
+    return {'path': child.name, 'bytes': size, 'complete': complete}
 
 
 def report(state, limit=8, command=None, env=None):
@@ -57,8 +68,7 @@ def report(state, limit=8, command=None, env=None):
     databases = [database(command, env, 'nocheh-db', 'nocheh', name, role, limit) for name, role in STORES]
     if config.get('NOCHEH_HONCHO_ENABLED') == 'true':
         databases.append(database(command, env, 'honcho-postgres', 'experiment', 'honcho_experiment', 'Honcho memory', limit))
-    folders = [{'path': child.name, 'bytes': directory_size(child)}
-               for child in sorted(state.iterdir()) if child.is_dir() and not child.is_symlink()] if state.is_dir() else []
+    folders = [folder(child) for child in sorted(state.iterdir()) if child.is_dir() and not child.is_symlink()] if state.is_dir() else []
     size, files = config.get('NOCHEH_LOG_MAX_SIZE', '10m'), int(config.get('NOCHEH_LOG_MAX_FILES', '3'))
     return {'databases': databases, 'state_folders': sorted(folders, key=lambda row: -row['bytes']),
             'docker_logs': {'max_size_per_file': size, 'max_files_per_container': files},
@@ -90,7 +100,7 @@ def main(state, argv):
             print(f"  {table['table']}: {human(table['bytes'])}, about {table['estimated_rows']} rows")
     print('Local state:')
     for row in result['state_folders']:
-        print(f"  {row['path']}: {human(row['bytes'])}")
+        print(f"  {row['path']}: {'at least ' if not row['complete'] else ''}{human(row['bytes'])}")
     logs = result['docker_logs']
     print(f"Docker logs: at most {logs['max_files_per_container']} x {logs['max_size_per_file']} per container")
     retention = result['retention_days']
