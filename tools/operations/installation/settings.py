@@ -121,7 +121,9 @@ def refresh_honcho(state, values):
     try:
         from tools.operations.installation.configuration import read_env
         from tools.operations.memory.honcho_setup import initialize, state_for
+        from tools.operations.installation.configuration import owns_project
         from tools.operations.memory.honcho_runtime import operate
+        if not owns_project(state): return 'skipped_unowned_state'
         honcho = state_for(state)
         current = (read_env(honcho / 'honcho.env').get('DERIVER_MODEL_CONFIG__MODEL'),
                    read_env(honcho / 'meter.env').get('NOCHEH_EMBEDDING_MODEL'))

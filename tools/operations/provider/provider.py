@@ -123,8 +123,9 @@ def served(state):
     """(model, owner) pairs the running provider serves; None when it cannot be asked.
 
     The client key reaches curl on stdin, never in a command argument."""
+    from tools.operations.installation.configuration import owns_project
     key=(paths(state)[2]/'hermes.key')
-    if not key.is_file():return None
+    if not key.is_file() or not owns_project(state):return None
     command,env=compose(state)
     try:
         raw=subprocess.run(command+['exec','-T','cliproxy-api','curl','--silent','--fail','--max-time','10','-H','@-',
