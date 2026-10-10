@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS memory_engine_connection (
 );
 INSERT INTO memory_engine_connection(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 ALTER TABLE memory_engine_connection ADD COLUMN IF NOT EXISTS revision integer NOT NULL DEFAULT 0;
+ALTER TABLE memory_engine_connection ADD COLUMN IF NOT EXISTS workspace_revision integer NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS memory_generations (
  id text PRIMARY KEY,installation_generation uuid NOT NULL,guard_epoch bigint NOT NULL,
  audience text NOT NULL,state text NOT NULL DEFAULT 'building' CHECK(state IN ('building','ready','retired')),
@@ -18,7 +19,9 @@ ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS error_code text;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS work_revision integer NOT NULL DEFAULT 1;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS representation_version text NOT NULL DEFAULT 'legacy-source-v1';
 ALTER TABLE memory_generations DROP CONSTRAINT IF EXISTS memory_generations_installation_generation_guard_epoch_audience_key;
-CREATE UNIQUE INDEX IF NOT EXISTS memory_generations_versioned_audience ON memory_generations(installation_generation,guard_epoch,audience,representation_version);
+DROP INDEX IF EXISTS memory_generations_versioned_audience;
+-- One current workspace per installation; a fresh start retires it and opens the next.
+CREATE UNIQUE INDEX IF NOT EXISTS memory_generations_current ON memory_generations(installation_generation) WHERE audience='installation' AND state<>'retired';
 DROP TABLE IF EXISTS memory_entity_peer_mappings;
 CREATE TABLE IF NOT EXISTS memory_ingestion_receipts (
  id text PRIMARY KEY,generation text NOT NULL REFERENCES memory_generations(id),
@@ -60,6 +63,11 @@ CREATE TABLE IF NOT EXISTS memory_session_deletions (
  created_at timestamptz NOT NULL DEFAULT now(),completed_at timestamptz
 );
 CREATE SEQUENCE IF NOT EXISTS memory_ingest_requests;
+CREATE TABLE IF NOT EXISTS memory_workspace_deletions (
+ workspace text PRIMARY KEY,state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','done')),
+ deleted_sessions integer NOT NULL DEFAULT 0,
+ requested_at timestamptz NOT NULL DEFAULT now(),completed_at timestamptz
+);
 DROP TABLE IF EXISTS memory_context_snapshots;
 CREATE TABLE IF NOT EXISTS interpretation_jobs (
  id text PRIMARY KEY,source_reference jsonb NOT NULL,workspace text NOT NULL,audience text NOT NULL,
