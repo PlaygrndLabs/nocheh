@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
-import {parseInterpretations,triggeredInterpretations,applicableInterpretations,type Interpretation,type InterpretationVersion} from '../src/interpretations.js';
+import {learningResult,parseInterpretations,triggeredInterpretations,applicableInterpretations,type Interpretation,type InterpretationVersion} from '../src/interpretations.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
@@ -37,11 +37,31 @@ test('reaction learning ignores unrelated conclusions and keeps strict original-
   const raw={interpretations:[{...base,subject:'unrelated',evidence_ids:[target]},
     {...base,evidence_ids:[trigger,target,rule]}]};
   const scoped=triggeredInterpretations(raw,trigger,[rule]);
-  const values=parseInterpretations(scoped,evidence,'-42',[]);
+  const {values}=parseInterpretations(scoped,evidence,'-42',[]);
   assert.equal(values.length,1);assert.deepEqual(values[0]!.evidence.map(item=>item.id),[trigger,target]);
   assert.equal(raw.interpretations[1]!.evidence_ids.length,3,'the saved model result stays unchanged');
-  assert.throws(()=>parseInterpretations(triggeredInterpretations({interpretations:[{...base,evidence_ids:[trigger,unknown]}]},trigger,[rule]),
-    evidence,'-42',[]),{code:'unavailable_interpretation_evidence'});
+  const unavailable=parseInterpretations(triggeredInterpretations({interpretations:[{...base,evidence_ids:[trigger,unknown]},{...base,subject:'kept',evidence_ids:[trigger]}]},trigger,[rule]),
+    evidence,'-42',[]);
+  assert.deepEqual(unavailable.values.map(v=>v.subject),['kept'],'an unavailable citation drops only its own item');
+  assert.deepEqual(unavailable.rejected,[{section:'interpretations',code:'unavailable_interpretation_evidence'}]);
+});
+test('a saved reasoning result is read from plain, fenced or sentence-wrapped JSON and unusable output is rejected',()=>{
+  const value={interpretations:[{kind:'state',subject:'a {brace} "quoted"',text:'Synthetic.'}],entity_claims:[]};
+  const json=JSON.stringify(value,null,2);
+  for(const text of [json,'```json\n'+json+'\n```','Here is the result:\n```\n'+json+'\n```\nDone.','Based on the evidence, '+json+' is my answer.'])
+    assert.deepEqual(learningResult(text),value);
+  assert.deepEqual(learningResult('Example {"note":1} then '+json),value,'an unrelated object is not the result');
+  for(const text of ['No learnable content.','```json\n{"interpretations":[\n```','[]','{"notes":"none"}'])
+    assert.throws(()=>learningResult(text),{code:'invalid_interpretation_result'});
+});
+test('learning result sections keep valid leading items and record what was dropped',()=>{
+  const source=digest('limit-trigger'),evidence=[{reference:{store:'archive' as const,kind:'event' as const,id:source,revision:'1',input_hash:digest(source)},text:'Synthetic source',space:'-42'}];
+  const item=(subject:string)=>({kind:'state',subject,text:'Synthetic.',scope:{kind:'conversation',id:'-42'},uncertainty:'supported',evidence_ids:[source]});
+  const many=parseInterpretations({interpretations:Array.from({length:14},(_,i)=>item('item '+i))},evidence,'-42',[]);
+  assert.equal(many.values.length,12);assert.deepEqual(many.rejected.map(r=>r.code),['interpretations_limit','interpretations_limit']);
+  assert.deepEqual(parseInterpretations({entity_claims:[]},evidence,'-42',[]),{values:[],rejected:[]},'an omitted section means none');
+  assert.deepEqual(parseInterpretations({interpretations:null},evidence,'-42',[]).rejected,[]);
+  assert.deepEqual(parseInterpretations({interpretations:'none'},evidence,'-42',[]).rejected,[{section:'interpretations',code:'invalid_interpretations'}]);
 });
 test('optional organization output cannot change or prevent ordinary interpretation validation',()=>{
   const source=digest('organization-trigger'),evidence=[{reference:{store:'archive' as const,kind:'event' as const,id:source,revision:'1',input_hash:digest(source)},text:'Synthetic source',space:'-42'}];
@@ -59,20 +79,22 @@ test('conventions are quoted evidence, general meanings stay contextual and expl
   const evidence=[{reference,text:'For project Atlas, a check means reviewed, not completed.',space:'-42'}];
   const input={kind:'convention',subject:'check reaction',text:'A check means reviewed.',scope:{kind:'conversation',id:'-42'},uncertainty:'explicit',
     evidence_ids:[reference.id],quote:{source_id:reference.id,text:evidence[0]!.text},conflicts:[]};
-  const [local]=parseInterpretations({interpretations:[input]},evidence,'-42',[]);assert.ok(local);
+  const rejection=(raw:unknown,projects:{id:string;name:string}[]=[],values=evidence,session?:string)=>{
+    const parsed=parseInterpretations({interpretations:[raw]},values,'-42',projects,session);assert.equal(parsed.values.length,0);return parsed.rejected[0]?.code;
+  };
+  const [local]=parseInterpretations({interpretations:[input]},evidence,'-42',[]).values;assert.ok(local);
   const session=digest('current-honcho-session');
-  const [aliased]=parseInterpretations({interpretations:[{...input,scope:{kind:'conversation',id:session}}]},evidence,'-42',[],session);
+  const [aliased]=parseInterpretations({interpretations:[{...input,scope:{kind:'conversation',id:session}}]},evidence,'-42',[],session).values;
   assert.equal(aliased?.scope.id,'-42','only the current session resolves to the evidence conversation');
-  assert.throws(()=>parseInterpretations({interpretations:[{...input,scope:{kind:'conversation',id:digest('other-session')}}]},evidence,'-42',[],session),
-    {code:'interpretation_scope_mismatch'});
-  assert.throws(()=>parseInterpretations({interpretations:[{...input,scope:{kind:'conversation',id:session}}]},
-    [{...evidence[0]!,space:'-99'}],'-42',[],session),{code:'interpretation_scope_mismatch'});
+  assert.equal(rejection({...input,scope:{kind:'conversation',id:digest('other-session')}},[],evidence,session),'interpretation_scope_mismatch');
+  assert.equal(rejection({...input,scope:{kind:'conversation',id:session}},[],[{...evidence[0]!,space:'-99'}],session),'interpretation_scope_mismatch');
   const project={id:digest('atlas'),name:'Atlas'};
-  assert.equal(parseInterpretations({interpretations:[{...input,scope:{kind:'project',id:project.id}}]},evidence,'-42',[project])[0]?.scope.kind,'project');
-  assert.throws(()=>parseInterpretations({interpretations:[{...input,scope:{kind:'project',id:project.id}}]},evidence,'-42',[project,{id:digest('duplicate'),name:'Atlas'}]),{code:'explicit_project_reference_required'});
-  assert.throws(()=>parseInterpretations({interpretations:[{...input,quote:{source_id:reference.id,text:'invented'}}]},evidence,'-42',[]),{code:'unverified_convention_quote'});
-  assert.throws(()=>parseInterpretations({interpretations:[{...input,guard_mode:'off'}]},evidence,'-42',[]),{code:'invalid_interpretation'});
-  assert.throws(()=>parseInterpretations({interpretations:[{...input,evidence_ids:[digest('missing')]}]},evidence,'-42',[]),{code:'unavailable_interpretation_evidence'});
+  assert.equal(parseInterpretations({interpretations:[{...input,scope:{kind:'project',id:project.id}}]},evidence,'-42',[project]).values[0]?.scope.kind,'project');
+  assert.equal(rejection({...input,scope:{kind:'project',id:project.id}},[project,{id:digest('duplicate'),name:'Atlas'}]),'explicit_project_reference_required');
+  assert.equal(rejection({...input,quote:{source_id:reference.id,text:'invented'}}),'unverified_convention_quote');
+  assert.equal(rejection({...input,guard_mode:'off'}),'invalid_interpretation');
+  assert.equal(rejection({...input,evidence_ids:[digest('missing')]}),'unavailable_interpretation_evidence');
+  assert.equal(rejection({...input,quote:null}),'convention_quote_required','a null optional field is absent, never a bypass');
   const first:InterpretationVersion={...local,id:digest('first'),revision:1,author:'participant',retired:false};
   const second={...first,id:digest('second'),text:'A check means done.'};
   const duplicate={...first,id:digest('duplicate-convention'),text:'The check means that is reviewed.'};

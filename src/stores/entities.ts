@@ -7,10 +7,12 @@ import type {StorePools} from './connections.js';
 import {OwnerCommands} from './owner-commands.js';
 import type {Project,ProjectRepository} from './projects.js';
 import type {PreparedLearningContext} from './learning-context.js';
+import {resultItems,withoutNulls,type LearningRejection} from '../interpretations.js';
 
 const protocol='nocheh-connected-entities-v1';
 export type EntityKind='person'|'project';
 export type RelationshipKind='contextual'|'participates'|'responsible'|'depends_on'|'associated';
+const relationshipKinds=['contextual','participates','responsible','depends_on','associated'];
 export interface MemoryEntity {id:string;kind:EntityKind;name:string;state:'active'|'merged'|'rejected';project_id:string|null;merged_into:string|null;revision:number}
 export interface EntityContext {speaker:MemoryEntity|null;project:MemoryEntity|null;mentioned_projects:MemoryEntity[];mentioned_people:MemoryEntity[];session_id:string}
 export interface EntityClaimInput {
@@ -221,19 +223,25 @@ export class EntityRepository {
   }
   async publishDiscoveries(context:PreparedLearningContext,input:unknown,operation:string) {
     const value=object(input),known=[context.entities.speaker,context.entities.project,...context.entities.mentioned_projects,...context.entities.mentioned_people].filter((item):item is MemoryEntity=>!!item);
-    const knownIds=new Set(known.map(item=>item.id)),evidence=new Map(context.evidence.map(item=>[item.reference.id,item.reference])),published=[],suggestions=[];
-    const suggested=value.entity_suggestions??[];
-    if(!Array.isArray(suggested)||suggested.length>12)throw new HttpError(422,'invalid_entity_suggestions');
-    for(const raw of suggested) {
-      const row=exact(raw,['kind','name','candidate_id','reason','evidence_ids']);
-      if(!['person','project','binding'].includes(String(row.kind))||!Array.isArray(row.evidence_ids)||!row.evidence_ids.length||row.evidence_ids.length>30)
-        throw new HttpError(422,'invalid_entity_suggestion');
-      const references=row.evidence_ids.map(id=>{const ref=evidence.get(String(id));if(!ref)throw new HttpError(422,'entity_evidence_unavailable');return ref;});
-      // A model may put a name or placeholder in candidate_id. Keep that
-      // suggestion unbound; only an exact known entity ID may create a link.
-      const candidate=typeof row.candidate_id==='string'&&/^[a-f0-9]{64}$/.test(row.candidate_id)?row.candidate_id:undefined;
-      if(candidate&&!knownIds.has(candidate))throw new HttpError(422,'entity_candidate_unavailable');
-      suggestions.push(await this.suggest(row.kind as 'person'|'project'|'binding',string(row.name,200),references[0]!,string(row.reason,1000),candidate));
+    const knownIds=new Set(known.map(item=>item.id)),evidence=new Map(context.evidence.map(item=>[item.reference.id,item.reference])),published=[],suggestions=[],rejected:LearningRejection[]=[];
+    // One invalid model item is dropped and recorded; valid items from the same result are kept.
+    const checked=<T>(section:LearningRejection['section'],check:()=>T):T|undefined=>{
+      try{return check();}catch(error){if(!(error instanceof HttpError))throw error;rejected.push({section,code:error.code});return undefined;}
+    };
+    for(const raw of resultItems(value.entity_suggestions,12,'entity_suggestions',rejected)) {
+      const suggestion=checked('entity_suggestions',()=>{
+        const row=exact(withoutNulls(raw),['kind','name','candidate_id','reason','evidence_ids']);
+        if(!['person','project','binding'].includes(String(row.kind))||!Array.isArray(row.evidence_ids)||!row.evidence_ids.length||row.evidence_ids.length>30)
+          throw new HttpError(422,'invalid_entity_suggestion');
+        const references=row.evidence_ids.map(id=>{const ref=evidence.get(String(id));if(!ref)throw new HttpError(422,'entity_evidence_unavailable');return ref;});
+        // A model may put a name or placeholder in candidate_id. Keep that
+        // suggestion unbound; only an exact known entity ID may create a link.
+        const candidate=typeof row.candidate_id==='string'&&/^[a-f0-9]{64}$/.test(row.candidate_id)?row.candidate_id:undefined;
+        if(candidate&&!knownIds.has(candidate))throw new HttpError(422,'entity_candidate_unavailable');
+        const name=string(row.name,200).trim();if(!name)throw new HttpError(422,'invalid_entity_name');
+        return {kind:row.kind as 'person'|'project'|'binding',name,source:references[0]!,reason:string(row.reason,1000),candidate};
+      });
+      if(suggestion)suggestions.push(await this.suggest(suggestion.kind,suggestion.name,suggestion.source,suggestion.reason,suggestion.candidate));
     }
     if(context.entities.project&&context.entities.speaker)published.push(await this.publishClaim({subject_id:context.entities.project.id,predicate:'participates',
       content:`${context.entities.speaker.name} participated in ${context.entities.project.name}.`,object_entity_id:context.entities.speaker.id,
@@ -246,21 +254,25 @@ export class EntityRepository {
       predicate:'contextual',content:`${target.name} was mentioned in ${context.entities.project.name} context.`,object_entity_id:target.id,relationship_kind:'contextual',
       attribution:'inferred',uncertainty:'supported',evidence:[context.source],
       ...(context.entities.speaker?{speaker_entity_id:context.entities.speaker.id}:{})},context.binding,operation+':contextual:'+target.id));
-    const claims=value.entity_claims??[];if(!Array.isArray(claims)||claims.length>20)throw new HttpError(422,'invalid_entity_claims');
-    for(const raw of claims) {
-      const row=exact(raw,['subject_id','predicate','content','object_entity_id','relationship_kind','attribution','speaker_entity_id','uncertainty','evidence_ids']);
-      const subject=entityId(row.subject_id),objectId=row.object_entity_id===undefined?undefined:entityId(row.object_entity_id),suppliedSpeaker=row.speaker_entity_id===undefined?undefined:entityId(row.speaker_entity_id);
-      if(!knownIds.has(subject)||objectId&&!knownIds.has(objectId)||suppliedSpeaker&&!knownIds.has(suppliedSpeaker)||!['direct','reported','inferred'].includes(String(row.attribution))||
-        !['uncertain','supported','explicit'].includes(String(row.uncertainty))||!Array.isArray(row.evidence_ids)||!row.evidence_ids.length||row.evidence_ids.length>30)
-        throw new HttpError(422,'invalid_entity_claim');
-      const speaker=attributedSpeaker(row.attribution as EntityClaimInput['attribution'],subject,suppliedSpeaker,context.entities.speaker?.id);
-      const references=row.evidence_ids.map(id=>{const ref=evidence.get(String(id));if(!ref)throw new HttpError(422,'entity_evidence_unavailable');return ref;});
-      published.push(await this.publishClaim({subject_id:subject,predicate:string(row.predicate,100),content:string(row.content,8000),
-        attribution:row.attribution as EntityClaimInput['attribution'],uncertainty:row.uncertainty as EntityClaimInput['uncertainty'],evidence:references,
-        ...(objectId?{object_entity_id:objectId}:{}),...(row.relationship_kind?{relationship_kind:row.relationship_kind as RelationshipKind}:{}),
-        ...(speaker?{speaker_entity_id:speaker}:{})},context.binding,operation+':claim:'+published.length));
+    for(const raw of resultItems(value.entity_claims,20,'entity_claims',rejected)) {
+      const claim=checked('entity_claims',():EntityClaimInput=>{
+        const row=exact(withoutNulls(raw),['subject_id','predicate','content','object_entity_id','relationship_kind','attribution','speaker_entity_id','uncertainty','evidence_ids']);
+        const subject=entityId(row.subject_id),objectId=row.object_entity_id===undefined?undefined:entityId(row.object_entity_id),suppliedSpeaker=row.speaker_entity_id===undefined?undefined:entityId(row.speaker_entity_id);
+        if(!knownIds.has(subject)||objectId&&!knownIds.has(objectId)||suppliedSpeaker&&!knownIds.has(suppliedSpeaker)||!['direct','reported','inferred'].includes(String(row.attribution))||
+          !['uncertain','supported','explicit'].includes(String(row.uncertainty))||!Array.isArray(row.evidence_ids)||!row.evidence_ids.length||row.evidence_ids.length>30)
+          throw new HttpError(422,'invalid_entity_claim');
+        // A relationship kind describes the link to an object. Models also label claims
+        // without an object; that label links nothing, so the claim stays and the label is ignored.
+        if(objectId&&!relationshipKinds.includes(String(row.relationship_kind)))throw new HttpError(422,'invalid_entity_relationship');
+        const content=string(row.content,8000).trim(),predicate=string(row.predicate,100);if(!predicate||!content)throw new HttpError(422,'invalid_entity_claim');
+        const speaker=attributedSpeaker(row.attribution as EntityClaimInput['attribution'],subject,suppliedSpeaker,context.entities.speaker?.id);
+        const references=row.evidence_ids.map(id=>{const ref=evidence.get(String(id));if(!ref)throw new HttpError(422,'entity_evidence_unavailable');return ref;});
+        return {subject_id:subject,predicate,content,attribution:row.attribution as EntityClaimInput['attribution'],uncertainty:row.uncertainty as EntityClaimInput['uncertainty'],evidence:references,
+          ...(objectId?{object_entity_id:objectId,relationship_kind:row.relationship_kind as RelationshipKind}:{}),...(speaker?{speaker_entity_id:speaker}:{})};
+      });
+      if(claim)published.push(await this.publishClaim(claim,context.binding,operation+':claim:'+published.length));
     }
-    return {published,suggestions};
+    return {published,suggestions,rejected};
   }
   async correct(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['content','relationship_kind','attribution','uncertainty','retired','expected_revision','operation_id']),claim=entityId(id),expected=revision(body.expected_revision);
@@ -276,7 +288,7 @@ export class EntityRepository {
         if(!entry)throw new HttpError(404,'entity_claim_not_found');if(entry.active_revision!==expected)throw new HttpError(409,'entity_claim_revision_conflict');
         const prior=(await db.query('SELECT * FROM entity_claim_versions WHERE claim_id=$1 AND revision=$2',[claim,expected])).rows[0],next=expected+1;
         const relationshipKind=body.relationship_kind===undefined?prior.relationship_kind:String(body.relationship_kind);
-        if(entry.object_entity_id&&!['contextual','participates','responsible','depends_on','associated'].includes(relationshipKind)||!entry.object_entity_id&&body.relationship_kind!==undefined)
+        if(entry.object_entity_id&&!relationshipKinds.includes(relationshipKind)||!entry.object_entity_id&&body.relationship_kind!==undefined)
           throw new HttpError(400,'invalid_entity_relationship');
         await db.query(`INSERT INTO entity_claim_versions(operation_id,claim_id,revision,expected_revision,content,relationship_kind,attribution,speaker_entity_id,
           uncertainty,author,retired,evidence,dependencies,input_binding) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'owner',$10,$11,$12,$13)`,

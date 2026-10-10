@@ -77,4 +77,5 @@ CREATE TABLE IF NOT EXISTS interpretation_jobs (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS interpretation_inputs ON interpretation_jobs(context_hash,state);
+ALTER TABLE interpretation_jobs ADD COLUMN IF NOT EXISTS rejected jsonb NOT NULL DEFAULT '[]';
 `;

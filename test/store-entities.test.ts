@@ -20,7 +20,7 @@ test('direct entity claims can omit the trusted speaker ID without weakening att
   assert.equal(attributedSpeaker('reported',other,trusted,trusted),trusted);
 });
 
-test('malformed model candidate IDs remain unbound while unknown canonical IDs are rejected',async()=>{
+test('malformed model candidate IDs remain unbound while unknown canonical IDs are dropped',async()=>{
   const source={id:digest('suggestion-source'),kind:'event',store:'archive',revision:'1',input_hash:digest('source-input')} as any;
   const known=digest('known-person'),unknown=digest('unknown-person'),seen:(string|undefined)[]=[];
   const entities=Object.create(EntityRepository.prototype) as EntityRepository;
@@ -35,8 +35,35 @@ test('malformed model candidate IDs remain unbound while unknown canonical IDs a
   assert.deepEqual(seen,[undefined]);
   await entities.publishDiscoveries(context,input(known),'suggest:known');
   assert.deepEqual(seen,[undefined,known]);
-  await assert.rejects(entities.publishDiscoveries(context,input(unknown),'suggest:unknown'),{code:'entity_candidate_unavailable'});
+  assert.deepEqual((await entities.publishDiscoveries(context,input(unknown),'suggest:unknown')).rejected,[{section:'entity_suggestions',code:'entity_candidate_unavailable'}]);
   assert.deepEqual(seen,[undefined,known]);
+});
+
+test('one invalid model entity item is dropped and recorded while valid items are kept',async()=>{
+  const source={id:digest('claim-source'),kind:'event',store:'archive',revision:'1',input_hash:digest('claim-input')} as any;
+  const speaker=digest('claim-speaker'),project=digest('claim-project'),claims:any[]=[],suggested:string[]=[];
+  const entities=Object.create(EntityRepository.prototype) as EntityRepository;
+  (entities as any).suggest=async(_kind:string,name:string)=>{suggested.push(name);return {name};};
+  (entities as any).publishClaim=async(input:any)=>{claims.push(input);return {id:digest(String(claims.length)),revision:1};};
+  const context:any={source,evidence:[{reference:source,text:'synthetic evidence',space:'synthetic'}],binding:{},
+    entities:{speaker:{id:speaker,kind:'person',name:'Synthetic person'},project:null,mentioned_projects:[{id:project,kind:'project',name:'Synthetic project'}],mentioned_people:[]}};
+  const claim={subject_id:speaker,predicate:'commitment',content:'Synthetic commitment.',attribution:'direct',uncertainty:'supported',evidence_ids:[source.id]};
+  const result=await entities.publishDiscoveries(context,{
+    entity_suggestions:[{kind:'person',name:'Kept',reason:'synthetic',evidence_ids:[source.id],candidate_id:null},
+      {kind:'person',name:'Dropped',reason:'synthetic',evidence_ids:[digest('unknown')]}],
+    entity_claims:[
+      {...claim,object_entity_id:null,relationship_kind:null,speaker_entity_id:null},
+      {...claim,predicate:'relationship without object',relationship_kind:'contextual'},
+      {...claim,predicate:'object without relationship',object_entity_id:project},
+      {...claim,predicate:'unknown relationship',object_entity_id:project,relationship_kind:'friend'},
+      {...claim,predicate:'linked',object_entity_id:project,relationship_kind:'depends_on'},
+    ]},'discoveries:partial');
+  assert.deepEqual(suggested,['Kept']);
+  assert.deepEqual(claims.map(c=>c.predicate),['commitment','relationship without object','linked']);
+  assert.equal(claims[1].relationship_kind,undefined,'a relationship label without an object links nothing');
+  assert.equal(claims[2].relationship_kind,'depends_on');
+  assert.deepEqual(result.rejected,[{section:'entity_suggestions',code:'entity_evidence_unavailable'},
+    ...Array(2).fill({section:'entity_claims',code:'invalid_entity_relationship'})]);
 });
 
 test('people and projects keep stable identity, attributed evidence, connected recall paths and audience privacy',

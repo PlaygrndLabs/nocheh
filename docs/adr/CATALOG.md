@@ -137,3 +137,4 @@ records current implementation and activation.
 | [0125](0125-per-chat-telegram-dispatch-lanes.md) | Telegram turns run per chat, two chats at a time | Replaces the gateway's single dispatch lock; per-chat order and receipts unchanged; two-chat limit superseded by 0126 |
 | [0126](0126-owner-set-parallel-replies-and-runs.md) | The owner sets parallel replies and parallel agent runs | Supersedes ADR-0125's fixed limit; settings default to three chats and four runs |
 | [0127](0127-parallel-guard-checks.md) | Secret-guard checks run side by side | Replaces the Hermes detector lock and global preparation lock with an owner setting, three by default |
+| [0128](0128-learning-results-keep-valid-items.md) | Silent learning keeps valid items and closes on unusable results | Extends 0056 and 0082; invalid items are dropped and recorded, evidence and attribution checks unchanged |

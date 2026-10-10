@@ -12,7 +12,7 @@ import {SelectionRepository} from '../src/stores/selections.js';
 import {LearnedMemoryRepository} from '../src/stores/learned.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {LearningContextRepository} from '../src/stores/learning-context.js';
-import {ContextualLearningRepository} from '../src/stores/learning-engine.js';
+import {ContextualLearningRepository,terminalLearningCodes} from '../src/stores/learning-engine.js';
 import {HonchoProvenanceRepository} from '../src/stores/honcho-provenance.js';
 
 test('silent Honcho learning uses authorized relationship evidence and recovers output/activation without duplicate reasoning',
@@ -35,7 +35,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(body.query.includes('message_reaction'));assert.ok(!body.query.includes('fixture-secret'));
     assert.ok(!body.query.includes('nested-unverified-target'));
     assert.ok(Array.isArray(body.filters?.session_id)&&body.filters.session_id.length>0,'topic learning reasons only over that topic\'s own sessions');
-    return {content:JSON.stringify(response)};
+    return {content:typeof response==='string'?response:JSON.stringify(response)};
   };
   const readable=async(workspace:string,label:string)=>{
     const session=digest(key+':session:'+label);
@@ -173,6 +173,29 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await learned.correct({admin:true,scope:null},ruleId,{expected_revision:3,operation_id:key+':retire-owner-rule',text:'',retired:true},detect);
     const retiredWorkspace=await workspaceNow('retired-rule');
     assert.notEqual(await learning.request(removed,retiredWorkspace,space),ownerJob,'retiring owner guidance must not reuse that guidance');
+    // Claude through Honcho can fence the JSON; one invalid item is dropped and recorded.
+    const thumbs=(await archive.capture(event('thumbs',{update_id:50,message_reaction:{chat:{id:group},message_id:1,date:1700000020,user:{id:7},
+      old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}}))).source.reference;
+    await guards.prepare(thumbs,'fixture',detect);
+    const item=(subject:string,evidence_ids:string[])=>({kind:'state',subject,text:'The packet was acknowledged.',scope:{kind:'conversation',id:space},
+      uncertainty:'uncertain',evidence_ids,conflicts:null,quote:null});
+    response='Here is the interpretation:\n```json\n'+JSON.stringify({interpretations:[item('acknowledged packet',[thumbs.id,parent.id]),
+      item('invented source',[thumbs.id,digest('not-in-context')])],entity_suggestions:null,entity_claims:[]})+'\n```';
+    const partialJob=await learning.request(thumbs,retiredWorkspace,space);
+    assert.equal((await learning.run(partialJob,detect,authority)).length,1);assert.equal(calls,6);
+    assert.deepEqual((await stores.control.query('SELECT state,rejected FROM interpretation_jobs WHERE id=$1',[partialJob])).rows[0],
+      {state:'done',rejected:[{section:'interpretations',code:'unavailable_interpretation_evidence'}]});
+    // An unusable saved result fails the same way on retry and never asks the model again.
+    const wave=(await archive.capture(event('wave',{update_id:51,message_reaction:{chat:{id:group},message_id:1,date:1700000021,user:{id:7},
+      old_reaction:[],new_reaction:[{type:'emoji',emoji:'👋'}]}}))).source.reference;
+    await guards.prepare(wave,'fixture',detect);
+    response='I could not find anything to learn here.';
+    const unusableJob=await learning.request(wave,retiredWorkspace,space);
+    for(let attempt=0;attempt<2;attempt++)await assert.rejects(learning.run(unusableJob,detect,authority),{code:'invalid_interpretation_result'});
+    assert.equal(calls,7,'the saved unusable result is reused, not regenerated');
+    assert.ok(terminalLearningCodes.has('invalid_interpretation_result'));
+    assert.deepEqual((await stores.control.query('SELECT state,error_code FROM interpretation_jobs WHERE id=$1',[unusableJob])).rows[0],
+      {state:'failed',error_code:'invalid_interpretation_result'});
     const stale=await guards.state();
     await access.setConsent({admin:true,scope:null},parent,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
     await assert.rejects(guards.assertCurrent(stale),{code:'guard_context_changed'});
@@ -180,7 +203,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(!(await contexts.prepare(reaction,await guards.state())).evidence.some(item=>item.reference.id===parent.id),'withdrawn evidence never reaches reasoning');
     await stores.control.query("UPDATE memory_generations SET state='retired' WHERE id=$1",[workspace]);
     await assert.rejects(learning.request(reaction,workspace,space),{code:'memory_context_retired'});
-    assert.equal(calls,5);
+    assert.equal(calls,7);
   } finally {
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');await stores.close();
   }
