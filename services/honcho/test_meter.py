@@ -30,6 +30,41 @@ class HttpFailureTransport:
 
 
 class BudgetTests(unittest.TestCase):
+    def test_closed_months_fold_into_totals_without_changing_lifetime_or_the_cap(self):
+        from datetime import datetime, timezone
+        at=lambda month,day=10:datetime(2026,month,day,tzinfo=timezone.utc).timestamp()
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';Ledger(path)
+            with sqlite3.connect(path) as db:
+                rows=[('/v1/embeddings',10_000,at(7),200,'response'),('/v1/embeddings',10_000,at(7,20),502,'http_error'),
+                      ('/v1/embeddings',10_000,at(8),502,'legacy_error_unverified'),('/v1/chat/completions',0,at(8),200,'response'),
+                      ('/v1/embeddings',20,at(9),200,'response'),('/v1/embeddings',30,at(10),200,'response')]
+                db.executemany('INSERT INTO calls(route,reserved,started,status,outcome,duration_ms,settlement_version) VALUES(?,?,?,?,?,5,1)',rows)
+                db.execute('UPDATE policy SET monthly_since=? WHERE id=1',(at(7,1),))
+            with patch('services.honcho.meter.time.time',return_value=at(10,15)):
+                self.assertEqual(Ledger(path).roll_up(at(10,15)),0,'the ledger opened in October already folded')
+                before=Ledger(path)
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM calls').fetchone()[0],2,'September and October keep their rows')
+                rolled=db.execute('SELECT month,route,outcome,calls,reserved FROM call_rollups ORDER BY 1,2,3').fetchall()
+            self.assertEqual(rolled,[('2026-07','/v1/embeddings','http_error',1,10_000),('2026-07','/v1/embeddings','response',1,10_000),
+                                     ('2026-08','/v1/chat/completions','response',1,0),('2026-08','/v1/embeddings','legacy_error_unverified',1,10_000)])
+            report=before.report()
+            self.assertEqual(report['lifetime_reserved_usd'],(30_000+20+30)/1e6)
+            self.assertEqual(len(report['monthly_rollups']),4)
+            self.assertEqual(before.roll_up(at(10,28)),0,'a second fold in the same month does nothing')
+            self.assertEqual(before.roll_up(at(11,2)),1,'a new month folds September')
+
+    def test_the_pilot_window_keeps_every_call(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path)
+            with sqlite3.connect(path) as db:
+                db.execute("INSERT INTO calls(route,reserved,started,status,outcome) VALUES('/v1/embeddings',10000,?,200,'response')",
+                           (datetime(2025,1,5,tzinfo=timezone.utc).timestamp(),))
+            self.assertEqual(Ledger(path).roll_up(),0)
+            self.assertEqual(Ledger(path).report()['reserved_usd'],.01)
+
     def test_monthly_limit_changes_are_durable_revision_checked_and_do_not_reset_reservations(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'budget.sqlite';ledger=Ledger(path);ledger.enable_monthly()

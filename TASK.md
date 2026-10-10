@@ -1007,9 +1007,11 @@ activation remains separate.
    unbounded: guarded prepared copies (`runtime_prepared_values` and
    `runtime_prepared_inputs`) of superseded guard epochs, which ADR-0109's
    single-workspace model changes; finished Hermes journals (outbound, dispatch,
-   async-run and managed-run files), which boot recovery also rescans; the
-   Honcho meter's call rows, which budget accounting sums and need a roll-up
-   rather than deletion; and spool files that fail permanently. Guard fragments
+   async-run and managed-run files), which boot recovery also rescans (pruning
+   them is an open owner decision); and spool files that fail permanently. The
+   Honcho meter now folds calls older than the previous month into monthly
+   totals ([decision](docs/adr/0131-honcho-meter-monthly-rollup.md),
+   [checks](services/honcho/test_meter.py)). Guard fragments
    of already prepared sources are now removed by the daily retention pass
    ([decision](docs/adr/0130-spent-guard-fragment-retention.md),
    [check](test/workflow-retention.test.ts)).
