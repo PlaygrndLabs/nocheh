@@ -964,6 +964,13 @@ activation remains separate.
      [turn check](services/hermes/test_turn_process.py)). Pending: a real-model
      rerun of the simulator's speech-outage scenario.
    - Peer cards are workspace-wide, so only owner turns read them.
+   - PDF attachments: preparation now reads a PDF's text layer (pinned
+     `unpdf` 1.8.1, in a worker thread with a heap limit and 30-second
+     deadline), whole pages up to 200,000 bytes, and records an explicit
+     status for unreadable or scanned PDFs
+     ([checks](test/pdf-text.test.ts)). Scanned pages are not read (no OCR).
+     Pending: the simulator's document scenario now also checks the extracted
+     text.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
    are implemented and pass focused synthetic checks: the `stage_timings` table with
    14-day retention, Hermes phases and window kept from the run receipt, Inngest

@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {canonical,digest} from '../archive.js';
+import {isPdf,pdfText} from '../pdf-text.js';
 import {HttpError} from '../http.js';
 import {requestWorkflow,enterFamily,leaveFamily,type ExecutionAuthority} from '../workflows/store.js';
 import type {RuntimeCall} from '../runtime.js';
@@ -15,9 +16,16 @@ export interface DerivationEngine {
   run(bytes:Buffer,metadata:{kind:string;metadata:Record<string,unknown>},configuration:Record<string,unknown>):Promise<string|{kind:'extraction_status';text:string}>;
 }
 
-export function utf8Extraction():DerivationEngine {
-  return {name:'nocheh-utf8',version:'1',outputKind:'extracted_text',async run(bytes,file,configuration){
+export function textExtraction():DerivationEngine {
+  return {name:'nocheh-text',version:'1',outputKind:'extracted_text',async run(bytes,file,configuration){
     if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_extraction_configuration');
+    if(!['photo','image','video','sticker','animation'].includes(file.kind)&&isPdf(bytes)) {
+      const result=await pdfText(bytes);
+      if(!result)return {kind:'extraction_status',text:'This PDF could not be read; its original file is kept.'};
+      if(!result.text)return {kind:'extraction_status',text:result.read<result.pages?'The first PDF page alone exceeds the text limit.':
+        'This PDF has no text layer (for example, scanned pages); its original file is kept.'};
+      return result.read<result.pages?result.text+`\n\n[Text of pages ${result.read+1} to ${result.pages} is not included.]`:result.text;
+    }
     if(!['photo','image','video','sticker','animation'].includes(file.kind)&&bytes.length<=200000&&!bytes.includes(0)) {
       try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* preserve unsupported original bytes */}
     }

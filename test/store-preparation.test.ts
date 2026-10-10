@@ -10,7 +10,7 @@ import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {SelectionRepository} from '../src/stores/selections.js';
-import {ReprocessingRepository,utf8Extraction,type DerivationEngine} from '../src/stores/reprocessing.js';
+import {ReprocessingRepository,textExtraction,type DerivationEngine} from '../src/stores/reprocessing.js';
 import {AttachmentRepository} from '../src/stores/attachments.js';
 import {PreparationRepository} from '../src/stores/preparation.js';
 import {CaptureCoordinator} from '../src/stores/capture.js';
@@ -28,7 +28,7 @@ test('preparation keeps manifests immutable and download state in control, with 
   const root=await mkdtemp(join(tmpdir(),'nocheh-preparation-')),attachments=new AttachmentRepository(stores,archive,root),key='preparation:'+Date.now();
   let stt=0,downloads=0,quietFailure=false;
   const transcription:DerivationEngine={name:'fixture-asr',version:'1',outputKind:'transcript',async run(bytes){stt++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));if(quietFailure)throw new HttpError(422,'invalid_transcription_response');return 'Voice result';}};
-  const extraction=utf8Extraction(),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[transcription,extraction]);
+  const extraction=textExtraction(),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[transcription,extraction]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction),authority={owner:'inngest' as const,epoch:1};
   const event=(suffix:string,payload:Record<string,unknown>,origin:'live'|'import'='live'):Envelope=>({version:1,key:key+suffix,origin,bot_id:'fixture',
     kind:'telegram_update',scope:'123',source_id:key+suffix,revision:'1',occurred_at:null,text:null,payload:{message:{chat:{id:123,type:'private'},...payload}}});
@@ -102,7 +102,7 @@ test('different events prepare side by side up to the guard-check setting, and o
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),capture=new CaptureCoordinator(archive,stores.control);
   const root=await mkdtemp(join(tmpdir(),'nocheh-preparation-')),attachments=new AttachmentRepository(stores,archive,root),key='parallel:'+Date.now();
-  const extraction=utf8Extraction(),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[extraction]);
+  const extraction=textExtraction(),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[extraction]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,extraction,extraction,2),authority={owner:'inngest' as const,epoch:1};
   const event=(suffix:string):Envelope=>({version:1,key:key+suffix,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:key+suffix,
     revision:'1',occurred_at:null,text:null,payload:{message:{chat:{id:123,type:'private'},text:'Synthetic note '+suffix}}});

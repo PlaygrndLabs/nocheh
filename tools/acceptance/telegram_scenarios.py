@@ -25,6 +25,21 @@ CANARY = 'fixture-secret-ORCHID-2718'
 PRIVATE_FACT = 'رنگ مورد علاقه‌ی خواهرم فیروزه‌ای است PRIVFACT91'
 
 
+
+def synthetic_pdf(lines):
+    """A minimal one-page PDF with a Helvetica text layer."""
+    stream = '\n'.join('BT /F1 12 Tf 20 %d Td (%s) Tj ET' % (760-row*14, line) for row, line in enumerate(lines))
+    objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+               '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+               '<< /Length %d >>\nstream\n%s\nendstream' % (len(stream), stream), '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']
+    out, offsets = '%PDF-1.4\n', []
+    for index, value in enumerate(objects):
+        offsets.append(len(out));out += '%d 0 obj\n%s\nendobj\n' % (index+1, value)
+    xref = len(out)
+    out += 'xref\n0 %d\n0000000000 65535 f \n' % (len(objects)+1) + ''.join('%010d 00000 n \n' % offset for offset in offsets)
+    out += 'trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n' % (len(objects)+1, xref)
+    return out.encode('latin-1')
+
 class Failed(AssertionError):
     pass
 
@@ -394,7 +409,7 @@ class Scenarios:
     def document_reply(self):
         # An ordinary file with a caption: the original bytes are kept exactly
         # and the owner still gets one causal reply.
-        content = b'%PDF-1.4\n% synthetic invoice DOCMARK55\n'+bytes(range(256))
+        content = synthetic_pdf(['Synthetic invoice DOCMARK55', 'Total 420 credits'])
         file_id = 'doc-'+str(self.f.ids())
         self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.pdf',
                                    'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
@@ -405,6 +420,9 @@ class Scenarios:
         expected = hashlib.sha256(content).hexdigest()
         self.wait('document_bytes_archived', lambda: self.f.query('nocheh_archive', "SELECT file_hash FROM artifacts WHERE event_id='"+event_id+"'") == expected, 120)
         self.gate('document_bytes_unchanged', (self.f.directory/'state/files'/expected).read_bytes() == content)
+        extracted = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='extracted_text' AND event_id='"+event_id+"'"
+                                 " AND position('DOCMARK55' in convert_from(content,'UTF8'))>0")
+        self.gate('document_text_extracted', extracted == '1', count=extracted)
 
     # Approvals --------------------------------------------------------------
 
