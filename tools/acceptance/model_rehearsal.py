@@ -30,7 +30,7 @@ def validate_paid_egress(manifest):
         raise ValueError('existing_model_bridge_required')
     bridged = {name for name, service in services.items()
                if 'existing-model' in service.get('networks', {})}
-    if bridged != {'fixture-real-provider'}:
+    if bridged != {'cliproxy-api'}:
         raise ValueError('existing_model_bridge_boundary_invalid')
     if any(network.get('internal') is not True for name, network in networks.items()
            if name not in ('honcho-egress', 'existing-model')):

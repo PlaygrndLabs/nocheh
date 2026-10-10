@@ -237,6 +237,24 @@ fixture's meter process while retaining the same shared counter and embedding
 dollar cap. Record that temporary authorization and ceiling in ignored fixture
 evidence; do not change operating policy or reset the ledger.
 
+[`real_model_fixture`](../tools/acceptance/real_model_fixture.py) switches an
+owned installation that has passed the HTTP Telegram rehearsal to real answers:
+`python3 -m tools.acceptance.real_model_fixture --directory <prepared-directory>
+--installation <operating state> --authorized [--honcho real]`. It requires the
+operating installation's ChatGPT subscription login and running provider, and
+the owner's authorization to use that route beside the operating stack. The
+fixture's `cliproxy-api` becomes the model relay, still serving the Telegram
+mock, on one internal bridge network shared only with the operating provider.
+`--honcho real` runs the production meter with the operating installation's
+embedding key and shared ledger on its own egress network; the default keeps
+Honcho's scripted meter. The manifest before the switch and a
+`route-preflight.json` record are kept. Then run
+`python -m tools.acceptance.telegram_scenarios --directory <prepared-directory>
+--real-model`: it runs the scenarios that do not depend on scripted
+directives, checks delivery, order, audience, recovery and effects, and saves
+each real answer in the report for review. A group reply that a real model
+chooses to withhold is a judgement to review, not a transport failure.
+
 The [quality runner](../tools/acceptance/model_rehearsal.py) collects synthetic
 reaction-removal, correction, private/topic isolation, restart recall and
 retirement cases. It correlates incoming updates by their captured source key:

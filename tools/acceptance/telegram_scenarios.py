@@ -130,6 +130,7 @@ class Scenarios:
         # Every (scenario, event) whose single causal reply was verified; the
         # stage timing scenario reads one breakdown for each of them.
         self.replied = []
+        self.real_model = False
 
     def save(self):
         (self.report/'progress.json').write_text(json.dumps(self.results, indent=2, ensure_ascii=False)+'\n')
@@ -185,6 +186,9 @@ class Scenarios:
         self.gate('reply_targets_source', reply.get('message_id') == update['message']['message_id'])
         self.wait('delivery_archived', lambda: archived_delivery(self.f.query, new[0]['message'], update['update_id']), 60)
         self.replied.append((self.current['scenario'], event_id))
+        if self.real_model:  # Real answers are saved for review against the scenario's intent.
+            self.current.setdefault('answers', []).append({'asked': update['message'].get('text') or update['message'].get('caption'),
+                                                           'answered': new[0]['message']['text'][:4000]})
         return event_id, new[0]['message']['text']
 
     def execute(self, name, function):
@@ -824,10 +828,21 @@ ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
 
 
+# With real model answers (tools.acceptance.real_model_fixture) the scripted
+# directives mean nothing; these scenarios check delivery, order, audience,
+# recovery and effects only, and save each answer for review.
+REAL_MODEL_ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics',
+                    'burst_in_order', 'private_burst_in_order', 'document_reply', 'participant_not_permitted', 'unselected_group',
+                    'schedule_fires_and_waits_for_review', 'voice_waits_while_speech_unavailable',
+                    'voice_recovers_when_speech_returns', 'burst_with_voice_in_order', 'deleted_topic', 'polling_outage',
+                    'lost_send_response', 'blocked_private_then_recovery', 'restart_preserves_receipts', 'storage_report', 'stage_timings']
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--only', nargs='*', choices=ORDER)
+    parser.add_argument('--real-model', action='store_true', help='Run REAL_MODEL_ORDER after real_model_fixture switched the model route')
     args = parser.parse_args()
     directory = args.directory.resolve()
     if not directory.is_relative_to(ROOT/'data/acceptance/results'):
@@ -844,7 +859,11 @@ def main():
         raise ValueError('previous_fixture_faults_pending')
     scenarios = Scenarios(fixture, report)
     scenarios.state = {}
-    for name in args.only or ORDER:
+    real = (directory/'route-preflight.json').exists()
+    if args.real_model != real:
+        raise ValueError('real_model_fixture_required' if args.real_model else 'scripted_fixture_required')
+    scenarios.real_model = real
+    for name in args.only or (REAL_MODEL_ORDER if real else ORDER):
         scenarios.execute(name, getattr(scenarios, name))
     final = fixture.telegram()
     project_networks = {value['name'] for value in fixture.manifest['networks'].values()}
@@ -873,7 +892,7 @@ def main():
                                      'native_reviews_awaiting_receipt': int(count("state='waiting' AND waiting_reason='receipt_pending'")), 'drain_seconds': round(time.monotonic()-started, 1)}
     scenarios.results.append(scenarios.current)
     summary = {'passed': all(row['passed'] for row in scenarios.results), 'live_acceptance': False,
-               'provider': 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
+               'provider': 'existing-model-route' if real else 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
                'unknown_methods': final['unknown'][len(initial['unknown']):], 'stats': fixture.http('/fixture/stats')}
     (report/'result.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False)+'\n')
     print(json.dumps({'passed': summary['passed'], 'failed': [row['scenario'] for row in scenarios.results if not row['passed']],
