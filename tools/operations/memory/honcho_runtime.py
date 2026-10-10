@@ -2,7 +2,7 @@
 import subprocess
 import os
 from pathlib import Path
-from tools.operations.installation.configuration import load,write_env,read_env,env_path
+from tools.operations.installation.configuration import load,owns_project,write_env,read_env,env_path
 from tools.operations.provider.provider import compose
 
 SERVICES=('honcho-postgres','honcho-redis','honcho-provider-gateway','honcho-api','honcho-deriver')
@@ -49,8 +49,9 @@ def enable(state,honcho_state):
 def operate(state,action):
     if action not in ('up','down','status'):raise ValueError('honcho_operation_invalid')
     command,env=compose(state)
+    if action=='up' and (Path(state)/'spool/.restore-inactive').exists():raise ValueError('inactive_restore')
+    if action!='status' and not owns_project(state):raise ValueError('state_project_required')
     if action=='up':
-        if (Path(state)/'spool/.restore-inactive').exists():raise ValueError('inactive_restore')
         ensure_single_project()
         normalize_endpoints(env['NOCHEH_HONCHO_STATE_DIR'])
         arguments=['up','-d','--no-build','--wait','--wait-timeout','240',*SERVICES]

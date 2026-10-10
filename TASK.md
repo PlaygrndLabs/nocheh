@@ -606,6 +606,15 @@ the owner-private answer still gave the name. No memory result or archive
 search after the retirement contained it; Hermes' native session history,
 which `/v1/context/prepare` guards but does not filter for retirement, still
 held the earlier turns. Open: retired sources must leave native history.
+Incident (October 10, about 12:47Z): a host run of the settings tests called
+Apply's new Honcho refresh with a temporary state that named no Compose
+project, so Compose used the file's `nocheh` project and recreated the
+operating stack's five Honcho containers with that state's secrets; the
+operating honcho-api then failed on the database password until the recall
+thread removed those containers. Honcho start/stop, the Apply refresh and the
+provider model list now refuse a state that is neither the installation's own
+nor names its own project ([guard](tools/operations/installation/configuration.py),
+[test](services/hermes/test_honcho_runtime.py)).
 Settings now offers both models: a reasoning-model picker grouped by signed-in
 provider login, with a sign-in hint when none is signed in, and an embedding-model
 picker that saving refuses once Honcho's ledger has committed to another model;

@@ -24,6 +24,24 @@ class HonchoRuntimeTests(unittest.TestCase):
                 self.assertEqual(compose_environment(state)['COMPOSE_PROFILES'],'')
                 with self.assertRaisesRegex(ValueError,'inactive_restore'):operate(state,'up')
 
+    def test_a_state_without_its_own_project_never_touches_the_installation(self):
+        # A temporary state would otherwise fall back to the Compose file's
+        # `nocheh` project and recreate the running installation's containers.
+        from tools.operations.installation.settings import refresh_honcho
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            with patch('tools.operations.memory.honcho_runtime.subprocess.call') as call:
+                for action in ('up','down'):
+                    with self.assertRaisesRegex(ValueError,'state_project_required'):operate(state,action)
+                values['NOCHEH_MODEL']='claude-opus-5-5'
+                self.assertEqual(refresh_honcho(state,values),'skipped_unowned_state')
+                call.assert_not_called()
+            values['COMPOSE_PROJECT_NAME']='nocheh-synthetic-owned';write_env(env_path(state),values)
+            with patch('tools.operations.memory.honcho_runtime.subprocess.call',return_value=0) as call,\
+                    patch('tools.operations.memory.honcho_runtime.ensure_single_project'):
+                self.assertEqual(operate(state,'up'),0)
+                self.assertEqual(call.call_args.kwargs['env']['COMPOSE_PROJECT_NAME'],'nocheh-synthetic-owned')
+
     def test_other_project_writers_block_and_clean_setup_uses_managed_volumes(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state);memory=state/'honcho'
