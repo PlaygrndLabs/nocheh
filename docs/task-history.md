@@ -2750,3 +2750,15 @@ commits. The original branch is preserved in an ignored local bundle, and
 
 </entry>
 
+
+<entry date="2026-10-10" area="Honcho fresh start (H5) rehearsal">
+
+The owner merged steps H1 to H4 and started H5 and H6. H5 added
+`./bin/nocheh memory honcho fresh-start`: it opens a new, empty Honcho
+workspace revision that learns from messages received from then on, retires
+every recorded workspace, and queues jobs that delete each one's Honcho sessions,
+the workspace itself, and Nocheh's records of it
+([ADR-0122](adr/0122-honcho-fresh-start.md)). Only workspaces Nocheh recorded
+are deleted. The fixture rehearsal passes; the operating run and H6 are pending.
+
+</entry>

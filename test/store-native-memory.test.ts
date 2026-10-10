@@ -84,12 +84,15 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-memory-')),key='native:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null},remote=new Map<string,any[]>(),calls:{path:string;body:any;method?:string}[]=[];
-  let loseReply=true,sequence=0;const ownerApproved='Owner-approved password=visible123',descendants:string[]=[];
+  let loseReply=true,sequence=0;const ownerApproved='Owner-approved password=visible123',descendants:string[]=[],active=new Map<string,Set<string>>();
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(_operation,input)=>({literals:String(input.text).includes('saffronpass')?['saffronpass']:[]}),
     honcho:async(path,body:any,method)=>{
       calls.push({path,body,...(method?{method}:{})});
-      if(method==='DELETE')return {deleted:true};
+      const session=/^\/v3\/workspaces\/([^/]+)\/sessions(?:\/([^/?]+))?/.exec(path);
+      if(method==='DELETE'){if(session?.[2])active.get(session[1]!)?.delete(session[2]);return {deleted:true};}
+      if(session&&session[2]==='list')return {items:[...active.get(session[1]!)??[]].map(id=>({id}))};
+      if(session&&!session[2]&&body?.id){if(!active.has(session[1]!))active.set(session[1]!,new Set());active.get(session[1]!)!.add(body.id);}
       if(path.endsWith('/nocheh/session-descendants'))return {ids:descendants.splice(0),truncated:false};
       if(path.endsWith('/messages/list'))return {items:remote.get(path.replace('/list',''))??[]};
       if(path.endsWith('/messages')) {
@@ -237,6 +240,37 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND retired_at IS NULL",[source.id])).rows[0].count,0,
       'withdrawn consent removes the source from every session that held it');
     assert.equal(await services.memory.ingested(source.id),false);
+
+    // Fresh start: a new, empty workspace learns from new messages only; earlier workspaces leave Honcho and Nocheh.
+    const legacy=digest('legacy-workspace:'+key),{generation}=await services.guards.state();
+    await stores.control.query(`INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience,state,representation_version)
+      VALUES($1,$2,1,$3,'retired','legacy-source-v1')`,[legacy,generation,group]);
+    active.set(legacy,new Set(['l'.repeat(21)]));
+    status=await services.memory.status();
+    const started=await services.memory.freshStart(owner,{expected_revision:status.connection.revision,operation_id:key+':fresh-start'});
+    assert.equal(started.workspace,null);assert.equal(started.connection.include_history,false);assert.equal(started.connection.workspace_revision,status.connection.workspace_revision+1);
+    await assert.rejects(services.memory.current(workspace),{code:'memory_context_retired'});
+    await assert.rejects(services.memory.freshStart(owner,{expected_revision:status.connection.revision,operation_id:key+':fresh-start-stale'}),{code:'memory_connection_conflict'});
+    assert.deepEqual((await stores.control.query("SELECT job_id FROM workflow_registry WHERE family='honcho' AND job_id LIKE 'retire:%' ORDER BY job_id")).rows.map(row=>row.job_id),
+      ['retire:'+legacy,'retire:'+workspace].sort());
+    assert.deepEqual(await services.memory.queueSource(question),[],'a message received before the fresh start is not learned again');
+    const remaining=[...active.get(workspace)!];assert.ok(remaining.length>0);
+    const beforeRetire=calls.length;
+    assert.equal(await services.memory.retireWorkspace(workspace,authority),true);
+    const retired=calls.slice(beforeRetire).filter(c=>c.method==='DELETE').map(c=>c.path);
+    assert.deepEqual(retired,[...remaining.map(id=>'/v3/workspaces/'+workspace+'/sessions/'+id),'/v3/workspaces/'+workspace],'sessions are deleted before their workspace');
+    for(const table of ['memory_generations WHERE id=$1','memory_ingestion_receipts WHERE generation=$1','memory_sessions WHERE workspace=$1'])
+      assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM '+table,[workspace])).rows[0].count,0,'Nocheh forgets the deleted workspace');
+    assert.equal(await services.memory.retireWorkspace(workspace,authority),true);assert.equal(calls.filter(c=>c.path==='/v3/workspaces/'+workspace&&c.method==='DELETE').length,1);
+    assert.equal(await services.memory.retireWorkspace(legacy,authority),true);assert.equal(active.get(legacy)!.size,0);
+    assert.deepEqual((await services.memory.status()).workspace_deletions,[{state:'done',workspaces:2,sessions:remaining.length+1}]);
+    const newText='A new message after the fresh start.';
+    const after=(await services.capture.capture({...event,key:key+':after',source_id:key+':after',text:newText,
+      payload:{message:{...(event.payload.message as Record<string,unknown>),message_id:3,text:newText}}})).source.reference;
+    await services.guards.prepare(after,'fixture',services.detect);
+    const renewed=await services.memory.queueSource(after);assert.equal(renewed.length,1);
+    assert.notEqual(renewed[0]!.workspace,workspace,'new messages go to the new workspace');assert.equal((await services.memory.status()).workspace?.id,renewed[0]!.workspace);
+    for(const receipt of renewed[0]!.receipts)assert.equal(await services.memory.syncReceipt(receipt,authority),true);
     status=await services.memory.status();await services.memory.connection(owner,{attached:false,include_history:false,catch_up:false,expected_revision:status.connection.revision,operation_id:key+':detach'});
     const beforeDetached=calls.length;assert.equal(await services.memory.reconcileReceipt(rebuilt[0]!.receipts[0]!),false);assert.equal(calls.length,beforeDetached);
   } finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await services.guards.setMode('off');await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
@@ -292,6 +326,7 @@ test('foreground recall requires independent source evidence while background co
     for(const receipt of older.receipts)assert.equal(await services.memory.syncReceipt(receipt,authority),true);
     await stores.control.query("UPDATE memory_ingestion_receipts SET source_references='[]'::jsonb WHERE id=ANY($1::text[])",[older.receipts]);
     assert.equal(await services.memory.settled(older.receipts),true);
+    assert.equal(await services.memory.observe(older.workspace),true,'Honcho finished the workspace\'s work');
     const recalled=await services.memory.recall(principal,'What was the meeting time?');
     assert.equal(recalled.limited_memory,false);assert.match(recalled.sources[0]!.text,/independently recorded meeting time is 18:00/);
     assert.equal(calls.filter(path=>path.endsWith('/chat')).length,1,'completed independent source evidence enables historical reasoning');

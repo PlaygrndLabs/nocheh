@@ -65,7 +65,7 @@ does not require another login or a paid transcription key.
 - Apply configuration with `./bin/nocheh up`. `auto` migrates to `on`.
 - Dashboard → Archive → Browse → open a source to inspect/edit guarded copies,
   original file access, preparation status and revision history.
-- Dashboard → Honcho shows attachment, generations, receipts, live-gate status,
+- Dashboard → Honcho shows attachment, workspace, sessions, receipts, live-gate status,
   the embedding reservation and usage estimate, and an owner control for the
   monthly embedding cap after attachment. OpenAI's API Usage page is the source
   for billed usage; Nocheh's reservation is a conservative admission limit.
@@ -73,6 +73,11 @@ does not require another login or a paid transcription key.
 - `./bin/nocheh memory honcho attach --catch-up` includes consented sources
   received while detached. `--include-history` includes older consented sources.
 - `./bin/nocheh memory honcho detach` stops memory use without deleting data.
+- `./bin/nocheh memory honcho fresh-start` moves Honcho to a new, empty
+  workspace that learns from messages received from then on, and deletes every
+  earlier Nocheh workspace from Honcho with its Nocheh records. Original
+  messages stay in the archive. `status` shows deletion progress under
+  `workspace_deletions`.
 - `./bin/nocheh backup` preserves originals, guarded histories, native state,
   consent, receipts and a spending-ledger snapshot. Restores start inactive and
   detached on a separate memory network. Never replace a newer spending ledger
