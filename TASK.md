@@ -31,6 +31,20 @@ operating installation, and no live recall check has run; the fresh start (H5)
 and live acceptance (H6) need separate owner approval. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
+Retired sources now leave Hermes' own stored history. The real-Claude simulator
+run found an owner-private answer repeating a fact 30 seconds after every source
+of it was retired: Honcho memory and archive search had dropped it, but Hermes
+replayed its native session history. Before each turn the Hermes service now
+rewrites that profile's stored rows for retired messages, their turn's tool work,
+answers that were themselves retired, tool results citing a retired source and
+later compaction summaries; owner native recall skips the same rows read-only
+([decision](docs/adr/0123-retired-sources-leave-native-history.md),
+[native history checks](services/hermes/test_retired_history.py),
+[storage checks](test/store-source-retirement.test.ts)). The pinned-Hermes replay
+and search check runs only in the Hermes image. Pending: the owner-Mac rerun of
+the simulator's retired-fact case; Hermes native notes (`MEMORY.md`, `USER.md`)
+are not yet checked for retired content.
+
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
 corrections, and applies saved proposals atomically after foreground work finishes.

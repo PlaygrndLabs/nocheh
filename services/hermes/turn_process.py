@@ -44,6 +44,10 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             except BlockingIOError:
                 await asyncio.sleep(.25)
         try:
+            # Native history must not replay a source retired since this profile's last turn.
+            from .isolated_profile import database_path
+            from .retired_history import service_lookup, withhold_retired
+            await asyncio.to_thread(withhold_retired, database_path(profile), service_lookup)
             return await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled)
         finally:
             await asyncio.to_thread((profile/'.foreground').touch)

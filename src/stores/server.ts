@@ -45,6 +45,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
     }
+    if(req.method==='POST'&&path==='/internal/sources/retired') {
+      // Hermes withholds retired turns from its own native history before each turn.
+      authorize(req,config.token);const ids=object(await readJson(req,64*1024)).event_ids;
+      if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
+      return json(res,200,await s.retirements.historyRetirements(ids as string[]));
+    }
     if(req.method==='POST'&&path==='/internal/honcho/prepare') {
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
       await assertGuardConfiguration(s.guards,config.guardMode);
