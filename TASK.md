@@ -525,6 +525,15 @@ reasoning provider and model is enough for the MVP phase.
 
 <pending>
 
+Scheduled runs (October 10): the simulator found every scheduled run rejected
+before the agent started with `space_policy_changed`, because
+`/v1/memory/check` accepted only an archived turn source and schedule fires are
+never archived. The check now accepts a scheduled turn credential whose admitted
+run still matches its scope, space, profile, guard binding, live lease and
+current schedule definition ([check](src/stores/scheduled-runs.ts),
+[store test](test/store-server.test.ts)). Pending: rerun the simulator's
+schedule scenario on Docker.
+
 Personal-use simulation follow-ups are resolved and verified in the coupled
 fixture: definite Telegram rejections close as rejected by Telegram; an
 approved action Hermes refuses before any send intent returns to the approved
@@ -558,12 +567,8 @@ scenario pass had 38 of 42. Its polling-outage, storage and lingering-turn
 failures and a second pass's rejected search reply came from the simulator;
 after those repairs the affected scenarios pass on rerun. The repeatable
 speech-outage restore and the review-drain wait before the lingering check
-are not yet exercised in a full pass. Open blocker: every scheduled run fails before the
-agent starts with `space_policy_changed`. `/v1/memory/check` accepts only an
-archived turn source (`telegramDeliveryAllowed` returns false without one),
-and scheduled fires are deliberately not archived, so `check_delivery_policy`
-in `services/hermes/turn_process.py` rejects each scheduler credential. Store
-tests never call that check with a scheduler credential. Observations for the
+are not yet exercised in a full pass. The schedule scenario found the
+scheduled-run rejection recorded above. Observations for the
 storage and timing plans: one run of 180 archived events left 228,823 guard
 fragments (97 MB) and 8,713 `guard-context` runtime contexts with only 1,370
 distinct contents, none covered by retention; native memory reviews keep
@@ -842,14 +847,18 @@ activation remains separate.
    perpetual 120-second Honcho context refresh, removed in source) were about six percent of
    sampled background steps.
 7. Honcho memory model: H1 to H4 of the
-   [plan](docs/honcho-standard-memory-plan.md) are implemented in source and
-   pass the fixture tests ([ADR-0115](docs/adr/0115-honcho-session-revisions.md)).
-   Next, with owner approval: H5 attaches the new workspace in an isolated
-   fixture rehearsal and then the operating installation, and deletes the old
-   per-audience workspaces; H6 runs same-topic recall, private recall, group
-   isolation and timing checks. Until H5 runs, the operating installation still
-   loses ready Honcho memory whenever a guard epoch advances. Peer cards are
-   workspace-wide, so only owner turns read them.
+   [plan](docs/honcho-standard-memory-plan.md) are on main
+   ([ADR-0115](docs/adr/0115-honcho-session-revisions.md)). The owner started H5
+   and H6 on 2026-10-10. The fresh-start command and workspace deletion
+   ([ADR-0122](docs/adr/0122-honcho-fresh-start.md)) pass the fixture rehearsal
+   ([check](test/store-native-memory.test.ts)). Pending: restart the operating
+   installation on current main, measure storage, run
+   `./bin/nocheh memory honcho fresh-start`, confirm `workspace_deletions` is
+   done and measure storage again; then H6 same-topic recall, private recall,
+   group isolation and timing checks with owner messages. Until the fresh start
+   runs, the operating installation still loses ready Honcho memory whenever a
+   guard epoch advances. Peer cards are workspace-wide, so only owner turns read
+   them.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
    are implemented and pass focused synthetic checks: the `stage_timings` table with
    14-day retention, Hermes phases and window kept from the run receipt, Inngest

@@ -54,6 +54,14 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
       producer:'nocheh',producer_version:this.protocol,configuration:{binding:row.binding,profile:row.logical_profile,job_id:row.job_id},provenance:{binding:row.binding}});
     await this.current(row);return {reference,input};
   }
+  /** Runtime delivery check for a scheduled turn credential. The server has
+   * already asserted the guard binding, open runtime turn and run lease. */
+  async deliveryAllowed(principal:Reader):Promise<boolean>{
+    const row=principal.turnEvent?await this.row(principal.turnEvent):null;
+    if(!row?.admitted||row.space_id!==principal.space||row.logical_profile!==principal.logical_profile||
+      (row.scope===this.access.policy().owner_id?null:row.scope)!==principal.scope)return false;
+    try{await this.current(row);return true;}catch(error){if(error instanceof HttpError&&error.status<500)return false;throw error;}
+  }
   override async cancel(input:unknown){const row=await this.row(managedEventId(object(input).event_id));
     if(!row)throw new HttpError(404,'captured_run_not_found');return this.cancelRow(row.event_id);}
   async recoverExpired(){

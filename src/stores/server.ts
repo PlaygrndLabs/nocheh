@@ -239,6 +239,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/memory/check'&&req.method==='GET'){
       const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
+      // Schedule fires are control operations, never archived; the admitted run is their authority.
+      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)});
       const retired=principal.turnEvent?await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference):false;
       return json(res,200,{valid:principal.admin||!retired&&telegramDeliveryAllowed(s.access.policy(),principal,source)});
     }
@@ -247,6 +249,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(req.method==='GET')return json(res,200,await s.memory.status());
       if(req.method==='POST')return json(res,200,await s.memory.connection(principal,await readJson(req)));
     }
+    if(path==='/v1/memory/honcho/fresh-start'&&req.method==='POST')return json(res,200,await s.memory.freshStart(principal,await readJson(req)));
     if(path==='/v1/memory/honcho/verify'&&req.method==='POST'){admin(principal);return json(res,200,await s.memory.acceptVerification(principal,await readJson(req)));}
     if(path==='/v1/memory/honcho/acceptance-session'&&req.method==='POST')return json(res,200,await s.memory.issueAcceptance(principal));
     const acceptanceSession=path.match(/^\/v1\/memory\/honcho\/acceptance-session\/([a-f0-9]{64})$/);
