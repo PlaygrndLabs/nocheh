@@ -101,6 +101,22 @@ def ensure_monitor_source(run=subprocess.run):
     return _ensure_source('cpa-manager-plus',MONITOR_LOCK,'provider_monitor',run)
 
 
+def models(state):
+    """Model IDs the running provider serves for the logins it holds; empty when unavailable.
+
+    The client key reaches curl on stdin, never in a command argument."""
+    key=(paths(state)[2]/'hermes.key')
+    if not key.is_file():return []
+    command,env=compose(state)
+    try:
+        raw=subprocess.run(command+['exec','-T','cliproxy-api','curl','--silent','--fail','--max-time','10','-H','@-',
+            'http://127.0.0.1:8317/v1/models'],input='Authorization: Bearer '+key.read_text().strip()+'\n',
+            cwd=ROOT,env=env,capture_output=True,text=True,timeout=20)
+        data=json.loads(raw.stdout) if raw.returncode==0 else {}
+    except (OSError,subprocess.SubprocessError,ValueError):return []
+    return sorted({row['id'] for row in data.get('data',[]) if isinstance(row,dict) and isinstance(row.get('id'),str)})
+
+
 def compose(state):
     from tools.operations.installation.configuration import compose_environment,env_path
     from tools.operations.installation.configuration import compose_command

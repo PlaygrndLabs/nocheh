@@ -568,6 +568,11 @@ from the ChatGPT login that transcription still needs. Pending: an installation
 whose `.env` pins `NOCHEH_MODEL` to a GPT model keeps it until changed; Honcho's
 JSON structured output and Hermes tool calls through CLIProxyAPI's Claude
 translation are unproven until a real-model run; no live acceptance.
+Settings now offers both models: a reasoning-model picker filled from the
+models the running provider serves, grouped by login, and an embedding-model
+picker that saving refuses once Honcho's ledger has committed to another model;
+Apply rewrites Honcho's generated settings and restarts it when either model
+changed. Checked in the synthetic dashboard preview at desktop and phone width.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
