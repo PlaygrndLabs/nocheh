@@ -26,28 +26,38 @@ def docker(*args, check=True):
     return subprocess.run(['docker', *args], check=check, text=True, capture_output=True)
 
 
-def operating(installation):
+def operating(installation, model):
     """The operating installation's provider and Honcho state, never its secrets' values."""
-    from tools.operations.installation.configuration import load
-    from tools.operations.provider.provider import login_state
-    if not login_state(installation)['login_present']:
-        raise ValueError('chatgpt_subscription_login_required')
+    from tools.operations.installation.configuration import read_env
+    from tools.operations.provider.provider import login_kind, login_state
+    if not login_state(installation, login_kind(model))['login_present']:
+        raise ValueError(login_kind(model)+'_subscription_login_required')
     if docker('inspect', '--format', '{{.State.Running}}', PROVIDER, check=False).stdout.strip() != 'true':
         raise ValueError('operating_provider_not_running')
     keys = installation/'provider/keys'
-    honcho = Path(load(installation).get('NOCHEH_HONCHO_STATE_DIR') or installation/'honcho')
+    # A default installation keeps its .env at the checkout root, beside data/local.
+    settings = installation/'.env' if (installation/'.env').exists() else installation.parent.parent/'.env'
+    honcho = Path(read_env(settings).get('NOCHEH_HONCHO_STATE_DIR') or installation/'honcho')
     for path in (keys/'hermes.key', keys/'honcho.key', honcho/'ledger', honcho/'temporary_embedding_key'):
         if not path.exists():
             raise ValueError('operating_state_missing:'+path.name)
     return keys, honcho
 
 
-def transform(manifest, directory, keys, honcho, bridge, limit, real_honcho):
+def transform(manifest, directory, keys, honcho, bridge, limit, real_honcho, model='claude-sonnet-5-5'):
     """Rewrite the executable fixture manifest; pure so it can be checked offline."""
     project = manifest['name']
+    for service in manifest['services'].values():
+        environment = service.get('environment')
+        if isinstance(environment, dict):
+            if 'NOCHEH_MODEL' in environment:
+                environment['NOCHEH_MODEL'] = model
+            for key in environment:  # Honcho's reasoning configurations; embeddings keep their own model.
+                if key.endswith('_MODEL_CONFIG__MODEL') and not key.startswith('EMBEDDING_'):
+                    environment[key] = model
     relay = manifest['services']['cliproxy-api']
     relay['command'] = ['/fixture/tools/acceptance/model_relay.py']
-    relay['environment'] = {'NOCHEH_INSTALLATION_FIXTURE': '1', 'NOCHEH_REAL_MODEL_AUTHORIZED': '1', 'PYTHONPATH': '/fixture:/app',
+    relay['environment'] = {'NOCHEH_INSTALLATION_FIXTURE': '1', 'NOCHEH_REAL_MODEL_AUTHORIZED': '1', 'PYTHONPATH': '/fixture:/app', 'NOCHEH_MODEL': model,
                             'NOCHEH_FIXTURE_MODEL_REQUEST_LIMIT': str(limit),
                             **({'NOCHEH_ADDITIONAL_MODEL_REQUESTS_AUTHORIZED': '1'} if limit > DEFAULT_REQUEST_LIMIT else {})}
     mounts = {'/fixture/tools/__init__.py': ROOT/'tools/__init__.py', '/fixture/tools/paths.py': ROOT/'tools/paths.py',
@@ -64,7 +74,7 @@ def transform(manifest, directory, keys, honcho, bridge, limit, real_honcho):
     if real_honcho:
         meter['command'] = ['python', '/fixture/services/honcho/meter.py']
         meter['environment'] = {key: value for key, value in meter['environment'].items() if key != 'NOCHEH_INSTALLATION_FIXTURE'}
-        meter['environment']['PYTHONPATH'] = '/fixture'
+        meter['environment'].update(PYTHONPATH='/fixture', NOCHEH_MODEL=model)
         meter['volumes'] = [mount for mount in meter['volumes'] if mount['target'] not in ('/fixture/provider.py', '/ledger', '/fixture/tools/__init__.py')]
         meter['volumes'] += [{'type': 'bind', 'source': str(honcho/'ledger'), 'target': '/ledger'},
                              {'type': 'bind', 'source': str(ROOT/'tools/__init__.py'), 'target': '/fixture/tools/__init__.py', 'read_only': True}]
@@ -85,6 +95,7 @@ def main():
     parser.add_argument('--installation', type=Path, default=ROOT/'data/local',
                         help='State folder of the operating installation whose model route is borrowed')
     parser.add_argument('--honcho', choices=('real', 'fixture'), default='fixture')
+    parser.add_argument('--model', default='claude-sonnet-5-5', help='Reasoning model the operating provider serves')
     parser.add_argument('--request-limit', type=int, default=DEFAULT_REQUEST_LIMIT)
     parser.add_argument('--authorized', action='store_true', help='The owner authorized this route and the parallel stack')
     args = parser.parse_args()
@@ -96,23 +107,28 @@ def main():
     info = json.loads((directory/'fixture.json').read_text())
     manifest = json.loads((directory/'compose.json').read_text())
     project = validate_fixture(directory, info, manifest)
-    keys, honcho = operating(args.installation.resolve())
+    keys, honcho = operating(args.installation.resolve(), args.model)
     bridge = project+'-existing-model'
     if docker('network', 'inspect', bridge, check=False).returncode:
         docker('network', 'create', '--internal', '--label', 'nocheh.fixture='+project, bridge)
     if bridge not in docker('inspect', '--format', '{{json .NetworkSettings.Networks}}', PROVIDER).stdout:
         docker('network', 'connect', bridge, PROVIDER)
     (directory/('compose.before-real-model-'+str(time.time_ns())+'.json')).write_text(json.dumps(manifest))
-    manifest = transform(manifest, directory, keys, honcho, bridge, args.request_limit, args.honcho == 'real')
+    before = manifest
+    manifest = transform(json.loads(json.dumps(manifest)), directory, keys, honcho, bridge, args.request_limit, args.honcho == 'real', args.model)
     for path in (directory/'compose.json', directory/'installation/docker-compose.yml'):
         path.write_text(json.dumps(manifest));path.chmod(0o600)
     (directory/'route-preflight.json').write_text(json.dumps({'project': project, 'authorized_existing_model_route': True,
-        'honcho': args.honcho, 'request_limit': args.request_limit, 'bridge': bridge, 'at': time.time()}, indent=2)+'\n')
+        'model': args.model, 'honcho': args.honcho, 'request_limit': args.request_limit, 'bridge': bridge, 'at': time.time()}, indent=2)+'\n')
     command = ['docker', 'compose', '-p', project, '-f', str(directory/'compose.json')]
     subprocess.run(command+['config', '--quiet'], check=True)
-    services = ['cliproxy-api']+(['honcho-provider-gateway'] if args.honcho == 'real' else [])
-    subprocess.run(command+['up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *services], check=True)
-    print(json.dumps({'real_model': True, 'project': project, 'honcho': args.honcho, 'request_limit': args.request_limit}), flush=True)
+    # The relay first, then every service whose definition changed (the model setting).
+    changed = [name for name in manifest['services'] if name != 'cliproxy-api' and manifest['services'][name] != before['services'].get(name)]
+    subprocess.run(command+['up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', 'cliproxy-api'], check=True)
+    if changed:
+        subprocess.run(command+['up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *changed], check=True)
+    print(json.dumps({'real_model': True, 'project': project, 'model': args.model, 'honcho': args.honcho,
+                      'request_limit': args.request_limit, 'recreated': ['cliproxy-api', *changed]}), flush=True)
 
 
 if __name__ == '__main__':

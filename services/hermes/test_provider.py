@@ -81,6 +81,34 @@ class SharedProviderTests(unittest.TestCase):
             current=login_state(state)
             self.assertTrue(current['login_present']);self.assertEqual(current['login_files'],1)
 
+    def test_reasoning_login_follows_the_configured_model(self):
+        from tools.operations.provider.provider import login_kind
+        self.assertEqual(login_kind('claude-sonnet-5-5'),'claude');self.assertEqual(login_kind('gpt-5.6-sol'),'codex')
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize_configuration(state);auth=state/'provider/auth'
+            (auth/'claude-owner.json').write_text(json.dumps({'type':'claude','access_token':'c','refresh_token':'r'}))
+            current=status(state)
+            # Claude reasons; the missing ChatGPT login stays visible for transcription.
+            self.assertEqual(current['reasoning_model'],'claude-sonnet-5-5')
+            self.assertTrue(current['reasoning_login_present']);self.assertFalse(current['login_present'])
+
+    def test_models_are_grouped_by_signed_in_provider(self):
+        from unittest.mock import patch
+        from tools.operations.provider.provider import reasoning_choices
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize(state);auth=state/'provider/auth'
+            with patch('tools.operations.provider.provider.served',return_value=None):
+                self.assertEqual([p for p in reasoning_choices(state)['providers'] if p['signed_in']],[])
+            (auth/'claude-owner.json').write_text(json.dumps({'type':'claude','access_token':'c','refresh_token':'r'}))
+            rows=[('claude-opus-5-5','anthropic'),('claude-sonnet-5-5','anthropic'),('gpt-5.6-sol','openai')]
+            with patch('tools.operations.provider.provider.served',return_value=rows):
+                result=reasoning_choices(state)
+            self.assertTrue(result['provider_running'])
+            first,*others=result['providers']
+            self.assertEqual((first['label'],first['signed_in'],first['models']),('Claude',True,['claude-opus-5-5','claude-sonnet-5-5']))
+            # A provider without a login offers nothing, even if a model of its kind is listed.
+            self.assertTrue(all(not p['signed_in'] and not p['models'] for p in others))
+
     def test_cutover_stays_native_without_fresh_provider_login(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize_configuration(state)

@@ -18,6 +18,8 @@ import urllib.request
 import math
 
 DEFAULT_REQUEST_LIMIT = 300
+# The one configured reasoning model; requests for any other model are refused.
+MODEL = os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5')
 MAX_REQUEST_LIMIT = 10_000
 
 
@@ -79,7 +81,7 @@ class Admission:
                        if hmac.compare_digest(authorization, 'Bearer ' + local)), None)
         if client is None:
             raise PermissionError('fixture_client_denied')
-        if not isinstance(payload, dict) or payload.get('model') != 'gpt-5.6-sol' or not isinstance(payload.get('messages'), list):
+        if not isinstance(payload, dict) or payload.get('model') != MODEL or not isinstance(payload.get('messages'), list):
             raise ValueError('fixture_model_contract_denied')
         category = 'detector' if is_detector(payload) else 'chat'
         with self.lock:
@@ -176,7 +178,7 @@ def create_app(admission, upstream, telegram_state, opener=None, route_probe=Non
 
     @app.get('/v1/models')
     def models():
-        return {'object': 'list', 'data': [{'id': 'gpt-5.6-sol', 'object': 'model', 'owned_by': 'existing-provider'}]}
+        return {'object': 'list', 'data': [{'id': MODEL, 'object': 'model', 'owned_by': 'existing-provider'}]}
 
     @app.post('/v1/chat/completions')
     async def chat(request: Request):

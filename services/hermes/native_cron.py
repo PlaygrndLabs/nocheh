@@ -161,7 +161,10 @@ def manage(admin,path,method,query,body,headers,call=None):
             job=native.update_job(job_id,{'enabled':operation=='resume','state':'scheduled' if operation=='resume' else 'paused','nocheh_registered':False})
         elif method=='DELETE' and not operation:
             if event:=job.get('nocheh_running'):call('cancel',{'event_id':event})
-            job=native.update_job(job_id,{'enabled':False,'state':'paused','nocheh_removed':True,'nocheh_registered':False,'nocheh_pending':None})
+            removal={'enabled':False,'nocheh_removed':True,'nocheh_registered':False,'nocheh_pending':None}
+            # Hermes keeps a finished job terminal; only a live job is paused on removal.
+            if job.get('state') not in ('completed','error'):removal['state']='paused'
+            job=native.update_job(job_id,removal)
         else:raise ValueError('cron_operation_unavailable')
         if not job.get('nocheh_registered'):
             # A failed archive write leaves the native definition intact but inert.

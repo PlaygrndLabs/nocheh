@@ -8,7 +8,7 @@ import urllib.error
 import uuid
 from pathlib import Path
 from unittest.mock import patch
-from .meter import CoolingDown, Egress, Ledger, Rejected, handler, validate
+from .meter import REASONING_MODEL, CoolingDown, Egress, Ledger, Rejected, handler, validate
 
 
 class Response(io.BytesIO):
@@ -206,7 +206,7 @@ class BudgetTests(unittest.TestCase):
                 self.assertEqual(len(transport.calls),1)
                 self.assertEqual(ledger.report()['reserved_usd'],.01)
                 # A different route remains available while embeddings cool down.
-                self.assertEqual(egress.send('/v1/chat/completions',{'model':'gpt-5.6-sol','messages':[]})[0],502)
+                self.assertEqual(egress.send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})[0],502)
             restored=Ledger(path)
             with patch('services.honcho.meter.time.time',return_value=1_800_000_061):
                 egress=Egress(restored,'internal','temporary',transport,reasoning_key='honcho-client')
@@ -260,7 +260,7 @@ class BudgetTests(unittest.TestCase):
             with self.assertRaises(Rejected): validate(route,payload)
         with tempfile.TemporaryDirectory() as root:
             transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
-            Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client').send('/v1/chat/completions',{'model':'gpt-5.6-sol','messages':[]})
+            Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client').send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})
             self.assertEqual(transport.calls[0].full_url,'http://shared-provider:8317/v1/chat/completions')
             self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer honcho-client')
             self.assertEqual(ledger.report()['reserved_usd'],0)

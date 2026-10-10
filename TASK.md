@@ -31,6 +31,20 @@ operating installation, and no live recall check has run; the fresh start (H5)
 and live acceptance (H6) need separate owner approval. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
+Retired sources now leave Hermes' own stored history. The real-Claude simulator
+run found an owner-private answer repeating a fact 30 seconds after every source
+of it was retired: Honcho memory and archive search had dropped it, but Hermes
+replayed its native session history. Before each turn the Hermes service now
+rewrites that profile's stored rows for retired messages, their turn's tool work,
+answers that were themselves retired, tool results citing a retired source and
+later compaction summaries; owner native recall skips the same rows read-only
+([decision](docs/adr/0123-retired-sources-leave-native-history.md),
+[native history checks](services/hermes/test_retired_history.py),
+[storage checks](test/store-source-retirement.test.ts)). The pinned-Hermes replay
+and search check runs only in the Hermes image. Pending: the owner-Mac rerun of
+the simulator's retired-fact case; Hermes native notes (`MEMORY.md`, `USER.md`)
+are not yet checked for retired content.
+
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
 corrections, and applies saved proposals atomically after foreground work finishes.
@@ -559,6 +573,44 @@ checks of the drawer, retirement offers and settings panels pass. Pending
 owner rechecks: a live exact approval to a topic and quick live messages with
 a voice note. Real-model quality, live Telegram release gates and release
 remain pending. [Live summary](docs/mvp-acceptance-status.md).
+
+Reasoning provider (October 10, owner: "why gpt? use claude provider."): the
+reasoning model is one `NOCHEH_MODEL` setting for Hermes, the guard, Honcho
+reasoning and the meter, defaulting to `claude-sonnet-5-5` through the Claude
+login in CLIProxyAPI; provider status reports the reasoning login separately
+from the ChatGPT login that transcription still needs. Pending: an installation
+whose `.env` pins `NOCHEH_MODEL` to a GPT model keeps it until changed; Honcho's
+JSON structured output and Hermes tool calls through CLIProxyAPI's Claude
+translation are unproven until a real-model run; no live acceptance.
+With real Claude answers the schedule scenario fires, waits for review and
+delivers once (the scheduled-run fix on main holds), but removing the finished
+one-time schedule failed: removal paused it, which Hermes refuses for a
+terminal job. Removal now leaves a finished job terminal
+([adapter](services/hermes/native_cron.py), [test](services/hermes/test_scheduler.py)).
+Real-Claude simulator run (October 10, fresh installation, Claude Sonnet 5.5
+through the operating provider, real Honcho embeddings): 14 of 16 scenarios
+passed before the fixture's 300-call cap; the schedule cleanup failure is fixed
+above and polling outage stopped at the cap. Of 300 model calls, 214 were
+literal-detection calls, 49 Honcho and 37 Hermes chat. Over 20 replies the
+reply time was p50 86 s and p95 176 s while provider wait was p50 2.2 s:
+preparation steps (p50 8.9 s), Hermes history (p50 5.7 s), model guard and
+step waits dominate, and detection calls are counted as internal steps rather
+than LLM time. Answers were natural Persian; while transcription was down the
+reply to a text after a voice note said no voice note was found, and a PDF
+caption reply said no text could be extracted. After the owner raised the cap
+to 1,000, every remaining real-Claude scenario passed. Memory cases with real
+Claude and Honcho: reaction removal, corrected fact, private isolation, topic
+isolation and recall after restart answered correctly; the retired-fact case
+failed. Thirty seconds after every source of the synthetic name was retired,
+the owner-private answer still gave the name. No memory result or archive
+search after the retirement contained it; Hermes' native session history,
+which `/v1/context/prepare` guards but does not filter for retirement, still
+held the earlier turns. Open: retired sources must leave native history.
+Settings now offers both models: a reasoning-model picker grouped by signed-in
+provider login, with a sign-in hint when none is signed in, and an embedding-model
+picker that saving refuses once Honcho's ledger has committed to another model;
+Apply rewrites Honcho's generated settings and restarts it when either model
+changed. Checked in the synthetic dashboard preview at desktop and phone width.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the

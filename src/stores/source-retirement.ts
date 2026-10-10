@@ -62,6 +62,31 @@ export class SourceRetirementRepository {
     return (await this.stores.control.query('SELECT 1 FROM source_retirements WHERE object_id=ANY($1::text[]) AND retired=true LIMIT 1',
       [rows.map(row=>row.object_id)])).rowCount!==0;
   }
+  /**
+   * Native Hermes history keeps its own copy of each turn. For the incoming
+   * events recorded there, report which are retired (directly or as a reaction
+   * to a retired message) and which have a retired delivered reply. The
+   * revision changes with every retirement decision, so an unchanged revision
+   * means nothing in native history needs rechecking.
+   */
+  async historyRetirements(eventIds:string[]) {
+    const revision=String((await this.stores.control.query(`SELECT count(*)::text||':'||coalesce(max(created_at)::text,'') AS revision
+      FROM source_retirement_history`)).rows[0].revision);
+    if(!eventIds.length)return {revision,retired:[] as string[],answered:[] as string[]};
+    const retired=await this.retiredEvents(eventIds);
+    const reactions=(await this.archive.pool.query(`SELECT event_id,target_id FROM source_relations
+      WHERE event_id=ANY($1::text[]) AND kind='reaction_to'`,[eventIds])).rows;
+    if(reactions.length) {
+      const targets=new Set((await this.stores.control.query('SELECT object_id FROM source_retirements WHERE retired=true AND object_id=ANY($1::text[])',
+        [reactions.map(row=>row.target_id)])).rows.map(row=>row.object_id));
+      for(const row of reactions)if(targets.has(row.target_id))retired.add(row.event_id);
+    }
+    const records=(await this.archive.pool.query(`SELECT id,kind,scope FROM events WHERE id=ANY($1::text[]) AND kind='telegram_update'`,[eventIds])).rows;
+    const replies=await archiveReplyPreviews(this.archive.pool,this.stores.control,records);
+    const retiredReplies=await this.retiredEvents([...replies.values()].flat().map(reply=>reply.id));
+    const answered=[...replies].filter(([,previews])=>previews.some(reply=>retiredReplies.has(reply.id))).map(([id])=>id);
+    return {revision,retired:[...retired].sort(),answered:answered.sort()};
+  }
   async get(principal:Reader,eventId:string) {
     admin(principal);const id=await this.identity(eventId);
     const state=(await this.stores.control.query('SELECT retired,revision,event_id,decision_authority,updated_at FROM source_retirements WHERE object_id=$1',[id])).rows[0];

@@ -8,7 +8,7 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
-from tools.acceptance.model_relay import Admission, ProviderCooldown, create_app, detector_interval_ms, request_limit
+from tools.acceptance.model_relay import MODEL, Admission, ProviderCooldown, create_app, detector_interval_ms, request_limit
 
 
 class ModelRelayAdmissionTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             path = Path(folder) / 'calls.jsonl'
             credentials = {'hermes': ('local', 'existing')}
             first = Admission(path, credentials, limit=1)
-            payload = {'model': 'gpt-5.6-sol', 'messages': []}
+            payload = {'model': MODEL, 'messages': []}
             first.reserve('Bearer local', payload)
             previous = path.read_bytes()
             increased = Admission(path, credentials, limit=400)
@@ -48,7 +48,7 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             path = Path(folder) / 'calls.jsonl'
             credentials = {'hermes': ('synthetic-local-token', 'existing-provider-token')}
             admission = Admission(path, credentials, limit=1)
-            payload = {'model': 'gpt-5.6-sol', 'messages': [{'role': 'user', 'content': 'synthetic-private-source'}]}
+            payload = {'model': MODEL, 'messages': [{'role': 'user', 'content': 'synthetic-private-source'}]}
             with self.assertRaises(PermissionError):
                 admission.reserve('Bearer wrong', payload)
             with self.assertRaises(ValueError):
@@ -69,7 +69,7 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             admission = Admission(Path(folder) / 'calls.jsonl', {'hermes': ('local', 'existing')}, limit=3)
             def attempt(_):
                 try:
-                    admission.reserve('Bearer local', {'model': 'gpt-5.6-sol', 'messages': []})
+                    admission.reserve('Bearer local', {'model': MODEL, 'messages': []})
                     return True
                 except PermissionError:
                     return False
@@ -82,13 +82,13 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             path = Path(folder) / 'calls.jsonl'
             credentials = {'hermes': ('local', 'existing')}
             first = Admission(path, credentials)
-            _, number = first.reserve('Bearer local', {'model': 'gpt-5.6-sol', 'messages': []})
+            _, number = first.reserve('Bearer local', {'model': MODEL, 'messages': []})
             first.record_outcome(number, 'upstream_http', 503, 12)
             previous = first.outcomes.read_bytes()
             restarted = Admission(path, credentials)
             with self.assertRaises(ValueError):
                 restarted.record_outcome(number, 'private-error', 503, 12)
-            _, second = restarted.reserve('Bearer local', {'model': 'gpt-5.6-sol', 'messages': []})
+            _, second = restarted.reserve('Bearer local', {'model': MODEL, 'messages': []})
             restarted.record_outcome(second, 'upstream_headers', 200, 8)
             self.assertTrue(restarted.outcomes.read_bytes().startswith(previous))
             self.assertEqual([json.loads(row)['number'] for row in restarted.outcomes.read_text().splitlines()], [1, 2])
@@ -99,7 +99,7 @@ class ModelRelayAdmissionTests(unittest.TestCase):
             path = Path(folder) / 'calls.jsonl'
             credentials = {'hermes': ('local', 'existing')}
             admission = Admission(path, credentials)
-            payload = {'model': 'gpt-5.6-sol', 'messages': []}
+            payload = {'model': MODEL, 'messages': []}
             _, older = admission.reserve('Bearer local', payload)
             _, limited = admission.reserve('Bearer local', payload)
             admission.record_outcome(limited, 'upstream_http', 429, 1)
@@ -131,7 +131,7 @@ class ModelRelayTransportTests(unittest.TestCase):
             admission = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
             app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions',
                              folder / 'telegram.json', Opener(), lambda: True, detector_interval=120)
-            payload = {'model': 'gpt-5.6-sol', 'messages': [{'role': 'system',
+            payload = {'model': MODEL, 'messages': [{'role': 'system',
                        'content': 'Find secret values in the supplied data. Synthetic fixture.'}]}
             barrier = threading.Barrier(3)
             with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
@@ -159,7 +159,7 @@ class ModelRelayTransportTests(unittest.TestCase):
             admission = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
             app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', folder / 'telegram.json', Opener(), lambda: True)
             with TestClient(app) as client:
-                payload = {'model': 'gpt-5.6-sol', 'messages': [], 'stream': True}
+                payload = {'model': MODEL, 'messages': [], 'stream': True}
                 self.assertEqual(client.post('/v1/chat/completions', json=payload).status_code, 403)
                 self.assertEqual(client.post('/v1/embeddings', json=payload).status_code, 404)
                 self.assertEqual(client.post('/bot123456:synthetic/getMe', json={}).status_code, 200)
@@ -190,7 +190,7 @@ class ModelRelayTransportTests(unittest.TestCase):
             app = create_app(admission, 'http://nocheh-cliproxy-api-1:8317/v1/chat/completions', folder / 'telegram.json', Opener(), lambda: True)
             with TestClient(app) as client:
                 reply = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
-                                    json={'model': 'gpt-5.6-sol', 'messages': []})
+                                    json={'model': MODEL, 'messages': []})
                 self.assertEqual(reply.status_code, 429)
                 self.assertEqual(reply.json(), {'error': {'message': 'existing_provider_rejected', 'status': 429}})
                 self.assertNotIn('private', reply.text)
@@ -201,15 +201,15 @@ class ModelRelayTransportTests(unittest.TestCase):
                 self.assertNotIn('private', admission.outcomes.read_text())
                 self.assertNotIn('existing-provider-key', admission.outcomes.read_text())
                 blocked = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
-                                      json={'model': 'gpt-5.6-sol', 'messages': []})
+                                      json={'model': MODEL, 'messages': []})
                 self.assertEqual(blocked.status_code, 429)
                 self.assertGreaterEqual(int(blocked.headers['Retry-After']), 1)
                 self.assertEqual(admission.summary()['requests'], 1)
                 restarted = Admission(folder / 'calls.jsonl', {'hermes': ('fixture-only', 'existing-provider-key')})
                 with self.assertRaises(ProviderCooldown):
-                    restarted.reserve('Bearer fixture-only', {'model': 'gpt-5.6-sol', 'messages': []})
+                    restarted.reserve('Bearer fixture-only', {'model': MODEL, 'messages': []})
                 restarted.cooldown_until = 0
-                _, number = restarted.reserve('Bearer fixture-only', {'model': 'gpt-5.6-sol', 'messages': []})
+                _, number = restarted.reserve('Bearer fixture-only', {'model': MODEL, 'messages': []})
                 restarted.record_outcome(number, 'upstream_headers', 200, 1)
                 self.assertEqual(restarted.rate_limit_streak, 0)
                 self.assertEqual(restarted.cooldown_until, 0)
@@ -227,7 +227,7 @@ class ModelRelayTransportTests(unittest.TestCase):
                              folder / 'telegram.json', Opener(), lambda: True)
             with TestClient(app) as client:
                 reply = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
-                                    json={'model': 'gpt-5.6-sol', 'messages': []})
+                                    json={'model': MODEL, 'messages': []})
                 self.assertEqual(reply.status_code, 502)
                 saved = admission.outcomes.read_text()
                 self.assertEqual((json.loads(saved)['result'], json.loads(saved)['status']), ('transport_error', 502))
@@ -244,7 +244,7 @@ class ModelRelayTransportTests(unittest.TestCase):
             with TestClient(app) as client:
                 self.assertEqual(client.get('/healthz').status_code, 503)
                 reply = client.post('/v1/chat/completions', headers={'Authorization': 'Bearer fixture-only'},
-                                    json={'model': 'gpt-5.6-sol', 'messages': []})
+                                    json={'model': MODEL, 'messages': []})
                 self.assertEqual(reply.status_code, 503)
                 self.assertEqual(reply.json(), {'error': {'message': 'existing_provider_unavailable'}})
                 self.assertEqual(admission.summary()['requests'], 0)
