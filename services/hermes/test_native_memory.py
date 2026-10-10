@@ -29,7 +29,8 @@ class NativeMemoryTests(unittest.TestCase):
                 (profile/'memories/MEMORY.md').write_text('Juniper launch Friday. nocheh:event:'+'a'*64)
                 db=SessionDB(profile/'state.db');db.create_session('session-'+scope,source='telegram')
                 db.append_message('session-'+scope,role='user',content='Juniper needs the checklist.');db.close()
-            result=recall(root,{'query':'Juniper','limit':20})
+            nothing_retired=lambda ids:{'revision':'0:','retired':[],'answered':[]}
+            result=recall(root,{'query':'Juniper','limit':20},retirements=nothing_retired)
             self.assertEqual(len(result['hits']),4)
             self.assertEqual({h['kind'] for h in result['hits']},{'native_note','native_session'})
             with self.assertRaises(ValueError):recall(root,{'query':'Juniper','profile':'../../secret'})
