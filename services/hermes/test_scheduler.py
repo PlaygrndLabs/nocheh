@@ -52,6 +52,14 @@ class SchedulerTests(unittest.TestCase):
         with store(home):native.update_job(job['id'],{'next_run_at':(now()-timedelta(seconds=seconds)).isoformat()})
         return home
 
+    def test_finished_schedule_can_be_removed(self):
+        from cron import jobs as native
+        job=self.create(repeat=1);home=Path(job['hermes_home'])
+        with store(home):native.update_job(job['id'],{'state':'completed','enabled':False,'next_run_at':None})
+        self.assertEqual(self.request('/api/cron/jobs/'+job['id'],'DELETE'),{'ok':True})
+        self.assertEqual(self.request(),[])
+        self.assertEqual(inspect(home)[0]['state'],'completed')
+
     def test_native_form_roundtrip_conflict_and_inert_capture_failure(self):
         self.assertEqual(self.request(),[]);self.assertFalse(list(self.root.rglob('jobs.json')))
         job=self.create();self.assertEqual(job['prompt'],'  Original\r\n\0 text  ')

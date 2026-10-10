@@ -478,7 +478,9 @@ class Scenarios:
         time.sleep(75)
         runs = self.f.query('nocheh_control', "SELECT count(*) FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"'")
         self.gate('repeat_limit_honored', runs == '1', runs=runs)
-        self.f.native('/api/cron/jobs/'+job['id']+'?profile=default', {}, 'DELETE')
+        # The owner can remove a schedule that has finished its runs.
+        self.gate('finished_schedule_removed', self.f.native('/api/cron/jobs/'+job['id']+'?profile=default', {}, 'DELETE') == {'ok': True}
+                  and all(row['id'] != job['id'] for row in self.f.native('/api/cron/jobs?profile=default')))
 
     # Audience policy ----------------------------------------------------------
 

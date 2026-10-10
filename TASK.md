@@ -568,6 +568,11 @@ from the ChatGPT login that transcription still needs. Pending: an installation
 whose `.env` pins `NOCHEH_MODEL` to a GPT model keeps it until changed; Honcho's
 JSON structured output and Hermes tool calls through CLIProxyAPI's Claude
 translation are unproven until a real-model run; no live acceptance.
+With real Claude answers the schedule scenario fires, waits for review and
+delivers once (the scheduled-run fix on main holds), but removing the finished
+one-time schedule failed: removal paused it, which Hermes refuses for a
+terminal job. Removal now leaves a finished job terminal
+([adapter](services/hermes/native_cron.py), [test](services/hermes/test_scheduler.py)).
 Settings now offers both models: a reasoning-model picker filled from the
 models the running provider serves, grouped by login, and an embedding-model
 picker that saving refuses once Honcho's ledger has committed to another model;
