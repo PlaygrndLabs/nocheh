@@ -1009,7 +1009,10 @@ activation remains separate.
    single-workspace model changes; finished Hermes journals (outbound, dispatch,
    async-run and managed-run files), which boot recovery also rescans; the
    Honcho meter's call rows, which budget accounting sums and need a roll-up
-   rather than deletion; and spool files that fail permanently.
+   rather than deletion; and spool files that fail permanently. Guard fragments
+   of already prepared sources are now removed by the daily retention pass
+   ([decision](docs/adr/0130-spent-guard-fragment-retention.md),
+   [check](test/workflow-retention.test.ts)).
 10. Inngest orchestration: every Nocheh loop outside Inngest is classified
     ([decision](docs/adr/0120-loops-outside-inngest.md)). Product workflows,
     including the Hermes turn and its reply send, run as Inngest functions;

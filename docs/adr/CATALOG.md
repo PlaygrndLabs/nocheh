@@ -139,3 +139,4 @@ records current implementation and activation.
 | [0127](0127-parallel-guard-checks.md) | Secret-guard checks run side by side | Replaces the Hermes detector lock and global preparation lock with an owner setting, three by default |
 | [0128](0128-learning-results-keep-valid-items.md) | Silent learning keeps valid items and closes on unusable results | Extends 0056 and 0082; invalid items are dropped and recorded, evidence and attribution checks unchanged |
 | [0129](0129-retired-sources-leave-native-notes.md) | Retired sources leave Hermes native notes | Extends 0123; removes note entries citing a retired source or written by a withheld turn's memory call |
+| [0130](0130-spent-guard-fragment-retention.md) | Guard fragments leave once their source is prepared | Extends 0113 and 0121; the daily retention pass removes fragments of published guard sources after an hour |
