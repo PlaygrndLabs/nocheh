@@ -28,14 +28,16 @@ def docker(*args, check=True):
 
 def operating(installation, model):
     """The operating installation's provider and Honcho state, never its secrets' values."""
-    from tools.operations.installation.configuration import load
+    from tools.operations.installation.configuration import read_env
     from tools.operations.provider.provider import login_kind, login_state
     if not login_state(installation, login_kind(model))['login_present']:
         raise ValueError(login_kind(model)+'_subscription_login_required')
     if docker('inspect', '--format', '{{.State.Running}}', PROVIDER, check=False).stdout.strip() != 'true':
         raise ValueError('operating_provider_not_running')
     keys = installation/'provider/keys'
-    honcho = Path(load(installation).get('NOCHEH_HONCHO_STATE_DIR') or installation/'honcho')
+    # A default installation keeps its .env at the checkout root, beside data/local.
+    settings = installation/'.env' if (installation/'.env').exists() else installation.parent.parent/'.env'
+    honcho = Path(read_env(settings).get('NOCHEH_HONCHO_STATE_DIR') or installation/'honcho')
     for path in (keys/'hermes.key', keys/'honcho.key', honcho/'ledger', honcho/'temporary_embedding_key'):
         if not path.exists():
             raise ValueError('operating_state_missing:'+path.name)
