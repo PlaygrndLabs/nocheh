@@ -21,8 +21,8 @@ def telegram_policy():
             'group_access': json.loads(os.environ.get('TELEGRAM_GROUP_ACCESS', '{}'))}
 
 
-def parallel(name, default):
-    """Owner-set concurrency of 1-8. A malformed value stops startup rather than guessing."""
+def parallel(name, default, high=8):
+    """Owner-set concurrency of 1 to high. A malformed value stops startup rather than guessing."""
     value = os.environ.get(name, '').strip() or str(default)
-    if value not in tuple('12345678'): raise ValueError('Invalid ' + name)
+    if value not in tuple('12345678'[:high]): raise ValueError('Invalid ' + name)
     return int(value)

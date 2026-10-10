@@ -932,8 +932,10 @@ activation remains separate.
      ([ADR-0125](docs/adr/0125-per-chat-telegram-dispatch-lanes.md)) run on the
      development installation; their Hermes unit tests pass. The reply limit (3)
      and parallel agent runs (4) are owner settings
-     ([ADR-0126](docs/adr/0126-owner-set-parallel-replies-and-runs.md)). A live
-     timing check with two chats at once is pending.
+     ([ADR-0126](docs/adr/0126-owner-set-parallel-replies-and-runs.md)), and
+     secret-guard checks run three at a time instead of one
+     ([ADR-0127](docs/adr/0127-parallel-guard-checks.md)). A live timing check
+     with two chats at once is pending.
      Preparation took 12.3 s on an idle turn.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.

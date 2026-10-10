@@ -21,7 +21,7 @@ DEFAULTS = {
     'NOCHEH_WORKFLOW_UI_PORT': '8288',
     'NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS': '14',
     'NOCHEH_LOG_MAX_SIZE': '10m', 'NOCHEH_LOG_MAX_FILES': '3',
-    'NOCHEH_PARALLEL_REPLIES': '3', 'NOCHEH_PARALLEL_RUNS': '4',
+    'NOCHEH_PARALLEL_REPLIES': '3', 'NOCHEH_PARALLEL_RUNS': '4', 'NOCHEH_PARALLEL_GUARD_CHECKS': '3',
     'NOCHEH_HONCHO_ENABLED': 'true',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
@@ -150,6 +150,7 @@ def validate(values):
     runs,replies=str(values.get('NOCHEH_PARALLEL_RUNS','4')),str(values.get('NOCHEH_PARALLEL_REPLIES','3'))
     if not re.fullmatch(r'[1-8]',runs):raise ValueError('NOCHEH_PARALLEL_RUNS must be 1-8')
     if not re.fullmatch(r'[1-8]',replies) or int(replies)>int(runs):raise ValueError('NOCHEH_PARALLEL_REPLIES must be 1 to NOCHEH_PARALLEL_RUNS')
+    if not re.fullmatch(r'[1-4]',str(values.get('NOCHEH_PARALLEL_GUARD_CHECKS','3'))):raise ValueError('NOCHEH_PARALLEL_GUARD_CHECKS must be 1-4')
     for name in ('INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'):
         if values.get(name) and not re.fullmatch('[a-f0-9]{64}',values[name]):raise ValueError('Invalid '+name)
         if not values.get(name):raise ValueError('Missing '+name)

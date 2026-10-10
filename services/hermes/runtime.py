@@ -1,7 +1,7 @@
 """Small authenticated service around native Hermes and its mounted profile state."""
 from __future__ import annotations
 
-from services.hermes.environment import secret as environment_secret
+from services.hermes.environment import secret as environment_secret, parallel
 
 import base64
 import asyncio
@@ -28,7 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
 TOKEN = environment_secret('SERVICE_TOKEN')
 CALL_LOCK = threading.RLock()
-DETECTOR_LOCK = threading.RLock()
+# Secret-guard checks run side by side up to the owner's Settings value.
+DETECTOR_SLOTS = threading.BoundedSemaphore(parallel('NOCHEH_PARALLEL_GUARD_CHECKS', 3, 4))
 TRANSCRIPTION_LOCK = threading.RLock()
 CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
@@ -129,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400, {"error": "expected_object"})
             # File capture and receipts must not queue behind model inference.
             # Detection can also be called by the guard during an active chat.
-            lock = {'/internal/chat':CALL_LOCK,'/internal/detect':DETECTOR_LOCK,
+            lock = {'/internal/chat':CALL_LOCK,'/internal/detect':DETECTOR_SLOTS,
                     '/internal/transcribe':TRANSCRIPTION_LOCK}.get(self.path,contextlib.nullcontext())
             with lock:
                 result = self.dispatch(body)

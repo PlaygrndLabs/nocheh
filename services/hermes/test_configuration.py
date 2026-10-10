@@ -141,6 +141,24 @@ class ConfigurationTests(unittest.TestCase):
         for bad in ('0','9','two','-1'):
             with patch.dict(os.environ,{'NOCHEH_PARALLEL_RUNS':bad}),self.assertRaises(ValueError,msg=bad):parallel('NOCHEH_PARALLEL_RUNS',4)
 
+    def test_owner_sets_guard_checks_at_once_for_hermes_and_preparation(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT,validate
+        from tools.operations.installation.settings import EDITABLE
+        from services.hermes.environment import parallel
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        for service in ('hermes','nocheh-app'):
+            self.assertEqual(compose[service]['environment']['NOCHEH_PARALLEL_GUARD_CHECKS'],'${NOCHEH_PARALLEL_GUARD_CHECKS:-3}',service)
+        self.assertIn('NOCHEH_PARALLEL_GUARD_CHECKS',EDITABLE)
+        with tempfile.TemporaryDirectory() as folder:
+            values=initialize(Path(folder))
+            self.assertEqual(values['NOCHEH_PARALLEL_GUARD_CHECKS'],'3')
+            for checks in ('1','4'):validate({**values,'NOCHEH_PARALLEL_GUARD_CHECKS':checks})
+            for checks in ('0','5','','x','03'):
+                with self.assertRaises(ValueError,msg=checks):validate({**values,'NOCHEH_PARALLEL_GUARD_CHECKS':checks})
+        with patch.dict(os.environ,{'NOCHEH_PARALLEL_GUARD_CHECKS':'4'}):self.assertEqual(parallel('NOCHEH_PARALLEL_GUARD_CHECKS',3,4),4)
+        with patch.dict(os.environ,{'NOCHEH_PARALLEL_GUARD_CHECKS':'5'}),self.assertRaises(ValueError):parallel('NOCHEH_PARALLEL_GUARD_CHECKS',3,4)
+
     def test_separate_storage_credentials_are_private_stable_and_explicitly_selected(self):
         from tools.operations.installation.configuration import compose_command,validate
         from tools.operations.installation.settings import view,save
