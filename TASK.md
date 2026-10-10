@@ -42,8 +42,11 @@ later compaction summaries; owner native recall skips the same rows read-only
 [native history checks](services/hermes/test_retired_history.py),
 [storage checks](test/store-source-retirement.test.ts)). The pinned-Hermes replay
 and search check runs only in the Hermes image. Pending: the owner-machine rerun of
-the simulator's retired-fact case; Hermes native notes (`MEMORY.md`, `USER.md`)
-are not yet checked for retired content.
+the simulator's retired-fact case. Hermes native notes (`MEMORY.md`,
+`USER.md` and their backups) now lose entries that cite a retired source or that
+a withheld turn's memory call wrote, checked before every turn
+([decision](docs/adr/0129-retired-sources-leave-native-notes.md),
+[checks](services/hermes/test_retired_history.py)); an uncited paraphrase stays.
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner

@@ -13,11 +13,18 @@ tool work, keeping the delivered answer, which is a separate source. A
 retired delivered answer withholds everything the turn produced. Any other
 row that cites a retired source is withheld too, as are compaction summaries
 written after the earliest newly withheld row.
+
+Hermes native notes (``MEMORY.md``, ``USER.md`` and Hermes' drift backups of
+them) are a third copy. An entry is removed when it cites a retired source or
+a turn whose delivered answer is retired, or when it is exactly the text a
+withheld turn's memory tool call wrote.
 """
+import fcntl
 import json
 import os
 import re
 import sqlite3
+import tempfile
 from pathlib import Path
 
 MARKER=re.compile(r'\[Archive source: nocheh:event:([a-f0-9]{64})\]')
@@ -32,6 +39,9 @@ DERIVED=('api_content','reasoning','reasoning_content','reasoning_details','code
 # Kept in Hermes's own key/value table so it travels and commits with the rows it describes.
 CHECKED_KEY='nocheh_retired_history_revision'
 LOOKUP_BATCH=200
+# Hermes' MemoryStore files and their entry delimiter (tools/memory_tool_store.py).
+NOTE_FILES=('MEMORY.md','USER.md')
+NOTE_DELIMITER='\n§\n'
 
 
 def service_lookup(event_ids):
@@ -84,6 +94,74 @@ def _withhold(row,content):
         value=json.dumps(cleared,ensure_ascii=False)
         if value!=row['tool_calls']:change['tool_calls']=value
     return change
+
+
+def _lookup(lookup,event_ids):
+    """Retired and answer-retired events among the given IDs, in bounded batches."""
+    revision=lookup([])['revision'] if not event_ids else None
+    retired,answered=set(),set()
+    ordered=sorted(event_ids)
+    for start in range(0,len(ordered),LOOKUP_BATCH):
+        value=lookup(ordered[start:start+LOOKUP_BATCH])
+        revision=revision or value['revision']
+        retired.update(value['retired']);answered.update(value['answered'])
+    return revision,retired,answered
+
+
+def _memory_writes(row):
+    """Entry text that a stored memory tool call added or wrote."""
+    try:calls=json.loads(row.get('tool_calls') or '[]')
+    except ValueError:return set()
+    written=set()
+    for call in calls if isinstance(calls,list) else []:
+        function=call.get('function') if isinstance(call,dict) else None
+        if not isinstance(function,dict) or function.get('name')!='memory':continue
+        try:arguments=json.loads(function.get('arguments') or '{}')
+        except (TypeError,ValueError):continue
+        if isinstance(arguments,dict) and isinstance(arguments.get('content'),str) and arguments['content'].strip():
+            written.add(arguments['content'].strip())
+    return written
+
+
+def _note_files(notes):
+    if notes is None:return []
+    notes=Path(notes)
+    if notes.is_symlink():raise ValueError('memory_path_denied')
+    if not notes.is_dir():return []
+    files=[notes/name for name in NOTE_FILES]+sorted(path for name in NOTE_FILES for path in notes.glob(name+'.bak.*'))
+    for file in files:
+        if file.is_symlink() or file.exists() and not file.resolve().is_relative_to(notes.resolve()):raise ValueError('memory_path_denied')
+    return [file for file in files if file.is_file()]
+
+
+def _note_entries(file):
+    with file.open('rb') as source:raw=source.read(1024*1024)
+    return [entry for entry in (part.strip() for part in raw.decode('utf-8',errors='replace').split(NOTE_DELIMITER)) if entry]
+
+
+def note_citations(notes):
+    """Event IDs cited by the native notes in one profile's memories folder."""
+    cited=set()
+    for file in _note_files(notes):
+        for entry in _note_entries(file):cited|=set(IDENTIFIER.findall(entry))
+    return cited
+
+
+def withhold_notes(notes,retired,written=()):
+    """Remove native note entries derived from retired sources; return how many."""
+    removed=0
+    for file in _note_files(notes):
+        # Hermes' own writers lock this sibling file and replace the note atomically.
+        with file.with_name(file.name.split('.bak.')[0]+'.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            entries=_note_entries(file)
+            kept=[entry for entry in entries if not set(IDENTIFIER.findall(entry))&retired and entry not in written]
+            if len(kept)==len(entries):continue
+            with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=file.parent,prefix='.mem_',delete=False) as output:
+                output.write(NOTE_DELIMITER.join(kept));output.flush();os.fsync(output.fileno())
+            os.replace(output.name,file)
+            removed+=len(entries)-len(kept)
+    return removed
 
 
 def plan(rows,lookup):
@@ -159,13 +237,17 @@ def withheld_ids(database,lookup):
     finally:connection.close()
 
 
-def withhold_retired(database,lookup):
-    """Bring one profile's stored native history current; run only while its turn lock is held."""
-    database=Path(database)
-    if not database.is_file():return 0
+def withhold_retired(database,lookup,notes=None):
+    """Bring one profile's stored native history and notes current; run only while its turn lock is held."""
+    database=Path(database);cited=note_citations(notes)
+    if not database.is_file() and not cited:return 0
+    # Notes are checked on every turn: a note written after the last check can cite a source retired before it.
+    revision,retired,answered=_lookup(lookup,cited)
+    removed=withhold_notes(notes,retired|answered)
+    if not database.is_file():return removed
     connection=_read_only(database)
     try:
-        if _checked(connection)==lookup([])['revision']:return 0
+        if _checked(connection)==revision:return removed
     finally:connection.close()
     connection=sqlite3.connect(database,timeout=30,isolation_level=None)
     try:
@@ -173,6 +255,7 @@ def withhold_retired(database,lookup):
         try:
             rows=_rows(connection)
             revision,changes=plan(rows,lookup)
+            written=set().union(*(_memory_writes(row) for row in rows if 'tool_calls' in changes.get(row['id'],{})))
             for row_id,change in changes.items():
                 keys=sorted(change)
                 connection.execute('UPDATE messages SET '+','.join(key+'=?' for key in keys)+' WHERE id=?',[change[key] for key in keys]+[row_id])
@@ -183,8 +266,10 @@ def withhold_retired(database,lookup):
                                    ") AND title IS NOT NULL AND coalesce(title_source,'')<>'user'",sessions)
             connection.execute('CREATE TABLE IF NOT EXISTS state_meta (key TEXT PRIMARY KEY, value TEXT)')
             connection.execute('INSERT INTO state_meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(CHECKED_KEY,revision))
+            # Notes first: if this fails the revision stays unchecked and the next turn retries.
+            removed+=withhold_notes(notes,set(),written)
             connection.execute('COMMIT')
         except BaseException:
             connection.execute('ROLLBACK');raise
     finally:connection.close()
-    return len(changes)
+    return len(changes)+removed

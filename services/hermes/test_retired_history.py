@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from .retired_history import ANSWER_WITHHELD, SUMMARY_WITHHELD, TOOL_WITHHELD, USER_WITHHELD, withheld_ids, withhold_retired
+from .retired_history import ANSWER_WITHHELD, NOTE_DELIMITER, SUMMARY_WITHHELD, TOOL_WITHHELD, USER_WITHHELD, withheld_ids, withhold_retired
 
 FACT='Synthetic Kite Juniper'
 PRIVATE,QUESTION,UNRELATED='a'*64,'b'*64,'c'*64
@@ -137,6 +137,42 @@ class RetiredHistoryTests(unittest.TestCase):
             self.assertEqual(withhold_retired(database,Lookup(revision='2:later')),8)
             self.assertEqual(withhold_retired(database,Lookup(retired=(),answered=(),revision='3:restored')),0)
             self.assertEqual(self.leaks(database),([],0,0))
+
+    def notes(self,folder,**files):
+        notes=Path(folder)/'memories';notes.mkdir(exist_ok=True)
+        for name,entries in files.items():(notes/name.replace('_','.',1)).write_text(NOTE_DELIMITER.join(entries))
+        return notes
+
+    def entries(self,notes,name):
+        return (notes/name).read_text().split(NOTE_DELIMITER)
+
+    def test_native_notes_lose_entries_written_by_or_citing_a_retired_message(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database=self.history(folder);cited='Kite colour noted (nocheh:event:'+PRIVATE+')';rain='Rain on Friday (nocheh:event:'+UNRELATED+')'
+            notes=self.notes(folder,MEMORY_md=['Kite: '+FACT,cited,rain],USER_md=['Prefers Persian replies'],
+                             **{'MEMORY_md.bak.1700000000':['Kite: '+FACT,cited]})
+            self.assertEqual(withhold_retired(database,Lookup(answered=()),notes),6+4,'six history rows and four note entries')
+            self.assertEqual(self.entries(notes,'MEMORY.md'),[rain],'the retired turn\'s memory write and a citing entry are removed')
+            self.assertEqual(self.entries(notes,'USER.md'),['Prefers Persian replies'])
+            self.assertEqual((notes/'MEMORY.md.bak.1700000000').read_text(),'','Hermes\' drift backup is a copy too')
+            self.assertFalse([path for path in notes.iterdir() if path.name.startswith('.mem_')])
+            # A note written after the last check is checked on the next turn without rereading history.
+            (notes/'MEMORY.md').write_text(NOTE_DELIMITER.join([rain,'Kite again (nocheh:event:'+PRIVATE+')']))
+            lookup=Lookup(answered=())
+            self.assertEqual(withhold_retired(database,lookup,notes),1)
+            self.assertEqual(self.entries(notes,'MEMORY.md'),[rain]);self.assertEqual(lookup.calls,[[PRIVATE,UNRELATED]])
+
+    def test_owner_recall_skips_native_notes_citing_a_retired_message(self):
+        import sys
+        from types import SimpleNamespace
+        from .native_memory import recall
+        from .scopes import Scopes
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder)/'profiles'/Scopes.profile('123');profile.mkdir(parents=True)
+            self.notes(profile,MEMORY_md=['Kite '+FACT+' (nocheh:event:'+PRIVATE+')','Kite festival '+FACT+' (nocheh:event:'+UNRELATED+')'])
+            with patch.dict(sys.modules,{'hermes_state':SimpleNamespace(SessionDB=None)}):
+                found=recall(Path(folder),{'query':'Juniper','limit':20},retirements=Lookup())
+            self.assertEqual([hit['citations'] for hit in found['hits']],[['nocheh:event:'+UNRELATED]])
 
     def test_unavailable_retirement_state_writes_nothing_and_stops_the_turn(self):
         from .scopes import Scope
