@@ -32,6 +32,13 @@ def env_path(state):
     return INSTALLATION_ROOT / '.env' if state == DEFAULT_STATE else state / '.env'
 
 
+def owns_project(state):
+    """Whether this state may act on Compose containers: the installation's own
+    state, or another state that names its own project. Any other state would
+    fall back to the Compose file's `nocheh` project and act on its containers."""
+    return Path(state).resolve() == DEFAULT_STATE or bool(read_env(env_path(state)).get('COMPOSE_PROJECT_NAME'))
+
+
 def compose_command(state, project=None):
     command=['docker','compose','--env-file',str(env_path(state)),'-f',str(INSTALLATION_ROOT/'docker-compose.yml')]
     layout=read_env(env_path(state)).get('NOCHEH_STORAGE_LAYOUT','original-only-v1')
