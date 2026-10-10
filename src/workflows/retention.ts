@@ -101,25 +101,20 @@ export async function pruneTelemetry(client:pg.ClientBase,cutoff:Date,batch=5000
 export const expireTelemetry=(client:pg.ClientBase,cutoff:Date,pause=200)=>drain(()=>pruneTelemetry(client,cutoff),pause);
 
 export type PrunedSummaries={memory_contexts:number;memory_results:number};
-/** Honcho context summaries that current, non-retired memory generations still serve. */
-export async function servedSummaries(control:pg.ClientBase):Promise<string[]> {
-  return (await control.query(`SELECT s.derived_id FROM memory_context_snapshots s JOIN memory_generations g ON g.id=s.generation
-    WHERE g.state<>'retired'`)).rows.map(row=>String(row.derived_id));
-}
 /**
- * Remove superseded Honcho context summaries from derived storage. Each rebuild
- * records the full Honcho representation (`memory_result`) and its bounded
- * `memory_context` with a guarded copy; only the summary a generation's snapshot
- * points at is ever read again. A summary younger than `before` is kept, so a
- * rebuild that has not yet saved its snapshot is never touched.
+ * Remove spent Honcho context summaries from derived storage. Each context read
+ * records Honcho's output (`memory_result`) and its bounded `memory_context`
+ * with a guarded copy, and uses them only in the call that records them; a
+ * later identical read reuses or recreates them. A summary younger than
+ * `before` is kept, so a read still in progress is never touched.
  */
-export async function pruneMemorySummaries(derived:pg.ClientBase,served:string[],before:Date,batch=200):Promise<PrunedSummaries> {
+export async function pruneMemorySummaries(derived:pg.ClientBase,before:Date,batch=200):Promise<PrunedSummaries> {
   if(!Number.isSafeInteger(batch)||batch<1)throw Error('invalid_retention_batch');
   await derived.query('BEGIN');
   try {
     const ids=(await derived.query(`SELECT d.id FROM derived_artifacts d WHERE d.kind='memory_context' AND d.operation_id LIKE 'native-context:%:bounded'
-      AND d.created_at<$2 AND NOT d.id=ANY($1::text[])
-      AND NOT EXISTS (SELECT 1 FROM runtime_prepared_inputs p WHERE p.source_id='derived_artifacts:'||d.id) LIMIT $3 FOR UPDATE`,[served,before,batch])).rows.map(row=>String(row.id));
+      AND d.created_at<$1
+      AND NOT EXISTS (SELECT 1 FROM runtime_prepared_inputs p WHERE p.source_id='derived_artifacts:'||d.id) LIMIT $2 FOR UPDATE`,[before,batch])).rows.map(row=>String(row.id));
     const sources=ids.map(id=>'derived_artifacts:'+id);
     for(const table of ['guard_activations','guard_fragments','guard_revisions','guard_sources'])
       await derived.query(`DELETE FROM ${table} WHERE ${table==='guard_sources'?'id':'source_id'}=ANY($1::text[])`,[sources]);
@@ -132,7 +127,7 @@ export async function pruneMemorySummaries(derived:pg.ClientBase,served:string[]
     return {memory_contexts:contexts.rowCount??0,memory_results:results.rowCount??0};
   } catch(error){await derived.query('ROLLBACK').catch(()=>{});throw error;}
 }
-export const expireMemorySummaries=(derived:pg.ClientBase,served:string[],before:Date,pause=200)=>drain(()=>pruneMemorySummaries(derived,served,before),pause);
+export const expireMemorySummaries=(derived:pg.ClientBase,before:Date,pause=200)=>drain(()=>pruneMemorySummaries(derived,before),pause);
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   let days=0;
@@ -161,8 +156,8 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
     await run('workflow_record_retention',([client])=>expireWorkflowRecords(client!,cutoff),['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD']);
     await run('telemetry_retention',([client])=>expireTelemetry(client!,cutoff),['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD']);
     // The derived runtime role cannot delete, so this local worker uses the administrator role.
-    await run('memory_summary_retention',async([control,derived])=>expireMemorySummaries(derived!,await servedSummaries(control!),new Date(Date.now()-3600000)),
-      ['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD'],['nocheh','nocheh_derived','POSTGRES_PASSWORD']);
+    await run('memory_summary_retention',([derived])=>expireMemorySummaries(derived!,new Date(Date.now()-3600000)),
+      ['nocheh','nocheh_derived','POSTGRES_PASSWORD']);
     // Expiry is measured in days, so one check per day is enough.
     await delay(86400000);
   }

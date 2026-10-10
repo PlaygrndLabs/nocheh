@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {expireMemorySummaries,expireTelemetry,expireWorkflowHistory,expireWorkflowRecords,retentionDays,servedSummaries} from '../src/workflows/retention.js';
+import {expireMemorySummaries,expireTelemetry,expireWorkflowHistory,expireWorkflowRecords,retentionDays} from '../src/workflows/retention.js';
 import {hash,workflowSchema} from '../src/workflows/store.js';
 import {controlGuardSchema,derivedGuardSchema} from '../src/stores/guard-schema.js';
 import {securityCoreSchema} from '../src/security/store.js';
@@ -117,21 +117,19 @@ test('telemetry retention removes only old model-call events and invalidation no
   } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
 });
 
-test('summary retention removes only superseded Honcho context summaries and their guarded copies',
+test('summary retention removes only spent Honcho context summaries and their guarded copies',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:60000},async()=>{
   const config:pg.ClientConfig={host:process.env.PGHOST!,port:Number(process.env.PGPORT??5432),user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const client=new pg.Client(config);await client.connect();const schema='summaries_'+Date.now();
   try {
     assert.equal((await client.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');
     await client.query(`CREATE SCHEMA ${schema}`);await client.query(`SET search_path=${schema}`);
-    // Column subsets of the control and derived schemas used by summary retention.
-    await client.query(`CREATE TABLE memory_generations(id text PRIMARY KEY,state text NOT NULL);
-      CREATE TABLE memory_context_snapshots(generation text PRIMARY KEY REFERENCES memory_generations(id),derived_id text NOT NULL);
-      CREATE TABLE derived_artifacts(id text PRIMARY KEY,kind text NOT NULL,operation_id text UNIQUE NOT NULL,created_at timestamptz NOT NULL);
+    // Column subsets of the derived schema used by summary retention.
+    await client.query(`CREATE TABLE derived_artifacts(id text PRIMARY KEY,kind text NOT NULL,operation_id text UNIQUE NOT NULL,created_at timestamptz NOT NULL);
       ${derivedGuardSchema}
       CREATE TABLE runtime_prepared_inputs(id text PRIMARY KEY,source_id text NOT NULL REFERENCES guard_sources(id))`);
     const ago=(hours:number)=>new Date(Date.now()-hours*3600000);
-    // Each rebuild n writes a full representation rn and its bounded summary bn.
+    // Each context read n writes Honcho's output rn and its bounded summary bn.
     const rebuild=async(n:string,hours:number,bounded=true)=>{
       await client.query(`INSERT INTO derived_artifacts VALUES($1,'memory_result',$2,$3)`,['r'+n,'native-context:w:1:'+n,ago(hours)]);
       if(bounded)await client.query(`INSERT INTO derived_artifacts VALUES($1,'memory_context',$2,$3)`,['b'+n,'native-context:w:1:'+n+':bounded',ago(hours)]);
@@ -146,15 +144,11 @@ test('summary retention removes only superseded Honcho context summaries and the
       await client.query(`INSERT INTO guard_fragments(id,source_id,input_hash,preparation_version,content) VALUES($1,$1,'h','v','\\x00')`,[source]);
     }
     await client.query("INSERT INTO runtime_prepared_inputs VALUES('in','derived_artifacts:b6')");
-    await client.query("INSERT INTO memory_generations VALUES('ready','ready'),('retired','retired')");
-    await client.query("INSERT INTO memory_context_snapshots VALUES('ready','b2'),('retired','b3')");
-    const served=await servedSummaries(client);
-    assert.deepEqual(served,['b2'],'a retired generation no longer serves its summary');
-    assert.deepEqual(await expireMemorySummaries(client,served,ago(1),0),{memory_contexts:2,memory_results:3});
-    assert.deepEqual((await client.query('SELECT id FROM derived_artifacts ORDER BY 1')).rows.map(row=>row.id),['b2','b4','b6','r2','r4','r6','recall'],
-      'the served summary, a recent rebuild, a summary still referenced and other memory results stay');
+    assert.deepEqual(await expireMemorySummaries(client,ago(1),0),{memory_contexts:3,memory_results:4});
+    assert.deepEqual((await client.query('SELECT id FROM derived_artifacts ORDER BY 1')).rows.map(row=>row.id),['b4','b6','r4','r6','recall'],
+      'a recent read, a summary still referenced and other memory results stay');
     assert.deepEqual((await client.query('SELECT id FROM guard_sources ORDER BY 1')).rows.map(row=>row.id),['derived_artifacts:b6']);
     assert.equal((await client.query('SELECT count(*)::int AS count FROM guard_revisions')).rows[0].count,1);
-    assert.deepEqual(await expireMemorySummaries(client,served,ago(1),0),{memory_contexts:0,memory_results:0},'a repeated pass is a no-op');
+    assert.deepEqual(await expireMemorySummaries(client,ago(1),0),{memory_contexts:0,memory_results:0},'a repeated pass is a no-op');
   } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
 });

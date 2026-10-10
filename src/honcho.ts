@@ -30,15 +30,18 @@ CREATE TABLE IF NOT EXISTS honcho_prepared_sources(source_id text NOT NULL REFER
 CREATE TABLE IF NOT EXISTS honcho_context_cache(generation text PRIMARY KEY REFERENCES honcho_generations(id),
  content bytea NOT NULL CHECK(octet_length(content)<=80000),refreshed_at timestamptz NOT NULL DEFAULT now());
 `;
-export type HonchoCall=(path:string,body?:unknown)=>Promise<any>;
+/** GET without a body, POST with one. DELETE treats an already absent resource as deleted. */
+export type HonchoCall=(path:string,body?:unknown,method?:'DELETE')=>Promise<any>;
 export function honchoClient(base:string):HonchoCall {
  const url=new URL(base);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('invalid_honcho_url');
- return async(path,body)=>{
+ return async(path,body,method)=>{
   // Recall includes guarded query preparation, embeddings and subscription reasoning.
-  let response:Response;try{response=await fetch(url.origin+path,{method:body===undefined?'GET':'POST',redirect:'error',signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
+  let response:Response;try{response=await fetch(url.origin+path,{method:method??(body===undefined?'GET':'POST'),redirect:'error',signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
    headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});}catch{throw new HttpError(503,'honcho_unavailable');}
+  if(method==='DELETE'&&response.status===404)return {deleted:false};
   if(!response.ok)throw new HttpError(503,'honcho_upstream_rejected');
   const text=await response.text();if(text.length>2*1024*1024)throw new HttpError(503,'honcho_response_limit');
+  if(method==='DELETE')return {deleted:true};
   return JSON.parse(text);
  };
 }

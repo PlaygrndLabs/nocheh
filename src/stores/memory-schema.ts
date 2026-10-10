@@ -19,13 +19,7 @@ ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS work_revision integer NO
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS representation_version text NOT NULL DEFAULT 'legacy-source-v1';
 ALTER TABLE memory_generations DROP CONSTRAINT IF EXISTS memory_generations_installation_generation_guard_epoch_audience_key;
 CREATE UNIQUE INDEX IF NOT EXISTS memory_generations_versioned_audience ON memory_generations(installation_generation,guard_epoch,audience,representation_version);
-CREATE TABLE IF NOT EXISTS memory_entity_peer_mappings (
- id text PRIMARY KEY,entity_id text NOT NULL REFERENCES memory_entities(id),generation text NOT NULL REFERENCES memory_generations(id),
- audience text NOT NULL,representation_version text NOT NULL,peer_id text NOT NULL,
- state text NOT NULL DEFAULT 'active' CHECK(state IN ('active','retired')),created_at timestamptz NOT NULL DEFAULT now(),
- UNIQUE(generation,entity_id,representation_version),UNIQUE(generation,peer_id)
-);
-CREATE INDEX IF NOT EXISTS memory_entity_peer_mappings_entity ON memory_entity_peer_mappings(entity_id,audience,state);
+DROP TABLE IF EXISTS memory_entity_peer_mappings;
 CREATE TABLE IF NOT EXISTS memory_ingestion_receipts (
  id text PRIMARY KEY,generation text NOT NULL REFERENCES memory_generations(id),
  source_reference jsonb NOT NULL,guard_source_id text NOT NULL,guarded_revision integer,
@@ -45,10 +39,28 @@ ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS source_references
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS dependencies jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS projection_reference jsonb;
 CREATE INDEX IF NOT EXISTS memory_receipts_due ON memory_ingestion_receipts(generation,state,next_attempt);
-CREATE TABLE IF NOT EXISTS memory_context_snapshots (
- generation text PRIMARY KEY REFERENCES memory_generations(id),derived_id text NOT NULL,
- content_hash text NOT NULL,refreshed_at timestamptz NOT NULL DEFAULT now()
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS audience text NOT NULL DEFAULT 'owner';
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS session_key text;
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS logical_id text;
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS guard_mode text;
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS retired_at timestamptz;
+CREATE INDEX IF NOT EXISTS memory_receipts_live_session ON memory_ingestion_receipts(session_id,state) WHERE retired_at IS NULL;
+CREATE INDEX IF NOT EXISTS memory_receipts_live_source ON memory_ingestion_receipts((source_reference->>'id')) WHERE retired_at IS NULL;
+CREATE TABLE IF NOT EXISTS memory_sessions (
+ workspace text NOT NULL REFERENCES memory_generations(id),key text NOT NULL,audience text NOT NULL,
+ kind text NOT NULL CHECK(kind IN ('conversation','entity_evidence','projection')),
+ revision integer NOT NULL DEFAULT 1,session_id text NOT NULL UNIQUE,
+ work_revision integer NOT NULL DEFAULT 0,prefetched_revision integer NOT NULL DEFAULT 0,
+ created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(workspace,key)
 );
+CREATE INDEX IF NOT EXISTS memory_sessions_audience ON memory_sessions(workspace,audience,updated_at);
+CREATE TABLE IF NOT EXISTS memory_session_deletions (
+ session_id text PRIMARY KEY,workspace text NOT NULL REFERENCES memory_generations(id),session_key text NOT NULL,
+ state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','done')),deleted_conclusions integer NOT NULL DEFAULT 0,
+ created_at timestamptz NOT NULL DEFAULT now(),completed_at timestamptz
+);
+CREATE SEQUENCE IF NOT EXISTS memory_ingest_requests;
+DROP TABLE IF EXISTS memory_context_snapshots;
 CREATE TABLE IF NOT EXISTS interpretation_jobs (
  id text PRIMARY KEY,source_reference jsonb NOT NULL,workspace text NOT NULL,audience text NOT NULL,
  input_reference jsonb NOT NULL,binding jsonb NOT NULL,context_hash text NOT NULL,output_id text,

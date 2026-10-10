@@ -46,7 +46,7 @@ records current implementation and activation.
 | [0030](0030-configurable-space-memory.md) | Owner-wide recall and versioned group or topic sharing | Current audience-memory direction |
 | [0031](0031-native-managed-schedules.md) | One supervised native scheduler and durable captured fires | Current scheduling foundation; workflow execution later consolidated in Inngest |
 | [0032](0032-isolated-upgrades-and-portable-memory.md) | Isolated candidate checks, complete restore holds, portable native memory | Active upgrade and portability boundary |
-| [0033](0033-guarded-projections-and-honcho-memory.md) | Durable editable guarding and Honcho primary memory | Current guarding and memory baseline |
+| [0033](0033-guarded-projections-and-honcho-memory.md) | Durable editable guarding and Honcho primary memory | Current guarding and memory baseline; its per-generation Honcho workspaces are superseded by 0109 |
 | [0034](0034-explicit-embedding-environment.md) | Explicit dedicated embedding provider, model, and capped key | Extends 0033 |
 | [0035](0035-shared-cliproxy-provider-and-monitoring.md) | One CLIProxyAPI login for Hermes and Honcho with monitoring | Active provider direction |
 | [0036](0036-one-compose-project.md) | All local containers in one Compose project | Active local packaging |
@@ -57,7 +57,7 @@ records current implementation and activation.
 | [0041](0041-local-inngest-workflows.md) | Local Inngest product workflows with owned outbox and receipts | Current workflow baseline |
 | [0042](0042-host-workflow-archive-coordination.md) | Host Connect through the archive listener with protected checkpoints | Implements 0041 |
 | [0043](0043-owner-workflow-inspection.md) | Owner workflow controls and authenticated inspection-only history | Implements 0041 |
-| [0044](0044-automatic-honcho-context.md) | Automatic primary Honcho context with protected generation cache | Current memory-context direction |
+| [0044](0044-automatic-honcho-context.md) | Automatic primary Honcho context with protected generation cache | Automatic context remains; its generation cache is superseded by 0109 and 0115, and its timed refresh and five-minute limit by 0114 |
 | [0045](0045-honcho-in-installation-compose.md) | Production Honcho in the installation Compose project | Current installation direction |
 | [0046](0046-consolidated-inngest-installation.md) | Consolidated applications and Inngest-only workflow execution | Extends 0041 installation design |
 | [0047](0047-receipted-event-handoff.md) | Retry one event identity until a fenced workflow records receipt | Durability implementation of 0041 |
@@ -69,7 +69,7 @@ records current implementation and activation.
 | [0053](0053-original-only-archive.md) | Original-only archive, derived guarded records, separate control database | Current storage boundary; supersedes 0052 guarded placement |
 | [0054](0054-postgres-owned-store-bootstrap.md) | Provision separated owned stores in PostgreSQL startup | Implements 0053 packaging |
 | [0055](0055-concise-core-service-names.md) | `hermes`, `hermes-agent-sb`, and `nocheh-db` service identities | Current service names |
-| [0056](0056-connected-entity-memory.md) | Stable people and project peers with attributed entity evidence | Current connected-memory direction; 0091 permits bounded delegation for discovered project creation, preserving identity review |
+| [0056](0056-connected-entity-memory.md) | Stable people and project peers with attributed entity evidence | Current connected-memory direction; 0091 permits bounded delegation for discovered project creation, preserving identity review; 0109 replaces its per-audience workspaces with one installation workspace |
 | [0057](0057-memory-relationship-access-map.md) | Human relationship map with fact-level conversation access | Current access model; relationships never grant access |
 | [0058](0058-semantic-react-flow-memory-map-editing.md) | React Flow Memory map with semantic revision-checked editing | Current Memory map interaction model |
 | [0059](0059-elk-layered-memory-map-layout.md) | ELK layered positioning for the Memory map | Current Memory map layout |
@@ -85,7 +85,7 @@ records current implementation and activation.
 | [0069](0069-role-based-source-layout.md) | Role-based tooling, services, dashboard, and one owner launcher | Extends 0025 and 0067 on code ownership and launcher placement |
 | [0070](0070-single-agent-support-root.md) | One `.agent/` directory for project agent support | Extends 0069 on agent skill and support placement |
 | [0071](0071-local-only-acceptance-evidence.md) | Track source and synthetic fixtures; keep runtime output and live evidence local | Extends 0040 on evidence retention and privacy |
-| [0072](0072-validated-honcho-context-renewal.md) | Revalidate unchanged Honcho context without repeated representation calls | Supersedes 0044's unconditional representation refresh; retains five-minute freshness |
+| [0072](0072-validated-honcho-context-renewal.md) | Revalidate unchanged Honcho context without repeated representation calls | Supersedes 0044's unconditional representation refresh; its timed renewal is superseded by 0114 and its snapshot by 0115 |
 | [0073](0073-live-data-source-watched-development.md) | Source-watched development reuses the operating Compose project, bot, data, and provider login | Supersedes 0066's separate project, state, and credential boundary |
 | [0074](0074-root-development-compose-layout.md) | Root development override and acceptance test overlay in their role-based locations | Refines 0073 on file placement; retires the isolated preview entrypoint |
 | [0075](0075-clean-development-setup.md) | Clean development reset with Compose-owned stores and one source-watched stack | Refines 0073 and 0074; release acceptance remains separate |
@@ -123,9 +123,11 @@ records current implementation and activation.
 | [0107](0107-daily-workflow-history-retention.md) | Run workflow telemetry retention daily | Supersedes the hourly interval in 0106 |
 | [0108](0108-first-derivative-selection-does-not-revoke.md) | A first derivative selection does not revoke authorized contexts | Extends the first-representation guard exemption; replacements keep the barrier |
 | [0110](0110-default-workflow-history-retention.md) | Inngest telemetry retention on by default with 14 days | Supersedes the off default in 0106; installations that set a value keep it |
-| [0109](0109-standard-honcho-entity-model.md) | Use Honcho through its documented entity model (proposed) | Would supersede per-generation workspaces in 0033, 0044, 0056 and timer refresh in 0072; retains 0030 audience isolation |
+| [0109](0109-standard-honcho-entity-model.md) | Use Honcho through its documented entity model | Supersedes per-generation workspaces in 0033, 0044, 0056 and timer refresh in 0072; retains 0030 audience isolation |
 | [0111](0111-complete-workflow-history-retention.md) | Inngest retention covers every run history table | Extends 0107 and 0110; supersedes 0106 on keeping events and run records |
 | [0112](0112-spent-workflow-record-retention.md) | Expire spent workflow publication records and run links | Extends 0047 and 0111; the registry and effect receipts are never expired |
-| [0113](0113-superseded-memory-summary-retention.md) | Remove superseded Honcho context summaries | Extends 0112; independent of the context refresh trigger in 0072 and 0109 |
+| [0113](0113-superseded-memory-summary-retention.md) | Remove superseded Honcho context summaries | Extends 0112; its served-summary exception is dropped by 0115, which keeps no context snapshot |
+| [0114](0114-event-driven-honcho-context.md) | Rebuild Honcho context when Honcho finishes work, not on a timer | Supersedes the two-minute refresh and five-minute limit in 0044 and 0072; its snapshot table is replaced by 0115 |
+| [0115](0115-honcho-session-revisions.md) | Versioned Honcho sessions with targeted rebuilds and live reply context | Implements 0109 steps H1–H4; replaces the context snapshot of 0044, 0072 and 0114 and the served-summary check of 0113 |
 | [0120](0120-loops-outside-inngest.md) | Classify every Nocheh loop that runs outside Inngest | Extends 0041, 0042 and 0047; removes the superseded single-database worker |
 | [0121](0121-operational-telemetry-retention.md) | Expire broker model-call events and guard invalidation notes | Extends 0111 and 0112; action and tool security events stay as the owner's audit |

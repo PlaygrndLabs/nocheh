@@ -18,11 +18,13 @@ export class SourceAccessRepository {
     readonly retirements?:SourceRetirementRepository,readonly reactions?:ReactionStateRepository) {
     this.relationships=new RelationshipRepository(archive);
   }
-  async canRead(principal:Reader,reference:SourceReference,binding:GuardBinding):Promise<boolean> {
+  /** `historical` rechecks evidence that was already learned: a later reaction
+   * change adds new evidence and does not retract the earlier reaction. */
+  async canRead(principal:Reader,reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
     if(!principal.admin&&source.channel==='telegram'){
       if(await this.retirements?.isRetired(reference))return false;
-      if(this.reactions&&!await this.reactions.isCurrent(reference))return false;
+      if(!options.historical&&this.reactions&&!await this.reactions.isCurrent(reference))return false;
     }
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
     if(!['telegram','browser'].includes(source.channel)||source.scope!==principal.scope)return false;
@@ -31,11 +33,11 @@ export class SourceAccessRepository {
       observed.topic_state==='none'&&space===observed.chat_id);
     await this.guards.assertCurrent(binding);return allowed;
   }
-  async canLearn(reference:SourceReference,binding:GuardBinding):Promise<boolean> {
+  async canLearn(reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
     if(source.channel==='telegram'){
       if(await this.retirements?.isRetired(reference))return false;
-      if(this.reactions&&!await this.reactions.isCurrent(reference))return false;
+      if(!options.historical&&this.reactions&&!await this.reactions.isCurrent(reference))return false;
     }
     const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[reference.id])).rows[0];
     if(intake?.state==='pending')return false;

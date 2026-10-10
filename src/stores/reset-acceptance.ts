@@ -152,11 +152,11 @@ export async function verifyFreshAcceptance(stores:StorePools,value:unknown) {
   if(memory.length!==1||!memory[0].attached||!memory[0].verified||accepted?.format!=='nocheh-honcho-live-v1'||
     required.some(name=>accepted?.checks?.[name]!=='passed'))throw Error('reset_fresh_acceptance_honcho_missing');
   after(accepted.recorded_at,boundary);
-  const generation=(await stores.control.query(`SELECT g.state,g.installation_generation::text AS installation_generation,g.last_ready_at,
-    s.refreshed_at FROM memory_generations g JOIN memory_context_snapshots s ON s.generation=g.id WHERE g.id=$1`,[e.honcho.generation_id])).rows;
+  const generation=(await stores.control.query(`SELECT g.state,g.installation_generation::text AS installation_generation,g.last_ready_at
+    FROM memory_generations g WHERE g.id=$1`,[e.honcho.generation_id])).rows;
   if(generation.length!==1||generation[0].state!=='ready'||generation[0].installation_generation!==input.generation||!generation[0].last_ready_at)
     throw Error('reset_fresh_acceptance_honcho_missing');
-  after(generation[0].last_ready_at,boundary);after(generation[0].refreshed_at,boundary);
+  after(generation[0].last_ready_at,boundary);
   const ingestion=(await stores.control.query(`SELECT state,attempts,created_at FROM memory_ingestion_receipts
     WHERE id=$1 AND generation=$2`,[e.honcho.ingestion_receipt_id,e.honcho.generation_id])).rows;
   if(ingestion.length!==1||ingestion[0].state!=='done'||ingestion[0].attempts<1)throw Error('reset_fresh_acceptance_honcho_missing');

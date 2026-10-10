@@ -41,7 +41,7 @@ source data is excluded; it is retained by design.
 | Risk | Component | Evidence |
 | --- | --- | --- |
 | High | Guard-epoch fan-out re-requests work for every source and creates Honcho workspaces never deleted | `src/stores/workflow-operations.ts:76-84`, `src/stores/native-memory.ts:122` |
-| High | 120-second Honcho `context:` workflow never ends; each wait is Inngest history | `src/stores/workflow-operations.ts:190` |
+| Resolved | 120-second Honcho `context:` workflow never ended; each wait was Inngest history. It now runs once per rebuild ([ADR-0114](adr/0114-event-driven-honcho-context.md)) | `src/stores/workflow-operations.ts` |
 | High | Inngest telemetry retention covers only spans, history and traces; it is 14 days by default per [ADR-0110](adr/0110-default-workflow-history-retention.md) | `docker-compose.yml:454` |
 | High | Honcho PostgreSQL and Redis have no cleanup | `docker-compose.yml` Honcho services |
 | Medium | Control tables never pruned: workflow registry, outbox, runs, receipts, ingestion receipts, security events, dispatches, turns, version history | `src/workflows/store.ts:28-62` and others |
