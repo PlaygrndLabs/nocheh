@@ -131,3 +131,4 @@ records current implementation and activation.
 | [0115](0115-honcho-session-revisions.md) | Versioned Honcho sessions with targeted rebuilds and live reply context | Implements 0109 steps H1–H4; replaces the context snapshot of 0044, 0072 and 0114 and the served-summary check of 0113 |
 | [0120](0120-loops-outside-inngest.md) | Classify every Nocheh loop that runs outside Inngest | Extends 0041, 0042 and 0047; removes the superseded single-database worker |
 | [0121](0121-operational-telemetry-retention.md) | Expire broker model-call events and guard invalidation notes | Extends 0111 and 0112; action and tool security events stay as the owner's audit |
+| [0122](0122-honcho-fresh-start.md) | Honcho fresh start deletes earlier Nocheh workspaces | Implements 0109 step H5 on top of 0115; deletes only workspaces Nocheh recorded |

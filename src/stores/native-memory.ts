@@ -28,6 +28,8 @@ const sessionName=(workspace:string,key:string,revision:number)=>digest(canonica
 const invalidCodes=new Set(['learning_consent_required','memory_refresh_required','learned_memory_not_found']);
 const contextTokens=4000,contextCharacters=20000;
 type SessionKind='conversation'|'entity_evidence'|'projection';
+/** The installation's Honcho workspace; only a fresh start or an installation reset changes it. */
+const workspaceId=(generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
 type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
 
 /** Honcho owns native memory. Nocheh owns guarded inputs, immutable results and recoverable receipts.
@@ -50,8 +52,10 @@ export class NativeMemoryRepository {
       WHERE s.workspace=$1 GROUP BY s.audience ORDER BY s.audience`,[workspace.id])).rows:[];
     const receipts=(await this.control.query('SELECT state,count(*)::int AS count FROM memory_ingestion_receipts WHERE retired_at IS NULL GROUP BY state')).rows;
     const deletions=(await this.control.query('SELECT state,count(*)::int AS count FROM memory_session_deletions GROUP BY state')).rows;
+    const retired=(await this.control.query(`SELECT state,count(*)::int AS workspaces,sum(deleted_sessions)::int AS sessions
+      FROM memory_workspace_deletions GROUP BY state ORDER BY state`)).rows;
     return {connection,workspace:workspace?{id:workspace.id,state:workspace.state,last_ready_at:workspace.last_ready_at,error_code:workspace.error_code}:null,
-      sessions,receipts,deletions,guard:binding,primary:'honcho',native_notes:['MEMORY.md','USER.md'],syncing:workspace?.state==='building',
+      sessions,receipts,deletions,workspace_deletions:retired,guard:binding,primary:'honcho',native_notes:['MEMORY.md','USER.md'],syncing:workspace?.state==='building',
       limited_memory:!connection.attached||!connection.verified||!workspace||!workspace.last_ready_at&&workspace.state!=='ready'};
   }
   /** A short-lived synthetic workspace for live provider acceptance before memory attachment. */
@@ -139,12 +143,16 @@ export class NativeMemoryRepository {
   /** The installation workspace stays current across guard epochs; only an installation reset replaces it. */
   async current(id:string) {
     const binding=await this.guards.state(),row=(await this.control.query('SELECT * FROM memory_generations WHERE id=$1',[id])).rows[0];
-    if(!row?.root_reference||row.audience!=='installation'||row.representation_version!==protocol)throw new HttpError(409,'memory_context_retired');
+    const revision=(await this.control.query('SELECT workspace_revision FROM memory_engine_connection WHERE singleton')).rows[0].workspace_revision;
+    // A fresh start opens the next workspace revision; nothing writes to or reads from an earlier one again.
+    if(!row?.root_reference||row.audience!=='installation'||row.representation_version!==protocol||id!==workspaceId(binding.generation,revision))
+      throw new HttpError(409,'memory_context_retired');
     await this.provenance.current(id,'owner',binding);
     return {row,binding,principal:this.principal('owner',row.root_reference.id,binding)};
   }
   private async ensureWorkspace(source:SourceReference,binding:GuardBinding) {
-    const id=digest(canonical([protocol,binding.generation]));
+    const revision=(await this.control.query('SELECT workspace_revision FROM memory_engine_connection WHERE singleton')).rows[0].workspace_revision;
+    const id=workspaceId(binding.generation,revision);
     // Per-audience, per-epoch workspaces of earlier mappings are superseded and never written again.
     await this.control.query(`UPDATE memory_generations SET state='retired' WHERE installation_generation=$1
       AND representation_version<>$2 AND state<>'retired'`,[binding.generation,protocol]);
@@ -241,7 +249,8 @@ export class NativeMemoryRepository {
     if(!row)throw new HttpError(404,'source_not_found');
     const explicit=(await this.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[source.id])).rows[0]?.enabled===true;
     if(!connection.include_history&&row.received_at<connection.attached_at&&!explicit&&
-      !(await this.control.query("SELECT 1 FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='done' LIMIT 1",[source.id])).rowCount)return [];
+      !(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
+        WHERE r.source_reference->>'id'=$1 AND r.state='done' AND g.state<>'retired' LIMIT 1`,[source.id])).rowCount)return [];
     const context=await this.contexts.prepare(source,binding);
     // A message is written once, with only its own observations and their dependencies,
     // so later rules, neighbouring messages or reactions never rewrite it.
@@ -409,6 +418,61 @@ export class NativeMemoryRepository {
       }
       await db.query('COMMIT');return next;
     } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  /**
+   * Fresh start: the installation moves to a new, empty Honcho workspace that learns from messages received from now on,
+   * and every earlier Nocheh workspace in Honcho is deleted with its Nocheh records. Original messages stay in the archive.
+   */
+  async freshStart(principal:Reader,input:unknown) {
+    admin(principal);const body=object(input);
+    if(Object.keys(body).some(k=>!['expected_revision','operation_id'].includes(k))||!Number.isSafeInteger(body.expected_revision))
+      throw new HttpError(400,'invalid_memory_fresh_start');
+    // Only workspaces Nocheh recorded as its own memory generations are deleted; anything else in Honcho is left alone.
+    await new OwnerCommands(this.control).run(principal,string(body.operation_id,200),body,async db=>{
+      const row=(await db.query('SELECT * FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
+      if(row.revision!==body.expected_revision)throw new HttpError(409,'memory_connection_conflict');
+      await db.query(`UPDATE memory_engine_connection SET workspace_revision=workspace_revision+1,attached_at=now(),include_history=false,
+        revision=revision+1 WHERE singleton`);
+      await db.query("UPDATE memory_generations SET state='retired' WHERE state<>'retired'");
+      for(const {id} of (await db.query('SELECT id FROM memory_generations')).rows) {
+        await db.query('INSERT INTO memory_workspace_deletions(workspace) VALUES($1) ON CONFLICT DO NOTHING',[id]);
+        await requestWorkflow(db,'honcho','retire:'+id);
+      }
+      return {revision:row.revision+1};
+    });
+    return this.status();
+  }
+  /** Remove one earlier workspace from Honcho: its sessions first, as Honcho requires, then the workspace and Nocheh's records of it. */
+  async retireWorkspace(id:string,authority:ExecutionAuthority):Promise<boolean> {
+    const db=await this.control.connect();let fenced=false,locked=false;
+    try {
+      fenced=await enterFamily(db,'honcho',authority.owner,authority.epoch);if(!fenced)throw new HttpError(409,'workflow_owner_changed');
+      locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'honcho_sync_busy');
+      const row=(await db.query('SELECT * FROM memory_workspace_deletions WHERE workspace=$1',[id])).rows[0];
+      if(!row)throw new HttpError(404,'memory_deletion_missing');if(row.state==='done')return true;
+      if((await db.query("SELECT 1 FROM memory_generations WHERE id=$1 AND state<>'retired'",[id])).rowCount)throw new HttpError(409,'memory_workspace_current');
+      const base='/v3/workspaces/'+id;
+      for(let page=0;page<10;page++) {
+        const found=await this.call(base+'/sessions/list?page=1&size=100',{});
+        const sessions:string[]=Array.isArray(found?.items)?found.items.map((item:any)=>String(item?.id??'')):[];
+        if(sessions.some(session=>!/^[A-Za-z0-9_-]{1,100}$/.test(session)))throw new HttpError(502,'invalid_honcho_sessions');
+        if(!sessions.length) {
+          await this.call(base,undefined,'DELETE');
+          await db.query('BEGIN');
+          try {
+            for(const table of ['memory_session_deletions','memory_sessions'])await db.query(`DELETE FROM ${table} WHERE workspace=$1`,[id]);
+            await db.query('DELETE FROM memory_ingestion_receipts WHERE generation=$1',[id]);
+            await db.query('DELETE FROM memory_generations WHERE id=$1',[id]);
+            await db.query("UPDATE memory_workspace_deletions SET state='done',completed_at=now() WHERE workspace=$1",[id]);
+            await db.query('COMMIT');
+          } catch(error){await db.query('ROLLBACK');throw error;}
+          return true;
+        }
+        for(const session of sessions)await this.call(base+'/sessions/'+session,undefined,'DELETE');
+        await db.query('UPDATE memory_workspace_deletions SET deleted_sessions=deleted_sessions+$2 WHERE workspace=$1',[id,sessions.length]);
+      }
+      return false;
+    } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803358)');if(fenced)await leaveFamily(db,'honcho');});}
   }
   /** Remove a replaced session from Honcho, first deleting conclusions other sessions derived from it. */
   async deleteSession(id:string,authority:ExecutionAuthority):Promise<boolean> {
