@@ -23,7 +23,7 @@ from pathlib import Path
 
 from .subscription import resolve_credentials, refresh_credentials, detect_literals, DetectorContractError, reasoning_route
 
-MODEL = os.environ.get("NOCHEH_MODEL", "gpt-5.6-sol")
+MODEL = os.environ.get("NOCHEH_MODEL", "claude-sonnet-5-5")
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
 TOKEN = environment_secret('SERVICE_TOKEN')

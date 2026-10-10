@@ -101,10 +101,30 @@ export function Settings({notify}) {
     const apply=async()=>{setBusy(true);try{await call('/settings/apply',{});notify('Applying saved settings. Follow the result in Maintenance.');}catch(e){notify(errorText(e),true);}finally{setBusy(false);}};
     if(error&&!data)return h(Alert,null,'Settings are unavailable.');
     if(!data)return h('p',{role:'status'},'Loading settings…');
-    const hints={TELEGRAM_ENABLED:'Start or stop Telegram message handling when settings are applied.',TELEGRAM_OWNER_ID:'Your numeric Telegram user ID. Only the owner can administer Nocheh.',TELEGRAM_GROUP_IDS:'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',TELEGRAM_BOT_TOKEN:'The token from BotFather for the bot used by the native Hermes Telegram adapter.',NOCHEH_MODEL:'The model used through your ChatGPT subscription.',NOCHEH_GUARD_MODE:'On uses saved guarded copies for agents and memory. Off uses originals with the same access rules.',NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Explicit destinations for trusted preparation services. This does not bypass guarding for agents.',NOCHEH_PORT:'Local port used by the archive service.'};
+    const hints={TELEGRAM_ENABLED:'Start or stop Telegram message handling when settings are applied.',TELEGRAM_OWNER_ID:'Your numeric Telegram user ID. Only the owner can administer Nocheh.',TELEGRAM_GROUP_IDS:'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',TELEGRAM_BOT_TOKEN:'The token from BotFather for the bot used by the native Hermes Telegram adapter.',NOCHEH_MODEL:'One model for Hermes replies, Honcho memory and secret detection, grouped by the provider login that serves it.',NOCHEH_EMBEDDING_MODEL:'The OpenAI model that turns memory into searchable vectors, paid from the embedding budget.',NOCHEH_GUARD_MODE:'On uses saved guarded copies for agents and memory. Off uses originals with the same access rules.',NOCHEH_GUARD_TRUSTED_ENDPOINTS:'Explicit destinations for trusted preparation services. This does not bypass guarding for agents.',NOCHEH_PORT:'Local port used by the archive service.'};
     const field=f=>{
       const value=changes[f.key]??f.value??'';
       const attrs={id:f.key,disabled:busy||!f.editable,value,type:f.secret?'password':'text',placeholder:f.secret&&f.configured?'****':undefined,autoComplete:'off','aria-describedby':f.key+'-help',onChange:e=>{const next={...changes};if(f.secret&&!e.target.value)delete next[f.key];else next[f.key]=e.target.value;setChanges(next);setReview(false);}};
+      const served=data.models?.reasoning||[],locked=data.models?.embedding_locked;
+      if(f.key==='NOCHEH_MODEL') {
+        // One group per provider login; providers without a login offer no models.
+        const providers=data.models?.providers||[],signedIn=providers.filter(p=>p.signed_in),missing=providers.filter(p=>!p.signed_in);
+        const running=data.models?.provider_running!==false,offered=signedIn.some(p=>p.models.length);
+        const cpa=h('a',{href:'/providers/management.html'},'CPA dashboard');
+        const hint=!signedIn.length?['No model provider is signed in. Sign in to Claude or ChatGPT in the ',cpa,', then reload this page.']:
+          !running?['The provider service is not running, so its models cannot be listed. Start Nocheh, then reload this page.']:
+          !offered?['Signed in to '+signedIn.map(p=>p.label).join(' and ')+', but the provider lists no models yet. Reload in a moment.']:
+          [hints[f.key],missing.length?' Not signed in: '+missing.map(p=>p.label+(p.id==='codex'?' (needed for voice transcription)':'')).join(', ')+'. Sign in from the ':'',missing.length?cpa:'',missing.length?'.':''];
+        const groups=signedIn.filter(p=>p.models.length).map(p=>h('optgroup',{key:p.id,label:p.label},...p.models.map(model=>h('option',{key:model,value:model},model))));
+        const stale=value&&!served.includes(value)?[h('option',{key:'saved',value},value+' · not served by a signed-in provider')]:[];
+        return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]),
+          offered?h('select',attrs,...stale,...groups):h('input',{...attrs,disabled:true}),
+          h('small',{id:f.key+'-help',role:offered?undefined:'status'},...hint));
+      }
+      if(f.key==='NOCHEH_EMBEDDING_MODEL')
+        return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]),
+          h('select',attrs,...(data.models?.embedding||[value]).map(model=>h('option',{key:model,value:model},model))),
+          h('small',{id:f.key+'-help'},hints[f.key],locked?' Memory already holds vectors from '+locked+'; another model needs a Honcho memory rebuild first.':' It can be changed until memory stores its first vectors.'));
       const options=f.key==='NOCHEH_GUARD_MODE'?[['on','On · use guarded copies'],['off','Off · use originals']]:[['false','Disabled'],['true','Enabled']];
       return h('div',{className:'n-field',key:f.key},h('label',{htmlFor:f.key},labels[f.key]||f.key,f.secret&&h('span',{className:'n-secret-status'},f.configured?'Configured':'Missing')),
         f.key==='NOCHEH_GUARD_MODE'||f.key==='TELEGRAM_ENABLED'?h('select',attrs,...options.map(([value,label])=>h('option',{key:value,value},label))):h('input',attrs),
@@ -194,8 +214,8 @@ export function Settings({notify}) {
       h(StatusBadge,{state:data.apply_state,label:({current:'Saved settings match the last successful apply',pending:'Saved changes are waiting to be applied',unverified:'Running settings have not been verified by this dashboard'})[data.apply_state]||data.apply_state}),
       h('form',{onSubmit:e=>{e.preventDefault();setReview(true);}},
         group('Telegram access','Choose who can use the assistant and which groups it can participate in.',['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_BOT_TOKEN'],accessEditor),
-        group('Model and privacy','These rules apply to outgoing model requests. Hermes profile preferences are in the other settings section.',['NOCHEH_MODEL','NOCHEH_GUARD_MODE']),
-        h('details',{className:'n-advanced'},h('summary',null,'Advanced · destinations, connections and internal credentials'),h('div',{className:'n-form'},...data.fields.filter(f=>!['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_GROUP_ACCESS','TELEGRAM_BOT_TOKEN','NOCHEH_MODEL','NOCHEH_GUARD_MODE'].includes(f.key)).map(field))),
+        group('Model and privacy','These rules apply to outgoing model requests. Applying a model change also restarts Honcho. Hermes profile preferences are in the other settings section.',['NOCHEH_MODEL','NOCHEH_EMBEDDING_MODEL','NOCHEH_GUARD_MODE']),
+        h('details',{className:'n-advanced'},h('summary',null,'Advanced · destinations, connections and internal credentials'),h('div',{className:'n-form'},...data.fields.filter(f=>!['TELEGRAM_ENABLED','TELEGRAM_OWNER_ID','TELEGRAM_GROUP_IDS','TELEGRAM_GROUP_ACCESS','TELEGRAM_BOT_TOKEN','NOCHEH_MODEL','NOCHEH_EMBEDDING_MODEL','NOCHEH_GUARD_MODE'].includes(f.key)).map(field))),
         h('div',{className:'n-actions'},h('button',{disabled:busy||!Object.keys(changes).length},'Review changes'),button('Discard edits',()=>{setChanges({});setReview(false);},busy||!Object.keys(changes).length))),
       review&&h('div',{className:'n-review'},h('h3',null,'Review before saving'),h('p',null,'Saving changes the configuration file. Running services update only after Apply.'),...Object.entries(changes).map(([k,v])=>h('p',{key:k},(labels[k]||k)+': '+(data.fields.find(f=>f.key===k)?.secret?'Replace stored credential':reviewValue(k,v)))),button('Save changes',save,busy,'n-primary')),
       h('div',{className:'n-apply'},h('h3',null,'Apply saved settings'),h('p',{className:'n-muted'},'Updates the running services and may briefly interrupt Telegram replies. Save or discard your current edits first.'),button('Apply saved settings',apply,busy||!!Object.keys(changes).length),h(RouteLink,{page:'operations'},'View apply results →')));

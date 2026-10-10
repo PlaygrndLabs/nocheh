@@ -27,9 +27,14 @@ def _secret(path):
     return value
 
 
-def login_state(state):
-    # Other providers' logins (Claude, Antigravity, ...) may sit beside the one
-    # shared ChatGPT login; they neither satisfy nor block it.
+def login_kind(model):
+    """CLIProxyAPI credential type serving a reasoning model."""
+    return 'claude' if model.startswith('claude-') else 'codex'
+
+
+def login_state(state,kind='codex'):
+    # Other providers' logins may sit beside the one login of the selected
+    # kind (`codex` is the shared ChatGPT login); they neither satisfy nor block it.
     _,auth,_,_=paths(state);files=active=invalid=others=0
     for path in auth.glob('*.json'):
         try:
@@ -37,7 +42,7 @@ def login_state(state):
                 raise ValueError()
             body=json.loads(path.read_text())
             if not isinstance(body,dict):raise ValueError()
-            if body.get('type')!='codex':
+            if body.get('type')!=kind:
                 others+=1;continue
             files+=1
             if (body.get('disabled') is not True
@@ -96,6 +101,58 @@ def ensure_monitor_source(run=subprocess.run):
     return _ensure_source('cpa-manager-plus',MONITOR_LOCK,'provider_monitor',run)
 
 
+# CLIProxyAPI credential types and the model owners they serve.
+PROVIDERS={'claude':('Claude',{'anthropic'}),'codex':('ChatGPT',{'openai'}),'gemini':('Gemini',{'google'}),
+           'qwen':('Qwen',{'qwen'}),'antigravity':('Antigravity',{'antigravity'})}
+
+
+def signed_in(state):
+    """Credential types with one active login, without reading token values beyond presence."""
+    _,auth,_,_=paths(state);kinds=set()
+    for path in auth.glob('*.json'):
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size>1024*1024:continue
+            body=json.loads(path.read_text())
+            if isinstance(body,dict) and isinstance(body.get('type'),str) and login_state(state,body['type'])['login_present']:
+                kinds.add(body['type'])
+        except (OSError,ValueError,UnicodeError):continue
+    return kinds
+
+
+def served(state):
+    """(model, owner) pairs the running provider serves; None when it cannot be asked.
+
+    The client key reaches curl on stdin, never in a command argument."""
+    key=(paths(state)[2]/'hermes.key')
+    if not key.is_file():return None
+    command,env=compose(state)
+    try:
+        raw=subprocess.run(command+['exec','-T','cliproxy-api','curl','--silent','--fail','--max-time','10','-H','@-',
+            'http://127.0.0.1:8317/v1/models'],input='Authorization: Bearer '+key.read_text().strip()+'\n',
+            cwd=ROOT,env=env,capture_output=True,text=True,timeout=20)
+        if raw.returncode:return None
+        data=json.loads(raw.stdout)
+    except (OSError,subprocess.SubprocessError,ValueError):return None
+    return sorted({(row['id'],str(row.get('owned_by') or '')) for row in data.get('data',[])
+                   if isinstance(row,dict) and isinstance(row.get('id'),str)})
+
+
+def reasoning_choices(state):
+    """Models grouped by the provider login that serves them, for the Settings picker."""
+    logins=signed_in(state);rows=served(state)
+    providers=[]
+    for kind in sorted(logins|set(PROVIDERS),key=lambda kind:(kind not in logins,PROVIDERS.get(kind,(kind,))[0])):
+        label,owners=PROVIDERS.get(kind,(kind.title(),{kind}))
+        models=[model for model,owner in rows or [] if owner in owners or login_kind(model)==kind] if kind in logins else []
+        providers.append({'id':kind,'label':label,'signed_in':kind in logins,'models':sorted(set(models))})
+    return {'provider_running':rows is not None,'providers':providers}
+
+
+def models(state):
+    """Every model ID the running provider serves; empty when unavailable."""
+    return sorted({model for model,_ in served(state) or []})
+
+
 def compose(state):
     from tools.operations.installation.configuration import compose_environment,env_path
     from tools.operations.installation.configuration import compose_command
@@ -104,7 +161,11 @@ def compose(state):
 
 
 def status(state):
-    info={'root':str(paths(state)[0]),**login_state(state),'clients':list(CLIENTS)};info.update(revision=LOCK['revision'],running=False,healthy=False,
+    from tools.operations.installation.configuration import DEFAULTS,env_path,read_env
+    model=read_env(env_path(state)).get('NOCHEH_MODEL') or DEFAULTS['NOCHEH_MODEL']
+    # The ChatGPT login stays reported: voice transcription uses it whatever the reasoning model.
+    info={'root':str(paths(state)[0]),**login_state(state),'clients':list(CLIENTS),'reasoning_model':model,
+          'reasoning_login_present':login_state(state,login_kind(model))['login_present']};info.update(revision=LOCK['revision'],running=False,healthy=False,
         monitor={'revision':MONITOR_LOCK['revision'],'running':False,'healthy':False})
     command,env=compose(state)
     try:

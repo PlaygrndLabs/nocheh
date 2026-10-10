@@ -475,7 +475,7 @@ def main():
     token = os.environ['SERVICE_TOKEN']
     os.environ['HERMES_DASHBOARD_SESSION_TOKEN'] = token
     import uvicorn
-    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'gpt-5.6-sol'), Scopes.load(None), token, os.environ.get('NOCHEH_BROWSER_CHAT')=='1',lambda space:audience_revision(token,space),os.environ.get('NOCHEH_DASHBOARD_HOME',str(root.parent/'admin/dashboard/home'))),
+    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5'), Scopes.load(None), token, os.environ.get('NOCHEH_BROWSER_CHAT')=='1',lambda space:audience_revision(token,space),os.environ.get('NOCHEH_DASHBOARD_HOME',str(root.parent/'admin/dashboard/home'))),
                 host='0.0.0.0', port=8785, access_log=False, log_level='critical')
 
 
