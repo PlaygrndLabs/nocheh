@@ -525,6 +525,15 @@ reasoning provider and model is enough for the MVP phase.
 
 <pending>
 
+Scheduled runs (October 10): the simulator found every scheduled run rejected
+before the agent started with `space_policy_changed`, because
+`/v1/memory/check` accepted only an archived turn source and schedule fires are
+never archived. The check now accepts a scheduled turn credential whose admitted
+run still matches its scope, space, profile, guard binding, live lease and
+current schedule definition ([check](src/stores/scheduled-runs.ts),
+[store test](test/store-server.test.ts)). Pending: rerun the simulator's
+schedule scenario on Docker.
+
 Personal-use simulation follow-ups are resolved and verified in the coupled
 fixture: definite Telegram rejections close as rejected by Telegram; an
 approved action Hermes refuses before any send intent returns to the approved
