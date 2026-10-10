@@ -1,4 +1,5 @@
 import {digest} from '../archive.js';
+import {guardChecks} from '../config.js';
 import {HttpError} from '../http.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
@@ -9,7 +10,8 @@ import {SelectionRepository} from './selections.js';
 
 export class PreparationRepository {
   constructor(readonly attachments:AttachmentRepository,readonly reprocessing:ReprocessingRepository,
-    readonly guards:GuardRepository,readonly selections:SelectionRepository,readonly transcription:DerivationEngine,readonly extraction:DerivationEngine){}
+    readonly guards:GuardRepository,readonly selections:SelectionRepository,readonly transcription:DerivationEngine,readonly extraction:DerivationEngine,
+    readonly slots=guardChecks()){}
   private get stores(){return this.attachments.stores;}
 
   async status(eventId:string):Promise<Observation> {
@@ -43,14 +45,18 @@ export class PreparationRepository {
 
   /** One existing workflow step; no timer or competing retry owner is added. */
   async run(eventId:string,fetchFile:(ref:string)=>Promise<Buffer>,detectorVersion:string,detect:(text:string)=>Promise<unknown>,authority:ExecutionAuthority):Promise<Observation> {
-    const client=await this.stores.control.connect();let fenced=false,locked=false;
+    const client=await this.stores.control.connect();let fenced=false,locked=false,slot=-1;
     try {
       fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);
       if(!fenced)return observation('waiting','admission',0,Date.now()+30000,'owner_paused');
-      // One bounded preparation batch leaves connections available for its
+      // Each event prepares once at a time, and up to `slots` events prepare side
+      // by side (Settings: guard checks at once). The bound leaves connections for
       // cross-store publications and family cutover; contenders release promptly.
-      locked=(await client.query('SELECT pg_try_advisory_lock(803357) AS locked')).rows[0].locked;
+      locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended($1,803357)) AS locked',[eventId])).rows[0].locked;
       if(!locked)return observation('waiting','preparation',0,Date.now()+2000,'receipt_pending');
+      for(let candidate=0;candidate<this.slots&&slot<0;candidate++)
+        if((await client.query('SELECT pg_try_advisory_lock(803357,$1) AS locked',[candidate])).rows[0].locked)slot=candidate;
+      if(slot<0)return observation('waiting','preparation',0,Date.now()+2000,'receipt_pending');
       const source=(await this.attachments.archive.captured(eventId)).reference;
       const before=await this.status(eventId);if(before.state==='failed')return before;
       await this.guards.register(source);
@@ -73,6 +79,9 @@ export class PreparationRepository {
       }
       if((await this.guards.state()).mode==='on')await this.guards.prepare(source,detectorVersion,detect);
       return this.status(eventId);
-    } finally {await releaseOperation(client,async()=>{if(locked)await client.query('SELECT pg_advisory_unlock(803357)');if(fenced)await leaveFamily(client,'preparation');});}
+    } finally {await releaseOperation(client,async()=>{
+      if(slot>=0)await client.query('SELECT pg_advisory_unlock(803357,$1)',[slot]);
+      if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended($1,803357))',[eventId]);
+      if(fenced)await leaveFamily(client,'preparation');});}
   }
 }

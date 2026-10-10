@@ -93,3 +93,35 @@ test('preparation keeps manifests immutable and download state in control, with 
     assert.equal((await stores.control.query('SELECT attempts FROM attachment_retrievals WHERE artifact_id=$1',[retry.artifact_ids[0]])).rows[0].attempts,job.attempts);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('different events prepare side by side up to the guard-check setting, and one event never twice at once',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive);
+  const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),capture=new CaptureCoordinator(archive,stores.control);
+  const root=await mkdtemp(join(tmpdir(),'nocheh-preparation-')),attachments=new AttachmentRepository(stores,archive,root),key='parallel:'+Date.now();
+  const extraction=utf8Extraction(),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[extraction]);
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,extraction,extraction,2),authority={owner:'inngest' as const,epoch:1};
+  const event=(suffix:string):Envelope=>({version:1,key:key+suffix,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:key+suffix,
+    revision:'1',occurred_at:null,text:null,payload:{message:{chat:{id:123,type:'private'},text:'Synthetic note '+suffix}}});
+  let active=0,peak=0,release!:()=>void,bothActive!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{bothActive=resolve;});
+  const detect=async()=>{active++;peak=Math.max(peak,active);if(active===2)bothActive();await gate;active--;return [];};
+  const fetch=async()=>{throw Error('text messages have no files');};
+  try {
+    await guards.reconcile();await selections.reconcile();await guards.setMode('on');
+    const [first,second,third]=await Promise.all([':a',':b',':c'].map(async suffix=>(await capture.capture(event(suffix))).source.reference.id));
+    const running=[first,second].map(id=>preparation.run(id!,fetch,'fixture',detect,authority));
+    await started;
+    const busy=await preparation.run(third!,fetch,'fixture',detect,authority);
+    assert.equal(busy.state,'waiting');assert.equal(busy.waiting_reason,'receipt_pending','a third event waits for a free slot');
+    const again=await preparation.run(first!,fetch,'fixture',detect,authority);
+    assert.equal(again.waiting_reason,'receipt_pending','the same event is never prepared twice at once');
+    release();
+    assert.deepEqual((await Promise.all(running)).map(result=>result.state),['completed','completed']);
+    assert.equal(peak,2);
+    assert.equal((await preparation.run(third!,fetch,'fixture',detect,authority)).state,'completed');
+  } finally {release();await stores.close();await rm(root,{recursive:true,force:true});}
+});

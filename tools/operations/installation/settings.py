@@ -93,7 +93,7 @@ def apply(state):
         fcntl.flock(lock, fcntl.LOCK_EX)
         values = load(state); validate(values)
         command = compose(state) + ['up', '-d', '--no-build', '--wait', '--wait-timeout', '180',
-                                    'nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes']
+                                    'nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb']
         def run():
             return subprocess.run(command, env=environment(state), stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL, timeout=420).returncode == 0

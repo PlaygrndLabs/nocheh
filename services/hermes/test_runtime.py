@@ -52,6 +52,36 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                     self.assertEqual(chat.result()['route'],'/internal/chat')
             finally:release.set();server.shutdown();server.server_close();thread.join()
 
+    def test_detector_requests_run_side_by_side_up_to_the_guard_check_setting(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
+            from . import runtime
+            lock=threading.Lock();state={'active':0,'peak':0};release=threading.Event()
+            class Fixture(runtime.Handler):
+                def dispatch(self,body):
+                    with lock:state['active']+=1;state['peak']=max(state['peak'],state['active'])
+                    try:release.wait(2)
+                    finally:
+                        with lock:state['active']-=1
+                    return {'route':self.path}
+            server=ThreadingHTTPServer(('127.0.0.1',0),Fixture)
+            thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+            def request():
+                req=urllib.request.Request(f'http://127.0.0.1:{server.server_port}/internal/detect',data=b'{}',headers={'Authorization':'Bearer '+runtime.TOKEN})
+                with urllib.request.urlopen(req,timeout=5) as response:return json.load(response)
+            try:
+                with patch.object(runtime,'DETECTOR_SLOTS',threading.BoundedSemaphore(2)),ThreadPoolExecutor(max_workers=3) as workers:
+                    calls=[workers.submit(request) for _ in range(3)]
+                    for _ in range(50):
+                        with lock:
+                            if state['active']==2:break
+                        threading.Event().wait(.02)
+                    threading.Event().wait(.2)
+                    with lock:self.assertEqual(state['active'],2,'two checks run at once and the third waits')
+                    release.set()
+                    self.assertEqual([call.result()['route'] for call in calls],['/internal/detect']*3)
+                self.assertEqual(state['peak'],2)
+            finally:release.set();server.shutdown();server.server_close();thread.join()
+
     def test_credential_resolution_shares_the_refresh_lock(self):
         from .subscription import AUTH_LOCK, resolve_credentials, CODEX_BASE_URL
         attempted=threading.Event();called=threading.Event()

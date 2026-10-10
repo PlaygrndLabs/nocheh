@@ -119,6 +119,46 @@ class ConfigurationTests(unittest.TestCase):
                             ('NOCHEH_LOG_MAX_FILES','0'),('NOCHEH_LOG_MAX_FILES','1000'),('NOCHEH_LOG_MAX_FILES','')]:
                 with self.assertRaises(ValueError,msg=key+'='+bad):validate({**values,key:bad})
 
+    def test_owner_sets_parallel_runs_and_replies_and_replies_never_exceed_runs(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT,validate
+        from tools.operations.installation.settings import EDITABLE
+        from services.hermes.environment import parallel
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        self.assertEqual(compose['hermes']['environment']['NOCHEH_PARALLEL_REPLIES'],'${NOCHEH_PARALLEL_REPLIES:-3}')
+        self.assertEqual(compose['hermes-agent-sb']['environment']['NOCHEH_PARALLEL_RUNS'],'${NOCHEH_PARALLEL_RUNS:-4}')
+        self.assertLessEqual({'NOCHEH_PARALLEL_RUNS','NOCHEH_PARALLEL_REPLIES'},EDITABLE)
+        with tempfile.TemporaryDirectory() as folder:
+            values=initialize(Path(folder))
+            self.assertEqual((values['NOCHEH_PARALLEL_RUNS'],values['NOCHEH_PARALLEL_REPLIES']),('4','3'))
+            for runs,replies in [('1','1'),('8','8'),('6','4')]:
+                validate({**values,'NOCHEH_PARALLEL_RUNS':runs,'NOCHEH_PARALLEL_REPLIES':replies})
+            for runs,replies in [('4','5'),('0','1'),('9','3'),('4','0'),('4',''),('',''),('4','2.5'),('04','3')]:
+                with self.assertRaises(ValueError,msg=runs+'/'+replies):
+                    validate({**values,'NOCHEH_PARALLEL_RUNS':runs,'NOCHEH_PARALLEL_REPLIES':replies})
+        with patch.dict(os.environ,{},clear=True):self.assertEqual(parallel('NOCHEH_PARALLEL_REPLIES',3),3)
+        with patch.dict(os.environ,{'NOCHEH_PARALLEL_REPLIES':'5'}):self.assertEqual(parallel('NOCHEH_PARALLEL_REPLIES',3),5)
+        for bad in ('0','9','two','-1'):
+            with patch.dict(os.environ,{'NOCHEH_PARALLEL_RUNS':bad}),self.assertRaises(ValueError,msg=bad):parallel('NOCHEH_PARALLEL_RUNS',4)
+
+    def test_owner_sets_guard_checks_at_once_for_hermes_and_preparation(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT,validate
+        from tools.operations.installation.settings import EDITABLE
+        from services.hermes.environment import parallel
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        for service in ('hermes','nocheh-app'):
+            self.assertEqual(compose[service]['environment']['NOCHEH_PARALLEL_GUARD_CHECKS'],'${NOCHEH_PARALLEL_GUARD_CHECKS:-3}',service)
+        self.assertIn('NOCHEH_PARALLEL_GUARD_CHECKS',EDITABLE)
+        with tempfile.TemporaryDirectory() as folder:
+            values=initialize(Path(folder))
+            self.assertEqual(values['NOCHEH_PARALLEL_GUARD_CHECKS'],'3')
+            for checks in ('1','4'):validate({**values,'NOCHEH_PARALLEL_GUARD_CHECKS':checks})
+            for checks in ('0','5','','x','03'):
+                with self.assertRaises(ValueError,msg=checks):validate({**values,'NOCHEH_PARALLEL_GUARD_CHECKS':checks})
+        with patch.dict(os.environ,{'NOCHEH_PARALLEL_GUARD_CHECKS':'4'}):self.assertEqual(parallel('NOCHEH_PARALLEL_GUARD_CHECKS',3,4),4)
+        with patch.dict(os.environ,{'NOCHEH_PARALLEL_GUARD_CHECKS':'5'}),self.assertRaises(ValueError):parallel('NOCHEH_PARALLEL_GUARD_CHECKS',3,4)
+
     def test_separate_storage_credentials_are_private_stable_and_explicitly_selected(self):
         from tools.operations.installation.configuration import compose_command,validate
         from tools.operations.installation.settings import view,save

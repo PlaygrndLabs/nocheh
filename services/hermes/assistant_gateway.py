@@ -1,6 +1,6 @@
 """Native Telegram adapter supervised by committed archive dispatch receipts."""
 
-from services.hermes.environment import secret as environment_secret
+from services.hermes.environment import parallel, secret as environment_secret
 import asyncio
 import contextvars
 import hashlib
@@ -16,9 +16,10 @@ from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, canonical, digest, i
 from .scopes import Scopes, verify_capability
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
-# Parallel Telegram turns across chats. Each isolated turn takes one of the
-# security launcher's four slots, which reviews, browser and scheduled runs share.
-TURN_CAPACITY = 2
+# Parallel Telegram turns across chats, set by the owner. Each isolated turn takes
+# one of the security launcher's NOCHEH_PARALLEL_RUNS slots, which reviews,
+# browser and scheduled runs share.
+TURN_CAPACITY = parallel('NOCHEH_PARALLEL_REPLIES', 3)
 # A native send can fail without any request, e.g. while polling reconnects.
 # Nothing reached Telegram, so the dispatcher may retry with a fresh attempt.
 NOT_TRANSMITTED = {'state':'failed','error_code':'assistant_runtime_unavailable','error_stage':'telegram_send_not_transmitted'}
