@@ -16,6 +16,9 @@ from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, canonical, digest, i
 from .scopes import Scopes, verify_capability
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
+# Parallel Telegram turns across chats. Each isolated turn takes one of the
+# security launcher's four slots, which reviews, browser and scheduled runs share.
+TURN_CAPACITY = 2
 # A native send can fail without any request, e.g. while polling reconnects.
 # Nothing reached Telegram, so the dispatcher may retry with a fresh attempt.
 NOT_TRANSMITTED = {'state':'failed','error_code':'assistant_runtime_unavailable','error_stage':'telegram_send_not_transmitted'}
@@ -124,6 +127,18 @@ def committed_adapter_class():
         async def _ensure_forum_commands(self,msg):pass
         def _is_user_authorized_from_message(self,msg):return TURN.get() is not None
         def _should_process_message(self,msg,**kwargs):return TURN.get() is not None
+        def _claim_tasks(self,field,enqueue):
+            # Native batching flushes later in its own task. Record the tasks
+            # this turn created so its dispatch waits for them and only them;
+            # enqueueing is synchronous, so no other turn can interleave.
+            before={id(task) for task in getattr(self,field,{}).values()}
+            enqueue()
+            turn=TURN.get()
+            if turn is not None:turn['tasks'].update(task for task in getattr(self,field,{}).values() if id(task) not in before)
+        def _enqueue_text_event(self,event):
+            self._claim_tasks('_pending_text_batch_tasks',lambda:super(CommittedAdapter,self)._enqueue_text_event(event))
+        def _enqueue_photo_event(self,batch_key,event):
+            self._claim_tasks('_pending_photo_batch_tasks',lambda:super(CommittedAdapter,self)._enqueue_photo_event(batch_key,event))
         def _register_handlers(self,app):
             from telegram import Update
             from telegram.ext import TypeHandler, ApplicationHandlerStop, MessageHandler, filters
@@ -190,7 +205,7 @@ class AssistantGateway:
     def __init__(self,root,spool,policy,token,model,credentials,on_failure=None):
         self.root,self.spool,self.scopes,self.token,self.model,self.credentials=Path(root),Path(spool),policy,token,model,credentials
         self.status='disabled' if not policy.enabled else 'starting'
-        self.loop=None;self.adapter=None;self.lock=None;self.action_lock=None
+        self.loop=None;self.adapter=None;self.lanes={};self.capacity=None;self.action_lock=None
         self.on_failure=on_failure
         self.stopping=False
         self.failure_reported=False
@@ -257,7 +272,7 @@ class AssistantGateway:
     def _serve(self):
         async def run():
             from gateway.config import PlatformConfig
-            self.loop=asyncio.get_running_loop();self.lock=asyncio.Lock();self.action_lock=asyncio.Lock()
+            self.loop=asyncio.get_running_loop();self.capacity=asyncio.Semaphore(TURN_CAPACITY);self.action_lock=asyncio.Lock()
             config=PlatformConfig(enabled=True,token=self.token,typing_indicator=False,gateway_restart_notification=False)
             self.adapter=committed_adapter_class()(config)
             async def message(event):
@@ -281,7 +296,6 @@ class AssistantGateway:
             self.failed()
 
     async def dispatch(self,body,progress=None,cancelled=None):
-        from telegram import Update
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
         scope=self.scopes.resolve(body['payload'],body['scope'])
         if scope is None:return {'state':'suppressed'}
@@ -289,63 +303,73 @@ class AssistantGateway:
         scope=Scopes.apply_revision(scope,claims)
         if body['event_id']!=digest(body['source_key']) or body['source_key']!=f"telegram:{self.token.split(':',1)[0]}:update:{body['payload']['update_id']}":raise ValueError('invalid_dispatch_identity')
         name=digest(body['event_id']+':'+str(body['attempt']))
-        async with self.lock:
-            receipt=self.receipts/(name+'.result')
-            if receipt.exists():return json.loads(receipt.read_bytes())
-            if cancelled and cancelled.is_set():
-                result={'state':'cancelled'};await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result));return result
-            await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id'],'attempt':body['attempt']}))
-            turn={'scope':scope,'body':body,'progress':progress,'cancelled':cancelled};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(body['source_key'])
-            try:
-                if progress:progress('assistant')
-                await self.adapter._app.process_update(Update.de_json(body['payload'],self.adapter._bot))
-                # Native text/album batching uses delayed tasks. Keep the durable
-                # dispatch open until those tasks and their native delivery finish.
-                for _ in range(4):
-                    tasks=set()
-                    for field in ('_pending_text_batch_tasks','_pending_photo_batch_tasks','_media_group_tasks','_session_tasks'):
-                        tasks.update(t for t in getattr(self.adapter,field,{}).values() if isinstance(t,asyncio.Task) and not t.done())
-                    if not tasks:break
-                    await asyncio.gather(*tasks)
-                agent=turn.get('agent_result')
-                if not agent:result={'state':'suppressed','error_code':'unsupported_message'}
-                elif agent['state']=='cancelled':result={'state':'cancelled'}
-                elif agent['state']!='done':
-                    result={'state':'failed','error_code':agent.get('error_code','model_unavailable')}
-                    if result['error_code']=='assistant_runtime_unavailable':
-                        # The child emits only Python type/function identifiers.
-                        # Preserve those bounded identifiers, never exception text,
-                        # so a failed turn can be diagnosed from its receipt.
-                        for key in ('error_type','error_stage'):
-                            value=agent.get(key)
-                            if isinstance(value,str) and re.fullmatch(r'[A-Za-z_]{1,64}',value):
-                                result[key]=value
-                    if result['error_code']=='unexpected_profile_tool':
-                        names=agent.get('unexpected_tool_names')
-                        if isinstance(names,list):
-                            result['unexpected_tool_names']=[name for name in names[:16]
-                                if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}',name)]
-                elif turn.get('delivery_skipped'):result={'state':'suppressed','error_code':'intentional_silence'}
-                elif turn.get('delivery_success'):result={'state':'done'}
-                elif (failure:=delivery_failure(turn.get('send_requests'))) is not None:
-                    result={'state':'cancelled'} if failure['state']=='failed' and cancelled and cancelled.is_set() else failure
-                else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
-            except Exception:
-                # Before native delivery starts, another attempt cannot
-                # duplicate a Telegram effect. Once sending has started, only
-                # reconciliation is safe because the remote outcome is unknown,
-                # unless the outbound boundary admitted no message request.
-                failure=delivery_failure(turn.get('send_requests')) if turn.get('delivery_started') else None
-                result=failure if failure is not None else {'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') else \
-                    {'state':'failed','error_code':'assistant_runtime_unavailable'}
-            finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
-            from .timing import safe
-            timings=safe((turn.get('agent_result') or {}).get('timings'))
-            if 'telegram_send_ms' in turn:
-                timings.update(safe({'telegram_send':{'ms':min(turn['telegram_send_ms'],86400000),'calls':turn['telegram_sends']}}))
-            if timings:result['timings']=timings
-            await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
-            return result
+        # Turns in one chat keep their arrival order; different chats run side
+        # by side, up to TURN_CAPACITY at once. Lane before capacity, always.
+        lane=self.lanes.setdefault(scope.chat_id,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
+        try:
+            async with lane['lock']:
+                receipt=self.receipts/(name+'.result')
+                if receipt.exists():return json.loads(receipt.read_bytes())
+                async with self.capacity:
+                    if cancelled and cancelled.is_set():
+                        result={'state':'cancelled'};await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result));return result
+                    return await self._run_turn(scope,body,name,progress,cancelled)
+        finally:
+            lane['users']-=1
+            if not lane['users'] and self.lanes.get(scope.chat_id) is lane:del self.lanes[scope.chat_id]
+
+    async def _run_turn(self,scope,body,name,progress,cancelled):
+        from telegram import Update
+        await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id'],'attempt':body['attempt']}))
+        turn={'scope':scope,'body':body,'progress':progress,'cancelled':cancelled,'tasks':set()};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(body['source_key'])
+        try:
+            if progress:progress('assistant')
+            await self.adapter._app.process_update(Update.de_json(body['payload'],self.adapter._bot))
+            # Native text/album batching uses delayed tasks. Keep the durable
+            # dispatch open until those tasks and their native delivery finish.
+            for _ in range(4):
+                tasks={t for t in turn['tasks'] if not t.done()}
+                if not tasks:break
+                await asyncio.gather(*tasks)
+            agent=turn.get('agent_result')
+            if not agent:result={'state':'suppressed','error_code':'unsupported_message'}
+            elif agent['state']=='cancelled':result={'state':'cancelled'}
+            elif agent['state']!='done':
+                result={'state':'failed','error_code':agent.get('error_code','model_unavailable')}
+                if result['error_code']=='assistant_runtime_unavailable':
+                    # The child emits only Python type/function identifiers.
+                    # Preserve those bounded identifiers, never exception text,
+                    # so a failed turn can be diagnosed from its receipt.
+                    for key in ('error_type','error_stage'):
+                        value=agent.get(key)
+                        if isinstance(value,str) and re.fullmatch(r'[A-Za-z_]{1,64}',value):
+                            result[key]=value
+                if result['error_code']=='unexpected_profile_tool':
+                    names=agent.get('unexpected_tool_names')
+                    if isinstance(names,list):
+                        result['unexpected_tool_names']=[name for name in names[:16]
+                            if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}',name)]
+            elif turn.get('delivery_skipped'):result={'state':'suppressed','error_code':'intentional_silence'}
+            elif turn.get('delivery_success'):result={'state':'done'}
+            elif (failure:=delivery_failure(turn.get('send_requests'))) is not None:
+                result={'state':'cancelled'} if failure['state']=='failed' and cancelled and cancelled.is_set() else failure
+            else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
+        except Exception:
+            # Before native delivery starts, another attempt cannot
+            # duplicate a Telegram effect. Once sending has started, only
+            # reconciliation is safe because the remote outcome is unknown,
+            # unless the outbound boundary admitted no message request.
+            failure=delivery_failure(turn.get('send_requests')) if turn.get('delivery_started') else None
+            result=failure if failure is not None else {'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') else \
+                {'state':'failed','error_code':'assistant_runtime_unavailable'}
+        finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
+        from .timing import safe
+        timings=safe((turn.get('agent_result') or {}).get('timings'))
+        if 'telegram_send_ms' in turn:
+            timings.update(safe({'telegram_send':{'ms':min(turn['telegram_send_ms'],86400000),'calls':turn['telegram_sends']}}))
+        if timings:result['timings']=timings
+        await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
+        return result
 
     def call(self,body):
         if self.loop is None:raise RuntimeError('telegram_not_ready')

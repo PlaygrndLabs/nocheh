@@ -927,8 +927,10 @@ activation remains separate.
    recall and group isolation passed
    ([status](docs/mvp-acceptance-status.md)). Open items:
    - Reply latency: the median was 88 s and the slowest 172 s. Most of it was the
-     Hermes run queue (median 30 s), because Telegram dispatch holds one lock
-     across all chats (`services/hermes/assistant_gateway.py` `dispatch`).
+     Hermes run queue (median 30 s), because Telegram dispatch held one lock
+     across all chats. Per-chat dispatch lanes with two shared slots
+     ([ADR-0125](docs/adr/0125-per-chat-telegram-dispatch-lanes.md)) are in
+     source; their Hermes unit tests and a live timing check are pending.
      Preparation took 12.3 s on an idle turn.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.
