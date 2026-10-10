@@ -20,7 +20,7 @@ except ModuleNotFoundError:
     from embedding_config import embeddings
 
 MODEL = 'text-embedding-3-small'
-REASONING_MODEL = 'gpt-5.6-sol'
+REASONING_MODEL = os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5')
 PILOT_LIMIT_MICRODOLLARS = 5_000_000
 MAX_MONTHLY_LIMIT_CENTS = 1_500
 REQUEST_LIMIT = 1_500  # Subscription reasoning attempts per budget window.

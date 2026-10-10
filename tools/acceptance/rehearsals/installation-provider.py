@@ -226,7 +226,7 @@ def provider():
 
     @app.get('/v1/models')
     def models():
-        return {'object': 'list', 'data': [{'id': 'gpt-5.6-sol', 'object': 'model', 'owned_by': 'fixture'}]}
+        return {'object': 'list', 'data': [{'id': os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5'), 'object': 'model', 'owned_by': 'fixture'}]}
 
     app.include_router(chat.router, prefix='/v1')
     app.include_router(embeddings.router, prefix='/v1')

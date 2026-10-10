@@ -132,4 +132,5 @@ records current implementation and activation.
 | [0120](0120-loops-outside-inngest.md) | Classify every Nocheh loop that runs outside Inngest | Extends 0041, 0042 and 0047; removes the superseded single-database worker |
 | [0121](0121-operational-telemetry-retention.md) | Expire broker model-call events and guard invalidation notes | Extends 0111 and 0112; action and tool security events stay as the owner's audit |
 | [0122](0122-honcho-fresh-start.md) | Honcho fresh start deletes earlier Nocheh workspaces | Implements 0109 step H5 on top of 0115; deletes only workspaces Nocheh recorded |
+| [0123](0123-retired-sources-leave-native-history.md) | Retired sources leave stored Hermes native history | Extends 0021; rewrites the profile's native rows before its next turn, Hermes' workflow unchanged |
 | [0124](0124-native-review-once-per-source.md) | Hermes native memory review runs once per source | Extends 0097 and 0088; later epochs review only unstarted sources and uncertain reviews have a bounded number of observations |

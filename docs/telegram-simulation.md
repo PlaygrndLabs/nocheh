@@ -240,8 +240,9 @@ evidence; do not change operating policy or reset the ledger.
 [`real_model_fixture`](../tools/acceptance/real_model_fixture.py) switches an
 owned installation that has passed the HTTP Telegram rehearsal to real answers:
 `python3 -m tools.acceptance.real_model_fixture --directory <prepared-directory>
---installation <operating state> --authorized [--honcho real]`. It requires the
-operating installation's ChatGPT subscription login and running provider, and
+--installation <operating state> --authorized [--honcho real] [--model M]`. It
+requires the operating provider's login for that model (Claude Sonnet 5.5 by
+default) and running provider, applies the model to every fixture service, and
 the owner's authorization to use that route beside the operating stack. The
 fixture's `cliproxy-api` becomes the model relay, still serving the Telegram
 mock, on one internal bridge network shared only with the operating provider.

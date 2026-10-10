@@ -42,7 +42,7 @@ class EmbeddingConfigTests(unittest.TestCase):
                 self.assertEqual(honcho['EMBEDDING_MODEL_CONFIG__MODEL'],values['NOCHEH_EMBEDDING_MODEL'])
                 self.assertEqual(honcho['EMBEDDING_VECTOR_DIMENSIONS'],'1536')
                 self.assertEqual(meter['NOCHEH_EMBEDDING_MODEL'],values['NOCHEH_EMBEDDING_MODEL'])
-                self.assertEqual(honcho['DERIVER_MODEL_CONFIG__MODEL'],'gpt-5.6-sol')
+                self.assertEqual(honcho['DERIVER_MODEL_CONFIG__MODEL'],'claude-sonnet-5-5')
                 for name in ('honcho.env','meter.env'):
                     self.assertNotIn(values['OPENAI_API_KEY'],(state/name).read_text())
                     self.assertNotIn('unrelated-shell-key',(state/name).read_text())

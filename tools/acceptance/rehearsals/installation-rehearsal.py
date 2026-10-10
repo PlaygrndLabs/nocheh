@@ -85,7 +85,7 @@ def main():
         native.update({prefix + '__OVERRIDES__BASE_URL': 'http://honcho-provider-gateway:8790/v1',
                        prefix + '__OVERRIDES__API_KEY_ENV': 'EXPERIMENT_INTERNAL_TOKEN'})
         if prefix != 'EMBEDDING_MODEL_CONFIG':
-            native.update({prefix + '__TRANSPORT': 'openai', prefix + '__MODEL': 'gpt-5.6-sol'})
+            native.update({prefix + '__TRANSPORT': 'openai', prefix + '__MODEL': config['NOCHEH_MODEL']})
     native['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE'] = 'json_object'
     for level in ('minimal', 'low', 'medium', 'high', 'max'):
         native[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS'] = '2500'
