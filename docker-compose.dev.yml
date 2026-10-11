@@ -27,6 +27,8 @@ services:
       start_period: 180s
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/src:/app/src:ro
+      # tsconfig.json compiles test/ with src/; a stale image copy breaks the watch build.
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/test:/app/test:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/dashboard:/app/dashboard:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/app/tools:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/hermes/dashboard:/app/services/hermes/dashboard:ro
