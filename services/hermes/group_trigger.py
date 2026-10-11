@@ -3,6 +3,8 @@ import os
 import re
 
 MODES = ('addressed', 'all')
+# The product's own name, in Latin and Persian script, always addresses the bot.
+BUILT_IN_NAMES = ('Nocheh', 'نوچه')
 
 
 def reply_mode():
@@ -22,6 +24,8 @@ def names():
 def addressed(facts, text, username, names):
     """A reply to the bot or tap on its name, its @username, or a name opening the message.
 
+    The names are "Nocheh" and "نوچه", the bot's display name, and owner-set names.
+
     `facts` come from the captured original because the routed message keeps
     neither its reply target nor its entities; `text` is the routed text.
     """
@@ -30,4 +34,4 @@ def addressed(facts, text, username, names):
     handles = facts.get('handles') if isinstance(facts.get('handles'), list) else []
     if username and username.lower() in handles: return True
     opening = text if isinstance(text, str) else ''
-    return any(re.match(r'\W*' + re.escape(name) + r'(?!\w)', opening, re.IGNORECASE) for name in names if name)
+    return any(re.match(r'\W*' + re.escape(name) + r'(?!\w)', opening, re.IGNORECASE) for name in (*BUILT_IN_NAMES, *names) if name)
