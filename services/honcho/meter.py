@@ -12,7 +12,7 @@ import urllib.request
 from decimal import Decimal, ROUND_CEILING
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 try:
     from tools.operations.provider.embedding_config import embeddings
@@ -67,6 +67,38 @@ class Ledger:
             if monthly_since is not None:
                 for (call,) in db.execute("SELECT id FROM calls WHERE route='/v1/embeddings' AND started>=? AND settlement_version=0 AND status IS NOT NULL",(monthly_since,)).fetchall():
                     self._settle_call(db,call)
+            db.execute('CREATE TABLE IF NOT EXISTS call_rollups(month TEXT NOT NULL, route TEXT NOT NULL, outcome TEXT NOT NULL, '
+                       'calls INTEGER NOT NULL, reserved INTEGER NOT NULL, duration_ms INTEGER NOT NULL, PRIMARY KEY(month,route,outcome))')
+            db.execute('CREATE INDEX IF NOT EXISTS calls_started ON calls(started)')
+        self._rolled=None
+        self.roll_up()
+
+    def roll_up(self, now=None):
+        """Fold finished calls of closed months into per-month totals.
+
+        Calls of the current cap window and of the previous calendar month stay
+        as rows. Older rows become one total per month, route and outcome, so
+        lifetime holds, released holds and unverified legacy errors stay
+        visible and counted while the table stays bounded. The pilot window
+        counts every call, so nothing is folded before monthly mode.
+        """
+        current=datetime.fromtimestamp(now or time.time(),timezone.utc).replace(day=1,hour=0,minute=0,second=0,microsecond=0)
+        if self._rolled==current:return 0
+        previous=(current-timedelta(days=1)).replace(day=1)
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            start,mode=self.window(db)
+            if mode=='pilot':return 0
+            before=min(start,previous.timestamp())
+            rows=db.execute("SELECT strftime('%Y-%m',started,'unixepoch'),route,coalesce(outcome,CASE WHEN status IS NULL THEN 'unfinished' ELSE 'response' END),"
+                            "count(*),coalesce(sum(reserved),0),coalesce(sum(duration_ms),0) FROM calls WHERE started<? GROUP BY 1,2,3",(before,)).fetchall()
+            for month,route,outcome,calls,reserved,duration in rows:
+                db.execute('INSERT INTO call_rollups(month,route,outcome,calls,reserved,duration_ms) VALUES(?,?,?,?,?,?) ON CONFLICT(month,route,outcome) '
+                           'DO UPDATE SET calls=calls+excluded.calls,reserved=reserved+excluded.reserved,duration_ms=duration_ms+excluded.duration_ms',
+                           (month,route or '',outcome,calls,reserved,duration))
+            folded=db.execute('DELETE FROM calls WHERE started<?',(before,)).rowcount
+        self._rolled=current
+        return folded
 
     @staticmethod
     def _reported_tokens(usage):
@@ -163,6 +195,7 @@ class Ledger:
                 (route, hashlib.sha256(body).hexdigest(), amount, time.time(),json.dumps(audit))).lastrowid
 
     def finish(self, call, status, duration, usage, outcome=None):
+        self.roll_up()
         with self.connect() as db:
             row=db.execute('SELECT route,started FROM calls WHERE id=?',(call,)).fetchone()
             if outcome not in (None,'response','http_error','transport_error'):
@@ -187,6 +220,7 @@ class Ledger:
         with self.connect() as db:
             db.row_factory = sqlite3.Row
             calls = [dict(row) for row in db.execute('SELECT * FROM calls ORDER BY id')]
+            rollups = [dict(row) for row in db.execute('SELECT * FROM call_rollups ORDER BY month,route,outcome')]
             start,mode=self.window(db)
             monthly_limit,revision=db.execute('SELECT monthly_limit,revision FROM policy WHERE id=1').fetchone()
             selected=db.execute('SELECT provider,model,dimensions FROM embedding_route WHERE id=1').fetchone()
@@ -200,13 +234,13 @@ class Ledger:
                 'revision':revision,'window_started_at':datetime.fromtimestamp(start,timezone.utc).isoformat(),
                 'mode':mode,'reserved_usd':reserved/1e6,'remaining_usd':max(0,limit-reserved)/1e6,
                 'counted_toward_cap_usd':reserved/1e6,
-                'lifetime_reserved_usd':sum(c['reserved'] for c in calls)/1e6,
+                'lifetime_reserved_usd':(sum(c['reserved'] for c in calls)+sum(r['reserved'] for r in rollups))/1e6,
                 'released_error_holds_usd':released/1e6,
                 'legacy_error_exposure_unverified_usd':legacy/1e6,
                 'embedding_route':dict(selected) if selected else None,
                 'embedding_hold_usd':embedding.reservation/1e6,
                 'pricing_usd_per_million_embedding_tokens':embedding.price_per_million,
-                'note': 'Reported successes settle by tokens. Explicit HTTP errors do not count toward the cap; transport failures, unfinished and unreported calls retain their hold. Legacy error type and provider billing remain unverified; this is not an invoice.', 'calls': calls}
+                'note': 'Reported successes settle by tokens. Explicit HTTP errors do not count toward the cap; transport failures, unfinished and unreported calls retain their hold. Legacy error type and provider billing remain unverified; this is not an invoice.', 'calls': calls, 'monthly_rollups': rollups}
 
     def summary(self):
         report=self.report();start=datetime.fromisoformat(report['window_started_at']).timestamp()

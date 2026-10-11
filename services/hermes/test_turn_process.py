@@ -47,7 +47,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         signature=base64.urlsafe_b64encode(hmac.new(self.secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
-    async def execute(self,source,cancel=None,delivery_allowed=True):
+    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None):
         with tempfile.TemporaryDirectory() as folder:
             self.env=None;original=asyncio.create_subprocess_exec
             async def spawn(*args,**kwargs):
@@ -56,7 +56,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
                 events=[]
                 result=await _run_process(Path(folder),Scope('-10','42',False,'group'),
-                    {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser'},'model',
+                    {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(access_token='ephemeral'),'session',events.append,cancel)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 return result,events
@@ -65,6 +65,14 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
+    async def test_untranscribed_earlier_voice_is_named_without_entering_memory_query(self):
+        check='import sys,json; body=json.load(sys.stdin); assert body["memory_query"]=="original"; print(json.dumps({"state":"done","text":body["text"]}))'
+        result,_=await self.execute(check,extra={'untranscribed_voice':2})
+        self.assertIn('2 voice notes were received and archived but not transcribed yet',result['text'])
+        self.assertIn('Do not say that no voice note was received or found',result['text'])
+        for value in (None,0,True,'1',21):
+            result,_=await self.execute(check,extra={'untranscribed_voice':value})
+            self.assertNotIn('voice note',result['text'])
     async def test_completed_child_revocation_keeps_safe_timings_without_answer_or_delivery(self):
         result,events=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"revoked answer","session_id":"private-session","timings":{"conversation":{"ms":10,"calls":1},"private_phase":{"ms":3,"calls":1},"total":{"ms":12,"calls":1,"content":"private"}}}))',delivery_allowed=False)
         self.assertEqual(result,{'state':'failed','error_code':'guard_context_changed',

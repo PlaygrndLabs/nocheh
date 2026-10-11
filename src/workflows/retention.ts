@@ -7,7 +7,8 @@ import {closedStates} from './store.js';
 /**
  * Optional expiry of Inngest's own run history and telemetry, Nocheh's spent
  * workflow publication records and run links, broker model-call events and
- * guard invalidation notes, and superseded Honcho context summaries. Nocheh
+ * guard invalidation notes, superseded Honcho context summaries, and guard
+ * fragments of already prepared sources. Nocheh
  * receipts, the workflow registry and Inngest's queue state are never removed.
  * Fourteen days is the default; zero keeps every row.
  */
@@ -129,6 +130,22 @@ export async function pruneMemorySummaries(derived:pg.ClientBase,before:Date,bat
 }
 export const expireMemorySummaries=(derived:pg.ClientBase,before:Date,pause=200)=>drain(()=>pruneMemorySummaries(derived,before),pause);
 
+export type PrunedFragments={guard_fragments:number};
+/**
+ * Remove guard fragments of sources that already have a published guarded
+ * revision. Fragments only let an interrupted preparation resume without
+ * repeating detector calls; a source with an active revision is never prepared
+ * again, so they are never read. A fragment younger than `before` is kept, so a
+ * preparation that is still finishing keeps its own checkpoints.
+ */
+export async function pruneGuardFragments(derived:pg.ClientBase,before:Date,batch=5000):Promise<PrunedFragments> {
+  if(!Number.isSafeInteger(batch)||batch<1)throw Error('invalid_retention_batch');
+  const fragments=await derived.query(`DELETE FROM guard_fragments WHERE ctid IN (SELECT f.ctid FROM guard_fragments f
+    JOIN guard_sources s ON s.id=f.source_id WHERE s.active_revision IS NOT NULL AND f.created_at<$1 LIMIT $2)`,[before,batch]);
+  return {guard_fragments:fragments.rowCount??0};
+}
+export const expireGuardFragments=(derived:pg.ClientBase,before:Date,pause=200)=>drain(()=>pruneGuardFragments(derived,before),pause);
+
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   let days=0;
   try{days=retentionDays();}catch{console.error(JSON.stringify({event:'workflow_history_retention',state:'invalid'}));process.exit(1);}
@@ -157,6 +174,8 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
     await run('telemetry_retention',([client])=>expireTelemetry(client!,cutoff),['nocheh_control','nocheh_control','NOCHEH_CONTROL_PASSWORD']);
     // The derived runtime role cannot delete, so this local worker uses the administrator role.
     await run('memory_summary_retention',([derived])=>expireMemorySummaries(derived!,new Date(Date.now()-3600000)),
+      ['nocheh','nocheh_derived','POSTGRES_PASSWORD']);
+    await run('guard_fragment_retention',([derived])=>expireGuardFragments(derived!,new Date(Date.now()-3600000)),
       ['nocheh','nocheh_derived','POSTGRES_PASSWORD']);
     // Expiry is measured in days, so one check per day is enough.
     await delay(86400000);

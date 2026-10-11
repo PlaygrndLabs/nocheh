@@ -13,7 +13,7 @@ import {CaptureCoordinator} from './capture.js';
 import {GuardRepository} from './guards.js';
 import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
-import {ReprocessingRepository,subscriptionTranscription,utf8Extraction,type DerivationEngine} from './reprocessing.js';
+import {ReprocessingRepository,subscriptionTranscription,textExtraction,type DerivationEngine} from './reprocessing.js';
 import {PreparationRepository} from './preparation.js';
 import {SourceAccessRepository} from './access.js';
 import {SourceRepository} from './retrieval.js';
@@ -57,7 +57,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   runtime:RuntimeCall;honcho:HonchoCall;transcription?:DerivationEngine;serviceToken?:string}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
-  const transcription=options.transcription??subscriptionTranscription(options.runtime),extraction=utf8Extraction();
+  const transcription=options.transcription??subscriptionTranscription(options.runtime),extraction=textExtraction();
   const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction);
   const retirements=new SourceRetirementRepository(stores,archive);

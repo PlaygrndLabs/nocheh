@@ -161,6 +161,31 @@ export class TelegramDispatchRepository {
       if(live.has(id)&&!started.has(id)&&await this.access.space((await this.archive.captured(id)).reference)===space)return true;
     return false;
   }
+  /**
+   * Earlier voice notes in this conversation that are archived but still wait
+   * for transcription. A later message may start before them (see above), so
+   * its turn is told they exist rather than answering as if none arrived.
+   */
+  private async untranscribedEarlier(source:SourceReference,space:string):Promise<number> {
+    const own=(await this.archive.pool.query(`SELECT scope,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE id=$1`,[source.id])).rows[0];
+    if(!own||!/^\d{1,19}$/.test(String(own.update_id)))return 0;
+    const earlier=(await this.archive.pool.query(`SELECT id FROM (SELECT e.id,convert_from(e.payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events e
+      WHERE e.scope=$1 AND e.id<>$2 AND e.channel='telegram' AND e.kind='telegram_update' AND e.origin='live' AND e.received_at>now()-interval '1 day'
+      AND EXISTS(SELECT 1 FROM artifacts a WHERE a.event_id=e.id AND a.kind IN ('voice','audio','video_note'))) recent
+      WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$3::numeric ORDER BY update_id::numeric DESC LIMIT 20`,
+      [own.scope,source.id,own.update_id])).rows.map(row=>row.id as string);
+    if(!earlier.length)return 0;
+    const started=new Set((await this.control.query(`SELECT event_id FROM dispatches WHERE event_id=ANY($1::text[])
+      AND state NOT IN ('pending','failed')`,[earlier])).rows.map(row=>row.event_id as string));
+    const retired=await this.access.retirements?.retiredEvents(earlier);
+    let count=0;
+    for(const id of earlier) {
+      if(started.has(id)||retired?.has(id))continue;
+      const status=await this.preparation.status(id);
+      if(['attachments','transcription'].includes(status.stage)&&status.state!=='failed'&&await this.access.space((await this.archive.captured(id)).reference)===space)count++;
+    }
+    return count;
+  }
   private async build(source:SourceReference,attempt:number):Promise<{reference:DerivativeReference;input:Input}|Observation> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
@@ -187,8 +212,10 @@ export class TelegramDispatchRepository {
     }
     // Command authority comes from the original owner DM, never a guarded edit.
     const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
+    const untranscribed=await this.untranscribedEarlier(source,space);
     const text=selected.event.text??null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
-      payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode};
+      payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control});await this.current(input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,

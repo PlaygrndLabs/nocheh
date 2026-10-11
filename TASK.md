@@ -42,8 +42,11 @@ later compaction summaries; owner native recall skips the same rows read-only
 [native history checks](services/hermes/test_retired_history.py),
 [storage checks](test/store-source-retirement.test.ts)). The pinned-Hermes replay
 and search check runs only in the Hermes image. Pending: the owner-Mac rerun of
-the simulator's retired-fact case; Hermes native notes (`MEMORY.md`, `USER.md`)
-are not yet checked for retired content.
+the simulator's retired-fact case. Hermes native notes (`MEMORY.md`,
+`USER.md` and their backups) now lose entries that cite a retired source or that
+a withheld turn's memory call wrote, checked before every turn
+([decision](docs/adr/0129-retired-sources-leave-native-notes.md),
+[checks](services/hermes/test_retired_history.py)); an uncited paraphrase stays.
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
@@ -956,8 +959,21 @@ activation remains separate.
      Preparation took 12.3 s on an idle turn.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.
-   - Voice transcription has no route on the Claude provider.
+   - Voice transcription has no route on the Claude provider. While a voice
+     note waits for its transcript, a later message in that chat starts after
+     the two-minute order bound and its turn is told that an earlier voice note
+     was received but is not transcribed yet, so the reply no longer says no
+     voice note was found ([dispatch check](test/store-telegram-dispatch.test.ts),
+     [turn check](services/hermes/test_turn_process.py)). Pending: a real-model
+     rerun of the simulator's speech-outage scenario.
    - Peer cards are workspace-wide, so only owner turns read them.
+   - PDF attachments: preparation now reads a PDF's text layer (pinned
+     `unpdf` 1.8.1, in a worker thread with a heap limit and 30-second
+     deadline), whole pages up to 200,000 bytes, and records an explicit
+     status for unreadable or scanned PDFs
+     ([checks](test/pdf-text.test.ts)). Scanned pages are not read (no OCR).
+     Pending: the simulator's document scenario now also checks the extracted
+     text.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)
    are implemented and pass focused synthetic checks: the `stage_timings` table with
    14-day retention, Hermes phases and window kept from the run receipt, Inngest
@@ -991,9 +1007,14 @@ activation remains separate.
    unbounded: guarded prepared copies (`runtime_prepared_values` and
    `runtime_prepared_inputs`) of superseded guard epochs, which ADR-0109's
    single-workspace model changes; finished Hermes journals (outbound, dispatch,
-   async-run and managed-run files), which boot recovery also rescans; the
-   Honcho meter's call rows, which budget accounting sums and need a roll-up
-   rather than deletion; and spool files that fail permanently.
+   async-run and managed-run files), which boot recovery also rescans (pruning
+   them is an open owner decision); and spool files that fail permanently. The
+   Honcho meter now folds calls older than the previous month into monthly
+   totals ([decision](docs/adr/0131-honcho-meter-monthly-rollup.md),
+   [checks](services/honcho/test_meter.py)). Guard fragments
+   of already prepared sources are now removed by the daily retention pass
+   ([decision](docs/adr/0130-spent-guard-fragment-retention.md),
+   [check](test/workflow-retention.test.ts)).
 10. Inngest orchestration: every Nocheh loop outside Inngest is classified
     ([decision](docs/adr/0120-loops-outside-inngest.md)). Product workflows,
     including the Hermes turn and its reply send, run as Inngest functions;

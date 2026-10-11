@@ -61,6 +61,8 @@ def recall(root, body, retirements=None):
     after = body.get('after_profile', '')
     profiles = [p for p in profiles if p.name > after]
     hits = []
+    from .retired_history import IDENTIFIER, service_lookup, withheld_ids
+    lookup = retirements or service_lookup
     for profile in profiles[:100]:
         for name in ('MEMORY.md', 'USER.md'):
             file = profile / 'memories' / name
@@ -68,18 +70,24 @@ def recall(root, body, retirements=None):
                 raise ValueError('memory_path_denied')
             if file.is_file():
                 with file.open('rb') as source: raw = source.read(256 * 1024)
-                for line in raw.decode('utf-8', errors='replace').splitlines():
-                    if all(word in line.casefold() for word in query.casefold().split()):
-                        hits.append({'profile': profile.name, 'kind': 'native_note', 'file': name,
-                                     'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line)})
+                lines = [line for line in raw.decode('utf-8', errors='replace').splitlines()
+                         if all(word in line.casefold() for word in query.casefold().split())]
+                # A note citing a retired source is skipped until the profile's next turn removes it.
+                cited = sorted({event for line in lines for event in IDENTIFIER.findall(line)})
+                hidden = set()
+                for start in range(0, len(cited), 200):
+                    value = lookup(cited[start:start+200]);hidden |= set(value['retired']) | set(value['answered'])
+                for line in lines:
+                    if set(IDENTIFIER.findall(line)) & hidden: continue
+                    hits.append({'profile': profile.name, 'kind': 'native_note', 'file': name,
+                                 'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line)})
         from .isolated_profile import database_path
         database = database_path(profile)
         if database.is_symlink(): raise ValueError('session_path_denied')
         if database.is_file():
             # Read-only: a profile whose turns have not run since a retirement
             # skips the rows its next turn will withhold.
-            from .retired_history import service_lookup, withheld_ids
-            withheld = withheld_ids(database, retirements or service_lookup)
+            withheld = withheld_ids(database, lookup)
             db = SessionDB(database, read_only=True)
             try:
                 for row in db.search_messages(query, limit=limit):
