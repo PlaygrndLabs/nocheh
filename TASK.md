@@ -37,8 +37,12 @@ of it was retired: Honcho memory and archive search had dropped it, but Hermes
 replayed its native session history. Before each turn the Hermes service now
 rewrites that profile's stored rows for retired messages, their turn's tool work,
 answers that were themselves retired, tool results citing a retired source and
-later compaction summaries; owner native recall skips the same rows read-only
+later compaction summaries; owner native recall skips the same rows read-only.
+Each withheld row keeps its place as a placeholder saying it was retired and
+naming the retired message or reply by its Archive source ID; restoring does not
+rebuild the row
 ([decision](docs/adr/0123-retired-sources-leave-native-history.md),
+[placeholders](docs/adr/0132-retired-history-placeholders.md),
 [native history checks](services/hermes/test_retired_history.py),
 [storage checks](test/store-source-retirement.test.ts)). The pinned-Hermes replay
 and search check runs only in the Hermes image. Pending: the owner-Mac rerun of

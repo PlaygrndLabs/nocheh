@@ -65,14 +65,14 @@ export class SourceRetirementRepository {
   /**
    * Native Hermes history keeps its own copy of each turn. For the incoming
    * events recorded there, report which are retired (directly or as a reaction
-   * to a retired message) and which have a retired delivered reply. The
-   * revision changes with every retirement decision, so an unchanged revision
-   * means nothing in native history needs rechecking.
+   * to a retired message) and, for each with a retired delivered reply, that
+   * reply's event IDs. The revision changes with every retirement decision, so
+   * an unchanged revision means nothing in native history needs rechecking.
    */
   async historyRetirements(eventIds:string[]) {
     const revision=String((await this.stores.control.query(`SELECT count(*)::text||':'||coalesce(max(created_at)::text,'') AS revision
       FROM source_retirement_history`)).rows[0].revision);
-    if(!eventIds.length)return {revision,retired:[] as string[],answered:[] as string[]};
+    if(!eventIds.length)return {revision,retired:[] as string[],answered:{} as Record<string,string[]>};
     const retired=await this.retiredEvents(eventIds);
     const reactions=(await this.archive.pool.query(`SELECT event_id,target_id FROM source_relations
       WHERE event_id=ANY($1::text[]) AND kind='reaction_to'`,[eventIds])).rows;
@@ -84,8 +84,12 @@ export class SourceRetirementRepository {
     const records=(await this.archive.pool.query(`SELECT id,kind,scope FROM events WHERE id=ANY($1::text[]) AND kind='telegram_update'`,[eventIds])).rows;
     const replies=await archiveReplyPreviews(this.archive.pool,this.stores.control,records);
     const retiredReplies=await this.retiredEvents([...replies.values()].flat().map(reply=>reply.id));
-    const answered=[...replies].filter(([,previews])=>previews.some(reply=>retiredReplies.has(reply.id))).map(([id])=>id);
-    return {revision,retired:[...retired].sort(),answered:answered.sort()};
+    const answered:Record<string,string[]>={};
+    for(const [id,previews] of replies) {
+      const ids=[...new Set(previews.map(reply=>reply.id).filter(reply=>retiredReplies.has(reply)))].sort();
+      if(ids.length)answered[id]=ids;
+    }
+    return {revision,retired:[...retired].sort(),answered};
   }
   async get(principal:Reader,eventId:string) {
     admin(principal);const id=await this.identity(eventId);
