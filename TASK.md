@@ -175,8 +175,8 @@ owner Claude login through the dev dashboard. The owner answered that one
 reasoning provider and model is enough for the MVP phase.
 
 Group chats now answer only when a message addresses Nocheh: a reply to one of
-its messages, its @username or a tap on its name, or its display name (or an
-owner-set name) opening the message. Other group messages are archived without
+its messages, its @username or a tap on its name, or “Nocheh”, “نوچه”, its
+display name or an owner-set name opening the message. Other group messages are archived without
 a turn. Settings › Telegram access has the “Group replies” choice (only when
 addressed by default, or every message) and extra names
 ([decision](docs/adr/0133-group-replies-when-addressed.md),
