@@ -19,6 +19,10 @@ class GroupTriggerTests(unittest.TestCase):
         for text in ('Nocheh, who wants lunch?', 'nocheh what do you think', '  Nocheh?', 'نوچه، نظرت چیست؟', 'نوچه‌جان کمک کن'):
             self.assertTrue(check({'direct': False, 'handles': []}, text), text)
         self.assertFalse(addressed({'direct': False, 'handles': ['nocheh_bot']}, 'Hi', None, []), 'an unknown username matches nothing')
+        for text in ('Nocheh, suggest three names', 'نوچه، سه اسم پیشنهاد بده'):
+            self.assertTrue(addressed({'direct': False, 'handles': []}, text, None, []), 'the product name always addresses the bot: '+text)
+        self.assertTrue(addressed({}, 'Nocheh, hi', 'other_bot', ['Helper']), 'the product name works beside a different display name')
+        self.assertFalse(addressed({}, 'Helper2 hi', 'other_bot', ['Helper']))
         self.assertFalse(addressed({'direct': 'true', 'handles': 'nocheh_bot'}, None, 'nocheh_bot', ['Nocheh']), 'malformed facts fail closed')
 
     def test_owner_settings_default_to_addressed_and_reject_malformed_values(self):
