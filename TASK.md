@@ -170,6 +170,19 @@ counts only Codex files. Build, [relay checks](test/provider-oauth.test.ts),
 owner Claude login through the dev dashboard. The owner answered that one
 reasoning provider and model is enough for the MVP phase.
 
+Group chats now answer only when a message addresses Nocheh: a reply to one of
+its messages, its @username or a tap on its name, or its display name (or an
+owner-set name) opening the message. Other group messages are archived without
+a turn. Settings › Telegram access has the “Group replies” choice (only when
+addressed by default, or every message) and extra names
+([decision](docs/adr/0132-group-replies-when-addressed.md),
+[dispatch checks](test/store-telegram-dispatch.test.ts),
+[trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
+gateway check ([test](services/hermes/test_gateway.py)) and the
+`group_answers_only_when_addressed` simulator scenario run only on the owner's
+machine and have not been run. Pending: a live group check that an unaddressed
+message gets no reply and an addressed one does.
+
 </current>
 
 <verification>

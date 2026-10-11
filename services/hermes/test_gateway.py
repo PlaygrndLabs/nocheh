@@ -120,6 +120,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
                     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
                     return {'event_id':event,'source_key':key,'scope':'-20','attempt':1,'archive_credential':'turn.'+body+'.'+signature,
+                        'group_addressing':{'direct':True,'handles':[]},
                         'payload':{'update_id':update_id,'message':{'message_id':update_id,'date':1700000000,'chat':{'id':-20,'type':'group','title':'Fixture'},'from':{'id':456,'is_bot':False,'first_name':'User'},'text':text,'entities':[{'type':'bot_command','offset':0,'length':6}] if text.startswith('/') else []}}}
                 try:
                     first=envelope(1,'Hello')
@@ -146,6 +147,13 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(await gateway.dispatch(media_body),{'state':'done'},str(media.keys()))
                         self.assertEqual(handled[-1].text,msg['caption'])
                     self.assertEqual(len(handled),8)
+                    unaddressed={**envelope(50,'Who wants lunch?'),'group_addressing':{'direct':False,'handles':['someone_else']}}
+                    self.assertEqual(await gateway.dispatch(unaddressed),{'state':'suppressed','error_code':'not_addressed'})
+                    self.assertEqual(len(handled),8,'a message for the whole group starts no turn')
+                    for addressed in ({**envelope(51,'Nocheh, who wants lunch?'),'group_addressing':{'direct':False,'handles':[]}},
+                                      {**envelope(52,'Lunch, @nocheh_fixture_bot?'),'group_addressing':{'direct':False,'handles':['nocheh_fixture_bot']}}):
+                        self.assertEqual(await gateway.dispatch(addressed),{'state':'done'},addressed['payload']['message']['text'])
+                    self.assertEqual(len(handled),10,'the display name from getMe and the @username address the bot')
                     # Fixture rejects getFile: none of these paths downloads or
                     # invokes the native sticker vision helper again.
                     lane={'lock':asyncio.Lock(),'users':0};gateway.lanes['-20']=lane
@@ -315,6 +323,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
                     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
                     return {'event_id':event,'source_key':key,'scope':chat,'attempt':1,'archive_credential':'turn.'+body+'.'+signature,
+                        'group_addressing':{'direct':True,'handles':[]},
                         'payload':{'update_id':update_id,'message':{'message_id':update_id,'date':1700000000,'chat':{'id':int(chat),'type':'group','title':'Fixture'},'from':{'id':456,'is_bot':False,'first_name':'User'},'text':text,'entities':[]}}}
                 async def until(condition):
                     for _ in range(500):

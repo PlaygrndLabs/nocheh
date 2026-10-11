@@ -8,7 +8,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
-import {dispatchPayload} from '../src/stores/telegram-dispatch.js';
+import {dispatchPayload,groupAddressing} from '../src/stores/telegram-dispatch.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
@@ -23,6 +23,25 @@ test('guarded representations cannot change Telegram routing or embed unobserved
   assert.equal(selected.update_id,1);assert.equal(selected.message.message_id,2);assert.equal(selected.message.chat.id,-4);
   assert.equal(selected.message.from.id,5);assert.equal(selected.message.from.first_name,'Prepared name');assert.equal(selected.message.message_thread_id,6);
   assert.equal(selected.message.text,'Prepared text');assert.equal(selected.message.reply_to_message,undefined);
+});
+
+test('group addressing facts come from the captured reply target and mention entities',()=>{
+  const group=(message:any)=>({update_id:1,message:{message_id:2,chat:{id:-4,type:'supergroup'},from:{id:5,is_bot:false},...message}});
+  assert.equal(groupAddressing({update_id:1,message:{chat:{id:5,type:'private'},from:{id:5},text:'hi'}},'777'),null,'private chats are not gated');
+  assert.deepEqual(groupAddressing(group({text:'Who wants lunch?'}),'777'),{direct:false,handles:[]});
+  assert.deepEqual(groupAddressing(group({text:'yes',reply_to_message:{message_id:1,from:{id:777,is_bot:true}}}),'777'),{direct:true,handles:[]});
+  assert.deepEqual(groupAddressing(group({text:'yes',reply_to_message:{message_id:1,from:{id:8,is_bot:false}}}),'777'),{direct:false,handles:[]},
+    'a reply to another participant is not addressed to the bot');
+  assert.equal(groupAddressing(group({text:'hi',message_thread_id:1,is_topic_message:true,
+    reply_to_message:{message_id:1,from:{id:777,is_bot:true},forum_topic_created:{name:'Plans'}}}),'777')!.direct,false,
+    'every topic message replies to the topic opening, even one the bot created');
+  // Offsets count UTF-16 units: the emoji before the mention takes two.
+  const text='🙂 سلام @Nocheh_Bot و @ali_k /help@Nocheh_Bot';
+  const at=(part:string)=>text.indexOf(part);
+  assert.deepEqual(groupAddressing(group({text,entities:[{type:'mention',offset:at('@Nocheh_Bot'),length:11},{type:'mention',offset:at('@ali_k'),length:6},
+    {type:'bot_command',offset:at('/help@'),length:16},{type:'bold',offset:0,length:2}]}),'777'),{direct:false,handles:['ali_k','nocheh_bot']});
+  assert.deepEqual(groupAddressing(group({caption:'look',caption_entities:[{type:'text_mention',offset:0,length:4,user:{id:777,is_bot:true}}]}),'777'),
+    {direct:true,handles:[]},'a tap on the bot name in a caption addresses it');
 });
 
 test('Telegram workflow dispatch uses current prepared derivatives and durable same-identity recovery across stores',
@@ -99,6 +118,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     mode='lost_ack';assert.equal((await advance(first.reference.id)).state,'running');const sent=calls.at(-1)!.input;
     assert.equal(sent.text,'Owner prepared text');assert.equal(sent.payload.message.chat.id,Number(group));assert.equal(sent.payload.message.from.id,9);
     assert.equal(sent.payload.message.message_thread_id,undefined);assert.equal(sent.attempt,1);assert.ok(!JSON.stringify(sent).includes('fixture-secret'));
+    assert.deepEqual(sent.group_addressing,{direct:false,handles:[]},'an unaddressed group message says so to the runtime');
     await due(first.reference.id);assert.equal((await advance(first.reference.id)).state,'completed');assert.equal(calls.at(-1)!.operation,'run.resume');
     const callCount=calls.length;assert.equal((await advance(first.reference.id)).state,'completed');assert.equal(calls.length,callCount);
     const stored=(await stores.control.query('SELECT * FROM dispatches WHERE event_id=$1',[first.reference.id])).rows[0];
@@ -129,6 +149,11 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
       const result=await run(source.reference.id);assert.equal(result.state,state==='suppressed'?'skipped':'ambiguous');
       const count:number=calls.length;await due(source.reference.id);await run(source.reference.id);assert.equal(calls.length,count,'terminal execution cannot automatically restart');
     }
+    const addressed=await capture('@Nocheh_Bot any plans?',{reply_to_message:{message_id:1,date:1700000000,chat:{id:Number(group),type:'supergroup'},from:{id:123456,is_bot:true,first_name:'Nocheh'},text:'Earlier answer'},
+      entities:[{type:'mention',offset:0,length:11}]});
+    await prepare(addressed.reference.id);mode='done';assert.equal((await run(addressed.reference.id)).state,'completed');
+    assert.deepEqual(calls.at(-1)!.input.group_addressing,{direct:true,handles:['nocheh_bot']},'the captured reply target and mention reach the runtime');
+    assert.equal(calls.at(-1)!.input.payload.message.reply_to_message,undefined,'the routed message still omits the reply snapshot');
     const failed=await capture('Retryable assistant failure');await prepare(failed.reference.id);mode='failed';
     assert.equal((await run(failed.reference.id)).state,'retryable_failed');
     assert.equal((await stores.control.query('SELECT error_code FROM dispatches WHERE event_id=$1',[failed.reference.id])).rows[0].error_code,'guard_context_changed');

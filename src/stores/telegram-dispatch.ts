@@ -35,7 +35,7 @@ const conversationOrderWaitMs=120000;
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
 const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected']);
+  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed']);
 type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
 type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
 
@@ -69,6 +69,32 @@ export function dispatchPayload(original:any,representation:any,text:string|null
   if(Number.isSafeInteger(message.message_thread_id))routed.message_thread_id=message.message_thread_id;
   if(typeof message.is_topic_message==='boolean')routed.is_topic_message=message.is_topic_message;
   return {update_id:original.update_id,message:routed};
+}
+
+/**
+ * What in a captured group message can address the bot: a reply to one of its
+ * messages or a tap on its name, and the @usernames the message names. The
+ * routed message keeps neither, so the runtime receives these facts and
+ * compares them, and the message's opening name, with the bot's own identity.
+ */
+export function groupAddressing(original:any,botId:string):{direct:boolean;handles:string[]}|null {
+  const message=original?.message;
+  if(!message||!['group','supergroup'].includes(message.chat?.type))return null;
+  const reply=message.reply_to_message;
+  // Every forum-topic message replies to the topic's opening service message.
+  let direct=!!reply&&!reply.forum_topic_created&&String(reply.from?.id)===botId;
+  const handles=new Set<string>();
+  for(const [text,entities] of [[message.text,message.entities],[message.caption,message.caption_entities]]) {
+    if(typeof text!=='string'||!Array.isArray(entities))continue;
+    for(const entity of entities) {
+      if(entity?.type==='text_mention'&&String(entity.user?.id)===botId)direct=true;
+      if(!['mention','bot_command'].includes(entity?.type)||!Number.isSafeInteger(entity.offset)||!Number.isSafeInteger(entity.length))continue;
+      // Entity offsets count UTF-16 units, as JavaScript strings do. `/start@name` addresses `name`.
+      const span=text.slice(entity.offset,entity.offset+entity.length),at=span.indexOf('@');
+      if(at>=0&&at<span.length-1)handles.add(span.slice(at+1).toLowerCase());
+    }
+  }
+  return {direct,handles:[...handles].sort().slice(0,20)};
 }
 
 export class TelegramDispatchRepository {
@@ -213,9 +239,10 @@ export class TelegramDispatchRepository {
     // Command authority comes from the original owner DM, never a guarded edit.
     const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
+    const addressing=groupAddressing(payload,/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'');
     const text=selected.event.text??null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{})};
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(addressing?{group_addressing:addressing}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control});await this.current(input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
