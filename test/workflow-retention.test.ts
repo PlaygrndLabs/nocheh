@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {expireMemorySummaries,expireTelemetry,expireWorkflowHistory,expireWorkflowRecords,retentionDays} from '../src/workflows/retention.js';
+import {expireGuardFragments,expireMemorySummaries,expireTelemetry,expireWorkflowHistory,expireWorkflowRecords,retentionDays} from '../src/workflows/retention.js';
 import {hash,workflowSchema} from '../src/workflows/store.js';
 import {controlGuardSchema,derivedGuardSchema} from '../src/stores/guard-schema.js';
 import {securityCoreSchema} from '../src/security/store.js';
@@ -150,5 +150,26 @@ test('summary retention removes only spent Honcho context summaries and their gu
     assert.deepEqual((await client.query('SELECT id FROM guard_sources ORDER BY 1')).rows.map(row=>row.id),['derived_artifacts:b6']);
     assert.equal((await client.query('SELECT count(*)::int AS count FROM guard_revisions')).rows[0].count,1);
     assert.deepEqual(await expireMemorySummaries(client,ago(1),0),{memory_contexts:0,memory_results:0},'a repeated pass is a no-op');
+  } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
+});
+
+test('fragment retention removes guard fragments only once their source has a published revision',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:60000},async()=>{
+  const config:pg.ClientConfig={host:process.env.PGHOST!,port:Number(process.env.PGPORT??5432),user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const client=new pg.Client(config);await client.connect();const schema='fragments_'+Date.now();
+  try {
+    assert.equal((await client.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');
+    await client.query(`CREATE SCHEMA ${schema}`);await client.query(`SET search_path=${schema}`);await client.query(derivedGuardSchema);
+    const ago=(hours:number)=>new Date(Date.now()-hours*3600000);
+    // `done` is published, `pending` is still being prepared, `recent` was published moments ago.
+    for(const [source,published] of [['done',true],['pending',false],['recent',true]] as const)
+      await client.query(`INSERT INTO guard_sources(id,kind,source_id,reference,input_hash,input,active_revision,state) VALUES($1,'events',$1,'{}','h','\\x00',$2,$3)`,
+        [source,published?1:null,published?'ready':'pending']);
+    for(const [id,source,hours] of [['d1','done',5],['d2','done',5],['p1','pending',5],['r1','recent',0.1]] as const)
+      await client.query(`INSERT INTO guard_fragments(id,source_id,input_hash,preparation_version,content,created_at) VALUES($1,$2,'h','v','\\x00',$3)`,[id,source,ago(hours)]);
+    assert.deepEqual(await expireGuardFragments(client,ago(1),0),{guard_fragments:2});
+    assert.deepEqual((await client.query('SELECT id FROM guard_fragments ORDER BY 1')).rows.map(row=>row.id),['p1','r1'],
+      'an unfinished preparation keeps its checkpoints, and a just-finished one keeps them for an hour');
+    assert.deepEqual(await expireGuardFragments(client,ago(1),0),{guard_fragments:0});
   } finally {await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(()=>{});await client.end();}
 });

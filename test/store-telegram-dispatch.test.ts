@@ -243,3 +243,44 @@ test('conversation messages start in Telegram update order while an earlier mess
     assert.equal(started.at(-1),after,'a closed unrecognized voice does not hold the conversation');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('a later message is told about an earlier voice note still waiting for transcription',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-voice-wait-')),base=Date.now(),group='-'+base,token=digest('voice-wait:'+base);
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let serial=base,speech=false;
+  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'delivery'};
+  };
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');},
+    transcription:{name:'fixture-asr',version:'1',outputKind:'transcript',async run(){if(!speech)throw new HttpError(503,'transcription_unavailable');return 'Synthetic voice words';}}});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  const capture=async(text:string|undefined,topic:number,extra:any={})=>{
+    const update=++serial,message:any={message_id:update,date:1700000000,chat:{id:Number(group),type:'supergroup',is_forum:true},from:{id:123,is_bot:false,first_name:'Owner'},
+      text,message_thread_id:topic,is_topic_message:true,...extra};
+    return (await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
+      source_id:String(update),revision:'1',occurred_at:null,text:text??'',payload:{update_id:update,message}})).source.reference.id;
+  };
+  const prepare=async(id:string)=>services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'));
+  const run=async(id:string)=>services.telegram.run(id,await authority('telegram'));
+  const voice=async(topic:number)=>{
+    const id=await capture(undefined,topic,{voice:{file_id:'wait-voice-'+serial,file_unique_id:'wait-voice-'+serial,duration:1}});
+    const [artifact]=(await stores.archive.query('SELECT id FROM artifacts WHERE event_id=$1',[id])).rows.map(row=>row.id as string);
+    await services.attachments.commit(artifact!,Buffer.from([79,103,103,0,2]));await assert.rejects(prepare(id),/transcription_unavailable/);return id;
+  };
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const waiting=await voice(7),otherTopic=await voice(8),after=await capture('A text after the voice note',7);await prepare(after);
+    assert.equal((await run(after)).state,'waiting','the earlier voice note holds the conversation for a bounded time');
+    await stores.control.query("UPDATE dispatches SET created_at=now()-interval '3 minutes' WHERE event_id=$1",[after]);
+    assert.equal((await run(after)).state,'completed');
+    assert.equal(started.at(-1).event_id,after);assert.equal(started.at(-1).untranscribed_voice,1,'only this conversation\'s untranscribed voice note counts');
+    assert.ok(!JSON.stringify(started.at(-1)).includes(otherTopic));
+    speech=true;await prepare(waiting);assert.equal((await run(waiting)).state,'completed');
+    const next=await capture('A text after the transcript',7);await prepare(next);assert.equal((await run(next)).state,'completed');
+    assert.equal(started.at(-1).event_id,next);assert.equal(started.at(-1).untranscribed_voice,undefined,'an answered voice note is no longer reported');
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
