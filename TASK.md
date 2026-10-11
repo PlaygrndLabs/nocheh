@@ -175,11 +175,13 @@ owner Claude login through the dev dashboard. The owner answered that one
 reasoning provider and model is enough for the MVP phase.
 
 Group chats now answer only when a message addresses Nocheh: a reply to one of
-its messages, its @username or a tap on its name, or “Nocheh”, “نوچه”, its
-display name or an owner-set name opening the message. Other group messages are archived without
-a turn. Settings › Telegram access has the “Group replies” choice (only when
-addressed by default, or every message) and extra names
+its messages, its @username or a tap on its name, or its display name or a
+name from Settings opening the message. Other group messages are archived
+without a turn. Settings › Telegram access has the “Group replies” choice
+(only when addressed by default, or every message) and an editable name list
+that starts as “Nocheh” and “نوچه”
 ([decision](docs/adr/0133-group-replies-when-addressed.md),
+[editable names](docs/adr/0134-editable-bot-names.md),
 [dispatch checks](test/store-telegram-dispatch.test.ts),
 [trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
 gateway check ([test](services/hermes/test_gateway.py)) and the

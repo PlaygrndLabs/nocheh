@@ -143,3 +143,4 @@ records current implementation and activation.
 | [0131](0131-honcho-meter-monthly-rollup.md) | The Honcho meter folds closed months into totals | Bounds the egress ledger; cap window and previous month keep per-call rows |
 | [0132](0132-retired-history-placeholders.md) | Withheld Hermes history rows name the retired source | Extends 0123; a retired message or reply leaves a placeholder with its message ID; restore still does not rebuild it |
 | [0133](0133-group-replies-when-addressed.md) | Group messages start a turn only when they address Nocheh | Narrows 0062; owner setting, only when addressed by default, unaddressed messages are archived without a turn |
+| [0134](0134-editable-bot-names.md) | The names that address Nocheh are one editable list | Amends 0133; `TELEGRAM_BOT_NAMES` starts as Nocheh and نوچه, the owner may change or empty it |
