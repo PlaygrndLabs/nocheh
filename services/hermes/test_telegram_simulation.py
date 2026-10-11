@@ -142,7 +142,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         if topic is not None:
             message.update(message_thread_id=topic, is_topic_message=True)
         return {'event_id': event_id, 'source_key': source_key, 'scope': '-20', 'attempt': 1,
-                'archive_credential': f'turn.{body}.{signature}',
+                'archive_credential': f'turn.{body}.{signature}', 'group_addressing': {'direct': True, 'handles': []},
                 'payload': {'update_id': identifier, 'message': message}}
 
     async def test_polling_duplicates_are_durable_before_dispatch_and_offsets_acknowledge(self):

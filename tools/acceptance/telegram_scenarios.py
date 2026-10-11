@@ -519,6 +519,15 @@ class Scenarios:
     def unselected_group(self):
         self.turn(self.f.message(UNSELECTED_GROUP, 'سلام'), UNSELECTED_GROUP, expect_reply=False)
 
+    def group_answers_only_when_addressed(self):
+        # A question to the whole group gets no reply; the bot's name opening a
+        # message, and a reply to the bot's own message, address it.
+        event_id, _ = self.turn(self.f.message(GROUP, 'کسی برای ناهار می‌آید؟', mention=False), GROUP, None, expect_reply=False)
+        self.gate('unaddressed_message_not_addressed', self.f.dispatch(event_id)['error'] == 'not_addressed')
+        self.turn(self.f.message(GROUP, 'Synthetic، نظرت درباره‌ی ناهار چیست؟', mention=False), GROUP, None)
+        answer = self.f.sent()[-1]['message']
+        self.turn(self.f.message(GROUP, 'یک پیشنهاد دیگر بده', mention=False, reply_to=answer), GROUP, None)
+
     def general_after_topics(self):
         self.turn(self.f.message(GROUP, 'سلام در تاپیک عمومی'), GROUP, None)
 
@@ -856,7 +865,7 @@ class Scenarios:
 ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
-         'unselected_group', 'retirement_hides_fact', 'voice_waits_while_speech_unavailable', 'voice_recovers_when_speech_returns',
+         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_waits_while_speech_unavailable', 'voice_recovers_when_speech_returns',
          'voice_transcript_drives_turn', 'burst_with_voice_in_order', 'voice_blank_transcript_is_terminal',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_executes_owner_requests', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
@@ -866,7 +875,7 @@ ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent',
 # directives mean nothing; these scenarios check delivery, order, audience,
 # recovery and effects only, and save each answer for review.
 REAL_MODEL_ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics',
-                    'burst_in_order', 'private_burst_in_order', 'document_reply', 'participant_not_permitted', 'unselected_group',
+                    'burst_in_order', 'private_burst_in_order', 'document_reply', 'participant_not_permitted', 'group_answers_only_when_addressed', 'unselected_group',
                     'schedule_fires_and_waits_for_review', 'voice_waits_while_speech_unavailable',
                     'voice_recovers_when_speech_returns', 'burst_with_voice_in_order', 'deleted_topic', 'polling_outage',
                     'lost_send_response', 'blocked_private_then_recovery', 'restart_preserves_receipts', 'storage_report', 'stage_timings']
