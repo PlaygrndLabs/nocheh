@@ -37,8 +37,12 @@ of it was retired: Honcho memory and archive search had dropped it, but Hermes
 replayed its native session history. Before each turn the Hermes service now
 rewrites that profile's stored rows for retired messages, their turn's tool work,
 answers that were themselves retired, tool results citing a retired source and
-later compaction summaries; owner native recall skips the same rows read-only
+later compaction summaries; owner native recall skips the same rows read-only.
+Each withheld row keeps its place as a placeholder saying it was retired and
+naming the retired message or reply by its Archive source ID; restoring does not
+rebuild the row
 ([decision](docs/adr/0123-retired-sources-leave-native-history.md),
+[placeholders](docs/adr/0132-retired-history-placeholders.md),
 [native history checks](services/hermes/test_retired_history.py),
 [storage checks](test/store-source-retirement.test.ts)). The pinned-Hermes replay
 and search check runs only in the Hermes image. Pending: the owner-machine rerun of
@@ -175,7 +179,7 @@ its messages, its @username or a tap on its name, or its display name (or an
 owner-set name) opening the message. Other group messages are archived without
 a turn. Settings › Telegram access has the “Group replies” choice (only when
 addressed by default, or every message) and extra names
-([decision](docs/adr/0132-group-replies-when-addressed.md),
+([decision](docs/adr/0133-group-replies-when-addressed.md),
 [dispatch checks](test/store-telegram-dispatch.test.ts),
 [trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
 gateway check ([test](services/hermes/test_gateway.py)) and the

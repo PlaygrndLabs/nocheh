@@ -6,11 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from .retired_history import ANSWER_WITHHELD, NOTE_DELIMITER, SUMMARY_WITHHELD, TOOL_WITHHELD, USER_WITHHELD, withheld_ids, withhold_retired
+from .retired_history import NOTE_DELIMITER, SUMMARY_WITHHELD, withheld_ids, withhold_retired
 
 FACT='Synthetic Kite Juniper'
 PRIVATE,QUESTION,UNRELATED='a'*64,'b'*64,'c'*64
 OTHER_SOURCE='d'*64
+# Delivered replies to the private message and to the later question.
+NOTED,ANSWERED='e'*64,'f'*64
 
 # The pinned Hermes messages table and a full-text index kept by triggers.
 SCHEMA='''
@@ -33,18 +35,24 @@ def marker(event):
     return '\n\n[Archive source: nocheh:event:'+event+']'
 
 
+def source(*events):
+    return ', '.join('nocheh:event:'+event for event in events)
+
+
 def call(name,arguments):
     return json.dumps([{'id':'call-'+name,'type':'function','function':{'name':name,'arguments':json.dumps(arguments)}}])
 
 
 class Lookup:
     """Storage's answer: the private message and the later answer repeating it are retired."""
-    def __init__(self,retired=(PRIVATE,),answered=(PRIVATE,QUESTION),revision='1:2026-10-10'):
-        self.retired,self.answered,self.revision,self.calls=set(retired),set(answered),revision,[]
+    def __init__(self,retired=(PRIVATE,),answered=((PRIVATE,NOTED),(QUESTION,ANSWERED)),revision='1:2026-10-10'):
+        self.answered=dict(answered);self.retired=set(retired)|set(self.answered.values())
+        self.revision,self.calls=revision,[]
 
     def __call__(self,event_ids):
         self.calls.append(list(event_ids))
-        return {'revision':self.revision,'retired':sorted(self.retired&set(event_ids)),'answered':sorted(self.answered&set(event_ids))}
+        return {'revision':self.revision,'retired':sorted(self.retired&set(event_ids)),
+                'answered':{event:[self.answered[event]] for event in event_ids if event in self.answered}}
 
 
 class RetiredHistoryTests(unittest.TestCase):
@@ -101,10 +109,11 @@ class RetiredHistoryTests(unittest.TestCase):
             self.assertEqual(withhold_retired(database,lookup),8)
             self.assertEqual(self.leaks(database),([],0,0))
             after={row['id']:row for row in self.rows(database)}
-            self.assertEqual(after[2]['content'],USER_WITHHELD+marker(PRIVATE))
+            self.assertEqual(after[2]['content'],'[Retired message: '+source(PRIVATE)+']','the row says it was retired and which message')
             self.assertEqual(json.loads(after[3]['tool_calls'])[0]['function'],{'name':'memory','arguments':'{}'})
             self.assertEqual((after[4]['content'],after[5]['content'],after[8]['content'],after[9]['content']),
-                             (TOOL_WITHHELD,ANSWER_WITHHELD,TOOL_WITHHELD,ANSWER_WITHHELD))
+                             ('[Tool result withheld; its source was retired: '+source(PRIVATE,NOTED)+']','[Retired reply: '+source(NOTED)+']',
+                              '[Tool result withheld; its source was retired: '+source(PRIVATE,ANSWERED)+']','[Retired reply: '+source(ANSWERED)+']'))
             self.assertEqual(after[6]['content'],'What is my kite called?'+marker(QUESTION),'the later question was not retired')
             self.assertEqual(after[10]['content'],SUMMARY_WITHHELD)
             unchanged={row['id']:row for row in before if row['id'] in (1,11,12,13,14,15)}
@@ -116,18 +125,24 @@ class RetiredHistoryTests(unittest.TestCase):
             lookup.calls.clear()
             self.assertEqual(withhold_retired(database,lookup),0);self.assertEqual(lookup.calls,[[]])
             self.assertEqual(withheld_ids(database,lookup),set())
+            # Placeholders keep naming their turn and source, so a later retirement rewrites nothing twice.
+            self.assertEqual(withhold_retired(database,Lookup(revision='2:later')),0)
+            self.assertEqual({row['id']:row['content'] for row in self.rows(database)},{key:row['content'] for key,row in after.items()})
 
     def test_retiring_only_the_message_keeps_its_delivered_answer_without_reasoning(self):
         with tempfile.TemporaryDirectory() as folder:
             database=self.history(folder)
             withhold_retired(database,Lookup(answered=()))
             after={row['id']:row for row in self.rows(database)}
-            self.assertEqual(after[2]['content'],USER_WITHHELD+marker(PRIVATE))
-            self.assertEqual((after[4]['content'],after[8]['content']),(TOOL_WITHHELD,TOOL_WITHHELD),
+            self.assertEqual(after[2]['content'],'[Retired message: '+source(PRIVATE)+']')
+            self.assertEqual((after[4]['content'],after[8]['content']),('[Tool result withheld; its source was retired: '+source(PRIVATE)+']',)*2,
                              'tool work for and results citing the retired message are withheld')
             self.assertEqual(after[5]['content'],'Noted, your kite is '+FACT+'.','an unretired reply remains its own source')
             self.assertIsNone(after[5]['reasoning'])
             self.assertEqual(after[9]['content'],'It is '+FACT+'.')
+            # The retired message's notice still identifies its turn when its reply is retired later.
+            withhold_retired(database,Lookup(revision='2:reply'))
+            self.assertEqual(self.rows(database)[4]['content'],'[Retired reply: '+source(NOTED)+']')
 
     def test_a_new_retirement_rechecks_history_and_restoring_does_not_rebuild_it(self):
         with tempfile.TemporaryDirectory() as folder:

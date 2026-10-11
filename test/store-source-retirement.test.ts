@@ -187,13 +187,13 @@ test('native history learns which recorded turns are retired or answered by a re
     }
     const recorded=[fact.id,question.id,unrelated.id,'e'.repeat(64)];
     const before=await s.retirements.historyRetirements(recorded);
-    assert.deepEqual([before.retired,before.answered],[[],[]]);
+    assert.deepEqual([before.retired,before.answered],[[],{}]);
     await s.retirements.set(owner,fact.id,{retired:true,expected_revision:0,operation_id:prefix+':fact'});
     await s.retirements.set(owner,answer.id,{retired:true,expected_revision:0,operation_id:prefix+':answer'});
     const after=await s.retirements.historyRetirements(recorded);
     assert.notEqual(after.revision,before.revision,'every decision invalidates checked native history');
     assert.deepEqual(after.retired,[fact.id]);
-    assert.deepEqual(after.answered,[question.id],'a turn whose delivered answer is retired is withheld');
+    assert.deepEqual(after.answered,{[question.id]:[answer.id]},'a turn whose delivered answer is retired names that reply');
     assert.equal((await s.retirements.historyRetirements([])).revision,after.revision);
     await s.retirements.set(owner,fact.id,{retired:false,expected_revision:1,operation_id:prefix+':restore'});
     const restored=await s.retirements.historyRetirements(recorded);
