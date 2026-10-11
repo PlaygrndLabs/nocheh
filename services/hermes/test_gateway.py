@@ -120,7 +120,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
                     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
                     return {'event_id':event,'source_key':key,'scope':'-20','attempt':1,'archive_credential':'turn.'+body+'.'+signature,
-                        'group_addressing':{'direct':True,'handles':[]},
+                        'text':text,'group_addressing':{'direct':True,'handles':[]},
                         'payload':{'update_id':update_id,'message':{'message_id':update_id,'date':1700000000,'chat':{'id':-20,'type':'group','title':'Fixture'},'from':{'id':456,'is_bot':False,'first_name':'User'},'text':text,'entities':[{'type':'bot_command','offset':0,'length':6}] if text.startswith('/') else []}}}
                 try:
                     first=envelope(1,'Hello')
@@ -323,7 +323,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
                     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
                     return {'event_id':event,'source_key':key,'scope':chat,'attempt':1,'archive_credential':'turn.'+body+'.'+signature,
-                        'group_addressing':{'direct':True,'handles':[]},
+                        'text':text,'group_addressing':{'direct':True,'handles':[]},
                         'payload':{'update_id':update_id,'message':{'message_id':update_id,'date':1700000000,'chat':{'id':int(chat),'type':'group','title':'Fixture'},'from':{'id':456,'is_bot':False,'first_name':'User'},'text':text,'entities':[]}}}
                 async def until(condition):
                     for _ in range(500):
