@@ -12,7 +12,8 @@ results and answer. A retired message withholds its own row and the turn's
 tool work, keeping the delivered answer, which is a separate source. A
 retired delivered answer withholds everything the turn produced. Any other
 row that cites a retired source is withheld too, as are compaction summaries
-written after the earliest newly withheld row.
+written after the earliest newly withheld row. A withheld row keeps its place
+and says which retired message or reply caused it, by archive event ID.
 
 Hermes native notes (``MEMORY.md``, ``USER.md`` and Hermes' drift backups of
 them) are a third copy. An entry is removed when it cites a retired source or
@@ -27,12 +28,14 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-MARKER=re.compile(r'\[Archive source: nocheh:event:([a-f0-9]{64})\]')
+# A retired message's row keeps its event ID in the notice, so later checks still find its turn.
+MARKER=re.compile(r'\[(?:Archive source|Retired message): nocheh:event:([a-f0-9]{64})\]')
 IDENTIFIER=re.compile(r'(?<![a-f0-9])[a-f0-9]{64}(?![a-f0-9])')
 COMPACTION=('[CONTEXT COMPACTION','[CONTEXT SUMMARY]:')
-USER_WITHHELD='[Retired message withheld; its content is unavailable.]'
-ANSWER_WITHHELD='[Retired reply withheld; its content is unavailable.]'
-TOOL_WITHHELD='[Tool result withheld; it came from a retired message.]'
+USER_WITHHELD='[Retired message: {}]'
+ANSWER_WITHHELD='[Retired reply: {}]'
+CITING_WITHHELD='[Reply withheld; it used a retired source: {}]'
+TOOL_WITHHELD='[Tool result withheld; its source was retired: {}]'
 SUMMARY_WITHHELD='[Earlier conversation summary withheld; it may include a retired message.]'
 # Every other stored copy of a withheld row's text or the model's reasoning about it.
 DERIVED=('api_content','reasoning','reasoning_content','reasoning_details','codex_reasoning_items','codex_message_items','display_metadata')
@@ -52,8 +55,8 @@ def service_lookup(event_ids):
         data=json.dumps({'event_ids':list(event_ids)}).encode(),
         headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
     with urlopen(request,timeout=15) as response:value=json.loads(response.read(1024*1024))
-    if (not isinstance(value,dict) or not isinstance(value.get('revision'),str)
-            or any(not isinstance(value.get(key),list) for key in ('retired','answered'))):
+    if (not isinstance(value,dict) or not isinstance(value.get('revision'),str) or not isinstance(value.get('retired'),list)
+            or not isinstance(value.get('answered'),dict) or any(not isinstance(replies,list) for replies in value['answered'].values())):
         raise RuntimeError('retired_history_unavailable')
     return value
 
@@ -83,6 +86,10 @@ def _cites(row):
     return set(IDENTIFIER.findall(' '.join(str(row.get(key) or '') for key in ('content','tool_calls','api_content'))))
 
 
+def _sources(event_ids):
+    return ', '.join('nocheh:event:'+event for event in sorted(event_ids))
+
+
 def _withhold(row,content):
     change={key:None for key in DERIVED if key in row and row[key] is not None}
     if row['content']!=content:change['content']=content
@@ -99,7 +106,7 @@ def _withhold(row,content):
 def _lookup(lookup,event_ids):
     """Retired and answer-retired events among the given IDs, in bounded batches."""
     revision=lookup([])['revision'] if not event_ids else None
-    retired,answered=set(),set()
+    retired,answered=set(),{}
     ordered=sorted(event_ids)
     for start in range(0,len(ordered),LOOKUP_BATCH):
         value=lookup(ordered[start:start+LOOKUP_BATCH])
@@ -172,7 +179,7 @@ def plan(rows,lookup):
     for event,user,following in turns:
         if event:cited.add(event)
         for row in following:cited|=_cites(row)
-    retired,answered=set(),set()
+    retired,answered=set(),{}
     ordered=sorted(cited)
     for start in range(0,len(ordered),LOOKUP_BATCH):
         value=lookup(ordered[start:start+LOOKUP_BATCH])
@@ -181,22 +188,22 @@ def plan(rows,lookup):
     def withhold(row,content):
         change=_withhold(row,content)
         if change:changes[row['id']]=change
-    def placeholder(row):
-        if row['role']=='tool':return TOOL_WITHHELD
-        return '' if row.get('tool_calls') else ANSWER_WITHHELD
+    def placeholder(row,causes,replies):
+        """Name the retired messages or replies that withhold this row."""
+        if row['role']=='tool':return TOOL_WITHHELD.format(_sources(causes|replies))
+        if row.get('tool_calls') and not row['content']:return ''
+        return ANSWER_WITHHELD.format(_sources(replies)) if replies else CITING_WITHHELD.format(_sources(causes))
     for event,user,following in turns:
         if event in retired:
-            withhold(user,USER_WITHHELD+'\n\n[Archive source: nocheh:event:'+event+']')
-        if event in answered:
-            for row in following:
-                if not _summary(row):withhold(row,placeholder(row))
-            continue
+            withhold(user,USER_WITHHELD.format(_sources([event])))
+        replies=set(answered.get(event,()))
         answer=next((row for row in reversed(following) if row['role']=='assistant' and not row.get('tool_calls')
                      and isinstance(row['content'],str) and row['content'].strip() and not _summary(row)),None)
         for row in following:
             if _summary(row):continue
-            if event in retired and row is not answer or _cites(row)&retired:
-                withhold(row,placeholder(row))
+            causes=_cites(row)&retired|{event}&retired
+            if replies or causes and (row is not answer or _cites(row)&retired):
+                withhold(row,placeholder(row,causes,replies))
             elif event in retired:
                 # The delivered answer stays; reasoning about the retired message does not.
                 change={key:None for key in DERIVED if key!='api_content' and key in row and row[key] is not None}
@@ -243,7 +250,7 @@ def withhold_retired(database,lookup,notes=None):
     if not database.is_file() and not cited:return 0
     # Notes are checked on every turn: a note written after the last check can cite a source retired before it.
     revision,retired,answered=_lookup(lookup,cited)
-    removed=withhold_notes(notes,retired|answered)
+    removed=withhold_notes(notes,retired|set(answered))
     if not database.is_file():return removed
     connection=_read_only(database)
     try:
