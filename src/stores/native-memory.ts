@@ -693,12 +693,12 @@ export class NativeMemoryRepository {
       if(connected.clarification)return {sources:corrections,limited_memory:false,syncing,clarification_required:true,note:connected.clarification};
       // Group and topic recall reads only that audience's own sessions; owner recall spans the workspace.
       const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience);
-      for(const item of sessions?.length===0?[]:connected.items.slice(0,4)) {
-        await this.current(id);
-        const response=await this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',{query:question,reasoning_level:'low',stream:false,
-          ...(sessions?{filters:{session_id:sessions}}:{})});
-        answers.push(`[related through ${item.path}]\n${string(response.content,20000)}`);
-      }
+      // Each peer is asked side by side, so recall waits for the slowest Honcho answer rather than their sum.
+      const asked=sessions?.length===0?[]:connected.items.slice(0,4);
+      if(asked.length)await this.current(id);
+      for(const [index,response] of (await Promise.all(asked.map(item=>this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',
+        {query:question,reasoning_level:'low',stream:false,...(sessions?{filters:{session_id:sessions}}:{})})))).entries())
+        answers.push(`[related through ${asked[index]!.path}]\n${string(response.content,20000)}`);
       if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing}:
         {...limited,note:'No authorized person or project memory matched this request.'};
       const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(string(answers.join('\n\n'),20000)),

@@ -55,6 +55,34 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   assert.ok(prepared>=3);
 });
 
+test('recall asks every connected peer side by side, keeps each inside the group\'s sessions and their order',async()=>{
+  const workspace=digest('recall-workspace'),root={store:'archive',kind:'event',id:digest('recall-root'),revision:'1',input_hash:digest('recall-root-hash')};
+  const groupSessions=[digest('group-session-a'),digest('group-session-b')],peers=['person_a','person_b','project_c'];
+  const asked:{peer:string;body:any}[]=[],waiting:(()=>void)[]=[];let recorded='';
+  const contexts={access:{stores:{control:{query:async()=>{throw Error('unexpected_control_query');}}},policy:()=>({owner_id:'123'})},
+    guards:{prepareContext:async()=>null,read:async()=>({value:{text:recorded}})}};
+  const derived={record:async(input:any)=>{if(input.kind==='memory_result')recorded=input.content.toString();
+    return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
+  const binding={generation:'fixture',epoch:1,mode:'on'};
+  const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
+  const provenance={sessions:async(id:string,audience:string)=>{assert.equal(id,workspace);assert.equal(audience,'-100');return groupSessions;}};
+  const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,async(path:string,body:any)=>{
+    const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;asked.push({peer,body});
+    // Hold every answer until all peers were asked, then release the first peer last.
+    await new Promise<void>(resolve=>{waiting.push(resolve);if(waiting.length===peers.length)[...waiting.slice(1),waiting[0]!].forEach(release=>release());});
+    return {content:'Answer from '+peer};
+  },async()=>[]);
+  Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],
+    current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
+    connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
+  const result=await Promise.race([memory.recall({admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader,'Who planned the trip?'),
+    new Promise((_resolve,reject)=>setTimeout(()=>reject(Error('peers were asked one after another')),2000))]) as any;
+  assert.deepEqual(asked.map(item=>item.peer),peers,'all connected peers are asked before any answer returns');
+  for(const item of asked)assert.deepEqual(item.body.filters,{session_id:groupSessions},'a group recall stays inside that group\'s sessions');
+  assert.deepEqual(recorded.split('\n\n').map(block=>block.split('\n')[1]),peers.map(peer=>'Answer from '+peer),'answers keep the connected-peer order');
+  assert.equal(result.sources.at(-1).text,recorded);
+});
+
 test('terminal Honcho derivation errors cannot mark a generation ready',async()=>{
   const id=digest('failed-derivation'),updates:{sql:string;values:unknown[]}[]=[];
   let failed=true,valid=true;
