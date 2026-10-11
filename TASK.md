@@ -971,9 +971,17 @@ activation remains separate.
      and parallel agent runs (4) are owner settings
      ([ADR-0126](docs/adr/0126-owner-set-parallel-replies-and-runs.md)), and
      secret-guard checks run three at a time instead of one
-     ([ADR-0127](docs/adr/0127-parallel-guard-checks.md)). A live timing check
-     with two chats at once is pending.
-     Preparation took 12.3 s on an idle turn.
+     ([ADR-0127](docs/adr/0127-parallel-guard-checks.md)). The October 11
+     live check with all three running had a private recall question take
+     148 s after capture; its Hermes queue wait was 6 ms, and its Honcho
+     recall tool took 78 s. That recall asked four connected peers one after
+     another, each Honcho reasoning call with its own guarded embeddings, so
+     recall now asks them side by side
+     ([check](test/store-native-memory.test.ts)). Guard preparation for
+     Honcho's provider requests still runs one at a time per audience. A
+     concurrent group reply was not measured because the group message was
+     not addressed to Nocheh. Pending: a live rerun of a recall question and
+     an addressed group message at the same time.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.
    - Voice transcription has no route on the Claude provider. While a voice
