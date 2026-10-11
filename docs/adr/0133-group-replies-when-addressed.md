@@ -1,4 +1,4 @@
-# ADR-0132: Group messages start a turn only when they address Nocheh
+# ADR-0133: Group messages start a turn only when they address Nocheh
 
 <status>
 Accepted on 2026-10-11. Narrows the group behavior of
