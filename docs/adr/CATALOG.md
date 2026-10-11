@@ -142,3 +142,4 @@ records current implementation and activation.
 | [0130](0130-spent-guard-fragment-retention.md) | Guard fragments leave once their source is prepared | Extends 0113 and 0121; the daily retention pass removes fragments of published guard sources after an hour |
 | [0131](0131-honcho-meter-monthly-rollup.md) | The Honcho meter folds closed months into totals | Bounds the egress ledger; cap window and previous month keep per-call rows |
 | [0132](0132-retired-history-placeholders.md) | Withheld Hermes history rows name the retired source | Extends 0123; a retired message or reply leaves a placeholder with its message ID; restore still does not rebuild it |
+| [0133](0133-group-replies-when-addressed.md) | Group messages start a turn only when they address Nocheh | Narrows 0062; owner setting, only when addressed by default, unaddressed messages are archived without a turn |

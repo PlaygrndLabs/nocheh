@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, canonical, digest, immutable_file, captured_adapter_class
 from .scopes import Scopes, verify_capability
+from . import group_trigger
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
 # Parallel Telegram turns across chats, set by the owner. Each isolated turn takes
@@ -208,6 +209,7 @@ class AssistantGateway:
         self.status='disabled' if not policy.enabled else 'starting'
         self.loop=None;self.adapter=None;self.lanes={};self.capacity=None;self.action_lock=None
         self.on_failure=on_failure
+        self.group_replies,self.group_names=group_trigger.reply_mode(),group_trigger.names()
         self.stopping=False
         self.failure_reported=False
         self.receipts=self.spool/'dispatch';self.receipts.mkdir(parents=True,exist_ok=True)
@@ -303,6 +305,8 @@ class AssistantGateway:
         claims=verify_capability(body['archive_credential'],environment_secret('SERVICE_TOKEN'),scope,body['event_id'])
         scope=Scopes.apply_revision(scope,claims)
         if body['event_id']!=digest(body['source_key']) or body['source_key']!=f"telegram:{self.token.split(':',1)[0]}:update:{body['payload']['update_id']}":raise ValueError('invalid_dispatch_identity')
+        # A group message nobody addressed to the bot stays archived without a turn.
+        if not scope.owner and not self.group_turn(body):return {'state':'suppressed','error_code':'not_addressed'}
         name=digest(body['event_id']+':'+str(body['attempt']))
         # Turns in one chat keep their arrival order; different chats run side
         # by side, up to TURN_CAPACITY at once. Lane before capacity, always.
@@ -318,6 +322,14 @@ class AssistantGateway:
         finally:
             lane['users']-=1
             if not lane['users'] and self.lanes.get(scope.chat_id) is lane:del self.lanes[scope.chat_id]
+
+    def group_turn(self,body):
+        if self.group_replies=='all':return True
+        # Native connect loads the bot's own identity; its display name addresses it too.
+        try:username,first=self.adapter._bot.username,self.adapter._bot.first_name
+        except Exception:username=first=None # An unloaded identity still honors replies and set names.
+        return group_trigger.addressed(body.get('group_addressing'),body.get('text'),username,
+                                       self.group_names+([first] if isinstance(first,str) else []))
 
     async def _run_turn(self,scope,body,name,progress,cancelled):
         from telegram import Update
