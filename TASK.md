@@ -1031,9 +1031,15 @@ activation remains separate.
      ran two topics side by side in 91 and 101 s with Honcho recall at 38–44 s.
      It still made 38 detector calls, 97% of their fragments repeats of text
      another audience had already checked, so detector results are now shared
-     by text ([ADR-0138](docs/adr/0138-shared-context-detection.md)). Pending:
-     a live check of that change. Background memory reviews also share the
-     three detector slots with live turns.
+     by text ([ADR-0138](docs/adr/0138-shared-context-detection.md)). The
+     next two-topic test answered in 34 and 37 s with 16 detector calls, but
+     made no Honcho recall call and reused per-topic turn-start context cached
+     earlier, so the shared-result effect on a never-used topic is still
+     unmeasured. Nine of those calls were background memory reviews, so reply
+     checks now go first and background checks leave one slot free
+     ([ADR-0139](docs/adr/0139-reply-checks-before-background-checks.md),
+     [slot check](services/hermes/test_runtime.py)). Pending: a live check of
+     that change.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.
    - Voice transcription has no route on the Claude provider. While a voice

@@ -58,7 +58,7 @@ export class PreparedContextRepository {
     await this.audience.assert(principal);
   }
 
-  async prepare(principal:Reader,value:unknown,detect:(text:string)=>Promise<unknown>):Promise<unknown> {
+  async prepare(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>):Promise<unknown> {
     if(principal.admin||!principal.turnEvent)throw new HttpError(403,'bound_guard_context_required');
     const binding=await this.audience.assert(principal),root=await this.root(principal,binding);
     if(binding.mode==='off'){await this.audience.assert(principal);return value;}
@@ -111,7 +111,7 @@ export class PreparedContextRepository {
   }
 
   private async guard(principal:Reader,binding:GuardBinding,root:SourceReference|OperationReference,scope:string,
-    owned:Map<string,{key:string}>,outputs:Map<string,string>,detect:(text:string)=>Promise<unknown>) {
+    owned:Map<string,{key:string}>,outputs:Map<string,string>,detect:(text:string,background?:boolean)=>Promise<unknown>) {
     const candidates=[...owned.entries()].map(([text,{key}])=>[text,key] as [string,string]),pending:[string,string][]=[];
     for(let offset=0;offset<candidates.length;offset+=500) {
       const cache=(await this.derived.pool.query('SELECT id,source_id FROM runtime_prepared_inputs WHERE id=ANY($1::text[])',
@@ -152,7 +152,7 @@ export class PreparedContextRepository {
         const unknown=missing.filter(input=>input.literals===undefined);
         if(unknown.length) {
           const joined=unknown.map(input=>input.text).join('\n<NOCHEH_FRAGMENT>\n');
-          await this.audience.assert(principal);const literals=await detect(joined);literalSpans(joined,literals);
+          await this.audience.assert(principal);const literals=await detect(joined,principal.purpose==='memory-review');literalSpans(joined,literals);
           if(!(literals as string[]).every(literal=>unknown.some(input=>input.text.includes(literal))))throw new HttpError(422,'guard_candidate_rejected');
           for(const input of unknown)input.literals=(literals as string[]).filter(literal=>input.text.includes(literal));
         }
