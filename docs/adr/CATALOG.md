@@ -147,3 +147,4 @@ records current implementation and activation.
 | [0135](0135-group-topics-share-memory.md) | A group's topics share one memory by default | Amends 0030 and 0115; reads widen to the group's General chat and every topic, `TELEGRAM_TOPIC_MEMORY=topic` keeps topics separate |
 | [0136](0136-per-topic-dispatch-lanes.md) | Each group topic has its own dispatch lane | Supersedes ADR-0125's shared group lane; order within one topic unchanged |
 | [0137](0137-side-by-side-runtime-context-guarding.md) | Runtime context for one audience is guarded side by side | Extends 0127 to guarded runtime context and Honcho provider requests; identical fresh text is shared, publications bounded at four |
+| [0138](0138-shared-context-detection.md) | Identical runtime text reuses one detector result across audiences | Extends 0137; detection shared by content, detector version and binding; guarded copies and access stay per audience |
