@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import subprocess
+import time
 from pathlib import Path
 
 from tools.operations.installation import configuration
@@ -38,8 +39,15 @@ def assert_ports(containers):
             for binding in bindings or []:
                 owned.add(int(binding['HostPort']))
     for port in PORTS:
-        if port not in owned and not port_available(port):
-            raise ValueError(f'Local development port {port} is in use by another process')
+        if port in owned:
+            continue
+        # A just-stopped stack's closing connections hold its ports for a moment.
+        for attempt in range(10):
+            if port_available(port):
+                break
+            if attempt == 9:
+                raise ValueError(f'Local development port {port} is in use by another process')
+            time.sleep(0.5)
 
 
 def prepare_source_mounts():
