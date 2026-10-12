@@ -138,14 +138,34 @@ export class PreparedContextRepository {
       }
       const missing=inputs.filter(input=>input.literals===undefined);
       if(missing.length) {
-        const joined=missing.map(input=>input.text).join('\n<NOCHEH_FRAGMENT>\n');
-        await this.audience.assert(principal);const literals=await detect(joined);literalSpans(joined,literals);
-        if(!(literals as string[]).every(literal=>missing.some(input=>input.text.includes(literal))))throw new HttpError(422,'guard_candidate_rejected');
-        for(const input of missing)input.literals=(literals as string[]).filter(literal=>input.text.includes(literal));
+        // Detector output depends only on the text, detector version and guard
+        // binding, so identical text another audience already checked reuses that
+        // result. Prepared values and guarded copies stay per audience.
+        const shared=new Map(missing.map(input=>[input,'context-detection-text:'+digest(canonical([binding,this.detectorVersion,input.output.input_hash]))]));
+        const known=(await this.derived.pool.query(`SELECT operation_id,content,content_hash,input_hash,producer_version,imported
+          FROM derived_artifacts WHERE operation_id=ANY($1::text[]) AND kind='guard_result'`,[[...shared.values()]])).rows;
+        for(const input of missing) {
+          const row=known.find(candidate=>candidate.operation_id===shared.get(input));
+          if(row&&!row.imported&&digest(row.content)===row.content_hash&&row.input_hash===input.output.input_hash&&row.producer_version===this.detectorVersion)
+            input.literals=JSON.parse(row.content.toString()) as string[];
+        }
+        const unknown=missing.filter(input=>input.literals===undefined);
+        if(unknown.length) {
+          const joined=unknown.map(input=>input.text).join('\n<NOCHEH_FRAGMENT>\n');
+          await this.audience.assert(principal);const literals=await detect(joined);literalSpans(joined,literals);
+          if(!(literals as string[]).every(literal=>unknown.some(input=>input.text.includes(literal))))throw new HttpError(422,'guard_candidate_rejected');
+          for(const input of unknown)input.literals=(literals as string[]).filter(literal=>input.text.includes(literal));
+        }
         // One derived transaction checkpoints the entire completed detector batch.
         await this.derived.recordMany(missing.map(input=>({operation_id:'context-detection:'+input.key,source:root,parents:[input.output],kind:'guard_result',
           content:Buffer.from(canonical(input.literals)),producer:'nocheh-context-detector',producer_version:this.detectorVersion,
           configuration:{audience:scope,binding},provenance:{purpose:principal.purpose??'assistant'}})));
+        // The first result saved for a text is the one every audience reuses.
+        for(const input of unknown)
+          await this.derived.record({operation_id:shared.get(input)!,source:root,parents:[input.output],kind:'guard_result',
+            content:Buffer.from(canonical(input.literals)),producer:'nocheh-context-detector',producer_version:this.detectorVersion,
+            configuration:{binding},provenance:{purpose:'shared-detection'}})
+            .catch(error=>{if(!(error instanceof HttpError&&error.code==='derivative_identity_conflict'))throw error;});
       }
       // Independent guarded copies keep their exact publication/checkpoint
       // identities. Bound SQL work below the pool size across every request
