@@ -1,6 +1,6 @@
 # Dashboard redesign plan
 
-Status: accepted by the owner on 2026-10-12. Steps 1 (groundwork) and 2 (navigation) are implemented; steps 3 to 5 are pending. Step 2 folded Graph into Memory and Imports into Archive, and keeps Sharing in the sidebar until step 3 replaces it with Chats & access.
+Status: accepted by the owner on 2026-10-12. Steps 1 (groundwork), 2 (navigation) and 3 (Chats & access) are implemented; steps 4 and 5 are pending. Step 2 folded Graph into Memory and Imports into Archive. Step 3 replaced Sharing with Chats & access, moved group people, topics and topic memory there from Settings, and sends memory-access request links to the Inbox.
 
 ## What makes the dashboard hard to use today
 

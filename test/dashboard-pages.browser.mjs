@@ -17,7 +17,7 @@ const origin = `http://127.0.0.1:${port}`;
 const pages = [
   ['home', 'Home'],
   ['inbox', 'Inbox'],
-  ['sharing', 'Sharing'],
+  ['access', 'Chats & access'],
   ['memory', 'Memory'],
   ['archive', 'Archive'],
   ['projects', 'Projects'],
@@ -27,6 +27,10 @@ const pages = [
 /** Every page, and every tab of the pages whose tabs live in the address. */
 const routes = [
   ...pages,
+  ...['chats', 'requests', 'shared', 'rules', 'defaults'].map(view => ['access?view=' + view, 'Chats & access']),
+  ['access?view=chats&chat=-10042', 'Chats & access'],
+  ['access?view=chats&chat=-10042%2Ftopic%2F7', 'Chats & access'],
+  ['access?view=chats&chat=42', 'Chats & access'],
   ...['working', 'learned', 'relations', 'graph', 'honcho'].map(view => ['memory?view=' + view, 'Memory']),
   ...['messages', 'imports'].map(view => ['archive?view=' + view, 'Archive']),
   ...['health', 'connections', 'databases', 'maintenance'].map(view => ['system?view=' + view, 'System']),
@@ -109,10 +113,12 @@ test('old bookmarks open the page and tab that now own them', async () => {
   const cases = [
     ['overview', 'Home', null, '#home'],
     ['activity', 'Inbox', 'Decisions', '#inbox'],
-    ['spaces', 'Sharing', null, '#sharing'],
+    ['spaces', 'Chats & access', 'Sharing rules', '#access?view=rules'],
+    ['sharing', 'Chats & access', 'Sharing rules', '#access?view=rules'],
     ['learned', 'Memory', 'Learned', '#memory?view=learned'],
-    ['entities', 'Memory', 'Relations & access', '#memory?view=relations'],
-    ['memoryMap?request=r1', 'Memory', 'Relations & access', '#memory?request=r1&view=relations'],
+    ['entities', 'Memory', 'People & facts', '#memory?view=relations'],
+    ['memoryMap', 'Memory', 'People & facts', '#memory?view=relations'],
+    ['memoryMap?request=r1', 'Inbox', null, '#inbox?kind=memory_access&decision=r1'],
     ['honcho', 'Memory', 'Long-term memory', '#memory?view=honcho'],
     ['graph', 'Memory', 'Evidence graph', '#memory?view=graph'],
     ['imports', 'Archive', 'Import chat history', '#archive?view=imports'],
@@ -168,34 +174,80 @@ test('archive shows a filterable table and opens a message in a drawer', async (
   await page.close();
 });
 
-test('memory has one workspace with relationships and access review', async () => {
+test('memory has one workspace, and people and facts open as a map', async () => {
   const {page, problems} = await open('memory');
   const tabs = page.getByRole('tablist', {name: 'Memory workspace'});
-  for (const name of ['Notes & history', 'Learned', 'Relations & access', 'Evidence graph', 'Long-term memory'])
+  for (const name of ['Notes & history', 'Learned', 'People & facts', 'Evidence graph', 'Long-term memory'])
     await tabs.getByRole('tab', {name}).waitFor();
-  await tabs.getByRole('tab', {name: 'Relations & access'}).click();
-  await page.getByRole('heading', {name: 'Relationships & memory access'}).waitFor();
-  await page.getByRole('tab', {name: /Review requests/}).click();
-  await page.getByRole('button', {name: 'Reject once'}).first().waitFor();
-  await page.getByRole('tab', {name: 'Shared memory'}).click();
-  await page.getByRole('tab', {name: 'Explore'}).click();
+  await tabs.getByRole('tab', {name: 'People & facts'}).click();
+  await page.getByRole('heading', {name: 'People, projects & facts'}).first().waitFor();
+  await page.getByRole('link', {name: 'Chats & access'}).first().waitFor();
   await page.getByRole('button', {name: 'Map'}).click();
   await page.getByRole('button', {name: 'Reset layout'}).waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
 
+test('chats & access manages a group, its people, shared facts and requests in one place', async () => {
+  const {page, problems} = await open('access');
+  const list = page.getByRole('region', {name: 'Chats'});
+  await list.getByRole('link', {name: /^You/}).waitFor();
+  await list.getByRole('link', {name: /Weekend notes.*Nocheh is off/}).waitFor();
+  await list.getByRole('link', {name: /Aurora planning.*Nocheh is on/}).click();
+  assert.equal(new URL(page.url()).hash, '#access?view=chats&chat=-10042');
+  await page.getByText('Nocheh is on in this group').waitFor();
+  await page.getByRole('heading', {name: 'Who can talk to Nocheh here'}).waitFor();
+  await page.getByText('You · always allowed').waitFor();
+  const mira = page.getByRole('group', {name: 'Who may talk to Nocheh: Mira Chen'});
+  await mira.getByRole('button', {name: 'Allowed', exact: true}).click();
+  await page.getByRole('status').filter({hasText: 'Saved, not applied yet.'}).waitFor();
+  assert.equal(await mira.getByRole('button', {name: 'Allowed', exact: true}).getAttribute('aria-pressed'), 'true');
+  await page.getByRole('button', {name: 'Apply saved settings'}).click();
+  await page.getByRole('status').filter({hasText: 'Saved, not applied yet.'}).waitFor({state: 'detached'});
+  // A request to share with this group, a sharing rule into it and a standing permission.
+  await page.getByRole('heading', {name: 'What Nocheh remembers here'}).waitFor();
+  await page.getByRole('button', {name: 'Reject once'}).first().waitFor();
+  await page.getByText('Trip notes from the topic').waitFor();
+  await page.getByText('Nothing shared with this chat yet').waitFor();
+  await page.getByRole('heading', {name: 'What Nocheh may do here'}).waitFor();
+  await page.getByRole('button', {name: 'Revoke'}).click();
+  await page.getByText('Nothing without asking.', {exact: false}).waitFor();
+  // The topic follows its group and holds the shared fact.
+  await list.getByRole('link', {name: /Iceland planning/}).click();
+  await page.getByText('Topics follow their group.', {exact: false}).waitFor();
+  await page.getByText('Mira prefers quiet aurora viewpoints.').first().waitFor();
+  // A group Nocheh is not in can be turned on.
+  await list.getByRole('link', {name: /Weekend notes/}).click();
+  await page.getByText('Nocheh is off in this group').waitFor();
+  await page.getByRole('group', {name: 'Nocheh in this group'}).getByRole('button', {name: 'On'}).click();
+  await page.getByText('Nocheh is on in this group').waitFor();
+  await list.getByRole('link', {name: /Weekend notes.*Nocheh is on/}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('chats & access holds requests, shared facts, sharing rules and topic memory', async () => {
+  const {page, problems} = await open('access?view=requests');
+  await page.getByRole('button', {name: 'Reject once'}).first().waitFor();
+  await page.getByRole('tab', {name: 'Shared facts'}).click();
+  await page.getByText('Mira prefers quiet aurora viewpoints.').first().waitFor();
+  await page.getByRole('tab', {name: 'Sharing rules'}).click();
+  await page.getByRole('button', {name: 'New sharing rule'}).waitFor();
+  await page.getByRole('tab', {name: 'Defaults'}).click();
+  const topicMemory = page.getByRole('group', {name: 'Topic memory'});
+  assert.equal(await topicMemory.getByRole('button', {name: /Whole group/}).getAttribute('aria-pressed'), 'true');
+  await topicMemory.getByRole('button', {name: /Each topic/}).click();
+  await page.getByRole('status').filter({hasText: 'Saved, not applied yet.'}).waitFor();
+  await page.getByRole('heading', {name: 'Suggestion and delivery settings'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('settings keeps every section reachable', async () => {
   const {page, problems} = await open('settings');
-  for (const name of [
-    'Telegram access',
-    'Model and privacy',
-    'Speed',
-    'Who may address Nocheh in groups',
-    'Telegram groups',
-    'Owner freedom',
-  ])
+  for (const name of ['Telegram access', 'Model and privacy', 'Speed', 'Owner freedom'])
     await page.getByRole('heading', {name, exact: true}).first().waitFor();
+  await page.getByRole('link', {name: 'Chats & access'}).first().waitFor();
   for (const label of [
     'Reasoning model',
     'Embedding model',

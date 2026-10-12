@@ -137,7 +137,7 @@ export class OwnerSupervisionRepository {
     const kind=kindOf(row.kind),id=String(row.id),revision=Number(row.revision),state=String(row.state??row.status);
     const review=kind==='controlled_action'?{href:'#inbox?action='+id,api_path:'/v1/tools/actions/'+id}:
       kind==='telegram_action'?{href:'#inbox?action='+id,api_path:'/v1/tools/actions/'+id}:
-      kind==='memory_access'?{href:'#memory?view=relations&request='+id,api_path:'/v1/memory-access/requests/'+id+'/decide'}:
+      kind==='memory_access'?{href:'#inbox?kind=memory_access&decision='+id,api_path:'/v1/memory-access/requests/'+id+'/decide'}:
       kind==='entity'?{href:'#inbox?kind=entity&decision='+id,api_path:'/v1/entities/'+id+'/decide'}:
       {href:'#inbox?kind=knowledge&decision='+id,api_path:'/v1/knowledge/proposals/'+id};
     return {kind,id,title:row.title??row.name??(kind==='knowledge'?'Knowledge change':kind.replaceAll('_',' ')),state,revision,

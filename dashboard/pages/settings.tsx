@@ -1,6 +1,5 @@
 import {useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode} from 'react';
 import {useRevisionDraft} from '../lib/draft';
-import {participantAllowed, switchDecision} from '../lib/group-access';
 import {RotateCcw} from 'lucide-react';
 import {
   call,
@@ -11,7 +10,6 @@ import {
   profileName,
   RouteLink,
   useLoad,
-  refreshResources,
   StatusBadge,
   Button,
   Alert,
@@ -23,18 +21,6 @@ import {
 
 type Notify = (message: string, error?: boolean) => void;
 
-type Conversation = {
-  space_id: string;
-  kind: string;
-  name?: string;
-  configured?: boolean;
-  parent_space?: string;
-  closed?: boolean;
-  registered?: boolean;
-  observed_at?: string | null;
-  telegram?: {state?: string; migrate_to_chat_id?: string | number};
-};
-
 type SettingsField = {
   key: string;
   value?: string;
@@ -42,8 +28,6 @@ type SettingsField = {
   configured?: boolean;
   editable?: boolean;
 };
-
-type AccessRule = {granted: string[]; denied: string[]};
 
 type FieldChangeEvent = ChangeEvent<HTMLInputElement | HTMLSelectElement>;
 
@@ -57,7 +41,6 @@ export function Settings({notify}: {notify: Notify}) {
       </TabsList>
       <TabsContent value="nocheh" forceMount>
         <NochehSettings notify={notify} />
-        <TelegramGroups notify={notify} />
         <OwnerFreedom notify={notify} />
       </TabsContent>
       <TabsContent value="hermes" forceMount>
@@ -65,185 +48,6 @@ export function Settings({notify}: {notify: Notify}) {
         <PolicySettings notify={notify} onSaved={() => setDefaultsRevision(v => v + 1)} />
       </TabsContent>
     </Tabs>
-  );
-}
-
-function TelegramGroups({notify}: {notify: Notify}) {
-  const [tick, setTick] = useState(0);
-  const [data, error] = useLoad('/conversations?limit=100', tick);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState('');
-  const items: Conversation[] = data?.items || [];
-  const groups = items.filter(item => item.kind === 'group' && item.configured);
-  const topicsOf = (group: Conversation) =>
-    items.filter(item => item.kind === 'topic' && item.parent_space === group.space_id);
-  const forums = groups.filter(group => /^-100/.test(group.space_id));
-  const [topicGroup, setTopicGroup] = useState('');
-  const [topicRef, setTopicRef] = useState('');
-  const [topicName, setTopicName] = useState('');
-
-  const changeTopic = async (body: Record<string, unknown>, message: string) => {
-    setBusy(true);
-    setProblem('');
-    try {
-      await call('/telegram/topics', body);
-      setTick(v => v + 1);
-      notify(message);
-      return true;
-    } catch (error) {
-      setProblem(errorText(error));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addTopic = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const ref = topicRef.trim();
-    const group = topicGroup || forums[0]?.space_id;
-    const target = /^\d+$/.test(ref) ? {chat_id: group, topic_id: Number(ref)} : {link: ref};
-    if (await changeTopic({action: 'add', name: topicName, ...target}, 'Topic added to the directory.')) {
-      setTopicRef('');
-      setTopicName('');
-    }
-  };
-
-  const topicLine = (topic: Conversation) => (
-    <li key={topic.space_id}>
-      <span dir="auto">{topic.name || 'Name unknown'}</span>
-      <code>{topic.space_id.split('/topic/')[1]}</code>
-      <small className="n-muted">
-        {[
-          topic.closed && 'closed',
-          topic.registered && 'added by you',
-          !topic.observed_at && !topic.registered && 'no message yet',
-        ]
-          .filter(Boolean)
-          .join(' · ')}
-      </small>
-      {topic.registered &&
-        button(
-          'Remove',
-          () =>
-            changeTopic(
-              {action: 'remove', chat_id: topic.parent_space, topic_id: Number(topic.space_id.split('/topic/')[1])},
-              'Topic removed from the directory.',
-            ),
-          busy,
-          '',
-        )}
-    </li>
-  );
-
-  const status = (item: Conversation) =>
-    item.telegram?.state === 'migrated'
-      ? 'Upgraded to a supergroup. Its new ID is ' + item.telegram.migrate_to_chat_id + '; update Selected groups.'
-      : item.telegram?.state === 'not_member'
-        ? 'The bot is not a member of this group.'
-        : item.telegram?.state === 'not_found'
-          ? 'Telegram did not find this group.'
-          : item.observed_at
-            ? 'Messages received.'
-            : 'No message received from this group yet.';
-
-  const refresh = async () => {
-    setBusy(true);
-    setProblem('');
-    try {
-      const result = await call('/telegram/chats/refresh', {});
-      setTick(v => v + 1);
-      notify(`Checked ${result.chats.length} ${result.chats.length === 1 ? 'group' : 'groups'} with Telegram.`);
-    } catch (error) {
-      setProblem(errorText(error));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Panel
-      title="Telegram groups"
-      note="Names come from messages Nocheh received. Refresh asks Telegram for the selected groups’ current names; it sends nothing."
-    >
-      {error && !data && <Alert>The group list is unavailable. Refresh and try again.</Alert>}
-      {!data && !error && <p role="status">Loading groups…</p>}
-      {data &&
-        (groups.length ? (
-          <ul className="telegram-groups">
-            {groups.map(item => (
-              <li key={item.space_id}>
-                <strong dir="auto">{item.name || 'Name unknown'}</strong>
-                <code>{item.space_id}</code>
-                <span className="n-muted">{status(item)}</span>
-                {topicsOf(item).length > 0 && (
-                  <ul className="telegram-topics" aria-label={'Topics in ' + (item.name || item.space_id)}>
-                    {topicsOf(item).map(topicLine)}
-                  </ul>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="n-muted">No groups are selected. Owner private messages still work.</p>
-        ))}
-      {forums.length > 0 && (
-        <form className="telegram-topic-form" onSubmit={addTopic}>
-          <p className="n-muted">
-            Telegram does not let bots list topics. New topics appear automatically when they are created or renamed;
-            add an older topic with no messages here. In Telegram, open the topic and use Copy link.
-          </p>
-          {forums.length > 1 && (
-            <label>
-              Group
-              <select
-                value={topicGroup || forums[0].space_id}
-                disabled={busy}
-                onChange={e => setTopicGroup(e.target.value)}
-              >
-                {forums.map(group => (
-                  <option key={group.space_id} value={group.space_id}>
-                    {group.name || group.space_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label>
-            Topic link or number
-            <input
-              value={topicRef}
-              disabled={busy}
-              placeholder="https://t.me/c/…/12"
-              onChange={e => setTopicRef(e.target.value)}
-            />
-          </label>
-          <label>
-            Topic name
-            <input
-              value={topicName}
-              disabled={busy}
-              dir="auto"
-              maxLength={128}
-              onChange={e => setTopicName(e.target.value)}
-            />
-          </label>
-          <div className="n-actions">
-            <button className="n-primary" disabled={busy || !topicRef.trim() || !topicName.trim()}>
-              Add topic
-            </button>
-          </div>
-        </form>
-      )}
-      {problem && (
-        <p role="alert" className="source-retirement-error">
-          {`Refresh failed: ${problem}. Telegram may be unavailable; try again.`}
-        </p>
-      )}
-      <div className="n-actions">
-        {button(busy ? 'Checking with Telegram…' : 'Refresh from Telegram', refresh, busy || !groups.length, '')}
-      </div>
-    </Panel>
   );
 }
 
@@ -453,14 +257,11 @@ function PolicySettings({notify, onSaved}: {notify: Notify; onSaved: () => void}
 const settingHints: Record<string, string> = {
   TELEGRAM_ENABLED: 'Start or stop Telegram message handling when settings are applied.',
   TELEGRAM_OWNER_ID: 'Your numeric Telegram user ID. Only the owner can administer Nocheh.',
-  TELEGRAM_GROUP_IDS: 'Comma-separated numeric chat IDs. Each selected group uses its own memory and sources.',
   TELEGRAM_BOT_TOKEN: 'The token from BotFather for the bot used by the native Hermes Telegram adapter.',
   TELEGRAM_GROUP_REPLIES:
     'Only when addressed: in groups Nocheh answers a reply to its own message, its @username, or its name at the start of a message, and stays silent otherwise. Every message: it may answer any message from a permitted person. All group messages are archived either way.',
   TELEGRAM_BOT_NAMES:
     'Names, separated by commas, that address Nocheh when they start a group message. Change, add or remove any of them; its Telegram display name and @username always work.',
-  TELEGRAM_TOPIC_MEMORY:
-    'Whole group: in a group with topics, Nocheh remembers what was said in its General chat and every topic, wherever you ask. Each topic: a topic remembers only its own messages. Either way a group never sees your private chat or other groups.',
   NOCHEH_MODEL:
     'One model for Hermes replies, Honcho memory and secret detection, grouped by the provider login that serves it.',
   NOCHEH_EMBEDDING_MODEL: 'The OpenAI model that turns memory into searchable vectors, paid from the embedding budget.',
@@ -486,39 +287,10 @@ const applyStateLabels: Record<string, string> = {
 function NochehSettings({notify}: {notify: Notify}) {
   const [refresh, setRefresh] = useState(0);
   const [data, error] = useLoad('/settings', refresh);
-  const [identityTick, setIdentityTick] = useState(0);
-  const [identityDirectory, identityError] = useLoad('/telegram/identities', identityTick);
-  const [chatRefresh, setChatRefresh] = useState<any[] | null>(null);
-  const [refreshingChats, setRefreshingChats] = useState(false);
-  // Reads Telegram only when the owner asks; saved names then serve every directory view.
-  const refreshChats = async () => {
-    setRefreshingChats(true);
-    try {
-      const result = await call('/telegram/chats/refresh', {});
-      setChatRefresh(result.chats || []);
-      setIdentityTick(v => v + 1);
-      void refreshResources();
-      notify('Group information refreshed from Telegram.');
-    } catch (e) {
-      notify(errorText(e), true);
-    } finally {
-      setRefreshingChats(false);
-    }
-  };
-  const chatState = (chat: any) =>
-    chat.state === 'available'
-      ? (chat.title || 'No title') + (chat.is_forum ? ' · forum' : '')
-      : chat.state === 'migrated'
-        ? 'Upgraded to a supergroup with ID ' + chat.migrate_to_chat_id + '. Replace the old ID in Selected groups.'
-        : chat.state === 'not_member'
-          ? 'Nocheh’s bot is not a member of this group.'
-          : 'Telegram does not know this ID.';
+  const [identityDirectory] = useLoad('/telegram/identities');
   const [changes, setChanges, editRevision] = useRevisionDraft<Record<string, string>>(data?.revision);
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState(false);
-  const [accessGroup, setAccessGroup] = useState('');
-  const [accessUser, setAccessUser] = useState('');
-  const [manualDecision, setManualDecision] = useState('deny');
 
   const save = async () => {
     setBusy(true);
@@ -691,24 +463,17 @@ function NochehSettings({notify}: {notify: Notify}) {
               ['addressed', 'Only when addressed'],
               ['all', 'Every message'],
             ]
-          : f.key === 'TELEGRAM_TOPIC_MEMORY'
-            ? [
-                ['group', 'Whole group'],
-                ['topic', 'Each topic'],
-              ]
-            : [
-                ['false', 'Disabled'],
-                ['true', 'Enabled'],
-              ];
+          : [
+              ['false', 'Disabled'],
+              ['true', 'Enabled'],
+            ];
     return (
       <div className="n-field" key={f.key}>
         <label htmlFor={f.key}>
           {labels[f.key] || f.key}
           {f.secret && <span className="n-secret-status">{f.configured ? 'Configured' : 'Missing'}</span>}
         </label>
-        {['NOCHEH_GUARD_MODE', 'TELEGRAM_ENABLED', 'TELEGRAM_GROUP_REPLIES', 'TELEGRAM_TOPIC_MEMORY'].includes(
-          f.key,
-        ) ? (
+        {['NOCHEH_GUARD_MODE', 'TELEGRAM_ENABLED', 'TELEGRAM_GROUP_REPLIES'].includes(f.key) ? (
           <select {...attrs}>
             {options.map(([option, label]) => (
               <option key={option} value={option}>
@@ -721,9 +486,6 @@ function NochehSettings({notify}: {notify: Notify}) {
         )}
         <small id={f.key + '-help'}>
           {settingHints[f.key]}
-          {f.key === 'TELEGRAM_GROUP_IDS' && !value
-            ? ' No groups selected; owner private messages can still work.'
-            : ''}
           {f.secret
             ? ' ' +
               (f.configured
@@ -735,9 +497,6 @@ function NochehSettings({notify}: {notify: Notify}) {
               ? ' Managed automatically.'
               : ''}
         </small>
-        {f.key === 'TELEGRAM_GROUP_IDS' && groups.length && (
-          <small>{'Selected: ' + groups.map(groupLabel).join('; ')}</small>
-        )}
         {f.key === 'TELEGRAM_OWNER_ID' && observedUsers.has(value) && <small>{participantLabel(value)}</small>}
       </div>
     );
@@ -756,18 +515,8 @@ function NochehSettings({notify}: {notify: Notify}) {
   };
 
   const saved = (key: string): string => fields.find(f => f.key === key)?.value || '';
-  const groups = (changes.TELEGRAM_GROUP_IDS ?? saved('TELEGRAM_GROUP_IDS'))
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
-  const owner = changes.TELEGRAM_OWNER_ID ?? saved('TELEGRAM_OWNER_ID');
   const observed: any[] = identityDirectory?.groups || [];
-  const observedById = new Map<string, any>(observed.map(group => [group.id, group]));
   const observedUsers = new Map<string, any>(observed.flatMap(group => group.users || []).map(user => [user.id, user]));
-  const groupLabel = (id: string) => {
-    const name = observedById.get(id)?.name;
-    return name ? name + ' · ID ' + id : 'Group ID ' + id;
-  };
   const participantLabel = (id: string) => {
     const found = observedUsers.get(id);
     if (!found) return 'User ID ' + id;
@@ -776,260 +525,16 @@ function NochehSettings({notify}: {notify: Notify}) {
       .join(' ');
     return name ? name + ' · ID ' + id : 'User ID ' + id;
   };
-  const participantName = (id: string): string =>
-    observedUsers.get(id)?.name || observedUsers.get(id)?.username || 'Unknown person';
-  const participantMeta = (id: string) => {
-    const found = observedUsers.get(id);
-    return [found?.name && found.username !== found.name ? found.username : null, 'ID ' + id]
-      .filter(Boolean)
-      .join(' · ');
-  };
-  const addObservedGroup = (id: string) => {
-    if (!id || groups.includes(id)) return;
-    setChanges({...changes, TELEGRAM_GROUP_IDS: [...groups, id].join(',')});
-    setAccessGroup(id);
-    setReview(false);
-  };
-  const chosen = groups.includes(accessGroup) ? accessGroup : groups[0];
-  let access: Record<string, AccessRule> = {};
-  try {
-    access = JSON.parse(changes.TELEGRAM_GROUP_ACCESS ?? saved('TELEGRAM_GROUP_ACCESS') ?? '{}');
-  } catch {
-    access = {};
-  }
-  const rule = access[chosen] || {granted: [], denied: []};
-  let savedAccess: Record<string, AccessRule> = {};
-  try {
-    savedAccess = JSON.parse(saved('TELEGRAM_GROUP_ACCESS') || '{}');
-  } catch {}
-  const savedRule = savedAccess[chosen] || {granted: [], denied: []};
-  const participantIds = [
-    ...new Set<string>([
-      ...(observedById.get(chosen)?.users || []).map((user: any) => user.id),
-      ...rule.granted,
-      ...rule.denied,
-    ]),
-  ]
-    .filter(id => id !== owner)
-    .sort((a, b) => participantName(a).localeCompare(participantName(b)) || a.localeCompare(b));
-  const accessState = (id: string) =>
-    rule.denied.includes(id) ? 'deny' : rule.granted.includes(id) ? 'grant' : 'default';
-  const changeAccess = (decision: string, user: string) => {
-    if (!/^[1-9]\d{0,18}$/.test(user) || user === owner) {
-      notify('Enter a valid participant user ID other than the owner.', true);
-      return;
-    }
-    if (accessState(user) === decision) return;
-    const next = {...access};
-    const current = next[chosen] || {granted: [], denied: []};
-    const granted = current.granted.filter(id => id !== user);
-    const denied = current.denied.filter(id => id !== user);
-    if (decision === 'grant') granted.push(user);
-    if (decision === 'deny') denied.push(user);
-    if (granted.length || denied.length) next[chosen] = {granted: granted.sort(), denied: denied.sort()};
-    else delete next[chosen];
-    const updated = {...changes};
-    const value = JSON.stringify(next);
-    let original = saved('TELEGRAM_GROUP_ACCESS') || '{}';
-    try {
-      original = JSON.stringify(JSON.parse(original));
-    } catch {}
-    if (value === original) delete updated.TELEGRAM_GROUP_ACCESS;
-    else updated.TELEGRAM_GROUP_ACCESS = value;
-    setChanges(updated);
-    setReview(false);
-  };
-  const accessChoices = [
-    ['deny', 'Denied'],
-    ['grant', 'Allowed'],
-  ];
-  const setParticipantAccess = (allow: boolean, id: string) => {
-    const decision = switchDecision(savedRule, rule, id, allow);
-    if (decision) changeAccess(decision, id);
-  };
-  const personRow = (id: string) => (
-    <li className="n-access-person" key={id}>
-      <div className="n-access-person-name">
-        <strong>{participantName(id)}</strong>
-        <small>{participantMeta(id)}</small>
-      </div>
-      <div className="n-access-choice" role="group" aria-label={'Group access for ' + participantLabel(id)}>
-        {accessChoices.map(([state, label]) => (
-          <button
-            type="button"
-            key={state}
-            disabled={busy}
-            aria-pressed={participantAllowed(rule, id) === (state === 'grant')}
-            onClick={() => setParticipantAccess(state === 'grant', id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-    </li>
-  );
-  const addManualRule = () => {
-    changeAccess(manualDecision, accessUser.trim());
-    setAccessUser('');
-    setManualDecision('deny');
-  };
-
-  const accessEditor = (
-    <div className="n-settings-access" aria-labelledby="group-access-title">
-      <h4 id="group-access-title">Who may address Nocheh in groups</h4>
-      <p className="n-muted">
-        Everyone except you is denied by default. Switch a person to Allowed to let them address Nocheh; Denied blocks
-        them. Telegram supplies group administrators; other people appear after Nocheh observes them. Save and Apply for
-        changes to take effect.
-      </p>
-      {!identityDirectory && !identityError && <p role="status">Looking up Telegram group names and visible people…</p>}
-      {identityError && <p role="status">Observed Telegram names are unavailable. You can still enter numeric IDs.</p>}
-      <div className="n-actions">
-        {button(
-          refreshingChats ? 'Refreshing…' : 'Refresh group names from Telegram',
-          refreshChats,
-          refreshingChats || busy,
-        )}
-      </div>
-      {chatRefresh && (
-        <ul className="n-telegram-refresh" aria-label="Telegram group information">
-          {chatRefresh.length ? (
-            chatRefresh.map(chat => (
-              <li key={chat.chat_id}>
-                <code>{chat.chat_id}</code>{' '}
-                {chat.state === 'available' ? (
-                  <span dir="auto">{chatState(chat)}</span>
-                ) : (
-                  <strong>{chatState(chat)}</strong>
-                )}
-              </li>
-            ))
-          ) : (
-            <li>No groups are selected.</li>
-          )}
-        </ul>
-      )}
-      {observed.some(group => !groups.includes(group.id)) && (
-        <div className="n-field">
-          <label htmlFor="observed-group">Add an observed group</label>
-          <select id="observed-group" value="" disabled={busy} onChange={e => addObservedGroup(e.target.value)}>
-            <option value="">Choose a group…</option>
-            {observed
-              .filter(group => !groups.includes(group.id))
-              .map(group => (
-                <option value={group.id} key={group.id}>
-                  {groupLabel(group.id)}
-                </option>
-              ))}
-          </select>
-        </div>
-      )}
-      {groups.length ? (
-        <div className="n-form">
-          <div className="n-field">
-            <label htmlFor="access-group">Selected group</label>
-            <select id="access-group" value={chosen} disabled={busy} onChange={e => setAccessGroup(e.target.value)}>
-              {groups.map(id => (
-                <option value={id} key={id}>
-                  {groupLabel(id)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="n-access-directory">
-            <div className="n-access-directory-head">
-              <b>Known people in this group</b>
-              <small>
-                {participantIds.filter(id => participantAllowed(rule, id)).length +
-                  ' allowed · ' +
-                  participantIds.filter(id => !participantAllowed(rule, id)).length +
-                  ' denied'}
-              </small>
-            </div>
-            <ul className="n-access-people">
-              {owner && (
-                <li className="n-access-person n-access-owner" key="owner">
-                  <div className="n-access-person-name">
-                    <strong>{participantName(owner)}</strong>
-                    <small>{participantMeta(owner)}</small>
-                  </div>
-                  <span className="n-access-owner-badge">Owner · always allowed</span>
-                </li>
-              )}
-              {participantIds.map(personRow)}
-            </ul>
-            {!participantIds.length && (
-              <p className="n-muted n-access-empty">No other people are known yet. You can add someone by ID below.</p>
-            )}
-          </div>
-          <details className="n-access-manual">
-            <summary>Add someone by user ID</summary>
-            <div className="n-access-manual-fields">
-              <div className="n-field">
-                <label htmlFor="access-user">Telegram user ID</label>
-                <input
-                  id="access-user"
-                  inputMode="numeric"
-                  value={accessUser}
-                  disabled={busy}
-                  placeholder="Numeric user ID"
-                  onChange={e => setAccessUser(e.target.value)}
-                />
-              </div>
-              <div className="n-field">
-                <label htmlFor="manual-decision">Access</label>
-                <select
-                  id="manual-decision"
-                  value={manualDecision}
-                  disabled={busy}
-                  onChange={e => setManualDecision(e.target.value)}
-                >
-                  <option value="deny">Denied</option>
-                  <option value="grant">Allowed</option>
-                </select>
-              </div>
-              {button(
-                'Add person',
-                addManualRule,
-                busy || !/^[1-9]\d{0,18}$/.test(accessUser.trim()) || accessUser.trim() === owner,
-              )}
-            </div>
-          </details>
-          {Object.keys(access).some(id => !groups.includes(id)) && (
-            <p role="alert">
-              A removed group still has access decisions. Restore its group ID or revoke its decisions before saving.
-            </p>
-          )}
-        </div>
-      ) : (
-        <p className="n-muted">Add a selected group above to manage participant access.</p>
-      )}
-    </div>
+  const accessLink = (
+    <p className="n-settings-moved">
+      Which groups Nocheh works in, who may talk to it there, topics and topic memory are chosen per chat in{' '}
+      <a href="#access">Chats &amp; access</a>.
+    </p>
   );
 
   const reviewValue = (key: string, value: string) => {
-    if (key === 'TELEGRAM_GROUP_IDS') return value.split(',').filter(Boolean).map(groupLabel).join(', ') || '(empty)';
     if (key === 'TELEGRAM_OWNER_ID') return participantLabel(value);
     if (key === 'TELEGRAM_GROUP_REPLIES') return value === 'all' ? 'Every message' : 'Only when addressed';
-    if (key === 'TELEGRAM_TOPIC_MEMORY') return value === 'topic' ? 'Each topic' : 'Whole group';
-    if (key === 'TELEGRAM_GROUP_ACCESS')
-      try {
-        return (
-          Object.entries(JSON.parse(value))
-            .map(
-              ([id, decision]: [string, any]) =>
-                groupLabel(id) +
-                ': ' +
-                [
-                  ...(decision.granted || []).map((user: string) => participantLabel(user) + ' granted'),
-                  ...(decision.denied || []).map((user: string) => participantLabel(user) + ' denied'),
-                ].join(', '),
-            )
-            .join('; ') || 'Owner only'
-        );
-      } catch {
-        return 'Invalid group access configuration';
-      }
     return value || '(empty)';
   };
 
@@ -1054,17 +559,15 @@ function NochehSettings({notify}: {notify: Notify}) {
       >
         {fieldGroup(
           'Telegram access',
-          'Choose who can use the assistant and which groups it can participate in.',
+          'Your Telegram account, the bot, and how Nocheh answers in groups.',
           [
             'TELEGRAM_ENABLED',
             'TELEGRAM_OWNER_ID',
-            'TELEGRAM_GROUP_IDS',
             'TELEGRAM_GROUP_REPLIES',
             'TELEGRAM_BOT_NAMES',
-            'TELEGRAM_TOPIC_MEMORY',
             'TELEGRAM_BOT_TOKEN',
           ],
-          accessEditor,
+          accessLink,
         )}
         {fieldGroup(
           'Model and privacy',
@@ -1135,7 +638,7 @@ function NochehSettings({notify}: {notify: Notify}) {
           first.
         </p>
         {button('Apply saved settings', apply, busy || !!Object.keys(changes).length)}
-        <RouteLink page="operations">View apply results →</RouteLink>
+        <a href="#system?view=maintenance">View apply results →</a>
       </div>
     </Panel>
   );
