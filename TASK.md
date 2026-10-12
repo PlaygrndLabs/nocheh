@@ -204,6 +204,16 @@ separate (“Each topic”)
 conversation. Pending: after a restart, a live question in one topic about
 something said in another topic of the same group.
 
+Dashboard redesign: the owner found the dashboard unclear, asked for a big
+redesign and refactor with memory access managed from the dashboard, and
+accepted the [redesign plan](docs/dashboard-redesign-plan.md) on 2026-10-12.
+Step 1 (groundwork, no visible change) is implemented: every browser module is
+TypeScript/TSX formatted with Prettier, one owner API client, unused access pages
+removed, and source-text dashboard tests replaced by a browser test of every page
+on the synthetic preview ([browser checks](test/dashboard-pages.browser.mjs)).
+Next: new navigation, the Chats & access page, Settings sections, then Memory and
+Archive tidy-up, each with its SPECS.md update.
+
 </current>
 
 <verification>

@@ -491,11 +491,20 @@ count in the labeled category, rather than an unavailable observation.
 No sampling service, uptime claim, or provider analytics collection is added.
 Detailed provider analytics remain in CPA.
 
-Page implementations live under `dashboard/pages/`; shared controls live in
-`dashboard/components/ui/`, while data subscriptions and revision-bound drafts live in
-`dashboard/lib/`. Browser code is checked with `tsconfig.dashboard.json`. The build removes
-obsolete chunks and emits independent chart, access-control, and Three.js bundles.
-`npm run test:dashboard` covers graph behavior and request handoff/cancellation.
+Page implementations live under `dashboard/pages/`; shared components live in
+`dashboard/components/` (primitives in `dashboard/components/ui/`), while the owner API
+client (`dashboard/lib/api.ts`), data subscriptions and revision-bound drafts live in
+`dashboard/lib/`. All browser code is TypeScript/TSX checked with `tsconfig.dashboard.json`
+and formatted with Prettier (`npm run format:dashboard`, `npm run check:dashboard-format`).
+The build removes obsolete chunks and emits independent chart and Three.js bundles. `npm run test:dashboard` covers graph behavior, request
+handoff/cancellation and small presentation helpers.
+
+`npm run test:dashboard-browser` opens every page in Chromium against the synthetic
+preview below and checks headings, navigation, old bookmarks, the archive drawer,
+the memory access views, Settings sections, phone-width layout, and that no page logs
+an error. It needs `npm run build`, a disposable PostgreSQL reachable through the
+usual `PG*` variables, and Chromium (`PLAYWRIGHT_CHROMIUM_EXECUTABLE`, or the browser
+Playwright manages). It starts and stops its own preview server on a free port.
 
 Archive and conversation history use list/detail views that stack on mobile.
 Original sources remain read-only; guarded copies are explicitly editable, and

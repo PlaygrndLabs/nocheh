@@ -9,6 +9,9 @@
   "scripts": {
     "build:dashboard": "node tools/build/build-dashboard.mjs",
     "test:dashboard": "node --test test/dashboard-*.test.mjs",
+    "test:dashboard-browser": "node --test test/dashboard-pages.browser.mjs",
+    "format:dashboard": "prettier --write 'dashboard/**/*.{ts,tsx,css}' test/dashboard-pages.browser.mjs",
+    "check:dashboard-format": "prettier --check 'dashboard/**/*.{ts,tsx,css}' test/dashboard-pages.browser.mjs",
     "build": "node tools/build/build.mjs",
     "start": "node dist/src/main.js",
     "dev": "npm run build && npm start",
@@ -40,6 +43,8 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "esbuild": "0.25.10",
+    "playwright-core": "1.56.1",
+    "prettier": "3.9.9",
     "tailwindcss": "4.3.3",
     "three": "0.180.0",
     "typescript": "5.9.3"
