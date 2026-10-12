@@ -38,8 +38,8 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Archive | Messages: browse originals, guarded copies and transcripts; edit guarded wording and inspect history or original files. Import chat history: choose a Telegram export, review access and files, then start or resume an import. |
 | Projects | Manage projects, the chats assigned to them, project memory and agent organization. |
 | System | Health: workflow totals, history charts, service diagnostics and paginated receipts; open Inngest. Connections: runtime status and capabilities, Hermes and provider dashboards. Databases: read-only table browser. Backups & maintenance: archive downloads, backups, restarts, restore checks and settings-apply results. |
-| Settings → Nocheh settings | Manage the Telegram owner and bot, group replies, model routing, speed and guarding across the installation. Review, save, then apply to running services. |
-| Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
+| Settings | Sections for Telegram (owner, bot, group replies), Models, Speed, Privacy and Advanced share one bar at the bottom: review, save, then apply to running services. Edits stay while you switch sections. |
+| Settings → Assistant | How much Nocheh may do without asking (owner freedom), and agent and memory preferences per Hermes profile. These save on their own; Hermes preferences take effect on the profile's next turn. |
 
 Links that use an earlier page name (for example `#activity`, `#sharing`, `#monitoring` or `#memoryMap`) open the page and tab that now hold that content; a link to one memory-access request opens it in the Inbox.
 

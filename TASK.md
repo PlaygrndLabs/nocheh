@@ -219,8 +219,12 @@ Step 3 (Chats & access) is implemented: one chat list with per-chat access
 (who can talk, what is remembered, what may be done, project), group on/off,
 people, topics, requests, shared facts, sharing rules and defaults including
 topic memory; memory-access lists filter by chat
-([page](dashboard/pages/access/index.tsx)). Next: Settings sections, then Memory
-and Archive tidy-up, each with its SPECS.md update.
+([page](dashboard/pages/access/index.tsx)). Step 4 (Settings) is implemented:
+sections Telegram, Models, Speed, Privacy, Assistant and Advanced as tabs, with
+one review/save/apply bar. Step 5 (phone pass) is implemented: every tab list
+wraps on phones; the browser test checks every page and tab at phone width for
+sideways scrolling. The redesign plan is complete; the owner's live look after
+restart is pending.
 
 </current>
 
