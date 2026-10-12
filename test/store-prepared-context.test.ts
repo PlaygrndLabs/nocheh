@@ -42,6 +42,16 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     assert.deepEqual(await services.prepared.prepare(reader,input,detect),result);assert.equal(calls,completedCalls);
     const simultaneous=await Promise.all(Array.from({length:4},()=>services.prepared.prepare(reader,'Concurrent saffronpass',detect)));
     assert.ok(simultaneous.every(value=>value===simultaneous[0]));assert.equal(calls,completedCalls+1);
+    // Honcho asks for every connected peer at once as one owner audience: its
+    // different texts are detected side by side, not one after another.
+    let inside=0,overlap=0,both!:()=>void;const together=new Promise<void>(resolve=>{both=resolve;});
+    const sideBySide=async(text:string)=>{
+      inside++;overlap=Math.max(overlap,inside);if(inside===2)both();
+      await Promise.race([together,new Promise(resolve=>setTimeout(resolve,2000))]);inside--;
+      return text.includes('saffronpass')?['saffronpass']:[];
+    };
+    const pair=await Promise.all(['First parallel saffronpass','Second parallel saffronpass'].map(text=>services.prepared.prepare(reader,text,sideBySide)));
+    assert.equal(overlap,2,'one audience detects different texts side by side');assert.ok(!JSON.stringify(pair).includes('saffronpass'));
 
     // Same owner but another purpose cannot inherit an assistant's prepared values.
     let filterCalls=0;
