@@ -55,6 +55,12 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     // Another audience reuses the detector result for identical text but keeps its own guarded copy.
     const reused=await services.prepared.prepare({...reader,purpose:'filter'},'Concurrent saffronpass',async()=>{throw Error('identical text was detected again');});
     assert.ok(!String(reused).includes('saffronpass'));
+    // Memory review marks its detector calls as background so reply checks get slots first.
+    const priorities:(boolean|undefined)[]=[];
+    const marked=async(text:string,background?:boolean)=>{priorities.push(background);return text.includes('saffronpass')?['saffronpass']:[];};
+    await services.prepared.prepare({...reader,purpose:'memory-review'},'Review-only saffronpass',marked);
+    await services.prepared.prepare(reader,'Reply-only saffronpass',marked);
+    assert.deepEqual(priorities,[true,false]);
 
     // Same owner but another purpose cannot inherit an assistant's prepared values.
     let filterCalls=0;
