@@ -308,9 +308,11 @@ class AssistantGateway:
         # A group message nobody addressed to the bot stays archived without a turn.
         if not scope.owner and not self.group_turn(body):return {'state':'suppressed','error_code':'not_addressed'}
         name=digest(body['event_id']+':'+str(body['attempt']))
-        # Turns in one chat keep their arrival order; different chats run side
-        # by side, up to TURN_CAPACITY at once. Lane before capacity, always.
-        lane=self.lanes.setdefault(scope.chat_id,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
+        # Turns in one conversation keep their arrival order; different chats
+        # and different topics of one group run side by side, up to
+        # TURN_CAPACITY at once. Lane before capacity, always.
+        key=scope.space or scope.chat_id
+        lane=self.lanes.setdefault(key,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
         try:
             async with lane['lock']:
                 receipt=self.receipts/(name+'.result')
@@ -321,7 +323,7 @@ class AssistantGateway:
                     return await self._run_turn(scope,body,name,progress,cancelled)
         finally:
             lane['users']-=1
-            if not lane['users'] and self.lanes.get(scope.chat_id) is lane:del self.lanes[scope.chat_id]
+            if not lane['users'] and self.lanes.get(key) is lane:del self.lanes[key]
 
     def group_turn(self,body):
         if self.group_replies=='all':return True
