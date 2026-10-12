@@ -186,8 +186,9 @@ that starts as “Nocheh” and “نوچه”
 [trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
 gateway check ([test](services/hermes/test_gateway.py)) and the
 `group_answers_only_when_addressed` simulator scenario run only on the owner's
-Mac and have not been run. Pending: a live group check that an unaddressed
-message gets no reply and an addressed one does.
+Mac and have not been run. Addressing by a name at the start passed live on
+October 12 (four group messages, one reply each). Pending: a live unaddressed
+group message that gets no reply, and a reply or @mention that gets one.
 
 All topics of a group now share one memory by default. A live question in a
 group's second topic did not know what the owner had said in another topic,
@@ -201,8 +202,10 @@ separate (“Each topic”)
 [grant checks](test/store-memory-access.test.ts),
 [sharing checks](test/store-sharing.test.ts),
 [helper checks](test/spaces.test.ts)). Hermes native notes stay per
-conversation. Pending: after a restart, a live question in one topic about
-something said in another topic of the same group.
+conversation. Live check passed on the owner's development installation on
+October 12: questions in other topics and in General recalled what was said in
+one topic, with no private-chat fact, after restarts on three successive builds
+([live summary](docs/mvp-acceptance-status.md)).
 
 Dashboard redesign: the owner found the dashboard unclear, asked for a big
 redesign and refactor with memory access managed from the dashboard, and
