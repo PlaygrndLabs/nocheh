@@ -28,8 +28,40 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
 TOKEN = environment_secret('SERVICE_TOKEN')
 CALL_LOCK = threading.RLock()
-# Secret-guard checks run side by side up to the owner's Settings value.
-DETECTOR_SLOTS = threading.BoundedSemaphore(parallel('NOCHEH_PARALLEL_GUARD_CHECKS', 3, 4))
+
+
+class DetectorSlots:
+    """Secret-guard checks run side by side up to the owner's Settings value.
+    Checks for replies take a free slot before any waiting background check,
+    and background learning leaves one slot free for replies when it can."""
+    def __init__(self, size):
+        self.size, self.used, self.background, self.waiting = size, 0, 0, 0
+        self.changed = threading.Condition()
+
+    @contextlib.contextmanager
+    def slot(self, background=False):
+        with self.changed:
+            if background:
+                self.changed.wait_for(lambda: not self.waiting and self.used < self.size
+                                      and self.background < max(1, self.size - 1))
+                self.background += 1
+            else:
+                self.waiting += 1
+                try: self.changed.wait_for(lambda: self.used < self.size)
+                finally:
+                    self.waiting -= 1
+                    self.changed.notify_all()
+            self.used += 1
+        try:
+            yield
+        finally:
+            with self.changed:
+                self.used -= 1
+                if background: self.background -= 1
+                self.changed.notify_all()
+
+
+DETECTOR_SLOTS = DetectorSlots(parallel('NOCHEH_PARALLEL_GUARD_CHECKS', 3, 4))
 TRANSCRIPTION_LOCK = threading.RLock()
 CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
@@ -130,8 +162,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400, {"error": "expected_object"})
             # File capture and receipts must not queue behind model inference.
             # Detection can also be called by the guard during an active chat.
-            lock = {'/internal/chat':CALL_LOCK,'/internal/detect':DETECTOR_SLOTS,
-                    '/internal/transcribe':TRANSCRIPTION_LOCK}.get(self.path,contextlib.nullcontext())
+            lock = DETECTOR_SLOTS.slot(body.get('priority') == 'background') if self.path == '/internal/detect' else \
+                {'/internal/chat':CALL_LOCK,'/internal/transcribe':TRANSCRIPTION_LOCK}.get(self.path,contextlib.nullcontext())
             with lock:
                 result = self.dispatch(body)
             self.reply(200, result)

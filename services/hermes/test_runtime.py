@@ -69,7 +69,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                 req=urllib.request.Request(f'http://127.0.0.1:{server.server_port}/internal/detect',data=b'{}',headers={'Authorization':'Bearer '+runtime.TOKEN})
                 with urllib.request.urlopen(req,timeout=5) as response:return json.load(response)
             try:
-                with patch.object(runtime,'DETECTOR_SLOTS',threading.BoundedSemaphore(2)),ThreadPoolExecutor(max_workers=3) as workers:
+                with patch.object(runtime,'DETECTOR_SLOTS',runtime.DetectorSlots(2)),ThreadPoolExecutor(max_workers=3) as workers:
                     calls=[workers.submit(request) for _ in range(3)]
                     for _ in range(50):
                         with lock:
@@ -81,6 +81,38 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                     self.assertEqual([call.result()['route'] for call in calls],['/internal/detect']*3)
                 self.assertEqual(state['peak'],2)
             finally:release.set();server.shutdown();server.server_close();thread.join()
+
+    def test_reply_checks_go_before_background_learning_checks(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
+            from . import runtime
+            slots=runtime.DetectorSlots(2);order=[];held=threading.Event()
+            def check(name,background):
+                with slots.slot(background):
+                    order.append(name);held.wait(2)
+            def started(count):
+                for _ in range(100):
+                    with slots.changed:
+                        if slots.used+slots.waiting>=count:return
+                    threading.Event().wait(.01)
+            first=threading.Thread(target=check,args=('learning-1',True));first.start();started(1)
+            # Background learning leaves the second slot free for a reply.
+            waiting=threading.Thread(target=check,args=('learning-2',True));waiting.start();threading.Event().wait(.1)
+            self.assertEqual(order,['learning-1'])
+            reply=threading.Thread(target=check,args=('reply-1',False));reply.start();started(2)
+            for _ in range(100):
+                if 'reply-1' in order:break
+                threading.Event().wait(.01)
+            self.assertEqual(order,['learning-1','reply-1'])
+            # With both slots busy, a waiting reply takes the next free slot.
+            late=threading.Thread(target=check,args=('reply-2',False));late.start()
+            for _ in range(100):
+                with slots.changed:
+                    if slots.waiting:break
+                threading.Event().wait(.01)
+            held.set()
+            for thread in (first,waiting,reply,late):thread.join(3)
+            self.assertLess(order.index('reply-2'),order.index('learning-2'))
+            self.assertEqual((slots.used,slots.background,slots.waiting),(0,0,0))
 
     def test_credential_resolution_shares_the_refresh_lock(self):
         from .subscription import AUTH_LOCK, resolve_credentials, CODEX_BASE_URL

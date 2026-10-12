@@ -148,3 +148,4 @@ records current implementation and activation.
 | [0136](0136-per-topic-dispatch-lanes.md) | Each group topic has its own dispatch lane | Supersedes ADR-0125's shared group lane; order within one topic unchanged |
 | [0137](0137-side-by-side-runtime-context-guarding.md) | Runtime context for one audience is guarded side by side | Extends 0127 to guarded runtime context and Honcho provider requests; identical fresh text is shared, publications bounded at four |
 | [0138](0138-shared-context-detection.md) | Identical runtime text reuses one detector result across audiences | Extends 0137; detection shared by content, detector version and binding; guarded copies and access stay per audience |
+| [0139](0139-reply-checks-before-background-checks.md) | Reply secret checks go before background learning checks | Extends 0127; memory review and learning checks are background, wait behind reply checks and leave one slot for replies |
