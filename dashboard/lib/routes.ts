@@ -1,5 +1,5 @@
 /** Dashboard pages in sidebar order, and where old bookmarks now lead. */
-export const pageIds = ['home', 'inbox', 'sharing', 'memory', 'archive', 'projects', 'system', 'settings'] as const;
+export const pageIds = ['home', 'inbox', 'access', 'memory', 'archive', 'projects', 'system', 'settings'] as const;
 export type PageId = (typeof pageIds)[number];
 
 /**
@@ -9,7 +9,8 @@ export type PageId = (typeof pageIds)[number];
 const aliases: Record<string, {page: PageId; view?: string}> = {
   overview: {page: 'home'},
   activity: {page: 'inbox'},
-  spaces: {page: 'sharing'},
+  sharing: {page: 'access', view: 'rules'},
+  spaces: {page: 'access', view: 'rules'},
   graph: {page: 'memory', view: 'graph'},
   learned: {page: 'memory', view: 'learned'},
   entities: {page: 'memory', view: 'relations'},
@@ -32,6 +33,10 @@ export function resolveRoute(hash: string): {page: PageId; hash: string | null} 
   const alias = aliases[key];
   if (!alias) return {page: 'home', hash: key ? '#home' : null};
   const params = new URLSearchParams(search);
+  // A memory-access request link opens that exact request in the Inbox.
+  const request = params.get('request');
+  if (request && (key === 'memoryMap' || key === 'entities'))
+    return {page: 'inbox', hash: '#inbox?' + new URLSearchParams({kind: 'memory_access', decision: request})};
   if (alias.view && !params.has('view')) params.set('view', alias.view);
   const query = params.toString();
   return {page: alias.page, hash: '#' + alias.page + (query ? '?' + query : '')};

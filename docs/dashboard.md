@@ -33,15 +33,15 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | --- | --- |
 | Home | See what needs you (decisions waiting, system problems), memory availability and archive and workflow totals; start common tasks. |
 | Inbox | Decide exact approvals, memory-access requests, identity suggestions and organization changes; review action history, bounded permissions and run history in separate tabs. |
-| Sharing | Choose which chats may use knowledge from other chats, preview exactly what is shared, and review released text. |
-| Memory | Notes & history: native notes and conversation history for one chat. Learned: learned interpretations. Relations & access: people, projects and fact-level access. Evidence graph: follow recorded relationships to their sources. Long-term memory: Honcho readiness, attachment, budget and stored data. |
+| Chats & access | The one place for memory access. Chats: pick any chat or topic to see who can talk to Nocheh there, what it remembers there and what it may do there; turn Nocheh on or off in a group, allow people, add older topics. Requests and Shared facts: approve, deny or revoke fact access. Sharing rules: let one chat use knowledge from another, with previews of exactly what is shared. Defaults: topic memory and suggestion settings. Changes save at once; apply them from the bar at the top. |
+| Memory | Notes & history: native notes and conversation history for one chat. Learned: learned interpretations. People & facts: explore people, projects and facts and share a fact with a chat. Evidence graph: follow recorded relationships to their sources. Long-term memory: Honcho readiness, attachment, budget and stored data. |
 | Archive | Messages: browse originals, guarded copies and transcripts; edit guarded wording and inspect history or original files. Import chat history: choose a Telegram export, review access and files, then start or resume an import. |
 | Projects | Manage projects, the chats assigned to them, project memory and agent organization. |
 | System | Health: workflow totals, history charts, service diagnostics and paginated receipts; open Inngest. Connections: runtime status and capabilities, Hermes and provider dashboards. Databases: read-only table browser. Backups & maintenance: archive downloads, backups, restarts, restore checks and settings-apply results. |
-| Settings → Nocheh settings | Manage Telegram access, model routing, speed and guarding across the installation. Review, save, then apply to running services. |
+| Settings → Nocheh settings | Manage the Telegram owner and bot, group replies, model routing, speed and guarding across the installation. Review, save, then apply to running services. |
 | Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
 
-Links that use an earlier page name (for example `#activity`, `#monitoring` or `#memoryMap`) open the page and tab that now hold that content.
+Links that use an earlier page name (for example `#activity`, `#sharing`, `#monitoring` or `#memoryMap`) open the page and tab that now hold that content; a link to one memory-access request opens it in the Inbox.
 
 Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
 tools, profiles and memory through an integration. Nocheh owns capture, access rules,

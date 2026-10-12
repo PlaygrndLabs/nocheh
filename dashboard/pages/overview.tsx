@@ -192,7 +192,11 @@ export function Status() {
         {[
           ['archive?view=imports', 'Import a chat', 'Bring your Telegram history into the archive.'],
           ['archive', 'Find a message', 'Search originals and the copies agents use.'],
-          ['sharing', 'Choose what chats share', 'Let one chat use knowledge from another.'],
+          [
+            'access',
+            'Choose who can talk to Nocheh',
+            'Turn Nocheh on in a group, pick people, and decide what chats share.',
+          ],
         ].map(([id, title, note]) => (
           <a href={'#' + id} key={id} className="n-shortcut">
             <h2>

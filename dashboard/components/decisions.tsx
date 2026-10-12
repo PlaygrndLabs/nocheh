@@ -12,7 +12,7 @@ import {
   type DecisionKind,
   type DecisionPage,
 } from '../lib/supervision';
-import {RequestRow} from '../pages/memory-map';
+import {RequestRow} from './memory-access';
 import {SuggestionRow} from '../pages/entities';
 
 export type KnowledgeProposal = {

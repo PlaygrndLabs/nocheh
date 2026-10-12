@@ -15,7 +15,7 @@ import {
   RefreshCw,
   Server,
   Settings as SettingsIcon,
-  Share2,
+  Users,
   X,
 } from 'lucide-react';
 import {Status} from './pages/overview';
@@ -24,7 +24,7 @@ import {ArchiveWorkspace} from './pages/archive-workspace';
 import {Activity} from './pages/activity';
 import {MemoryWorkspace} from './pages/memory-workspace';
 import {Projects} from './pages/projects';
-import {Sharing} from './pages/sharing';
+import {ChatsAccess} from './pages/access';
 import {Source} from './pages/source';
 import {System} from './pages/system';
 import {call} from './lib/api';
@@ -52,11 +52,11 @@ const routes: Route[] = [
     Page: Activity,
   },
   {
-    id: 'sharing',
-    title: 'Sharing',
-    Icon: Share2,
-    description: 'Which chats may use knowledge from other chats.',
-    Page: Sharing,
+    id: 'access',
+    title: 'Chats & access',
+    Icon: Users,
+    description: 'Who can talk to Nocheh in each chat, and what each chat may remember and use.',
+    Page: ChatsAccess,
   },
   {
     id: 'memory',

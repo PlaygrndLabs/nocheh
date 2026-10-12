@@ -11,13 +11,15 @@ test('current page names open as they are',()=>{
 
 test('old page names lead to the page and tab that now own them, keeping their details',()=>{
  assert.deepEqual(resolveRoute('#activity?kind=entity&decision=abc'),{page:'inbox',hash:'#inbox?kind=entity&decision=abc'});
- assert.deepEqual(resolveRoute('#memoryMap?request=r1'),{page:'memory',hash:'#memory?request=r1&view=relations'});
+ assert.deepEqual(resolveRoute('#memoryMap?request=r1'),{page:'inbox',hash:'#inbox?kind=memory_access&decision=r1'},'a sent request link opens that request');
+ assert.deepEqual(resolveRoute('#memoryMap'),{page:'memory',hash:'#memory?view=relations'});
  assert.deepEqual(resolveRoute('#monitoring'),{page:'system',hash:'#system?view=health'});
  assert.deepEqual(resolveRoute('#operations'),{page:'system',hash:'#system?view=maintenance'});
  assert.deepEqual(resolveRoute('#imports'),{page:'archive',hash:'#archive?view=imports'});
  assert.deepEqual(resolveRoute('#graph'),{page:'memory',hash:'#memory?view=graph'});
  assert.deepEqual(resolveRoute('#overview'),{page:'home',hash:'#home'});
- assert.deepEqual(resolveRoute('#spaces'),{page:'sharing',hash:'#sharing'});
+ assert.deepEqual(resolveRoute('#spaces'),{page:'access',hash:'#access?view=rules'});
+ assert.deepEqual(resolveRoute('#sharing'),{page:'access',hash:'#access?view=rules'});
  assert.deepEqual(resolveRoute('#honcho?view=learned'),{page:'memory',hash:'#memory?view=learned'},'an explicit tab wins');
 });
 

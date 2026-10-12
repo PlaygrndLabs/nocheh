@@ -46,12 +46,11 @@ import {
   TabsTrigger,
 } from '../components/ui/primitives';
 import {CursorButtons, EvidenceLinks, Provenance, ResourceState, useOwnerCommand} from '../lib/owner-controls';
-import {accessDescription, connectionDescription, shareableFact} from '../lib/memory-access-presentation';
+import {connectionDescription, shareableFact} from '../lib/memory-access-presentation';
 import {layoutMemoryMap} from '../lib/memory-map-layout';
 import {useResource} from '../lib/resource';
+import {countLabel, destinationName, RequestRow, type MapNode, type NodeKind} from '../components/memory-access';
 
-type NodeKind = 'person' | 'project' | 'conversation' | 'topic' | 'fact';
-type MapNode = {id: string; kind: NodeKind; label: string; state?: string; detail?: Record<string, any>};
 type MapEdge = {
   id: string;
   kind: 'relationship' | 'project_assignment' | 'access' | 'suggestion';
@@ -63,28 +62,6 @@ type MapEdge = {
   detail?: Record<string, any>;
 };
 type MapData = {nodes: MapNode[]; edges: MapEdge[]; next: string | null; counts: {nodes: number; edges: number}};
-type Request = {
-  id: string;
-  destination: string;
-  state: string;
-  revision: number;
-  expires_at: string;
-  wording: string | null;
-  relationship_path: string[];
-  evidence: {id: string}[];
-  provenance: unknown;
-};
-type Grant = {
-  id: string;
-  destination: string;
-  fact_revision: number;
-  mode: string;
-  state: string;
-  revision: number;
-  wording: string | null;
-  suspended_reason: string | null;
-  provenance: unknown;
-};
 type Project = {id: string; name: string; description: string; state: 'active' | 'archived'; revision: number};
 type Assignment = {
   space_id: string;
@@ -138,7 +115,6 @@ const kindIcons: Record<NodeKind, typeof UserRound> = {
   topic: Hash,
   fact: BrainCircuit,
 };
-const countLabel = (count: number, label: string) => `${count} ${label}${count === 1 ? '' : 's'}`;
 
 function MapLegend() {
   return (
@@ -450,11 +426,6 @@ function GraphView({
   );
 }
 
-const destinationName = (destination: string, nodes: MapNode[]) =>
-  nodes.find(node => node.detail?.space_id === destination)?.label ??
-  (destination.includes('/topic/')
-    ? `Topic ${destination.split('/topic/')[1]} · Group ${destination.split('/topic/')[0]}`
-    : `Conversation ${destination}`);
 const endpointName = (id: string, nodes: MapNode[]) =>
   nodes.find(node => node.id === id)?.label ?? 'Record outside this page';
 
@@ -608,155 +579,6 @@ function DestinationPicker({
       <ResourceState {...spaces} hasData={!!spaces.data} />
       <CursorButtons pages={pages} next={spaces.data?.next} onChange={setPages} />
     </div>
-  );
-}
-export function RequestRow({
-  item,
-  nodes = [],
-  onChanged,
-  disabled = false,
-}: {
-  item: Request;
-  nodes?: MapNode[];
-  onChanged: (message?: string) => void;
-  disabled?: boolean;
-}) {
-  const [wording, setWording] = useState(item.wording ?? ''),
-    [mode, setMode] = useState<'one_time' | 'persistent'>('one_time'),
-    command = useOwnerCommand();
-  const decide = async (decision: 'one_time' | 'persistent' | 'reject') => {
-    if (
-      await command.run('/memory-access/requests/' + item.id + '/decide', {
-        decision,
-        expected_revision: item.revision,
-        ...(decision === 'reject' ? {} : {wording}),
-      })
-    )
-      onChanged(
-        decision === 'reject'
-          ? 'Request rejected. No access granted.'
-          : decision === 'one_time'
-            ? 'One-time access approved.'
-            : 'Access approved until revoked.',
-      );
-  };
-  return (
-    <article className="memory-access-card">
-      <div className="list-heading">
-        <div>
-          <small>Requested for</small>
-          <h3>{destinationName(item.destination, nodes)}</h3>
-          <small>{item.destination}</small>
-        </div>
-        <Badge>{item.state === 'pending' ? 'Needs review' : item.state}</Badge>
-      </div>
-      {item.state === 'pending' ? (
-        <>
-          <label>
-            Wording this conversation may use
-            <textarea
-              rows={4}
-              maxLength={12000}
-              value={wording}
-              disabled={disabled || command.busy}
-              onChange={event => setWording(event.target.value)}
-            />
-          </label>
-          <p className="n-muted">Only this wording is shared. Original evidence and private provenance stay private.</p>
-          <label>
-            How long should access last?
-            <select
-              value={mode}
-              disabled={disabled || command.busy}
-              onChange={event => setMode(event.target.value as typeof mode)}
-            >
-              <option value="one_time">One-time (default)</option>
-              <option value="persistent">Persistent until revoked</option>
-            </select>
-          </label>
-          <p className="n-muted">
-            {mode === 'one_time'
-              ? 'For one pending reply. Used only after confirmed delivery.'
-              : 'This exact group or topic can recall this wording until access is revoked or suspended.'}{' '}
-            An approved follow-up may be sent automatically, according to your settings.
-          </p>
-        </>
-      ) : (
-        <p className="memory-prose">{item.wording}</p>
-      )}
-      <details className="memory-review-context">
-        <summary>Why this was suggested · evidence</summary>
-        <p>Related through {item.relationship_path.join(' → ') || 'confirmed evidence'}</p>
-        <p className="n-muted">Expires {new Date(item.expires_at).toLocaleString()}</p>
-        <EvidenceLinks sources={item.evidence} />
-        <Provenance value={item.provenance} label="Owner-only provenance" />
-      </details>
-      {command.error && <Alert>{command.error}</Alert>}
-      {item.state === 'pending' && (
-        <div className="n-actions">
-          <Button
-            variant="default"
-            disabled={disabled || command.busy || !wording.trim()}
-            onClick={() => void decide(mode)}
-          >
-            {command.busy ? 'Saving…' : mode === 'one_time' ? 'Approve for one reply' : 'Approve until revoked'}
-          </Button>
-          <Button disabled={disabled || command.busy} onClick={() => void decide('reject')}>
-            Reject once
-          </Button>
-        </div>
-      )}
-    </article>
-  );
-}
-function GrantRow({
-  item,
-  nodes = [],
-  onChanged,
-}: {
-  item: Grant;
-  nodes?: MapNode[];
-  onChanged: (message?: string) => void;
-}) {
-  const command = useOwnerCommand();
-  return (
-    <article className="memory-access-card">
-      <div className="list-heading">
-        <div>
-          <small>Shared with</small>
-          <h3>{destinationName(item.destination, nodes)}</h3>
-          <small>{item.destination}</small>
-        </div>
-        <Badge>{item.state}</Badge>
-      </div>
-      <p className="memory-prose">{item.wording || 'Approved wording is unavailable.'}</p>
-      <p className="memory-access-duration">
-        {item.mode === 'one_time' ? 'One reply only' : 'Until revoked'} · revision {item.fact_revision}
-      </p>
-      <p className="n-muted">
-        {accessDescription(item.state)}
-        {item.suspended_reason ? ' ' + item.suspended_reason.replaceAll('_', ' ') : ''}
-      </p>
-      {command.error && <Alert>{command.error}</Alert>}
-      {['active', 'suspended'].includes(item.state) && (
-        <>
-          <Button
-            variant="destructive"
-            disabled={command.busy}
-            onClick={async () => {
-              if (await command.run('/memory-access/grants/' + item.id + '/revoke', {expected_revision: item.revision}))
-                onChanged('Access revoked. Future recall through this grant is blocked.');
-            }}
-          >
-            {command.busy ? 'Revoking…' : 'Revoke access'}
-          </Button>
-          <small className="memory-revoke-note">
-            Stops future recall. Messages already delivered cannot be taken back.
-          </small>
-        </>
-      )}
-      <Provenance value={item.provenance} label="Owner-only provenance" />
-    </article>
   );
 }
 function ManualGrant({
@@ -1224,205 +1046,7 @@ function NodeDetail({
   );
 }
 
-type RequestPage = {requests: Request[]; next: string | null};
-type GrantPage = {grants: Grant[]; next: string | null};
-function AccessReview({
-  mode,
-  nodes,
-  onChanged,
-}: {
-  mode: 'requests' | 'grants';
-  nodes: MapNode[];
-  onChanged: (message?: string) => void;
-}) {
-  const [pages, setPages] = useState(['']),
-    requests = useResource<RequestPage>(
-      mode === 'requests'
-        ? '/memory-access/requests' + (pages.at(-1) ? '?after=' + encodeURIComponent(pages.at(-1)!) : '')
-        : null,
-    ),
-    grants = useResource<GrantPage>(
-      mode === 'grants'
-        ? '/memory-access/grants' + (pages.at(-1) ? '?after=' + encodeURIComponent(pages.at(-1)!) : '')
-        : null,
-    );
-  const resource = mode === 'requests' ? requests : grants,
-    all = mode === 'requests' ? (requests.data?.requests ?? []) : (grants.data?.grants ?? []),
-    current = all.filter(item =>
-      mode === 'requests' ? item.state === 'pending' : ['active', 'suspended'].includes(item.state),
-    ),
-    past = all.filter(item => !current.includes(item));
-  const row = (item: Request | Grant) =>
-    mode === 'requests' ? (
-      <RequestRow key={item.id} item={item as Request} nodes={nodes} onChanged={onChanged} />
-    ) : (
-      <GrantRow key={item.id} item={item as Grant} nodes={nodes} onChanged={onChanged} />
-    );
-  return (
-    <section className="memory-access-review">
-      <div className="memory-section-intro">
-        <h3>{mode === 'requests' ? 'Review requests' : 'Shared memory'}</h3>
-        <p className="n-muted">
-          {mode === 'requests'
-            ? 'Review the exact wording before allowing another conversation to use it.'
-            : 'See where approved facts can be used, and revoke access when needed.'}
-        </p>
-      </div>
-      <ResourceState {...resource} hasData={!!resource.data} />
-      {resource.data && !current.length && (
-        <EmptyState title={mode === 'requests' ? 'No pending requests on this page' : 'No current shares on this page'}>
-          {mode === 'requests'
-            ? 'Suggestions appear here when a related fact could help a group or topic. Nothing is shared without your approval.'
-            : 'To share something, open a memory fact in Explore and choose Share fact.'}
-        </EmptyState>
-      )}
-      <div className="memory-access-cards">{current.map(row)}</div>
-      {past.length > 0 && (
-        <details className="memory-decision-history">
-          <summary>
-            {mode === 'requests' ? 'Past decisions' : 'Past access'} on this page ({past.length})
-          </summary>
-          <div className="memory-access-cards">{past.map(row)}</div>
-        </details>
-      )}
-      <div className="memory-review-pagination">
-        <span>
-          {resource.data
-            ? `${countLabel(all.length, 'record')} on this page${resource.data.next ? ' · more available' : ''}`
-            : ''}
-        </span>
-        <CursorButtons pages={pages} next={resource.data?.next} onChange={setPages} />
-      </div>
-    </section>
-  );
-}
-function Settings({onChanged}: {onChanged: (message?: string) => void}) {
-  const data = useResource<any>('/memory-access/settings'),
-    command = useOwnerCommand(),
-    [destination, setDestination] = useState('');
-  if (!data.data) return <ResourceState {...data} hasData={false} />;
-  const global = data.data.settings.find((row: any) => row.destination === '*'),
-    override = data.data.settings.find((row: any) => row.destination === destination);
-  const fields = (prefix: string, values: any) => (
-    <>
-      <div className="search-toolbar">
-        <label>
-          Suggestions
-          <select name={prefix + 'suggestions'} defaultValue={values.suggestions ?? global.suggestions}>
-            <option value="related">Related entities only</option>
-            <option value="off">Off</option>
-          </select>
-        </label>
-        <label>
-          Default approval
-          <select
-            name={prefix + 'default_grant_mode'}
-            defaultValue={values.default_grant_mode ?? global.default_grant_mode}
-          >
-            <option value="one_time">One-time</option>
-            <option value="persistent">Persistent</option>
-          </select>
-        </label>
-        <label>
-          Request lifetime (seconds)
-          <input
-            name={prefix + 'request_ttl_seconds'}
-            type="number"
-            min="60"
-            max="2592000"
-            defaultValue={values.request_ttl_seconds ?? global.request_ttl_seconds}
-          />
-        </label>
-      </div>
-      <label>
-        <input
-          name={prefix + 'notify_owner'}
-          type="checkbox"
-          defaultChecked={values.notify_owner ?? global.notify_owner}
-        />{' '}
-        Send content-free owner notification
-      </label>
-      <label>
-        <input
-          name={prefix + 'auto_followup'}
-          type="checkbox"
-          defaultChecked={values.auto_followup ?? global.auto_followup}
-        />{' '}
-        Send approved follow-up automatically
-      </label>
-    </>
-  );
-  const values = (form: FormData, prefix: string) => ({
-    suggestions: form.get(prefix + 'suggestions'),
-    notify_owner: form.get(prefix + 'notify_owner') === 'on',
-    auto_followup: form.get(prefix + 'auto_followup') === 'on',
-    request_ttl_seconds: Number(form.get(prefix + 'request_ttl_seconds')),
-    default_grant_mode: form.get(prefix + 'default_grant_mode'),
-  });
-  return (
-    <details className="n-panel">
-      <summary>Suggestion and delivery settings</summary>
-      <h3>Global defaults</h3>
-      <form
-        className="owner-form"
-        onSubmit={async event => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          if (
-            await command.run('/memory-access/settings', {
-              destination: '*',
-              ...values(form, 'global_'),
-              expected_revision: global.revision,
-            })
-          )
-            onChanged('Suggestion defaults saved.');
-        }}
-      >
-        {fields('global_', global)}
-        <Button type="submit" variant="default" disabled={command.busy}>
-          Save defaults
-        </Button>
-      </form>
-      <h3>Group or topic override</h3>
-      <form
-        key={destination + ':' + (override?.revision ?? 0)}
-        className="owner-form"
-        onSubmit={async event => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          if (
-            await command.run('/memory-access/settings', {
-              destination,
-              ...values(form, 'override_'),
-              expected_revision: override?.revision ?? 1,
-            })
-          )
-            onChanged('Destination settings saved.');
-        }}
-      >
-        <label>
-          Exact destination
-          <input
-            value={destination}
-            onChange={event => setDestination(event.target.value)}
-            placeholder="-10042 or -10042/topic/7"
-            required
-          />
-        </label>
-        {fields('override_', override ?? {})}
-        <Button type="submit" disabled={command.busy || !destination.trim()}>
-          Save destination override
-        </Button>
-      </form>
-      {command.error && <Alert>{command.error}</Alert>}
-    </details>
-  );
-}
-
 export function MemoryMap() {
-  const [section, setSection] = useState(() =>
-    new URLSearchParams(location.hash.split('?')[1] ?? '').has('request') ? 'requests' : 'explore',
-  );
   const [query, setQuery] = useState(''),
     deferredQuery = useDeferredValue(query),
     [kind, setKind] = useState(''),
@@ -1443,7 +1067,6 @@ export function MemoryMap() {
     }),
     data = useResource<MapData>('/memory-map?' + params, 0, revision),
     directory = useResource<MapData>('/memory-map?limit=250'),
-    requests = useResource<RequestPage>('/memory-access/requests'),
     factsVisible = showFacts || kind === 'fact',
     pageFacts = data.data?.nodes.filter(node => node.kind === 'fact').length ?? 0,
     shownNodes = data.data?.nodes.filter(node => factsVisible || node.kind !== 'fact') ?? [],
@@ -1490,13 +1113,15 @@ export function MemoryMap() {
   const mapStatus = data.data
     ? `${countLabel(shownNodes.length, 'item')} shown · ${countLabel(shownEdges, 'connection')} shown${!factsVisible && pageFacts ? ` · ${countLabel(pageFacts, 'fact')} hidden` : ''}`
     : 'Loading memory map';
-  const pending = requests.data?.requests.filter(item => item.state === 'pending').length;
   return (
     <section className="n-panel memory-relations-page">
       <div className="memory-relations-heading">
         <div>
-          <h2>Relationships & memory access</h2>
-          <p className="n-muted">Explore what Nocheh knows. Choose which facts other conversations can use.</p>
+          <h2>People, projects & facts</h2>
+          <p className="n-muted">
+            Explore what Nocheh knows and how it connects. Who may use which facts is managed in{' '}
+            <a href="#access">Chats &amp; access</a>.
+          </p>
         </div>
         <Badge>
           <ShieldCheck size={13} aria-hidden="true" />
@@ -1515,197 +1140,170 @@ export function MemoryMap() {
           {notice}
         </p>
       )}
-      <Tabs value={section} onValueChange={setSection}>
-        <TabsList className="memory-task-tabs" aria-label="Relationships and access tasks">
-          <TabsTrigger value="explore">
-            <Search size={16} aria-hidden="true" />
-            Explore
-          </TabsTrigger>
-          <TabsTrigger value="requests">
-            Review requests
-            {pending !== undefined && (
-              <Badge>
-                {pending}
-                {requests.data?.next ? '+' : ''}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="grants">Shared memory</TabsTrigger>
-        </TabsList>
-        <TabsContent value="explore">
-          <div className="memory-explore-toolbar">
-            <form
-              className="memory-map-filters"
-              role="search"
-              onSubmit={event => event.preventDefault()}
-              aria-label="Filter the memory map"
-            >
-              <label className="memory-map-search">
-                <span>Search memory</span>
-                <span className="memory-map-input-wrap">
-                  <Search size={16} aria-hidden="true" />
-                  <input
-                    type="search"
-                    value={query}
-                    onChange={event => {
-                      setQuery(event.target.value);
-                      setPages(['']);
-                    }}
-                    placeholder="Person, project, conversation or fact…"
-                  />
-                </span>
-              </label>
-              <label>
-                <span>Record type</span>
-                <select
-                  value={kind}
-                  onChange={event => {
-                    setKind(event.target.value);
-                    setPages(['']);
-                  }}
-                >
-                  <option value="">All records</option>
-                  <option value="person">People</option>
-                  <option value="project">Projects</option>
-                  <option value="conversation">Conversations</option>
-                  <option value="topic">Topics</option>
-                  <option value="fact">Facts</option>
-                </select>
-              </label>
-              <label>
-                <span>Status</span>
-                <select
-                  value={state}
-                  onChange={event => {
-                    setState(event.target.value);
-                    setPages(['']);
-                  }}
-                >
-                  <option value="">Any status</option>
-                  {[
-                    'active',
-                    'pending',
-                    'suspended',
-                    'retired',
-                    'archived',
-                    'revoked',
-                    'expired',
-                    'consumed',
-                    'approved',
-                    'rejected',
-                  ].map(value => (
-                    <option key={value} value={value}>
-                      {value[0].toUpperCase() + value.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </form>
-          </div>
-          <div className="memory-explore-heading">
-            <div>
-              <h3>{view === 'map' ? 'Relationship map' : 'People, projects & facts'}</h3>
-              <p className="n-muted">
-                {view === 'map'
-                  ? 'Drag cards to arrange them. Select a card or connection for details.'
-                  : 'Open a record to edit it, see its connections, or share a fact.'}
-              </p>
-            </div>
-            <div className="memory-map-view-switch" role="group" aria-label="Memory map view">
-              <Button
-                size="sm"
-                variant={view === 'list' ? 'default' : 'outline'}
-                aria-pressed={view === 'list'}
-                onClick={() => setView('list')}
-              >
-                <List size={15} aria-hidden="true" />
-                List
-              </Button>
-              <Button
-                size="sm"
-                variant={view === 'map' ? 'default' : 'outline'}
-                aria-pressed={view === 'map'}
-                onClick={() => setView('map')}
-              >
-                <MapIcon size={15} aria-hidden="true" />
-                Map
-              </Button>
-            </div>
-          </div>
-          <div className="memory-results-status">
-            <span role="status">
-              {searching
-                ? 'Updating results…'
-                : data.data
-                  ? view === 'map'
-                    ? mapStatus
-                    : `${data.data.nodes.length} records shown · ${data.data.counts.nodes} matching`
-                  : 'Loading records…'}
+      <div className="memory-explore-toolbar">
+        <form
+          className="memory-map-filters"
+          role="search"
+          onSubmit={event => event.preventDefault()}
+          aria-label="Filter the memory map"
+        >
+          <label className="memory-map-search">
+            <span>Search memory</span>
+            <span className="memory-map-input-wrap">
+              <Search size={16} aria-hidden="true" />
+              <input
+                type="search"
+                value={query}
+                onChange={event => {
+                  setQuery(event.target.value);
+                  setPages(['']);
+                }}
+                placeholder="Person, project, conversation or fact…"
+              />
             </span>
-            <div>
-              {view === 'map' && (
-                <Button
-                  size="sm"
-                  aria-pressed={factsVisible}
-                  disabled={kind === 'fact'}
-                  onClick={() => setShowFacts(value => !value)}
-                >
-                  {kind === 'fact' ? 'Facts selected' : showFacts ? 'Hide facts from map' : 'Show facts on map'}
-                </Button>
-              )}
-              {hasFilters && (
-                <Button size="sm" variant="ghost" onClick={clearFilters}>
-                  Clear filters
-                </Button>
-              )}
-            </div>
-          </div>
-          <ResourceState {...data} hasData={!!data.data} />
-          {data.data && (
-            <div className="memory-map-workspace">
-              {view === 'map' ? (
-                shownNodes.length ? (
-                  <GraphView data={data.data} showFacts={factsVisible} onSelect={select} onConnectEdit={select} />
-                ) : (
-                  <EmptyState title="Nothing to draw">
-                    Show facts on the map or clear a filter to restore connected records.
-                  </EmptyState>
-                )
-              ) : (
-                <MemoryList nodes={data.data.nodes} edges={data.data.edges} onSelect={select} />
-              )}
-              <div className="memory-map-workspace-footer">
-                <span>
-                  {data.data.next
-                    ? 'More records available. Connections may continue on another page.'
-                    : pages.length > 1
-                      ? 'Last page of matching records.'
-                      : 'All matching records shown.'}
-                </span>
-                <CursorButtons pages={pages} next={data.data.next} onChange={setPages} />
-              </div>
-            </div>
-          )}
+          </label>
+          <label>
+            <span>Record type</span>
+            <select
+              value={kind}
+              onChange={event => {
+                setKind(event.target.value);
+                setPages(['']);
+              }}
+            >
+              <option value="">All records</option>
+              <option value="person">People</option>
+              <option value="project">Projects</option>
+              <option value="conversation">Conversations</option>
+              <option value="topic">Topics</option>
+              <option value="fact">Facts</option>
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={state}
+              onChange={event => {
+                setState(event.target.value);
+                setPages(['']);
+              }}
+            >
+              <option value="">Any status</option>
+              {[
+                'active',
+                'pending',
+                'suspended',
+                'retired',
+                'archived',
+                'revoked',
+                'expired',
+                'consumed',
+                'approved',
+                'rejected',
+              ].map(value => (
+                <option key={value} value={value}>
+                  {value[0].toUpperCase() + value.slice(1)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </form>
+      </div>
+      <div className="memory-explore-heading">
+        <div>
+          <h3>{view === 'map' ? 'Relationship map' : 'People, projects & facts'}</h3>
+          <p className="n-muted">
+            {view === 'map'
+              ? 'Drag cards to arrange them. Select a card or connection for details.'
+              : 'Open a record to edit it, see its connections, or share a fact.'}
+          </p>
+        </div>
+        <div className="memory-map-view-switch" role="group" aria-label="Memory map view">
+          <Button
+            size="sm"
+            variant={view === 'list' ? 'default' : 'outline'}
+            aria-pressed={view === 'list'}
+            onClick={() => setView('list')}
+          >
+            <List size={15} aria-hidden="true" />
+            List
+          </Button>
+          <Button
+            size="sm"
+            variant={view === 'map' ? 'default' : 'outline'}
+            aria-pressed={view === 'map'}
+            onClick={() => setView('map')}
+          >
+            <MapIcon size={15} aria-hidden="true" />
+            Map
+          </Button>
+        </div>
+      </div>
+      <div className="memory-results-status">
+        <span role="status">
+          {searching
+            ? 'Updating results…'
+            : data.data
+              ? view === 'map'
+                ? mapStatus
+                : `${data.data.nodes.length} records shown · ${data.data.counts.nodes} matching`
+              : 'Loading records…'}
+        </span>
+        <div>
           {view === 'map' && (
-            <details className="memory-map-help">
-              <summary>How to use this map</summary>
-              <MapLegend />
-              <p className="memory-map-instruction">
-                Connect a fact to a conversation or topic to prepare a share, or a project to a conversation to prepare
-                an assignment. Every change opens for review before it is saved. You can also open a fact and choose
-                Share fact without dragging.
-              </p>
-            </details>
+            <Button
+              size="sm"
+              aria-pressed={factsVisible}
+              disabled={kind === 'fact'}
+              onClick={() => setShowFacts(value => !value)}
+            >
+              {kind === 'fact' ? 'Facts selected' : showFacts ? 'Hide facts from map' : 'Show facts on map'}
+            </Button>
           )}
-        </TabsContent>
-        <TabsContent value="requests">
-          <AccessReview key="requests" mode="requests" nodes={knownNodes} onChanged={changed} />
-        </TabsContent>
-        <TabsContent value="grants">
-          <AccessReview key="grants" mode="grants" nodes={knownNodes} onChanged={changed} />
-        </TabsContent>
-      </Tabs>
-      <Settings onChanged={changed} />
+          {hasFilters && (
+            <Button size="sm" variant="ghost" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          )}
+        </div>
+      </div>
+      <ResourceState {...data} hasData={!!data.data} />
+      {data.data && (
+        <div className="memory-map-workspace">
+          {view === 'map' ? (
+            shownNodes.length ? (
+              <GraphView data={data.data} showFacts={factsVisible} onSelect={select} onConnectEdit={select} />
+            ) : (
+              <EmptyState title="Nothing to draw">
+                Show facts on the map or clear a filter to restore connected records.
+              </EmptyState>
+            )
+          ) : (
+            <MemoryList nodes={data.data.nodes} edges={data.data.edges} onSelect={select} />
+          )}
+          <div className="memory-map-workspace-footer">
+            <span>
+              {data.data.next
+                ? 'More records available. Connections may continue on another page.'
+                : pages.length > 1
+                  ? 'Last page of matching records.'
+                  : 'All matching records shown.'}
+            </span>
+            <CursorButtons pages={pages} next={data.data.next} onChange={setPages} />
+          </div>
+        </div>
+      )}
+      {view === 'map' && (
+        <details className="memory-map-help">
+          <summary>How to use this map</summary>
+          <MapLegend />
+          <p className="memory-map-instruction">
+            Connect a fact to a conversation or topic to prepare a share, or a project to a conversation to prepare an
+            assignment. Every change opens for review before it is saved. You can also open a fact and choose Share fact
+            without dragging.
+          </p>
+        </details>
+      )}
       <Sheet
         open={!!selected}
         onOpenChange={open => {

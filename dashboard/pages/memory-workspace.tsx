@@ -16,7 +16,7 @@ export function MemoryWorkspace({notify}: {notify: Notify}) {
       views={[
         {id: 'working', label: 'Notes & history', Icon: BookOpen, render: () => <Memory />},
         {id: 'learned', label: 'Learned', Icon: BrainCircuit, render: () => <LearnedMemory />},
-        {id: 'relations', label: 'Relations & access', Icon: Network, render: () => <MemoryMap />},
+        {id: 'relations', label: 'People & facts', Icon: Network, render: () => <MemoryMap />},
         {id: 'graph', label: 'Evidence graph', Icon: GitFork, render: () => <Graph notify={notify} />},
         {id: 'honcho', label: 'Long-term memory', Icon: Database, render: () => <Honcho notify={notify} />},
       ]}
