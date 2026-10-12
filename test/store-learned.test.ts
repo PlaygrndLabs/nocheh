@@ -51,8 +51,19 @@ test('a saved reasoning result is read from plain, fenced or sentence-wrapped JS
   for(const text of [json,'```json\n'+json+'\n```','Here is the result:\n```\n'+json+'\n```\nDone.','Based on the evidence, '+json+' is my answer.'])
     assert.deepEqual(learningResult(text),value);
   assert.deepEqual(learningResult('Example {"note":1} then '+json),value,'an unrelated object is not the result');
-  for(const text of ['No learnable content.','```json\n{"interpretations":[\n```','[]','{"notes":"none"}'])
+  for(const text of ['No learnable content.','```json\n{"interpretations":[\n```','[]','{"notes":"none"}','{"interpretations":[{"kind":"state","subject":"cut'])
     assert.throws(()=>learningResult(text),{code:'invalid_interpretation_result'});
+  // An answer cut off at the output limit keeps only its whole leading items.
+  const whole={kind:'state',subject:'a [bracket] "quoted" {brace}',text:'Synthetic.',evidence_ids:['e1']};
+  const cut=JSON.stringify({interpretations:[whole,whole],entity_suggestions:[{kind:'person',name:'Synthetic person',reason:'cut here'}]});
+  for(const end of [cut.indexOf('cut here'),cut.lastIndexOf('{"kind":"person"')+5])
+    assert.deepEqual(learningResult('```json\n'+cut.slice(0,end)),{interpretations:[whole,whole]});
+  const second=JSON.stringify({interpretations:[whole,{...whole,subject:'unfinished'}]});
+  assert.deepEqual(learningResult(second.slice(0,second.indexOf('unfinished'))),{interpretations:[whole]});
+  assert.deepEqual(learningResult(cut.slice(0,cut.indexOf(',"entity_suggestions"')+5)),{interpretations:[whole,whole]});
+  const person={kind:'person',name:'Synthetic person',reason:'Synthetic.',evidence_ids:['e1']};
+  const later=JSON.stringify({interpretations:[whole],entity_suggestions:[person,{...person,reason:'cut here'}]},null,2);
+  assert.deepEqual(learningResult(later.slice(0,later.indexOf('cut here'))),{interpretations:[whole],entity_suggestions:[person]});
 });
 test('learning result sections keep valid leading items and record what was dropped',()=>{
   const source=digest('limit-trigger'),evidence=[{reference:{store:'archive' as const,kind:'event' as const,id:source,revision:'1',input_hash:digest(source)},text:'Synthetic source',space:'-42'}];

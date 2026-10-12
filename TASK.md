@@ -615,6 +615,13 @@ confirmation of keeping valid items rather than failing the whole result, and
 a check on the development installation that the seven jobs complete or close
 on their next retry.
 
+Silent learning (October 12): 3 of 20 `interpret` jobs closed as failed
+because Honcho's reasoning answer hit its 2,500-token output limit and was cut
+off inside the entity sections. A cut-off answer now keeps its whole leading
+items ([decision](docs/adr/0140-truncated-learning-results-keep-whole-items.md),
+[check](test/store-learned.test.ts)). Pending: a live check that the next such
+answer publishes its complete interpretations.
+
 Scheduled runs (October 10): the simulator found every scheduled run rejected
 before the agent started with `space_policy_changed`, because
 `/v1/memory/check` accepted only an archived turn source and schedule fires are

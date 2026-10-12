@@ -36,7 +36,32 @@ export function learningResult(text:string):Record<string,unknown> {
     let value:unknown;try{value=JSON.parse(candidate);}catch{continue;}
     if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).some(key=>resultKeys.includes(key)))return value as Record<string,unknown>;
   }
+  const truncated=truncatedResult(text);if(truncated)return truncated;
   throw new HttpError(422,'invalid_interpretation_result');
+}
+/** An answer cut off at the reasoning output limit keeps its complete leading
+ * section items; the unfinished item and everything after it are dropped. */
+function truncatedResult(text:string):Record<string,unknown>|null {
+  for(const match of text.matchAll(/\{\s*"(?:interpretations|entity_suggestions|entity_claims|organization)"/g)) {
+    const stack:string[]=[];let quoted=false,escaped=false,cut=-1,closing='';
+    for(let index=match.index;index<text.length;index++) {
+      const char=text[index]!;
+      if(quoted){if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')quoted=false;continue;}
+      if(char==='"')quoted=true;else if(char==='{'||char==='[')stack.push(char);
+      else if(char==='}'||char===']') {
+        stack.pop();if(!stack.length)break;
+        // Cut only after a whole section item or a whole section.
+        const parent=stack[stack.length-1];
+        if(char==='}'&&parent==='['||char===']'&&stack.length===1){cut=index;closing=stack.map(open=>open==='{'?'}':']').reverse().join('');}
+      }
+    }
+    if(!stack.length||cut<0)continue;
+    try{
+      const value=JSON.parse(text.slice(match.index,cut+1)+closing);
+      if(value&&typeof value==='object'&&!Array.isArray(value))return value as Record<string,unknown>;
+    }catch{continue;}
+  }
+  return null;
 }
 /** Bounded model sections keep their valid leading items; null or absent means none. */
 export function resultItems(value:unknown,limit:number,section:LearningRejection['section'],rejected:LearningRejection[]):unknown[] {
