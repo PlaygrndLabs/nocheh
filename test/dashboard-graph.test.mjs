@@ -94,7 +94,13 @@ test('a full bounded page including 400 messages retains every node with finite 
 // small hook driver keeps these tests independent of the native React bundle.
 const {readFile} = await import('node:fs/promises');
 const {runInNewContext} = await import('node:vm');
-const pluginSource = (await readFile(new URL('../dashboard/pages/graph.js',import.meta.url),'utf8')).replace(/^import .*;$/gm,'').replace('export function Graph', 'function Graph')+'\nwindow.__NOCHEH_PAGES__={graph:{component:Graph}};';
+const {build} = await import('esbuild');
+// Compile the real page and hand its imports to the small hook driver below.
+const shim = {name:'driver-imports',setup(b){
+  b.onResolve({filter:/^(react|\.\.\/lib\/page-helpers|\.\/source)$/},args=>({path:args.path,namespace:'driver'}));
+  b.onLoad({filter:/.*/,namespace:'driver'},()=>({contents:'module.exports=globalThis.__deps',loader:'js'}));
+}};
+const pluginSource = (await build({entryPoints:['dashboard/pages/graph.tsx'],bundle:true,write:false,format:'iife',globalName:'__graphPage',platform:'neutral',jsx:'transform',jsxFactory:'__deps.createElement',jsxFragment:'__deps.Fragment',plugins:[shim],logLevel:'silent'})).outputFiles[0].text+'\nwindow.__NOCHEH_PAGES__={graph:{component:__graphPage.Graph}};';
 const deferred = () => {let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 function componentDriver(fetchJSON) {
   let cursor=0, dirty=true, tree;
@@ -108,7 +114,9 @@ function componentDriver(fetchJSON) {
   };
   const window={addEventListener(){},removeEventListener(){},__HERMES_PLUGIN_SDK__:{React,fetchJSON},__HERMES_PLUGINS__:{register(){}}};
   const useLoad=(path)=>{const [data,setData]=React.useState(null),[error,setError]=React.useState('');React.useEffect(()=>{let alive=true;fetchJSON('/api/nocheh'+path).then(v=>{if(alive)setData(v);}).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;};},[path]);return [data,error];};
-  runInNewContext(pluginSource,{window,React,AbortController,StatusBadge:()=>null,h:React.createElement,useState:React.useState,useEffect:React.useEffect,useRef:React.useRef,useMemo:React.useMemo,useLoad,call:path=>fetchJSON('/api/nocheh'+path),errorText:e=>e.message,button:(label,onClick,disabled=false)=>React.createElement('button',{onClick,disabled},label),Panel:()=>null,Source:()=>null,Data:()=>null,document:{getElementById:()=>({})}});
+  const context={window,React,AbortController,StatusBadge:()=>null,h:React.createElement,useState:React.useState,useEffect:React.useEffect,useRef:React.useRef,useMemo:React.useMemo,useLoad,call:path=>fetchJSON('/api/nocheh'+path),errorText:e=>e.message,button:(label,onClick,disabled=false)=>React.createElement('button',{onClick,disabled},label),Panel:()=>null,Source:()=>null,Data:()=>null,document:{getElementById:()=>({})}};
+  context.__deps={...React,Fragment:'fragment',...context};
+  runInNewContext(pluginSource,context);
   const Graph=window.__NOCHEH_PAGES__.graph.component;
   return {
     async flush(){for(let i=0;i<15;i++){await Promise.resolve();if(dirty){dirty=false;cursor=0;tree=Graph({notify(){}});while(effects.length)effects.shift()();}}return tree;},
