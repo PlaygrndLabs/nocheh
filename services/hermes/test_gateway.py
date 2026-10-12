@@ -317,14 +317,16 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     turn['agent_result']={'state':'done','text':'Reply to '+text,'session_id':'fixture'}
                     return 'Reply to '+text
                 adapter.set_message_handler(message)
-                def envelope(update_id,chat,text):
+                def envelope(update_id,chat,text,topic=None):
                     key=f'telegram:123456:update:{update_id}';event=digest(key)
-                    claims={'scope':chat,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant'}
+                    claims={'scope':chat,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+                            **({'space':chat+'/topic/'+str(topic),'revision':1} if topic else {})}
                     body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
                     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
                     return {'event_id':event,'source_key':key,'scope':chat,'attempt':1,'archive_credential':'turn.'+body+'.'+signature,
                         'text':text,'group_addressing':{'direct':True,'handles':[]},
-                        'payload':{'update_id':update_id,'message':{'message_id':update_id,'date':1700000000,'chat':{'id':int(chat),'type':'group','title':'Fixture'},'from':{'id':456,'is_bot':False,'first_name':'User'},'text':text,'entities':[]}}}
+                        'payload':{'update_id':update_id,'message':{'message_id':update_id,'date':1700000000,'chat':{'id':int(chat),'title':'Fixture',**({'type':'supergroup','is_forum':True} if topic else {'type':'group'})},'from':{'id':456,'is_bot':False,'first_name':'User'},'text':text,'entities':[],
+                            **({'message_thread_id':topic,'is_topic_message':True} if topic else {})}}}
                 async def until(condition):
                     for _ in range(500):
                         if condition():return
@@ -341,6 +343,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(other,{'state':'done'},'another chat does not wait for a running turn')
                     self.assertEqual([m['text'] for m in request.sent],['Reply to other'])
                     self.assertEqual([str(m['chat_id']) for m in request.sent],['-30'],'each reply goes to its own chat')
+                    gates['topic']=asyncio.Event();gates['topic'].set()
+                    topic=await asyncio.wait_for(gateway.dispatch(envelope(6,'-20','topic',topic=7),progress=track('topic')),2)
+                    self.assertEqual(topic,{'state':'done'},'another topic of the same group does not wait for a running turn')
+                    self.assertEqual((str(request.sent[-1]['chat_id']),str(request.sent[-1].get('message_thread_id'))),('-20','7'),'the reply stays in its own topic')
                     held=asyncio.create_task(gateway.dispatch(envelope(4,'-30','held'),progress=track('held')))
                     await until(lambda:'held' in started)
                     third=asyncio.create_task(gateway.dispatch(envelope(5,'-40','third'),progress=track('third')))
@@ -358,10 +364,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertLess(started.index('slow'),started.index('later'))
                     replies=[m['text'] for m in request.sent]
                     self.assertLess(replies.index('Reply to slow'),replies.index('Reply to later'))
-                    self.assertEqual(len(replies),5,'every turn sends exactly once')
+                    self.assertEqual(len(replies),6,'every turn sends exactly once')
                     self.assertEqual(gateway.lanes,{},'idle chats leave no lane behind')
                     again=await gateway.dispatch(envelope(1,'-20','slow'))
-                    self.assertEqual(again,{'state':'done'});self.assertEqual(len(request.sent),5,'a replayed receipt does not resend')
+                    self.assertEqual(again,{'state':'done'});self.assertEqual(len(request.sent),6,'a replayed receipt does not resend')
                 finally:await app.shutdown()
 
 
