@@ -50,11 +50,15 @@ def validate_fixture(directory,info,manifest):
 
 def archived_delivery(query,message,update_id):
     chat=int(message['chat']['id']);number=int(message['message_id']);update_id=int(update_id)
-    raw=query('nocheh_archive',"SELECT json_build_object('id',id,'text',convert_from(original_text,'UTF8')) FROM events "
+    # A fixture whose Bot API state was restored can repeat a message number,
+    # so the delivery is the archived record carrying exactly this reply's text.
+    raw=query('nocheh_archive',"SELECT json_agg(json_build_object('id',id,'text',convert_from(original_text,'UTF8')) ORDER BY received_at) FROM events "
         +"WHERE kind='telegram_delivered_message' AND bot_id='123456' AND scope='"+str(chat)+"' AND source_id='"+str(number)+"'")
-    if not raw:return False
-    stored=json.loads(raw)
-    assert stored['text']==message['text'],'delivered original text differs from Bot API response'
+    rows=json.loads(raw) if raw else None
+    if not rows:return False
+    matching=[row for row in rows if row['text']==message['text']]
+    assert matching,'delivered original text differs from Bot API response'
+    stored=matching[-1]
     prefix='outbound:123456:telegram:123456:update:'+str(update_id)+':sendMessage:'
     return query('nocheh_control',"SELECT count(*) FROM content_operations o JOIN capture_effect_receipts r ON r.operation_id=o.id "
         +"WHERE o.kind='outbound_result' AND r.state='delivered' AND o.operation_key LIKE '"+prefix+"%' "
