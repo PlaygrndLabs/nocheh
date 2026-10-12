@@ -136,12 +136,12 @@ export class MemoryAccessRepository {
   private dashboardLink(requestId:string) {
     const configured=process.env.NOCHEH_DASHBOARD_URL?.trim();let base='http://localhost:'+(process.env.NOCHEH_DASHBOARD_PORT??'8783');
     if(configured)try {if(['http:','https:'].includes(new URL(configured).protocol))base=configured;}catch{/* Keep the safe local dashboard route. */}
-    return base.replace(/\/$/,'')+'/#memoryMap?request='+encodeURIComponent(requestId);
+    return base.replace(/\/$/,'')+'/#inbox?kind=memory_access&decision='+encodeURIComponent(requestId);
   }
-  async list(principal:Reader,after='') {admin(principal);if(after)identity(after);await this.reconcile();const rows=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
+  async list(principal:Reader,after='',destination='') {admin(principal);if(after)identity(after);if(destination)validateSpace(destination);await this.reconcile();const rows=(await this.stores.control.query("SELECT * FROM memory_access_requests WHERE id>$1 AND ($2='' OR destination=$2) ORDER BY id LIMIT 101",[after,destination])).rows;
     const page=rows.slice(0,100),artifacts=await this.artifacts(page,'proposal_reference'),requests=page.map(row=>{const artifact=artifacts.get(row.proposal_reference.id);return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null};});
     return {requests,next:rows.length>100?rows[99].id:null};}
-  async grants(principal:Reader,after='') {admin(principal);if(after)identity(after);await this.reconcile();const rows=(await this.stores.control.query('SELECT * FROM memory_fact_grants WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
+  async grants(principal:Reader,after='',destination='') {admin(principal);if(after)identity(after);if(destination)validateSpace(destination);await this.reconcile();const rows=(await this.stores.control.query("SELECT * FROM memory_fact_grants WHERE id>$1 AND ($2='' OR destination=$2) ORDER BY id LIMIT 101",[after,destination])).rows;
     const page=rows.slice(0,100),artifacts=await this.artifacts(page,'representation_reference'),grants=page.map(row=>{const artifact=artifacts.get(row.representation_reference.id);return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null};});
     return {grants,next:rows.length>100?rows[99].id:null};}
   /** Repair a pre-atomic handoff only on replay of its exact owner command, under current authority. */

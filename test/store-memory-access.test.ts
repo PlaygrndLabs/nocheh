@@ -41,6 +41,8 @@ test('fact grants authorize exact destinations while relationships only create r
     const grantedFact=await services.entities.publishClaim({subject_id:projectEntity.id,predicate:'checkpoint',content:'Apollo financial checkpoint is complete.',attribution:'reported',uncertainty:'supported',evidence:[privateSource]},binding,key+':grant-fact');
     const suggestedFact=await services.entities.publishClaim({subject_id:projectEntity.id,predicate:'launch_schedule',content:'Apollo launch schedule milestone is October.',object_entity_id:personId,relationship_kind:'responsible',attribution:'reported',uncertainty:'supported',evidence:[privateSource]},binding,key+':suggest-fact');
     const grant=await services.memoryAccess.grant(owner,{fact_id:grantedFact.id,fact_revision:grantedFact.revision,destination:group,wording:'The checkpoint is complete.',operation_id:key+':grant'});
+    assert.ok((await services.memoryAccess.grants(owner,'',group)).grants.some(item=>item.id===grant.id),'a chat lists its own grants');
+    assert.ok(!(await services.memoryAccess.grants(owner,'','-1'+Date.now())).grants.some(item=>item.id===grant.id),'another chat does not list them');
     let actor=await principal(groupSource),context=await services.memoryAccess.context(actor,'checkpoint complete');
     assert.equal(context.sources.length,1);assert.equal(context.sources[0]!.text,'The checkpoint is complete.');
     assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources[0]?.text,'The checkpoint is complete.',
