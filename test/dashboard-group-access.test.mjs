@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {participantAllowed,switchDecision} from '../dashboard/lib/group-access.js';
+import {build} from 'esbuild';
+
+const compiled=await build({entryPoints:['dashboard/lib/group-access.ts'],bundle:true,write:false,format:'esm',platform:'node'});
+const {participantAllowed,switchDecision}=await import('data:text/javascript;base64,'+Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
 test('default-denied people switch on and return to the saved default',()=>{
   const empty={granted:[],denied:[]},granted={granted:['73'],denied:[]};

@@ -1,34 +1,25 @@
-import {useEffect,useState} from 'react';
-import {BookOpen,BrainCircuit,Database,Network} from 'lucide-react';
-import {Tabs,TabsContent,TabsList,TabsTrigger} from '../components/ui/primitives';
+import {BookOpen, BrainCircuit, Database, GitFork, Network} from 'lucide-react';
+import {WorkspaceTabs} from '../components/workspace-tabs';
 import {Memory} from './memory';
 import {LearnedMemory} from './learned';
-import {Honcho} from './honcho.js';
+import {Honcho} from './honcho';
 import {MemoryMap} from './memory-map';
+import {Graph} from './graph';
 
-type MemoryView='working'|'learned'|'honcho'|'relations';
-const views:MemoryView[]=['working','learned','honcho','relations'];
-const legacyViews:Record<string,MemoryView>={learned:'learned',entities:'relations',memoryMap:'relations',honcho:'honcho'};
+type Notify = (text: string, error?: boolean) => void;
 
-function currentView():MemoryView{
- const [route,search='']=location.hash.slice(1).split('?'),requested=new URLSearchParams(search).get('view');
- return views.includes(requested as MemoryView)?requested as MemoryView:legacyViews[route]??'working';
-}
-
-export function MemoryWorkspace({notify}:{notify:(text:string,error?:boolean)=>void}){
- const [view,setView]=useState<MemoryView>(currentView);
- useEffect(()=>{const changed=()=>setView(currentView());addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
- const select=(next:string)=>{const value=next as MemoryView;setView(value);location.hash='memory?view='+value;};
- return <Tabs value={view} onValueChange={select} className="memory-hub">
-  <TabsList className="memory-hub-tabs" aria-label="Memory workspace">
-   <TabsTrigger value="working"><BookOpen size={16} aria-hidden="true"/>Notes & history</TabsTrigger>
-   <TabsTrigger value="learned"><BrainCircuit size={16} aria-hidden="true"/>Learned</TabsTrigger>
-   <TabsTrigger value="honcho"><Database size={16} aria-hidden="true"/>Honcho</TabsTrigger>
-   <TabsTrigger value="relations"><Network size={16} aria-hidden="true"/>Relations & access</TabsTrigger>
-  </TabsList>
-  <TabsContent value="working">{view==='working'&&<Memory/>}</TabsContent>
-  <TabsContent value="learned">{view==='learned'&&<LearnedMemory/>}</TabsContent>
-  <TabsContent value="honcho">{view==='honcho'&&<Honcho notify={notify}/>}</TabsContent>
-  <TabsContent value="relations">{view==='relations'&&<MemoryMap/>}</TabsContent>
- </Tabs>;
+export function MemoryWorkspace({notify}: {notify: Notify}) {
+  return (
+    <WorkspaceTabs
+      page="memory"
+      label="Memory workspace"
+      views={[
+        {id: 'working', label: 'Notes & history', Icon: BookOpen, render: () => <Memory />},
+        {id: 'learned', label: 'Learned', Icon: BrainCircuit, render: () => <LearnedMemory />},
+        {id: 'relations', label: 'People & facts', Icon: Network, render: () => <MemoryMap />},
+        {id: 'graph', label: 'Evidence graph', Icon: GitFork, render: () => <Graph notify={notify} />},
+        {id: 'honcho', label: 'Long-term memory', Icon: Database, render: () => <Honcho notify={notify} />},
+      ]}
+    />
+  );
 }

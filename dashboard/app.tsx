@@ -1,45 +1,301 @@
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity as ActivityIcon,Archive as ArchiveIcon,ArrowUpRight,BrainCircuit,Database,FolderInput,FolderKanban,Share2,GitFork,Home,Menu,PanelLeftClose,PanelLeftOpen,Plug,RefreshCw,Settings as SettingsIcon,ShieldCheck,Wrench,X} from 'lucide-react';
+import {
+  Activity as ActivityIcon,
+  Archive as ArchiveIcon,
+  ArrowUpRight,
+  BrainCircuit,
+  FolderKanban,
+  Home,
+  Inbox,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plug,
+  RefreshCw,
+  Server,
+  Settings as SettingsIcon,
+  Users,
+  X,
+} from 'lucide-react';
 import {Status} from './pages/overview';
-import {Settings} from './pages/settings.js';
-import {Jobs} from './pages/imports.js';
-import {Archive} from './pages/archive';
-import {DatabaseBrowser} from './pages/database-browser';
+import {Settings} from './pages/settings';
+import {ArchiveWorkspace} from './pages/archive-workspace';
 import {Activity} from './pages/activity';
 import {MemoryWorkspace} from './pages/memory-workspace';
 import {Projects} from './pages/projects';
-import {Sharing} from './pages/sharing';
-import {Source} from './pages/source.js';
-import {Graph} from './pages/graph.js';
-import {Operations} from './pages/maintenance.js';
-import {Integrations} from './pages/integrations.js';
-import {Monitoring} from './monitoring.js';
-import {call} from './lib/page-helpers.js';
-import {Button,Sheet,Tooltip} from './components/ui/primitives';
+import {ChatsAccess} from './pages/access';
+import {Source} from './pages/source';
+import {System} from './pages/system';
+import {call} from './lib/api';
+import {resolveRoute, type PageId} from './lib/routes';
+import {Button, Sheet, Tooltip} from './components/ui/primitives';
 import {ThemeSelect} from './lib/theme';
 import {StatusBadge} from './components/status';
-import {useResource,refreshResources} from './lib/resource';
-const pages={overview:Status,monitoring:Monitoring,archive:Archive,databases:DatabaseBrowser,activity:Activity,imports:Jobs,settings:Settings,integrations:Integrations,graph:Graph,operations:Operations,memory:MemoryWorkspace,projects:Projects,sharing:Sharing,Source,call};
-const routes=[
- ['overview','Overview',Home,'Your conversations, memory, and assistant at a glance.'],['archive','Archive',ArchiveIcon,'Find originals and inspect the evidence behind generated text.'],['memory','Memory',BrainCircuit,'Review native notes, learned and Honcho memory, relationships, and access.'],['graph','Graph',GitFork,'Explore recorded relationships and their sources.'],
- ['monitoring','Monitoring',ActivityIcon,'System health, workflow progress, and historical trends.'],['databases','Databases',Database,'Browse tables and rows across the installation.'],['activity','Activity',ShieldCheck,'Review approvals, permissions, and conversation results.'],
- ['projects','Projects',FolderKanban,'Manage projects, conversation assignments, and project memory.'],['sharing','Sharing',Share2,'Choose sources, destinations, and the exact knowledge they can use.'],['imports','Imports',FolderInput,'Bring Telegram history into your owned archive.'],['integrations','Integrations',Plug,'The connected tools behind your personal brain.'],['settings','Settings',SettingsIcon,'Telegram access, agent preferences, and privacy.'],['operations','Maintenance',Wrench,'Diagnostics, exports, backups, and recovery.']
-] as const;
-const groups=[['Knowledge',['overview','archive','memory','graph']],['Operations',['monitoring','databases','activity']],['Manage',['projects','sharing','imports','integrations','settings','operations']]] as const;
-function currentRoute(){const key=location.hash.slice(1).split('?')[0];if(key==='spaces')return 'sharing';if(['learned','entities','memoryMap','honcho'].includes(key))return 'memory';return routes.some(r=>r[0]===key)?key:'overview';}
-function PersistentStatus(){const {data,error}=useResource<any>('/monitoring',10000);return <a className="persistent-status" href="#monitoring" aria-label="Inspect system status"><StatusBadge state={error?'stale':data?.application?.ok?'ready':data?.application?.ok===false?'failed':'unknown'} label={error?'Status stale':data?.application?.ok?'API ready':data?.application?.ok===false?'API unavailable':'Status unobserved'}/></a>;}
-function App(){
- const [page,setPage]=React.useState(currentRoute),[mobile,setMobile]=React.useState(false),[collapsed,setCollapsed]=React.useState(()=>{try{return localStorage.getItem('nocheh.sidebar.v1')==='collapsed';}catch{return false;}}),[notice,setNotice]=React.useState<{text:string;error:boolean}|null>(null),[refreshing,setRefreshing]=React.useState(false);
- const heading=React.useRef<HTMLHeadingElement>(null),menu=React.useRef<HTMLButtonElement>(null);
- React.useEffect(()=>{const change=()=>{setPage(currentRoute());setNotice(null);setMobile(false);};addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
- React.useEffect(()=>{heading.current?.focus({preventScroll:true});},[page]);
- const toggle=()=>setCollapsed(value=>{try{localStorage.setItem('nocheh.sidebar.v1',!value?'collapsed':'expanded');}catch{}return !value;});
- const refresh=async()=>{setRefreshing(true);try{await refreshResources();}finally{setRefreshing(false);}};
- const notify=React.useCallback((text:string,error=false)=>setNotice({text,error}),[]);
- const route=routes.find(r=>r[0]===page)!;
- const Current=pages[page as keyof typeof pages] as React.ComponentType<any>;
- const navigation=(compact=false,showToggle=false)=><><div className="n-sidebar-head"><a href="#overview" className="n-brand"><span className="n-mark" aria-hidden="true">ن</span><span className={compact?'sr-only':''}>Nocheh<small>Your personal brain</small></span></a>{showToggle&&<Button className="sidebar-toggle" size="icon" onClick={toggle} aria-label={collapsed?'Expand sidebar':'Collapse sidebar'} title={collapsed?'Expand sidebar':'Collapse sidebar'}>{collapsed?<PanelLeftOpen size={18} aria-hidden="true"/>:<PanelLeftClose size={18} aria-hidden="true"/>}</Button>}</div><nav aria-label="Main navigation">{groups.map(([label,keys])=><div className="n-nav-group" key={label}><span className={compact?'sr-only':'n-nav-label'}>{label}</span>{keys.map(key=>{const [id,title,Icon]=routes.find(r=>r[0]===key)!;const link=<a href={'#'+id} aria-current={page===id?'page':undefined} aria-label={compact?title:undefined} onClick={()=>setMobile(false)}><Icon size={18} aria-hidden="true"/><span className={compact?'sr-only':''}>{title}</span></a>;return compact?<Tooltip label={title} key={id}>{link}</Tooltip>:<React.Fragment key={id}>{link}</React.Fragment>;})}</div>)}</nav><div className="n-sidebar-foot"><a href="/hermes/nocheh" aria-label="Open Hermes dashboard" title="Open Hermes dashboard"><Plug size={18} aria-hidden="true"/><span className={compact?'sr-only':''}>Hermes</span><ArrowUpRight size={14} aria-hidden="true"/></a><a href="/providers/management.html" aria-label="Open CPA dashboard" title="Open CPA dashboard"><ActivityIcon size={18} aria-hidden="true"/><span className={compact?'sr-only':''}>CPA dashboard</span><ArrowUpRight size={14} aria-hidden="true"/></a></div></>;
- return <div className={'nocheh-app'+(collapsed?' sidebar-collapsed':'')+(['graph','memory'].includes(page)?' n-graph-active':'')}><a className="skip-link" href="#main-content" onClick={e=>{e.preventDefault();document.getElementById('main-content')?.focus();}}>Skip to content</a><aside className="n-sidebar">{navigation(collapsed,true)}</aside><Sheet open={mobile} onOpenChange={setMobile} title="Navigation" side="left" returnFocus={menu.current}><div className="mobile-navigation">{navigation()}</div></Sheet><main className="n-main" id="main-content" tabIndex={-1}><header className="n-header"><div className="page-title"><Button className="mobile-menu" size="icon" onClick={()=>setMobile(true)} ref={menu} aria-label="Open navigation"><Menu size={20}/></Button><div><p className="n-eyebrow">NOCHEH / {groups.find(g=>g[1].some(id=>id===page))?.[0]}</p><h1 ref={heading} tabIndex={-1}>{route[1]}</h1><p className="n-page-description">{route[3]}</p></div></div><div className="header-actions"><PersistentStatus/><ThemeSelect/><Button onClick={refresh} disabled={refreshing} aria-label="Refresh page data"><RefreshCw size={15} className={refreshing?'refreshing':''}/><span>Refresh</span></Button></div></header>{notice&&<div className={'n-notice '+(notice.error?'n-error':'')} role={notice.error?'alert':'status'}><span>{notice.text}</span><Button size="icon" variant="ghost" onClick={()=>setNotice(null)} aria-label="Dismiss notification"><X size={16}/></Button></div>}<div className="page-content" key={page}><Current notify={notify} call={pages.call} renderSource={(record:any)=><pages.Source record={record} notify={notify}/>} refresh={0}/></div><footer>Owned sources. Useful memory. Clear operations.</footer></main></div>;
+import {useResource, refreshResources} from './lib/resource';
+
+type PageProps = {
+  notify: (text: string, error?: boolean) => void;
+  call: typeof call;
+  renderSource: (record: any) => React.ReactNode;
+};
+type Route = {id: PageId; title: string; Icon: typeof Home; description: string; Page: React.ComponentType<PageProps>};
+
+/** Sidebar order. Old page names are redirected by `resolveRoute`. */
+const routes: Route[] = [
+  {id: 'home', title: 'Home', Icon: Home, description: 'What needs you, and how Nocheh is doing.', Page: Status},
+  {
+    id: 'inbox',
+    title: 'Inbox',
+    Icon: Inbox,
+    description: 'Decisions waiting for you, and what Nocheh did.',
+    Page: Activity,
+  },
+  {
+    id: 'access',
+    title: 'Chats & access',
+    Icon: Users,
+    description: 'Who can talk to Nocheh in each chat, and what each chat may remember and use.',
+    Page: ChatsAccess,
+  },
+  {
+    id: 'memory',
+    title: 'Memory',
+    Icon: BrainCircuit,
+    description: 'What Nocheh knows: notes, learned facts, people, projects and long-term memory.',
+    Page: MemoryWorkspace,
+  },
+  {
+    id: 'archive',
+    title: 'Archive',
+    Icon: ArchiveIcon,
+    description: 'Every original message, and the copy agents may use.',
+    Page: ArchiveWorkspace,
+  },
+  {
+    id: 'projects',
+    title: 'Projects',
+    Icon: FolderKanban,
+    description: 'Projects, the chats in them, and project memory.',
+    Page: Projects,
+  },
+  {
+    id: 'system',
+    title: 'System',
+    Icon: Server,
+    description: 'Health, connections, databases, backups and maintenance.',
+    Page: System,
+  },
+  {
+    id: 'settings',
+    title: 'Settings',
+    Icon: SettingsIcon,
+    description: 'Telegram, models, speed and assistant preferences.',
+    Page: Settings,
+  },
+];
+
+/** Rewrite an old page name in the address before any page reads it. */
+function canonicalRoute(): PageId {
+  const {page, hash} = resolveRoute(location.hash);
+  if (hash) history.replaceState(null, '', hash);
+  return page;
 }
-createRoot(document.getElementById('root')!).render(<App/>);
+canonicalRoute();
+// Registered before any page mounts, so pages listening for hash changes see the new name.
+addEventListener('hashchange', canonicalRoute);
+
+function PersistentStatus() {
+  const {data, error} = useResource<any>('/monitoring', 10000);
+  return (
+    <a className="persistent-status" href="#system?view=health" aria-label="Inspect system status">
+      <StatusBadge
+        state={
+          error ? 'stale' : data?.application?.ok ? 'ready' : data?.application?.ok === false ? 'failed' : 'unknown'
+        }
+        label={
+          error
+            ? 'Status stale'
+            : data?.application?.ok
+              ? 'API ready'
+              : data?.application?.ok === false
+                ? 'API unavailable'
+                : 'Status unobserved'
+        }
+      />
+    </a>
+  );
+}
+function App() {
+  const [page, setPage] = React.useState(canonicalRoute),
+    [mobile, setMobile] = React.useState(false),
+    [collapsed, setCollapsed] = React.useState(() => {
+      try {
+        return localStorage.getItem('nocheh.sidebar.v1') === 'collapsed';
+      } catch {
+        return false;
+      }
+    }),
+    [notice, setNotice] = React.useState<{text: string; error: boolean} | null>(null),
+    [refreshing, setRefreshing] = React.useState(false);
+  const heading = React.useRef<HTMLHeadingElement>(null),
+    menu = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    const change = () => {
+      setPage(resolveRoute(location.hash).page);
+      setNotice(null);
+      setMobile(false);
+    };
+    addEventListener('hashchange', change);
+    return () => removeEventListener('hashchange', change);
+  }, []);
+  React.useEffect(() => {
+    heading.current?.focus({preventScroll: true});
+  }, [page]);
+  const toggle = () =>
+    setCollapsed(value => {
+      try {
+        localStorage.setItem('nocheh.sidebar.v1', !value ? 'collapsed' : 'expanded');
+      } catch {}
+      return !value;
+    });
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshResources();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  const notify = React.useCallback((text: string, error = false) => setNotice({text, error}), []);
+  const route = routes.find(r => r.id === page)!;
+  const Current = route.Page;
+  const renderSource = (record: any) => <Source record={record} notify={notify} />;
+  const navigation = (compact = false, showToggle = false) => (
+    <>
+      <div className="n-sidebar-head">
+        <a href="#home" className="n-brand">
+          <span className="n-mark" aria-hidden="true">
+            ن
+          </span>
+          <span className={compact ? 'sr-only' : ''}>
+            Nocheh<small>Your personal brain</small>
+          </span>
+        </a>
+        {showToggle && (
+          <Button
+            className="sidebar-toggle"
+            size="icon"
+            onClick={toggle}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? (
+              <PanelLeftOpen size={18} aria-hidden="true" />
+            ) : (
+              <PanelLeftClose size={18} aria-hidden="true" />
+            )}
+          </Button>
+        )}
+      </div>
+      <nav aria-label="Main navigation">
+        <div className="n-nav-group">
+          {routes.map(({id, title, Icon}) => {
+            const link = (
+              <a
+                href={'#' + id}
+                aria-current={page === id ? 'page' : undefined}
+                aria-label={compact ? title : undefined}
+                onClick={() => setMobile(false)}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span className={compact ? 'sr-only' : ''}>{title}</span>
+              </a>
+            );
+            return compact ? (
+              <Tooltip label={title} key={id}>
+                {link}
+              </Tooltip>
+            ) : (
+              <React.Fragment key={id}>{link}</React.Fragment>
+            );
+          })}
+        </div>
+      </nav>
+      <div className="n-sidebar-foot">
+        <a href="/hermes/nocheh" aria-label="Open Hermes dashboard" title="Open Hermes dashboard">
+          <Plug size={18} aria-hidden="true" />
+          <span className={compact ? 'sr-only' : ''}>Hermes</span>
+          <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+        <a href="/providers/management.html" aria-label="Open CPA dashboard" title="Open CPA dashboard">
+          <ActivityIcon size={18} aria-hidden="true" />
+          <span className={compact ? 'sr-only' : ''}>CPA dashboard</span>
+          <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+      </div>
+    </>
+  );
+  return (
+    <div
+      className={'nocheh-app' + (collapsed ? ' sidebar-collapsed' : '') + (page === 'memory' ? ' n-graph-active' : '')}
+    >
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={e => {
+          e.preventDefault();
+          document.getElementById('main-content')?.focus();
+        }}
+      >
+        Skip to content
+      </a>
+      <aside className="n-sidebar">{navigation(collapsed, true)}</aside>
+      <Sheet open={mobile} onOpenChange={setMobile} title="Navigation" side="left" returnFocus={menu.current}>
+        <div className="mobile-navigation">{navigation()}</div>
+      </Sheet>
+      <main className="n-main" id="main-content" tabIndex={-1}>
+        <header className="n-header">
+          <div className="page-title">
+            <Button
+              className="mobile-menu"
+              size="icon"
+              onClick={() => setMobile(true)}
+              ref={menu}
+              aria-label="Open navigation"
+            >
+              <Menu size={20} />
+            </Button>
+            <div>
+              <h1 ref={heading} tabIndex={-1}>
+                {route.title}
+              </h1>
+              <p className="n-page-description">{route.description}</p>
+            </div>
+          </div>
+          <div className="header-actions">
+            <PersistentStatus />
+            <ThemeSelect />
+            <Button onClick={refresh} disabled={refreshing} aria-label="Refresh page data">
+              <RefreshCw size={15} className={refreshing ? 'refreshing' : ''} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+        </header>
+        {notice && (
+          <div className={'n-notice ' + (notice.error ? 'n-error' : '')} role={notice.error ? 'alert' : 'status'}>
+            <span>{notice.text}</span>
+            <Button size="icon" variant="ghost" onClick={() => setNotice(null)} aria-label="Dismiss notification">
+              <X size={16} />
+            </Button>
+          </div>
+        )}
+        <div className="page-content" key={page}>
+          <Current notify={notify} call={call} renderSource={renderSource} />
+        </div>
+        <footer>Owned sources. Useful memory. Clear operations.</footer>
+      </main>
+    </div>
+  );
+}
+createRoot(document.getElementById('root')!).render(<App />);

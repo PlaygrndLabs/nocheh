@@ -204,6 +204,24 @@ separate (“Each topic”)
 conversation. Pending: after a restart, a live question in one topic about
 something said in another topic of the same group.
 
+Dashboard redesign: the owner found the dashboard unclear, asked for a big
+redesign and refactor with memory access managed from the dashboard, and
+accepted the [redesign plan](docs/dashboard-redesign-plan.md) on 2026-10-12.
+Step 1 (groundwork, no visible change) is implemented: every browser module is
+TypeScript/TSX formatted with Prettier, one owner API client, unused access pages
+removed, and source-text dashboard tests replaced by a browser test of every page
+on the synthetic preview ([browser checks](test/dashboard-pages.browser.mjs)).
+Step 2 (navigation) is implemented: eight pages (Home, Inbox, Chats & access,
+Memory, Archive, Projects, System, Settings), tabs held in the address, Home
+leading with what needs the owner, and earlier page names redirected
+([routes](dashboard/lib/routes.ts), [route checks](test/dashboard-routes.test.mjs)).
+Step 3 (Chats & access) is implemented: one chat list with per-chat access
+(who can talk, what is remembered, what may be done, project), group on/off,
+people, topics, requests, shared facts, sharing rules and defaults including
+topic memory; memory-access lists filter by chat
+([page](dashboard/pages/access/index.tsx)). Next: Settings sections, then Memory
+and Archive tidy-up, each with its SPECS.md update.
+
 </current>
 
 <verification>

@@ -31,19 +31,17 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 
 | Page | Use it for |
 | --- | --- |
-| Overview | Read system health, archive/workflow metrics, attention items and 24-hour activity; start common tasks. |
-| Monitoring | Read five global workflow totals, history charts, service diagnostics, and paginated receipts; open Inngest. |
-| Memory access | Review audience policy, shared knowledge, recall previews, and learning jobs in separate tabs. |
-| Archive | Browse originals, guarded copies and transcripts; edit guarded wording and inspect history or original files. |
-| Memory | Read general notes, user profile notes and native conversation history for one chat. |
-| Graph | Follow recorded relationships back to their source evidence. |
-| Activity | Review exact approvals, bounded permissions, and run history in separate tabs; inspect original evidence. |
-| Imports | Choose a Telegram export, review access and files, then start or resume an import. |
-| Settings → Nocheh settings | Manage Telegram access, model routing and guarding across the installation. Review, save, then apply to running services. |
+| Home | See what needs you (decisions waiting, system problems), memory availability and archive and workflow totals; start common tasks. |
+| Inbox | Decide exact approvals, memory-access requests, identity suggestions and organization changes; review action history, bounded permissions and run history in separate tabs. |
+| Chats & access | The one place for memory access. Chats: pick any chat or topic to see who can talk to Nocheh there, what it remembers there and what it may do there; turn Nocheh on or off in a group, allow people, add older topics. Requests and Shared facts: approve, deny or revoke fact access. Sharing rules: let one chat use knowledge from another, with previews of exactly what is shared. Defaults: topic memory and suggestion settings. Changes save at once; apply them from the bar at the top. |
+| Memory | Notes & history: native notes and conversation history for one chat. Learned: learned interpretations. People & facts: explore people, projects and facts and share a fact with a chat. Evidence graph: follow recorded relationships to their sources. Long-term memory: Honcho readiness, attachment, budget and stored data. |
+| Archive | Messages: browse originals, guarded copies and transcripts; edit guarded wording and inspect history or original files. Import chat history: choose a Telegram export, review access and files, then start or resume an import. |
+| Projects | Manage projects, the chats assigned to them, project memory and agent organization. |
+| System | Health: workflow totals, history charts, service diagnostics and paginated receipts; open Inngest. Connections: runtime status and capabilities, Hermes and provider dashboards. Databases: read-only table browser. Backups & maintenance: archive downloads, backups, restarts, restore checks and settings-apply results. |
+| Settings → Nocheh settings | Manage the Telegram owner and bot, group replies, model routing, speed and guarding across the installation. Review, save, then apply to running services. |
 | Settings → Hermes preferences | Tune supported agent and memory preferences for one profile. Saves take effect on its next turn. |
-| Maintenance | Check health, prepare archive downloads, create backups, restart or verify an inactive restore; inspect settings-apply results. |
-| Integrations | Inspect runtime status and capabilities, or open Hermes and provider monitoring. |
-| Honcho memory | Inspect primary-memory readiness, attachment, generations and receipts, plus stored Honcho data. |
+
+Links that use an earlier page name (for example `#activity`, `#sharing`, `#monitoring` or `#memoryMap`) open the page and tab that now hold that content; a link to one memory-access request opens it in the Inbox.
 
 Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
 tools, profiles and memory through an integration. Nocheh owns capture, access rules,
@@ -491,11 +489,20 @@ count in the labeled category, rather than an unavailable observation.
 No sampling service, uptime claim, or provider analytics collection is added.
 Detailed provider analytics remain in CPA.
 
-Page implementations live under `dashboard/pages/`; shared controls live in
-`dashboard/components/ui/`, while data subscriptions and revision-bound drafts live in
-`dashboard/lib/`. Browser code is checked with `tsconfig.dashboard.json`. The build removes
-obsolete chunks and emits independent chart, access-control, and Three.js bundles.
-`npm run test:dashboard` covers graph behavior and request handoff/cancellation.
+Page implementations live under `dashboard/pages/`; shared components live in
+`dashboard/components/` (primitives in `dashboard/components/ui/`), while the owner API
+client (`dashboard/lib/api.ts`), data subscriptions and revision-bound drafts live in
+`dashboard/lib/`. All browser code is TypeScript/TSX checked with `tsconfig.dashboard.json`
+and formatted with Prettier (`npm run format:dashboard`, `npm run check:dashboard-format`).
+The build removes obsolete chunks and emits independent chart and Three.js bundles. `npm run test:dashboard` covers graph behavior, request
+handoff/cancellation and small presentation helpers.
+
+`npm run test:dashboard-browser` opens every page in Chromium against the synthetic
+preview below and checks headings, navigation, old bookmarks, the archive drawer,
+the memory access views, Settings sections, phone-width layout, and that no page logs
+an error. It needs `npm run build`, a disposable PostgreSQL reachable through the
+usual `PG*` variables, and Chromium (`PLAYWRIGHT_CHROMIUM_EXECUTABLE`, or the browser
+Playwright manages). It starts and stops its own preview server on a free port.
 
 Archive and conversation history use list/detail views that stack on mobile.
 Original sources remain read-only; guarded copies are explicitly editable, and

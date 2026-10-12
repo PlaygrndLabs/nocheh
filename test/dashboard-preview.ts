@@ -57,6 +57,13 @@ const memoryMapEdges:any[]=[
  {id:`access:${grantId}`,kind:'access',source:`fact:${factId}`,target:`topic:${topic}`,state:'active',label:'persistent',authoritative:true,detail:{grant_id:grantId,destination:topic,wording:'Mira prefers quiet aurora viewpoints.',mode:'persistent',revision:1,fact_revision:1}},
  {id:`suggestion:${requestId}`,kind:'suggestion',source:`fact:${factId}`,target:`conversation:${conversation}`,state:'pending',label:'suggested',authoritative:false,detail:{request_id:requestId,destination:conversation,wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',revision:1,fact_revision:1,relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],expires_at:new Date(Date.now()+86400000).toISOString()}},
 ];
+const conversations:any[]=[
+ {space_id:'42',name:'Owner',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:true},
+ {space_id:'73',name:'Mira Chen',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
+ {space_id:conversation,name:'Aurora planning',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:true},
+ {space_id:topic,name:'Iceland planning',kind:'topic',parent_space:conversation,parent_name:'Aurora planning',observed_at:new Date().toISOString(),configured:false,closed:false},
+];
+permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
 const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true}};
 const memoryGrant={id:grantId,destination:topic,fact_revision:1,mode:'persistent',state:'active',revision:1,wording:'Mira prefers quiet aurora viewpoints.',suspended_reason:null,provenance:{fixture:true}};
 async function scenario(){try{return (await readFile('/tmp/nocheh-ui-scenario','utf8')).trim();}catch{return 'normal';}}
@@ -116,8 +123,19 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/preview')return json(res,200,{originals:[],shares,filtered_sources:[]});
   if(route==='/memory/reviews')return json(res,200,{jobs:[{id:'e'.repeat(64),event_id:id,reason:'import',state:'paused',chunk_index:0}],next:null});
   if(route==='/memory-map'){const query=(url.searchParams.get('q')??'').trim().toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'';const stateEdges=state?memoryMapEdges.filter(edge=>edge.state===state||edge.label===state):memoryMapEdges,stateNodes=new Set(stateEdges.flatMap(edge=>[edge.source,edge.target])),nodes=memoryMapNodes.filter(node=>(!kind||node.kind===kind)&&(!state||node.state===state||stateNodes.has(node.id))&&(!query||`${node.label} ${node.kind}`.toLocaleLowerCase().includes(query))),ids=new Set(nodes.map(node=>node.id));return json(res,200,{format:'nocheh-memory-map-v1',nodes,edges:stateEdges.filter(edge=>ids.has(edge.source)||ids.has(edge.target)),next:null,collapsed_facts:true,focus:null,counts:{nodes:nodes.length,edges:memoryMapEdges.length},relationship_edges_grant_access:false});}
-  if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest]});
-  if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant]});
+  if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
+  if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
+  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.filter(row=>!q||[row.space_id,row.name,row.parent_name].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
+  if(route==='/conversations/context'){const space=url.searchParams.get('space')??'',group=space.split('/topic/')[0]!,groups=String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',');
+   return json(res,200,{conversation:conversations.find(row=>row.space_id===space)??{space_id:space,name:null,kind:'unknown'},observed_at:new Date().toISOString(),state:'current',
+    addressing:{state:'current',enabled:false,owner_id:'42',group_enabled:groups.includes(group),granted:[],denied:[]},
+    knowledge_access:{owner_access:space==='42',sharing_rules:space===conversation?[{id:'rule-fixture',name:'Trip notes from the topic',enabled:true,sources:[topic],destination:conversation,mode:'approved',revision:1}]:[],fact_grants:[],sharing_releases:[],note:'Synthetic preview.'},
+    external_actions:{policy:null,permissions:permissions.filter(row=>row.scope===group),note:'Synthetic preview.'},
+    organization:{effective:{project:space.startsWith(conversation)?{id:projectId,name:'Aurora field guide'}:null,inherited:space===topic},delegations:[],note:'Synthetic preview.'},
+    memory:{connection:{attached:memoryAttached,verified:true},availability:memoryAttached?'available':'unavailable',syncing:false,sessions:[],note:'Synthetic preview.'}});}
+  if(route==='/sharing/rules')return json(res,200,{rules:[],next:null});
+  if(route==='/sharing/previews')return json(res,200,{previews:[],next:null});
+  if(route==='/sharing/releases')return json(res,200,{releases:[],next:null});
   if(route==='/memory-access/settings')return json(res,200,{settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}]});
   if(route==='/projects')return json(res,200,{projects:[memoryMapNodes[1].detail.project],next:null});
  }
@@ -137,6 +155,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/operations'||route==='/settings/apply'){const job={id:randomUUID(),kind:route==='/operations'?'operations.'+body.action:'settings.apply',state:'complete',created_at:new Date().toISOString(),result:{status:'synthetic_only'}};jobs.unshift(job);return json(res,200,job);}
   const importAction=/^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);
   if(importAction){const job=jobs.find(j=>j.id===importAction[1]);if(!job)throw new HttpError(404,'job_not_found');if(importAction[2]==='start'){if(job.state!=='ready'&&(JSON.stringify(body.mapping)!==JSON.stringify(job.mapping)||body.review_approved!==job.review_approved))throw new HttpError(409,'import_configuration_conflict');job.mapping=body.mapping;job.review_approved=body.review_approved;job.state='running';}else job.state='cancelled';return json(res,200,job);}
+  if(route==='/telegram/chats/refresh')return json(res,200,{chats:String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean).map(chat_id=>({chat_id,state:'available',title:'Aurora planning',is_forum:false}))});
+  if(route==='/telegram/topics')return json(res,200,{ok:true});
   if(route==='/settings'){if(body.revision!==settingsRevision)throw new HttpError(409,'configuration_conflict');settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';return json(res,200,{ok:true});}
   if(route==='/data/'+id+'/guarded'){if(body.expected_revision!==revision)throw new HttpError(409,'guard_revision_conflict');guarded=body.content?.text??source.event.text;revision++;return json(res,200,{ok:true});}
   if(route==='/sources/'+id+'/retirement'){
