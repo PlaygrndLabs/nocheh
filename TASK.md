@@ -1102,9 +1102,12 @@ activation remains separate.
    ([decision](docs/adr/0121-operational-telemetry-retention.md)). Still
    unbounded: guarded prepared copies (`runtime_prepared_values` and
    `runtime_prepared_inputs`) of superseded guard epochs, which ADR-0109's
-   single-workspace model changes; finished Hermes journals (outbound, dispatch,
-   async-run and managed-run files), which boot recovery also rescans (pruning
-   them is an open owner decision); and spool files that fail permanently. The
+   single-workspace model changes; and spool files that fail permanently.
+   Finished Hermes journals (outbound, dispatch, async-run and managed-run
+   files) now expire after one month by owner decision
+   ([decision](docs/adr/0141-hermes-delivery-log-retention.md),
+   [checks](services/hermes/test_journal_retention.py)); pending: the owner's
+   confirmation whether workflow history should also default to one month. The
    Honcho meter now folds calls older than the previous month into monthly
    totals ([decision](docs/adr/0131-honcho-meter-monthly-rollup.md),
    [checks](services/honcho/test_meter.py)). Guard fragments
@@ -1118,5 +1121,11 @@ activation remains separate.
     recovery, health, retention or the Inngest connection, and none becomes a
     cron. The superseded single-database worker is removed; four older modules
     remain only for their tests.
+    Steps that come due while the stack restarts or the Mac sleeps can fail
+    once with `connect_no_healthy_connection` in the seconds before both
+    Connect workers re-register (13 runs from October 10 to 12, all background
+    memory review or Honcho work); every retry that ran completed, one review
+    was still in its backoff wait, and no reply was affected, so no change was
+    made.
 
 </pending>
