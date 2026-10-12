@@ -171,7 +171,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       });
       if(kind==='interpret') {
         const attempts=async()=>Number((await control.query('SELECT attempts FROM interpretation_jobs WHERE id=$1',[id])).rows[0].attempts);
-        try{await s.learning.run(id,s.detect,authority);}
+        try{await s.learning.run(id,text=>s.detect(text,true),authority);}
         catch(error) {
           // The saved reasoning result is reused on retry, so an unusable one closes the workflow.
           if(error instanceof HttpError&&terminalLearningCodes.has(error.code))return observation('failed','review',await attempts(),Date.now(),'invalid_model_output');

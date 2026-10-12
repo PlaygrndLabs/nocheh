@@ -76,7 +76,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
   const projects=new ProjectRepository(stores.control),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new HonchoProvenanceRepository(stores,archive,guards,options.honcho);
-  const detect=async(text:string)=>(await options.runtime('guard.detect',{text})).literals;
+  // Background learning marks its checks so reply checks get detector slots first.
+  const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
   const turns=new RuntimeTurnRepository(access,prepared);
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
