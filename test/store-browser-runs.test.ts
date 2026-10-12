@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -21,7 +22,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-browser-runs-')),base=Date.now(),token=digest('browser'+base),group='-'+base;
-  const owner={admin:true,scope:null},policy={enabled:true,owner_id:'123',group_ids:[group]};let serial=0,mode='done',failCompletion=false,research='',planning='';
+  const owner={admin:true,scope:null},policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group]};let serial=0,mode='done',failCompletion=false,research='',planning='';
   const control=new Proxy(stores.control,{get(target,key){if(key==='connect')return async()=>{
     const db=await target.connect();return new Proxy(db,{get(client,name){if(name==='query')return (sql:any,...args:any[])=>{
       if(failCompletion&&String(sql).startsWith('UPDATE managed_runs SET state=$2,result_reference')){failCompletion=false;return Promise.reject(Error('lost control completion'));}
@@ -113,8 +114,14 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     assert.equal((await s.browser.heartbeat(contexts.get(cancelled.event_id))).cancel_requested,true);await run(cancelled.event_id);
     const scoped=await capture({scope:group,space:group+'/topic/12'});const reference=(await s.archive.captured(scoped.event_id)).reference,binding=await s.guards.state();
     const principal={admin:false,scope:group,space:group+'/topic/12',generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
-    assert.equal(await s.access.canRead(principal,reference,binding),true);assert.equal(await s.access.canRead({...principal,space:group},reference,binding),false);
-    assert.equal(await s.access.canRead({...principal,space:group+'/topic/13'},reference,binding),false);assert.equal(await s.access.canLearn(reference,binding),true);
+    assert.equal(await s.access.canRead(principal,reference,binding),true);assert.equal(await s.access.canLearn(reference,binding),true);
+    // By default the group's General chat and its other topics share the topic's memory; separate topic memory isolates them.
+    assert.equal(await s.access.canRead({...principal,space:group},reference,binding),true);
+    assert.equal(await s.access.canRead({...principal,space:group+'/topic/13'},reference,binding),true);
+    policy.topic_memory='topic';
+    assert.equal(await s.access.canRead({...principal,space:group},reference,binding),false);
+    assert.equal(await s.access.canRead({...principal,space:group+'/topic/13'},reference,binding),false);
+    delete policy.topic_memory;
     await s.browser.admit(owner,scoped);await prepare(scoped.event_id);mode='done';assert.equal((await run(scoped.event_id)).state,'completed');
     const media=await capture({text:'Read the attached audio',files:[{name:'original.ogg',kind:'audio',bytes_base64:Buffer.from([79,103,103,0,255]).toString('base64')}]});
     await s.browser.admit(owner,media);await prepare(media.event_id);assert.equal((await run(media.event_id)).state,'completed','initial transcript preparation must not cancel an unstarted browser submission');

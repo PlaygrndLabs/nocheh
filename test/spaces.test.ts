@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {eventSpace,validateOverrides,spacePolicy,saveSpace} from '../src/spaces.js';
+import {eventSpace,validateOverrides,spacePolicy,saveSpace,recallScope,inRecall,recallCondition} from '../src/spaces.js';
+import {assistantPolicy} from '../src/assistant-policy.js';
 import {initialize} from '../src/database.js';
 import {ingest,type Envelope} from '../src/archive.js';
 
@@ -13,6 +14,23 @@ test('space identity uses explicit topics and rejects ambiguous policy values',(
   assert.throws(()=>eventSpace('-20',{message:{message_thread_id:-1}}),{code:'invalid_topic'});
   assert.throws(()=>validateOverrides({mode:'public'}),{code:'invalid_memory_mode'});
   assert.throws(()=>validateOverrides({owner:true}),{code:'unknown_space_preference'});
+});
+test('a group\'s topics share one memory unless the owner keeps topics separate',()=>{
+  const shared=recallScope('-20/topic/42');
+  assert.deepEqual(shared,{space:'-20/topic/42',group:'-20'});
+  for(const space of ['-20','-20/topic/42','-20/topic/7'])assert.ok(inRecall(shared,space),space);
+  for(const space of ['-200','-200/topic/42','123'])assert.ok(!inRecall(shared,space),space);
+  const separate=recallScope('-20/topic/42','topic');
+  assert.ok(inRecall(separate,'-20/topic/42'));
+  for(const space of ['-20','-20/topic/7'])assert.ok(!inRecall(separate,space),space);
+  assert.equal(recallScope('123').group,null,'a private chat never widens to a group');
+  assert.equal(recallCondition('audience','$1','$2'),"(audience=$1 OR ($2::text IS NOT NULL AND (audience=$2 OR starts_with(audience,$2||'/topic/'))))");
+  const saved=process.env.TELEGRAM_TOPIC_MEMORY;
+  try {
+    delete process.env.TELEGRAM_TOPIC_MEMORY;assert.equal(assistantPolicy().topic_memory,'group');
+    process.env.TELEGRAM_TOPIC_MEMORY='topic';assert.equal(assistantPolicy().topic_memory,'topic');
+    process.env.TELEGRAM_TOPIC_MEMORY='everything';assert.throws(()=>assistantPolicy(),/Invalid assistant policy/);
+  }finally{if(saved===undefined)delete process.env.TELEGRAM_TOPIC_MEMORY;else process.env.TELEGRAM_TOPIC_MEMORY=saved;}
 });
 test('real PostgreSQL: topic inheritance, revision conflicts and immutable source backfill',{skip:!process.env.PGHOST},async()=>{
   const admin=new pg.Pool(),namespace=`spaces_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);

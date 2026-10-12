@@ -1,6 +1,7 @@
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
+import {inRecall,type RecallScope} from '../spaces.js';
 import type {Interpretation,InterpretationVersion} from '../interpretations.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
@@ -193,14 +194,15 @@ export class LearnedMemoryRepository {
     return rows.length;
   }
 
-  async read(principal:Reader,id:string,binding:GuardBinding,canReadEvidence:(reference:SourceReference)=>Promise<boolean>):Promise<InterpretationVersion> {
+  /** `recall` widens a conversation's own entries to every conversation it recalls. */
+  async read(principal:Reader,id:string,binding:GuardBinding,canReadEvidence:(reference:SourceReference)=>Promise<boolean>,recall?:RecallScope|null):Promise<InterpretationVersion> {
     await this.guards.assertCurrent(binding);
     const row=(await this.stores.derived.query(`SELECT e.*,v.author,v.retired,v.evidence,v.dependencies,v.derived_id FROM learned_entries e
       JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[id])).rows[0];
     if(!row||row.retired||row.imported&&!principal.admin)throw new HttpError(404,'learned_memory_not_found');
     if(!principal.admin&&principal.scope!==null) {
       const space=principal.space??principal.scope;
-      if(row.scope_kind==='conversation'&&row.scope_id!==space)throw new HttpError(404,'learned_memory_not_found');
+      if(row.scope_kind==='conversation'&&!(recall?inRecall(recall,row.scope_id):row.scope_id===space))throw new HttpError(404,'learned_memory_not_found');
       if(row.scope_kind==='project') {
         const effective=await new ProjectRepository(this.stores.control).effective(space);
         if(effective.project?.id!==row.scope_id||effective.project?.state!=='active')throw new HttpError(404,'learned_memory_not_found');

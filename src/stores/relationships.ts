@@ -5,9 +5,11 @@ import {canonical} from '../archive.js';
 import {sourceObjectId,type SourceIdentity} from '../source-model.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 
-export type RelationshipAudience={kind:'owner'}|{kind:'conversation';chat_id:string;topic_id:string|null};
+/** `group` admits every known conversation of the chat, for groups whose topics share memory. */
+export type RelationshipAudience={kind:'owner'}|{kind:'conversation';chat_id:string;topic_id:string|null;group?:boolean};
 const permits=(audience:RelationshipAudience,observed:ObservedAudience|null):boolean=>audience.kind==='owner'||!!observed&&
-  audience.chat_id===observed.chat_id&&(observed.topic_state==='known'?audience.topic_id===observed.topic_id:observed.topic_state==='none'&&audience.topic_id===null);
+  audience.chat_id===observed.chat_id&&(observed.topic_state==='known'?audience.group||audience.topic_id===observed.topic_id:
+    observed.topic_state==='none'&&(audience.group||audience.topic_id===null));
 
 // Resolve the older adapter's unknown General projection from the immutable
 // full message. This changes neither archived bytes nor the saved descriptor.

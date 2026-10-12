@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
@@ -23,7 +24,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive),guards=new GuardRepository(stores,archive);
   const key='learning:'+Date.now(),group=String(-Date.now()),space=group+'/topic/17';
-  const policy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
+  const policy:AssistantPolicy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
   const learned=new LearnedMemoryRepository(stores,archive,derived,guards),projects=new ProjectRepository(stores.control),selections=new SelectionRepository(stores,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,new EntityRepository(stores,access,projects));
   const event=(label:string,payload:any):Envelope=>({version:1,key:key+':'+label,origin:'live',bot_id:key,kind:'telegram_update',scope:group,
@@ -85,7 +86,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     // Learning never schedules a dispatch, outbound action, or approval; the row above only simulates an active reply.
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE job_id=$1 AND family='memory_review'",['interpret:'+job])).rows[0].count,'1');
     const wrong={...access.principal(space),space:group+'/topic/18'};
-    assert.equal(await access.canRead(wrong,parent,binding),false);
+    assert.equal(await access.canRead(wrong,parent,binding),true,'another topic of the group shares its memory by default');
+    policy.topic_memory='topic';assert.equal(await access.canRead(wrong,parent,binding),false);delete policy.topic_memory;
     const removed=(await archive.capture(event('removed',{update_id:31,message_reaction:{chat:{id:group},message_id:1,date:1700000011,user:{id:7},
       old_reaction:[{type:'emoji',emoji:'✅'}],new_reaction:[]}}))).source.reference;
     await guards.prepare(removed,'fixture',detect);
