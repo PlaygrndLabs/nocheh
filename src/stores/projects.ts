@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {parentSpace,validateSpace} from '../spaces.js';
+import {parentSpace,recallCondition,validateSpace} from '../spaces.js';
 import {OwnerCommands} from './owner-commands.js';
 
 const id=(value:unknown):string=>{const v=string(value,64);if(!/^[a-f0-9]{64}$/.test(v))throw new HttpError(400,'invalid_project_id');return v;};
@@ -99,8 +99,9 @@ export class SharingPolicyRepository {
     admin(principal);const {rows}=await this.control.query('SELECT * FROM sharing_rules WHERE id>$1 ORDER BY id LIMIT 101',[after]);
     return {rules:rows.slice(0,100),next:rows.length>100?rows[99].id:null};
   }
-  /** Configuration for preparing a separate permitted projection; never authorizes raw source reads. */
-  async forDestination(destination:string):Promise<SharingRule[]> {
-    return (await this.control.query('SELECT * FROM sharing_rules WHERE destination=$1 AND enabled ORDER BY id',[validateSpace(destination)])).rows;
+  /** Configuration for preparing a separate permitted projection; never authorizes raw source reads.
+   * With `group`, rules for that group's base conversation and every one of its topics apply too. */
+  async forDestination(destination:string,group:string|null=null):Promise<SharingRule[]> {
+    return (await this.control.query(`SELECT * FROM sharing_rules WHERE ${recallCondition('destination','$1','$2')} AND enabled ORDER BY id`,[validateSpace(destination),group])).rows;
   }
 }

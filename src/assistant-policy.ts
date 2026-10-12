@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { HttpError, object } from './http.js';
 
 export interface GroupAccess {granted:string[];denied:string[]}
-export interface AssistantPolicy {enabled:boolean;owner_id:string|null;group_ids:string[];group_access?:Record<string,GroupAccess>}
+/** Whether every topic of a group shares one memory ('group', the default) or each topic keeps its own ('topic'). */
+export type TopicMemory='group'|'topic';
+export interface AssistantPolicy {enabled:boolean;owner_id:string|null;group_ids:string[];group_access?:Record<string,GroupAccess>;topic_memory?:TopicMemory}
 export function groupAccess(value:unknown,groups:string[],owner:string|null):Record<string,GroupAccess> {
   const input=object(value),result:Record<string,GroupAccess>={};
   if(Object.keys(input).length>100)throw new Error('Invalid TELEGRAM_GROUP_ACCESS');
@@ -25,13 +27,14 @@ export function assistantPolicy(path?:string):AssistantPolicy {
     enabled:enabled==='true',owner_id:process.env.TELEGRAM_OWNER_ID || null,
     group_ids:(process.env.TELEGRAM_GROUP_IDS ?? '').split(',').map(v=>v.trim()).filter(Boolean),
     group_access:JSON.parse(process.env.TELEGRAM_GROUP_ACCESS ?? '{}'),
+    topic_memory:process.env.TELEGRAM_TOPIC_MEMORY || 'group',
   };
   if (typeof value.enabled!=='boolean' || (value.owner_id!==null && (typeof value.owner_id!=='string' || !/^[1-9]\d{0,18}$/.test(value.owner_id))) ||
       !Array.isArray(value.group_ids) || value.group_ids.some(v=>typeof v!=='string' || !/^-\d{1,19}$/.test(v)) ||
-      (value.enabled && !value.owner_id)) throw new Error('Invalid assistant policy');
+      (value.enabled && !value.owner_id) || !['group','topic',undefined].includes(value.topic_memory as string|undefined)) throw new Error('Invalid assistant policy');
   const groups=[...new Set(value.group_ids as string[])];
   return {enabled:value.enabled,owner_id:value.owner_id as string|null,group_ids:groups,
-    group_access:groupAccess(value.group_access??{},groups,value.owner_id as string|null)};
+    group_access:groupAccess(value.group_access??{},groups,value.owner_id as string|null),topic_memory:(value.topic_memory as TopicMemory|undefined)??'group'};
 }
 export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:string):{owner:boolean;chat_id:string;user_id:string}|null {
   if (!policy.enabled) return null;

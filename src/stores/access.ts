@@ -2,7 +2,7 @@ import type {Reader} from '../access.js';
 import {admin} from '../access.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {parentSpace} from '../spaces.js';
+import {inRecall,parentSpace,recallScope,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
@@ -28,9 +28,9 @@ export class SourceAccessRepository {
     }
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
     if(!['telegram','browser'].includes(source.channel)||source.scope!==principal.scope)return false;
-    const observed=(await this.relationships.describe(reference)).audience,space=principal.space??principal.scope;
-    const allowed=!!observed&&observed.chat_id===principal.scope&&(observed.topic_state==='known'?space===observed.chat_id+'/topic/'+observed.topic_id:
-      observed.topic_state==='none'&&space===observed.chat_id);
+    const observed=(await this.relationships.describe(reference)).audience,scope=this.recall(principal)!;
+    const space=!observed||observed.topic_state==='unknown'?null:observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id;
+    const allowed=!!observed&&observed.chat_id===principal.scope&&space!==null&&inRecall(scope,space);
     await this.guards.assertCurrent(binding);return allowed;
   }
   async canLearn(reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
@@ -56,6 +56,11 @@ export class SourceAccessRepository {
     // A reaction to an unseen forum message waits for context, never learns at group scope.
     if(!observed||observed.topic_state==='unknown')return false;
     await this.guards.assertCurrent(binding);return true;
+  }
+  /** The conversations a scoped principal recalls; null for the owner and administration, which read everything. */
+  recall(principal:Reader):RecallScope|null {
+    if(principal.admin||principal.scope===null)return null;
+    return recallScope(principal.space??principal.scope,this.policy().topic_memory);
   }
   async space(reference:SourceReference):Promise<string|null> {
     const source=await this.archive.verify(reference);

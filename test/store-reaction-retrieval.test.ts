@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -14,7 +15,8 @@ test('archive reads link current captured reactions while preserving removal, gu
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-reaction-read-')),key='reaction-read:'+Date.now(),group='-'+Date.now();
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group],topic_memory:'topic'};
+  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,
     runtime:async()=>({literals:[]}),honcho:async()=>{throw Error('no provider');}});
   const capture=async(label:string,payload:any)=>{
     const value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(payload.message?.message_id??payload.message_reaction?.message_id??payload.message_reaction_count?.message_id),
@@ -48,6 +50,11 @@ test('archive reads link current captured reactions while preserving removal, gu
     assert.deepEqual((removal.event.payload as any).message_reaction.new_reaction,[]);
     await assert.rejects(s.sources.read(await actor(18),target.id),{code:'source_not_found'});
     await assert.rejects(s.sources.read(await actor(18),removed.id),{code:'source_not_found'});
+    // When a group's topics share memory, another topic of the same group reads the reaction and its target.
+    policy.topic_memory='group';
+    assert.equal((await s.sources.read(await actor(18),target.id)).current_reactions.sources.length,1);
+    assert.equal((await s.sources.read(await actor(18),removed.id)).relationships.targets[0]?.references[0]?.id,target.id);
+    policy.topic_memory='topic';
     const aggregate=await capture('aggregate',{update_id:4,message_reaction_count:{chat:message.chat,message_id:1,date:1700000011,reactions:[{type:{type:'emoji',emoji:'👍'},total_count:2}]}});
     assert.deepEqual(new Set((await s.sources.read(await actor(),target.id)).current_reactions.sources),new Set(['nocheh:event:'+removed.id,'nocheh:event:'+aggregate.id]));
     assert.deepEqual(new Set((await s.sources.currentReactions(await actor())).sources.map(row=>row.source)),new Set(['nocheh:event:'+removed.id,'nocheh:event:'+aggregate.id]));

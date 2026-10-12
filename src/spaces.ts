@@ -48,6 +48,17 @@ export function validateSpace(id:unknown):string {
   return value;
 }
 export function parentSpace(id:string):string|null {return id.includes('/topic/')?id.split('/topic/')[0]!:null;}
+/** The conversations a group or topic turn recalls: its own, or, when the group's topics share
+ * memory, the group's base conversation and every one of its topics. Owner turns read everything. */
+export interface RecallScope {space:string;group:string|null}
+export function recallScope(space:string,topicMemory:'group'|'topic'='group'):RecallScope {
+  const chat=parentSpace(space)??space;
+  return {space,group:topicMemory==='group'&&/^-\d+$/.test(chat)?chat:null};
+}
+export const inRecall=(scope:RecallScope,space:string)=>space===scope.space||scope.group!==null&&(parentSpace(space)??space)===scope.group;
+/** SQL test that `column` names a conversation of the recall scope bound as `space` and `group`. */
+export const recallCondition=(column:string,space:string,group:string)=>
+  `(${column}=${space} OR (${group}::text IS NOT NULL AND (${column}=${group} OR starts_with(${column},${group}||'/topic/'))))`;
 export function validateOverrides(input:unknown):Partial<SpacePreferences> {
   const body=object(input), result:Partial<SpacePreferences>={};
   for(const key of Object.keys(body)) if(!['mode','sources','privacy_instructions'].includes(key))throw new HttpError(400,'unknown_space_preference');

@@ -5,6 +5,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
@@ -15,7 +16,8 @@ test('fact grants authorize exact destinations while relationships only create r
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-access-'));
   const key='memory-access:'+Date.now(),group='-'+Date.now(),owner:Reader={admin:true,scope:null};
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group]};
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async operation=>operation==='guard.detect'?{literals:[]}:{state:'done'},honcho:async()=>{throw Error('no provider');}});
   const capture=async(scope:string,index:number,text:string)=>{const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(index),revision:'1',occurred_at:null,text,
     payload:{message:{message_id:index,date:1,chat:{id:Number(scope),type:scope==='123'?'private':'group'},from:{id:Number(scope==='123'?'123':'456'),first_name:'Fixture'},text}}};
@@ -41,7 +43,11 @@ test('fact grants authorize exact destinations while relationships only create r
     const grant=await services.memoryAccess.grant(owner,{fact_id:grantedFact.id,fact_revision:grantedFact.revision,destination:group,wording:'The checkpoint is complete.',operation_id:key+':grant'});
     let actor=await principal(groupSource),context=await services.memoryAccess.context(actor,'checkpoint complete');
     assert.equal(context.sources.length,1);assert.equal(context.sources[0]!.text,'The checkpoint is complete.');
-    assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources.length,0,'topics keep their own boundary');
+    assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources[0]?.text,'The checkpoint is complete.',
+      'every topic of a group shares its grants by default');
+    policy.topic_memory='topic';
+    assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources.length,0,'separate topics keep their own boundary');
+    delete policy.topic_memory;
     const suggestion=await services.memoryAccess.suggest(actor,'Apollo launch schedule October');assert.ok(suggestion);
     let pending=await find('requests',suggestion.id);
     assert.equal(pending.wording,'Apollo launch schedule milestone is October.');assert.equal(pending.state,'pending');

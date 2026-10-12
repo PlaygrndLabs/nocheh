@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {parentSpace,validateSpace} from '../spaces.js';
+import {parentSpace,recallCondition,validateSpace} from '../spaces.js';
 import type {SourceReference} from './archive.js';
 import type {StorePools} from './connections.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
@@ -112,7 +112,7 @@ export class MemoryAccessRepository {
     const binding=await this.guards.state();let selected:Fact|undefined,path:string[]=[];
     for(const fact of candidates.slice(0,100)) {
       if(!relevant(query,fact.content))continue;
-      if((await this.stores.control.query("SELECT 1 FROM memory_fact_grants WHERE destination=$1 AND fact_id=$2 AND state='active' AND (expires_at IS NULL OR expires_at>now()) LIMIT 1",[principal.space,fact.id])).rowCount)continue;
+      if((await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE ${recallCondition('destination','$1','$3')} AND fact_id=$2 AND state='active' AND (expires_at IS NULL OR expires_at>now()) LIMIT 1`,[principal.space,fact.id,this.access.recall(principal)?.group??null])).rowCount)continue;
       const readable=(await Promise.all(fact.evidence.map(ref=>this.access.canRead(principal,ref,binding)))).every(Boolean);if(readable)continue;
       selected=fact;path=pathByEntity.get(fact.subject_entity_id)??pathByEntity.get(fact.object_entity_id??'')??[];break;
     }
@@ -290,8 +290,10 @@ export class MemoryAccessRepository {
   private async suspendRequest(id:string,expected:number){await this.stores.control.query("UPDATE memory_access_requests SET state='suspended',revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2 AND state='pending'",[id,expected]);}
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);await this.reconcile();
+    // Persistent grants to any conversation the principal recalls apply, so a group's topics share them.
     const binding=await this.prepared.audience.assert(principal),rows=(await this.stores.control.query(`SELECT * FROM memory_fact_grants
-      WHERE destination=$1 AND mode='persistent' AND state='active' AND (expires_at IS NULL OR expires_at>now()) ORDER BY id LIMIT 100`,[principal.space])).rows,sources=[];
+      WHERE ${recallCondition('destination','$1','$2')} AND mode='persistent' AND state='active' AND (expires_at IS NULL OR expires_at>now()) ORDER BY id LIMIT 100`,
+      [principal.space,this.access.recall(principal)?.group??null])).rows,sources=[];
     for(const row of rows){const text=await this.validateGrant(row,binding);if(text&&(!query.trim()||relevant(query,text)))sources.push({id:row.id,source:'nocheh:grant:'+row.id,kind:'owner_approved' as const,text,limitations:[]});if(sources.length>=10)break;}
     await this.prepared.audience.assert(principal);return {sources};
   }
