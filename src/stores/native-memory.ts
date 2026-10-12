@@ -5,7 +5,7 @@ import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inspectRequest} from '../guard.js';
 import type {HonchoCall} from '../honcho.js';
-import {parentSpace} from '../spaces.js';
+import {parentSpace,recallCondition} from '../spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
@@ -42,6 +42,8 @@ export class NativeMemoryRepository {
   private get owner(){return this.contexts.access.policy().owner_id;}
   private audienceOf(space:string){return space===this.owner?'owner':space;}
   private principalAudience(principal:Reader){return principal.scope===null?'owner':principal.space??principal.scope;}
+  /** The group whose every conversation a scoped principal recalls when its topics share memory. */
+  private recallGroup(principal:Reader){return principal.admin?null:this.contexts.access.recall(principal)?.group??null;}
 
   async status() {
     const binding=await this.guards.state(),connection=(await this.control.query('SELECT * FROM memory_engine_connection WHERE singleton')).rows[0];
@@ -569,7 +571,7 @@ export class NativeMemoryRepository {
       .map(output=>output.content.toString() as string);
     if(texts.length)await this.prepared.allow(current.principal,texts);
   }
-  private async connectedPeers(current:Current,audience:string,principal:Reader,query='',turnSource?:string) {
+  private async connectedPeers(current:Current,audience:string,principal:Reader,query='',turnSource?:string,group:string|null=null) {
     let connected=query.trim()?await this.contexts.entities.connected(principal,query,12):{entities:[],partial:false,ambiguities:[]};
     const clarification=principal.scope===null&&connected.ambiguities.length?
       `Please clarify which ${connected.ambiguities.map(item=>item.name).join(', ')} identity you mean.`:undefined;
@@ -585,12 +587,12 @@ export class NativeMemoryRepository {
     const available=new Set((await this.control.query(`SELECT DISTINCT peer.value AS peer_id FROM memory_ingestion_receipts r
       CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_array_length(r.peer_ids)>0 THEN r.peer_ids ELSE jsonb_build_array(r.peer_id) END) peer(value)
       WHERE r.generation=$1 AND r.state='done' AND r.retired_at IS NULL AND peer.value=ANY($2::text[])
-      AND ($4::text='owner' OR r.audience=$4)
+      AND ($4::text='owner' OR ${recallCondition('r.audience','$4','$5')})
       AND ($3::text IS NULL OR EXISTS (
         SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_array_length(r.source_references)>0 THEN r.source_references
           ELSE jsonb_build_array(r.source_reference) END) evidence(value)
         WHERE evidence.value->>'id'<>$3
-      ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null,audience])).rows.map(row=>String(row.peer_id)));
+      ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null,audience,group])).rows.map(row=>String(row.peer_id)));
     return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial,clarification:undefined};
   }
   /** Read Honcho's context for the current conversation and its speaker, guarded once per distinct result.
@@ -650,10 +652,10 @@ export class NativeMemoryRepository {
   private async relevantOwnerCorrections(principal:Reader,query:string,binding:GuardBinding) {
     const space=principal.space??principal.scope;
     if(!space)return [];
-    const rows=(await this.contexts.access.stores.derived.query(`SELECT e.id,e.subject FROM learned_entries e
+    const rows=(await this.contexts.access.stores.derived.query(`SELECT e.id,e.subject,e.scope_id FROM learned_entries e
       JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
-      WHERE e.scope_kind='conversation' AND e.scope_id=$1 AND v.author='owner' AND NOT v.retired
-      ORDER BY e.id LIMIT 101`,[space])).rows;
+      WHERE e.scope_kind='conversation' AND ${recallCondition('e.scope_id','$1','$2')} AND v.author='owner' AND NOT v.retired
+      ORDER BY e.id LIMIT 101`,[space,this.recallGroup(principal)])).rows;
     if(rows.length>100)throw new HttpError(409,'owner_correction_limit');
     const normalized=(text:string)=>text.toLocaleLowerCase().replace(/\s+/g,' ').trim();
     const question=normalized(query),sources=[];
@@ -662,8 +664,8 @@ export class NativeMemoryRepository {
       if(!subject||!question.includes(subject))continue;
       try {
         const version=await this.contexts.learned.read(principal,row.id,binding,async reference=>
-          this.contexts.access.canRead(principal,reference,binding));
-        const text=`Active owner correction for ${version.subject} in this conversation (revision ${version.revision}): ${version.text}`;
+          this.contexts.access.canRead(principal,reference,binding),this.contexts.access.recall(principal));
+        const text=`Active owner correction for ${version.subject} in ${row.scope_id===space?'this conversation':'another topic of this group'} (revision ${version.revision}): ${version.text}`;
         await this.prepared.allow(principal,text);
         sources.push({source:`nocheh:learned:${row.id}:${version.revision}`,kind:'owner_corrected_interpretation',text,exact_citations:false});
       } catch(error) {
@@ -680,7 +682,7 @@ export class NativeMemoryRepository {
     let corrections:Awaited<ReturnType<NativeMemoryRepository['relevantOwnerCorrections']>>=[];
     try {
       const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
-      const audience=principal.admin?'owner':this.principalAudience(principal);
+      const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
       corrections=await this.relevantOwnerCorrections(principal,query,current.binding);
       const question=await this.prepared.prepare(actor,query,this.detect),requestId=randomUUID();
       const root=await this.prepared.root(actor,current.binding);
@@ -688,11 +690,12 @@ export class NativeMemoryRepository {
         producer:'nocheh',producer_version:protocol,configuration:{workspace:id,audience,reasoning_level:'low'},provenance:{binding:current.binding}});
       // The active question alone is not prior memory. Background context
       // still includes it, and receipts with independent supporting evidence qualify.
-      const connected=await this.connectedPeers(current,audience,actor,String(question),principal.turnEvent),answers=[];
+      const connected=await this.connectedPeers(current,audience,actor,String(question),principal.turnEvent,group),answers=[];
       const syncing=current.row.state==='building';
       if(connected.clarification)return {sources:corrections,limited_memory:false,syncing,clarification_required:true,note:connected.clarification};
-      // Group and topic recall reads only that audience's own sessions; owner recall spans the workspace.
-      const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience);
+      // Group and topic recall reads only that audience's own sessions, or every session of its group when
+      // the group's topics share memory; owner recall spans the workspace.
+      const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
       // Each peer is asked side by side, so recall waits for the slowest Honcho answer rather than their sum.
       const asked=sessions?.length===0?[]:connected.items.slice(0,4);
       if(asked.length)await this.current(id);

@@ -15,6 +15,7 @@ import type {SourceReference} from './archive.js';
 import type {GuardBinding} from './guards.js';
 import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel} from '../graph-labels.js';
 import {ProjectRepository} from './projects.js';
+import type {RelationshipAudience} from './relationships.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 
@@ -33,6 +34,11 @@ export class SourceRepository {
     this.audience=new AudienceRepository(access.guards);
   }
   private get stores(){return this.access.stores;}
+  /** Relations are shown within the conversations the principal recalls. */
+  private relationAudience(principal:Reader):RelationshipAudience {
+    const scope=this.access.recall(principal);
+    return scope?{kind:'conversation',chat_id:principal.scope!,topic_id:scope.space.includes('/topic/')?scope.space.split('/topic/')[1]!:null,group:scope.group!==null}:{kind:'owner'};
+  }
   async status(principal:Reader) {
     admin(principal);
     const [events,artifacts]=await Promise.all([
@@ -71,8 +77,7 @@ export class SourceRepository {
     for(const row of rows) {
       const reference=(await this.access.archive.captured(row.event_id)).reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
-      const context=await this.access.relationships.context(reference,binding&&principal.scope!==null?{
-        kind:'conversation',chat_id:principal.scope,topic_id:principal.space?.includes('/topic/')?principal.space.split('/topic/')[1]!:null}:{kind:'owner'},20);
+      const context=await this.access.relationships.context(reference,binding?this.relationAudience(principal):{kind:'owner'},20);
       const targets:SourceReference[]=[];
       for(const relation of context.targets)if(relation.kind==='reaction_to')for(const target of relation.references) {
         if(binding&&!await this.access.canRead(principal,target,binding))continue;
@@ -125,8 +130,7 @@ export class SourceRepository {
       derived.push({id:item.derived_id,event_id:id,artifact_id:item.artifact_id,kind:value.kind,representation:binding?.mode==='on'?'guarded':'derived',
         content_base64:Buffer.from(value.text).toString('base64'),provenance:value.provenance,source:'nocheh:derivative:'+item.derived_id});
     }
-    const relationships=await this.access.relationships.context(reference,binding&&principal.scope!==null?{
-      kind:'conversation',chat_id:principal.scope,topic_id:principal.space?.includes('/topic/')?principal.space.split('/topic/')[1]!:null}:{kind:'owner'},20);
+    const relationships=await this.access.relationships.context(reference,binding?this.relationAudience(principal):{kind:'owner'},20);
     if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const replies=principal.admin?await archiveReplyPreviews(this.stores.archive,this.stores.control,[{id,kind:row.kind,scope:row.scope}]):new Map();
     const current_reactions=await this.currentReactionSources(principal,reference,binding);

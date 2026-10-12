@@ -189,6 +189,21 @@ gateway check ([test](services/hermes/test_gateway.py)) and the
 machine and have not been run. Pending: a live group check that an unaddressed
 message gets no reply and an addressed one does.
 
+All topics of a group now share one memory by default. A live question in a
+group's second topic did not know what the owner had said in another topic,
+because every recall path matched the turn's topic exactly. Archive reads and
+search, Honcho recall, owner corrections, persistent grants and sharing now
+reach the group's General chat and every topic; the private chat and other
+groups stay out. Settings › Telegram access › “Topic memory” can keep topics
+separate (“Each topic”)
+([decision](docs/adr/0135-group-topics-share-memory.md),
+[retrieval checks](test/store-retrieval.test.ts),
+[grant checks](test/store-memory-access.test.ts),
+[sharing checks](test/store-sharing.test.ts),
+[helper checks](test/spaces.test.ts)). Hermes native notes stay per
+conversation. Pending: after a restart, a live question in one topic about
+something said in another topic of the same group.
+
 </current>
 
 <verification>

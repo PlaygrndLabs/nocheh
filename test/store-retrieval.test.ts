@@ -17,6 +17,7 @@ import {SourceAccessRepository} from '../src/stores/access.js';
 import {SourceRepository} from '../src/stores/retrieval.js';
 import {ProjectRepository} from '../src/stores/projects.js';
 import {observedSource} from '../src/observed-source.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 
 test('source-only retrieval keeps derivative links, independent relationship lookup and generation-bound privacy',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -27,7 +28,8 @@ test('source-only retrieval keeps derivative links, independent relationship loo
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),root=await mkdtemp(join(tmpdir(),'nocheh-retrieval-'));
-  const access=new SourceAccessRepository(stores,archive,guards,()=>({enabled:true,owner_id:'123',group_ids:['-321','-654']}));
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:['-321','-654'],topic_memory:'topic'};
+  const access=new SourceAccessRepository(stores,archive,guards,()=>policy);
   const sources=new SourceRepository(access,new AttachmentRepository(stores,archive,root),selections),owner:Reader={scope:null,admin:true},key='retrieval:'+Date.now();
   const sequence=Date.now();
   const event=(suffix:string,scope:string,message:Record<string,unknown>):Envelope=>({version:1,key:key+suffix,origin:'live',bot_id:'fixture',
@@ -69,6 +71,19 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     assert.equal((await sources.read(scoped,general.id)).event.text,'General quillmarsh');
     await assert.rejects(sources.read(await principal('-321','-321/topic/77'),general.id),{code:'source_not_found'});
     assert.ok(!(await sources.search(await principal('-321','-321/topic/77'),'quillmarsh')).some(row=>row.id===general.id));
+    // By default every topic of a group shares one memory: General and each topic read one another,
+    // while unknown topic membership and other groups stay unavailable.
+    policy.topic_memory='group';
+    const topical=await principal('-321','-321/topic/78');
+    assert.equal((await sources.read(topical,topic.id)).event.text,'Topic quillmarsh');
+    assert.equal((await sources.read(topical,general.id)).event.text,'General quillmarsh');
+    assert.equal((await sources.read(scoped,topic.id)).event.text,'Topic quillmarsh');
+    const shared=(await sources.search(topical,'quillmarsh')).map(row=>row.id);
+    for(const [name,id] of Object.entries({target:target.id,topic:topic.id,general:general.id}))assert.ok(shared.includes(id),name);
+    await assert.rejects(sources.read(topical,unknown.id),{code:'source_not_found'});
+    await assert.rejects(sources.read(topical,foreign.id),{code:'source_not_found'});
+    assert.deepEqual(await sources.search(topical,'hazelwharf'),[]);
+    policy.topic_memory='topic';
     assert.equal(await access.space(general),'-321');assert.equal(await access.canLearn(general,await guards.state()),true);
     const graph=await sources.graph(owner,'*','',1,reply.id);
     assert.ok(graph.nodes.some(n=>n.id==='collection:*'&&n.kind==='collection'&&n.label==='All private knowledge'));

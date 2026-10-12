@@ -59,13 +59,15 @@ test('recall asks every connected peer side by side, keeps each inside the group
   const workspace=digest('recall-workspace'),root={store:'archive',kind:'event',id:digest('recall-root'),revision:'1',input_hash:digest('recall-root-hash')};
   const groupSessions=[digest('group-session-a'),digest('group-session-b')],peers=['person_a','person_b','project_c'];
   const asked:{peer:string;body:any}[]=[],waiting:(()=>void)[]=[];let recorded='';
-  const contexts={access:{stores:{control:{query:async()=>{throw Error('unexpected_control_query');}}},policy:()=>({owner_id:'123'})},
+  const contexts={access:{stores:{control:{query:async()=>{throw Error('unexpected_control_query');}}},policy:()=>({owner_id:'123'}),
+    recall:(principal:Reader)=>({space:principal.space,group:'-100'})},
     guards:{prepareContext:async()=>null,read:async()=>({value:{text:recorded}})}};
   const derived={record:async(input:any)=>{if(input.kind==='memory_result')recorded=input.content.toString();
     return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
   const binding={generation:'fixture',epoch:1,mode:'on'};
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
-  const provenance={sessions:async(id:string,audience:string)=>{assert.equal(id,workspace);assert.equal(audience,'-100');return groupSessions;}};
+  const provenance={sessions:async(id:string,audience:string,_limit:number,group:string|null)=>{
+    assert.equal(id,workspace);assert.equal(audience,'-100');assert.equal(group,'-100','a group recall spans every topic of its group');return groupSessions;}};
   const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,async(path:string,body:any)=>{
     const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;asked.push({peer,body});
     // Hold every answer until all peers were asked, then release the first peer last.
