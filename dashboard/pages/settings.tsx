@@ -1,6 +1,7 @@
 import {useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode} from 'react';
 import {useRevisionDraft} from '../lib/draft';
-import {RotateCcw} from 'lucide-react';
+import {Bot, Cpu, Gauge, RotateCcw, Send, ShieldCheck, Wrench} from 'lucide-react';
+import {WorkspaceTabs} from '../components/workspace-tabs';
 import {
   call,
   button,
@@ -31,23 +32,12 @@ type SettingsField = {
 
 type FieldChangeEvent = ChangeEvent<HTMLInputElement | HTMLSelectElement>;
 
+/** Installation settings in short sections, saved and applied from one bar. */
 export function Settings({notify}: {notify: Notify}) {
-  const [defaultsRevision, setDefaultsRevision] = useState(0);
   return (
-    <Tabs defaultValue="nocheh" className="settings-page">
-      <TabsList aria-label="Settings category">
-        <TabsTrigger value="nocheh">Nocheh settings</TabsTrigger>
-        <TabsTrigger value="hermes">Hermes preferences</TabsTrigger>
-      </TabsList>
-      <TabsContent value="nocheh" forceMount>
-        <NochehSettings notify={notify} />
-        <OwnerFreedom notify={notify} />
-      </TabsContent>
-      <TabsContent value="hermes" forceMount>
-        <HermesPreferences notify={notify} defaultsRevision={defaultsRevision} />
-        <PolicySettings notify={notify} onSaved={() => setDefaultsRevision(v => v + 1)} />
-      </TabsContent>
-    </Tabs>
+    <div className="settings-page">
+      <NochehSettings notify={notify} />
+    </div>
   );
 }
 
@@ -247,8 +237,8 @@ function PolicySettings({notify, onSaved}: {notify: Notify; onSaved: () => void}
         </form>
       )}
       <p className="n-muted">
-        Whether external actions wait for your review is set under Owner freedom in Nocheh settings. Job overrides are
-        stored for the scheduling phase.
+        Whether external actions wait for your review is set under Owner freedom above. Job overrides are stored for the
+        scheduling phase.
       </p>
     </Panel>
   );
@@ -291,6 +281,7 @@ function NochehSettings({notify}: {notify: Notify}) {
   const [changes, setChanges, editRevision] = useRevisionDraft<Record<string, string>>(data?.revision);
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState(false);
+  const [defaultsRevision, setDefaultsRevision] = useState(0);
 
   const save = async () => {
     setBusy(true);
@@ -299,7 +290,7 @@ function NochehSettings({notify}: {notify: Notify}) {
       setChanges({});
       setReview(false);
       setRefresh(v => v + 1);
-      notify('Nocheh settings saved. Apply saved settings when you are ready to update running services.');
+      notify('Settings saved. Apply saved settings when you are ready to update running services.');
     } catch (e) {
       notify(errorText(e), true);
     } finally {
@@ -310,7 +301,8 @@ function NochehSettings({notify}: {notify: Notify}) {
     setBusy(true);
     try {
       await call('/settings/apply', {});
-      notify('Applying saved settings. Follow the result in Maintenance.');
+      notify('Applying saved settings. Follow the result in System › Backups & maintenance.');
+      setRefresh(v => v + 1);
     } catch (e) {
       notify(errorText(e), true);
     } finally {
@@ -503,12 +495,16 @@ function NochehSettings({notify}: {notify: Notify}) {
   };
 
   const fieldGroup = (title: string, note: string, keys: string[], extra: ReactNode = null) => {
-    const id = 'settings-' + keys[0].toLowerCase();
+    const id = 'settings-' + title.toLowerCase().replace(/\W+/g, '-');
     return (
       <section className="n-settings-group" aria-labelledby={id}>
         <h3 id={id}>{title}</h3>
         <p className="n-muted">{note}</p>
-        <div className="n-form">{fields.filter(f => keys.includes(f.key)).map(field)}</div>
+        {keys.length ? (
+          <div className="n-form">{fields.filter(f => keys.includes(f.key)).map(field)}</div>
+        ) : (
+          <p>Nothing else to set here.</p>
+        )}
         {extra}
       </section>
     );
@@ -538,11 +534,27 @@ function NochehSettings({notify}: {notify: Notify}) {
     return value || '(empty)';
   };
 
+  const managedElsewhere = ['TELEGRAM_GROUP_IDS', 'TELEGRAM_GROUP_ACCESS', 'TELEGRAM_TOPIC_MEMORY'];
+  const sectionKeys = {
+    telegram: [
+      'TELEGRAM_ENABLED',
+      'TELEGRAM_OWNER_ID',
+      'TELEGRAM_GROUP_REPLIES',
+      'TELEGRAM_BOT_NAMES',
+      'TELEGRAM_BOT_TOKEN',
+    ],
+    models: ['NOCHEH_MODEL', 'NOCHEH_EMBEDDING_MODEL'],
+    speed: ['NOCHEH_PARALLEL_RUNS', 'NOCHEH_PARALLEL_REPLIES', 'NOCHEH_PARALLEL_GUARD_CHECKS'],
+    privacy: ['NOCHEH_GUARD_MODE', 'NOCHEH_GUARD_TRUSTED_ENDPOINTS'],
+  };
+  const placed = [...managedElsewhere, ...Object.values(sectionKeys).flat()];
+  const advanced = fields.filter(f => !placed.includes(f.key)).map(f => f.key);
+  const count = Object.keys(changes).length;
+  const changedIn = (keys: string[]) => keys.filter(key => key in changes).length;
+  const tab = (label: string, keys: string[]) => (changedIn(keys) ? label + ' •' : label);
+
   return (
-    <Panel
-      title="Nocheh settings"
-      note="Telegram access, model routing and privacy for the whole installation. Stored in Nocheh’s .env file."
-    >
+    <>
       {error && <Alert>Saved settings may be stale. Edits are retained.</Alert>}
       {editRevision !== data.revision && (
         <Alert>
@@ -550,97 +562,129 @@ function NochehSettings({notify}: {notify: Notify}) {
           the new values, or attempt Save to see the conflict.
         </Alert>
       )}
-      <StatusBadge state={data.apply_state} label={applyStateLabels[data.apply_state] || data.apply_state} />
-      <form
-        onSubmit={e => {
-          e.preventDefault();
-          setReview(true);
-        }}
+      <WorkspaceTabs
+        page="settings"
+        label="Settings sections"
+        views={[
+          {
+            id: 'telegram',
+            label: tab('Telegram', sectionKeys.telegram),
+            Icon: Send,
+            render: () =>
+              fieldGroup(
+                'Telegram access',
+                'Your Telegram account, the bot, and how Nocheh answers in groups.',
+                sectionKeys.telegram,
+                accessLink,
+              ),
+          },
+          {
+            id: 'models',
+            label: tab('Models', sectionKeys.models),
+            Icon: Cpu,
+            render: () =>
+              fieldGroup(
+                'Models',
+                'The model behind replies, memory and secret detection, and the model that makes memory searchable. Applying a model change also restarts Honcho.',
+                sectionKeys.models,
+              ),
+          },
+          {
+            id: 'speed',
+            label: tab('Speed', sectionKeys.speed),
+            Icon: Gauge,
+            render: () =>
+              fieldGroup(
+                'Speed',
+                'How much work runs at the same time. More is faster for several chats but uses more memory and more of your model subscription at once. Apply restarts Hermes and its launcher.',
+                sectionKeys.speed,
+              ),
+          },
+          {
+            id: 'privacy',
+            label: tab('Privacy', sectionKeys.privacy),
+            Icon: ShieldCheck,
+            render: () =>
+              fieldGroup(
+                'Privacy',
+                'Whether agents and memory see guarded copies with secrets hidden. These rules apply to outgoing model requests.',
+                sectionKeys.privacy,
+              ),
+          },
+          {
+            id: 'assistant',
+            label: 'Assistant',
+            Icon: Bot,
+            render: () => (
+              <>
+                <OwnerFreedom notify={notify} />
+                <HermesPreferences notify={notify} defaultsRevision={defaultsRevision} />
+                <PolicySettings notify={notify} onSaved={() => setDefaultsRevision(v => v + 1)} />
+              </>
+            ),
+          },
+          {
+            id: 'advanced',
+            label: tab('Advanced', advanced),
+            Icon: Wrench,
+            render: () => fieldGroup('Advanced', 'Destinations, connections and internal credentials.', advanced),
+          },
+        ]}
+      />
+      <section
+        className={count ? 'settings-bar settings-bar-dirty' : 'settings-bar'}
+        aria-label="Save and apply settings"
       >
-        {fieldGroup(
-          'Telegram access',
-          'Your Telegram account, the bot, and how Nocheh answers in groups.',
-          [
-            'TELEGRAM_ENABLED',
-            'TELEGRAM_OWNER_ID',
-            'TELEGRAM_GROUP_REPLIES',
-            'TELEGRAM_BOT_NAMES',
-            'TELEGRAM_BOT_TOKEN',
-          ],
-          accessLink,
-        )}
-        {fieldGroup(
-          'Model and privacy',
-          'These rules apply to outgoing model requests. Applying a model change also restarts Honcho. Hermes profile preferences are in the other settings section.',
-          ['NOCHEH_MODEL', 'NOCHEH_EMBEDDING_MODEL', 'NOCHEH_GUARD_MODE'],
-        )}
-        {fieldGroup(
-          'Speed',
-          'How much work runs at the same time. More is faster for several chats but uses more memory and more of your model subscription at once. Apply restarts Hermes and its launcher.',
-          ['NOCHEH_PARALLEL_RUNS', 'NOCHEH_PARALLEL_REPLIES', 'NOCHEH_PARALLEL_GUARD_CHECKS'],
-        )}
-        <details className="n-advanced">
-          <summary>Advanced · destinations, connections and internal credentials</summary>
-          <div className="n-form">
-            {fields
-              .filter(
-                f =>
-                  ![
-                    'TELEGRAM_ENABLED',
-                    'TELEGRAM_OWNER_ID',
-                    'TELEGRAM_GROUP_IDS',
-                    'TELEGRAM_GROUP_ACCESS',
-                    'TELEGRAM_GROUP_REPLIES',
-                    'TELEGRAM_BOT_NAMES',
-                    'TELEGRAM_TOPIC_MEMORY',
-                    'TELEGRAM_BOT_TOKEN',
-                    'NOCHEH_MODEL',
-                    'NOCHEH_EMBEDDING_MODEL',
-                    'NOCHEH_GUARD_MODE',
-                    'NOCHEH_PARALLEL_RUNS',
-                    'NOCHEH_PARALLEL_REPLIES',
-                    'NOCHEH_PARALLEL_GUARD_CHECKS',
-                  ].includes(f.key),
-              )
-              .map(field)}
+        {review && count > 0 && (
+          <div className="n-review">
+            <h3>Review before saving</h3>
+            <p>Saving changes the configuration file. Running services update only after Apply.</p>
+            <ul>
+              {Object.entries(changes).map(([k, v]) => (
+                <li key={k}>
+                  {(labels[k] || k) +
+                    ': ' +
+                    (fields.find(f => f.key === k)?.secret ? 'Replace stored credential' : reviewValue(k, v))}
+                </li>
+              ))}
+            </ul>
           </div>
-        </details>
-        <div className="n-actions">
-          <button disabled={busy || !Object.keys(changes).length}>Review changes</button>
-          {button(
-            'Discard edits',
-            () => {
-              setChanges({});
-              setReview(false);
-            },
-            busy || !Object.keys(changes).length,
-          )}
+        )}
+        <div className="settings-bar-row">
+          <StatusBadge
+            state={count ? 'waiting' : data.apply_state}
+            label={
+              count
+                ? `${count} unsaved ${count === 1 ? 'change' : 'changes'}`
+                : applyStateLabels[data.apply_state] || data.apply_state
+            }
+          />
+          <div className="n-actions">
+            {count > 0 &&
+              button(
+                'Discard edits',
+                () => {
+                  setChanges({});
+                  setReview(false);
+                },
+                busy,
+              )}
+            {count > 0 &&
+              (review
+                ? button('Save changes', save, busy, 'n-primary')
+                : button('Review changes', () => setReview(true), busy))}
+            {count === 0 &&
+              button('Apply saved settings', apply, busy, data.apply_state === 'pending' ? 'n-primary' : '')}
+            <a href="#system?view=maintenance">Apply results →</a>
+          </div>
         </div>
-      </form>
-      {review && (
-        <div className="n-review">
-          <h3>Review before saving</h3>
-          <p>Saving changes the configuration file. Running services update only after Apply.</p>
-          {Object.entries(changes).map(([k, v]) => (
-            <p key={k}>
-              {(labels[k] || k) +
-                ': ' +
-                (fields.find(f => f.key === k)?.secret ? 'Replace stored credential' : reviewValue(k, v))}
-            </p>
-          ))}
-          {button('Save changes', save, busy, 'n-primary')}
-        </div>
-      )}
-      <div className="n-apply">
-        <h3>Apply saved settings</h3>
-        <p className="n-muted">
-          Updates the running services and may briefly interrupt Telegram replies. Save or discard your current edits
-          first.
-        </p>
-        {button('Apply saved settings', apply, busy || !!Object.keys(changes).length)}
-        <a href="#system?view=maintenance">View apply results →</a>
-      </div>
-    </Panel>
+        <small className="n-muted">
+          {count
+            ? 'Save or discard your edits before applying.'
+            : 'Apply updates the running services and may briefly interrupt Telegram replies.'}
+        </small>
+      </section>
+    </>
   );
 }
 
@@ -719,7 +763,10 @@ function HermesPreferences({notify, defaultsRevision}: {notify: Notify; defaults
       </label>
       {!profiles && !error && <p role="status">Loading profiles…</p>}
       {profiles && !profiles.profiles.length && (
-        <p>Configure the Telegram owner and groups in Nocheh settings to make profiles available.</p>
+        <p>
+          Set the Telegram owner in Settings › Telegram, and turn Nocheh on in groups in Chats & access, to make
+          profiles available.
+        </p>
       )}
       {problem && <p role="alert">{problem}</p>}
       {scope && !problem && prefs?.scope !== scope && <p role="status">Loading this profile’s preferences…</p>}

@@ -31,6 +31,10 @@ const routes = [
   ['access?view=chats&chat=-10042', 'Chats & access'],
   ['access?view=chats&chat=-10042%2Ftopic%2F7', 'Chats & access'],
   ['access?view=chats&chat=42', 'Chats & access'],
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'advanced'].map(view => [
+    'settings?view=' + view,
+    'Settings',
+  ]),
   ...['working', 'learned', 'relations', 'graph', 'honcho'].map(view => ['memory?view=' + view, 'Memory']),
   ...['messages', 'imports'].map(view => ['archive?view=' + view, 'Archive']),
   ...['health', 'connections', 'databases', 'maintenance'].map(view => ['system?view=' + view, 'System']),
@@ -243,21 +247,36 @@ test('chats & access holds requests, shared facts, sharing rules and topic memor
   await page.close();
 });
 
-test('settings keeps every section reachable', async () => {
+test('settings keeps every section reachable, with one save and apply bar', async () => {
   const {page, problems} = await open('settings');
-  for (const name of ['Telegram access', 'Model and privacy', 'Speed', 'Owner freedom'])
-    await page.getByRole('heading', {name, exact: true}).first().waitFor();
-  await page.getByRole('link', {name: 'Chats & access'}).first().waitFor();
-  for (const label of [
-    'Reasoning model',
-    'Embedding model',
-    'Parallel agent runs',
-    'Chats answered at once',
-    'Names that address Nocheh',
-  ])
-    await page.getByLabel(label, {exact: true}).first().waitFor();
-  await page.getByRole('tab', {name: 'Hermes preferences'}).click();
+  const tabs = page.getByRole('tablist', {name: 'Settings sections'});
+  const sections = [
+    ['Telegram', 'Telegram access', ['Names that address Nocheh', 'Group replies']],
+    ['Models', 'Models', ['Reasoning model', 'Embedding model']],
+    ['Speed', 'Speed', ['Parallel agent runs', 'Chats answered at once', 'Guard checks at once']],
+    ['Privacy', 'Privacy', ['Secret guarding']],
+    ['Advanced', 'Advanced', []],
+  ];
+  for (const [tab, heading, fields] of sections) {
+    await tabs.getByRole('tab', {name: tab, exact: true}).click();
+    await page.getByRole('heading', {name: heading, exact: true}).first().waitFor();
+    for (const label of fields) await page.getByLabel(label, {exact: true}).first().waitFor();
+  }
+  await tabs.getByRole('tab', {name: 'Assistant'}).click();
+  await page.getByRole('heading', {name: 'Owner freedom'}).first().waitFor();
   await page.getByRole('heading', {name: 'Hermes profile preferences'}).first().waitFor();
+  // An edit survives switching sections, and the bar saves it.
+  await tabs.getByRole('tab', {name: 'Telegram', exact: true}).click();
+  await page.getByRole('link', {name: 'Chats & access'}).first().waitFor();
+  await page.getByLabel('Names that address Nocheh', {exact: true}).fill('Nocheh,Helper');
+  await tabs.getByRole('tab', {name: 'Speed'}).click();
+  await tabs.getByRole('tab', {name: 'Telegram •'}).waitFor();
+  const bar = page.getByRole('region', {name: 'Save and apply settings'});
+  await bar.getByText('1 unsaved change').waitFor();
+  await bar.getByRole('button', {name: 'Review changes'}).click();
+  await bar.getByText('Names that address Nocheh: Nocheh,Helper').waitFor();
+  await bar.getByRole('button', {name: 'Save changes'}).click();
+  await bar.getByRole('button', {name: 'Apply saved settings'}).waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
