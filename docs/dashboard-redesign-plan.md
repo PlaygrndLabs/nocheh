@@ -1,6 +1,6 @@
 # Dashboard redesign plan
 
-Status: accepted by the owner on 2026-10-12. Step 1 (groundwork) is implemented; steps 2 to 5 are pending.
+Status: accepted by the owner on 2026-10-12. Steps 1 (groundwork) and 2 (navigation) are implemented; steps 3 to 5 are pending. Step 2 folded Graph into Memory and Imports into Archive, and keeps Sharing in the sidebar until step 3 replaces it with Chats & access.
 
 ## What makes the dashboard hard to use today
 

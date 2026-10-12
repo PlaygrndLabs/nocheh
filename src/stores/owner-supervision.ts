@@ -135,11 +135,11 @@ export class OwnerSupervisionRepository {
 
   private summary(row:any) {
     const kind=kindOf(row.kind),id=String(row.id),revision=Number(row.revision),state=String(row.state??row.status);
-    const review=kind==='controlled_action'?{href:'#activity?action='+id,api_path:'/v1/tools/actions/'+id}:
-      kind==='telegram_action'?{href:'#activity?action='+id,api_path:'/v1/tools/actions/'+id}:
-      kind==='memory_access'?{href:'#memoryMap?request='+id,api_path:'/v1/memory-access/requests/'+id+'/decide'}:
-      kind==='entity'?{href:'#activity?kind=entity&decision='+id,api_path:'/v1/entities/'+id+'/decide'}:
-      {href:'#activity?kind=knowledge&decision='+id,api_path:'/v1/knowledge/proposals/'+id};
+    const review=kind==='controlled_action'?{href:'#inbox?action='+id,api_path:'/v1/tools/actions/'+id}:
+      kind==='telegram_action'?{href:'#inbox?action='+id,api_path:'/v1/tools/actions/'+id}:
+      kind==='memory_access'?{href:'#memory?view=relations&request='+id,api_path:'/v1/memory-access/requests/'+id+'/decide'}:
+      kind==='entity'?{href:'#inbox?kind=entity&decision='+id,api_path:'/v1/entities/'+id+'/decide'}:
+      {href:'#inbox?kind=knowledge&decision='+id,api_path:'/v1/knowledge/proposals/'+id};
     return {kind,id,title:row.title??row.name??(kind==='knowledge'?'Knowledge change':kind.replaceAll('_',' ')),state,revision,
       source_scope:row.source_scope??row.space_id??null,destination:row.destination??null,fingerprint:row.fingerprint??null,
       created_at:iso(row.created_at),review:{...review,expected_revision:revision,fingerprint:row.fingerprint??null}};

@@ -14,20 +14,22 @@ import {chromium} from 'playwright-core';
 
 const port = Number(process.env.NOCHEH_DASHBOARD_PORT || 18900 + Math.floor(Math.random() * 500));
 const origin = `http://127.0.0.1:${port}`;
-const routes = [
-  ['overview', 'Overview'],
-  ['archive', 'Archive'],
-  ['memory', 'Memory'],
-  ['graph', 'Graph'],
-  ['monitoring', 'Monitoring'],
-  ['databases', 'Databases'],
-  ['activity', 'Activity'],
-  ['projects', 'Projects'],
+const pages = [
+  ['home', 'Home'],
+  ['inbox', 'Inbox'],
   ['sharing', 'Sharing'],
-  ['imports', 'Imports'],
-  ['integrations', 'Integrations'],
+  ['memory', 'Memory'],
+  ['archive', 'Archive'],
+  ['projects', 'Projects'],
+  ['system', 'System'],
   ['settings', 'Settings'],
-  ['operations', 'Maintenance'],
+];
+/** Every page, and every tab of the pages whose tabs live in the address. */
+const routes = [
+  ...pages,
+  ...['working', 'learned', 'relations', 'graph', 'honcho'].map(view => ['memory?view=' + view, 'Memory']),
+  ...['messages', 'imports'].map(view => ['archive?view=' + view, 'Archive']),
+  ...['health', 'connections', 'databases', 'maintenance'].map(view => ['system?view=' + view, 'System']),
 ];
 
 let server, browser;
@@ -91,33 +93,60 @@ test('every page opens with its heading and without errors', async () => {
   }
 });
 
-test('navigation lists each page once and links to Hermes and CPA', async () => {
-  const {page} = await open('overview');
+test('navigation lists each page once, in order, and links to Hermes and CPA', async () => {
+  const {page} = await open('home');
   const nav = page.getByRole('navigation', {name: 'Main navigation'});
-  for (const [route, title] of routes) {
-    assert.equal(await nav.locator(`a[href="#${route}"]`).count(), 1, route);
-    assert.equal((await nav.locator(`a[href="#${route}"]`).textContent()).trim(), title);
-  }
+  assert.deepEqual(
+    (await nav.getByRole('link').allTextContents()).map(text => text.trim()),
+    pages.map(([, title]) => title),
+  );
   assert.equal(await page.locator('a[href="/hermes/nocheh"][aria-label="Open Hermes dashboard"]').count(), 1);
   assert.equal(await page.locator('a[href="/providers/management.html"][aria-label="Open CPA dashboard"]').count(), 1);
   await page.close();
 });
 
-test('old bookmarks open the page that now owns them', async () => {
+test('old bookmarks open the page and tab that now own them', async () => {
   const cases = [
-    ['spaces', 'Sharing', null],
-    ['learned', 'Memory', 'Learned'],
-    ['entities', 'Memory', 'Relations & access'],
-    ['memoryMap', 'Memory', 'Relations & access'],
-    ['honcho', 'Memory', 'Honcho'],
+    ['overview', 'Home', null, '#home'],
+    ['activity', 'Inbox', 'Decisions', '#inbox'],
+    ['spaces', 'Sharing', null, '#sharing'],
+    ['learned', 'Memory', 'Learned', '#memory?view=learned'],
+    ['entities', 'Memory', 'Relations & access', '#memory?view=relations'],
+    ['memoryMap?request=r1', 'Memory', 'Relations & access', '#memory?request=r1&view=relations'],
+    ['honcho', 'Memory', 'Long-term memory', '#memory?view=honcho'],
+    ['graph', 'Memory', 'Evidence graph', '#memory?view=graph'],
+    ['imports', 'Archive', 'Import chat history', '#archive?view=imports'],
+    ['monitoring', 'System', 'Health', '#system?view=health'],
+    ['integrations', 'System', 'Connections', '#system?view=connections'],
+    ['databases', 'System', 'Databases', '#system?view=databases'],
+    ['operations', 'System', 'Backups & maintenance', '#system?view=maintenance'],
   ];
-  for (const [hash, title, tab] of cases) {
+  for (const [hash, title, tab, canonical] of cases) {
     const {page, problems} = await open(hash);
     assert.equal((await page.locator('main h1').first().textContent()).trim(), title, hash);
     if (tab) assert.equal((await page.getByRole('tab', {selected: true}).first().textContent()).trim(), tab, hash);
+    assert.equal(new URL(page.url()).hash, canonical, hash);
     assert.deepEqual(problems, [], hash);
     await page.close();
   }
+});
+
+test('an old link clicked inside the dashboard opens the right tab', async () => {
+  const {page, problems} = await open('memory?view=working');
+  await page.evaluate(() => (location.hash = 'graph'));
+  await page.getByRole('tab', {name: 'Evidence graph', selected: true}).waitFor();
+  assert.equal(new URL(page.url()).hash, '#memory?view=graph');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('home leads with what needs the owner', async () => {
+  const {page, problems} = await open('home');
+  const needs = page.getByRole('region', {name: 'What needs you'});
+  await needs.getByRole('link', {name: /Open inbox/}).waitFor();
+  await needs.getByRole('link', {name: /Check system/}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
 });
 
 test('archive shows a filterable table and opens a message in a drawer', async () => {
@@ -142,7 +171,7 @@ test('archive shows a filterable table and opens a message in a drawer', async (
 test('memory has one workspace with relationships and access review', async () => {
   const {page, problems} = await open('memory');
   const tabs = page.getByRole('tablist', {name: 'Memory workspace'});
-  for (const name of ['Notes & history', 'Learned', 'Honcho', 'Relations & access'])
+  for (const name of ['Notes & history', 'Learned', 'Relations & access', 'Evidence graph', 'Long-term memory'])
     await tabs.getByRole('tab', {name}).waitFor();
   await tabs.getByRole('tab', {name: 'Relations & access'}).click();
   await page.getByRole('heading', {name: 'Relationships & memory access'}).waitFor();
@@ -191,7 +220,7 @@ test('pages fit a phone screen and the menu opens as a drawer', async () => {
     assert.deepEqual(problems, [], route);
     await page.close();
   }
-  const {page} = await open('overview', {width: 390, height: 844});
+  const {page} = await open('home', {width: 390, height: 844});
   await page.getByRole('button', {name: 'Open navigation'}).click();
   await page.getByRole('dialog').getByRole('link', {name: 'Settings'}).waitFor();
   await page.close();

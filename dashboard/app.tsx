@@ -5,88 +5,110 @@ import {
   Archive as ArchiveIcon,
   ArrowUpRight,
   BrainCircuit,
-  Database,
-  FolderInput,
   FolderKanban,
-  Share2,
-  GitFork,
   Home,
+  Inbox,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
   RefreshCw,
+  Server,
   Settings as SettingsIcon,
-  ShieldCheck,
-  Wrench,
+  Share2,
   X,
 } from 'lucide-react';
 import {Status} from './pages/overview';
 import {Settings} from './pages/settings';
-import {Jobs} from './pages/imports';
-import {Archive} from './pages/archive';
-import {DatabaseBrowser} from './pages/database-browser';
+import {ArchiveWorkspace} from './pages/archive-workspace';
 import {Activity} from './pages/activity';
 import {MemoryWorkspace} from './pages/memory-workspace';
 import {Projects} from './pages/projects';
 import {Sharing} from './pages/sharing';
 import {Source} from './pages/source';
-import {Graph} from './pages/graph';
-import {Operations} from './pages/maintenance';
-import {Integrations} from './pages/integrations';
-import {Monitoring} from './pages/monitoring';
+import {System} from './pages/system';
 import {call} from './lib/api';
+import {resolveRoute, type PageId} from './lib/routes';
 import {Button, Sheet, Tooltip} from './components/ui/primitives';
 import {ThemeSelect} from './lib/theme';
 import {StatusBadge} from './components/status';
 import {useResource, refreshResources} from './lib/resource';
-const pages = {
-  overview: Status,
-  monitoring: Monitoring,
-  archive: Archive,
-  databases: DatabaseBrowser,
-  activity: Activity,
-  imports: Jobs,
-  settings: Settings,
-  integrations: Integrations,
-  graph: Graph,
-  operations: Operations,
-  memory: MemoryWorkspace,
-  projects: Projects,
-  sharing: Sharing,
-  Source,
-  call,
+
+type PageProps = {
+  notify: (text: string, error?: boolean) => void;
+  call: typeof call;
+  renderSource: (record: any) => React.ReactNode;
 };
-const routes = [
-  ['overview', 'Overview', Home, 'Your conversations, memory, and assistant at a glance.'],
-  ['archive', 'Archive', ArchiveIcon, 'Find originals and inspect the evidence behind generated text.'],
-  ['memory', 'Memory', BrainCircuit, 'Review native notes, learned and Honcho memory, relationships, and access.'],
-  ['graph', 'Graph', GitFork, 'Explore recorded relationships and their sources.'],
-  ['monitoring', 'Monitoring', ActivityIcon, 'System health, workflow progress, and historical trends.'],
-  ['databases', 'Databases', Database, 'Browse tables and rows across the installation.'],
-  ['activity', 'Activity', ShieldCheck, 'Review approvals, permissions, and conversation results.'],
-  ['projects', 'Projects', FolderKanban, 'Manage projects, conversation assignments, and project memory.'],
-  ['sharing', 'Sharing', Share2, 'Choose sources, destinations, and the exact knowledge they can use.'],
-  ['imports', 'Imports', FolderInput, 'Bring Telegram history into your owned archive.'],
-  ['integrations', 'Integrations', Plug, 'The connected tools behind your personal brain.'],
-  ['settings', 'Settings', SettingsIcon, 'Telegram access, agent preferences, and privacy.'],
-  ['operations', 'Maintenance', Wrench, 'Diagnostics, exports, backups, and recovery.'],
-] as const;
-const groups = [
-  ['Knowledge', ['overview', 'archive', 'memory', 'graph']],
-  ['Operations', ['monitoring', 'databases', 'activity']],
-  ['Manage', ['projects', 'sharing', 'imports', 'integrations', 'settings', 'operations']],
-] as const;
-function currentRoute() {
-  const key = location.hash.slice(1).split('?')[0];
-  if (key === 'spaces') return 'sharing';
-  if (['learned', 'entities', 'memoryMap', 'honcho'].includes(key)) return 'memory';
-  return routes.some(r => r[0] === key) ? key : 'overview';
+type Route = {id: PageId; title: string; Icon: typeof Home; description: string; Page: React.ComponentType<PageProps>};
+
+/** Sidebar order. Old page names are redirected by `resolveRoute`. */
+const routes: Route[] = [
+  {id: 'home', title: 'Home', Icon: Home, description: 'What needs you, and how Nocheh is doing.', Page: Status},
+  {
+    id: 'inbox',
+    title: 'Inbox',
+    Icon: Inbox,
+    description: 'Decisions waiting for you, and what Nocheh did.',
+    Page: Activity,
+  },
+  {
+    id: 'sharing',
+    title: 'Sharing',
+    Icon: Share2,
+    description: 'Which chats may use knowledge from other chats.',
+    Page: Sharing,
+  },
+  {
+    id: 'memory',
+    title: 'Memory',
+    Icon: BrainCircuit,
+    description: 'What Nocheh knows: notes, learned facts, people, projects and long-term memory.',
+    Page: MemoryWorkspace,
+  },
+  {
+    id: 'archive',
+    title: 'Archive',
+    Icon: ArchiveIcon,
+    description: 'Every original message, and the copy agents may use.',
+    Page: ArchiveWorkspace,
+  },
+  {
+    id: 'projects',
+    title: 'Projects',
+    Icon: FolderKanban,
+    description: 'Projects, the chats in them, and project memory.',
+    Page: Projects,
+  },
+  {
+    id: 'system',
+    title: 'System',
+    Icon: Server,
+    description: 'Health, connections, databases, backups and maintenance.',
+    Page: System,
+  },
+  {
+    id: 'settings',
+    title: 'Settings',
+    Icon: SettingsIcon,
+    description: 'Telegram, models, speed and assistant preferences.',
+    Page: Settings,
+  },
+];
+
+/** Rewrite an old page name in the address before any page reads it. */
+function canonicalRoute(): PageId {
+  const {page, hash} = resolveRoute(location.hash);
+  if (hash) history.replaceState(null, '', hash);
+  return page;
 }
+canonicalRoute();
+// Registered before any page mounts, so pages listening for hash changes see the new name.
+addEventListener('hashchange', canonicalRoute);
+
 function PersistentStatus() {
   const {data, error} = useResource<any>('/monitoring', 10000);
   return (
-    <a className="persistent-status" href="#monitoring" aria-label="Inspect system status">
+    <a className="persistent-status" href="#system?view=health" aria-label="Inspect system status">
       <StatusBadge
         state={
           error ? 'stale' : data?.application?.ok ? 'ready' : data?.application?.ok === false ? 'failed' : 'unknown'
@@ -105,7 +127,7 @@ function PersistentStatus() {
   );
 }
 function App() {
-  const [page, setPage] = React.useState(currentRoute),
+  const [page, setPage] = React.useState(canonicalRoute),
     [mobile, setMobile] = React.useState(false),
     [collapsed, setCollapsed] = React.useState(() => {
       try {
@@ -120,7 +142,7 @@ function App() {
     menu = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => {
     const change = () => {
-      setPage(currentRoute());
+      setPage(resolveRoute(location.hash).page);
       setNotice(null);
       setMobile(false);
     };
@@ -146,12 +168,13 @@ function App() {
     }
   };
   const notify = React.useCallback((text: string, error = false) => setNotice({text, error}), []);
-  const route = routes.find(r => r[0] === page)!;
-  const Current = pages[page as keyof typeof pages] as React.ComponentType<any>;
+  const route = routes.find(r => r.id === page)!;
+  const Current = route.Page;
+  const renderSource = (record: any) => <Source record={record} notify={notify} />;
   const navigation = (compact = false, showToggle = false) => (
     <>
       <div className="n-sidebar-head">
-        <a href="#overview" className="n-brand">
+        <a href="#home" className="n-brand">
           <span className="n-mark" aria-hidden="true">
             ن
           </span>
@@ -176,32 +199,28 @@ function App() {
         )}
       </div>
       <nav aria-label="Main navigation">
-        {groups.map(([label, keys]) => (
-          <div className="n-nav-group" key={label}>
-            <span className={compact ? 'sr-only' : 'n-nav-label'}>{label}</span>
-            {keys.map(key => {
-              const [id, title, Icon] = routes.find(r => r[0] === key)!;
-              const link = (
-                <a
-                  href={'#' + id}
-                  aria-current={page === id ? 'page' : undefined}
-                  aria-label={compact ? title : undefined}
-                  onClick={() => setMobile(false)}
-                >
-                  <Icon size={18} aria-hidden="true" />
-                  <span className={compact ? 'sr-only' : ''}>{title}</span>
-                </a>
-              );
-              return compact ? (
-                <Tooltip label={title} key={id}>
-                  {link}
-                </Tooltip>
-              ) : (
-                <React.Fragment key={id}>{link}</React.Fragment>
-              );
-            })}
-          </div>
-        ))}
+        <div className="n-nav-group">
+          {routes.map(({id, title, Icon}) => {
+            const link = (
+              <a
+                href={'#' + id}
+                aria-current={page === id ? 'page' : undefined}
+                aria-label={compact ? title : undefined}
+                onClick={() => setMobile(false)}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span className={compact ? 'sr-only' : ''}>{title}</span>
+              </a>
+            );
+            return compact ? (
+              <Tooltip label={title} key={id}>
+                {link}
+              </Tooltip>
+            ) : (
+              <React.Fragment key={id}>{link}</React.Fragment>
+            );
+          })}
+        </div>
       </nav>
       <div className="n-sidebar-foot">
         <a href="/hermes/nocheh" aria-label="Open Hermes dashboard" title="Open Hermes dashboard">
@@ -219,11 +238,7 @@ function App() {
   );
   return (
     <div
-      className={
-        'nocheh-app' +
-        (collapsed ? ' sidebar-collapsed' : '') +
-        (['graph', 'memory'].includes(page) ? ' n-graph-active' : '')
-      }
+      className={'nocheh-app' + (collapsed ? ' sidebar-collapsed' : '') + (page === 'memory' ? ' n-graph-active' : '')}
     >
       <a
         className="skip-link"
@@ -252,11 +267,10 @@ function App() {
               <Menu size={20} />
             </Button>
             <div>
-              <p className="n-eyebrow">NOCHEH / {groups.find(g => g[1].some(id => id === page))?.[0]}</p>
               <h1 ref={heading} tabIndex={-1}>
-                {route[1]}
+                {route.title}
               </h1>
-              <p className="n-page-description">{route[3]}</p>
+              <p className="n-page-description">{route.description}</p>
             </div>
           </div>
           <div className="header-actions">
@@ -277,12 +291,7 @@ function App() {
           </div>
         )}
         <div className="page-content" key={page}>
-          <Current
-            notify={notify}
-            call={pages.call}
-            renderSource={(record: any) => <pages.Source record={record} notify={notify} />}
-            refresh={0}
-          />
+          <Current notify={notify} call={call} renderSource={renderSource} />
         </div>
         <footer>Owned sources. Useful memory. Clear operations.</footer>
       </main>

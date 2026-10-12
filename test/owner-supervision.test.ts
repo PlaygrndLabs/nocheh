@@ -82,5 +82,5 @@ test('inbox uses database totals rather than visible page length and retains exa
   const result=await value.decisions(owner,{kind:'entity',limit:100});
   assert.equal(result.total,145);assert.equal(result.totals.memory_access,20);assert.equal(result.items.length,100);
   assert.equal(result.next_cursor,'entity:'+rows[99]!.id);assert.equal(result.items[0]!.review.expected_revision,7);
-  assert.equal(result.items[0]!.review.href,'#activity?kind=entity&decision='+rows[0]!.id);
+  assert.equal(result.items[0]!.review.href,'#inbox?kind=entity&decision='+rows[0]!.id);
 });
