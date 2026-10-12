@@ -1,6 +1,6 @@
 # Dashboard redesign plan
 
-Status: accepted by the owner on 2026-10-12. Steps 1 (groundwork), 2 (navigation), 3 (Chats & access) and 4 (Settings sections) are implemented; step 5 is pending. Step 2 folded Graph into Memory and Imports into Archive. Step 3 replaced Sharing with Chats & access, moved group people, topics and topic memory there from Settings, and sends memory-access request links to the Inbox.
+Status: accepted by the owner on 2026-10-12. All five steps are implemented. Graph and Imports moved in step 2, so step 5 was the phone pass: every tab list wraps into a grid on phones instead of hiding tabs off-screen. Step 2 folded Graph into Memory and Imports into Archive. Step 3 replaced Sharing with Chats & access, moved group people, topics and topic memory there from Settings, and sends memory-access request links to the Inbox.
 
 ## What makes the dashboard hard to use today
 

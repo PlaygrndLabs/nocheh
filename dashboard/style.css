@@ -2322,12 +2322,14 @@ a {
     height: auto;
     min-height: 0;
   }
-  .workspace-tabs-list {
+  .workspace-tabs-list,
+  .ui-tabs-list:not(.memory-task-tabs) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: visible;
   }
-  .workspace-tabs-list .ui-tabs-trigger {
+  .workspace-tabs-list .ui-tabs-trigger,
+  .ui-tabs-list:not(.memory-task-tabs) .ui-tabs-trigger {
     justify-content: flex-start;
     min-width: 0;
     white-space: normal;
