@@ -4,7 +4,7 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {parentSpace} from '../spaces.js';
+import {parentSpace,recallCondition} from '../spaces.js';
 import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
@@ -237,8 +237,8 @@ export class SharingContentRepository {
       throw new HttpError(403,'space_context_required');
     const binding=await this.prepared.audience.assert(principal);
     const row=(await this.stores.control.query(`SELECT r.* FROM sharing_releases r JOIN sharing_rules s ON s.id=r.rule_id
-      WHERE r.id=$1 AND r.state='active' AND s.enabled AND s.revision=r.rule_revision AND s.destination=$2
-      AND r.generation=$3 AND r.guard_mode=$4 AND (r.expires_at IS NULL OR r.expires_at>now())`,[identity(id),principal.space,binding.generation,binding.mode])).rows[0];
+      WHERE r.id=$1 AND r.state='active' AND s.enabled AND s.revision=r.rule_revision AND ${recallCondition('s.destination','$2','$5')}
+      AND r.generation=$3 AND r.guard_mode=$4 AND (r.expires_at IS NULL OR r.expires_at>now())`,[identity(id),principal.space,binding.generation,binding.mode,this.access.recall(principal)?.group??null])).rows[0];
     if(!row)throw new HttpError(404,'shared_source_not_found');
     const preview=await this.previewRow(row.preview_id),input=await this.inputs(preview);await this.validate(input,binding,true);
     const representation=await this.representation(preview,binding);
@@ -280,9 +280,11 @@ export class SharingContentRepository {
   }
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');
-    string(query,2000);const binding=await this.prepared.audience.assert(principal),rules=await this.policies.forDestination(principal.space),sources:Shared[]=[];
+    // A group whose topics share memory shares its approved releases and filters across those topics too.
+    const group=this.access.recall(principal)?.group??null;
+    string(query,2000);const binding=await this.prepared.audience.assert(principal),rules=await this.policies.forDestination(principal.space,group),sources:Shared[]=[];
     const rows=(await this.stores.control.query(`SELECT r.id FROM sharing_releases r JOIN sharing_rules s ON s.id=r.rule_id
-      WHERE s.destination=$1 AND s.enabled AND r.mode='approved' AND r.state='active' ORDER BY r.id LIMIT 100`,[principal.space])).rows;
+      WHERE ${recallCondition('s.destination','$1','$2')} AND s.enabled AND r.mode='approved' AND r.state='active' ORDER BY r.id LIMIT 100`,[principal.space,group])).rows;
     for(const row of rows) {
       try {const source=await this.read(principal,row.id);if(query.toLowerCase().split(/\s+/).every(word=>source.text.toLowerCase().includes(word)))sources.push(source);}
       catch(error){if(!(error instanceof HttpError))throw error;await this.prepared.audience.assert(principal);}

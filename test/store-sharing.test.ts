@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 import assert from 'node:assert/strict';
 import type {IncomingMessage} from 'node:http';
 import pg from 'pg';
@@ -21,7 +22,8 @@ test('sharing publishes exact prepared text with private provenance, revocation 
   const key='sharing:'+Date.now(),group='-'+Date.now(),other=group+'7',token='synthetic-sharing-token-not-a-real-credential',owner:Reader={admin:true,scope:null};
   let calls=0,mode:'safe'|'citation'|'outside'|'instruction'='safe',duringFilter:(()=>Promise<void>)|null=null;
   const filterInputs:string[]=[];
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group,other]}),
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};
       assert.equal(operation,'memory.filter');calls++;
@@ -64,7 +66,10 @@ test('sharing publishes exact prepared text with private provenance, revocation 
     assert.equal(shared.text,preview.text);assert.equal(shared.kind,'owner_approved');assert.ok(!JSON.stringify(shared).includes(original.id));
     await assert.rejects(services.sources.read(actor,original.id),{code:'source_not_found'});
     await assert.rejects(services.shared.read(await principal(other,unrelated.id),released.id),{code:'shared_source_not_found'});
+    assert.equal((await services.shared.read(await principal(group+'/topic/77',destination.id),released.id)).text,preview.text,'every topic of the group shares its releases');
+    policy.topic_memory='topic';
     await assert.rejects(services.shared.read(await principal(group+'/topic/77',destination.id),released.id),{code:'shared_source_not_found'});
+    delete policy.topic_memory;
     assert.equal((await services.shared.context(actor,'Approved')).sources.length,1);
     assert.ok((await request('/v1/sharing/releases')).releases.some((r:any)=>r.id===released.id));
     await request('/v1/sharing/releases/'+released.id+'/revoke',{expected_revision:1,operation_id:key+':revoke'});
