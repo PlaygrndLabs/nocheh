@@ -1027,8 +1027,13 @@ activation remains separate.
      across topics but took 109–202 s: Honcho recall took 51–75 s, and the
      group's topics waited 53 and 76 s behind each other in one dispatch
      lane, so each topic now has its own lane
-     ([ADR-0136](docs/adr/0136-per-topic-dispatch-lanes.md)). Pending: the
-     Hermes gateway tests and a live check on the owner's installation.
+     ([ADR-0136](docs/adr/0136-per-topic-dispatch-lanes.md)). The live retest
+     ran two topics side by side in 91 and 101 s with Honcho recall at 38–44 s.
+     It still made 38 detector calls, 97% of their fragments repeats of text
+     another audience had already checked, so detector results are now shared
+     by text ([ADR-0138](docs/adr/0138-shared-context-detection.md)). Pending:
+     a live check of that change. Background memory reviews also share the
+     three detector slots with live turns.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.
    - Voice transcription has no route on the Claude provider. While a voice
