@@ -146,3 +146,4 @@ records current implementation and activation.
 | [0134](0134-editable-bot-names.md) | The names that address Nocheh are one editable list | Amends 0133; `TELEGRAM_BOT_NAMES` starts as Nocheh and نوچه, the owner may change or empty it |
 | [0135](0135-group-topics-share-memory.md) | A group's topics share one memory by default | Amends 0030 and 0115; reads widen to the group's General chat and every topic, `TELEGRAM_TOPIC_MEMORY=topic` keeps topics separate |
 | [0136](0136-per-topic-dispatch-lanes.md) | Each group topic has its own dispatch lane | Supersedes ADR-0125's shared group lane; order within one topic unchanged |
+| [0137](0137-side-by-side-runtime-context-guarding.md) | Runtime context for one audience is guarded side by side | Extends 0127 to guarded runtime context and Honcho provider requests; identical fresh text is shared, publications bounded at four |

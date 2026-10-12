@@ -1012,8 +1012,9 @@ activation remains separate.
      recall tool took 78 s. That recall asked four connected peers one after
      another, each Honcho reasoning call with its own guarded embeddings, so
      recall now asks them side by side
-     ([check](test/store-native-memory.test.ts)). Guard preparation for
-     Honcho's provider requests still runs one at a time per audience. A
+     ([check](test/store-native-memory.test.ts)), and guard preparation for
+     Honcho's provider requests no longer runs one at a time
+     ([ADR-0137](docs/adr/0137-side-by-side-runtime-context-guarding.md)). A
      concurrent group reply was not measured because the group message was
      not addressed to Nocheh. The October 12 rerun answered an addressed
      group message in 30 s and a private recall question in 33 s side by
