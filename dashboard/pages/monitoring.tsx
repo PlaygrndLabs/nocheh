@@ -118,12 +118,12 @@ export function Monitoring({
         <small>{'Checked ' + time(data.checked_at) + ' · refreshes every 10 seconds'}</small>
       </div>
       {compact ? (
-        <a href="#monitoring" className="n-text-link">
+        <a href="#system?view=health" className="n-text-link">
           Open system monitoring →
         </a>
       ) : (
-        <a href="#operations" className="n-text-link">
-          Open Maintenance →
+        <a href="#system?view=maintenance" className="n-text-link">
+          Open backups &amp; maintenance →
         </a>
       )}
     </section>
@@ -395,7 +395,7 @@ export function Monitoring({
             </span>
           </div>
         ))}
-        <a href="#activity">Open browser runs and approvals →</a>
+        <a href="#inbox">Open browser runs and approvals →</a>
       </Disclosure>
       <Disclosure
         title="Services"

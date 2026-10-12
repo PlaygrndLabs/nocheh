@@ -172,7 +172,7 @@ export function Archive({notify}: {notify: (message: string, error?: boolean) =>
         <div className="archive-search-copy">
           <h2 id="archive-search-title">Find a message</h2>
           <p>Search the exact words you remember, or browse every original below.</p>
-          <a className="archive-database-link" href="#databases">
+          <a className="archive-database-link" href="#system?view=databases">
             Browse raw database tables
           </a>
         </div>
@@ -390,7 +390,7 @@ export function Archive({notify}: {notify: (message: string, error?: boolean) =>
                           {row.action_review && (
                             <>
                               <a
-                                href={'#activity?action=' + encodeURIComponent(row.action_review.id)}
+                                href={'#inbox?action=' + encodeURIComponent(row.action_review.id)}
                                 className="archive-action-link"
                               >
                                 <StatusBadge

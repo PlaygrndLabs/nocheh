@@ -14,7 +14,7 @@ import {
   Alert,
   EmptyState,
 } from '../components/ui/primitives';
-import {Source} from './source.js';
+import {Source} from './source';
 import {Decisions} from '../components/decisions';
 import {activityNavigation, type ActivityTab} from '../lib/supervision';
 type Action = {
@@ -119,12 +119,12 @@ export function Activity({notify}: {notify: (message: string, error?: boolean) =
     setReview(item);
     setProblem('');
     setLinkedId(item.id);
-    history.replaceState(null, '', '#activity?action=' + encodeURIComponent(item.id));
+    history.replaceState(null, '', '#inbox?action=' + encodeURIComponent(item.id));
   };
   const closeReview = () => {
     setReview(null);
     setLinkedId(null);
-    if (actionFromHash()) history.replaceState(null, '', '#activity');
+    if (actionFromHash()) history.replaceState(null, '', '#inbox');
   };
   const current = actions.find(a => a.id === review?.id) || (linked.data?.id === review?.id ? linked.data : undefined),
     changed = !!review && (!current || current.fingerprint !== review.fingerprint),

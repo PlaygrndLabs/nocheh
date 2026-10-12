@@ -96,7 +96,7 @@ replace('''      <PluginSlot name="cron:top" />''', '''      <PluginSlot name="c
         Prompt schedules run in the selected profile, with a fresh session for each fire.
         Local results appear in Nocheh Activity. Telegram results require review before sending.
         Missed runs are skipped; Catch up once runs one missed occurrence. Pause stops future starts; Cancel run stops active work.
-        <a className="underline ml-2" href="/#activity">Open run evidence and approvals</a>
+        <a className="underline ml-2" href="/#inbox">Open run evidence and approvals</a>
       </div>''')
 replace('''    <details className="border border-border bg-background/30 p-3" open>''', '''    <details hidden className="border border-border bg-background/30 p-3">''')
 replace('''                <div className="flex items-center gap-1 shrink-0">

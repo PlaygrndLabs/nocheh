@@ -27,7 +27,7 @@ export const decisionLabels: Record<DecisionKind, string> = {
   knowledge: 'Knowledge management',
 };
 export function decisionLink(kind: DecisionKind, id: string) {
-  return '#activity?' + new URLSearchParams({kind, decision: id});
+  return '#inbox?' + new URLSearchParams({kind, decision: id});
 }
 export function selectedDecision(hash: string): {kind: DecisionKind; id: string} | null {
   const params = new URLSearchParams(hash.split('?')[1] ?? ''),

@@ -136,7 +136,7 @@ export class MemoryAccessRepository {
   private dashboardLink(requestId:string) {
     const configured=process.env.NOCHEH_DASHBOARD_URL?.trim();let base='http://localhost:'+(process.env.NOCHEH_DASHBOARD_PORT??'8783');
     if(configured)try {if(['http:','https:'].includes(new URL(configured).protocol))base=configured;}catch{/* Keep the safe local dashboard route. */}
-    return base.replace(/\/$/,'')+'/#memoryMap?request='+encodeURIComponent(requestId);
+    return base.replace(/\/$/,'')+'/#memory?view=relations&request='+encodeURIComponent(requestId);
   }
   async list(principal:Reader,after='') {admin(principal);if(after)identity(after);await this.reconcile();const rows=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
     const page=rows.slice(0,100),artifacts=await this.artifacts(page,'proposal_reference'),requests=page.map(row=>{const artifact=artifacts.get(row.proposal_reference.id);return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null};});

@@ -108,7 +108,7 @@ export function ProjectContext({
             {context.decisions.next_cursor && (
               <p className="n-muted">
                 Showing the first {context.decisions.items.length} of {context.decisions.total} decisions.{' '}
-                <a href="#activity">Open the complete inbox</a>.
+                <a href="#inbox">Open the complete inbox</a>.
               </p>
             )}
           </section>

@@ -361,7 +361,7 @@ export function Graph({notify}: {notify: Notify}) {
       {scopes && !scopeList.length && (
         <Panel title="Your evidence space starts here">
           <p>Import a chat to explore its messages and connections.</p>
-          <a href="#imports">Open Imports &amp; jobs</a>
+          <a href="#archive?view=imports">Import chat history</a>
         </Panel>
       )}
       {busy && (

@@ -491,7 +491,8 @@ export function Workflows({call, health, onSource}: {call: Call; health: any; on
         )}
       </section>
       <p className="n-muted">
-        Backup, restore and shutdown progress remain in <a href="#operations">Maintenance</a>.
+        Backup, restore and shutdown progress remain in <a href="#system?view=maintenance">Backups &amp; maintenance</a>
+        .
       </p>
     </>
   );

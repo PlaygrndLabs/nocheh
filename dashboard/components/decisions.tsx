@@ -278,7 +278,7 @@ export function Decisions({
   };
   const close = () => {
     setSelected(null);
-    if (selectedDecision(location.hash)) history.replaceState(null, '', '#activity');
+    if (selectedDecision(location.hash)) history.replaceState(null, '', '#inbox');
   };
   const changed = () => {
     notify('Decision saved. Application and delivery are tracked separately.');

@@ -2322,12 +2322,12 @@ a {
     height: auto;
     min-height: 0;
   }
-  .memory-hub-tabs {
+  .workspace-tabs-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: visible;
   }
-  .memory-hub-tabs .ui-tabs-trigger {
+  .workspace-tabs-list .ui-tabs-trigger {
     justify-content: flex-start;
     min-width: 0;
     white-space: normal;
@@ -2635,33 +2635,49 @@ a {
   gap: 4px;
   font-size: 12px;
 }
-.attention-panel {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  background: var(--n-warning-bg);
-  color: var(--n-warning);
-  border: 1px solid var(--n-warning);
-  padding: 15px 18px;
-  border-radius: 9px;
-  margin-bottom: 18px;
+.home-needs h2 {
+  margin: 0 0 10px;
 }
-.attention-panel h2 {
-  margin: 0 0 3px;
+.home-needs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.home-needs-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--n-line);
+  border-radius: 8px;
+  background: var(--n-subtle);
   font-size: 13px;
 }
-.attention-panel p {
-  margin: 0;
+.home-needs-list li > a {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
   font-size: 12px;
 }
-.attention-panel > a {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 5px;
+.home-needs-list li.home-needs-problem {
+  background: var(--n-warning-bg);
+  color: var(--n-warning);
+  border-color: var(--n-warning);
+}
+.home-needs-list li.home-needs-problem > a {
   color: inherit;
-  font-size: 12px;
-  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .home-needs-list li {
+    flex-wrap: wrap;
+  }
+  .home-needs-list li > a {
+    margin-left: 28px;
+  }
 }
 .dashboard-help > summary {
   font-weight: 600;
