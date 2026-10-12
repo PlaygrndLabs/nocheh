@@ -101,3 +101,19 @@ class RealModelFixtureTests(unittest.TestCase):
                     meter=result['services']['honcho-provider-gateway']
                     self.assertEqual(meter.get('command')==['python','/fixture/services/honcho/meter.py'],real)
                     self.assertEqual('NOCHEH_INSTALLATION_FIXTURE' in meter['environment'],not real)
+
+
+class ArchivedDeliveryTests(unittest.TestCase):
+    def test_a_repeated_message_number_matches_the_reply_with_the_same_text(self):
+        import json
+        from tools.acceptance.telegram_rehearsal import archived_delivery
+        rows=[{'id':'a'*64,'text':'an older synthetic reply'},{'id':'b'*64,'text':'the current synthetic reply'}]
+        seen=[]
+        def query(database,sql):
+            seen.append(sql)
+            return json.dumps(rows) if database=='nocheh_archive' else '1'
+        message={'chat':{'id':123},'message_id':1035,'text':'the current synthetic reply'}
+        self.assertTrue(archived_delivery(query,message,77))
+        self.assertIn('b'*64,seen[-1])
+        with self.assertRaisesRegex(AssertionError,'differs'):
+            archived_delivery(query,{**message,'text':'a reply that was never archived'},77)
