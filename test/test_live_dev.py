@@ -158,9 +158,19 @@ class LiveDevTests(unittest.TestCase):
         self.assertIn(str(root), command)
 
     def test_rejects_occupied_development_port(self):
-        with patch.object(live_dev, 'port_available', side_effect=lambda port: port != 8783):
+        with patch.object(live_dev, 'port_available', side_effect=lambda port: port != 8783), patch.object(live_dev.time, 'sleep'):
             with self.assertRaisesRegex(ValueError, '8783 is in use'):
                 live_dev.assert_ports([])
+
+    def test_waits_for_a_just_released_development_port(self):
+        probes = []
+        def available(port):
+            probes.append(port)
+            return port != 8783 or probes.count(8783) > 2
+        with patch.object(live_dev, 'port_available', side_effect=available), patch.object(live_dev.time, 'sleep') as sleep:
+            live_dev.assert_ports([])
+        self.assertEqual(probes.count(8783), 3)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_rejects_unpinned_runtime_base(self):
         result = type('Result', (), {'returncode': 0, 'stdout': 'wrong-revision\n'})()
