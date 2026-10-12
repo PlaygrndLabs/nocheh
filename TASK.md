@@ -688,7 +688,13 @@ failed. Thirty seconds after every source of the synthetic name was retired,
 the owner-private answer still gave the name. No memory result or archive
 search after the retirement contained it; Hermes' native session history,
 which `/v1/context/prepare` guards but does not filter for retirement, still
-held the earlier turns. Open: retired sources must leave native history.
+held the earlier turns. Recheck on main 4db58ef (October 12, real Claude, owner-approved pause of the
+operating stack): after the retirement the owner-private answer no longer gives
+the name and says it will not guess, so the native-history fix holds. Claude
+calls stopped after the run: 11 in the following two minutes, then none for
+three and a half minutes; the recheck used 42 calls. The checker then failed
+on a repeated Telegram message number in the restored fixture, now matched by
+reply text.
 Incident (October 10, about 12:47Z): a host run of the settings tests called
 Apply's new Honcho refresh with a temporary state that named no Compose
 project, so Compose used the file's `nocheh` project and recreated the
