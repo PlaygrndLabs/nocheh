@@ -52,6 +52,9 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     };
     const pair=await Promise.all(['First parallel saffronpass','Second parallel saffronpass'].map(text=>services.prepared.prepare(reader,text,sideBySide)));
     assert.equal(overlap,2,'one audience detects different texts side by side');assert.ok(!JSON.stringify(pair).includes('saffronpass'));
+    // Another audience reuses the detector result for identical text but keeps its own guarded copy.
+    const reused=await services.prepared.prepare({...reader,purpose:'filter'},'Concurrent saffronpass',async()=>{throw Error('identical text was detected again');});
+    assert.ok(!String(reused).includes('saffronpass'));
 
     // Same owner but another purpose cannot inherit an assistant's prepared values.
     let filterCalls=0;
