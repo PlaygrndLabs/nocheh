@@ -101,9 +101,7 @@ export function UsageView() {
   if (data?.sources.pricing === 'unavailable')
     notes.push('Memory costs are unknown right now because Hermes, which prices them, did not answer.');
   if (all?.unknown)
-    notes.push(
-      'Some costs are unknown. Hermes only prices models it knows; a custom provider such as my-gateway may not publish prices.',
-    );
+    notes.push('Some costs are unknown. Hermes only prices models it knows; a custom provider may not publish prices.');
   return (
     <div className="n-usage">
       <section className="n-panel n-usage-head">

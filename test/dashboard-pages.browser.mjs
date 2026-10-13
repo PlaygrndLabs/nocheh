@@ -290,7 +290,7 @@ test('usage shows every part’s calls, tokens and cost in one place', async () 
   await totals.getByText('At least $0.22').waitFor();
   const reply = page.getByRole('rowgroup', {name: 'Telegram replies'});
   await reply.getByText('2 models').waitFor();
-  await reply.getByText('my-gateway · claude-sonnet-5-5').waitFor();
+  await reply.getByText('Example gateway · claude-sonnet-5-5').waitFor();
   await page.getByRole('rowgroup', {name: 'Memory', exact: true}).getByText('Unknown').waitFor();
   await page.getByRole('rowgroup', {name: 'Browser chat'}).getByText('Not used in this period').waitFor();
   await page.getByRole('group', {name: 'Usage period'}).getByRole('button', {name: 'Today'}).click();
@@ -327,11 +327,11 @@ test('models let the owner add a custom provider and give one part its own provi
   );
   assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
   await page.getByRole('button', {name: 'Add custom provider'}).click();
-  await page.getByLabel('Name', {exact: true}).fill('my-gateway');
+  await page.getByLabel('Name', {exact: true}).fill('Example gateway');
   await page.getByLabel('Address', {exact: true}).fill('https://gateway.example.test/v1');
   await page.locator('#key-custom-1').fill('synthetic-gateway-key');
   // Its models load from the address and key while it is still unsaved.
-  await page.getByRole('group', {name: 'my-gateway'}).getByText('2 models available.').waitFor();
+  await page.getByRole('group', {name: 'Example gateway'}).getByText('2 models available.').waitFor();
   await page.locator('#default-provider').selectOption('openai');
   await page.locator('#memory-provider').selectOption('custom-1');
   await page.locator('#memory-model').selectOption('gpt-5.6-sol');
@@ -340,14 +340,14 @@ test('models let the owner add a custom provider and give one part its own provi
   const bar = page.getByRole('region', {name: 'Save and apply settings'});
   await bar.getByRole('button', {name: 'Review changes'}).click();
   await bar.getByText('Default provider: OpenAI').waitFor();
-  await bar.getByText('Custom providers: my-gateway').waitFor();
+  await bar.getByText('Custom providers: Example gateway').waitFor();
   await bar.getByText('Custom provider API keys: Replace stored credential').waitFor();
-  await bar.getByText('Memory provider: my-gateway').waitFor();
+  await bar.getByText('Memory provider: Example gateway').waitFor();
   assert.equal(await bar.getByText('synthetic-gateway-key').count(), 0);
   await bar.getByRole('button', {name: 'Save changes'}).click();
   await bar.getByRole('button', {name: 'Apply saved settings'}).waitFor();
   // A provider still used by a part cannot be removed.
-  assert.equal(await page.getByRole('button', {name: 'Remove my-gateway'}).isDisabled(), true);
+  assert.equal(await page.getByRole('button', {name: 'Remove Example gateway'}).isDisabled(), true);
   assert.deepEqual(problems, []);
   await page.close();
 });
