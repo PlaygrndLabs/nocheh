@@ -2,9 +2,6 @@
 
 
 def register(ctx):
-    from .transcription import SubscriptionTranscriptionProvider
-
-    ctx.register_transcription_provider(SubscriptionTranscriptionProvider())
     # Hermes loads plugins under hermes_plugins.NAME. Import runtime context
     # modules by their stable name so dispatcher and tool share one ContextVar.
     from services.hermes.archive_tools import register as register_archive

@@ -33,14 +33,6 @@ export function Integrations() {
           </div>
         )}
       </Panel>
-      <Panel
-        title="Provider monitoring"
-        note="Request history, usage, latency, failures and subscription account observations from CPA Manager Plus."
-      >
-        <a className="n-text-link" href="/providers/management.html">
-          Open provider monitoring →
-        </a>
-      </Panel>
     </div>
   );
 }

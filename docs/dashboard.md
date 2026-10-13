@@ -15,9 +15,8 @@ then run:
 Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
 Open Hermes from the sidebar for its dedicated native dashboard at `/hermes/nocheh`;
 its return link brings you back to Nocheh. Old `/nocheh#…` bookmarks still work.
-Open CPA dashboard from the sidebar for the CPA Manager Plus Full Mode UI at
-`/providers/management.html`; it reuses the Nocheh owner session and keeps all
-provider credentials server-side.
+Settings › Models holds the model providers and keeps their keys server-side; see
+[model providers](provider.md).
 
 The launcher starts Nocheh before building the optional native page. If Hermes is
 unavailable, the Nocheh archive/import/maintenance screens remain accessible.
@@ -88,7 +87,7 @@ remain supported alongside these conveniences:
 
 Secret settings take a hidden prompt or piped stdin, never a value in argv.
 The dashboard owner session is separate from the archive service credential and
-Hermes OAuth. No remote login is implemented; ports bind only to localhost.
+model provider keys. No remote login is implemented; ports bind only to localhost.
 The browser receives a separate HttpOnly owner session and CSRF value. Native HTTP
 and one-use, 30-second WebSocket tickets are checked by Nocheh before proxying.
 Internal backend credentials are not injected into native pages. Existing CLI
@@ -103,7 +102,7 @@ The terminal, its model turn and the sidebar metadata connection have distinct r
 only the managed turn runner can invoke a model.
 
 Submitted text and up to 10 files (25 MiB total) are archived before execution.
-Voice attachments use automatic subscription transcription; bounded UTF-8 files
+Voice attachments are archived without transcription; bounded UTF-8 files
 (up to 200 kB each, 1 MB total) are included as context. Other binary files remain
 retrievable. Original images remain owner-only while guarding is on; required guarding
 rejects opaque image context. Generated results and transcripts retain provenance.
@@ -214,7 +213,7 @@ Maintenance provides diagnostics, portable archive ZIP export, consistent backup
 service restart, and restore into a new inactive Compose project. Backup and
 restart show a review step. Restore selects a locally generated backup ID and an
 unused loopback port; it cannot overwrite current state. Restored Telegram stays
-disabled, and the copied OAuth login stays inactive. The existing `backup`,
+disabled, and copied credentials stay inactive. The existing `backup`,
 `restore`, `diagnose`, and `archive export` commands remain available under `./bin/nocheh`.
 
 Jobs, downloads, exports, backups and inactive restores are private files under
@@ -238,8 +237,8 @@ and backup files are retained until the owner removes them.
 ## Native administration and inherited preferences (P3)
 
 The native page now reads actual Hermes profiles and sessions from the running
-runtime. Its separate administration process owns no Telegram poller, scheduler,
-agent, or subscription refresh. Nocheh proxies its authenticated API separately from
+runtime. Its separate administration process owns no Telegram poller, scheduler
+or agent. Nocheh proxies its authenticated API separately from
 the presentation assets. The internal API binds on loopback at archive port + 5
 (8785 by default); restored installations derive their own port.
 
@@ -329,8 +328,8 @@ selected source spaces. Approved shares disclose the exact saved text, while
 supporting original IDs remain private. Revoking a share retires old group contexts
 and blocks stale in-flight delivery; it cannot retract messages already posted.
 
-Filtered mode currently considers original archive text only and uses the ChatGPT
-subscription privacy reviewer. Native-note/transcript filtering is pending explicit
+Filtered mode currently considers original archive text only and uses a
+model-based privacy reviewer. Native-note/transcript filtering is pending explicit
 owner authorization. Filtering can miss personal details; failures withhold wider
 knowledge. The access preview performs no model call and shows eligible sources,
 not a promise that their contents will be released.
@@ -406,10 +405,10 @@ Concurrent saves require refresh and comparison; preparation never overwrites an
 owner revision. Original file downloads remain read only.
 
 Local Compose now uses the saved guarded version when guarding is on. A synthetic
-live subscription test verified import, edit, scoped retrieval and native Hermes
+live test verified import, edit, scoped retrieval and native Hermes
 archive recall. See [task history](task-history.md) for that recorded checkpoint and [TASK.md](../TASK.md) for current Honcho and release checks.
 
-## System monitoring and subscription login
+## System monitoring
 
 Open **Monitoring** (`/#monitoring`) for running, waiting and failed workflow
 totals, the last confirmed workflow completion, and unpublished backlog across
@@ -430,19 +429,6 @@ database's size and largest tables, local state folder sizes (a folder the
 dashboard cannot fully read is shown as "at least"), Docker log limits and the
 workflow history retention setting. It is measured only when expanded.
 
-The provider panel's **OAuth Login** uses a temporary host callback listener for
-each redirect provider: Codex on port 1455, Claude on 54545 and Antigravity on
-51121. Kimi and xAI use device codes and need no callback. Each provider accepts
-one login. Start a fresh login after an expired attempt. If a callback port is
-busy with another login, finish it first; for Codex,
-`./bin/nocheh provider login` also offers device authentication. Once the shared login is present, run
-`./bin/nocheh provider cutover` to validate and switch the active route.
-
-The three API keys shown in the provider panel are generated local access keys
-for Hermes, Honcho and guarded-text preparation. The management key protects the
-local administration API. Neither kind is an OpenAI billing key or a substitute
-for the subscription OAuth login.
-
 <design_and_metrics>
 
 ## Appearance and workflow trends
@@ -451,7 +437,7 @@ The owner dashboard uses locally owned Radix-based components, Tailwind, Lucide,
 and Recharts. Appearance follows the system by default; Light, Dark, or System
 is persisted locally. The desktop sidebar collapses, and below 1024px navigation
 opens in a keyboard-accessible drawer. Refresh updates data without remounting
-the page. Hermes and CPA keep their native interfaces and integration links.
+the page. Hermes keeps its native interface and integration link.
 
 Monitoring retains global running, waiting, failed, last confirmed success and
 unpublished backlog totals, independent of table pagination and chart filters.
@@ -487,7 +473,6 @@ and backlog, red for failures, and green for a recorded confirmed completion.
 Missing or unavailable values are neutral in both themes. Zero is an observed
 count in the labeled category, rather than an unavailable observation.
 No sampling service, uptime claim, or provider analytics collection is added.
-Detailed provider analytics remain in CPA.
 
 Page implementations live under `dashboard/pages/`; shared components live in
 `dashboard/components/` (primitives in `dashboard/components/ui/`), while the owner API
@@ -524,7 +509,7 @@ an unused localhost port, and new random credentials in a private environment fi
 `POSTGRES_PASSWORD`, and `SERVICE_TOKEN`. Never copy installation credentials.
 The fixture owns its database volume and internal database network; only its
 HTTP preview bridge publishes the chosen loopback port. It has no poller,
-scheduler, provider login, or external-effect executor.
+scheduler, provider credentials, or external-effect executor.
 
 From the session worktree, with `FIXTURE_ENV` pointing to that private file:
 
@@ -547,8 +532,8 @@ preview file with `deploy/acceptance/dashboard-native-checks-compose.yml`, enabl
 It starts pinned Inngest and Redis only on the private fixture network, without
 registered runtime workers or published ports. The `checks` service runs against
 that same fixture. The container-dashboard boundary test additionally requires a
-separate network-isolated container with `nocheh-app`, `hermes`, and
-`cliproxy-monitor` mapped to loopback and `NOCHEH_CONTAINER_TEST=1`.
+separate network-isolated container with `nocheh-app` and `hermes`
+mapped to loopback and `NOCHEH_CONTAINER_TEST=1`.
 
 </synthetic_preview>
 

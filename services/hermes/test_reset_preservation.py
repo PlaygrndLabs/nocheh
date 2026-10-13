@@ -1,7 +1,6 @@
 import copy
 import hashlib
 import json
-import copy
 import tempfile
 import unittest
 import uuid
@@ -22,14 +21,11 @@ class ResetPreservationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve(); self.state = self.root / 'state'; self.memory = self.root / 'memory'
         self.state.mkdir(); self.memory.mkdir()
-        for relative in ('files', 'spool', 'workflows', 'admin/reset', 'admin/tools', 'hermes/profiles',
-                         'provider/auth', 'provider/monitor'):
+        for relative in ('files', 'spool', 'workflows', 'admin/reset', 'admin/tools', 'hermes/profiles'):
             (self.state / relative).mkdir(parents=True)
         (self.state / 'files/original').write_text('PRIVATE ORIGINAL SOURCE')
         (self.state / 'spool/observation').write_text('PRIVATE INCOMING OBSERVATION')
         (self.state / 'hermes/auth.json').write_text('PRIVATE PROVIDER LOGIN')
-        (self.state / 'provider/auth/token').write_text('PRIVATE EXTERNAL CREDENTIAL')
-        self.accounting = self.state / 'provider/monitor/usage.sqlite'; self.accounting.write_text('PRIVATE ACCOUNTING DIAGNOSTIC')
         (self.memory / 'ledger').mkdir(); (self.memory / 'ledger/spend').write_text('RETAINED SPENDING')
         (self.memory / 'honcho.env').write_text('PRIVATE HONCHO SETUP')
         values = dict(configuration.DEFAULTS)
@@ -58,7 +54,6 @@ class ResetPreservationTests(unittest.TestCase):
                 'state_anchor': reset_inventory.entry(self.state, 'retain_root', 'fixture')}}
         self.recovery = Mock(spec=['assert_maintenance', 'query'])
         self.recovery.query.return_value = json.dumps(self.database)
-        self.sanitize_calls = 0
 
     def ready(self, journal):
         journal.create(self.preflight, str(uuid.uuid4()))
@@ -73,36 +68,27 @@ class ResetPreservationTests(unittest.TestCase):
                 row['disposition'] = 'preserve-unrelated'
         return review
 
-    def sanitize(self, path):
-        self.assertEqual(Path(path), self.accounting); self.sanitize_calls += 1
-        self.accounting.write_text('SANITIZED ACCOUNTING ONLY')
-        Path(str(path) + '.manager.lock').touch()
-        return {'accounting_preserved': True, 'erased_rows': {'content_log': 2},
-                'compacted': True, 'backup_created': False}
-
     def freeze(self, journal, ownership=None):
         return reset_preservation.freeze(journal, self.preflight, self.recovery,
-            self.ownership() if ownership is None else ownership, inspect=lambda: self.preflight,
-            sanitize=self.sanitize)
+            self.ownership() if ownership is None else ownership, inspect=lambda: self.preflight)
 
     def test_complete_gate_is_durable_content_free_and_retryable(self):
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal); result = self.freeze(journal)
             self.assertEqual(journal.value['steps'][-1]['step'], 'preservation_frozen')
-            self.assertEqual(self.sanitize_calls, 1); self.assertTrue(result['accounting_preserved'])
             self.assertFalse(result['content_backup_created']); self.assertFalse(result['source_content_copied'])
-            for forbidden in ('PRIVATE', 'RETAINED SPENDING', str(self.accounting)):
+            for forbidden in ('PRIVATE', 'RETAINED SPENDING'):
                 self.assertNotIn(forbidden, json.dumps(result))
             self.assertTrue((self.state / 'files/original').exists())
             self.assertTrue((self.state / 'spool/observation').exists())
-            for name in ('configuration.json', 'preferences.json', 'accounting.json', 'preserved.json',
+            for name in ('configuration.json', 'preferences.json', 'preserved.json',
                          'ownership.json', 'files.json', 'preservation.json'):
                 path = journal.directory / name
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn(b'PRIVATE ORIGINAL SOURCE', path.read_bytes())
                 self.assertNotIn(b'PRIVATE INCOMING OBSERVATION', path.read_bytes())
             before = {path.name: path.read_bytes() for path in journal.directory.iterdir() if path.is_file()}
-            self.assertEqual(self.freeze(journal), result); self.assertEqual(self.sanitize_calls, 1)
+            self.assertEqual(self.freeze(journal), result)
             self.assertEqual(before, {path.name: path.read_bytes() for path in journal.directory.iterdir() if path.is_file()})
 
     def test_incomplete_ownership_review_blocks_before_preservation_mutation(self):
@@ -112,25 +98,26 @@ class ResetPreservationTests(unittest.TestCase):
             self.ready(journal); review = reset_ownership.prepare(self.preflight)
             with self.assertRaisesRegex(ValueError, 'incomplete'):
                 self.freeze(journal, review)
-            self.assertEqual(self.sanitize_calls, 0); self.assertEqual(len(journal.value['steps']), 3)
-            self.assertEqual(self.accounting.read_text(), 'PRIVATE ACCOUNTING DIAGNOSTIC')
+            self.assertEqual(len(journal.value['steps']), 3)
+            self.assertFalse((journal.directory / 'preserved.json').exists())
 
-    def test_database_policy_mismatch_blocks_accounting_and_completion(self):
+    def test_database_policy_mismatch_blocks_completion(self):
         self.database['runtime_configuration'][0]['document']['group_ids'] = ['-99']
         self.recovery.query.return_value = json.dumps(self.database)
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)
             with self.assertRaisesRegex(ValueError, 'runtime_configuration_mismatch'):
                 self.freeze(journal)
-            self.assertEqual(self.sanitize_calls, 0); self.assertEqual(len(journal.value['steps']), 3)
+            self.assertEqual(len(journal.value['steps']), 3)
 
-    def test_preserved_credential_drift_blocks_before_accounting_mutation(self):
-        credentials = self.state / 'provider/auth'; prior = self.root / 'prior-auth'
+    def test_preserved_spending_drift_blocks_before_the_preserved_snapshot(self):
+        ledger = self.memory / 'ledger'; prior = self.root / 'prior-ledger'
         with reset_protocol.locked(self.state) as journal:
-            self.ready(journal); credentials.rename(prior); credentials.mkdir(); (credentials / 'token').write_text('CHANGED CREDENTIAL')
+            self.ready(journal); ledger.rename(prior); ledger.mkdir(); (ledger / 'spend').write_text('CHANGED SPENDING')
             with self.assertRaisesRegex(ValueError, 'identity_changed'):
                 self.freeze(journal)
-            self.assertEqual(self.sanitize_calls, 0); self.assertEqual(len(journal.value['steps']), 3)
+            self.assertEqual(len(journal.value['steps']), 3)
+            self.assertFalse((journal.directory / 'preserved.json').exists())
 
     def test_changed_erasure_tree_cannot_reuse_completed_preservation(self):
         with reset_protocol.locked(self.state) as journal:
@@ -138,7 +125,6 @@ class ResetPreservationTests(unittest.TestCase):
             (self.state / 'files/late').write_text('LATE SOURCE')
             with self.assertRaisesRegex(ValueError, 'artifact_changed|manifest_changed'):
                 self.freeze(journal)
-            self.assertEqual(self.sanitize_calls, 1)
 
     def test_native_status_replaced_during_shutdown_is_rebound_once(self):
         status=self.state/'hermes/gateway_state.json';status.write_text('running status')
@@ -178,21 +164,21 @@ class ResetPreservationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'artifact_changed'):
                 reset_preservation._frozen_files(journal,self.preflight,stopped,replaced)
 
-    def test_interruption_before_phase_record_reuses_sanitized_accounting(self):
+    def test_interruption_before_phase_record_reuses_frozen_artifacts(self):
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal); complete = journal.complete
             journal.complete = lambda step, evidence: (_ for _ in ()).throw(RuntimeError('fixture interruption')) if step == 'preservation_frozen' else complete(step, evidence)
             with self.assertRaisesRegex(RuntimeError, 'fixture interruption'):
                 self.freeze(journal)
-            self.assertEqual(self.sanitize_calls, 1); self.assertEqual(len(journal.value['steps']), 3)
+            self.assertEqual(len(journal.value['steps']), 3)
         with reset_protocol.locked(self.state) as journal:
             result = self.freeze(journal)
-            self.assertEqual(result['phase'], 'preservation_frozen'); self.assertEqual(self.sanitize_calls, 1)
+            self.assertEqual(result['phase'], 'preservation_frozen')
 
-    def test_crash_after_sanitization_before_receipt_retries_safely(self):
+    def test_crash_before_preserved_receipt_retries_safely(self):
         original = reset_preservation._immutable
         def interrupted(path, value):
-            if path.name == 'accounting.json':
+            if path.name == 'preserved.json':
                 raise OSError('fixture receipt interruption')
             return original(path, value)
         with reset_protocol.locked(self.state) as journal:
@@ -200,21 +186,21 @@ class ResetPreservationTests(unittest.TestCase):
             with patch.object(reset_preservation, '_immutable', side_effect=interrupted):
                 with self.assertRaisesRegex(OSError, 'receipt interruption'):
                     self.freeze(journal)
-            self.assertEqual(self.sanitize_calls, 1); self.assertFalse((journal.directory / 'accounting.json').exists())
+            self.assertFalse((journal.directory / 'preserved.json').exists())
         with reset_protocol.locked(self.state) as journal:
             self.assertEqual(self.freeze(journal)['phase'], 'preservation_frozen')
-            self.assertEqual(self.sanitize_calls, 2)
 
-    def test_lost_maintenance_after_sanitization_never_completes_phase(self):
-        def sanitize(path):
-            result = self.sanitize(path)
+    def test_lost_maintenance_after_preserved_snapshot_never_completes_phase(self):
+        original = reset_preservation._snapshot_preserved
+        def snapshot(*args):
+            result = original(*args)
             self.recovery.assert_maintenance.side_effect = RuntimeError('maintenance lost')
             return result
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)
-            with self.assertRaisesRegex(RuntimeError, 'maintenance lost'):
-                reset_preservation.freeze(journal, self.preflight, self.recovery, self.ownership(),
-                    inspect=lambda: self.preflight, sanitize=sanitize)
+            with patch.object(reset_preservation, '_snapshot_preserved', side_effect=snapshot):
+                with self.assertRaisesRegex(RuntimeError, 'maintenance lost'):
+                    self.freeze(journal)
             self.assertEqual(len(journal.value['steps']), 3)
 
 

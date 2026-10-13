@@ -23,8 +23,13 @@ class EmbeddingConfigTests(unittest.TestCase):
             self.assertNotIn('synthetic-owner-key',str(visible))
             field=next(v for v in visible['fields'] if v['key']=='OPENAI_API_KEY')
             self.assertTrue(field['secret']);self.assertTrue(field['configured']);self.assertIsNone(field['value'])
-            for change in ({'NOCHEH_EMBEDDING_PROVIDER':'openrouter'},{'NOCHEH_EMBEDDING_MODEL':'unreviewed-model'}):
+            for change in ({'NOCHEH_EMBEDDING_MODEL':'unreviewed-model'},
+                           {'NOCHEH_EMBEDDING_URL':'http://plain.example/v1'}):
                 with self.assertRaises(ValueError):embeddings(change)
+            # Only providers configured in Settings may serve embeddings.
+            from tools.operations.provider.routes import validate as validate_routes
+            for provider in ('openrouter','anthropic'):
+                with self.assertRaises(ValueError):validate_routes({**values,'NOCHEH_EMBEDDING_PROVIDER':provider})
             del values['OPENAI_API_KEY'];values['NOCHEH_EMBEDDING_API_KEY']='legacy-dedicated-key';write_env(env_path(state),values)
             self.assertEqual(load(state)['OPENAI_API_KEY'],'legacy-dedicated-key')
             self.assertEqual(initialize(state)['OPENAI_API_KEY'],'legacy-dedicated-key')

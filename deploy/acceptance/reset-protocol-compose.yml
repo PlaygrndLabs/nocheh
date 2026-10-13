@@ -10,7 +10,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     entrypoint: [python3, -m, unittest]
-    command: [services.hermes.test_reset_protocol, services.hermes.test_reset_inventory, services.hermes.test_reset_accounting, services.hermes.test_reset_files, services.hermes.test_reset_ownership, services.hermes.test_reset_preservation, services.hermes.test_reset_erasure, -q]
+    command: [services.hermes.test_reset_protocol, services.hermes.test_reset_inventory, services.hermes.test_reset_files, services.hermes.test_reset_ownership, services.hermes.test_reset_preservation, services.hermes.test_reset_erasure, -q]
     environment:
       HOME: /tmp
       PYTHONDONTWRITEBYTECODE: "1"

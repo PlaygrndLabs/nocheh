@@ -23,8 +23,8 @@ def install_transport():
         if url.scheme!='https' or url.host!='api.telegram.org' or url.port not in (None,443):return request
         if not any(url.path.startswith(prefix) for prefix in ('/bot'+TOKEN+'/', '/file/bot'+TOKEN+'/')):
             raise ValueError('synthetic_telegram_token_required')
-        return httpx.Request(request.method,url.copy_with(scheme='http',host='cliproxy-api',port=8317),
-            headers={**dict(request.headers),'host':'cliproxy-api:8317'},
+        return httpx.Request(request.method,url.copy_with(scheme='http',host='model-fixture',port=8317),
+            headers={**dict(request.headers),'host':'model-fixture:8317'},
             stream=request.stream,extensions=dict(request.extensions))
     def send(self,request):return original_sync(self,route(request))
     async def async_send(self,request):return await original_async(self,route(request))

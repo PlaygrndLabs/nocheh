@@ -19,7 +19,7 @@ class PreferenceTransferTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.source, self.target = self.root / 'source', self.root / 'target'
         self.source.mkdir(); self.target.mkdir()
-        self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.source), 'NOCHEH_REASONING_ROUTE': 'native'})
+        self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.source)})
         self.env.start(); self.addCleanup(self.env.stop)
         self.policy = Scopes({'enabled': True, 'owner_id': '42', 'group_ids': ['-10']})
         save(self.source, {'agent.max_iterations': 5, 'nocheh_tools.shell': 'off'}, view(self.source)['revision'])

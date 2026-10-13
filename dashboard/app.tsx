@@ -1,7 +1,6 @@
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
 import {
-  Activity as ActivityIcon,
   Archive as ArchiveIcon,
   ArrowUpRight,
   BrainCircuit,
@@ -83,7 +82,7 @@ const routes: Route[] = [
     id: 'system',
     title: 'System',
     Icon: Server,
-    description: 'Health, connections, databases, backups and maintenance.',
+    description: 'Health, model usage, connections, databases, backups and maintenance.',
     Page: System,
   },
   {
@@ -226,11 +225,6 @@ function App() {
         <a href="/hermes/nocheh" aria-label="Open Hermes dashboard" title="Open Hermes dashboard">
           <Plug size={18} aria-hidden="true" />
           <span className={compact ? 'sr-only' : ''}>Hermes</span>
-          <ArrowUpRight size={14} aria-hidden="true" />
-        </a>
-        <a href="/providers/management.html" aria-label="Open CPA dashboard" title="Open CPA dashboard">
-          <ActivityIcon size={18} aria-hidden="true" />
-          <span className={compact ? 'sr-only' : ''}>CPA dashboard</span>
           <ArrowUpRight size={14} aria-hidden="true" />
         </a>
       </div>

@@ -13,7 +13,7 @@ test('owner runtime status reports Telegram polling and denies scoped readers',a
   const token='fixture-owner-token';
   const config={token,dataDir} as Settings;
   const server=storageServer({} as StorageServices,config,async()=>({ok:true,telegram:'connected',
-    telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'},reasoning_route:'shared'}));
+    telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}}));
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');

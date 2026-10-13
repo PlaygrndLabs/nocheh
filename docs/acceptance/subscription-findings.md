@@ -1,5 +1,10 @@
 # Phase 1 findings — 2026-09-06
 
+Historical record. The subscription login, its speech route and the tools that
+produced these findings were removed by
+[ADR-0142](../adr/0142-external-providers-only.md); models now come only from
+Settings › Models.
+
 **Status:** Hermes-owned device login, live refresh and all three core subscription
 paths pass locally. Phase 1 is complete under ADR-0019: the owner chose local
 Compose and deferred VPS verification. Container acceptance subsequently passed; see [current status](../../TASK.md).

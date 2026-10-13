@@ -48,9 +48,16 @@ services:
     restart: "no"
     environment:
       NOCHEH_DEV_WATCH: "1"
+      # Settings › Apply recreates services with this same development setup.
+      NOCHEH_DEV_COMPOSE_DIR: /dev-source
+      NOCHEH_DEV_SOURCE_ROOT: ${NOCHEH_DEV_SOURCE_ROOT:?}
+      NOCHEH_DEV_PROJECT: ${NOCHEH_DEV_PROJECT:?}
+      NOCHEH_DEV_HERMES_BASE: ${NOCHEH_DEV_HERMES_BASE:?}
+      NOCHEH_DEV_HONCHO_IMAGE: ${NOCHEH_DEV_HONCHO_IMAGE:?}
     entrypoint: [python3, -m, tools.development.dev_reload]
     command: [--watch, /app/tools, --watch, /app/services/honcho, --, python3, -m, tools.runtime.container_service, dashboard]
     volumes:
+      - ${NOCHEH_DEV_SOURCE_ROOT:?}:/dev-source:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/app/tools:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/honcho:/app/services/honcho:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/hermes/dashboard:/app/services/hermes/dashboard:ro
@@ -98,18 +105,7 @@ services:
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
-      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/test/fixtures/acceptance:/workspace/test/fixtures/acceptance:ro
       - dev_graph_dist:/workspace/services/hermes/dashboard/dist:ro
-
-  chatgpt-speech:
-    image: ${NOCHEH_DEV_HERMES_BASE:?}
-    build: !reset null
-    restart: "no"
-    entrypoint: [python, -m, tools.development.dev_reload]
-    command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.speech_gateway]
-    volumes:
-      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
-      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
 
   hermes-agent-sb:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
@@ -124,14 +120,6 @@ services:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
 
-  cliproxy-api:
-    image: ${NOCHEH_DEV_PROJECT:?}:cliproxy
-    build: !reset null
-    restart: "no"
-  cliproxy-monitor:
-    image: ${NOCHEH_DEV_PROJECT:?}:monitor
-    build: !reset null
-    restart: "no"
   inngest-redis:
     restart: "no"
   inngest-server:

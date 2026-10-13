@@ -13,7 +13,6 @@ test('dashboard shutdown closes partial HTTP connections but waits for an admitt
   const probe=createServer();probe.listen(0,'127.0.0.1');await once(probe,'listening');const port=(probe.address() as {port:number}).port;
   await new Promise<void>(done=>probe.close(()=>done()));
   await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),token);
-  await mkdir(join(state,'provider/keys'),{recursive:true});await writeFile(join(state,'provider/keys/monitor-admin.key'),token);
   const adapter=join(state,'python-fixture');await writeFile(adapter,`#!/usr/bin/env python3
 import json,os,sys,time
 from pathlib import Path

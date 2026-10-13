@@ -1,8 +1,7 @@
 """Freeze every non-content reset preservation input before any erasure.
 
 The caller owns the reset journal and PostgreSQL maintenance lock.  This module
-binds current database setup, native preferences, sanitized provider accounting,
-retained files, explicit archive ownership decisions and the exact file-erasure
+binds current database setup, native preferences, retained files, explicit archive ownership decisions and the exact file-erasure
 manifest.  It does not erase source stores, containers or volumes.
 """
 import hashlib
@@ -16,8 +15,8 @@ from types import SimpleNamespace
 from services.hermes import preference_transfer
 
 from tools.operations.installation import configuration
-from tools.acceptance import (reset_accounting, reset_configuration, reset_files,
-                              reset_ownership, reset_protocol, reset_quiescence)
+from tools.acceptance import (reset_configuration, reset_files, reset_ownership,
+                              reset_protocol, reset_quiescence)
 
 FORMAT = 'nocheh-reset-preservation-v1'
 PRIVATE_LIMIT = 64 * 1024 * 1024
@@ -168,7 +167,7 @@ def _fingerprint_path(row, *, transformed=False):
 
 
 def _preserved_rows(preflight, reviewed):
-    rows = [row for row in preflight['paths'] if row['action'] in ('preserve', 'sanitize_accounting', 'sqlite_checkpoint')
+    rows = [row for row in preflight['paths'] if row['action'] == 'preserve'
             and row.get('reason') != 'reset_coordinator_journal']
     rows.extend(reviewed['preserve'])
     paths = [row['path'] for row in rows]
@@ -182,15 +181,8 @@ def _preserved_rows(preflight, reviewed):
     return ordered
 
 
-def _snapshot_preserved(preflight, reviewed, accounting_path=None):
-    managed = set()
-    if accounting_path is not None:
-        # SQLite mutates the reviewed database in place. Its device/inode/kind
-        # therefore remain bound; only checkpoint companions and the native lock
-        # may appear or disappear around a safely retryable sanitization.
-        managed = {str(accounting_path) + suffix for suffix in ('-wal', '-shm', '-journal', '.manager.lock')}
-    values = [_fingerprint_path(row, transformed=row['path'] in managed)
-              for row in _preserved_rows(preflight, reviewed)]
+def _snapshot_preserved(preflight, reviewed):
+    values = [_fingerprint_path(row) for row in _preserved_rows(preflight, reviewed)]
     if sum(row['entries'] for row in values) > MAX_PRESERVED_ENTRIES:
         raise ValueError('reset_preserved_entry_limit')
     if sum(row['bytes'] for row in values) > MAX_PRESERVED_BYTES:
@@ -283,59 +275,8 @@ def _preference_receipt(journal, preflight, policy, config_receipt):
     return receipt
 
 
-def _accounting_receipt(journal, preflight, reviewed, sanitize):
-    targets = [row for row in preflight['paths'] if row['action'] == 'sanitize_accounting']
-    if len(targets) > 1:
-        raise ValueError('reset_accounting_scope_invalid')
-    target = targets[0] if targets else None
-    path = journal.directory / 'accounting.json'
-    if target is None or not target['exists']:
-        receipt = {'format': 'nocheh-reset-accounting-receipt-v1', 'reset_id': journal.value['reset_id'],
-                   'preflight_sha256': journal.value['preflight_sha256'], 'present': False,
-                   'accounting_preserved': True, 'backup_created': False}
-        _immutable(path, receipt)
-        return receipt, None
-    accounting_path = reset_files.absolute(target['path'])
-    rows = [row for row in _preserved_rows(preflight, reviewed)
-            if row['path'] in {str(accounting_path) + suffix for suffix in ('', '-wal', '-shm', '-journal', '.manager.lock')}]
-    if path.exists() or path.is_symlink():
-        receipt = _private_read(path)
-    else:
-        result = sanitize(accounting_path)
-        if result.get('accounting_preserved') is not True or result.get('backup_created') is not False:
-            raise RuntimeError('reset_accounting_preservation_failed')
-        frozen = {'format': 'nocheh-reset-accounting-files-v1',
-                  'entries': [_fingerprint_path(row, transformed=row['path'] != str(accounting_path)) for row in rows]}
-        frozen['sha256'] = reset_protocol.fingerprint(frozen)
-        receipt = {'format': 'nocheh-reset-accounting-receipt-v1', 'reset_id': journal.value['reset_id'],
-                   'preflight_sha256': journal.value['preflight_sha256'], 'present': True,
-                   'accounting_preserved': True, 'backup_created': False,
-                   'files': frozen, 'erased_rows': result.get('erased_rows', {})}
-        _immutable(path, receipt)
-    required = {'format', 'reset_id', 'preflight_sha256', 'present', 'accounting_preserved',
-                'backup_created', 'files', 'erased_rows'}
-    if (not isinstance(receipt, dict) or set(receipt) != required or
-            receipt['format'] != 'nocheh-reset-accounting-receipt-v1' or
-            receipt['reset_id'] != journal.value['reset_id'] or
-            receipt['preflight_sha256'] != journal.value['preflight_sha256'] or
-            receipt['present'] is not True or receipt['accounting_preserved'] is not True or
-            receipt['backup_created'] is not False):
-        raise ValueError('reset_accounting_receipt_changed')
-    if (not isinstance(receipt['erased_rows'], dict) or
-            any(not isinstance(name, str) or type(count) is not int or count < 0
-                for name, count in receipt['erased_rows'].items())):
-        raise ValueError('reset_accounting_receipt_changed')
-    current = {'format': 'nocheh-reset-accounting-files-v1',
-               'entries': [_fingerprint_path(row, transformed=row['path'] != str(accounting_path)) for row in rows]}
-    current['sha256'] = reset_protocol.fingerprint(current)
-    if current != receipt['files']:
-        raise ValueError('reset_accounting_changed')
-    return receipt, accounting_path
-
-
 def _public(receipt):
     return {'phase': 'preservation_frozen', **receipt['counts'],
-            'accounting_preserved': receipt['accounting_preserved'],
             'content_backup_created': False, 'source_content_copied': False}
 
 
@@ -349,27 +290,22 @@ def assert_frozen(journal, preflight):
         raise ValueError('reset_preservation_phase_required')
     receipt = _private_read(journal.directory / 'preservation.json')
     required = {'format', 'reset_id', 'preflight_sha256', 'configuration_sha256', 'preferences_sha256',
-                'accounting_sha256', 'preserved_sha256', 'ownership_sha256', 'file_manifest_sha256',
-                'counts', 'accounting_preserved', 'content_backup_created', 'source_content_copied'}
+                'preserved_sha256', 'ownership_sha256', 'file_manifest_sha256',
+                'counts', 'content_backup_created', 'source_content_copied'}
     if (not isinstance(receipt, dict) or set(receipt) != required or receipt['format'] != FORMAT or
             receipt['reset_id'] != journal.value['reset_id'] or
             receipt['preflight_sha256'] != journal.value['preflight_sha256'] or
-            receipt['accounting_preserved'] is not True or receipt['content_backup_created'] is not False or
+            receipt['content_backup_created'] is not False or
             receipt['source_content_copied'] is not False or
             journal.value['steps'][3]['evidence_sha256'] != reset_protocol.fingerprint(receipt)):
         raise ValueError('reset_preservation_evidence_changed')
     configuration_receipt = reset_protocol.read(journal.directory / 'configuration.json')
     preferences = _private_read(journal.directory / 'preferences.json')
-    accounting = _private_read(journal.directory / 'accounting.json')
     preserved = _private_read(journal.directory / 'preserved.json')
     ownership = _private_read(journal.directory / 'ownership.json')
     files = _private_read(journal.directory / 'files.json')
     configuration_fields = {'format', 'reset_id', 'preflight_sha256', 'snapshot_sha256', 'snapshot'}
     preference_fields = {'format', 'reset_id', 'preflight_sha256', 'snapshot_sha256', 'snapshot'}
-    accounting_fields = ({'format', 'reset_id', 'preflight_sha256', 'present', 'accounting_preserved', 'backup_created'}
-                         if accounting.get('present') is False else
-                         {'format', 'reset_id', 'preflight_sha256', 'present', 'accounting_preserved',
-                          'backup_created', 'files', 'erased_rows'})
     preserved_fields = {'format', 'entries', 'roots', 'files', 'bytes', 'sha256'}
     ownership_fields = {'format', 'reset_id', 'review_sha256', 'review'}
     file_fields = {'format', 'reset_id', 'preflight_sha256', 'ownership_sha256', 'manifest_sha256', 'manifest'}
@@ -377,7 +313,6 @@ def assert_frozen(journal, preflight):
                     'preserved_entries', 'reviewed_items', 'erasure_targets'}
     if (not isinstance(configuration_receipt, dict) or set(configuration_receipt) != configuration_fields or
             not isinstance(preferences, dict) or set(preferences) != preference_fields or
-            not isinstance(accounting, dict) or set(accounting) != accounting_fields or
             not isinstance(preserved, dict) or set(preserved) != preserved_fields or
             not isinstance(ownership, dict) or set(ownership) != ownership_fields or
             not isinstance(files, dict) or set(files) != file_fields or
@@ -389,9 +324,6 @@ def assert_frozen(journal, preflight):
             preferences.get('format') != 'nocheh-reset-preferences-receipt-v1' or
             preferences.get('reset_id') != journal.value['reset_id'] or
             preferences.get('preflight_sha256') != journal.value['preflight_sha256'] or
-            accounting.get('format') != 'nocheh-reset-accounting-receipt-v1' or
-            accounting.get('reset_id') != journal.value['reset_id'] or
-            accounting.get('preflight_sha256') != journal.value['preflight_sha256'] or
             preserved.get('format') != 'nocheh-reset-preserved-files-v1' or
             ownership.get('format') != reset_ownership.FORMAT or
             ownership.get('reset_id') != journal.value['reset_id'] or
@@ -403,7 +335,6 @@ def assert_frozen(journal, preflight):
             configuration_receipt.get('snapshot_sha256') != reset_protocol.fingerprint(configuration_receipt.get('snapshot')) or
             preferences.get('snapshot_sha256') != receipt['preferences_sha256'] or
             preferences.get('snapshot_sha256') != reset_protocol.fingerprint(preferences.get('snapshot')) or
-            reset_protocol.fingerprint(accounting) != receipt['accounting_sha256'] or
             preserved.get('sha256') != receipt['preserved_sha256'] or
             reset_protocol.fingerprint({key: value for key, value in preserved.items() if key != 'sha256'}) != preserved.get('sha256') or
             ownership.get('review_sha256') != receipt['ownership_sha256'] or
@@ -421,11 +352,10 @@ def assert_frozen(journal, preflight):
                   'erasure_targets': len(files['manifest']['targets'])}
     except (KeyError, TypeError):
         raise ValueError('reset_preservation_artifact_changed') from None
-    if (counts != receipt['counts'] or accounting.get('accounting_preserved') is not True or
-            accounting.get('backup_created') is not False):
+    if counts != receipt['counts']:
         raise ValueError('reset_preservation_artifact_changed')
     return {'receipt': receipt, 'configuration': configuration_receipt, 'preferences': preferences,
-            'accounting': accounting, 'preserved': preserved, 'ownership': ownership, 'files': files}
+            'preserved': preserved, 'ownership': ownership, 'files': files}
 
 
 def verify_retained(journal, preflight):
@@ -446,7 +376,7 @@ def verify_retained(journal, preflight):
 
 
 def freeze(journal, preflight, recovery, ownership_review, *, inspect,
-           load_setup=configuration.load, sanitize=reset_accounting.sanitize):
+           load_setup=configuration.load):
     """Freeze the complete preservation gate, safely retrying private artifacts."""
     journal.assert_current()
     if (journal.value is None or len(journal.value['steps']) not in (3, 4) or
@@ -473,17 +403,10 @@ def freeze(journal, preflight, recovery, ownership_review, *, inspect,
         raise ValueError('reset_setup_configuration_changed')
     policy = _policy(values, config_receipt['snapshot'])
     held(); preferences = _preference_receipt(journal, preflight, policy, config_receipt)
-    # Establish that credentials, login state, ledgers and the unsanitized
-    # accounting database still match the reviewed inventory before the one
-    # permitted preservation mutation begins. On retry, the immutable accounting
-    # receipt authorizes only the already-sanitized SQLite companions to differ.
-    accounting_targets = [row for row in preflight['paths'] if row['action'] == 'sanitize_accounting' and row['exists']]
-    accounting_identity = accounting_targets[0]['path'] if accounting_targets else None
-    held(); _snapshot_preserved(preflight, reviewed, accounting_identity)
-    held(); accounting, accounting_path = _accounting_receipt(journal, preflight, reviewed, sanitize)
+    # Establish that credentials, login state and ledgers still match the
+    # reviewed inventory before the preserved snapshot is frozen.
     held()
-
-    preserved = _snapshot_preserved(preflight, reviewed, accounting_path)
+    preserved = _snapshot_preserved(preflight, reviewed)
     _immutable(journal.directory / 'preserved.json', preserved)
     protected = [journal.state / relative for relative in reset_quiescence.FENCES]
     rebound = _post_shutdown_rebound(journal, preflight)
@@ -500,7 +423,7 @@ def freeze(journal, preflight, recovery, ownership_review, *, inspect,
     if reset_configuration.snapshot(recovery.query, config_receipt['snapshot']['layout']) != config_receipt['snapshot']:
         raise ValueError('reset_configuration_changed')
     preference_transfer.verify_source(journal.state / 'hermes', preferences['snapshot'])
-    if _snapshot_preserved(preflight, reviewed, accounting_path) != preserved:
+    if _snapshot_preserved(preflight, reviewed) != preserved:
         raise ValueError('reset_preserved_files_changed')
     latest_manifest = reset_files.freeze(preflight, protected, ownership_review,
                                          rebound=_post_shutdown_rebound(journal, preflight))
@@ -518,10 +441,8 @@ def freeze(journal, preflight, recovery, ownership_review, *, inspect,
                'preflight_sha256': journal.value['preflight_sha256'],
                'configuration_sha256': config_receipt['snapshot_sha256'],
                'preferences_sha256': preferences['snapshot_sha256'],
-               'accounting_sha256': reset_protocol.fingerprint(accounting),
                'preserved_sha256': preserved['sha256'], 'ownership_sha256': reviewed['review_sha256'],
                'file_manifest_sha256': files_receipt['manifest_sha256'], 'counts': counts,
-               'accounting_preserved': accounting['accounting_preserved'],
                'content_backup_created': False, 'source_content_copied': False}
     path = journal.directory / 'preservation.json'
     _immutable(path, receipt)

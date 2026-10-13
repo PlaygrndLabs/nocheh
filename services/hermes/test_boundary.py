@@ -75,28 +75,19 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         def fail(*args): raise GuardUnavailable('guard_down')
         self.setup_boundary(fail)
         with httpx.Client(transport=httpx.MockTransport(sink),follow_redirects=True) as client:
-            with self.assertRaises(GuardUnavailable):client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'planted-SECRET'})
+            with self.assertRaises(GuardUnavailable):client.post('https://gateway.example.test/v1/chat/completions',json={'messages':'planted-SECRET'})
         self.assertEqual(destinations,[])
 
-    def test_detector_exemption_is_confined_to_trusted_endpoint_and_reset(self):
+    def test_detector_exemption_is_confined_to_the_configured_provider_and_reset(self):
         seen=[]
         def fail(*args):raise GuardUnavailable('guard_down')
         self.setup_boundary(fail,mode='on')
         with httpx.Client(transport=httpx.MockTransport(lambda req:seen.append(req) or httpx.Response(200,json={}))) as client:
-            with trusted_detector():
-                client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'planted-SECRET'})
-                with self.assertRaises(GuardUnavailable):client.post('https://untrusted.example/responses',json={'input':'planted-SECRET'})
-            with self.assertRaises(GuardUnavailable):client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'planted-SECRET'})
-        self.assertEqual(len(seen),1)
-
-    def test_detector_exemption_can_be_bound_to_only_the_shared_provider(self):
-        seen=[]
-        self.setup_boundary(lambda *_: (_ for _ in ()).throw(GuardUnavailable('guard_down')))
-        with httpx.Client(transport=httpx.MockTransport(lambda req:seen.append(req) or httpx.Response(200,json={}))) as client:
-            with trusted_detector('http://cliproxy-api:8317/v1'):
-                client.post('http://cliproxy-api:8317/v1/chat/completions',json={'messages':[]})
-                with self.assertRaises(GuardUnavailable):
-                    client.post('https://chatgpt.com/backend-api/codex/responses',json={'input':'secret'})
+            with trusted_detector('https://gateway.example.test/v1'):
+                client.post('https://gateway.example.test/v1/chat/completions',json={'messages':[]})
+                for other in ('https://untrusted.example/v1/chat/completions','https://gateway.example.test/v10/chat/completions'):
+                    with self.assertRaises(GuardUnavailable):client.post(other,json={'messages':'planted-SECRET'})
+            with self.assertRaises(GuardUnavailable):client.post('https://gateway.example.test/v1/chat/completions',json={'messages':'planted-SECRET'})
         self.assertEqual(len(seen),1)
 
     def test_required_guard_drops_only_opaque_reasoning_sidecars_and_preserves_original_request(self):

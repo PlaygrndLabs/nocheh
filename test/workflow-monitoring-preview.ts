@@ -34,7 +34,7 @@ const server=createServer((req,res)=>{void(async()=>{
     if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(pool));
     if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(pool,path.split('/').at(-1)!));
     if(path==='/v1/status')return json(res,200,{archive:await archiveStatus(pool),guard_mode:'on',services:[]});
-    if(path==='/v1/runtime')return json(res,200,{status:{telegram:'disabled',reasoning_route:'native'},fixture:true});
+    if(path==='/v1/runtime')return json(res,200,{status:{telegram:'disabled'},fixture:true});
     if(/^\/v1\/events\/[a-f0-9]{64}$/.test(path))return json(res,200,await readEvent(pool,{admin:true,scope:null},path.split('/').at(-1)!));
   }
   if(req.method==='POST'&&/^\/v1\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(path))return json(res,200,await controlWorkflow(pool,path.split('/')[3]!,path.split('/')[4]!,await readJson(req)));

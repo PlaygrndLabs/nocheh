@@ -19,7 +19,7 @@ the D1–D4 execution checkpoints, not the superseded pre-implementation design.
 - [Dashboard and CLI guide](dashboard.md): available commands, settings ownership, native integration, and graph controls.
 - [Import/export](import-export.md): source round-trips and media handling.
 - [Runtime-platform sequence](runtime-platform-plan.md): independent Nocheh UI, native chat, broader tools, scheduling, and release acceptance.
-- [Shared provider](shared-provider-plan.md) and [guarded memory](guarded-memory-plan.md): production connection gates, separate from data inspection.
+- [Guarded memory](guarded-memory-plan.md): production connection gates, separate from data inspection.
 
 Follow [AGENTS.md](../AGENTS.md) for commits and previews. D1–D4 are implemented;
 older D3/D4 pending rows are historical; [task history](task-history.md) summarizes them and [TASK.md](../TASK.md) has current status.

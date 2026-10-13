@@ -1,4 +1,4 @@
-"""Synthetic, local acceptance using the installed subscription refresh authority.
+"""Synthetic, local acceptance using the installation's configured reply provider.
 
 Requires candidate images and the isolated PostgreSQL fixture. Never switches the
 active runtime or imports real user history. Output contains scores, not credentials.
@@ -39,10 +39,10 @@ from agent.model_metadata import get_model_context_length
 result['model_context_length']=get_model_context_length(result['model'],base_url=result['base_url'],api_key=result['api_key'],provider=result['provider'])
 sys.stdout.write(json.dumps(result))
 '''
-    from tools.operations.provider.provider import compose
+    from tools.operations.installation.configuration import compose
     command,env=compose(ROOT/'data/local')
     result=subprocess.run(command+['exec','-T','hermes','python','-c',code],env=env,input=json.dumps(body).encode(),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=120)
-    if result.returncode:raise RuntimeError('live_subscription_unavailable')
+    if result.returncode:raise RuntimeError('live_provider_unavailable')
     return json.loads(result.stdout)
 
 def quality_gate(results):
@@ -179,7 +179,7 @@ def main():
             report['status']='passed' if report['quality_gate']['passed'] and all(report['checks'].values()) else 'quality_regression_or_inconclusive'
         except Exception as error:
             report['status']='pending';report['error_type']=type(error).__name__
-            report['error_code']=str(error) if str(error) in ('live_subscription_unavailable','acceptance_broker_unavailable','acceptance_launcher_unavailable','live_turn_failed','owner_configuration_required') else 'acceptance_unavailable'
+            report['error_code']=str(error) if str(error) in ('live_provider_unavailable','acceptance_broker_unavailable','acceptance_launcher_unavailable','live_turn_failed','owner_configuration_required') else 'acceptance_unavailable'
         finally:
             if (root/'effects.json').exists():
                 try:report['effect_evidence']=json.loads((root/'effects.json').read_text())

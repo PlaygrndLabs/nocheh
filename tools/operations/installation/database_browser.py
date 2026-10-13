@@ -54,10 +54,9 @@ def _catalog(state):
             continue
         databases.append({'id': 'hermes:' + profile.name, 'name': 'Hermes · ' + profile.name,
                           'engine': 'sqlite', 'path': path})
-    provider = Path(state) / 'provider/monitor/usage.sqlite'
-    if not provider.is_symlink():
-        databases.append({'id': 'provider-usage', 'name': 'Provider usage',
-                          'engine': 'sqlite', 'path': provider})
+    usage = root / 'usage/usage.sqlite'
+    if not usage.is_symlink() and not usage.parent.is_symlink():
+        databases.append({'id': 'usage', 'name': 'Model usage', 'engine': 'sqlite', 'path': usage})
     honcho_state = Path(config.get('NOCHEH_HONCHO_STATE_DIR') or Path(state) / 'honcho')
     ledger = honcho_state / 'ledger/budget.sqlite'
     if config.get('NOCHEH_HONCHO_ENABLED') == 'true' and not ledger.is_symlink():
@@ -113,7 +112,7 @@ def _sqlite(state, db):
     path = db['path']
     # Each path is discovered from one configured installation location. Never
     # accept a path from the browser, or follow a replaced symlink at open time.
-    roots = [Path(state) / 'hermes', Path(state) / 'provider/monitor',
+    roots = [Path(state) / 'hermes',
              Path(load(state).get('NOCHEH_HONCHO_STATE_DIR') or Path(state) / 'honcho') / 'ledger']
     if path.is_symlink() or not any(path.resolve().is_relative_to(root.resolve()) for root in roots):
         raise ValueError('database_path_denied')

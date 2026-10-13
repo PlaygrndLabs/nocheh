@@ -1,9 +1,8 @@
-"""Exercise the complete preservation gate with real PostgreSQL and SQLite."""
+"""Exercise the complete preservation gate with real PostgreSQL."""
 import argparse
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import uuid
@@ -11,7 +10,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.operations.installation import configuration
-from tools.acceptance import reset_accounting
 from tools.acceptance import reset_inventory
 from tools.acceptance import reset_ownership
 from tools.acceptance import reset_preservation
@@ -57,33 +55,15 @@ class Recovery:
         return result.stdout
 
 
-def seed_accounting(path):
-    schema = Path('/app/test/fixtures/acceptance/cpamp-reset-schema.sql').read_text()
-    with sqlite3.connect(path) as db:
-        db.executescript(schema); reset_accounting.schema(db)
-        db.execute('''INSERT INTO usage_events(event_hash,timestamp_ms,timestamp,model,provider,executor_type,
-            input_tokens,output_tokens,total_tokens,cache_input_mode,normalized_uncached_input_tokens,
-            normalized_total_input_tokens,normalized_cache_read_tokens,normalized_cache_creation_tokens,
-            fail_body,fail_summary,response_metadata_json,raw_json,created_at_ms)
-            VALUES(?,1789680000000,'2026-09-18T00:00:00Z','fixture-model','openai','codex',410,80,490,
-            'included_in_input',410,410,0,0,?,?,?,?,1789680000000)''',
-            ('synthetic-preservation-event', MARKER, MARKER, json.dumps({'private': MARKER}),
-             json.dumps({'tokens': {'total_tokens': 490}, 'private': MARKER})))
-        db.execute("INSERT INTO settings(key,value,updated_at_ms) VALUES('fixture_saved_preference','saved',1789680000000)")
-        db.execute('INSERT INTO dead_letter_events(payload,error,created_at_ms) VALUES(?,?,1789680000000)', (MARKER, MARKER))
-
-
 def fixture_check(root):
     if (root / 'fixture.json').read_text() != 'nocheh-reset-preservation-fixture-v1\n':
         raise ValueError('fixture_marker_required')
     state, memory = root / 'state', root / 'memory'; state.mkdir(); memory.mkdir()
-    for relative in ('files', 'spool', 'workflows', 'admin/reset', 'admin/tools', 'hermes/profiles',
-                     'provider/auth', 'provider/monitor'):
+    for relative in ('files', 'spool', 'workflows', 'admin/reset', 'admin/tools', 'hermes/profiles'):
         (state / relative).mkdir(parents=True)
     (state / 'files/original').write_text(MARKER); (state / 'spool/observation').write_text(MARKER)
     (state / 'hermes/auth.json').write_text('SYNTHETIC_LOGIN_RETAINED')
-    (state / 'provider/auth/token').write_text('SYNTHETIC_CREDENTIAL_RETAINED')
-    accounting = state / 'provider/monitor/usage.sqlite'; seed_accounting(accounting)
+    (state / 'secrets').mkdir(); (state / 'secrets/token').write_text('SYNTHETIC_CREDENTIAL_RETAINED')
     (memory / 'ledger').mkdir(); (memory / 'ledger/spend').write_text('SYNTHETIC_SPENDING_RETAINED')
     (memory / 'honcho.env').write_text('SYNTHETIC_HONCHO_SETUP_RETAINED')
     values = dict(configuration.DEFAULTS)
@@ -113,19 +93,12 @@ def fixture_check(root):
         assert MARKER not in (journal.directory / 'configuration.json').read_text()
         for candidate in journal.directory.iterdir():
             if candidate.is_file(): assert MARKER.encode() not in candidate.read_bytes()
-    with sqlite3.connect(accounting) as db:
-        assert db.execute("SELECT input_tokens,total_tokens FROM usage_events WHERE event_hash='synthetic-preservation-event'").fetchone() == (410, 490)
-        assert db.execute("SELECT value FROM settings WHERE key='fixture_saved_preference'").fetchone() == ('saved',)
-        assert db.execute('SELECT count(*) FROM dead_letter_events').fetchone() == (0,)
-    for suffix in ('', '-wal', '-shm', '-journal'):
-        candidate = Path(str(accounting) + suffix)
-        if candidate.is_file(): assert MARKER.encode() not in candidate.read_bytes()
     for candidate in (state / 'files/original', state / 'spool/observation'):
         assert candidate.read_text() == MARKER
     assert (memory / 'ledger/spend').read_text() == 'SYNTHETIC_SPENDING_RETAINED'
     return {'passed': True, 'phase': result['phase'], 'configuration_records': result['configuration_records'],
             'preserved_roots': result['preserved_roots'], 'erasure_targets': result['erasure_targets'],
-            'accounting_preserved': True, 'source_and_derivative_canaries_excluded_from_configuration': True,
+            'source_and_derivative_canaries_excluded_from_configuration': True,
             'original_files_not_erased': True, 'provider_calls': 0, 'live_state_changed': False}
 
 

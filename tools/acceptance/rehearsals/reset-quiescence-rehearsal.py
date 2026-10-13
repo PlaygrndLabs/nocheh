@@ -46,7 +46,7 @@ def main():
     config=configuration.initialize(state);config.update(COMPOSE_PROJECT_NAME=project)
     configuration.write_env(state/'.env',config)
     writers=('hermes','nocheh-executor','hermes-agent-sb','nocheh-app','nocheh-security',
-             'nocheh-dashboard','honcho-deriver','cliproxy-api')
+             'nocheh-dashboard','honcho-deriver')
     services={'nocheh-db': {
         'image':'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
         'restart':'unless-stopped', 'command':['postgres','-c','cluster_name=nocheh-reset-quiescence-fixture'],

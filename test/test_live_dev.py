@@ -134,7 +134,6 @@ class LiveDevTests(unittest.TestCase):
                         'hermes': {'volumes': mounts({'/workspace/data/local/hermes': '/synthetic/state/hermes'}),
                                    'environment': {'TELEGRAM_ENABLED': 'true',
                                                    'HOME': '/workspace/data/local/hermes'}},
-                        'cliproxy-api': {'volumes': mounts({'/auth': '/synthetic/state/provider/auth'})},
                         'honcho-api': {'volumes': mounts({'/nocheh': str(live_dev.ROOT / 'services/honcho')})},
                         'honcho-provider-gateway': {'volumes': mounts({
                             '/workspace-honcho': str(live_dev.ROOT / 'services/honcho'),
