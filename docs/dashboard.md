@@ -39,8 +39,9 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | System | Health: services, connections, storage and diagnostics. Background work: workflow totals, history charts and the run list with retry and cancel. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
 | Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (secret check, how long history is kept), Assistant (owner freedom and agent preferences) and Advanced. |
 
-Every settings edit, on any page, is a draft. While something is unsaved, the page
-header stays at the top of the screen with the number of changes, Discard and Save. Save
+Every settings edit, on any page, is a draft. On Settings and Chats the page header
+always stays at the top of the screen with Discard and Save, turned off until something
+is unsaved; elsewhere it appears only while something is unsaved. Save
 writes the settings and applies them to the running services in one step, follows
 the apply to the end and shows the saved values. A failed apply keeps your edits.
 Edits stay while you switch tabs or pages; a tab with unsaved edits has a dot.

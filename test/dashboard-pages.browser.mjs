@@ -159,18 +159,24 @@ test('home leads with what needs the owner', async () => {
 test('a settings edit survives switching tabs and Save at the top of the page saves and applies it', async () => {
   const {page, problems} = await open('settings?view=telegram');
   const tabs = page.getByRole('tablist', {name: 'Settings sections'});
-  assert.equal(await page.getByRole('region', {name: 'Save changes'}).count(), 0);
+  // Save is always in the same place on Settings, turned off until there is something to save.
+  const save = page.getByRole('region', {name: 'Save changes'}).getByRole('button', {name: 'Save'});
+  assert.equal(await save.isDisabled(), true);
+  const headerBefore = await page.locator('main header').boundingBox();
   await page.locator('#telegram-names').fill('Nocheh,Helper');
   await tabs.getByRole('tab', {name: /Speed/}).click();
   await tabs.getByRole('tab', {name: /Telegram.*unsaved/}).waitFor();
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByText('1 unsaved change').waitFor();
+  assert.equal(await save.isEnabled(), true);
+  assert.deepEqual(await page.locator('main header').boundingBox(), headerBefore, 'the header does not move');
   // Save stays at the top of the screen, never in a card at the bottom, even after scrolling down.
   await page.locator('main').evaluate(main => main.scrollTo(0, main.scrollHeight));
   assert.ok((await bar.boundingBox()).y < 120, 'Save sits at the top of the screen');
   await bar.getByRole('button', {name: 'Save'}).click();
   await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor();
-  await bar.waitFor({state: 'detached'});
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.equal(await bar.getByRole('button', {name: 'Save'}).isDisabled(), true);
   await tabs.getByRole('tab', {name: /Telegram/}).click();
   assert.equal(await page.locator('#telegram-names').inputValue(), 'Nocheh,Helper');
   assert.deepEqual(problems, []);
@@ -183,7 +189,8 @@ test('discard drops unsaved edits', async () => {
   await page.locator('#telegram-names').fill('Something else');
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByRole('button', {name: 'Discard'}).click();
-  await bar.waitFor({state: 'detached'});
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.equal(await bar.getByRole('button', {name: 'Save'}).isDisabled(), true);
   assert.equal(await page.locator('#telegram-names').inputValue(), before);
   assert.deepEqual(problems, []);
   await page.close();
@@ -210,7 +217,8 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   assert.equal(await bar.getByText('synthetic-gateway-key').count(), 0);
   await bar.getByRole('button', {name: 'Save'}).click();
   await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor();
-  await bar.waitFor({state: 'detached'});
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.equal(await bar.getByRole('button', {name: 'Save'}).isDisabled(), true);
   assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
   // Every model is picked from a dropdown of the provider's models, and any other name can still be typed.
   const mainModel = page.locator('#main-model');
