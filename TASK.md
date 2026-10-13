@@ -155,17 +155,6 @@ The existing embedding spending cap and subscription request safety limit remain
 in force. Nocheh runs no provider proxy or provider login of its own
 ([ADR-0142](docs/adr/0142-external-providers-only.md)).
 
-The relationships and memory access UI now separates Explore, Review requests,
-and Shared memory, with a list-first explorer, optional map, direct fact sharing,
-and state-aware access explanations. The dashboard build and all 33 dashboard
-checks pass; isolated synthetic browser checks cover desktop, phone, keyboard,
-failed approval drafts, successful approval, sharing, and revocation. See the
-[implementation](dashboard/pages/memory-map.tsx),
-[access-state checks](test/dashboard-memory-access.test.mjs), and
-[completed increment](docs/task-history.md). Operating activation remains pending;
-this UI verification does not establish live recall or release readiness.
-
-
 Group chats now answer only when a message addresses Nocheh: a reply to one of
 its messages, its @username or a tap on its name, or its display name or a
 name from Settings opening the message. Other group messages are archived
@@ -196,27 +185,27 @@ separate (“Each topic”)
 conversation. Pending: after a restart, a live question in one topic about
 something said in another topic of the same group.
 
-Dashboard redesign: the owner found the dashboard unclear, asked for a big
-redesign and refactor with memory access managed from the dashboard, and
-accepted the [redesign plan](docs/dashboard-redesign-plan.md) on 2026-10-12.
-Step 1 (groundwork, no visible change) is implemented: every browser module is
-TypeScript/TSX formatted with Prettier, one owner API client, unused access pages
-removed, and source-text dashboard tests replaced by a browser test of every page
-on the synthetic preview ([browser checks](test/dashboard-pages.browser.mjs)).
-Step 2 (navigation) is implemented: eight pages (Home, Inbox, Chats & access,
-Memory, Archive, Projects, System, Settings), tabs held in the address, Home
-leading with what needs the owner, and earlier page names redirected
-([routes](dashboard/lib/routes.ts), [route checks](test/dashboard-routes.test.mjs)).
-Step 3 (Chats & access) is implemented: one chat list with per-chat access
-(who can talk, what is remembered, what may be done, project), group on/off,
-people, topics, requests, shared facts, sharing rules and defaults including
-topic memory; memory-access lists filter by chat
-([page](dashboard/pages/access/index.tsx)). Step 4 (Settings) is implemented:
-sections Telegram, Models, Speed, Privacy, Assistant and Advanced as tabs, with
-one review/save/apply bar. Step 5 (phone pass) is implemented: every tab list
-wraps on phones; the browser test checks every page and tab at phone width for
-sideways scrolling. The redesign plan is complete; the owner's live look after
-restart is pending.
+Dashboard rebuild (October 13, owner: "the work flow and ui update after save is
+bad, save btn is not in good place and lots of other ui/ux issue ... need to check
+app fully and do a refactor to make dashboard simple and usable"): the owner
+dashboard is rebuilt from scratch around eight pages (Home, Inbox, Chats,
+Messages, Memory, Usage, System, Settings), shared components in `dashboard/ui`
+and one save bar pinned to the bottom of the screen that saves and applies every
+settings edit in one step and shows the outcome
+([decision](docs/adr/0145-rebuilt-owner-dashboard.md),
+[save bar](dashboard/ui/save-bar.tsx), [settings store](dashboard/lib/settings.ts),
+[routes](dashboard/lib/routes.ts), [browser checks](test/dashboard-pages.browser.mjs)).
+Model providers are added in a dialog that lists the provider's models before
+adding it. The 3D evidence graph and the editable memory map are gone from the
+dashboard; people, facts and projects are lists with side panels. Pending: the
+owner's review of the new dashboard on the running installation after the
+pull request is merged and the stack restarted. Open server gaps found while
+building it: `/decisions` items carry no summary, `/tools/actions/<id>` is not
+proxied, `/entities/claims/<id>/history` is not on the owner allowlist, `/learned`
+has no text search, message lists carry no sender, a failed import preview stays
+"uploading", `/runtime` reports no capabilities, and the unused
+`services/hermes/dashboard/graph-3d.js` build can go once the Docker images stop
+copying its folder.
 
 </current>
 
