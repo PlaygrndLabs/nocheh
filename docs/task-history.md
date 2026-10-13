@@ -2795,3 +2795,18 @@ operating installation's CLIProxyAPI were removed
 ([ADR-0142](adr/0142-external-providers-only.md)).
 
 </entry>
+
+
+<entry date="2026-10-12" area="Dashboard redesign">
+
+The owner found the dashboard unclear and accepted a five-step
+[redesign plan](dashboard-redesign-plan.md): TypeScript groundwork with one API
+client and a browser test of every page; eight pages (Home, Inbox, Chats &
+access, Memory, Archive, Projects, System, Settings) with tabs in the address and
+old page names redirected; Chats & access as the one memory-access hub; Settings
+tabs with one review/save/apply bar; and a phone pass. The relationships and
+memory access UI separated Explore, Review requests and Shared memory with a
+list-first explorer and optional map. Both were superseded on October 13 by the
+from-scratch rebuild ([ADR-0145](adr/0145-rebuilt-owner-dashboard.md)).
+
+</entry>
