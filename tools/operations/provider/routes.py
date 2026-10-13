@@ -38,6 +38,9 @@ DEFAULTS = {
 }
 KEY_SETTINGS = {'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'NOCHEH_PROVIDER_KEYS'}
 MAX_CUSTOM = 10
+# A hosted gateway that sleeps when idle answers its first request only once it has
+# woken up, so a model list waits as long as the secret check's model call does.
+LIST_TIMEOUT = 90
 ID = re.compile(r'[a-z0-9][a-z0-9-]{0,31}')
 MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}')
 
@@ -230,7 +233,7 @@ def list_models(values, provider, opener=None, url=None, secret=None):
     opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies()))
     try:
         request = urllib.request.Request(url + '/models', headers=headers)
-        with opener.open(request, timeout=15) as response:
+        with opener.open(request, timeout=LIST_TIMEOUT) as response:
             body = json.loads(response.read(2 * 1024 * 1024 + 1))
     except urllib.error.HTTPError as error:
         error.close()
