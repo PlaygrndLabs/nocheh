@@ -5,7 +5,7 @@
  * message are offered, never hidden implicitly.
  */
 import {useState} from 'react';
-import {Eye, EyeOff} from 'lucide-react';
+import {Eye, EyeOff, Undo2} from 'lucide-react';
 import {useResource, refreshResources} from '../../lib/resource';
 import {fullTime} from '../../lib/messages-format';
 import {Badge, Button, Details, LoadError, Notice, Skeleton} from '../../ui/core';
@@ -52,20 +52,8 @@ export function HideControl({id}: {id: string}) {
     return done;
   }
 
+  // Hiding is reversible, so it takes one click; Undo brings the message back.
   async function hide() {
-    const ok = await feedback.confirm({
-      title: 'Hide this message from the assistant?',
-      body: (
-        <>
-          The assistant stops using it in replies and learning. The original stays here, and a reply already sent in
-          Telegram is not recalled. You can bring it back at any time.
-          {selected.length > 0 && <> {plural(selected.length)} you selected will be hidden too.</>}
-        </>
-      ),
-      confirm: selected.length ? `Hide message and ${plural(selected.length)}` : 'Hide message',
-      danger: true,
-    });
-    if (!ok) return;
     const result = await command.run('toggle', path, {retired: true, expected_revision: state.revision});
     if (!result) return;
     const replies = selected.length ? await hideReplies() : 0;
@@ -106,7 +94,7 @@ export function HideControl({id}: {id: string}) {
               disabled={!!command.busy}
               onClick={() => void bringBack()}
             >
-              Bring back
+              <Undo2 aria-hidden /> Undo hiding
             </Button>
           ) : (
             <Button
@@ -125,7 +113,7 @@ export function HideControl({id}: {id: string}) {
       <p className="text-[13px] text-muted">
         {state.retired
           ? 'The assistant won’t use this message or its edits in replies or learning. The original is still kept.'
-          : 'Hiding never deletes the original or recalls a reply already sent in Telegram.'}
+          : 'Hiding never deletes the original or recalls a reply already sent in Telegram. You can undo it.'}
       </p>
 
       {offered.length > 0 && (

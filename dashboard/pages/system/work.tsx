@@ -57,24 +57,37 @@ export function WorkView() {
   const status = useParam('status') ?? '';
   const reasons: any[] = Array.isArray(health?.waiting_reasons) ? health.waiting_reasons : [];
   const show = (value: number) => (counts.available ? count(value) : '—');
+  const rows: {family: string; state: string; count: number}[] = counts.available ? health.counts : [];
+  const denied = rows.filter(row => row.state === 'denied').reduce((n, row) => n + row.count, 0);
+  const waitingByFamily = Object.entries(
+    rows
+      .filter(row => row.state === 'queued' || row.state === 'waiting')
+      .reduce<Record<string, number>>((all, row) => ({...all, [row.family]: (all[row.family] ?? 0) + row.count}), {}),
+  ).sort((a, b) => b[1] - a[1]);
+  const backlog: number | null = typeof health?.outbox?.pending === 'number' ? health.outbox.pending : null;
   return (
     <>
       {monitoring.error && !monitoring.data && <LoadError what="background work" />}
+      {monitoring.error && monitoring.data && (
+        <Notice tone="warn" title="These numbers may be out of date">
+          The latest check didn’t answer, so this shows the last known state.
+        </Notice>
+      )}
       {monitoring.data && !counts.available && (
         <Notice tone="warn" title="Background work couldn’t be checked">
           Counts and failures are unknown right now. They will appear when the scheduler answers.
         </Notice>
       )}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {!monitoring.data ? (
-          [0, 1, 2, 3].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)
+          [0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)
         ) : (
           <>
             <Stat label="Running" value={show(counts.running)} hint="Working on it now" />
             <Stat
               label="Waiting"
               value={show(counts.queued + counts.waiting)}
-              hint={`${count(counts.queued)} queued to start`}
+              hint={`${count(counts.queued)} queued · ${count(counts.waiting)} waiting on something`}
               tone={counts.waiting ? 'warn' : undefined}
             />
             <Stat
@@ -93,9 +106,20 @@ export function WorkView() {
               hint={team.total ? `${team.connected} of ${team.total} workers connected` : 'No workers registered'}
               tone={team.connected < team.total ? 'warn' : undefined}
             />
+            <Stat
+              label="Backlog"
+              value={backlog === null ? '—' : count(backlog)}
+              hint={backlog === null ? 'Couldn’t be checked' : 'Not yet handed to the scheduler'}
+              tone={backlog ? 'warn' : undefined}
+            />
           </>
         )}
       </div>
+      {counts.available && denied > 0 && (
+        <p className="text-[13px] text-muted">
+          {count(denied)} {denied === 1 ? 'task was' : 'tasks were'} denied or refused. They are closed, not failed.
+        </p>
+      )}
 
       {counts.queued + counts.waiting > 0 && reasons.length > 0 && (
         <Card>
@@ -105,14 +129,27 @@ export function WorkView() {
               health?.oldest_waiting ? `Oldest has waited since ${dateTime(health.oldest_waiting)}.` : undefined
             }
           />
-          <ul className="mt-2 pb-2">
-            {reasons.slice(0, 5).map((row, index) => (
-              <li key={index} className="flex justify-between gap-3 border-t border-line px-5 py-2 text-sm">
-                <span>{waitingReason(row)}</span>
-                <span className="tabular font-medium">{count(row.count)}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-2 grid sm:grid-cols-2">
+            <ul aria-label="By reason" className="pb-2">
+              {reasons.slice(0, 5).map((row, index) => (
+                <li key={index} className="flex justify-between gap-3 border-t border-line px-5 py-2 text-sm">
+                  <span>{waitingReason(row)}</span>
+                  <span className="tabular font-medium">{count(row.count)}</span>
+                </li>
+              ))}
+            </ul>
+            <ul aria-label="By kind of work" className="pb-2 sm:border-l sm:border-line">
+              {waitingByFamily.slice(0, 5).map(([family, value]) => (
+                <li key={family} className="flex justify-between gap-3 border-t border-line px-5 py-2 text-sm">
+                  <span>{familyName(family)}</span>
+                  <span className="tabular font-medium">{count(value)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <p className="border-t border-line px-5 py-3 text-xs text-muted">
+            These count tasks, not messages: one message can start several tasks.
+          </p>
         </Card>
       )}
 

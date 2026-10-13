@@ -44,6 +44,9 @@ type Budget = {
   estimated_embedding_cost_usd: number;
   embedding_tokens: number;
   embedding_requests: number;
+  embedding_unreported_requests?: number;
+  released_error_holds_usd?: number;
+  legacy_error_exposure_unverified_usd?: number;
   reasoning_requests: number;
   reasoning_request_limit: number;
   reasoning_remaining_requests: number;
@@ -197,21 +200,21 @@ function StatusCard({
 
         <div className="space-y-3 rounded-xl bg-subtle/60 p-4">
           {!attached && (
-            <fieldset className="space-y-2">
+            <fieldset className="space-y-0.5">
               <legend className="mb-1 text-[13px] font-medium">When connecting</legend>
-              <label className="flex items-start gap-2 text-sm">
+              <label className="-mx-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-subtle">
                 <input
                   type="checkbox"
-                  className="mt-0.5 size-4 accent-accent"
+                  className="size-4 shrink-0 accent-accent"
                   checked={history}
                   onChange={event => setHistory(event.target.checked)}
                 />
                 <span>Include older history you already agreed to share</span>
               </label>
-              <label className="flex items-start gap-2 text-sm">
+              <label className="-mx-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-subtle">
                 <input
                   type="checkbox"
-                  className="mt-0.5 size-4 accent-accent"
+                  className="size-4 shrink-0 accent-accent"
                   checked={catchUp}
                   onChange={event => setCatchUp(event.target.checked)}
                 />
@@ -332,8 +335,25 @@ function BudgetCard({editable}: {editable: boolean}) {
                 )}
                 <p className="text-xs text-muted">
                   Estimated cost so far: {usd(data.estimated_embedding_cost_usd)} for{' '}
-                  {data.embedding_requests.toLocaleString()} searches. This is an estimate, not your provider’s bill.
+                  {data.embedding_requests.toLocaleString()} searches ({data.embedding_tokens.toLocaleString()} tokens
+                  reported). This is an estimate, not your provider’s bill.
                 </p>
+                {!!data.embedding_unreported_requests && (
+                  <p className="text-xs text-warn">
+                    {data.embedding_unreported_requests.toLocaleString()}{' '}
+                    {data.embedding_unreported_requests === 1 ? 'search came' : 'searches came'} back without a usage
+                    report, so each still counts its full reserved amount.
+                  </p>
+                )}
+                {(!!data.released_error_holds_usd || !!data.legacy_error_exposure_unverified_usd) && (
+                  <p className="text-xs text-muted">
+                    {usd(data.released_error_holds_usd ?? 0)} reserved for failed searches was given back this month
+                    {data.legacy_error_exposure_unverified_usd
+                      ? `; ${usd(data.legacy_error_exposure_unverified_usd)} of older failures can’t be checked and isn’t counted as spending`
+                      : ''}
+                    .
+                  </p>
+                )}
               </div>
               {data.mode === 'monthly' && editable ? (
                 <LimitForm budget={data} />

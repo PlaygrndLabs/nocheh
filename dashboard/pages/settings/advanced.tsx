@@ -40,7 +40,16 @@ export function AdvancedSettings() {
                   <Unsaved show={s.changed(key)} />
                 </>
               }
-              description={settingLabels[key] ? <code className="text-xs">{key}</code> : undefined}
+              description={
+                settingLabels[key] || (field.secret && field.configured) ? (
+                  <>
+                    {settingLabels[key] && <code className="text-xs">{key}</code>}
+                    {field.secret && field.configured && (
+                      <span className="block">A value is saved. Leave it blank to keep it.</span>
+                    )}
+                  </>
+                ) : undefined
+              }
             >
               {['true', 'false'].includes(s.saved(key)) ? (
                 <div className="flex sm:justify-end">
@@ -58,7 +67,7 @@ export function AdvancedSettings() {
                   type={field.secret ? 'password' : 'text'}
                   autoComplete="off"
                   value={s.value(key)}
-                  placeholder={field.secret && field.configured ? '••••••••' : ''}
+                  placeholder={field.secret && field.configured ? '****' : ''}
                   disabled={s.busy}
                   onChange={e => s.set(key, e.target.value)}
                 />

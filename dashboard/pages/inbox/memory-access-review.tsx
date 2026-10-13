@@ -131,7 +131,8 @@ export function MemoryAccessReview({
             <p className="text-xs text-muted">
               {mode === 'one_time'
                 ? 'Used for one reply in this chat, then it ends.'
-                : 'This chat can use it again until you revoke it under Chats.'}
+                : 'This chat can use it again until you revoke it under Chats.'}{' '}
+              If this chat’s settings allow it, Nocheh posts its follow-up there right after you approve.
             </p>
           </div>
         </>

@@ -463,7 +463,7 @@ function ProviderDialog({
               autoComplete="off"
               className="pl-9"
               value={key}
-              placeholder={savedKey && !addressChanged ? '••••••••' : 'Paste the key'}
+              placeholder={savedKey && !addressChanged ? '****' : 'Paste the key'}
               onChange={e => setKey(e.target.value)}
               autoFocus={!custom}
             />

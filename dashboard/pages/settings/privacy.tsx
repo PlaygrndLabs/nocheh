@@ -8,7 +8,7 @@ export const privacyKeys = [
   'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS',
 ];
 
-const presets = ['0', '30', '90', '180', '365'];
+const presets = ['0', '14', '30', '90', '180', '365'];
 
 /** Days to keep something; 0 keeps it forever. */
 function Retention({setting, label}: {setting: string; label: string}) {
@@ -25,6 +25,7 @@ function Retention({setting, label}: {setting: string; label: string}) {
         onChange={e => s.set(setting, e.target.value === 'custom' ? '60' : e.target.value)}
       >
         <option value="0">Forever</option>
+        <option value="14">2 weeks</option>
         <option value="30">30 days</option>
         <option value="90">90 days</option>
         <option value="180">6 months</option>
