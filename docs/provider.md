@@ -9,8 +9,7 @@ to a provider chosen in Settings › Models
 
 - **OpenAI**: `https://api.openai.com/v1` with `OPENAI_API_KEY`.
 - **Anthropic**: `https://api.anthropic.com/v1` with `ANTHROPIC_API_KEY`.
-- **Custom**: any OpenAI-compatible HTTPS provider, such as a hosted sub2api
-  gateway. It needs a short id, a name, its address (usually ending in `/v1`)
+- **Custom**: any OpenAI-compatible HTTPS provider. It needs a short id, a name, its address (usually ending in `/v1`)
   and its API key. Custom providers are saved in `NOCHEH_PROVIDERS`; their keys
   in `NOCHEH_PROVIDER_KEYS`. Addresses must be `https://` without a password or
   query.

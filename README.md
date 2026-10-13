@@ -69,7 +69,7 @@ Configuration is in the ignored root `.env`; `.env.example` documents its fields
 Bootstrap generates missing internal passwords and creates writable state under
 ignored `data/local/`. A new installation starts without a model: add a provider
 in Settings › Models (an OpenAI or Anthropic API key, or a custom OpenAI-compatible
-HTTPS provider such as a hosted sub2api) and choose the default model. Until then
+HTTPS provider) and choose the default model. Until then
 replies and memory work wait with `provider_not_configured`. Optional Honcho
 activation additionally requires a dedicated embeddings credential, capped at $5
 for the pilot and then $5 per month. No local models are used.

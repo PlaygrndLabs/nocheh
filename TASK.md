@@ -669,7 +669,7 @@ applies sub2api on Cloudflare (or adds an API key), adds it in Settings and
 applies; then a live reply, memory answer and secret check through it; whether
 and how voice transcription returns is the owner's decision. An existing
 installation keeps its old `data/local/provider/` folder (the CPA logins);
-reset refuses it as an unknown path until the owner deletes it. Honcho's structured output through
+reset refuses it as an unknown path until the owner deletes it. Its Honcho `meter.env` still names the old CPA address, so the memory gateway refuses to start until Apply in Settings › Models rewrites it. Owner, October 13: "dont point to sub2api in code." Dashboard text, placeholders, examples and test fixtures name no specific custom provider. Honcho's structured output through
 Anthropic's OpenAI-compatible endpoint is unproven. Moving Nocheh itself to an
 always-on server is a separate, unstarted step.
 Usage tracker (October 13, owner: "we need to have our own tracker ... everything
