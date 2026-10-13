@@ -225,7 +225,8 @@ def list_models(values, provider, opener=None, url=None, secret=None):
     # Anthropic lists models with its own key header; the others use a bearer key.
     headers = ({'x-api-key': secret, 'anthropic-version': '2023-06-01'} if kind == 'anthropic'
                else {'Authorization': 'Bearer ' + secret})
-    headers['Accept'] = 'application/json'
+    # Some hosted gateways refuse Python's default client name.
+    headers.update({'Accept': 'application/json', 'User-Agent': 'Nocheh'})
     opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies()))
     try:
         request = urllib.request.Request(url + '/models', headers=headers)
