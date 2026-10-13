@@ -27,7 +27,7 @@ import {useInboxCount} from './lib/inbox';
 import {cn} from './lib/utils';
 import {Button, Dot, Spinner, type Tone} from './ui/core';
 import {FeedbackProvider} from './ui/overlay';
-import {SaveBar} from './ui/save-bar';
+import {SaveWatcher} from './ui/save-bar';
 
 type NavItem = {id: PageId; title: string; Icon: React.ComponentType<{className?: string}>};
 const nav: NavItem[] = [
@@ -292,9 +292,7 @@ function App() {
           >
             <Current key={page} />
           </React.Suspense>
-          <div className="pointer-events-none sticky bottom-0 z-30 mx-auto w-full max-w-6xl px-4 sm:px-8">
-            <SaveBar />
-          </div>
+          <SaveWatcher />
         </main>
       </div>
     </div>
