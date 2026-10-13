@@ -35,7 +35,7 @@ const conversationOrderWaitMs=120000;
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
 const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed']);
+  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured']);
 type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
 type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
 
@@ -113,7 +113,9 @@ export class TelegramDispatchRepository {
   }
   private observation(row:any):Observation {
     const states:Record<string,Observation['state']>={pending:'waiting',running:'running',done:'completed',failed:'retryable_failed',ambiguous:'ambiguous',suppressed:'skipped',cancelled:'cancelled'};
-    return observation(states[row.state]!,row.runtime_stage,row.attempts,row.next_attempt.getTime(),row.state==='running'?'receipt_pending':row.state==='failed'?'runtime_unavailable':row.state==='pending'?'prerequisite':null);
+    return observation(states[row.state]!,row.runtime_stage,row.attempts,row.next_attempt.getTime(),row.state==='running'?'receipt_pending':row.state==='failed'?
+      // No model provider is chosen yet: the reply waits and retries after Settings › Models is applied.
+      (row.error_code==='provider_not_configured'?'provider_not_configured':'runtime_unavailable'):row.state==='pending'?'prerequisite':null);
   }
   private async row(id:string) {return (await this.control.query('SELECT * FROM dispatches WHERE event_id=$1',[id])).rows[0];}
   private async storeResult(row:any,response:Record<string,unknown>) {

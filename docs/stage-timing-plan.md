@@ -60,7 +60,7 @@ unmeasured, never as zero; no content or credentials are recorded.
 | Capture → archive | `events.received_at`, spool timestamps | Record start and end as `internal` |
 | Outbox → Inngest | `workflow_outbox.created_at` / `published_at` | Derive as `internal`; stop overwriting `published_at` on republish so the first value survives |
 | Inngest queue and steps | `workflow_registry`, Inngest history | Record step start/end in `advanceWorkflow` (`src/workflows/engine.ts:9-56`); queue wait = step start − request time, as `workflow` |
-| Transcription | none | Time the speech call in `services/hermes/transcription.py` as `third_party` |
+| Transcription | none | Removed with voice transcription ([ADR-0142](adr/0142-external-providers-only.md)); voice notes record only a status |
 | Hermes phases | `services/hermes/timing.py`, already in the dispatch result | Keep them: `storeResult` (`src/stores/telegram-dispatch.ts:92`) currently drops them |
 | Honcho context and recall | Hermes `memory_recall` phase; Honcho meter `calls.duration_ms` | Time Nocheh's Honcho HTTP calls per event as `third_party` |
 | Embeddings | Honcho meter SQLite, not event-bound | Tag meter rows with the event when the call is bound to one |

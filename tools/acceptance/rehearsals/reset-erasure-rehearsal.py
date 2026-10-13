@@ -3,7 +3,6 @@ import argparse
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import uuid
@@ -11,7 +10,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.operations.installation import configuration
-from tools.acceptance import reset_accounting
 from tools.acceptance import reset_erasure
 from tools.acceptance import reset_inventory
 from tools.acceptance import reset_ownership
@@ -44,33 +42,17 @@ def output(arguments, environment=None):
     return subprocess.check_output(arguments, env=environment, text=True, stderr=subprocess.DEVNULL)
 
 
-def seed_accounting(path):
-    schema = (Path(__file__).resolve().parents[3] / 'test/fixtures/acceptance/cpamp-reset-schema.sql').read_text()
-    with sqlite3.connect(path) as db:
-        db.executescript(schema); reset_accounting.schema(db)
-        db.execute('''INSERT INTO usage_events(event_hash,timestamp_ms,timestamp,model,provider,executor_type,
-            input_tokens,output_tokens,total_tokens,cache_input_mode,normalized_uncached_input_tokens,
-            normalized_total_input_tokens,normalized_cache_read_tokens,normalized_cache_creation_tokens,
-            fail_body,fail_summary,response_metadata_json,raw_json,created_at_ms)
-            VALUES(?,1789680000000,'2026-09-18T00:00:00Z','fixture-model','openai','codex',410,80,490,
-            'included_in_input',410,410,0,0,?,?,?,?,1789680000000)''',
-            ('synthetic-erasure-event', MARKER, MARKER, json.dumps({'private': MARKER}), json.dumps({'private': MARKER})))
-        db.execute("INSERT INTO settings(key,value,updated_at_ms) VALUES('saved','yes',1789680000000)")
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True); parser.add_argument('--management-image', required=True)
     args = parser.parse_args(); directory = args.directory.resolve(); directory.mkdir(mode=0o700, exist_ok=False)
     state, memory = directory / 'state', directory / 'memory'; state.mkdir(); memory.mkdir()
-    for relative in ('files', 'spool', 'workflows/redis', 'admin/reset', 'admin/tools', 'hermes/profiles',
-                     'provider/auth', 'provider/monitor'):
+    for relative in ('files', 'spool', 'workflows/redis', 'admin/reset', 'admin/tools', 'hermes/profiles'):
         (state / relative).mkdir(parents=True)
     (state / 'files/original').write_text(MARKER); (state / 'spool/observation').write_text(MARKER)
     (state / 'workflows/redis/appendonly.aof').write_text(MARKER)
     (state / 'hermes/auth.json').write_text('SYNTHETIC_LOGIN_RETAINED')
-    (state / 'provider/auth/token').write_text('SYNTHETIC_CREDENTIAL_RETAINED')
-    seed_accounting(state / 'provider/monitor/usage.sqlite')
+    (state / 'secrets').mkdir(); (state / 'secrets/token').write_text('SYNTHETIC_CREDENTIAL_RETAINED')
     (memory / 'ledger').mkdir(); (memory / 'ledger/spend').write_text('SYNTHETIC_SPENDING_RETAINED')
     (memory / 'honcho.env').write_text('SYNTHETIC_HONCHO_SETUP_RETAINED')
     values = dict(configuration.DEFAULTS)
@@ -153,7 +135,7 @@ def main():
         assert not any(Path(path).exists() for path in (state / 'files', state / 'workflows/redis'))
         assert not (state / 'spool/observation').exists() and (state / 'spool/.restore-inactive').is_file()
         assert (state / 'hermes/auth.json').read_text() == 'SYNTHETIC_LOGIN_RETAINED'
-        assert (state / 'provider/auth/token').read_text() == 'SYNTHETIC_CREDENTIAL_RETAINED'
+        assert (state / 'secrets/token').read_text() == 'SYNTHETIC_CREDENTIAL_RETAINED'
         assert (memory / 'ledger/spend').read_text() == 'SYNTHETIC_SPENDING_RETAINED'
         assert all(subprocess.run(['docker', 'inspect', identifier], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode for identifier in identifiers)
         assert all(subprocess.run(['docker', 'volume', 'inspect', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode for name in expected_volume_names)

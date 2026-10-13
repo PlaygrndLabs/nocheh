@@ -185,7 +185,7 @@ the retirement gate remains pending after an inconclusive source test. [Decision
 | Group silence | Passed; rerun required | Captured note, completed intentional-silence decision, zero linked replies. Rerun because group replies now require addressing ([ADR-0133](adr/0133-group-replies-when-addressed.md)): an unaddressed note closes as not addressed without a turn. | Group response policy or dispatch changes. |
 | Group replies when addressed | Pending | Not yet run live. Needs an ordinary group message that addresses nobody (no reply, dispatch closed as not addressed) and one that replies to Nocheh or names it (one reply). | Group addressing, bot identity, or dispatch changes. |
 | Private/group isolation | Passed | Group answer and 336 runtime contexts omitted the private phrase and source. | Scope, retrieval, sharing, or guard changes. |
-| Voice | Passed with retry caveat | Original audio bytes/hash, separate subscription transcript, one source-linked reply. Delivery took five attempts before the tool-policy fix. | Speech route, audio capture/storage, transcript provenance, or voice dispatch changes. |
+| Voice | Passed with retry caveat; rerun required | Original audio bytes/hash, separate subscription transcript, one source-linked reply. Delivery took five attempts before the tool-policy fix. | Speech route, audio capture/storage, transcript provenance, or voice dispatch changes. Rerun because voice transcription was removed ([ADR-0142](adr/0142-external-providers-only.md)): a voice note now keeps its audio and an extraction status and must not hold a reply. |
 | Exact owner approval | Passed | Exact destination and text approved; one delivery; replay did not send again. | Approval authority, action identity, or delivery/replay changes. |
 | Archive retirement and Undo | Passed | Original retained; later answer/context excluded retired content; Undo restored eligibility. Separate source retired before delivery stayed cancelled with zero replies. | Retirement/access rules, archive revisions, or cancellation changes. |
 | Private recall and owner correction | Passed | Correct private recall; owner-authored learned revisions; completed Honcho projection; one correct owner-confirmed answer after correction. | Learning, correction, projection, or recall changes. |
@@ -280,6 +280,10 @@ refresh metadata and later successful chat support current provider operation;
 expiry was not deliberately forced. Twenty-one provider failure/quota checks
 passed in the pinned native fixture. Historical voice evidence remains applicable
 because speech source, dependencies, and refresh ownership are unchanged.
+[ADR-0142](adr/0142-external-providers-only.md) later removed the subscription
+provider, its refresh ownership and voice transcription. The provider and voice
+evidence above is historical; provider checks need a rerun against a Settings ›
+Models provider.
 
 The October 2 dashboard shutdown repair was reproduced with a partial HTTP
 request and verified with four focused shutdown/maintenance checks. Disconnected

@@ -43,7 +43,9 @@ class ProfileConfigurationTests(unittest.TestCase):
             saved = read(path)
             self.assertEqual(saved['display']['skin'], 'personal')
             self.assertEqual(saved['agent']['reasoning_effort'], 'high')
-            self.assertEqual(saved['model']['provider'], 'openai-codex')
+            self.assertEqual(saved['model']['provider'], 'openai')
+            # Voice notes are archived; native Hermes never transcribes them.
+            self.assertEqual(saved['stt'], {'enabled': False})
             self.assertEqual(saved['plugins']['enabled'], ['nocheh'])
             self.assertEqual(saved['memory']['provider'], '')
             self.assertEqual(saved['fallback_models'], [])

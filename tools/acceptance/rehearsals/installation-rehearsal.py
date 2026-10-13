@@ -22,6 +22,11 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.operations.installation.configuration import initialize, write_env, compose_command, compose_environment
 
+# The deterministic model service, configured as an ordinary custom provider.
+# Routes accept this plain-HTTP address only inside an installation fixture.
+FIXTURE_MODEL_URL = 'http://model-fixture:8317/v1'
+FIXTURE_PROVIDER = 'model-fixture'
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -37,6 +42,7 @@ def main():
     args = parser.parse_args()
     if args.prepare_only:
         args.keep = True
+    os.environ['NOCHEH_INSTALLATION_FIXTURE'] = '1'
     root = Path(__file__).resolve().parents[3]
     directory = args.directory.resolve()
     if args.preview_port:
@@ -58,7 +64,9 @@ def main():
         NOCHEH_HONCHO_STATE_DIR=str(state / 'honcho'), NOCHEH_MEMORY_TOKEN=token,
         NOCHEH_HONCHO_DATABASE_VOLUME=project + '_honcho_database', NOCHEH_HONCHO_REDIS_VOLUME=project + '_honcho_redis',
         COMPOSE_PROJECT_NAME=project, NOCHEH_AGENT_NETWORK=project + '-agent', NOCHEH_MEMORY_NETWORK=project + '-memory',
-        TELEGRAM_OWNER_ID='123', TELEGRAM_GROUP_IDS='-10042,-10043', TELEGRAM_ENABLED='false', NOCHEH_PORT='18990')
+        TELEGRAM_OWNER_ID='123', TELEGRAM_GROUP_IDS='-10042,-10043', TELEGRAM_ENABLED='false', NOCHEH_PORT='18990',
+        NOCHEH_PROVIDER=FIXTURE_PROVIDER, NOCHEH_PROVIDER_KEYS=json.dumps({FIXTURE_PROVIDER: 'synthetic-fixture-model-key'}),
+        NOCHEH_PROVIDERS=json.dumps([{'id': FIXTURE_PROVIDER, 'name': 'Model fixture', 'url': FIXTURE_MODEL_URL}]))
     if args.preview_port:
         config['NOCHEH_DASHBOARD_PORT'] = str(args.preview_port)
     write_env(state / '.env', config)
@@ -111,7 +119,7 @@ def main():
             owned.append(volume)
         rendered = json.loads(subprocess.check_output(compose_command(state, project) + ['config', '--format', 'json'], env=env, text=True))
         selected = {'nocheh-db', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
-            'hermes', 'hermes-agent-sb', 'chatgpt-speech', 'cliproxy-api', 'honcho-postgres', 'honcho-redis',
+            'hermes', 'hermes-agent-sb', 'honcho-postgres', 'honcho-redis',
             'honcho-api', 'honcho-deriver', 'honcho-provider-gateway', 'nocheh-dashboard', 'nocheh-executor'}
         rendered['services'] = {name: value for name, value in rendered['services'].items() if name in selected}
         for network in rendered['networks'].values():
@@ -121,6 +129,8 @@ def main():
             service.pop('ports', None)
             service.pop('profiles', None)
             service['restart'] = 'no'
+            if name in ('nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb', 'nocheh-dashboard', 'nocheh-executor'):
+                service['environment']['NOCHEH_INSTALLATION_FIXTURE'] = '1'
             if name in ('nocheh-app', 'nocheh-security'):
                 service['image'] = images['services']
                 service['entrypoint'] = []
@@ -136,7 +146,7 @@ def main():
                 service['environment']['NOCHEH_INSTALLATION_ROOT'] = str(installation)
                 service['volumes'] = [mount for mount in service['volumes'] if mount.get('source') != str(root)]
                 service['volumes'].append({'type': 'bind', 'source': str(installation), 'target': str(installation), 'read_only': True})
-            if name in ('hermes', 'hermes-agent-sb', 'chatgpt-speech'):
+            if name in ('hermes', 'hermes-agent-sb'):
                 service['image'] = images['native']
             if name == 'hermes-agent-sb':
                 service['environment']['NOCHEH_TURN_IMAGE'] = images['native']
@@ -146,11 +156,13 @@ def main():
                 service['command'] = ['postgres', '-c', 'shared_buffers=32MB', '-c', 'max_connections=80',
                                       '-c', 'cluster_name=nocheh-installation-fixture']
                 service['mem_limit'] = '512m'
-        mock = rendered['services']['cliproxy-api']
-        mock.update(image=images['honcho'], user='0:0', entrypoint=['/app/.venv/bin/python'],
-            command=['/fixture/provider.py', 'provider'], environment={'NOCHEH_INSTALLATION_FIXTURE': '1', 'PYTHONPATH': '/app'},
-            volumes=[{'type': 'bind', 'source': str(root / 'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True}],
-            healthcheck={'test': ['CMD', '/app/.venv/bin/python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8317/healthz')"], 'interval': '3s', 'retries': 30})
+        rendered['services']['model-fixture'] = {'image': images['honcho'], 'user': '0:0', 'init': True, 'restart': 'no',
+            'read_only': True, 'tmpfs': ['/tmp'], 'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'],
+            'entrypoint': ['/app/.venv/bin/python'], 'command': ['/fixture/provider.py', 'provider'],
+            'environment': {'NOCHEH_INSTALLATION_FIXTURE': '1', 'PYTHONPATH': '/app'},
+            'networks': {'default': None, 'memory': None},
+            'volumes': [{'type': 'bind', 'source': str(root / 'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True}],
+            'healthcheck': {'test': ['CMD', '/app/.venv/bin/python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8317/healthz')"], 'interval': '3s', 'retries': 30}}
         meter = rendered['services']['honcho-provider-gateway']
         meter['command'] = ['python', '/fixture/provider.py', 'meter']
         meter['environment']['NOCHEH_INSTALLATION_FIXTURE'] = '1'
@@ -310,7 +322,7 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
     wait('outage_capture_recovered', lambda: query('nocheh_archive', "SELECT count(*) FROM events WHERE id='" + pending['id'] + "'") == '1')
     wait('outage_handoff_recovered', lambda: query('nocheh_control', "SELECT count(*) FROM source_intakes WHERE event_id='" + pending['id'] + "' AND state='ready'") == '1')
     wait('outage_memory_recovered', lambda: query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE source_reference->>'id'='" + pending['id'] + "' AND state='done'") != '0', 300)
-    stats = http('/fixture/stats', service='cliproxy-api', port=8317)
+    stats = http('/fixture/stats', service='model-fixture', port=8317)
     assert stats['detector'] > 0 and stats['learning'] > 0 and stats['embeddings'] > 0 and stats['raw_canary_outside_detector'] == 0
     report = {'passed': True, 'project': project, 'images': images, 'provider': 'deterministic-fixture',
         'live_acceptance': False, 'external_provider_calls': 0, 'live_state_changed': False, 'stats': stats, 'gates': gates,

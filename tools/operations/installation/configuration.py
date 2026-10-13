@@ -6,14 +6,14 @@ import re
 import secrets
 from pathlib import Path
 from tools.operations.provider.embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
+from tools.operations.provider import routes as provider_routes
 
 ROOT = REPO_ROOT
 INSTALLATION_ROOT = Path(os.environ.get('NOCHEH_INSTALLATION_ROOT', ROOT)).resolve()
 DEFAULT_STATE = INSTALLATION_ROOT / 'data/local'
 DEFAULTS = {
-    'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_PROVIDER_MONITOR_PORT': '18317', 'NOCHEH_MODEL': 'claude-sonnet-5-5',
-    'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_REASONING_ROUTE': 'shared', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
-    'NOCHEH_GUARD_TRUSTED_ENDPOINTS': '["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]',
+    'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_MODEL': 'claude-sonnet-5-5',
+    'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}', 'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group',
     'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
@@ -26,6 +26,7 @@ DEFAULTS = {
     'NOCHEH_HONCHO_ENABLED': 'true',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
+    **provider_routes.DEFAULTS,
 }
 
 
@@ -41,12 +42,33 @@ def owns_project(state):
     return Path(state).resolve() == DEFAULT_STATE or bool(read_env(env_path(state)).get('COMPOSE_PROJECT_NAME'))
 
 
+def development_source():
+    """Where the dashboard container sees the `make dev` source checkout it runs from, if any."""
+    source=os.environ.get('NOCHEH_DEV_COMPOSE_DIR','')
+    if not source or os.environ.get('NOCHEH_CONTAINER')!='1': return None
+    source=Path(source)
+    if not source.is_absolute() or not (source/'docker-compose.dev.yml').is_file():
+        raise ValueError('development_source_unavailable')
+    return source
+
+
 def compose_command(state, project=None):
     command=['docker','compose','--env-file',str(env_path(state)),'-f',str(INSTALLATION_ROOT/'docker-compose.yml')]
+    source=development_source()
+    if source:
+        # Apply inside `make dev` keeps the source-watched services and their images,
+        # exactly as make dev started them, instead of the installed images.
+        command=['docker','compose','--env-file',str(env_path(state)),'--project-directory',str(INSTALLATION_ROOT),
+                 '-f',str(source/'docker-compose.yml'),'-f',str(source/'docker-compose.dev.yml')]
     layout=read_env(env_path(state)).get('NOCHEH_STORAGE_LAYOUT','original-only-v1')
     if layout != 'original-only-v1':raise ValueError('Invalid NOCHEH_STORAGE_LAYOUT')
     if project:command+=['-p',project]
     return command
+
+
+def compose(state):
+    """Compose command and environment for this state's project."""
+    return compose_command(state), compose_environment(state)
 
 
 def archive_url(state):
@@ -168,13 +190,9 @@ def validate(values):
     if len(names)>10 or any(len(name)>32 for name in names):raise ValueError('TELEGRAM_BOT_NAMES must be up to 10 comma-separated names of up to 32 characters')
     if values['TELEGRAM_ENABLED'] == 'true' and (not owner or not values['TELEGRAM_BOT_TOKEN']): raise ValueError('Enabling Telegram requires TELEGRAM_OWNER_ID and TELEGRAM_BOT_TOKEN')
     if values['NOCHEH_GUARD_MODE'] not in ('off', 'on'): raise ValueError('NOCHEH_GUARD_MODE must be off or on')
-    if values['NOCHEH_REASONING_ROUTE'] not in ('native', 'shared'): raise ValueError('NOCHEH_REASONING_ROUTE must be native or shared')
-    from urllib.parse import urlsplit
-    endpoints = json.loads(values['NOCHEH_GUARD_TRUSTED_ENDPOINTS'])
-    if not isinstance(endpoints, list) or any(not isinstance(v,str) or urlsplit(v).scheme not in ('http','https') or not urlsplit(v).netloc for v in endpoints): raise ValueError('Invalid trusted endpoints')
     if not values['NOCHEH_MODEL'].strip(): raise ValueError('NOCHEH_MODEL is required')
+    provider_routes.validate(values)
     if not values['NOCHEH_PORT'].isdigit() or not 1024 <= int(values['NOCHEH_PORT']) <= 65535: raise ValueError('Invalid NOCHEH_PORT')
-    if not values['NOCHEH_PROVIDER_MONITOR_PORT'].isdigit() or not 1024 <= int(values['NOCHEH_PROVIDER_MONITOR_PORT']) <= 65535: raise ValueError('Invalid NOCHEH_PROVIDER_MONITOR_PORT')
     for name in ('POSTGRES_PASSWORD', 'SERVICE_TOKEN'):
         if len(values[name]) < 24: raise ValueError(f'{name} must contain at least 24 characters')
 
@@ -195,8 +213,6 @@ def initialize(state):
     (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
     if values != existing: write_env(path, values)
     path.chmod(0o600)
-    from tools.operations.provider.provider import initialize as initialize_provider
-    initialize_provider(state)
     if values['NOCHEH_HONCHO_ENABLED']=='true':
         from tools.operations.memory.honcho_setup import initialize as initialize_honcho, runtime_init
         initialize_honcho(state)
@@ -223,4 +239,5 @@ def compose_environment(state):
     if result.get('NOCHEH_HONCHO_ENABLED')=='true' and not (Path(state)/'spool/.restore-inactive').exists():profiles.append('honcho')
     result['NOCHEH_HONCHO_STATE_DIR']=load(state).get('NOCHEH_HONCHO_STATE_DIR') or str(Path(state).resolve()/'honcho')
     result['COMPOSE_PROFILES']=','.join(profiles)
+    result.update(provider_routes.environment({**DEFAULTS,**load(state)}))
     return result

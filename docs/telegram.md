@@ -59,16 +59,16 @@ access supports isolated, approved and filtered derived sharing under ADR-0030;
 the owner DM may search the complete archive and registered native memory. Unselected
 chats and participants without a group grant cannot trigger the assistant. Bot
 senders, edits and historical replay do not trigger new replies.
-Normal group chatter can produce intentional silence. Voice transcripts are
-derived records, never replacements for original audio or message payloads.
-Round video notes follow the same transcription path. Media bytes are downloaded
+Normal group chatter can produce intentional silence. Voice, audio and round
+video notes are archived with their original bytes and an extraction status
+saying transcription is not available; they never hold a reply. Media bytes are downloaded
 by the archive worker; the assistant does not repeat native media downloads or
 run a shared sticker-description cache. Photos/documents remain available as
 archived files and captions; automatic visual interpretation is not enabled.
 
 In an ordinary bot chat, Telegram's Bot API does not report when a user deletes
 a message. A voice note that Nocheh already captured remains source evidence and
-may still be transcribed or answered after it disappears from Telegram. Sending
+may still be answered after it disappears from Telegram. Sending
 a second voice note creates a separate request; it does not cancel the first.
 The Bot API's `deleted_business_messages` update applies to connected business
 accounts, not ordinary bot chats.
@@ -111,7 +111,7 @@ delivery remains ambiguous; it is not automatically resent.
 
 ## Validation
 
-`./bin/nocheh test` exercises scope, native memory/session isolation, transcript
+`./bin/nocheh test` exercises scope, native memory/session isolation, attachment
 provenance and retry behavior, immutable action requests and owner-only approval.
 The synthetic native memory rehearsal sends no Telegram messages:
 
@@ -120,7 +120,7 @@ docker compose exec -T hermes python -m services.hermes.verify_assistant
 ```
 
 Before release, verify actual owner DM replies, selected-group replies and silence,
-group-private retrieval boundaries, voice transcript persistence, approved action
+group-private retrieval boundaries, voice note persistence, approved action
 delivery, native reconnect and restart recovery. Credentials are present; those
 remaining checks need actual Telegram traffic and saved evidence. Production
 release cannot be marked complete on offline tests alone. See

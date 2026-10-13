@@ -14,14 +14,12 @@ import os
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
-import urllib.request
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .subscription import resolve_credentials, refresh_credentials, detect_literals, DetectorContractError, reasoning_route
+from .subscription import resolve_credentials, detect_literals, DetectorContractError, ProviderNotConfigured, part_model
 
 MODEL = os.environ.get("NOCHEH_MODEL", "claude-sonnet-5-5")
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +60,6 @@ class DetectorSlots:
 
 
 DETECTOR_SLOTS = DetectorSlots(parallel('NOCHEH_PARALLEL_GUARD_CHECKS', 3, 4))
-TRANSCRIPTION_LOCK = threading.RLock()
 CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
 ASSISTANT = None
@@ -75,10 +72,10 @@ def configure():
     PROFILE_HOME.mkdir(parents=True, exist_ok=True)
     config = PROFILE_HOME / "config.yaml"
     if not config.exists():
-        provider = 'openai-codex' if reasoning_route() == 'native' else 'openai'
+        # Voice notes are archived without transcription.
         config.write_text(
-            f"model:\n  provider: {provider}\n  default: {MODEL}\n"
-            "stt:\n  enabled: true\n  provider: nocheh-subscription\n"
+            f"model:\n  provider: openai\n  default: {MODEL}\n"
+            "stt:\n  enabled: false\n"
             "plugins:\n  enabled: [nocheh]\nfallback_models: []\n"
         )
     plugin = PROFILE_HOME / "plugins/nocheh"
@@ -115,15 +112,6 @@ def chat(text: str):
         agent.close()
 
 
-def login_present():
-    if reasoning_route() == 'native':return (PROFILE_HOME/'auth.json').is_file()
-    try:
-        opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(os.environ.get('SPEECH_URL','http://chatgpt-speech:8783')+'/health',timeout=3) as response:
-            return json.load(response).get('login_present') is True
-    except Exception:return False
-
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -140,10 +128,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/health":
             return self.reply(404, {"error": "not_found"})
-        route=reasoning_route()
         return self.reply(200, {"ok": True, "service": "hermes", "model": MODEL,
-                                "login_present": login_present(), "reasoning_route":route,
-                                "refresh_owner":"cliproxy" if route=='shared' else 'hermes',
                                 "telegram": ASSISTANT.health()['state'] if ASSISTANT else 'not_started',
                                 "telegram_details": ASSISTANT.health() if ASSISTANT else {},
                                 "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable",
@@ -163,10 +148,13 @@ class Handler(BaseHTTPRequestHandler):
             # File capture and receipts must not queue behind model inference.
             # Detection can also be called by the guard during an active chat.
             lock = DETECTOR_SLOTS.slot(body.get('priority') == 'background') if self.path == '/internal/detect' else \
-                {'/internal/chat':CALL_LOCK,'/internal/transcribe':TRANSCRIPTION_LOCK}.get(self.path,contextlib.nullcontext())
+                {'/internal/chat':CALL_LOCK}.get(self.path,contextlib.nullcontext())
             with lock:
                 result = self.dispatch(body)
             self.reply(200, result)
+        except ProviderNotConfigured:
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/file') else 'unknown','kind':'provider_not_configured'})
+            self.reply(503, {'error':'provider_not_configured'})
         except DetectorContractError as error:
             ERRORS.append({'route':'/internal/detect','kind':str(error)})
             self.reply(503, {'error':'detector_contract_rejected'})
@@ -177,12 +165,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(409 if code == 'configuration_conflict' else 400, {'error': code})
             self.reply(400, {'error': 'invalid_request'})
         except (KeyError, TypeError):
-            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/transcribe','/internal/file') else 'unknown','kind':'invalid_request'})
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/file') else 'unknown','kind':'invalid_request'})
             self.reply(400, {"error": "invalid_request"})
         except Exception as error:
             status = getattr(error, "status_code", 503)
             status = status if isinstance(status, int) and status in (401, 403, 429, 503) else 503
-            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/refresh','/internal/transcribe','/internal/file') else 'unknown','kind':type(error).__name__,'status':status})
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/file') else 'unknown','kind':type(error).__name__,'status':status})
             self.reply(status, {"error": "quota_paused" if status == 429 else "subscription_unavailable",
                                 "error_type": type(error).__name__})
 
@@ -286,24 +274,15 @@ class Handler(BaseHTTPRequestHandler):
                     return {'chat_id': str(found.id), 'state': 'available', 'type': found.type, 'title': found.title,
                             'username': found.username, 'is_forum': bool(getattr(found, 'is_forum', False))}
             return asyncio.run(read_chat())
-        if self.path == "/internal/refresh":
-            return {"refreshed": refresh_credentials(), "owner": "cliproxy" if reasoning_route() == "shared" else "hermes"}
+        if self.path == "/internal/usage/price":
+            # Prices Honcho's reported memory tokens with Hermes's own pricing table; counts only, no content.
+            from services.hermes.usage import price
+            return {"costs": price(body.get("rows"))}
         if self.path in ("/internal/chat", "/internal/detect"):
             text = body["text"]
             if not isinstance(text, str) or len(text) > 100000:
                 raise ValueError("invalid_text")
-            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials(), MODEL)}
-        if self.path == "/internal/transcribe":
-            from tools.transcription_tools import transcribe_audio
-            raw = base64.b64decode(body["audio_base64"], validate=True)
-            if not raw or len(raw) > 25 * 1024 * 1024:
-                raise ValueError("invalid_audio")
-            suffix = body.get("suffix", ".ogg")
-            if suffix not in (".ogg", ".oga", ".mp3", ".wav", ".m4a", ".mp4", ".flac"):
-                raise ValueError("invalid_audio_suffix")
-            with tempfile.NamedTemporaryFile(suffix=suffix) as audio:
-                audio.write(raw); audio.flush()
-                return transcribe_audio(audio.name)
+            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials("guard"), part_model("guard"))}
         raise ValueError("unknown_route")
 
 

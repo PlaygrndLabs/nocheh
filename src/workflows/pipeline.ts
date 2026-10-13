@@ -21,7 +21,7 @@ export function pipelineOperations(pool:pg.Pool,config:Settings,call:RuntimeCall
       const before=await preparationStatus(pool,eventId);
       if(before.state==='completed'||before.next_attempt>Date.now()+200)return before;
       if(before.stage==='attachments')await fetchAttachments(pool,config.dataDir,async ref=>Buffer.from(string((await call('source.file',{file_id:ref})).bytes_base64,70*1024*1024),'base64'),eventId,authority);
-      else if(before.stage==='transcription')await prepareArchiveFiles(pool,config.dataDir,call,eventId,authority);
+      else if(before.stage==='transcription')await prepareArchiveFiles(pool,config.dataDir,eventId,authority);
       else await prepareGuarded(pool,async text=>(await call('guard.detect',{text})).literals,config.detectorVersion,20,eventId,authority);
       return preparationStatus(pool,eventId);
     },
@@ -37,9 +37,9 @@ export function pipelineOperations(pool:pg.Pool,config:Settings,call:RuntimeCall
         await dispatchCommitted(pool,config,call,eventId,authority);row=await load();
       }
       const state:WorkflowState=row.state==='done'?'completed':row.state==='suppressed'?'skipped':row.state==='ambiguous'?'ambiguous':row.state==='cancelled'?'cancelled':row.state==='failed'?'retryable_failed':row.state==='running'?'running':'waiting';
-      const waitStage:Record<string,string>={waiting_for_attachments:'attachments',waiting_for_transcription:'transcription',guard_preparation_pending:'preparation'};
+      const waitStage:Record<string,string>={waiting_for_attachments:'attachments',guard_preparation_pending:'preparation'};
       const stage=waitStage[row.error_code]??row.runtime_stage??'assistant';
-      return observation(state,stage,row.attempts,row.next_attempt?.getTime(),row.state==='running'?'receipt_pending':state==='retryable_failed'?'runtime_unavailable':state==='waiting'?'prerequisite':null);
+      return observation(state,stage,row.attempts,row.next_attempt?.getTime(),row.state==='running'?'receipt_pending':state==='retryable_failed'?(row.error_code==='provider_not_configured'?'provider_not_configured':'runtime_unavailable'):state==='waiting'?'prerequisite':null);
     },
   };
 }

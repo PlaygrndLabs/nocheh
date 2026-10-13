@@ -17,7 +17,7 @@ from pathlib import Path,PurePosixPath
 
 from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
 ROOT=INSTALLATION_ROOT
-SERVICES=['hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security','chatgpt-speech','cliproxy-monitor','cliproxy-api']
+SERVICES=['hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -78,7 +78,7 @@ def backup(state,output,leave_stopped=False):
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
     if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
-        copied_roots=[Path(state)/name for name in ('files','spool','hermes','provider','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
+        copied_roots=[Path(state)/name for name in ('files','spool','hermes','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
         if any(output.resolve().is_relative_to(root.resolve()) for root in copied_roots):
             raise ValueError('Backup destination would be included in its own snapshot')
         from tools.operations.installation.store_recovery import StoreRecovery
@@ -131,9 +131,9 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
             manifest.update(version=5,honcho=memory_snapshot(command,env,stage,sha))
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
-            for name in ('.env','files','spool','hermes','provider','admin/jobs','admin/tools/receipts','admin/dashboard/home'):
+            for name in ('.env','files','spool','hermes','admin/jobs','admin/tools/receipts','admin/dashboard/home'):
                 base=env_path(state) if name=='.env' else state/name
-                if (name=='provider' or name.startswith('admin/')) and not base.exists(): continue
+                if name.startswith('admin/') and not base.exists(): continue
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
                 for path in candidates:
                     relative='.env' if name=='.env' else path.relative_to(state).as_posix()
@@ -238,22 +238,16 @@ def restore(snapshot,state,project,port):
             destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             with tar.extractfile(member) as source,destination.open('xb') as target: shutil.copyfileobj(source,target)
             destination.chmod(0o600)
-    for directory in ('reports','files','spool','hermes','provider','secrets'): (state/directory).mkdir(exist_ok=True,mode=0o700)
-    # Retain the saved settings, but don't activate duplicate bot/OAuth owners.
+    for directory in ('reports','files','spool','hermes','secrets'): (state/directory).mkdir(exist_ok=True,mode=0o700)
+    # Retain the saved settings, but don't activate a duplicate Hermes credential owner.
     auth=state/'hermes/auth.json'
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')
-    provider_auth=state/'provider/auth'
-    if provider_auth.is_dir() and any(provider_auth.iterdir()):
-        provider_auth.rename(state/'provider/auth.restore-pending')
-    from tools.operations.provider.provider import initialize as initialize_provider
-    initialize_provider(state)
     config=initialize(state) if manifest['version']==1 else load(state)
     write_env(state/'restored.env',config)
     config.update(TELEGRAM_ENABLED='false',NOCHEH_HONCHO_ENABLED='false',NOCHEH_HONCHO_STATE_DIR=str(state/'honcho'),
                   NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
                   NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
-                  NOCHEH_PROVIDER_MONITOR_PORT=str(port+10 if port<=65525 else port-10),
-                  NOCHEH_DASHBOARD_PORT=str(port+3 if port<=65532 else port-3),NOCHEH_OAUTH_PORT=str(port+4 if port<=65531 else port-4),
+                  NOCHEH_DASHBOARD_PORT=str(port+3 if port<=65532 else port-3),
                   COMPOSE_PROJECT_NAME=project,NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
@@ -285,10 +279,10 @@ def restore(snapshot,state,project,port):
         subprocess.run(command+['exec','-T','nocheh-db','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
             "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
     if manifest['version']!=6:
-        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes','hermes-agent-sb','chatgpt-speech','cliproxy-api','cliproxy-monitor','inngest-server'],env=env,check=True)
+        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes','hermes-agent-sb','inngest-server'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
-            'telegram_enabled':False,'subscription_login_activated':False}
+            'telegram_enabled':False,'hermes_login_activated':False}
     result['honcho_attached']=False
     result['executors_active']=False
     (state/'reports/restore.json').write_text(json.dumps(result,indent=2)+'\n')
@@ -306,7 +300,7 @@ def main(command,state,rest):
             'workers':(state/'spool/.restore-inactive').exists(),
             'tools':(state/'admin/tools/inactive').exists(),
             'scheduler':(state/'hermes/scheduler-inactive').exists(),
-            'subscription_login':(state/'hermes/auth.restore-pending.json').exists() or (state/'provider/auth.restore-pending').exists(),
+            'hermes_login':(state/'hermes/auth.restore-pending.json').exists(),
         }
         config=load(state)
         port=int(config.get('NOCHEH_PORT','8780'))

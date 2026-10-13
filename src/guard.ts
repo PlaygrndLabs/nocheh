@@ -5,18 +5,9 @@ import { HttpError, object, string } from './http.js';
 export type GuardMode='off'|'on';
 export const DETECTOR_VERSION='gpt-literals-v2+patterns-v1';
 export const POLICY_VERSION='exact-spans-v1';
-export const DEFAULT_TRUSTED=['https://chatgpt.com/backend-api/codex','http://cliproxy-api:8317/v1'];
 export interface Span {start:number;end:number}
-export interface GuardPolicy {mode:GuardMode;trusted:readonly string[];detectorVersion:string}
+export interface GuardPolicy {mode:GuardMode;detectorVersion:string}
 
-export function trustedDestination(destination:string,trusted:readonly string[]):boolean {
-  const target=new URL(destination);
-  if (target.username || target.password) throw new HttpError(400,'invalid_destination');
-  return trusted.some(entry=>{
-    const base=new URL(entry),path=base.pathname.replace(/\/$/,'');
-    return target.origin===base.origin && (target.pathname===path || target.pathname.startsWith(path+'/'));
-  });
-}
 export function requiresGuard(policy:GuardPolicy,destination:string):boolean {
   if (!['off','on'].includes(policy.mode)) throw new HttpError(400,'invalid_guard_mode');
   return policy.mode==='on';

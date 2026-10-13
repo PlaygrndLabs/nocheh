@@ -68,14 +68,12 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     memory_query=text[:2000]
     waiting=body.get('untranscribed_voice')
     if type(waiting) is int and 0<waiting<=20:
-        # A later message may start before an earlier voice note's transcript exists.
+        # Voice notes are archived without transcription; their content never reaches the model.
         text += ('\n\n[Earlier in this chat, ' + ('a voice note was' if waiting==1 else str(waiting)+' voice notes were') +
-                 ' received and archived but not transcribed yet. That content is not available to you and will be answered'
-                 ' separately once transcribed. Do not say that no voice note was received or found.]')
+                 ' received and archived. Transcription is not available, so that content is not available to you.'
+                 ' Do not say that no voice note was received or found.]')
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
-    transport = credentials.runtime() if hasattr(credentials, 'runtime') else {
-        'api_key': credentials.access_token, 'base_url': 'https://chatgpt.com/backend-api/codex',
-        'provider': 'openai-codex', 'api_mode': 'codex_responses'}
+    transport = credentials.runtime()
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
                'model':model, 'memory_query':memory_query, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
@@ -96,7 +94,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             effective,_=inherited_config(profile,read(profile/'config.yaml'))
             request['preferences']=preferences(effective)
     env = {key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
-           'ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE') if key in os.environ}
+           'ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
     env.update(HERMES_HOME=str(profile), NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
     if isolated:
         from .environment import secret
@@ -130,6 +128,10 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                 result = value
             else: raise RuntimeError('assistant_output_invalid')
         await process.wait()
+        if result is not None:
+            # Nocheh's usage tracker: Hermes's own token counts and cost for this turn.
+            from .usage import part_of, record
+            await asyncio.to_thread(record, part_of(body), result.pop('usage',None), model, result.get('state')!='done')
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
         from .assistant_gateway import check_delivery_policy

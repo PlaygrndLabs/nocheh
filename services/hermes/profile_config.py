@@ -60,9 +60,11 @@ def resolved(config, model):
     for key, value in values.items():
         section, field = key.split('.')
         config.setdefault(section, {})[field] = value
-    from .subscription import reasoning_route
-    provider = 'openai-codex' if reasoning_route() == 'native' else 'openai'
+    # Every model call goes to the OpenAI-compatible provider chosen in Settings › Models.
+    provider = 'openai'
     config['model'] = {'provider': provider, 'default': model}
+    # Voice notes are archived without transcription.
+    config['stt'] = {'enabled': False}
     config['plugins'] = {'enabled': ['nocheh']}
     config['fallback_models'] = []
     config.setdefault('tools', {})['tool_search'] = {'enabled': 'off'}

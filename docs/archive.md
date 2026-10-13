@@ -28,7 +28,7 @@ local audience policy remains independent of source identity and relationships.
 Attachments keep source IDs and metadata. Downloads are retried with capped
 backoff, saved by SHA-256 under `files/`, and fsynced before their database state
 becomes `ready`. Unretrievable files remain `failed` with attempt counts and a
-next retry time. Provider transcripts and other extracted text belong in
+next retry time. Extracted text and extraction statuses belong in
 `derived_artifacts` with provenance; they never replace an original message.
 
 Outbound requests have fsynced intents and results, including original parameters
@@ -39,7 +39,7 @@ Journal records remain outside the pending spool for restart reconciliation.
 Live update events receive a dispatch record in the same database transaction.
 Native Telegram handlers reject updates unless invoked by the committed dispatch
 path. Imports, wire captures and outbound records are suppressed. The assistant
-uses committed originals and separately recorded transcripts. Archive capture,
+uses committed originals and separately recorded extracted text. Archive capture,
 attachment downloads, assistant work and approved actions have independent retry
 loops; a slow model request does not block archive ingestion or downloads. A loop
 never overlaps itself. Malformed live source messages stay archived with a visible
@@ -48,7 +48,7 @@ suppressed dispatch, allowing later work to continue.
 Committed media uses native Telegram event decoding and replies. The integration
 bypasses native duplicate downloads and sticker vision preprocessing; those paths
 would operate outside the scoped assistant process. Voice, audio and round video
-notes use the archived transcript path. Photos, stickers and documents are archived
+notes keep their original bytes and record that transcription is not available. Photos, stickers and documents are archived
 with their captions and source references; automatic image/document interpretation
 is not enabled in this release.
 

@@ -1756,7 +1756,7 @@ reaction target message IDs with update IDs; its incomplete synthetic message
 set is retired through the owner API, original evidence remains, and the runner
 uses captured update source keys. Real-model semantic review remains in progress;
 no conversational quality or live release pass is claimed.
-[Procedure](telegram-simulation.md), [relay tests](../test/test_model_relay.py).
+[Procedure](telegram-simulation.md), relay tests (removed `test/test_model_relay.py`).
 
 </entry>
 
@@ -1805,8 +1805,8 @@ Telegram reply. A Docker load average of 61.76 on eight CPUs is observed. The
 fixture alone is restarted with a 30-second health-probe interval to investigate
 resource contention, retaining its state and original response/startup deadlines.
 No conversational pass or explanation of every timeout is claimed.
-[Runner](../tools/acceptance/model_rehearsal.py),
-[causal checks](../test/test_model_rehearsal.py).
+Runner (removed `tools/acceptance/model_rehearsal.py`),
+causal checks (removed `test/test_model_rehearsal.py`).
 
 </entry>
 
@@ -1831,7 +1831,7 @@ question itself, yet foreground Honcho recall takes about 160 seconds during the
 failed turn. The fixture is stopped for diagnosis; restart recall and retirement
 remain unrun, and no complete semantic, cold-ingestion or live-release pass is
 claimed. Synthetic source identities and detailed answers remain ignored.
-[Procedure](telegram-simulation.md), [relay checks](../test/test_model_relay.py).
+[Procedure](telegram-simulation.md), relay checks (removed `test/test_model_relay.py`).
 
 </entry>
 
@@ -1859,8 +1859,8 @@ topic distinct from the seeded topic for cold-audience isolation. Four focused
 checks pass, including invalid continuation rejected before any fixture access.
 This supports the remaining topic, restart and retirement checks without
 repeating unaffected reaction and correction questions or claiming omitted cases
-were rerun. [Runner](../tools/acceptance/model_rehearsal.py),
-[checks](../test/test_model_rehearsal.py).
+were rerun. Runner (removed `tools/acceptance/model_rehearsal.py`),
+checks (removed `test/test_model_rehearsal.py`).
 
 </entry>
 
@@ -1938,8 +1938,8 @@ verification and a fresh ready-memory semantic pass remain pending. Automatic
 approval review rejected
 starting the operating provider container because the authorization to use its
 model route does not authorize changing the operating installation.
-[Procedure](telegram-simulation.md), [relay](../tools/acceptance/model_relay.py),
-[checks](../test/test_model_relay.py).
+[Procedure](telegram-simulation.md), relay (removed `tools/acceptance/model_relay.py`),
+checks (removed `test/test_model_relay.py`).
 
 </entry>
 
@@ -1988,8 +1988,8 @@ remain absent. Nine networkless checks pass, including scoped transport,
 missing route, provider HTTP rejection, generic transport failure, admission
 accounting across restart, and journal privacy. This candidate has not run in
 the coupled fixture and cannot reconstruct the outcomes of previous requests.
-[Procedure](telegram-simulation.md), [relay](../tools/acceptance/model_relay.py),
-[checks](../test/test_model_relay.py).
+[Procedure](telegram-simulation.md), relay (removed `tools/acceptance/model_relay.py`),
+checks (removed `test/test_model_relay.py`).
 
 </entry>
 
@@ -2020,7 +2020,7 @@ checks pass, including concurrent detector pacing and the existing provider
 failure/privacy cases. This is an experimental capacity diagnostic, not a
 production mitigation or an unthrottled acceptance pass. The paced coupled
 recheck is pending. [Procedure](telegram-simulation.md),
-[relay](../tools/acceptance/model_relay.py), [checks](../test/test_model_relay.py).
+relay (removed `tools/acceptance/model_relay.py`), checks (removed `test/test_model_relay.py`).
 
 </entry>
 
@@ -2040,7 +2040,7 @@ outcomes. This paced pass establishes the scenario's semantics under controlled
 model traffic, not unthrottled provider reliability or production acceptance.
 The original 503 burst's cause and a fresh cold full-quality rehearsal remain
 open. The detailed answer and receipts remain in ignored fixture state.
-[Procedure](telegram-simulation.md), [runner](../tools/acceptance/model_rehearsal.py).
+[Procedure](telegram-simulation.md), runner (removed `tools/acceptance/model_rehearsal.py`).
 
 </entry>
 
@@ -2051,8 +2051,8 @@ including their synthetic source retirement and new Telegram questions. It
 rejects an end before the selected start prior to fixture access. Six
 networkless runner checks pass. This is preparation for an unused-topic
 isolation recheck; the coupled result remains pending.
-[Runner](../tools/acceptance/model_rehearsal.py),
-[checks](../test/test_model_rehearsal.py).
+Runner (removed `tools/acceptance/model_rehearsal.py`),
+checks (removed `test/test_model_rehearsal.py`).
 
 </entry>
 
@@ -2074,8 +2074,8 @@ numeric upstream Retry-After when supplied; no upstream headers, bodies or keys
 are forwarded or logged. Eleven networkless relay checks pass. This is a
 capacity guard for synthetic evaluation; coupled confirmation and actual model
 quality remain pending. All sixteen fixture services are stopped.
-[Relay](../tools/acceptance/model_relay.py),
-[checks](../test/test_model_relay.py),
+Relay (removed `tools/acceptance/model_relay.py`),
+checks (removed `test/test_model_relay.py`),
 [procedure](telegram-simulation.md).
 
 </entry>
@@ -2092,7 +2092,7 @@ HTTP 200 outcomes and no 429. The fixture was stopped; the existing provider
 remained healthy. This focused semantic and timing pass does not erase the
 earlier topic-17 failure or exercise the new 429 cooldown in coupled traffic.
 Detailed answer and receipt identifiers remain in ignored fixture state.
-[Procedure](telegram-simulation.md), [runner](../tools/acceptance/model_rehearsal.py).
+[Procedure](telegram-simulation.md), runner (removed `tools/acceptance/model_rehearsal.py`).
 
 </entry>
 
@@ -2104,7 +2104,7 @@ begins cannot clear the shared cooldown by completing later. This holds across
 relay restarts because the content-free admission and outcome journals are
 replayed. A focused concurrency-order check passes with the other eleven relay
 checks. The coupled cooldown path still awaits an actual upstream 429.
-[Relay](../tools/acceptance/model_relay.py), [checks](../test/test_model_relay.py).
+Relay (removed `tools/acceptance/model_relay.py`), checks (removed `test/test_model_relay.py`).
 
 </entry>
 
@@ -2130,8 +2130,8 @@ with their state and receipts preserved. This is a bounded fixture cooldown
 observation, not an unthrottled reliability or production acceptance pass. The
 content-free review, original observations, queue diagnosis and model journal
 remain in ignored local acceptance state. [Procedure](telegram-simulation.md),
-[runner](../tools/acceptance/model_rehearsal.py),
-[relay](../tools/acceptance/model_relay.py).
+runner (removed `tools/acceptance/model_rehearsal.py`),
+relay (removed `tools/acceptance/model_relay.py`).
 
 </entry>
 
@@ -2245,8 +2245,8 @@ provider-throttling observations remain in their original receipts. The fixture
 is stopped with its volumes and receipts preserved, and the operating gateway
 is healthy. Operating activation, real Telegram and subscription-transcription
 release gates remain open. [Procedure](telegram-simulation.md),
-[preflight](../tools/acceptance/model_rehearsal.py),
-[focused checks](../test/test_model_rehearsal.py).
+preflight (removed `tools/acceptance/model_rehearsal.py`),
+focused checks (removed `test/test_model_rehearsal.py`).
 
 </entry>
 
@@ -2777,5 +2777,21 @@ and group isolation; Honcho had not finished its first work before those
 turns, so a later private question was added and also passed with Honcho's
 context present. Honcho spend was about $0.04 of the $5 cap. Reply time had a
 median of 88 s, mostly the Hermes run queue.
+
+</entry>
+
+
+<entry date="2026-10-13" area="Provider logins and CLIProxyAPI removed">
+
+Provider login had relayed every redirect-based CLIProxyAPI provider (Codex,
+Claude, Antigravity) through temporary host callbacks
+([ADR-0103](adr/0103-relay-every-provider-oauth-login.md)), and since October 10
+one `NOCHEH_MODEL` routed Hermes, the guard and Honcho through CLIProxyAPI's
+Claude login. On October 13 the owner chose a hosted provider gateway, asked for
+providers per part ([ADR-0141](adr/0141-per-part-model-providers.md)) and then
+to "remove CPA and it admin panel from our services". CLIProxyAPI, CPA Manager
+Plus, provider logins, the ChatGPT speech route and the real-model relay to the
+operating installation's CLIProxyAPI were removed
+([ADR-0142](adr/0142-external-providers-only.md)).
 
 </entry>

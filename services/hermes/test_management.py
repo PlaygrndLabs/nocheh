@@ -55,3 +55,24 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(updated['values']['agent.max_iterations'],4)
             with self.assertRaises(ValueError):dispatch(root,'test',policy,{**request,'revision':first['revision'],'changes':{'agent.max_iterations':5}})
             with self.assertRaises(ValueError):dispatch(root,'test',policy,{**request,'revision':updated['revision'],'changes':{'model.provider':'unsafe'}})
+
+
+class SettingsErrorRelayTests(unittest.TestCase):
+    def test_settings_validation_says_what_to_fix_and_other_errors_stay_generic(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        from tools.runtime import management
+
+        def run(operation, error):
+            out = io.StringIO()
+            stdin = type('In', (), {'buffer': io.BytesIO(json.dumps({'operation': operation}).encode())})()
+            with patch.object(management, 'dispatch', side_effect=error), patch.object(management.sys, 'stdin', stdin), redirect_stdout(out):
+                management.main()
+            return json.loads(out.getvalue())['error']
+
+        self.assertEqual(run('settings.save', ValueError('Memory (Honcho) needs a model name')), 'Memory (Honcho) needs a model name')
+        self.assertEqual(run('settings.save', ValueError('configuration_conflict')), 'configuration_conflict')
+        self.assertEqual(run('archive.view', ValueError('upstream said secret-value here')), 'ValueError')
+        self.assertEqual(run('settings.save', RuntimeError('provider body')), 'RuntimeError')
