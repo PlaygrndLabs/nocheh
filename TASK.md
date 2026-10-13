@@ -101,9 +101,10 @@ directed their full deletion: `spans`, `history` and `traces` were truncated
 with the database isolated, leaving Inngest at 70 MB and the volume at 1.6 GB.
 Nocheh stores, receipts and the workflow registry were untouched.
 Telemetry retention is now a configurable setting,
-`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, 14 days by default and checked daily
-([default decision](docs/adr/0110-default-workflow-history-retention.md)); an
-installation whose `.env` already sets `0` keeps retention off until the owner changes it.
+`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, checked daily; by owner decision it
+keeps everything by default (`0`) until the owner sets a number of days
+([default decision](docs/adr/0142-keep-history-by-default.md)); an
+installation whose `.env` already sets a number keeps it.
 [Decision](docs/adr/0106-configurable-workflow-history-retention.md),
 [daily interval](docs/adr/0107-daily-workflow-history-retention.md),
 [retention checks](test/workflow-retention.test.ts),
@@ -1005,8 +1006,8 @@ activation remains separate.
    with the next authorized operating restart, then compare span growth per day
    against the 2026-10-08 measurement in ignored
    `data/acceptance/results/inngest-storage/`. The existing telemetry was deleted on owner
-   direction. Configurable retention defaults to 14 days by
-   owner decision; the operating `.env` must be checked for an explicit `0`. The rebuilt `nocheh-db` image is needed
+   direction. Configurable retention keeps everything by default
+   by owner decision ([ADR-0142](docs/adr/0142-keep-history-by-default.md)); the operating `.env` must be checked for an explicit number. The rebuilt `nocheh-db` image is needed
    for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh, removed in source) were about six percent of
@@ -1113,10 +1114,12 @@ activation remains separate.
    `runtime_prepared_inputs`) of superseded guard epochs, which ADR-0109's
    single-workspace model changes; and spool files that fail permanently.
    Finished Hermes journals (outbound, dispatch, async-run and managed-run
-   files) now expire after one month by owner decision
+   files) can expire after an owner-set number of days
    ([decision](docs/adr/0141-hermes-delivery-log-retention.md),
-   [checks](services/hermes/test_journal_retention.py)); pending: the owner's
-   confirmation whether workflow history should also default to one month. The
+   [checks](services/hermes/test_journal_retention.py)). On October 13 the
+   owner chose "keep data for ever", so both these journals and workflow
+   history are kept by default and grow until the owner sets a number of days
+   ([decision](docs/adr/0142-keep-history-by-default.md)). The
    Honcho meter now folds calls older than the previous month into monthly
    totals ([decision](docs/adr/0131-honcho-meter-monthly-rollup.md),
    [checks](services/honcho/test_meter.py)). Guard fragments

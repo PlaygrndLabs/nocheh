@@ -9,7 +9,7 @@ export function size(bytes: unknown) {
   }
 }
 
-/** Where disk is used, read-only. Owned originals grow by design; everything else is bounded. */
+/** Where disk is used, read-only. Owned originals grow by design; history follows the owner retention setting. */
 export function StorageUsage() {
   const {data, error} = useResource<any>('/storage');
   if (error) return <p role="alert">Storage usage is unavailable. The database services may be stopped.</p>;
@@ -19,7 +19,8 @@ export function StorageUsage() {
   return (
     <div className="n-storage">
       <p className="n-muted">
-        Owned originals are kept without a limit by design. Workflow history, operational records and logs are bounded.
+        Owned originals are kept without a limit by design. Workflow history and operational records are kept unless a
+        retention period is set; container logs are bounded.
       </p>
       {(data.databases || []).map((row: any) => (
         <section key={row.database}>
@@ -69,7 +70,7 @@ export function StorageUsage() {
           (logs.max_size_per_file ?? '—') +
           ' per container.'}
       </p>
-      <p>{'Workflow history retention: ' + (retention ? retention + ' days' : 'off') + '.'}</p>
+      <p>{'Workflow history retention: ' + (retention ? retention + ' days' : 'kept forever') + '.'}</p>
     </div>
   );
 }
