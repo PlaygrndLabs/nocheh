@@ -162,6 +162,7 @@ def dispatch(body):
 
 
 def main():
+    body = None
     try:
         body = json.loads(sys.stdin.buffer.read(1024 * 1024))
         result = dispatch(body)
@@ -169,6 +170,12 @@ def main():
     except Exception as error:
         # Never relay provider bodies, subprocess output, credentials or source text.
         code = str(error) if isinstance(error, ValueError) and str(error).replace('_', '').isalnum() else type(error).__name__
+        # Settings validation explains what to fix in plain words, and never includes a key or value.
+        message = str(error)
+        operation = body.get('operation') if isinstance(body, dict) else None
+        if (isinstance(error, ValueError) and operation in ('settings.save', 'settings.apply')
+                and message.isprintable() and 0 < len(message) <= 200):
+            code = message
         print(json.dumps({'error': code}), flush=True)
         return 1
     return 0
