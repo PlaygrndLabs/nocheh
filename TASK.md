@@ -1056,8 +1056,14 @@ activation remains separate.
      ([ADR-0139](docs/adr/0139-reply-checks-before-background-checks.md),
      [slot check](services/hermes/test_runtime.py)). Pending: a live check of
      that change.
-   - Honcho-only recall is unproven: the passing answer also had the fact from
-     chat history and a Nocheh learned rule.
+   - Honcho-only recall passed live on October 13: a note in one group topic
+     was answered correctly in another topic the next day. The fact reached
+     Hermes only through `nocheh_memory_recall` (Honcho's answer); the
+     turn-start Honcho context, the archive results and per-topic chat history
+     did not contain it. The reply waited 33 minutes because the Claude login
+     expired overnight while the Mac slept; once it renewed, the turn took
+     about 87 seconds, 24 of them Honcho recall
+     ([live summary](docs/mvp-acceptance-status.md)).
    - Voice transcription has no route on the Claude provider. While a voice
      note waits for its transcript, a later message in that chat starts after
      the two-minute order bound and its turn is told that an earlier voice note
