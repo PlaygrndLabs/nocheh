@@ -76,6 +76,38 @@ class ProviderRouteTests(unittest.TestCase):
         save(self.state, {'NOCHEH_PROVIDERS': '[]', 'NOCHEH_REPLY_PROVIDER': ''}, saved['revision'])
         self.assertEqual(routes.keys(load(self.state)), {})
 
+    def test_model_lists_follow_the_provider_being_edited_without_leaking_a_saved_key(self):
+        sent = []
+
+        class Opener:
+            def open(self, request, timeout):
+                sent.append((request.full_url, request.get_header('Authorization')))
+                body = json.dumps({'data': [{'id': 'claude-sonnet-5-5'}, {'id': 'bad model'}]}).encode()
+                return type('Response', (), {'read': lambda self, size: body, '__enter__': lambda self: self,
+                                             '__exit__': lambda self, *a: None})()
+
+        values = load(self.state)
+        values.update(NOCHEH_PROVIDERS=json.dumps([GATEWAY]), NOCHEH_PROVIDER_KEYS='{"gateway":"synthetic-gateway-key"}')
+        # An unsaved provider lists with the address and key being typed.
+        listed = routes.list_models(values, 'custom-2', Opener(), url='https://other.example.test/v1/', secret='synthetic-typed-key')
+        self.assertEqual(listed['models'], ['claude-sonnet-5-5'])
+        self.assertEqual(sent[-1], ('https://other.example.test/v1/models', 'Bearer synthetic-typed-key'))
+        # The saved key goes only to the saved address.
+        routes.list_models(values, 'gateway', Opener(), url=GATEWAY['url'])
+        self.assertEqual(sent[-1], (GATEWAY['url'] + '/models', 'Bearer synthetic-gateway-key'))
+        count = len(sent)
+        moved = routes.list_models(values, 'gateway', Opener(), url='https://elsewhere.example.test/v1')
+        self.assertEqual((moved['error'], len(sent)), ('missing_key', count))
+        for url, secret, error in (('http://other.example.test/v1', 'k', 'invalid_url'),
+                                   ('https://other.example.test/v1', 'bad\nkey', 'invalid_key')):
+            self.assertEqual(routes.list_models(values, 'custom-2', Opener(), url=url, secret=secret)['error'], error)
+        self.assertEqual(len(sent), count)
+        # Presets always use their own address.
+        routes.list_models({**values, 'OPENAI_API_KEY': 'synthetic-openai-key'}, 'openai', Opener(), url='https://other.example.test/v1')
+        self.assertEqual(sent[-1][0], 'https://api.openai.com/v1/models')
+        with self.assertRaises(ValueError):
+            routes.list_models(values, 'builtin', Opener())
+
     def test_compose_gets_resolved_routes_and_honcho_gets_the_memory_route(self):
         from tools.operations.memory.honcho_setup import initialize as initialize_honcho, state_for
         values = load(self.state)

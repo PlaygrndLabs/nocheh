@@ -192,21 +192,38 @@ def builtin_models(values):
     return sorted({current.model for current in routes(values).values() if current.builtin})
 
 
-def list_models(values, provider, opener=None):
-    """Model IDs a configured external provider lists; the key never leaves this process."""
+def list_models(values, provider, opener=None, url=None, secret=None):
+    """Model IDs an external provider lists; the key never leaves this process.
+    An unsaved custom provider is listed from the address and key being typed. A saved
+    key is only sent to the saved address, so a typed address needs its own key."""
     known = providers(values)
-    if provider not in known or provider == BUILTIN:
+    if provider == BUILTIN or not isinstance(provider, str) or not ID.fullmatch(provider):
         raise ValueError('unknown_provider')
-    secret = key(values, provider)
+    saved = known.get(provider)
+    if provider in PRESETS or url is None:
+        if not saved:
+            raise ValueError('unknown_provider')
+        url = saved['url']
+    elif not valid_url(url):
+        return {'provider': provider, 'models': [], 'error': 'invalid_url'}
+    url = url.rstrip('/')
+    if secret is not None and (not isinstance(secret, str) or len(secret) > 4096
+                               or not secret.strip().isprintable()):
+        return {'provider': provider, 'models': [], 'error': 'invalid_key'}
+    secret = (secret or '').strip()
+    if not secret:
+        same = saved and saved['url'].rstrip('/') == url
+        secret = key(values, provider) if same else ''
     if not secret:
         return {'provider': provider, 'models': [], 'error': 'missing_key'}
+    kind = saved['kind'] if saved else 'custom'
     # Anthropic lists models with its own key header; the others use a bearer key.
-    headers = ({'x-api-key': secret, 'anthropic-version': '2023-06-01'} if known[provider]['kind'] == 'anthropic'
+    headers = ({'x-api-key': secret, 'anthropic-version': '2023-06-01'} if kind == 'anthropic'
                else {'Authorization': 'Bearer ' + secret})
     headers['Accept'] = 'application/json'
     opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies()))
     try:
-        request = urllib.request.Request(known[provider]['url'] + '/models', headers=headers)
+        request = urllib.request.Request(url + '/models', headers=headers)
         with opener.open(request, timeout=15) as response:
             body = json.loads(response.read(2 * 1024 * 1024 + 1))
     except urllib.error.HTTPError as error:
