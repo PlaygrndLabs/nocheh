@@ -62,10 +62,11 @@ def provider_view(values):
     return {'list': rows, 'parts': parts, 'builtin': provider_routes.BUILTIN}
 
 
-def provider_models(state, provider):
-    """Models an external provider lists, fetched server-side with its saved key."""
+def provider_models(state, provider, url=None, key=None):
+    """Models an external provider lists, fetched server-side with the key being typed
+    or its saved key, so the list follows the provider while it is still being edited."""
     if not isinstance(provider, str): raise ValueError('unknown_provider')
-    return provider_routes.list_models(load(state), provider)
+    return provider_routes.list_models(load(state), provider, url=url or None, secret=key or None)
 
 
 def embedding_route(state):

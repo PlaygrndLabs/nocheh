@@ -673,7 +673,9 @@ and model of replies, memory, the secret check and memory search, with one
 default for every part ([decision](docs/adr/0141-per-part-model-providers.md),
 [resolver](tools/operations/provider/routes.py),
 [checks](services/hermes/test_provider_routes.py),
-[browser check](test/dashboard-pages.browser.mjs)). Pending: the owner applies
+[browser check](test/dashboard-pages.browser.mjs)). After the owner's review,
+model lists load from added providers while they are being edited, and each
+custom provider is a card with Remove in its header. Pending: the owner applies
 my-gateway on Cloudflare, adds it in Settings and applies; then a live reply,
 memory answer and secret check through it. Honcho's structured output through
 Anthropic's OpenAI-compatible endpoint is unproven. Moving Nocheh itself to an

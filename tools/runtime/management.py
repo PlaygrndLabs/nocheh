@@ -140,7 +140,9 @@ def dispatch(body):
     if operation.startswith('settings.'):
         from tools.operations.installation.settings import view, save, apply, provider_models
         if operation == 'settings.view': return view(state)
-        if operation == 'settings.provider_models': return provider_models(state, body.get('provider'))
+        if operation == 'settings.provider_models':
+            request = body.get('request') or {}
+            return provider_models(state, request.get('provider'), request.get('url'), request.get('key'))
         if operation == 'settings.save': return save(state, body['changes'], body['revision'])
         if operation == 'settings.apply': return apply(state)
     if operation == 'telegram.directory':

@@ -288,8 +288,10 @@ test('models let the owner add a custom provider and give one part its own provi
   await page.getByLabel('Name', {exact: true}).fill('my-gateway');
   await page.getByLabel('Address', {exact: true}).fill('https://gateway.example.test/v1');
   await page.locator('#key-custom-1').fill('synthetic-gateway-key');
+  // Its models load from the address and key while it is still unsaved.
+  await page.getByRole('group', {name: 'my-gateway'}).getByText('2 models available.').waitFor();
   await page.locator('#memory-provider').selectOption('custom-1');
-  await page.locator('#memory-model').fill('gpt-5.6-sol');
+  await page.locator('#memory-model').selectOption('gpt-5.6-sol');
   const bar = page.getByRole('region', {name: 'Save and apply settings'});
   await bar.getByRole('button', {name: 'Review changes'}).click();
   await bar.getByText('Custom providers: my-gateway').waitFor();

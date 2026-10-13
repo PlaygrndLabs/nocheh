@@ -92,7 +92,6 @@ const server=createServer((req,res)=>{void(async()=>{
    providers:{builtin:'builtin',list:[{id:'builtin',name:'Nocheh login',kind:'builtin',url:null,has_key:true},{id:'openai',name:'OpenAI',kind:'openai',url:'https://api.openai.com/v1',has_key:true},{id:'anthropic',name:'Anthropic',kind:'anthropic',url:'https://api.anthropic.com/v1',has_key:false},
      ...JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).map((p:any)=>({...p,kind:'custom',has_key:true}))],
     parts:[{id:'reply',label:'Replies (Hermes)',provider_setting:'NOCHEH_REPLY_PROVIDER',model_setting:'NOCHEH_REPLY_MODEL'},{id:'memory',label:'Memory (Honcho)',provider_setting:'NOCHEH_MEMORY_PROVIDER',model_setting:'NOCHEH_MEMORY_MODEL'},{id:'guard',label:'Secret check',provider_setting:'NOCHEH_GUARD_PROVIDER',model_setting:'NOCHEH_GUARD_MODEL'}]}});
-  if(route==='/settings/provider-models')return json(res,200,{provider:url.searchParams.get('provider'),models:['gpt-5.6-sol','claude-sonnet-5-5']});
   if(route==='/telegram/identities')return json(res,200,{groups:[
     {id:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
     {id:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
@@ -155,6 +154,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/spaces'){if(body.revision!==spaceRevision)throw new HttpError(409,'space_revision_conflict');spaceOverrides=body.overrides;spaceRevision++;return json(res,200,{ok:true});}
   if(route==='/memory/shares'){shares.push({id:randomUUID(),destination:body.destination,content:body.content});spaceRevision++;return json(res,200,{ok:true});}
   if(route==='/memory/recall')return json(res,200,{hits:[]});
+  if(route==='/settings/provider-models')return json(res,200,body.provider==='openai'||body.key
+    ?{provider:body.provider,models:body.provider==='openai'?['gpt-5.6-sol','text-embedding-3-small']:['claude-sonnet-5-5','gpt-5.6-sol']}
+    :{provider:body.provider,models:[],error:'missing_key'});
   if(route==='/memory/reviews/control')return json(res,200,{ok:true});
   if(route==='/operations'||route==='/settings/apply'){const job={id:randomUUID(),kind:route==='/operations'?'operations.'+body.action:'settings.apply',state:'complete',created_at:new Date().toISOString(),result:{status:'synthetic_only'}};jobs.unshift(job);return json(res,200,job);}
   const importAction=/^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);

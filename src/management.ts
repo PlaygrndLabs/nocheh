@@ -274,7 +274,8 @@ export async function startManagement() {
         return json(res,200,await python({operation:'policy.manage',request:{...body,profile:url.searchParams.get('profile'),job:url.searchParams.get('job')},write:req.method==='POST'}));
       }
       if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
-      if (req.method === 'GET' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', provider: url.searchParams.get('provider')}));
+      // POST so a key being typed travels in the body, never in a URL or access log.
+      if (req.method === 'POST' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', request: object(await readJson(req))}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
       if (req.method === 'GET' && route === '/honcho/budget') return json(res, 200, await python({operation: 'honcho.budget'}));
       if (req.method === 'POST' && route === '/honcho/budget') return exclusive('honcho-budget',async()=>

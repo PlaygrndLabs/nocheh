@@ -1,10 +1,22 @@
-import {useEffect, useState, type ReactNode} from 'react';
+import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {Plus, Trash2} from 'lucide-react';
 import {call, Button} from '../lib/page-helpers';
 
 type Provider = {id: string; name: string; kind: string; url: string | null; has_key: boolean};
 type Part = {id: string; label: string; provider_setting: string; model_setting: string};
 type Custom = {id: string; name: string; url: string};
+type Listing = {signature: string; models: string[]; error?: string; loading?: boolean};
+
+const OTHER = '__other_model__';
+function listError(error: string): string {
+  if (error === 'missing_key') return 'Paste its API key again to list models from this address.';
+  if (error === 'invalid_url') return 'Enter an https:// address without a password or query to list its models.';
+  if (error === 'invalid_key') return 'This key has characters an API key cannot have.';
+  if (error === 'http_401' || error === 'http_403') return 'It refused the API key; check the key.';
+  if (error === 'http_404') return 'It has no model list at this address; check the address or type the model name.';
+  if (error.startsWith('http_')) return 'It answered with error ' + error.slice(5) + '; type the model name.';
+  return 'It could not be reached; check the address or type the model name.';
+}
 
 const PRESET_KEYS: Record<string, string> = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY'};
 const partHints: Record<string, string> = {
@@ -98,72 +110,123 @@ export function ModelRouting({
   ];
   const providerName = (id: string) => all.find(p => p.id === id)?.name || id;
 
-  // Model lists: the built-in login's served models, or what a saved provider lists with its saved key.
-  const [listed, setListed] = useState<Record<string, {models: string[]; error?: string}>>({});
-  const listable = (id: string) => id !== 'builtin' && savedList.some(p => p.id === id && p.has_key);
-  const wanted = Array.from(
-    new Set(
-      [
-        value('NOCHEH_PROVIDER'),
-        ...parts.map(p => value(p.provider_setting)),
-        value('NOCHEH_EMBEDDING_PROVIDER'),
-      ].filter(listable),
-    ),
+  // Model lists: the built-in login's served models, or what each added provider lists. A
+  // provider is asked again, after a short pause, whenever its address or typed key changes,
+  // so its models appear while it is still being added; the server sends the key, never the page.
+  const [listed, setListed] = useState<Record<string, Listing>>({});
+  const requests = useMemo(
+    () =>
+      Object.fromEntries(
+        all
+          .filter(p => p.id !== 'builtin' && p.has_key && (p.kind !== 'custom' || /^https:\/\/\S+$/.test(p.url || '')))
+          .map(p => {
+            const typed = p.kind === 'custom' ? typedKeys[p.id] : changes[PRESET_KEYS[p.id]];
+            return [
+              p.id,
+              {provider: p.id, ...(p.kind === 'custom' ? {url: p.url} : {}), ...(typed ? {key: typed} : {})},
+            ];
+          }),
+      ) as Record<string, Record<string, string>>,
+    [JSON.stringify(all), changes.NOCHEH_PROVIDER_KEYS, changes.OPENAI_API_KEY, changes.ANTHROPIC_API_KEY],
   );
+  const latest = useRef(requests);
+  latest.current = requests;
   useEffect(() => {
-    for (const id of wanted) {
-      if (listed[id]) continue;
-      setListed(current => ({...current, [id]: {models: []}}));
-      call('/settings/provider-models?provider=' + encodeURIComponent(id))
-        .then((result: any) => setListed(current => ({...current, [id]: result})))
-        .catch(() => setListed(current => ({...current, [id]: {models: [], error: 'unreachable'}})));
-    }
-  }, [wanted.join(',')]);
+    const timers = Object.entries(requests).map(([id, request]) => {
+      const signature = JSON.stringify(request);
+      if (listed[id]?.signature === signature) return undefined;
+      return setTimeout(() => {
+        setListed(current => ({...current, [id]: {signature, models: current[id]?.models || [], loading: true}}));
+        const done = (result: {models?: string[]; error?: string}) => {
+          if (JSON.stringify(latest.current[id]) !== signature) return;
+          setListed(current => ({...current, [id]: {signature, models: result.models || [], error: result.error}}));
+        };
+        call('/settings/provider-models', request).then(done, () => done({error: 'unreachable'}));
+      }, 600);
+    });
+    return () => timers.forEach(timer => timer && clearTimeout(timer));
+  }, [JSON.stringify(requests)]);
+  const listing = (id: string): Listing | undefined =>
+    requests[id] && listed[id]?.signature === JSON.stringify(requests[id]) ? listed[id] : undefined;
   const modelsOf = (id: string): string[] =>
-    id === 'builtin' ? data.models?.reasoning || [] : listed[id]?.models || [];
-  const modelNote = (id: string): string => {
+    id === 'builtin' ? data.models?.reasoning || [] : listing(id)?.models || [];
+  const listNote = (id: string): string => {
+    const provider = all.find(p => p.id === id);
+    if (!provider) return '';
     if (id === 'builtin')
       return data.models?.provider_running === false
         ? 'Nocheh’s provider service is not running, so its models cannot be listed.'
         : modelsOf(id).length
           ? ''
           : 'Sign in to Claude or ChatGPT in the CPA dashboard to list models.';
-    if (!savedList.some(p => p.id === id)) return 'Save this provider to list its models.';
-    if (!savedList.find(p => p.id === id)?.has_key) return 'Add and save its API key to list its models.';
-    const found = listed[id];
-    if (!found) return '';
-    if (found.error)
-      return 'Its model list is unavailable (' + found.error.replace('_', ' ') + '); type the model name.';
-    return found.models.length ? '' : 'It listed no models; type the model name.';
+    if (provider.kind === 'custom' && !/^https:\/\/\S+$/.test(provider.url || ''))
+      return 'Enter its https:// address to list its models.';
+    if (!provider.has_key) return 'Add its API key to list its models.';
+    const found = listing(id);
+    if (!found || found.loading) return 'Loading its models…';
+    if (found.error) return listError(found.error);
+    return found.models.length
+      ? found.models.length + ' models available.'
+      : 'It listed no models; type the model name.';
   };
 
-  const modelInput = (id: string, key: string, provider: string, placeholder?: string) => {
+  const modelsClass = (id: string) => {
+    const found = listing(id);
+    return 'n-provider-models' + (found?.error ? ' is-error' : found?.models.length ? ' is-ready' : '');
+  };
+  // A part row speaks up only while its provider's models are not listed.
+  const rowNote = (id: string): string => (modelsOf(id).length ? '' : listNote(id));
+  const [typing, setTyping] = useState<Record<string, boolean>>({});
+
+  const modelField = (id: string, key: string, provider: string, fallback?: string) => {
     const options = modelsOf(provider);
-    return (
-      <>
+    const current = value(key);
+    if (!options.length || typing[key])
+      return (
         <input
           id={id + '-model'}
-          list={key + '-models'}
-          value={value(key)}
-          placeholder={placeholder}
+          value={current}
+          placeholder={fallback ? 'Same as default · ' + fallback : 'Model name'}
           disabled={busy}
           autoComplete="off"
           onChange={e => set(key, e.target.value.trim())}
         />
-        <datalist id={key + '-models'}>
-          {options.map(model => (
-            <option key={model} value={model} />
-          ))}
-        </datalist>
-      </>
+      );
+    return (
+      <select
+        id={id + '-model'}
+        value={current}
+        disabled={busy}
+        onChange={e => {
+          if (e.target.value === OTHER) setTyping({...typing, [key]: true});
+          else set(key, e.target.value);
+        }}
+      >
+        {fallback !== undefined && <option value="">Same as default · {fallback || 'not set'}</option>}
+        {fallback === undefined && !current && <option value="">Choose a model</option>}
+        {current && !options.includes(current) && <option value={current}>{current} · not listed</option>}
+        {options.map(model => (
+          <option key={model} value={model}>
+            {model}
+          </option>
+        ))}
+        <option value={OTHER}>Type another model…</option>
+      </select>
     );
   };
 
-  const keyField = (id: string, label: string, isConfigured: boolean, typed: string, onChange: (v: string) => void) => (
+  const keyField = (
+    id: string,
+    label: string,
+    isConfigured: boolean,
+    typed: string,
+    onChange: (v: string) => void,
+    models?: string,
+  ) => (
     <div className="n-field">
       <label htmlFor={'key-' + id}>
         {label}
-        <span className="n-secret-status">{isConfigured ? 'Configured' : 'Missing'}</span>
+        <span className="n-secret-status">{typed ? 'New key' : isConfigured ? 'Configured' : 'Missing'}</span>
       </label>
       <input
         id={'key-' + id}
@@ -175,10 +238,17 @@ export function ModelRouting({
         onChange={e => onChange(e.target.value)}
       />
       <small>
-        {isConfigured
-          ? '**** is a placeholder, not the saved key. Leave blank to keep it; paste a new key to replace it.'
-          : 'Needed before any part can use this provider.'}
+        {typed
+          ? 'Saved with the other changes.'
+          : isConfigured
+            ? 'Leave blank to keep the saved key; paste a new one to replace it.'
+            : 'Needed before any part can use this provider.'}
       </small>
+      {models && (typed || isConfigured) && (
+        <small className={modelsClass(id)} role="status">
+          {models}
+        </small>
+      )}
     </div>
   );
 
@@ -214,8 +284,13 @@ export function ModelRouting({
           stay on the server and are never shown again.
         </p>
         <div className="n-form">
-          {keyField('openai', 'OpenAI API key', configured('OPENAI_API_KEY'), changes.OPENAI_API_KEY ?? '', v =>
-            set('OPENAI_API_KEY', v),
+          {keyField(
+            'openai',
+            'OpenAI API key',
+            configured('OPENAI_API_KEY'),
+            changes.OPENAI_API_KEY ?? '',
+            v => set('OPENAI_API_KEY', v),
+            listNote('openai'),
           )}
           {keyField(
             'anthropic',
@@ -223,20 +298,41 @@ export function ModelRouting({
             configured('ANTHROPIC_API_KEY'),
             changes.ANTHROPIC_API_KEY ?? '',
             v => set('ANTHROPIC_API_KEY', v),
+            listNote('anthropic'),
           )}
         </div>
         {customs.map((custom, index) => {
           const change = (patch: Partial<Custom>) =>
             setCustoms(customs.map((c, i) => (i === index ? {...c, ...patch} : c)));
-          const inUse = [
-            defaultProvider,
-            ...parts.map(p => value(p.provider_setting)),
-            value('NOCHEH_EMBEDDING_PROVIDER'),
-          ].includes(custom.id);
+          const usedBy = [
+            defaultProvider === custom.id && 'Default',
+            ...parts.map(p => value(p.provider_setting) === custom.id && p.label),
+            value('NOCHEH_EMBEDDING_PROVIDER') === custom.id && 'Memory search',
+          ].filter(Boolean);
+          const title = custom.name.trim() || 'New provider';
           return (
-            <fieldset className="n-custom-provider" key={custom.id}>
-              <legend>{custom.name || 'New provider'}</legend>
-              <div className="n-form">
+            <div className="n-custom-provider" role="group" aria-labelledby={'title-' + custom.id} key={custom.id}>
+              <div className="n-custom-provider-head">
+                <div>
+                  <strong id={'title-' + custom.id}>{title}</strong>
+                  <small className="n-muted">
+                    {usedBy.length ? 'Used by ' + usedBy.join(', ') : 'Not used by any part yet'}
+                  </small>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="n-custom-provider-remove"
+                  aria-label={'Remove ' + (custom.name.trim() || 'provider')}
+                  disabled={busy || usedBy.length > 0}
+                  title={usedBy.length ? 'Choose another provider for the parts that use it first' : undefined}
+                  onClick={() => setCustoms(customs.filter((_, i) => i !== index))}
+                >
+                  <Trash2 size={16} aria-hidden={true} /> Remove
+                </Button>
+              </div>
+              <div className="n-custom-provider-fields">
                 <div className="n-field">
                   <label htmlFor={'name-' + custom.id}>Name</label>
                   <input
@@ -256,7 +352,7 @@ export function ModelRouting({
                     disabled={busy}
                     onChange={e => change({url: e.target.value.trim()})}
                   />
-                  <small>The OpenAI-compatible base address, usually ending in /v1. It must start with https://.</small>
+                  <small>OpenAI-compatible, starting with https:// and usually ending in /v1.</small>
                 </div>
                 {keyField(
                   custom.id,
@@ -266,17 +362,10 @@ export function ModelRouting({
                   v => setCustoms(customs, {...typedKeys, [custom.id]: v}),
                 )}
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy || inUse}
-                title={inUse ? 'Choose another provider for the parts that use it first' : undefined}
-                onClick={() => setCustoms(customs.filter((_, i) => i !== index))}
-              >
-                <Trash2 size={16} aria-hidden={true} /> Remove {custom.name || 'provider'}
-              </Button>
-              {inUse && <small className="n-muted"> A part uses this provider, so it cannot be removed yet.</small>}
-            </fieldset>
+              <p className={modelsClass(custom.id)} role="status">
+                {listNote(custom.id)}
+              </p>
+            </div>
           );
         })}
         <div className="n-actions">
@@ -318,8 +407,8 @@ export function ModelRouting({
                 </option>
               ))}
             </select>,
-            modelInput('default', 'NOCHEH_MODEL', defaultProvider),
-            modelNote(defaultProvider),
+            modelField('default', 'NOCHEH_MODEL', defaultProvider),
+            rowNote(defaultProvider),
           )}
           {parts.map(part => {
             const chosen = value(part.provider_setting);
@@ -341,13 +430,8 @@ export function ModelRouting({
                   </option>
                 ))}
               </select>,
-              modelInput(
-                part.id,
-                part.model_setting,
-                effective,
-                'Same as default · ' + (value('NOCHEH_MODEL') || 'not set'),
-              ),
-              modelNote(effective),
+              modelField(part.id, part.model_setting, effective, value('NOCHEH_MODEL')),
+              rowNote(effective),
             );
           })}
           {row(
