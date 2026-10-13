@@ -278,6 +278,14 @@ function NochehSettings({notify}: {notify: Notify}) {
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState(false);
   const [defaultsRevision, setDefaultsRevision] = useState(0);
+  const unsaved = Object.keys(changes).length > 0;
+  useEffect(() => {
+    // Development reloads the page when its code changes; it waits while edits are unsaved.
+    (window as any).__nochehUnsaved = unsaved;
+    return () => {
+      (window as any).__nochehUnsaved = false;
+    };
+  }, [unsaved]);
 
   const save = async () => {
     setBusy(true);
@@ -443,7 +451,7 @@ function NochehSettings({notify}: {notify: Notify}) {
     if (key === 'NOCHEH_PROVIDERS') {
       try {
         const names = JSON.parse(value).map((p: any) => p.name || 'New provider');
-        return names.length ? 'Custom providers: ' + names.join(', ') : 'No custom providers';
+        return names.length ? names.join(', ') : 'None';
       } catch {
         return value;
       }
