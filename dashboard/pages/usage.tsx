@@ -1,228 +1,291 @@
-import {useState} from 'react';
+/**
+ * Usage: what Nocheh costs and how fast it answers. Counts come from Nocheh's
+ * own usage tracker (counts only, never content); a cost it can't price is
+ * shown as unknown, never as zero.
+ */
+import {lazy, Suspense, useState, type ComponentProps} from 'react';
+import {Gauge} from 'lucide-react';
+import {useParam} from '../lib/navigation';
 import {useResource} from '../lib/resource';
-import {Alert, Skeleton} from '../components/ui/primitives';
-import {Panel} from '../lib/page-helpers';
+import {setParams} from '../lib/routes';
+import {compact, cost, count, duration, partName} from '../lib/system-format';
+import {cn} from '../lib/utils';
+import {Card, CardHeader, Empty, LoadError, Notice, Segmented, Skeleton, Stat, Table, Td, Th} from '../ui/core';
+import {Page} from '../ui/page';
+import {addRow, emptyTotal, groupRows as group, type Usage, type UsageRow} from '../lib/system-usage';
+import {ReplySpeed, type TimingSummary} from './usage/reply-speed';
 
-type Row = {
-  day: string;
-  part: string;
-  label: string;
-  service: string;
-  provider: string;
-  provider_name: string;
-  model: string;
-  runs: number;
-  calls: number;
-  failed: number;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  reasoning_tokens: number;
-  cost_usd: number | null;
-  cost_complete: boolean;
-};
-type Usage = {
-  since: string;
-  today: string;
-  days: number;
-  rows: Row[];
-  parts: {id: string; label: string; service: string}[];
-  sources: {hermes: string; honcho: string; pricing: string};
-};
-type Total = Omit<Row, 'day' | 'cost_usd'> & {cost: number; unknown: boolean};
+const DailyChart = lazy(() => import('./usage/daily-chart'));
 
-const periods: [number, string][] = [
-  [1, 'Today'],
-  [7, '7 days'],
-  [30, '30 days'],
-];
-const count = new Intl.NumberFormat();
+const periods = [
+  {value: '1', label: 'Today'},
+  {value: '7', label: '7 days'},
+  {value: '30', label: '30 days'},
+] as const;
+type Period = (typeof periods)[number]['value'];
 
-function add(total: Total | undefined, row: Row): Total {
-  const base: Total = total ?? {
-    ...row,
-    runs: 0,
-    calls: 0,
-    failed: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    reasoning_tokens: 0,
-    cost: 0,
-    unknown: false,
-    cost_complete: true,
-  };
-  return {
-    ...base,
-    runs: base.runs + row.runs,
-    calls: base.calls + row.calls,
-    failed: base.failed + row.failed,
-    input_tokens: base.input_tokens + row.input_tokens,
-    output_tokens: base.output_tokens + row.output_tokens,
-    cache_read_tokens: base.cache_read_tokens + row.cache_read_tokens,
-    cache_write_tokens: base.cache_write_tokens + row.cache_write_tokens,
-    reasoning_tokens: base.reasoning_tokens + row.reasoning_tokens,
-    cost: base.cost + (row.cost_usd ?? 0),
-    unknown: base.unknown || row.cost_usd === null || !row.cost_complete,
-  };
-}
+export default function UsagePage() {
+  const param = useParam('days');
+  const days: Period = periods.some(p => p.value === param) ? (param as Period) : '7';
+  const usage = useResource<Usage>('/usage?days=' + days, 60000);
+  const timings = useResource<TimingSummary>('/workflows/timings', 30000);
+  const data = usage.data?.days === Number(days) ? usage.data : null;
+  const rows = data?.rows ?? [];
+  const all = rows.reduce(addRow, emptyTotal());
 
-function money(value: number): string {
-  if (value === 0) return '$0.00';
-  if (value < 0.01) return '< $0.01';
-  return '$' + value.toFixed(2);
-}
-
-function cost(total: {cost: number; unknown: boolean; calls: number}): string {
-  if (!total.calls) return '—';
-  if (total.unknown && total.cost === 0) return 'Unknown';
-  return total.unknown ? 'At least ' + money(total.cost) : money(total.cost);
-}
-
-/** Model use of every part (Hermes, Honcho and Nocheh's own checks) in one place. */
-export function UsageView() {
-  const [days, setDays] = useState(30);
-  const {data, error} = useResource<Usage>('/usage?days=' + days, 60000);
-  const lines = new Map<string, Total>();
-  const totals = new Map<string, Total>();
-  let all: Total | undefined;
-  for (const row of data?.rows ?? []) {
-    const key = [row.part, row.provider, row.model].join('\u0000');
-    lines.set(key, add(lines.get(key), row));
-    totals.set(row.part, add(totals.get(row.part), row));
-    all = add(all, row);
-  }
-  const tokens = all ? all.input_tokens + all.output_tokens : 0;
   const notes: string[] = [];
-  if (data?.sources.hermes === 'empty') notes.push('Hermes has not recorded any use yet.');
-  if (data?.sources.honcho === 'empty') notes.push('Honcho memory has not recorded any use yet.');
+  if (data?.sources.hermes === 'empty') notes.push('The assistant hasn’t recorded any use yet.');
+  if (data?.sources.honcho === 'empty') notes.push('Long-term memory hasn’t recorded any use yet.');
   if (data?.sources.pricing === 'unavailable')
-    notes.push('Memory costs are unknown right now because Hermes, which prices them, did not answer.');
-  if (all?.unknown)
-    notes.push('Some costs are unknown. Hermes only prices models it knows; a custom provider may not publish prices.');
+    notes.push('Long-term memory costs are unknown right now because the price check didn’t answer.');
+  if (all.unknown && data?.sources.pricing !== 'unavailable')
+    notes.push('Some models have no published price, for example a custom provider, so part of the cost is unknown.');
+
+  const median = timings.data?.reply_ms_p50;
   return (
-    <div className="n-usage">
-      <section className="n-panel n-usage-head">
-        <div>
-          <h2>Model usage</h2>
-          <p className="n-muted">
-            Every part that calls a model, counted by Nocheh. Days are UTC
-            {data ? ', from ' + data.since + ' to ' + data.today : ''}.
-          </p>
-        </div>
-        <div className="n-access-choice" role="group" aria-label="Usage period">
-          {periods.map(([value, label]) => (
-            <button type="button" key={value} aria-pressed={days === value} onClick={() => setDays(value)}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </section>
-      {error && <Alert>{data ? 'Usage may be out of date: ' + error : 'Usage is unavailable: ' + error}</Alert>}
-      {!data && !error && (
-        <div role="status" aria-label="Loading usage">
-          <Skeleton className="chart-skeleton" />
-        </div>
+    <Page
+      title="Usage"
+      description="What Nocheh costs and how fast it answers."
+      actions={
+        <Segmented
+          label="Period"
+          value={days}
+          options={periods.map(p => ({value: p.value, label: p.label}))}
+          onChange={value => setParams({days: value === '7' ? null : value}, true)}
+        />
+      }
+    >
+      {usage.error && <LoadError what="usage" onRetry={() => location.reload()} />}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {data ? (
+          <>
+            <Stat
+              label="Cost"
+              value={all.calls ? cost(all) : '$0.00'}
+              hint={all.unknown ? 'Some calls can’t be priced' : 'Estimated from list prices'}
+            />
+            <Stat
+              label="Model calls"
+              value={count(all.calls)}
+              hint={all.failed ? `${count(all.failed)} failed` : 'None failed'}
+            />
+            <Stat
+              label="Tokens"
+              value={compact(all.input + all.output)}
+              hint={`${compact(all.input)} in · ${compact(all.output)} out`}
+            />
+          </>
+        ) : (
+          [0, 1, 2].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)
+        )}
+        {timings.data || timings.error ? (
+          <Stat
+            label="Median reply time"
+            value={timings.data ? duration(median) : '—'}
+            hint={
+              timings.data
+                ? timings.data.messages
+                  ? `Last ${timings.data.messages} replies`
+                  : 'No replies measured yet'
+                : 'Couldn’t be measured'
+            }
+          />
+        ) : (
+          <Skeleton className="h-[92px] rounded-xl" />
+        )}
+      </div>
+
+      {notes.length > 0 && (
+        <Notice tone="info" title="About these numbers">
+          <ul className="list-disc space-y-0.5 pl-4">
+            {notes.map(note => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </Notice>
       )}
-      {data && (
-        <>
-          <div className="n-metrics" aria-label="Usage totals">
-            <section className="n-panel">
-              <h2>Model calls</h2>
-              <strong className="n-usage-value">{count.format(all?.calls ?? 0)}</strong>
-              <p className="n-muted">{all?.failed ? count.format(all.failed) + ' failed' : 'None failed'}</p>
-            </section>
-            <section className="n-panel">
-              <h2>Tokens</h2>
-              <strong className="n-usage-value">{count.format(tokens)}</strong>
-              <p className="n-muted">
-                {count.format(all?.input_tokens ?? 0)} in · {count.format(all?.output_tokens ?? 0)} out
-              </p>
-            </section>
-            <section className="n-panel">
-              <h2>Estimated cost</h2>
-              <strong className="n-usage-value">{all ? cost(all) : '$0.00'}</strong>
-              <p className="n-muted">Hermes's price list; subscriptions show as $0.</p>
-            </section>
+
+      {data && days !== '1' && rows.length > 0 && (
+        <Card>
+          <CardHeader title="Calls per day" description="Days are counted in UTC." />
+          <div className="px-2 pt-2 pb-3 sm:px-4">
+            <Suspense fallback={<Skeleton className="h-48 w-full" />}>
+              <DailyChart rows={rows} since={data.since} today={data.today} />
+            </Suspense>
           </div>
-          {notes.length > 0 && (
-            <Alert role="note" aria-label="About these numbers">
-              {notes.map(note => (
-                <p key={note}>{note}</p>
-              ))}
-            </Alert>
-          )}
-          <Panel title="By part" note="Each part, the provider it used and the model.">
-            <div className="n-usage-scroll">
-              <table className="n-timing-table n-usage-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Part</th>
-                    <th scope="col">Provider and model</th>
-                    <th scope="col" className="n-number">
-                      Calls
-                    </th>
-                    <th scope="col" className="n-number">
-                      Failed
-                    </th>
-                    <th scope="col" className="n-number">
-                      Input tokens
-                    </th>
-                    <th scope="col" className="n-number">
-                      Output tokens
-                    </th>
-                    <th scope="col" className="n-number">
-                      Cost
-                    </th>
-                  </tr>
-                </thead>
-                {data.parts.map(part => {
-                  const used = [...lines.values()].filter(line => line.part === part.id);
-                  const total = totals.get(part.id);
-                  return (
-                    <tbody key={part.id} aria-label={part.label}>
-                      <tr className="n-usage-part">
-                        <th scope="row">
-                          {part.label}
-                          <small>{part.service}</small>
-                        </th>
-                        <td className={used.length === 1 ? '' : 'n-muted'}>
-                          {used.length === 0
-                            ? 'Not used in this period'
-                            : used.length === 1
-                              ? used[0]!.provider_name + ' · ' + used[0]!.model
-                              : used.length + ' models'}
-                        </td>
-                        <td className="n-number">{count.format(total?.calls ?? 0)}</td>
-                        <td className="n-number">{count.format(total?.failed ?? 0)}</td>
-                        <td className="n-number">{count.format(total?.input_tokens ?? 0)}</td>
-                        <td className="n-number">{count.format(total?.output_tokens ?? 0)}</td>
-                        <td className="n-number">{total ? cost(total) : '—'}</td>
-                      </tr>
-                      {used.length > 1 &&
-                        used.map(line => (
-                          <tr key={line.provider + line.model} className="n-usage-line">
-                            <td />
-                            <td>
-                              {line.provider_name} · {line.model}
-                            </td>
-                            <td className="n-number">{count.format(line.calls)}</td>
-                            <td className="n-number">{count.format(line.failed)}</td>
-                            <td className="n-number">{count.format(line.input_tokens)}</td>
-                            <td className="n-number">{count.format(line.output_tokens)}</td>
-                            <td className="n-number">{cost(line)}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  );
-                })}
-              </table>
-            </div>
-          </Panel>
-        </>
+        </Card>
       )}
-    </div>
+
+      <Breakdown data={data} loading={!data && !usage.error} />
+
+      <ReplySpeed summary={timings.data} error={!!timings.error} />
+    </Page>
+  );
+}
+
+function Breakdown({data, loading}: {data: Usage | null; loading: boolean}) {
+  const [by, setBy] = useState<'part' | 'model'>('part');
+  const rows = data?.rows ?? [];
+  return (
+    <Card>
+      <CardHeader
+        title="Where it goes"
+        description={
+          by === 'part' ? 'Each part of Nocheh that calls a model.' : 'Each provider and model that was called.'
+        }
+        action={
+          <Segmented
+            size="sm"
+            label="Group by"
+            value={by}
+            onChange={setBy}
+            options={[
+              {value: 'part', label: 'By part'},
+              {value: 'model', label: 'By model'},
+            ]}
+          />
+        }
+      />
+      <div className="mt-3">
+        {loading ? (
+          <div className="space-y-2 px-5 pb-5">
+            {[0, 1, 2, 3].map(i => (
+              <Skeleton key={i} className="h-9 w-full" />
+            ))}
+          </div>
+        ) : !data ? (
+          <Empty title="Usage isn’t available">It will appear here once the usage tracker answers.</Empty>
+        ) : !rows.length ? (
+          <Empty icon={Gauge} title="No model calls in this period">
+            Calls appear here as Nocheh replies, checks messages for secrets and builds memory.
+          </Empty>
+        ) : by === 'part' ? (
+          <PartTable data={data} />
+        ) : (
+          <ModelTable rows={rows} />
+        )}
+      </div>
+    </Card>
+  );
+}
+
+const Num = ({className, ...props}: ComponentProps<'td'>) => (
+  <Td className={cn('tabular text-right whitespace-nowrap', className)} {...props} />
+);
+const NumTh = ({className, ...props}: ComponentProps<'th'>) => (
+  <Th className={cn('text-right', className)} {...props} />
+);
+
+function PartTable({data}: {data: Usage}) {
+  const byPart = group(data.rows, row => row.part);
+  const lines = group(data.rows, row => [row.part, row.provider, row.model].join('\u0000'));
+  const names = new Map(data.rows.map(row => [row.provider + '\u0000' + row.model, row.provider_name || row.provider]));
+  const ids = [...data.parts.map(p => p.id), ...[...byPart.keys()].filter(id => !data.parts.some(p => p.id === id))];
+  const used = ids.filter(id => byPart.has(id));
+  const unused = ids.filter(id => !byPart.has(id));
+  return (
+    <>
+      <Table aria-label="Usage by part">
+        <thead>
+          <tr>
+            <Th scope="col">Part</Th>
+            <Th scope="col">Provider and model</Th>
+            <NumTh scope="col">Calls</NumTh>
+            <NumTh scope="col">Tokens in</NumTh>
+            <NumTh scope="col">Tokens out</NumTh>
+            <NumTh scope="col">Cost</NumTh>
+          </tr>
+        </thead>
+        {used.map(id => {
+          const total = byPart.get(id)!;
+          const models = [...lines].filter(([key]) => key.startsWith(id + '\u0000'));
+          const label = (key: string) => {
+            const [, provider = '', model = ''] = key.split('\u0000');
+            return (names.get(provider + '\u0000' + model) ?? provider) + ' · ' + model;
+          };
+          return (
+            <tbody key={id}>
+              <tr>
+                <Td className="font-medium whitespace-nowrap">
+                  {partName(id, data.parts.find(p => p.id === id)?.label)}
+                </Td>
+                <Td className={cn('min-w-48', models.length > 1 && 'text-muted')}>
+                  {models.length === 1 ? label(models[0]![0]) : `${models.length} models`}
+                </Td>
+                <Num>
+                  {count(total.calls)}
+                  {total.failed > 0 && <span className="block text-xs text-bad">{count(total.failed)} failed</span>}
+                </Num>
+                <Num>{compact(total.input)}</Num>
+                <Num>{compact(total.output)}</Num>
+                <Num className={cn(total.unknown && 'text-warn')}>{cost(total)}</Num>
+              </tr>
+              {models.length > 1 &&
+                models.map(([key, line]) => (
+                  <tr key={key} className="text-[13px] text-muted">
+                    <Td className="border-b-0 py-1.5" />
+                    <Td className="py-1.5">{label(key)}</Td>
+                    <Num className="py-1.5">{count(line.calls)}</Num>
+                    <Num className="py-1.5">{compact(line.input)}</Num>
+                    <Num className="py-1.5">{compact(line.output)}</Num>
+                    <Num className="py-1.5">{cost(line)}</Num>
+                  </tr>
+                ))}
+            </tbody>
+          );
+        })}
+      </Table>
+      {unused.length > 0 && (
+        <p className="px-5 py-3 text-xs text-muted">
+          Not used in this period: {unused.map(id => partName(id, data.parts.find(p => p.id === id)?.label)).join(', ')}
+          .
+        </p>
+      )}
+    </>
+  );
+}
+
+function ModelTable({rows}: {rows: UsageRow[]}) {
+  const byModel = group(rows, row => row.provider + '\u0000' + row.model);
+  const info = new Map<string, {provider: string; model: string; parts: Set<string>}>();
+  for (const row of rows) {
+    const key = row.provider + '\u0000' + row.model;
+    const entry = info.get(key) ?? {provider: row.provider_name || row.provider, model: row.model, parts: new Set()};
+    entry.parts.add(partName(row.part, row.label));
+    info.set(key, entry);
+  }
+  const sorted = [...byModel].sort((a, b) => b[1].calls - a[1].calls);
+  return (
+    <Table aria-label="Usage by provider and model">
+      <thead>
+        <tr>
+          <Th scope="col">Provider</Th>
+          <Th scope="col">Model</Th>
+          <Th scope="col">Used for</Th>
+          <NumTh scope="col">Calls</NumTh>
+          <NumTh scope="col">Tokens</NumTh>
+          <NumTh scope="col">Cost</NumTh>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map(([key, total]) => {
+          const entry = info.get(key)!;
+          return (
+            <tr key={key}>
+              <Td className="font-medium whitespace-nowrap">{entry.provider}</Td>
+              <Td className="whitespace-nowrap">{entry.model || '—'}</Td>
+              <Td className="min-w-40 text-muted">{[...entry.parts].join(', ')}</Td>
+              <Num>
+                {count(total.calls)}
+                {total.failed > 0 && <span className="block text-xs text-bad">{count(total.failed)} failed</span>}
+              </Num>
+              <Num>{compact(total.input + total.output)}</Num>
+              <Num className={cn(total.unknown && 'text-warn')}>{cost(total)}</Num>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }
