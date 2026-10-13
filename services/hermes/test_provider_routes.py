@@ -100,11 +100,12 @@ class ProviderRouteTests(unittest.TestCase):
         self.assertEqual(routes.keys(load(self.state)), {})
 
     def test_model_lists_follow_the_provider_being_edited_without_leaking_a_saved_key(self):
-        sent = []
+        sent, waits = [], []
 
         class Opener:
             def open(self, request, timeout):
                 sent.append((request.full_url, request.get_header('Authorization')))
+                waits.append(timeout)
                 body = json.dumps({'data': [{'id': 'claude-sonnet-5-5'}, {'id': 'bad model'}]}).encode()
                 return type('Response', (), {'read': lambda self, size: body, '__enter__': lambda self: self,
                                              '__exit__': lambda self, *a: None})()
@@ -115,6 +116,8 @@ class ProviderRouteTests(unittest.TestCase):
         listed = routes.list_models(values, 'custom-2', Opener(), url='https://other.example.test/v1/', secret='synthetic-typed-key')
         self.assertEqual(listed['models'], ['claude-sonnet-5-5'])
         self.assertEqual(sent[-1], ('https://other.example.test/v1/models', 'Bearer synthetic-typed-key'))
+        # A gateway that sleeps when idle gets time to wake up before the list gives up.
+        self.assertGreaterEqual(waits[-1], 60)
         # The saved key goes only to the saved address.
         routes.list_models(values, 'gateway', Opener(), url=GATEWAY['url'])
         self.assertEqual(sent[-1], (GATEWAY['url'] + '/models', 'Bearer synthetic-gateway-key'))
