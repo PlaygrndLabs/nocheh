@@ -10,15 +10,15 @@ import time
 from pathlib import Path
 
 from tools.operations.installation import configuration
+from tools.operations.provider import routes as provider_routes
 
 PROJECT = 'nocheh'
 DEV_IMAGES = 'nocheh-dev'
 SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
-            'nocheh-security', 'hermes-agent-sb', 'cliproxy-api',
-            'cliproxy-monitor', 'inngest-redis', 'inngest-server',
-            'chatgpt-speech', 'hermes', 'honcho-postgres', 'honcho-redis',
+            'nocheh-security', 'hermes-agent-sb', 'inngest-redis', 'inngest-server',
+            'hermes', 'honcho-postgres', 'honcho-redis',
             'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
-PORTS = (8780, 8783, 8785, 1455, 54545, 51121, 18317)
+PORTS = (8780, 8783, 8785)
 
 
 def port_available(port):
@@ -65,8 +65,6 @@ def prepare_runtime_images(env):
     locks = json.loads((ROOT / 'deploy/upstreams.lock.json').read_text())
     sources = (
         ('nocheh-hermes:local', locks['hermes']['revision'], DEV_IMAGES + ':hermes-base'),
-        ('nocheh-cliproxy:c76dfd4e', locks['cliproxy']['revision'], DEV_IMAGES + ':cliproxy'),
-        (locks['cpamp']['image'], locks['cpamp']['revision'], DEV_IMAGES + ':monitor'),
     )
     for source, revision, destination in sources:
         def image_revision(tag):
@@ -128,13 +126,15 @@ def docker_env(root, values):
             'XDG_RUNTIME_DIR', 'SSL_CERT_FILE')
     env = {name: os.environ[name] for name in keep if name in os.environ}
     env.update(values)
+    # Settings › Models: the resolved provider and model of replies and secret checks.
+    env.update(provider_routes.environment(values))
     env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_DEV_PROJECT=DEV_IMAGES,
                NOCHEH_DEV_SOURCE_ROOT=str(ROOT), NOCHEH_INSTALLATION_ROOT=str(root),
                NOCHEH_STATE_DIR=str(root / 'data/local'),
                NOCHEH_DEV_HERMES_BASE=DEV_IMAGES + ':hermes-base',
                NOCHEH_DEV_HONCHO_IMAGE=DEV_IMAGES + ':honcho',
                NOCHEH_NATIVE_ADMIN_PORT=str(int(values['NOCHEH_PORT']) + 5),
-               NOCHEH_OAUTH_PORT='1455', COMPOSE_PROFILES='honcho',
+               COMPOSE_PROFILES='honcho',
                COMPOSE_PROGRESS='plain',
                NOCHEH_AGENT_NETWORK=PROJECT + '-agent',
                NOCHEH_MEMORY_NETWORK=PROJECT + '-memory')
@@ -227,7 +227,6 @@ def assert_compose_mounts(cmd, env):
             or mount('honcho-postgres', '/var/lib/postgresql/data') != 'honcho_database'
             or mount('nocheh-app', '/data/files') != str(Path(env['NOCHEH_STATE_DIR']) / 'files')
             or mount('hermes', '/workspace/data/local/hermes') != str(Path(env['NOCHEH_STATE_DIR']) / 'hermes')
-            or mount('cliproxy-api', '/auth') != str(Path(env['NOCHEH_STATE_DIR']) / 'provider/auth')
             or mount('nocheh-app', '/app/src') != str(ROOT / 'src')
             or mount('honcho-api', '/nocheh') != str(ROOT / 'services/honcho')
             or mount('honcho-provider-gateway', '/workspace-honcho') != str(ROOT / 'services/honcho')

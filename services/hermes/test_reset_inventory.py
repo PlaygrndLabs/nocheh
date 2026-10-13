@@ -14,11 +14,10 @@ class ResetInventoryTests(unittest.TestCase):
         self.state = self.root / 'data/local'; self.memory = self.root / 'data/honcho'
         self.state.mkdir(parents=True); self.memory.mkdir()
         self.config = self.root / '.env'; self.config.write_text('SYNTHETIC_CREDENTIAL_NOT_FOR_MANIFEST')
-        for relative in ('files', 'spool', 'hermes/profiles', 'provider/auth', 'provider/monitor', 'admin/restores', 'admin/reset'):
+        for relative in ('files', 'spool', 'hermes/profiles', 'admin/restores', 'admin/reset'):
             (self.state / relative).mkdir(parents=True)
         (self.state / 'hermes/auth.json').write_text('LOGIN_MUST_NOT_BE_READ_OR_COPIED')
         (self.state / 'files/original.bin').write_bytes(b'PRIVATE_ORIGINAL_MUST_NOT_BE_COPIED')
-        (self.state / 'provider/monitor/usage.sqlite').write_bytes(b'ACCOUNTING_NOT_TOUCHED')
         (self.state / 'admin/applied.json').write_text('STALE_REVISION_MUST_NOT_BE_COPIED')
         (self.state / 'admin/settings.lock').touch()
         (self.memory / 'ledger').mkdir()
@@ -67,13 +66,12 @@ class ResetInventoryTests(unittest.TestCase):
         self.assertEqual(manifest['blockers'], [])
         self.assertEqual(len(manifest['volumes']), 4)
         text = json.dumps(manifest)
-        for forbidden in ('SECRET_NEVER_SERIALIZED', 'DO_NOT_SERIALIZE', 'LOGIN_MUST', 'PRIVATE_ORIGINAL', 'ACCOUNTING_NOT_TOUCHED', 'STALE_REVISION_MUST_NOT_BE_COPIED'):
+        for forbidden in ('SECRET_NEVER_SERIALIZED', 'DO_NOT_SERIALIZE', 'LOGIN_MUST', 'PRIVATE_ORIGINAL', 'STALE_REVISION_MUST_NOT_BE_COPIED'):
             self.assertNotIn(forbidden, text)
         actions = {item['path']: item['action'] for item in manifest['paths']}
         self.assertEqual(actions[str(self.state / 'files')], 'erase')
         self.assertEqual(actions[str(self.state / 'hermes/auth.json')], 'preserve')
         self.assertEqual(actions[str(self.state / 'hermes/profiles')], 'snapshot_preferences_then_erase')
-        self.assertEqual(actions[str(self.state / 'provider/monitor/usage.sqlite')], 'sanitize_accounting')
         self.assertEqual(actions[str(self.memory / 'ledger')], 'preserve')
         self.assertEqual(actions[str(self.state / 'admin/restores')], 'review_restore')
         self.assertEqual(actions[str(self.state / 'admin/applied.json')], 'erase')
@@ -101,6 +99,8 @@ class ResetInventoryTests(unittest.TestCase):
 
     def test_unknown_paths_and_external_volume_options_require_review(self):
         (self.state / 'unknown-state').mkdir()
+        # Former provider login state is no longer part of an installation.
+        (self.state / 'provider/auth').mkdir(parents=True)
         self.volumes['fixture-volume0']['options_count'] = 1
         codes = {item['code'] for item in self.inspect()['blockers']}
         self.assertIn('unclassified_state_path', codes)

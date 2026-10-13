@@ -66,7 +66,7 @@ patch('ui-tui/src/lib/externalCli.ts', [
     child.on('error', err => resolve({ code: null, error: err.message }))
     child.on('exit', code => resolve({ code }))
   })''', '''export const launchHermesCommand = (_args: string[]): Promise<LaunchResult> =>
-  Promise.resolve({code: 1, error: 'Nocheh manages subscription setup. Use Nocheh Settings and CLI.'})'''),
+  Promise.resolve({code: 1, error: 'Nocheh manages model providers. Use Nocheh Settings and CLI.'})'''),
 ])
 patch('ui-tui/src/lib/editor.ts', [
     ("    status = spawnSync(cmd!, [...args, file], { stdio: 'inherit' }).status", "    status = null // External editor processes require the managed tools boundary."),

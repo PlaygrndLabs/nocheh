@@ -40,22 +40,15 @@ def checkout(name, spec):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--skip-image", action="store_true", help="Prepare offline contract tests only")
-    args = parser.parse_args()
-    required = ["git", "uv", "ffprobe"] + ([] if args.skip_image else ["docker"])
-    for binary in required:
+    parser.parse_args()
+    for binary in ("git", "uv"):
         if not shutil.which(binary):
             parser.error(f"Install {binary} first")
     hermes = checkout("hermes-agent", LOCK["hermes"])
-    checkout("codex-asr", LOCK["codex_asr"])
     env = dict(os.environ, UV_CACHE_DIR=str(WORK / "uv-cache"),
                UV_PROJECT_ENVIRONMENT=str(WORK / "hermes-venv"))
     run("uv", "sync", "--project", str(hermes), "--python", LOCK["python"],
         "--frozen", "--no-dev", "--no-install-project", env=env)
-    if not args.skip_image:
-        run("docker", "build", "--target", "asr", "--build-context", "hermes_source="+str(hermes),
-            "-f", str(ROOT/"deploy/hermes.Dockerfile"),
-            "-t", LOCK["codex_asr"]["image"], str(ROOT))
     print("Compatibility dependencies ready; no live model checks have run.")
 
 

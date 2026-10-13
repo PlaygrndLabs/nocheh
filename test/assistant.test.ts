@@ -10,8 +10,8 @@ import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
 import {conversationScope,telegramDeliveryAllowed} from '../src/assistant-policy.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
-import {dispatchCommitted} from '../src/assistant.js';
-import {preparationStatus,waitForPreparation} from '../src/workflows/preparation-status.js';
+import {dispatchCommitted,storedTranscripts} from '../src/assistant.js';
+import {preparationStatus} from '../src/workflows/preparation-status.js';
 import {requestAction,controlReply,executeApproved} from '../src/actions.js';
 
 const policy={enabled:true,owner_id:'123',group_ids:['-20','-30']};
@@ -84,7 +84,7 @@ test('real PostgreSQL: action proposals require a bound turn; only a captured ow
   } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });
 
-test('real PostgreSQL: voice is stored as derived text before dispatch; quotas pause, uncertain RPC reuses receipt identity, history never replies',{skip:!process.env.PGHOST},async()=>{
+test('real PostgreSQL: voice is archived untranscribed and never blocks dispatch; uncertain RPC reuses receipt identity, history never replies',{skip:!process.env.PGHOST},async()=>{
   const config={...settings(),assistant:{...policy,group_access:{'-20':{granted:['456'],denied:[]}}}};
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
   const admin=new pg.Pool(connection),namespace=`assistant_${Date.now()}`;
@@ -100,16 +100,13 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     await immutableFile(join(root,'files'),digest(audio),audio);
     await pool.query("UPDATE artifacts SET state='ready',file_hash=$1,byte_size=$2",[digest(audio),audio.length]);
     await pool.query('UPDATE dispatches SET next_attempt=now()');
-    await prepareArchiveFiles(pool,root,async(path)=>{assert.equal(path,'perception.transcribe');calls++;return {success:false,error:'quota_paused'};},event.id,{owner:'inngest',epoch:1});
-    assert.equal((await pool.query('SELECT error_code FROM transcription_jobs')).rows[0].error_code,'quota_paused');
-    await pool.query('UPDATE transcription_jobs SET next_attempt=now()');await pool.query('UPDATE dispatches SET next_attempt=now()');
-    const transcript='😃 Juniper is due Friday.\r\n  ';let firstAttempt=0;
-    await prepareArchiveFiles(pool,root,async()=>{calls++;return {success:true,transcript};},event.id,{owner:'inngest',epoch:1});
+    let firstAttempt=0;
+    await prepareArchiveFiles(pool,root,event.id,{owner:'inngest',epoch:1});
     await dispatchCommitted(pool,config,async(path,body)=>{
       calls++;
       assert.equal(path,'run.start');assert.equal(body.asynchronous,true);
       const request=body as {attempt:number;archive_credential:string;transcripts:string[]};firstAttempt=request.attempt;
-      assert.deepEqual(request.transcripts,[transcript]);
+      assert.deepEqual(request.transcripts,[]);
       const claims=JSON.parse(Buffer.from(request.archive_credential.split('.')[1]!,'base64url').toString());assert.equal(claims.scope,'-20');
       assert.equal((await pool.query('SELECT count(*) FROM derived_artifacts')).rows[0].count,'1');
       throw Error('response lost after possible delivery');
@@ -117,12 +114,12 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     assert.equal((await pool.query('SELECT state FROM dispatches')).rows[0].state,'running');
     await pool.query('UPDATE dispatches SET next_attempt=now()');
     await dispatchCommitted(pool,config,async(path,body)=>{assert.equal(path,'run.resume');assert.equal((body as {attempt:number}).attempt,firstAttempt);return {state:'done'};},undefined,{owner:'inngest',epoch:1});
-    assert.equal((await pool.query('SELECT content FROM derived_artifacts')).rows[0].content.toString(),transcript);
+    assert.equal((await pool.query('SELECT content FROM derived_artifacts')).rows[0].content.toString(),'Voice note archived; transcription is not available.');
     assert.equal((await pool.query('SELECT original_text FROM events')).rows[0].original_text,null);
     await ingest(pool,{...value,key:'historical:voice1',origin:'import'});
     await dispatchCommitted(pool,config,async()=>{throw Error('history must not dispatch');},undefined,{owner:'inngest',epoch:1});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[event.id])).rows[0].state,'done');
-    assert.equal(calls,3);
+    assert.equal(calls,1);
     const other={...value,key:'telegram:fixture:update:2',text:'other',payload:update(-20,456)};
     const second=await ingest(pool,other);
     await dispatchCommitted(pool,config,async()=>({state:'ambiguous',error_code:'delivery_unconfirmed'}),undefined,{owner:'inngest',epoch:1});
@@ -139,16 +136,10 @@ test('real PostgreSQL: voice is stored as derived text before dispatch; quotas p
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[later.id])).rows[0].state,'done');
     const quiet=await ingest(pool,{...value,key:'telegram:fixture:quiet-voice',source_id:'quiet-voice',payload:{update_id:9,message:{message_id:9,chat:{id:-20,type:'group'},from:{id:123,is_bot:false},voice:{file_id:'quiet'}}}});
     await pool.query("UPDATE artifacts SET state='ready',file_hash=$2,byte_size=$3 WHERE event_id=$1",[quiet.id,digest(audio),audio.length]);
-    let quietCalls=0;
-    await prepareArchiveFiles(pool,root,async()=>{quietCalls++;return {success:false,error:'invalid_transcription_response',retryable:false};},quiet.id,{owner:'inngest',epoch:1});
-    const failed=await preparationStatus(pool,quiet.id);
-    assert.equal(failed.state,'failed');assert.equal(failed.stage,'transcription');
-    assert.equal(waitForPreparation(failed).state,'failed');
-    assert.equal((await pool.query('SELECT t.error_code FROM transcription_jobs t JOIN artifacts a ON a.id=t.artifact_id WHERE a.event_id=$1',[quiet.id])).rows[0].error_code,'invalid_transcription_response');
-    await pool.query("UPDATE transcription_jobs SET next_attempt=now() WHERE artifact_id IN (SELECT id FROM artifacts WHERE event_id=$1)",[quiet.id]);
-    await prepareArchiveFiles(pool,root,async()=>{throw Error('nonretryable audio must not be sent again');},quiet.id,{owner:'inngest',epoch:1});
-    assert.equal(quietCalls,1);
-    assert.equal((await pool.query('SELECT count(*)::int AS count FROM derived_artifacts WHERE event_id=$1',[quiet.id])).rows[0].count,0);
-    await dispatchCommitted(pool,config,async()=>{throw Error('voice without transcript must not reach Hermes');},quiet.id,{owner:'inngest',epoch:1});
+    assert.deepEqual(await storedTranscripts(pool,quiet.id),[],'a voice note without a reading never holds a reply back');
+    assert.equal((await preparationStatus(pool,quiet.id)).stage,'transcription');
+    await prepareArchiveFiles(pool,root,quiet.id,{owner:'inngest',epoch:1});
+    assert.notEqual((await preparationStatus(pool,quiet.id)).stage,'transcription');
+    assert.equal((await pool.query("SELECT kind FROM derived_artifacts WHERE event_id=$1",[quiet.id])).rows[0].kind,'extraction_status');
   } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });

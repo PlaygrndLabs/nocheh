@@ -107,7 +107,7 @@ class Administration:
             result = []
             for entry in self.profile_catalog.list():
                 path = self.profile_catalog.path(entry['native_profile'])
-                result.append({**entry, 'path': str(path), 'model': self.model, 'provider': 'openai-codex',
+                result.append({**entry, 'path': str(path), 'model': self.model, 'provider': 'openai',
                     'has_env': False, 'skill_count': 0, 'gateway_running': False, 'has_alias': False,
                     'description': 'Owner private' if entry['owner'] else 'Managed Telegram group',
                     'scope': 'owner' if entry['owner'] else 'group', 'exists': path.exists()})
@@ -122,7 +122,7 @@ class Administration:
             managed = name.startswith('nocheh-')
             owner = name == (Scopes.profile(self.policy.owner) if self.policy.owner else '') or not managed
             result.append({'name': name, 'path': str(path), 'is_default': name == (Scopes.profile(self.policy.owner) if self.policy.owner else ''),
-                           'model': self.model, 'provider': 'openai-codex', 'has_env': False,
+                           'model': self.model, 'provider': 'openai', 'has_env': False,
                            'skill_count': 0, 'gateway_running': False, 'has_alias': False,
                            'description': 'Owner private' if owner else 'Managed Telegram group',
                            'scope': 'owner' if owner else 'group', 'managed': managed, 'exists': path.exists()})
@@ -156,7 +156,7 @@ class Administration:
                 request=json.loads(raw);method=request.get('method');params=request.get('params') or {};result=None
                 if method=='session.create' and params.get('source')=='tool':
                     name,_=self.profile(params.get('profile'));session='metadata-'+uuid.uuid4().hex
-                    info={'model':self.model,'provider':'openai-codex','profile_name':name,'lazy':True,'read_only':True}
+                    info={'model':self.model,'provider':'openai','profile_name':name,'lazy':True,'read_only':True}
                     result={'session_id':session,'info':info}
                     await ws.send_json({'jsonrpc':'2.0','method':'event','params':{'type':'session.info','session_id':session,'payload':info}})
                 elif method=='ping': result={'pong':True}
@@ -287,7 +287,7 @@ class Administration:
                         raise ValueError('invalid_profile_name')
                     if any(body.get(k) for k in ('clone_from', 'clone_all', 'clone_from_default', 'mcp_servers', 'hub_skills')):
                         raise ValueError('profile_import_requires_managed_bootstrap')
-                    if body.get('provider') not in (None, '', 'openai-codex') or body.get('model') not in (None, '', self.model):
+                    if body.get('provider') not in (None, '', 'openai') or body.get('model') not in (None, '', self.model):
                         raise ValueError('subscription_model_managed_by_nocheh')
                     if self.profile_catalog:
                         self.profile_catalog.save({'name': new, 'state': 'active', 'expected_revision': 0,
@@ -393,17 +393,16 @@ class Administration:
                     result = (configure_profile(home, self.model, body.get('changes'), body.get('revision')) if method == 'PUT'
                               else inspect_profile(home, self.model))
                 elif path == '/api/model/options' and method == 'GET':
-                    result = {'model': self.model, 'provider': 'openai-codex', 'providers': [
-                        {'name':'ChatGPT subscription', 'slug':'openai-codex', 'models':[self.model],
+                    result = {'model': self.model, 'provider': 'openai', 'providers': [
+                        {'name':'Nocheh Settings › Models', 'slug':'openai', 'models':[self.model],
                          'total_models':1, 'is_current':True, 'source':'Nocheh settings',
                          'warning':'Change the production model in Nocheh Settings and Apply.'}]}
                 elif path == '/api/model/info' and method == 'GET':
-                    result = {'model':self.model, 'provider':'openai-codex', 'auto_context_length':0,
+                    result = {'model':self.model, 'provider':'openai', 'auto_context_length':0,
                               'config_context_length':0, 'effective_context_length':0, 'capabilities':{}}
                 elif path == '/api/model/auxiliary' and method == 'GET':
-                    result = {'main':{'provider':'openai-codex', 'model':self.model},
-                              'tasks':[{'task':'session_search', 'provider':'openai-codex', 'model':self.model,
-                                        'base_url':'https://chatgpt.com/backend-api/codex'}]}
+                    result = {'main':{'provider':'openai', 'model':self.model},
+                              'tasks':[{'task':'session_search', 'provider':'openai', 'model':self.model}]}
                 elif path == '/api/env' and method == 'GET': result = {}
                 elif path in ('/api/status', '/api/gateway/status') and method == 'GET':
                     import urllib.request

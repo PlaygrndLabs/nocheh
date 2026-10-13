@@ -12,6 +12,7 @@ import sys
 
 if os.environ.get('NOCHEH_INSTALLATION_FIXTURE') != '1':
     raise SystemExit('explicit_fixture_required')
+FIXTURE = 'http://model-fixture:8317/v1'
 
 
 class ScriptedBrain:
@@ -243,51 +244,13 @@ def meter():
     token = Path('/state/internal_token').read_text().strip()
     service = Egress(Ledger('/ledger/budget.sqlite'), token, 'synthetic-no-provider',
         prepare=ArchivePreparation('http://nocheh-app:8780', token),
-        embedding=replace(embeddings({}), url='http://shared-provider:8317/v1/embeddings'),
-        reasoning_key='synthetic-no-provider')
+        embedding=replace(embeddings({}), url=FIXTURE + '/embeddings'),
+        reasoning_key='synthetic-fixture-model-key')
+    # The meter admits only HTTPS reasoning addresses; this fixture process
+    # alone points it at the local model fixture.
+    service.reasoning_url = FIXTURE
     ThreadingHTTPServer(('0.0.0.0', 8790), handler(service)).serve_forever()
 
 
-def speech():
-    # Same HTTP contract as services.hermes.speech_gateway; only the ASR call is
-    # substituted. Synthetic audio names its transcript as ``SPEECH:<text>``;
-    # ``BLANK`` models a recognizer returning no usable text.
-    import hmac
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    token = os.environ['SERVICE_TOKEN']
-
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-
-        def reply(self, status, data):
-            raw = json.dumps(data).encode()
-            self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(raw)))
-            self.end_headers()
-            self.wfile.write(raw)
-
-        def do_GET(self):
-            if self.path != '/health':
-                return self.reply(404, {'error': 'not_found'})
-            return self.reply(200, {'ok': True, 'service': 'speech', 'login_present': True, 'synthetic': True})
-
-        def do_POST(self):
-            if self.path != '/transcribe':
-                return self.reply(404, {'error': 'not_found'})
-            if not hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Bearer ' + token).encode()):
-                return self.reply(401, {'error': 'unauthorized'})
-            raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
-            if b'BLANK' in raw:
-                return self.reply(200, {'success': False, 'transcript': '', 'provider': 'nocheh-subscription',
-                                        'error': 'invalid_transcription_response', 'retryable': False})
-            marker = re.search(rb'SPEECH:([^\x00\n]{1,500})', raw)
-            text = marker[1].decode('utf-8', errors='replace') if marker else 'پیام صوتی مصنوعی'
-            return self.reply(200, {'success': True, 'transcript': text, 'provider': 'nocheh-subscription'})
-
-    ThreadingHTTPServer(('0.0.0.0', 8783), Handler).serve_forever()
-
-
 if __name__ == '__main__':
-    {'provider': provider, 'meter': meter, 'speech': speech}[sys.argv[1]]()
+    {'provider': provider, 'meter': meter}[sys.argv[1]]()

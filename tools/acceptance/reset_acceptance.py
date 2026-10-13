@@ -346,7 +346,7 @@ def _fresh_result(raw, request):
     except (IndexError, json.JSONDecodeError):
         raise RuntimeError('reset_fresh_acceptance_verification_failed') from None
     names = ('owner_dm', 'dedicated_group', 'reply', 'human_reaction',
-             'subscription_transcription', 'learned_recall', 'owner_correction',
+             'learned_recall', 'owner_correction',
              'isolation', 'intentional_silence', 'exact_approval',
              'restart_recovery', 'honcho')
     required = {'event', 'reset_id', 'generation', 'mode', 'boundary_confirmed_at',

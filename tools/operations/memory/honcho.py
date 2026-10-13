@@ -5,14 +5,14 @@ import subprocess
 from services.honcho.cli.cli_runner import validate
 from tools.operations.memory.honcho_setup import ROOT, STATE, PROVIDER_STATE, initialize, sources, runtime_init, runtime_up, monthly
 from tools.operations.memory.honcho_runtime import enabled, operate
-from tools.operations.provider.provider import compose, login, login_state, login_kind
+from tools.operations.memory.honcho_setup import provider_ready
+from tools.operations.installation.configuration import compose
 
 
-def reasoning_login(state):
-    """Whether the provider login that serves the configured reasoning model exists."""
-    from tools.operations.installation.configuration import DEFAULTS, env_path, read_env
-    model = read_env(env_path(state)).get('NOCHEH_MODEL') or DEFAULTS['NOCHEH_MODEL']
-    return login_state(state, login_kind(model))['login_present']
+def reasoning_provider_configured(state):
+    """Whether Honcho's reasoning has a provider: the memory part's route is
+    configured, and Settings validation requires that provider's key."""
+    return provider_ready(state)
 
 
 def status():
@@ -26,7 +26,7 @@ def status():
             (STATE / 'temporary_embedding_key').exists()
             and (STATE / 'temporary_embedding_key').stat().st_size
         ),
-        'subscription_login': reasoning_login(PROVIDER_STATE),
+        'reasoning_provider_configured': reasoning_provider_configured(PROVIDER_STATE),
     }
     if enabled(PROVIDER_STATE):
         command, env = compose(PROVIDER_STATE)
@@ -68,8 +68,6 @@ def main(args):
         elif args == ['install']:
             command, env = compose(PROVIDER_STATE)
             return subprocess.call(command + ['--profile', 'honcho-tools', 'build', 'honcho-cli'], cwd=ROOT, env=env)
-        elif args == ['login']:
-            return login(PROVIDER_STATE)
         elif args == ['runtime-init']:
             initialize()
             runtime_init()

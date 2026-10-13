@@ -212,7 +212,6 @@ export async function prepareRun(pool:pg.Pool,config:Settings,input:unknown,call
     if(!held.rowCount)throw new HttpError(409,'run_lease_lost');
     if(held.rows[0].owner_epoch===null)throw new HttpError(409,'workflow_owner_changed');
     const transcripts=await storedTranscripts(client,event);
-    if(transcripts===null)throw new HttpError(503,'transcription_unavailable');
     const {rows}=await client.query<{id:string;file_hash:string;metadata:{file_name:string};kind:string}>('SELECT id,file_hash,metadata,kind FROM artifacts WHERE event_id=$1 ORDER BY id',[event]);
     const files=[];let total=0;
     for(const row of rows) {

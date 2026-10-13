@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, open, stat, lstat, unlink, chmod } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, open, stat, unlink, chmod } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -9,8 +9,6 @@ import { HttpError, json, object, readJson, string } from './http.js';
 import {DashboardSessions} from './dashboard-auth.js';
 import type {Duplex} from 'node:stream';
 import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
-import {proxyProviderMonitor} from './provider-monitor-proxy.js';
-import {OAUTH_PROVIDERS,ProviderOAuth,type OAuthProvider} from './provider-oauth.js';
 import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
@@ -22,8 +20,6 @@ const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
 const JOBS = join(STATE, 'admin/jobs');
 const PORT = Number(process.env.NOCHEH_DASHBOARD_PORT ?? 8783);
 const CONTAINER=process.env.NOCHEH_CONTAINER==='1';
-const MONITOR=CONTAINER?18317:Number(process.env.NOCHEH_PROVIDER_MONITOR_PORT??18317);
-const MONITOR_HOST=CONTAINER?'cliproxy-monitor':'127.0.0.1';
 const PREFIX = '/api/plugins/nocheh';
 const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
@@ -167,15 +163,8 @@ export async function startManagement() {
   await mkdir(JOBS, {recursive: true, mode: 0o700});
   const token = (await readFile(join(STATE, 'admin/dashboard/token'), 'utf8')).trim();
   if (token.length < 32) throw new Error('dashboard_token_missing');
-  const monitorKeyPath=join(STATE,'provider/keys/monitor-admin.key');
-  const monitorKeyStat=await lstat(monitorKeyPath);
-  if(!monitorKeyStat.isFile()||monitorKeyStat.isSymbolicLink()||monitorKeyStat.size>1024)throw new Error('provider_monitor_key_invalid');
-  const monitorKey=(await readFile(monitorKeyPath,'utf8')).trim();
-  if(monitorKey.length<32)throw new Error('provider_monitor_key_missing');
   const sessions=new DashboardSessions();
   const archiveConnection=object(await python({operation:'archive.connection'}));
-  const providerOAuth=Object.fromEntries((Object.keys(OAUTH_PROVIDERS) as OAuthProvider[]).map(provider=>
-    [provider,new ProviderOAuth(MONITOR,monitorKey,PORT,OAUTH_PROVIDERS[provider].port,MONITOR_HOST,CONTAINER?'0.0.0.0':'127.0.0.1',provider)])) as Record<OAuthProvider,ProviderOAuth>;
   const sockets=new Set<Duplex>();
   const live=new DashboardLiveUpdates();
   for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
@@ -264,7 +253,7 @@ export async function startManagement() {
             const draining=maintenance.begin(job.id,tracked.id);
             live.closeAll();
             coordinator=await draining;
-            for(const socket of sockets)socket.destroy();await Promise.all(Object.values(providerOAuth).map(oauth=>oauth.quiesce()));maintenance.ready(coordinator);
+            for(const socket of sockets)socket.destroy();maintenance.ready(coordinator);
           }
           launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}},coordinator);return json(res,202,job);
         }catch(error){operationBusy=false;if(coordinator)maintenance.end(coordinator);throw error;}
@@ -274,7 +263,10 @@ export async function startManagement() {
         return json(res,200,await python({operation:'policy.manage',request:{...body,profile:url.searchParams.get('profile'),job:url.searchParams.get('job')},write:req.method==='POST'}));
       }
       if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
+      // POST so a key being typed travels in the body, never in a URL or access log.
+      if (req.method === 'POST' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', request: object(await readJson(req))}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
+      if (req.method === 'GET' && route === '/usage') return json(res, 200, await python({operation: 'usage.view', days: Number(url.searchParams.get('days') ?? 30)}));
       if (req.method === 'GET' && route === '/honcho/budget') return json(res, 200, await python({operation: 'honcho.budget'}));
       if (req.method === 'POST' && route === '/honcho/budget') return exclusive('honcho-budget',async()=>
         json(res,200,await python({operation:'honcho.budget.update',request:object(await readJson(req))})));
@@ -351,7 +343,6 @@ export async function startManagement() {
     res.setHeader('x-frame-options','DENY');res.setHeader('referrer-policy','no-referrer');res.setHeader('x-content-type-options','nosniff');
     if(req.method==='GET'&&(path==='/nocheh'||path==='/nocheh/')){res.writeHead(308,{location:'/'+url.search});res.end();return;}
     if(req.method==='GET'&&path==='/hermes'){res.writeHead(308,{location:'/hermes/'+url.search});res.end();return;}
-    if(req.method==='GET'&&(path==='/providers'||path==='/providers/')){res.writeHead(308,{location:'/providers/management.html'+url.search});res.end();return;}
     if(process.env.NOCHEH_DEV_WATCH==='1'&&req.method==='GET'&&path==='/__dev/revision') {
       const revision=await readFile(join(ROOT,'dashboard/dist/.dev-revision'),'utf8').catch(()=>'');
       res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});res.end(revision);return;
@@ -359,7 +350,7 @@ export async function startManagement() {
     if(req.method==='GET'&&path==='/') {
       const session=sessions.page(req);
       res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
-      const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision)location.reload();nochehRevision=next}catch{}},1000)</script>` : '';
+      const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision){if(window.__nochehUnsaved)return;location.reload()}nochehRevision=next}catch{}},1000)</script>` : '';
       const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
     }
@@ -367,21 +358,6 @@ export async function startManagement() {
     if(req.method==='GET'&&asset?.[1]) {
       res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache'});
       createReadStream(join(ROOT,'dashboard/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;
-    }
-    if(path.startsWith('/providers/')) {
-      const page=req.method==='GET'&&path==='/providers/management.html';
-      const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
-      if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
-      const login=req.method==='GET'?path.match(/^\/providers\/v0\/management\/([a-z]+)-auth-url$/)?.[1]:undefined;
-      if(login&&Object.hasOwn(OAUTH_PROVIDERS,login)) {
-        sessions.authorize(req,true);
-        const provider=login as OAuthProvider;
-        // One credential per provider: a second login would add quota switching.
-        const credentials=await readdir(join(STATE,'provider/auth')).catch(()=>[] as string[]);
-        if(credentials.some(name=>OAUTH_PROVIDERS[provider].credential.test(name)))throw new HttpError(409,'provider_login_already_exists');
-        return json(res,200,await providerOAuth[provider].start());
-      }
-      proxyProviderMonitor(req,res,MONITOR,monitorKey,session.csrf,MONITOR_HOST);return;
     }
     if(path.startsWith('/inngest/')){
       const session=sessions.authorize(req,req.method!=='GET');
@@ -422,7 +398,6 @@ export async function startManagement() {
     live.closeAll();
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
-    for(const oauth of Object.values(providerOAuth))oauth.close();
     // A partial request or stalled stream must not hold a reload open forever.
     // Closing its transport does not cancel admitted owner writes or lifecycle jobs.
     const admitted=maintenance.drain();

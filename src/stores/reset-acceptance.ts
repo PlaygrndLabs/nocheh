@@ -2,7 +2,7 @@ import {canonical,digest} from '../archive.js';
 import type {StorePools} from './connections.js';
 
 const HASH=/^[a-f0-9]{64}$/,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const checks=['owner_dm','dedicated_group','reply','human_reaction','subscription_transcription','learned_recall',
+const checks=['owner_dm','dedicated_group','reply','human_reaction','learned_recall',
   'owner_correction','isolation','intentional_silence','exact_approval','restart_recovery','honcho'] as const;
 const exact=(value:unknown,keys:string[],code='reset_fresh_acceptance_invalid')=>{
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('\0')!==[...keys].sort().join('\0'))throw Error(code);
@@ -26,8 +26,6 @@ function request(value:unknown) {
   const reply=exact(evidence.reply,['event_id','target_event_id']);hash(reply.event_id);hash(reply.target_event_id);
   const reaction=exact(evidence.human_reaction,['event_id','target_event_id','actor_observed']);
   hash(reaction.event_id);hash(reaction.target_event_id);truth(reaction.actor_observed);
-  const transcript=exact(evidence.subscription_transcription,['event_id','artifact_id','derived_id']);
-  hash(transcript.event_id);hash(transcript.artifact_id);hash(transcript.derived_id);
   const recall=exact(evidence.learned_recall,['entry_id','version_operation_id','memory_receipt_id','dispatch_event_id','owner_inspected']);
   hash(recall.entry_id);hash(recall.version_operation_id);hash(recall.memory_receipt_id);hash(recall.dispatch_event_id);truth(recall.owner_inspected);
   const correction=exact(evidence.owner_correction,['entry_id','operation_id','revision']);
@@ -100,18 +98,6 @@ export async function verifyFreshAcceptance(stores:StorePools,value:unknown) {
     WHERE r.event_id=$1 AND r.kind='authored_by' AND o.kind='actor'`,[e.human_reaction.event_id])).rows;
   if(actors.length!==1||digest(actors[0].external_id)!==input.human_participant_sha256)throw Error('reset_fresh_acceptance_human_required');
 
-  await event(e.subscription_transcription.event_id,policy.owner_id);
-  const transcript=(await stores.archive.query('SELECT file_hash,byte_size FROM artifacts WHERE id=$1 AND event_id=$2',
-    [e.subscription_transcription.artifact_id,e.subscription_transcription.event_id])).rows;
-  const derived=(await stores.derived.query(`SELECT d.kind,d.producer,d.created_at FROM derived_artifacts d
-    JOIN derivative_selections s ON s.event_id=d.event_id AND s.artifact_id=d.artifact_id AND s.kind=d.kind
-    JOIN derivative_selection_revisions v ON v.selection_id=s.id AND v.revision=s.active_revision AND v.derived_id=d.id
-    WHERE d.id=$1 AND d.event_id=$2 AND d.artifact_id=$3`,[e.subscription_transcription.derived_id,
-      e.subscription_transcription.event_id,e.subscription_transcription.artifact_id])).rows;
-  if(transcript.length!==1||!transcript[0].file_hash||Number(transcript[0].byte_size)<1||derived.length!==1||
-    derived[0].kind!=='transcript'||derived[0].producer!=='nocheh-subscription')throw Error('reset_fresh_acceptance_transcription_missing');
-  after(derived[0].created_at,boundary);
-
   await event(e.learned_recall.dispatch_event_id);await dispatch(e.learned_recall.dispatch_event_id);
   const learned=(await stores.derived.query(`SELECT v.operation_id,v.author,v.retired,v.created_at
     FROM learned_entries x JOIN learned_versions v ON v.entry_id=x.id AND v.revision=x.active_revision
@@ -163,7 +149,7 @@ export async function verifyFreshAcceptance(stores:StorePools,value:unknown) {
   after(ingestion[0].created_at,boundary);
 
   const sourceEvents=new Set([e.owner_dm.event_id,e.dedicated_group.event_id,e.reply.event_id,e.reply.target_event_id,
-    e.human_reaction.event_id,e.human_reaction.target_event_id,e.subscription_transcription.event_id,e.learned_recall.dispatch_event_id,
+    e.human_reaction.event_id,e.human_reaction.target_event_id,e.learned_recall.dispatch_event_id,
     e.isolation.event_id,e.intentional_silence.event_id,e.restart_recovery.event_id]);
   return {reset_id:input.reset_id,generation:input.generation,mode:'live',boundary_confirmed_at:input.boundary_confirmed_at,
     checks:Object.fromEntries(checks.map(name=>[name,'passed'])),source_events:sourceEvents.size,live_only:true,historical_evidence:false,

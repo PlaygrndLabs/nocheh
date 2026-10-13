@@ -22,7 +22,7 @@ Follow [AGENTS.md](../AGENTS.md) for verified increments and Git integration.
 - G4 preflight (report removed for privacy): pinned infrastructure and boundary checks; not live connection acceptance.
 - G7 guarded acceptance (report removed for privacy) and live saved-copy recall (report removed for privacy): owner edits, exact retrieval, and restart passed. The historical backfill recorded 161 events plus 278 derived records ready, zero pending/failed.
 - Dedicated embedding attempt (report removed for privacy): HTTP 429 with a retained reservation. Configuration is supplied; provider capacity and live memory gates remain pending, rather than being reported as absent configuration or passed acceptance.
-- [Operating instructions and system graph](guarded-memory-system.md): actual commands, embedding model configuration, receipt reconciliation, and the accepted target flow. [Shared-provider cutover](shared-provider-plan.md) is separate from Honcho attachment.
+- [Operating instructions and system graph](guarded-memory-system.md): actual commands, embedding model configuration, receipt reconciliation, and the accepted target flow. Honcho reasoning uses the memory provider chosen in Settings › Models ([model providers](provider.md)).
 
 Honcho attachment, opted-in history acceptance, and monthly cutover remain gated.
 Existing Telegram release checks are also pending. These gates do not prohibit

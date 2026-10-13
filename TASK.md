@@ -152,8 +152,8 @@ automatic service restarts disabled and is not the unattended release
 configuration.
 
 The existing embedding spending cap and subscription request safety limit remain
-in force. The local provider route has one CPA login and one refresh owner. Native
-auth is absent; no duplicate login or refresh worker was introduced.
+in force. Nocheh runs no provider proxy or provider login of its own
+([ADR-0142](docs/adr/0142-external-providers-only.md)).
 
 The relationships and memory access UI now separates Explore, Review requests,
 and Shared memory, with a list-first explorer, optional map, direct fact sharing,
@@ -165,14 +165,6 @@ failed approval drafts, successful approval, sharing, and revocation. See the
 [completed increment](docs/task-history.md). Operating activation remains pending;
 this UI verification does not establish live recall or release readiness.
 
-Provider login now relays every redirect-based CLIProxyAPI provider (Codex,
-Claude, Antigravity) through its own temporary host callback; Kimi and xAI use
-device codes. Each provider keeps one credential, and shared ChatGPT login status
-counts only Codex files. Build, [relay checks](test/provider-oauth.test.ts),
-[login-state checks](services/hermes/test_provider.py), and live-dev checks pass.
-[Decision](docs/adr/0103-relay-every-provider-oauth-login.md). Pending: a live
-owner Claude login through the dev dashboard. The owner answered that one
-reasoning provider and model is enough for the MVP phase.
 
 Group chats now answer only when a message addresses Nocheh: a reply to one of
 its messages, its @username or a tap on its name, or its display name or a
@@ -316,8 +308,8 @@ restart is pending.
   status, and time to headers/error. Eleven networkless checks pass, including
   provider HTTP and transport failures without credential/body leakage. This
   diagnostic cannot recover outcomes for the 2,665 earlier admissions; the
-  coupled fixture results are recorded below. [Relay](tools/acceptance/model_relay.py),
-  [checks](test/test_model_relay.py).
+  coupled fixture results are recorded below. Relay (removed `tools/acceptance/model_relay.py`),
+  checks (removed `test/test_model_relay.py`).
 
   With Docker restored by the owner, the 16-service fixture passed health
   startup, but 45 new model admissions included 33 upstream HTTP 503 and one
@@ -389,8 +381,8 @@ restart is pending.
   429s, not unthrottled provider reliability or operating activation. The
   content-free summary and full synthetic receipts remain in ignored local
   acceptance state. [Procedure](docs/telegram-simulation.md),
-  [runner](tools/acceptance/model_rehearsal.py),
-  [relay](tools/acceptance/model_relay.py).
+  runner (removed `tools/acceptance/model_rehearsal.py`),
+  relay (removed `tools/acceptance/model_relay.py`).
 
   The Honcho egress candidate now persists a shared, exponential 60-second to
   one-hour cooldown after paid embedding 5xx outcomes. Blocked calls return
@@ -446,8 +438,8 @@ restart is pending.
   before opening a fixture. Six networkless runner checks pass. This prepares an
   unused-topic recheck; the first attempt failed, and the later focused topic-18
   recheck passed as recorded above.
-  [Runner](tools/acceptance/model_rehearsal.py),
-  [checks](test/test_model_rehearsal.py).
+  Runner (removed `tools/acceptance/model_rehearsal.py`),
+  checks (removed `test/test_model_rehearsal.py`).
 
   Foreground Honcho recall now requires completed evidence beyond the current
   question. Background context still learns the first source; older receipts
@@ -657,14 +649,40 @@ owner rechecks: a live exact approval to a topic and quick live messages with
 a voice note. Real-model quality, live Telegram release gates and release
 remain pending. [Live summary](docs/mvp-acceptance-status.md).
 
-Reasoning provider (October 10, owner: "why gpt? use claude provider."): the
-reasoning model is one `NOCHEH_MODEL` setting for Hermes, the guard, Honcho
-reasoning and the meter, defaulting to `claude-sonnet-5-5` through the Claude
-login in CLIProxyAPI; provider status reports the reasoning login separately
-from the ChatGPT login that transcription still needs. Pending: an installation
-whose `.env` pins `NOCHEH_MODEL` to a GPT model keeps it until changed; Honcho's
-JSON structured output and Hermes tool calls through CLIProxyAPI's Claude
-translation are unproven until a real-model run; no live acceptance.
+Providers per part (October 13, owner: use the hosted sub2api gateway instead
+of Nocheh's own provider; its wake-up time does not matter): Settings › Models
+now lists providers (OpenAI and Anthropic by API key, and custom
+OpenAI-compatible providers by HTTPS address and key) and the provider
+and model of replies, memory, the secret check and memory search, with one
+default for every part ([decision](docs/adr/0141-per-part-model-providers.md),
+[resolver](tools/operations/provider/routes.py),
+[checks](services/hermes/test_provider_routes.py),
+[browser check](test/dashboard-pages.browser.mjs)). After the owner's review,
+model lists load from added providers while they are being edited, and each
+custom provider is a card with Remove in its header. Owner, October 13: "remove
+CPA and it admin panel from our services." CLIProxyAPI, CPA Manager Plus, the
+provider logins and the ChatGPT speech route are gone; a fresh installation has
+no provider and its model calls wait with `provider_not_configured`; voice
+notes are archived without transcription and never hold a reply
+([decision](docs/adr/0142-external-providers-only.md)). Pending: the owner
+applies sub2api on Cloudflare (or adds an API key), adds it in Settings and
+applies; then a live reply, memory answer and secret check through it; whether
+and how voice transcription returns is the owner's decision. An existing
+installation keeps its old `data/local/provider/` folder (the CPA logins);
+reset refuses it as an unknown path until the owner deletes it. Honcho's structured output through
+Anthropic's OpenAI-compatible endpoint is unproven. Moving Nocheh itself to an
+always-on server is a separate, unstarted step.
+Usage tracker (October 13, owner: "we need to have our own tracker ... everything
+needs to be displayed in one place (Nocheh)"): Hermes's own per-turn token
+counts and cost go to a daily table per part, provider and model
+([tracker](services/hermes/usage.py)); Honcho memory and memory search are
+counted at Honcho's meter ([meter](services/honcho/meter.py)); System › Usage
+shows calls, tokens and estimated cost for every part in one list
+([view](tools/operations/provider/usage.py), [page](dashboard/pages/usage.tsx),
+[checks](services/hermes/test_usage.py), [view checks](services/hermes/test_usage_view.py)).
+Costs Hermes cannot price, such as a custom provider's, show as unknown.
+Pending: live counts after the owner adds a provider and applies (Hermes and
+the meter must be rebuilt for the tracker to start counting).
 With real Claude answers the schedule scenario fires, waits for review and
 delivers once (the scheduled-run fix on main holds), but removing the finished
 one-time schedule failed: removal paused it, which Hermes refuses for a
@@ -704,11 +722,6 @@ thread removed those containers. Honcho start/stop, the Apply refresh and the
 provider model list now refuse a state that is neither the installation's own
 nor names its own project ([guard](tools/operations/installation/configuration.py),
 [test](services/hermes/test_honcho_runtime.py)).
-Settings now offers both models: a reasoning-model picker grouped by signed-in
-provider login, with a sign-in hint when none is signed in, and an embedding-model
-picker that saving refuses once Honcho's ledger has committed to another model;
-Apply rewrites Honcho's generated settings and restarts it when either model
-changed. Checked in the synthetic dashboard preview at desktop and phone width.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
@@ -1055,13 +1068,9 @@ activation remains separate.
      that change.
    - Honcho-only recall is unproven: the passing answer also had the fact from
      chat history and a Nocheh learned rule.
-   - Voice transcription has no route on the Claude provider. While a voice
-     note waits for its transcript, a later message in that chat starts after
-     the two-minute order bound and its turn is told that an earlier voice note
-     was received but is not transcribed yet, so the reply no longer says no
-     voice note was found ([dispatch check](test/store-telegram-dispatch.test.ts),
-     [turn check](services/hermes/test_turn_process.py)). Pending: a real-model
-     rerun of the simulator's speech-outage scenario.
+   - Voice notes are archived without transcription and never wait
+     ([ADR-0142](docs/adr/0142-external-providers-only.md)); the simulator's
+     speech scenarios became `voice_is_archived_without_blocking`.
    - Peer cards are workspace-wide, so only owner turns read them.
    - PDF attachments: preparation now reads a PDF's text layer (pinned
      `unpdf` 1.8.1, in a worker thread with a heap limit and 30-second

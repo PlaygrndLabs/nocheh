@@ -8,8 +8,8 @@ Docker administration access is explicitly owner-authorized.
 
 <layout>
 
-One Compose project contains 17 continuously running containers when Honcho is
-enabled, or 18 with pgweb. In the original-only layout, database initialization
+One Compose project contains 14 continuously running containers when Honcho is
+enabled, or 15 with pgweb. In the original-only layout, database initialization
 runs inside `nocheh-db` before it reports healthy. The legacy layout retains
 its application startup initialization.
 Temporary isolated agent containers are additional.
@@ -23,9 +23,6 @@ Temporary isolated agent containers are additional.
 | `nocheh-security` | Security broker, guard and exact authorization checks | Docker / running |
 | `hermes` | Managed Hermes runtime and native dashboard | Docker / running |
 | `hermes-agent-sb` | Launch isolated agents; only agent infrastructure container mounting the Docker socket | Docker / running |
-| `chatgpt-speech` | Subscription transcription; read-only shared login | Docker / running |
-| `cliproxy-api` | Shared model provider; sole OAuth refresh authority | Docker / running |
-| `cliproxy-monitor` | CPA Manager Plus full request history and analytics | Docker / running |
 | `inngest-server` | Workflow scheduling, retries, waits and inspection UI | Docker / running |
 | `inngest-redis` | Durable workflow queue and run state | Docker / running |
 | `honcho-api` | Memory API | Docker / running when enabled |
@@ -41,6 +38,11 @@ location, observed state and expected state. The Honcho metrics probe establishe
 process availability; memory backlog and receipt observations establish progress.
 API, capture and Inngest connectivity are separate observations.
 
+Nocheh runs no model provider service. Model calls leave through the security
+broker (replies and the secret check) and `honcho-provider-gateway` (memory and
+embeddings) to the providers chosen in Settings › Models; see
+[model providers](provider.md).
+
 </layout>
 
 <relationships>
@@ -49,7 +51,7 @@ API, capture and Inngest connectivity are separate observations.
 flowchart TB
     Owner[Owner] --> Dashboard
     Telegram[Telegram] --> Hermes
-    subgraph Docker["Local Docker Compose · 17 services"]
+    subgraph Docker["Local Docker Compose · 14 services"]
         Dashboard["nocheh-dashboard :8783"]
         Executor["nocheh-executor<br/>imports · approved tools · receipt recovery"]
         App["nocheh-app<br/>API · capture · publisher · workflow handlers"]
@@ -59,9 +61,6 @@ flowchart TB
         Hermes["hermes<br/>managed runtime and native dashboard"]
         Launcher[hermes-agent-sb]
         Security["nocheh-security<br/>broker and guard"]
-        Speech[chatgpt-speech]
-        Provider["cliproxy-api<br/>shared provider and sole login refresh"]
-        Monitor[cliproxy-monitor]
         Memory[honcho-api]
         Deriver[honcho-deriver]
         MemoryDB[honcho-postgres]
@@ -70,7 +69,6 @@ flowchart TB
     end
     Dashboard --> App
     Dashboard --> Hermes
-    Dashboard --> Monitor
     Dashboard -.->|maintenance| DockerAPI[Local Docker engine]
     Executor -.->|approved tool sandboxes| DockerAPI
     Executor <-->|authenticated Connect via app| App
@@ -84,21 +82,15 @@ flowchart TB
     Launcher --> Agents[Temporary isolated Docker agents]
     Agents --> Security
     Security --> App
-    Security --> Provider
-    Hermes --> Speech
-    Speech -->|read only| Login[Shared OAuth file]
-    Provider -->|sole writer| Login
-    Provider --> Subscription[ChatGPT subscription]
-    Speech --> Subscription
+    Security --> Providers[Settings › Models providers]
     App --> Memory
     Memory --> MemoryDB
     Deriver --> MemoryDB
     Memory --> Cache
     Deriver --> Gateway
     Memory --> Gateway
-    Gateway --> Provider
+    Gateway --> Providers
     Gateway --> Embeddings[Dedicated capped embeddings provider]
-    Monitor --> Provider
 ```
 
 Ordinary functions share one application and concurrency four. Executor functions use
@@ -117,7 +109,7 @@ legacy layout follows [ADR-0049](adr/0049-application-database-bootstrap.md).
 <workflow>
 
 Telegram → capture and save → durable event publication → Inngest → prepare files,
-transcripts and guarded copies → Hermes reasoning → security and exact approvals →
+extracted text and guarded copies → Hermes reasoning → security and exact approvals →
 deliver and save receipt → sync authorized Honcho memory.
 
 Preparation is a prerequisite. Workflow events carry opaque references and approved
@@ -136,7 +128,6 @@ PostgreSQL derivation queue stay with their respective tools.
   gateway/scheduler startup runs. Presentation preferences live in
   `data/local/admin/dashboard/home/`, separately from runtime profiles.
 - Inngest inspection: <http://localhost:8783/inngest/runs>.
-- Provider monitoring: <http://localhost:8783/providers/management.html>.
 - Optional pgweb: <http://localhost:8782/>, after `./bin/nocheh db`.
 
 React, React DOM, Three.js, GraphQL, pg, TypeScript and esbuild are libraries or

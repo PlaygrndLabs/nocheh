@@ -40,7 +40,7 @@ function OperationResult({result}: {result: any}) {
   const messages: Record<string, string> = {
     backed_up: 'Full backup created.',
     restored_inactive:
-      'Backup restored into a separate inactive installation. Telegram and the copied login remain disabled.',
+      'Backup restored into a separate inactive installation. Telegram and scheduled work remain disabled.',
     exported: 'Portable archive ZIP ready to download.',
     restarted: 'Services restarted and readiness checked.',
     applied: 'Saved settings applied to running services.',
@@ -107,7 +107,7 @@ export function Operations({notify}: {notify: (message: string, error?: boolean)
     restart:
       'Restart Hermes and the archive workers, then check readiness. Telegram replies may be briefly interrupted.',
     restore:
-      'Restore the selected backup into a new, separate local installation. Telegram stays disabled and the copied subscription login stays inactive. Your current installation is not replaced.',
+      'Restore the selected backup into a new, separate local installation. Telegram and scheduled work stay disabled. Your current installation is not replaced.',
   };
   const tasks = (jobs || []).filter(j => j.kind !== 'import');
   const operations: [action: string, title: string, note: string, label: string][] = [

@@ -43,17 +43,15 @@ class SettingsTests(unittest.TestCase):
     def test_models_are_owner_settings_and_embeddings_never_mix(self):
         import sqlite3
         from tools.operations.memory.honcho_setup import state_for
-        choices = {'provider_running': True, 'providers': [{'id': 'claude', 'label': 'Claude', 'signed_in': True, 'models': ['claude-sonnet-5-5']},
-                                                            {'id': 'codex', 'label': 'ChatGPT', 'signed_in': False, 'models': []}]}
-        with tempfile.TemporaryDirectory() as folder, patch('tools.operations.provider.provider.reasoning_choices', return_value=choices):
+        with tempfile.TemporaryDirectory() as folder:
             state = Path(folder); initialize(state)
             current = view(state)
-            self.assertEqual(current['models']['reasoning'], ['claude-sonnet-5-5'])
-            self.assertEqual([provider['signed_in'] for provider in current['models']['providers']], [True, False])
+            self.assertEqual([row['id'] for row in current['providers']['list']], ['openai', 'anthropic'])
             self.assertIn('text-embedding-3-large', current['models']['embedding'])
             editable = {field['key'] for field in current['fields'] if field['editable']}
             self.assertLessEqual({'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_MODEL'}, editable)
-            self.assertNotIn('OPENAI_API_KEY', editable)
+            # Provider keys are entered in Settings › Models.
+            self.assertLessEqual({'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'NOCHEH_PROVIDER_KEYS', 'NOCHEH_PROVIDERS'}, editable)
             saved = save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-large'}, current['revision'])
             # Once Honcho's ledger holds vectors from one model, another one is refused.
             ledger = state_for(state) / 'ledger/budget.sqlite'

@@ -17,7 +17,7 @@ class ResetQuiescenceTests(unittest.TestCase):
         self.state = Path(self.temporary.name).resolve(); self.generation = str(uuid.uuid4())
         services = ['nocheh-db', 'honcho-postgres', 'honcho-redis', 'inngest-postgres', 'inngest-redis',
                     'hermes', 'nocheh-executor', 'hermes-agent-sb', 'nocheh-app',
-                    'nocheh-security', 'nocheh-dashboard', 'cliproxy-api', 'cliproxy-monitor',
+                    'nocheh-security', 'nocheh-dashboard',
                     'honcho-api', 'honcho-deriver', 'honcho-provider-gateway']
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False,
             'content_copied': False, 'blockers': [], 'volumes': [], 'installation': {
