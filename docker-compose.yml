@@ -30,10 +30,12 @@ x-service: &service
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
     HONCHO_URL: http://honcho-memory:8000
-    NOCHEH_MODEL: ${NOCHEH_MODEL:-claude-sonnet-5-5}
+    # The reply model: the security broker admits only this model and provider address.
+    NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+    NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-}
+    NOCHEH_GUARD_ROUTE_MODEL: ${NOCHEH_GUARD_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
     NOCHEH_PARALLEL_GUARD_CHECKS: ${NOCHEH_PARALLEL_GUARD_CHECKS:-3}
-    GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]}
     TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
     TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
     TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
@@ -213,10 +215,6 @@ services:
     command: [dashboard]
     ports:
       - "127.0.0.1:${NOCHEH_DASHBOARD_PORT:-8783}:${NOCHEH_DASHBOARD_PORT:-8783}"
-      - "127.0.0.1:${NOCHEH_OAUTH_PORT:-1455}:1455"
-      # Claude and Antigravity redirect URIs fix these host ports.
-      - "127.0.0.1:54545:54545"
-      - "127.0.0.1:51121:51121"
     healthcheck:
       test: [CMD, python3, -m, tools.runtime.container_service, dashboard-health]
       interval: 10s
@@ -293,7 +291,7 @@ services:
   honcho-provider-gateway:
     logging: *logging
     init: true
-    environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MODEL:-claude-sonnet-5-5}"}
+    environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MEMORY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}"}
     profiles: [honcho]
     restart: unless-stopped
     image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
@@ -305,7 +303,6 @@ services:
       - ./tools/operations/provider/embedding_config.py:/nocheh/embedding_config.py:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/internal_token:/state/internal_token:ro
       - ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/ledger:/ledger
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/honcho.key:/run/secrets/cliproxy_honcho_key:ro
     secrets: [temporary_embedding_key]
     networks: [honcho-isolated, honcho-egress, memory]
     healthcheck:
@@ -369,80 +366,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
-  cliproxy-api:
-    logging: *logging
-    image: nocheh-cliproxy:c76dfd4e
-    build:
-      context: ./data/compat/upstreams/CLIProxyAPI
-      dockerfile: ../../../../deploy/cliproxy.Dockerfile
-      args:
-        COMMIT: c76dfd4e0edabab9000628b1560ab8ab379eadb8
-    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
-    init: true
-    restart: unless-stopped
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    command: [./CLIProxyAPI, -config, /state/config.yaml]
-    volumes:
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/config.yaml:/state/config.yaml:ro
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/auth:/auth
-    networks:
-      default: {}
-      memory: {aliases: [shared-provider]}
-    healthcheck:
-      test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8317/healthz]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  cliproxy-monitor:
-    logging: *logging
-    image: nocheh-cpamp:1ae656c
-    build:
-      context: ./data/compat/upstreams/cpa-manager-plus
-      dockerfile: ../../../../deploy/cpamp.Dockerfile
-      additional_contexts:
-        nocheh_source: .
-      args:
-        CPAMP_REVISION: 1ae656c82990c480f3f104326a08c6e0001eeb4c
-    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
-    init: true
-    restart: unless-stopped
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    environment:
-      HTTP_ADDR: 0.0.0.0:18317
-      USAGE_DATA_DIR: /data
-      USAGE_DB_PATH: /data/usage.sqlite
-      CPA_UPSTREAM_URL: http://cliproxy-api:8317
-      CPA_MANAGEMENT_KEY_FILE: /run/secrets/cpa_management_key
-      CPA_MANAGER_ADMIN_KEY_FILE: /run/secrets/cpamp_admin_key
-      CPA_MANAGER_DATA_KEY_FILE: /run/secrets/cpamp_data_key
-      USAGE_COLLECTOR_MODE: http
-      USAGE_CORS_ORIGINS: ''
-      USAGE_QUOTA_COOLDOWN_ENABLED: 'false'
-      USAGE_ACCOUNT_ACTIONS_ENABLED: 'false'
-      USAGE_ACCOUNT_ACTIONS_AUTO_DISABLE: 'false'
-    volumes:
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/monitor:/data
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/management.key:/run/secrets/cpa_management_key:ro
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/monitor-admin.key:/run/secrets/cpamp_admin_key:ro
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/monitor-data.key:/run/secrets/cpamp_data_key:ro
-    ports: ["127.0.0.1:${NOCHEH_PROVIDER_MONITOR_PORT:-18317}:18317"]
-    depends_on:
-      cliproxy-api: {condition: service_healthy}
-    healthcheck:
-      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:18317/health]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
   pgweb-archive:
     logging: *logging
     image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
@@ -542,31 +465,6 @@ services:
     depends_on:
       nocheh-db: {condition: service_healthy}
 
-  chatgpt-speech:
-    logging: *logging
-    image: nocheh-hermes:local
-    command: [python, -m, services.hermes.speech_gateway]
-    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
-    init: true
-    restart: unless-stopped
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    environment:
-      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
-      CLIPROXY_AUTH_DIR: /provider-auth
-    volumes:
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/auth:/provider-auth:ro
-    depends_on:
-      cliproxy-api: {condition: service_healthy}
-    healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8783/health', timeout=4)"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
   hermes:
     logging: *logging
     image: nocheh-hermes:local
@@ -597,16 +495,21 @@ services:
       TELEGRAM_GROUP_REPLIES: ${TELEGRAM_GROUP_REPLIES:-addressed}
       TELEGRAM_BOT_NAMES: ${TELEGRAM_BOT_NAMES-Nocheh,نوچه}
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
-      GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]}
-      NOCHEH_REASONING_ROUTE: ${NOCHEH_REASONING_ROUTE:-shared}
       NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-isolated}
       NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-evidence}
       NOCHEH_PARALLEL_REPLIES: ${NOCHEH_PARALLEL_REPLIES:-3}
       NOCHEH_PARALLEL_GUARD_CHECKS: ${NOCHEH_PARALLEL_GUARD_CHECKS:-3}
       NOCHEH_HERMES_JOURNAL_RETENTION_DAYS: ${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}
-      CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
-      SPEECH_URL: http://chatgpt-speech:8783
-      NOCHEH_MODEL: ${NOCHEH_MODEL:-claude-sonnet-5-5}
+      # Settings › Models: replies and secret checks each use their own provider and model.
+      NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+      NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-}
+      NOCHEH_REPLY_ROUTE_KEY: ${NOCHEH_REPLY_ROUTE_KEY:-}
+      # Provider ids label Nocheh's usage tracker rows.
+      NOCHEH_REPLY_ROUTE_PROVIDER: ${NOCHEH_REPLY_ROUTE_PROVIDER:-}
+      NOCHEH_GUARD_ROUTE_PROVIDER: ${NOCHEH_GUARD_ROUTE_PROVIDER:-}
+      NOCHEH_GUARD_ROUTE_URL: ${NOCHEH_GUARD_ROUTE_URL:-}
+      NOCHEH_GUARD_ROUTE_MODEL: ${NOCHEH_GUARD_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+      NOCHEH_GUARD_ROUTE_KEY: ${NOCHEH_GUARD_ROUTE_KEY:-}
       ARCHIVE_URL: http://nocheh-app:8780
       GUARD_URL: http://nocheh-security:8786
     volumes:
@@ -615,12 +518,9 @@ services:
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
       - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
-      - ${NOCHEH_STATE_DIR:-./data/local}/provider/keys/hermes.key:/run/secrets/cliproxy_hermes_key:ro
     depends_on:
       nocheh-app: {condition: service_healthy}
       nocheh-security: {condition: service_healthy}
-      cliproxy-api: {condition: service_healthy}
-      chatgpt-speech: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=4)"]
       interval: 5s

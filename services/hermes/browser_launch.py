@@ -28,8 +28,8 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
                 if not db.get_session(resume): resume=None
             finally: db.close()
     env = {key:os.environ[key] for key in ('LANG','LC_ALL','LD_LIBRARY_PATH','SERVICE_TOKEN',
-        'ARCHIVE_URL','GUARD_URL','GUARD_MODE','GUARD_TRUSTED_ENDPOINTS',
-        'NOCHEH_SECURITY_RUNTIME','NOCHEH_MEMORY_CONTEXT','NOCHEH_REASONING_ROUTE','NOCHEH_STORAGE_LAYOUT') if key in os.environ}
+        'ARCHIVE_URL','GUARD_URL','GUARD_MODE',
+        'NOCHEH_SECURITY_RUNTIME','NOCHEH_MEMORY_CONTEXT','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE','NOCHEH_STORAGE_LAYOUT') if key in os.environ}
     env.update(PATH='/opt/venv/bin:/usr/local/bin:/usr/bin:/bin',HOME=str(home),HERMES_HOME=str(home),
         PYTHONPATH='/workspace:/opt/hermes',HERMES_PYTHON='/opt/venv/bin/python',
         HERMES_PYTHON_SRC_ROOT='/opt/hermes',HERMES_CWD=str(workspace),

@@ -76,7 +76,7 @@ def fields(body,model):
     for key,value in body.items():
         if key in allowed:continue
         if key in empty_fields and value in (None,'',False,[]):continue
-        if key=='provider' and value in (None,'','openai-codex'):continue
+        if key=='provider' and value in (None,'','openai'):continue
         if key=='model' and value in (None,'',model):continue
         raise ValueError('cron_setting_unavailable')
     values={key:body[key] for key in ('name','prompt','schedule','deliver','repeat','nocheh_preferences') if key in body}
@@ -150,7 +150,7 @@ def manage(admin,path,method,query,body,headers,call=None):
             existing=next((j for j in jobs if j.get('nocheh_create_id')==request_id),None)
             if existing:return annotate(existing,home,name)
             preferences=values.pop('nocheh_preferences',{})
-            job=native.create_job(**values,provider='openai-codex',model=admin.model)
+            job=native.create_job(**values,provider='openai',model=admin.model)
             job=native.update_job(job['id'],{'prompt':values['prompt'],'nocheh_create_id':request_id,'nocheh_preferences':preferences,'nocheh_registered':False})
         elif method=='PUT' and not operation:
             changes=fields(body.get('updates',body),admin.model)

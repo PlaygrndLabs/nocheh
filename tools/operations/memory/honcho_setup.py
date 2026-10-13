@@ -1,5 +1,6 @@
 """Configure pinned production Honcho without changing existing memory storage."""
 from tools.paths import ROOT as REPO_ROOT
+import hashlib
 import json
 import os
 import secrets
@@ -22,8 +23,13 @@ def state_for(provider_state):
 def initialize(provider_state=PROVIDER_STATE):
     from tools.operations.installation.configuration import read_env
     from tools.operations.provider.embedding_config import embeddings
+    from tools.operations.installation.configuration import DEFAULTS
+    from tools.operations.provider import routes
     provider_state=Path(provider_state).resolve();state=state_for(provider_state)
-    values=read_env(env_path(provider_state));embedding=embeddings(values)
+    values=read_env(env_path(provider_state))
+    settings={**DEFAULTS,**values}
+    reasoning=routes.route(settings,'memory');embedded=routes.embedding_route(settings)
+    embedding=embeddings({**settings,'NOCHEH_EMBEDDING_URL':embedded.url})
     for directory in ('','ledger'):
         (state/directory).mkdir(parents=True,exist_ok=True,mode=0o700)
     for name in ('internal_token','database_password','temporary_embedding_key'):
@@ -33,13 +39,22 @@ def initialize(provider_state=PROVIDER_STATE):
     # Only the owner-designated embedding key. Never use unrelated provider keys.
     # Explicitly empty OPENAI_API_KEY revokes the saved key. The old dedicated
     # name is accepted only when the new setting is absent; never use shell keys.
-    if 'OPENAI_API_KEY' in values or 'NOCHEH_EMBEDDING_API_KEY' in values:
-        dedicated=values.get('OPENAI_API_KEY',values.get('NOCHEH_EMBEDDING_API_KEY','')).strip()
+    if embedded.provider!='openai' or 'OPENAI_API_KEY' in values or 'NOCHEH_EMBEDDING_API_KEY' in values:
+        dedicated=embedded.key if embedded.provider!='openai' else values.get('OPENAI_API_KEY',values.get('NOCHEH_EMBEDDING_API_KEY','')).strip()
         (state/'temporary_embedding_key').write_text(dedicated)
         (state/'temporary_embedding_key').chmod(0o600)
+    # Honcho reasoning goes to the memory part's provider, whose key goes in meter.env.
+    # An unconfigured memory part leaves both empty; the meter then refuses reasoning.
+    reasoning_key=reasoning.key
     token=(state/'internal_token').read_text().strip()
     password=(state/'database_password').read_text().strip()
-    (state/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedding.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\nNOCHEH_REASONING_URL=http://shared-provider:8317/v1\n')
+    # A changed key or address recreates the egress container, which reads keys at start.
+    revision=hashlib.sha256('\0'.join((reasoning.url,reasoning.model,reasoning_key,embedding.url,embedding.model,
+                                         (state/'temporary_embedding_key').read_text())).encode()).hexdigest()[:16]
+    (state/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedded.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\n'
+                                   f'NOCHEH_EMBEDDING_URL={embedded.url}\nNOCHEH_REASONING_URL={reasoning.url}\n'
+                                   f'NOCHEH_REASONING_PROVIDER={reasoning.provider}\nNOCHEH_REASONING_MODEL={reasoning.model}\nNOCHEH_REASONING_KEY={reasoning_key}\n'
+                                   f'NOCHEH_ROUTE_REVISION={revision}\n')
     env={'DB_CONNECTION_URI':f'postgresql+psycopg://experiment:{password}@database:5432/honcho_experiment',
          'CACHE_URL':'redis://redis:6379/0?suppress=true','CACHE_ENABLED':'true','AUTH_USE_AUTH':'false',
          'PYTHON_DOTENV_DISABLED':'1','HONCHO_CONFIG_TOML_DISABLED':'1',
@@ -53,7 +68,7 @@ def initialize(provider_state=PROVIDER_STATE):
          'EMBEDDING_MODEL_CONFIG__MODEL':embedding.model,
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL':'http://meter:8790/v1',
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'}
-    model=values.get('NOCHEH_MODEL') or DEFAULTS['NOCHEH_MODEL']
+    model=reasoning.model
     prefixes=['DERIVER_MODEL_CONFIG','SUMMARY_MODEL_CONFIG','DREAM_DEDUCTION_MODEL_CONFIG','DREAM_INDUCTION_MODEL_CONFIG']
     prefixes += [f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG' for level in ('minimal','low','medium','high','max')]
     for prefix in prefixes:
@@ -89,10 +104,10 @@ def sources():
     (STATE/'honcho.Dockerfile').write_text(upstream+'\nENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache\nRUN python -c "import tiktoken; tiktoken.get_encoding(\'o200k_base\'); tiktoken.get_encoding(\'cl100k_base\')"\n')
 
 
-def provider_ready():
-    from tools.operations.provider.provider import status
-    result=status(PROVIDER_STATE)
-    return result['healthy'] and result['reasoning_login_present']
+def provider_ready(provider_state=PROVIDER_STATE):
+    """Whether the memory part has a provider; Settings validation requires its key."""
+    from tools.operations.provider.routes import route
+    return route({**DEFAULTS,**read_env(env_path(provider_state))},'memory').configured
 
 
 def runtime_init(provider_state=PROVIDER_STATE):
@@ -106,10 +121,10 @@ def runtime_up():
     from tools.operations.memory.honcho_runtime import enable,operate
     if read_env(env_path(PROVIDER_STATE)).get('NOCHEH_MEMORY_TOKEN')!=(STATE/'internal_token').read_text().strip():
         raise ValueError('honcho_runtime_init_required')
-    if not provider_ready():raise ValueError('shared_provider_not_ready')
+    if not provider_ready():raise ValueError('provider_not_configured')
     sources()
     enable(PROVIDER_STATE,STATE)
-    from tools.operations.provider.provider import compose
+    from tools.operations.installation.configuration import compose
     command,env=compose(PROVIDER_STATE)
     subprocess.run(command+['--profile','honcho','build','honcho-api','honcho-deriver'],cwd=ROOT,env=env,check=True)
     return operate(PROVIDER_STATE,'up')

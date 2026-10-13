@@ -27,7 +27,7 @@ test('prepared passages survive formatting without splitting different identifie
   assert.deepEqual(segments('mysecretvalue',['secret']),[{text:'mysecretvalue',prepared:false}]);
 });
 
-test('ingestion prepares text files and transcripts once, retains binaries and fences late delivery',{skip:!process.env.PGHOST},async()=>{
+test('ingestion prepares text files once, archives voice notes untranscribed, retains binaries and fences late delivery',{skip:!process.env.PGHOST},async()=>{
   const admin=new pg.Pool(),namespace=`files_${Date.now()}`,root=await mkdtemp(join(tmpdir(),'guard-files-'));
   await admin.query(`CREATE SCHEMA ${namespace}`);const pool=new pg.Pool({options:`-c search_path=${namespace}`});
   const config=settings();config.dataDir=root;config.assistant={enabled:false,owner_id:'42',group_ids:[]};
@@ -38,11 +38,12 @@ test('ingestion prepares text files and transcripts once, retains binaries and f
       {name:'notes.txt',kind:'file',bytes_base64:original.toString('base64')},
       {name:'voice.wav',kind:'audio',bytes_base64:Buffer.from([0,1,2,3]).toString('base64')},
       {name:'photo.png',kind:'image',bytes_base64:Buffer.from([0,4,5,6]).toString('base64')}]});
-    let transcriptions=0;const call=async(operation:string)=>{assert.equal(operation,'perception.transcribe');transcriptions++;return {success:true,transcript:'Voice password: planted-SECRET'};};
-    await prepareArchiveFiles(pool,root,call,undefined,{owner:'inngest',epoch:1});await prepareArchiveFiles(pool,root,call,undefined,{owner:'inngest',epoch:1});assert.equal(transcriptions,1);
+    await prepareArchiveFiles(pool,root,undefined,{owner:'inngest',epoch:1});await prepareArchiveFiles(pool,root,undefined,{owner:'inngest',epoch:1});
     assert.deepEqual(await readFile(join(root,'files',captured.attachments[0]!.sha256)),original);
     const kinds=(await pool.query('SELECT kind FROM derived_artifacts WHERE event_id=$1',[captured.event_id])).rows.map(r=>r.kind).sort();
-    assert.deepEqual(kinds,['extracted_text','extraction_status','transcript']);
+    assert.deepEqual(kinds,['extracted_text','extraction_status','extraction_status']);
+    const voice=(await pool.query("SELECT d.content FROM derived_artifacts d JOIN artifacts a ON a.id=d.artifact_id WHERE a.event_id=$1 AND a.kind='audio'",[captured.event_id])).rows;
+    assert.deepEqual(voice.map(row=>row.content.toString()),['Voice note archived; transcription is not available.']);
     await prepareGuarded(pool,async text=>text.includes('planted-SECRET')?['planted-SECRET']:[],undefined,100,captured.event_id,{owner:'inngest',epoch:1});
     const guard=await guardState(pool),principal={admin:false,scope:null,guard_epoch:guard.epoch,turnEvent:captured.event_id};
     const visible=await readEvent(pool,principal,captured.event_id);

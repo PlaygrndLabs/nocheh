@@ -1,19 +1,3 @@
-FROM rust:1.91.1-bookworm@sha256:c1e5f19e773b7878c3f7a805dd00a495e747acbdc76fb2337a4ebf0418896b33 AS asr-builder
-ARG CODEX_ASR_REVISION=479f6a7a3db81fe2a23d4755b0ccbeb4400317d4
-ARG RUST_SILK_VERSION=0.1.3
-RUN git init /src && cd /src && git remote add origin https://github.com/Wangnov/codex-asr.git && \
-    git fetch --depth 1 origin "$CODEX_ASR_REVISION" && git checkout --detach FETCH_HEAD && \
-    cargo build --release --locked --bin codex-asr && cp target/release/codex-asr /usr/local/bin/ && \
-    cargo install rust-silk --version "$RUST_SILK_VERSION" --locked --root /usr/local
-
-FROM debian:bookworm@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443 AS asr
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* && \
-    useradd --system --uid 10001 --gid nogroup --home-dir /nonexistent --shell /usr/sbin/nologin codex-asr
-COPY --from=asr-builder /usr/local/bin/codex-asr /usr/local/bin/rust-silk /usr/local/bin/
-ENV CODEX_ASR_SILK_DECODER=/usr/local/bin/rust-silk
-USER 10001:65534
-ENTRYPOINT ["codex-asr"]
-
 FROM ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 AS uv
 FROM python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84 AS sqlite
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -27,12 +11,11 @@ RUN curl -fSL --retry 3 https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz -
 FROM python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84 AS native-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg ca-certificates libatomic1 && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /uvx /usr/local/bin/
-COPY --from=asr /usr/local/bin/codex-asr /usr/local/bin/rust-silk /usr/local/bin/
 COPY --from=sqlite /opt/sqlite/lib /opt/sqlite/lib
 ENV LD_LIBRARY_PATH=/opt/sqlite/lib PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv UV_PYTHON_DOWNLOADS=never \
     PYTHONPATH=/opt/hermes:/workspace PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
-    HERMES_HOME=/workspace/data/local/hermes CODEX_ASR_SILK_DECODER=/usr/local/bin/rust-silk
+    HERMES_HOME=/workspace/data/local/hermes
 ARG HERMES_REVISION=7166071fcaadb36df26f6d753dda97da6b5d699e
 COPY --from=hermes_source . /opt/hermes
 RUN test "$(cat /opt/hermes/.nocheh-source-revision)" = "$HERMES_REVISION" && cd /opt/hermes && \
@@ -45,7 +28,6 @@ ARG LOCAL_GID=1000
 RUN /usr/sbin/useradd --uid ${LOCAL_UID} --create-home nocheh && mkdir -p /workspace /reports && chown ${LOCAL_UID}:${LOCAL_GID} /workspace /reports
 WORKDIR /workspace
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} services ./services
-COPY --chown=${LOCAL_UID}:${LOCAL_GID} test/fixtures/acceptance ./test/fixtures/acceptance
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} deploy/upstreams.lock.json ./deploy/upstreams.lock.json
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} tools ./tools
 USER nocheh

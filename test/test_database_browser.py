@@ -21,11 +21,6 @@ class DatabaseBrowserTests(unittest.TestCase):
             connection.executemany('INSERT INTO messages VALUES (?,?,?)', [
                 (2, 'Second greeting', b'\x00\xff'), (1, 'First greeting', b'\x01')])
             connection.commit()
-        provider = self.state / 'provider/monitor/usage.sqlite'
-        provider.parent.mkdir(parents=True)
-        with closing(sqlite3.connect(provider)) as connection:
-            connection.execute('CREATE TABLE usage (tokens INTEGER)')
-            connection.commit()
         ledger = self.state / 'honcho/ledger/budget.sqlite'
         ledger.parent.mkdir(parents=True)
         with closing(sqlite3.connect(ledger)) as connection:
@@ -43,7 +38,7 @@ class DatabaseBrowserTests(unittest.TestCase):
         result = database_browser.view(self.state, {'action': 'databases'})
         self.assertEqual([item['id'] for item in result['databases']],
                          ['archive', 'derived', 'control', 'workflow', 'honcho',
-                          'hermes:research', 'provider-usage', 'honcho-ledger'])
+                          'hermes:research', 'usage', 'honcho-ledger'])
         self.assertNotIn('path', str(result))
         tables = database_browser.view(self.state, {'action': 'tables', 'database': 'hermes:research'})
         self.assertIn({'schema': 'main', 'name': 'messages', 'estimated_rows': None}, tables['tables'])

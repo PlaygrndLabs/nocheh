@@ -14,8 +14,8 @@
 | SEC4 | Preserve full authorized memory as evidence. Compare exact requests, citations, native histories, model/reasoning settings, and context accounting; reject lossy or approval-heavy context handling. |
 | SEC5 | Run adversarial and real Compose isolation/recovery checks, live recall/grounding comparison, backup/inactive-state checks, then record deliberate activation and quality limits. |
 
-SEC1–SEC5 are verified and active locally; shared-provider and Honcho activation
-remain separately gated. [Owner operations](security-service.md) contains commands
+SEC1–SEC5 are verified and active locally; Honcho activation remains separately
+gated. [Owner operations](security-service.md) contains commands
 and rollback instructions. Quality measurements are finite observations, separate
 from deterministic transport and authorization checks.
 
@@ -97,8 +97,8 @@ SEC5 verification and activation, 2026-09-10:
   The owner-edit check isolates the transport guarantee from detector quality.
 
 No new layer summarizes or deletes memory, changes reasoning effort, or reduces
-configured native memory/context limits. Existing Honcho attachment and shared
-provider cutover remain pending under their own plans. Trusted perception,
+configured native memory/context limits. Existing Honcho attachment remains
+pending under its own plan. Trusted perception,
 selected-group conversation and scheduled delivery retain their existing gates;
 this service does not claim to isolate the trusted launcher or host. Guard off
 never disables audience, tool authority, hosted-tool or opaque-context boundaries.

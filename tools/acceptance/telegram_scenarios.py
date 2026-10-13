@@ -60,7 +60,7 @@ class Fixture:
         return subprocess.check_output(self.command+['exec', '-T', 'nocheh-db', 'psql', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1',
             '-U', 'nocheh', '-d', database, '-c', sql], text=True).strip()
 
-    def http(self, path, body=None, service='cliproxy-api', port=8317, allow_error=False):
+    def http(self, path, body=None, service='model-fixture', port=8317, allow_error=False):
         script = """const [service,port,path,encoded,tolerant]=process.argv.slice(1),body=JSON.parse(encoded);
 const response=await fetch('http://'+service+':'+port+path,{method:body===null?'GET':'POST',
 headers:{'content-type':'application/json',Authorization:'Bearer '+process.env.SERVICE_TOKEN},
@@ -145,7 +145,6 @@ class Scenarios:
         # Every (scenario, event) whose single causal reply was verified; the
         # stage timing scenario reads one breakdown for each of them.
         self.replied = []
-        self.real_model = False
 
     def save(self):
         (self.report/'progress.json').write_text(json.dumps(self.results, indent=2, ensure_ascii=False)+'\n')
@@ -201,20 +200,7 @@ class Scenarios:
         self.gate('reply_targets_source', reply.get('message_id') == update['message']['message_id'])
         self.wait('delivery_archived', lambda: archived_delivery(self.f.query, new[0]['message'], update['update_id']), 60)
         self.replied.append((self.current['scenario'], event_id))
-        if self.real_model:  # Real answers are saved for review against the scenario's intent.
-            self.current.setdefault('answers', []).append({'asked': update['message'].get('text') or update['message'].get('caption'),
-                                                           'answered': new[0]['message']['text'][:4000]})
         return event_id, new[0]['message']['text']
-
-    def keep(self, updates, sent):
-        """With real answers, save each reply beside the message it answers, for review."""
-        if not self.real_model:
-            return
-        by_target = {json.loads(row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id'): row['message']['text'] for row in sent}
-        for update in updates:
-            message = update['message']
-            self.current.setdefault('answers', []).append({'asked': message.get('text') or message.get('caption') or '[voice]',
-                                                           'answered': (by_target.get(message['message_id']) or '')[:4000]})
 
     def execute(self, name, function):
         self.current = {'scenario': name, 'gates': [], 'passed': False, 'started': time.time()}
@@ -236,7 +222,7 @@ class Scenarios:
         # native adapter then reconnects polling; a reply ready in that window
         # was never transmitted and must be retried, then delivered once.
         started = time.time()
-        self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', 'cliproxy-api')
+        self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', 'model-fixture')
         self.wait('polling_connected', lambda: self.f.http('/health', service='hermes', port=8781)['telegram'] == 'connected', 120)
         update = self.f.message(OWNER, 'سلام، هنوز وصلی؟')
         _, _ = self.turn(update, OWNER, attempts=None)
@@ -289,7 +275,6 @@ class Scenarios:
         new = self.replies(before, chat, topic)
         self.gate('one_reply_per_message', len(new) == 3, count=len(new))
         targets = [json.loads(row['parameters'].get('reply_parameters', '{}')).get('message_id') for row in new]
-        self.keep(updates, new)
         self.gate('replies_in_telegram_order', targets == [update['message']['message_id'] for update in updates], targets=targets)
 
     def private_burst_in_order(self):
@@ -600,69 +585,16 @@ class Scenarios:
         self.gate('voice_bytes_unchanged', (self.f.directory/'state/files'/expected).read_bytes() == content)
         return update, event_id
 
-    def speech(self, synthetic):
-        service = self.f.manifest['services']['chatgpt-speech']
-        if not synthetic:
-            # Restore the prepared, unavailable speech service so a later run on
-            # the same installation can repeat the speech-outage scenarios.
-            before = sorted(self.f.directory.glob('telegram-http-*/compose.before.json'))
-            if not before:
-                raise Failed('original_speech_definition_missing')
-            service = self.f.manifest['services']['chatgpt-speech'] = json.loads(before[0].read_text())['services']['chatgpt-speech']
-        if synthetic:
-            service['command'] = ['python', '/fixture/provider.py', 'speech']
-            service['environment']['NOCHEH_INSTALLATION_FIXTURE'] = '1'
-            service['volumes'] = [mount for mount in service['volumes'] if mount.get('target') != '/fixture/provider.py']+[
-                {'type': 'bind', 'source': str(ROOT/'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True}]
-        path = self.f.directory/'compose.json'
-        path.write_text(json.dumps(self.f.manifest));path.chmod(0o600)
-        self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', 'chatgpt-speech')
-
-    def voice_waits_while_speech_unavailable(self):
-        if self.f.manifest['services']['chatgpt-speech'].get('command') == ['python', '/fixture/provider.py', 'speech']:
-            self.speech(False)
-            self.gate('speech_made_unavailable_again')
-        before = len(self.f.sent())
-        update, event_id = self.voice(b'OggS\x00\x02synthetic-voice SPEECH:\xd9\xbe\xdb\x8c\xd8\xa7\xd9\x85 \xd9\x85\xd9\x86\xd8\xaa\xd8\xb8\xd8\xb1\n\xff'*4)
-        self.state['waiting_voice'] = (update, event_id)
-        time.sleep(30)
-        row = self.f.dispatch(event_id)
-        self.gate('voice_not_answered_without_transcript', row is None or row['state'] in ('pending', 'running') and not self.replies(before, OWNER),
-                  dispatch=row)
-        self.turn(self.f.message(OWNER, 'یک پیام متنی بعد از ویس'), OWNER)
-
-    def voice_recovers_when_speech_returns(self):
-        update, event_id = self.state['waiting_voice']
-        before = len(self.f.sent())
-        self.speech(True)
-        row = self.finished(event_id, seconds=900)
-        self.keep([update], self.replies(before, OWNER))
-        self.gate('waiting_voice_answered_after_recovery', row['state'] == 'done', state=row['state'], error=row['error'], attempts=row['attempts'])
-        transcripts = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'")
-        self.current['observed'] = {'transcripts': transcripts}
-
-    def voice_transcript_drives_turn(self):
-        before = len(self.f.sent())
-        _, event_id = self.voice(b'OggS\x00\x02SPEECH:'+'یادآوری صوتی VOICEMARK77 [[search:VOICEMARK77]]'.encode()+b'\n\xff')
-        row = self.finished(event_id, seconds=600)
-        self.gate('voice_dispatch_done', row['state'] == 'done', state=row['state'], error=row['error'])
-        new = self.replies(before, OWNER)
-        self.gate('one_voice_reply', len(new) == 1, count=len(new))
-        self.gate('transcript_reached_model_as_turn', any(event.get('argument') == 'VOICEMARK77' and event['phase'] == 'final' for event in self.f.brain()))
-
-    def voice_blank_transcript_is_terminal(self):
-        before = len(self.f.sent())
-        _, event_id = self.voice(b'OggS\x00\x02BLANK synthetic silence\n\xff')
-        time.sleep(45)
-        row = self.f.dispatch(event_id)
-        retrievals = self.f.query('nocheh_control', "SELECT json_agg(json_build_object('state',state,'attempts',attempts)) FROM workflow_registry "
-                                  "WHERE family='preparation' AND job_id LIKE '%"+event_id+"%'")
-        self.current['observed'] = {'dispatch': row, 'preparation': retrievals}
-        self.gate('blank_voice_not_answered_as_transcribed', not self.replies(before, OWNER), dispatch=row)
-        self.gate('blank_voice_closed_visibly', row is not None and row['state'] == 'suppressed' and row['error'] == 'invalid_transcription_response',
-                  dispatch=row)
+    def voice_is_archived_without_blocking(self):
+        # Nocheh has no speech recognition: a voice note keeps its original
+        # bytes, records an extraction status, and never holds later replies.
+        _, event_id = self.voice(b'OggS\x00\x02synthetic voice note\n\xff'*4)
+        row = self.finished(event_id, seconds=300)
+        self.gate('voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
+        self.gate('voice_status_recorded', self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE "
+                  "kind='extraction_status' AND event_id='"+event_id+"'") != '0')
         started = time.monotonic()
-        self.turn(self.f.message(OWNER, 'بعد از ویس نامفهوم'), OWNER)
+        self.turn(self.f.message(OWNER, 'یک پیام متنی بعد از ویس'), OWNER)
         self.gate('next_message_not_held', time.monotonic()-started < 90, seconds=round(time.monotonic()-started, 1))
 
     # Owner authority ------------------------------------------------------------
@@ -746,26 +678,6 @@ class Scenarios:
         self.gate('interrupted_turn_recovered', row['state'] == 'done', state=row['state'], attempts=row['attempts'])
         self.gate('one_reply_after_recovery', len(self.replies(before, OWNER)) >= 1 and
                   len({json.loads(r['parameters'].get('reply_parameters', '{}')).get('message_id') for r in self.replies(before, OWNER)}) == 1)
-
-    def burst_with_voice_in_order(self):
-        before = len(self.f.sent())
-        texts = [self.f.message(OWNER, 'پیام پشت‌سرهم '+str(index)) for index in range(1, 4)]
-        content = b'OggS\x00\x02SPEECH:'+'ویس وسط پیام‌ها'.encode()+b'\n\xff'
-        file_id = 'voice-'+str(self.f.ids())
-        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.oga',
-                                   'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
-        voice = self.f.message(OWNER, None, extra={'voice': {'file_id': file_id, 'file_unique_id': 'u'+file_id, 'duration': 2,
-                                                             'mime_type': 'audio/ogg', 'file_size': len(content)}})
-        last = self.f.message(OWNER, 'و پیام آخر')
-        updates = texts+[voice, last]
-        self.f.inject(*updates)
-        for update in updates:
-            row = self.finished(self.captured(update), seconds=600)
-            self.gate('burst_reply_done', row['state'] == 'done', state=row['state'], attempts=row['attempts'])
-        new = self.replies(before, OWNER)
-        targets = [json.loads(row['parameters'].get('reply_parameters', '{}')).get('message_id') for row in new]
-        self.keep(updates, new)
-        self.gate('one_reply_each_in_telegram_order', targets == [update['message']['message_id'] for update in updates], targets=targets)
 
     def restart_preserves_receipts(self):
         sent = len(self.f.sent())
@@ -865,27 +777,15 @@ class Scenarios:
 ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
-         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_waits_while_speech_unavailable', 'voice_recovers_when_speech_returns',
-         'voice_transcript_drives_turn', 'burst_with_voice_in_order', 'voice_blank_transcript_is_terminal',
+         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_archived_without_blocking',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_executes_owner_requests', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
-
-
-# With real model answers (tools.acceptance.real_model_fixture) the scripted
-# directives mean nothing; these scenarios check delivery, order, audience,
-# recovery and effects only, and save each answer for review.
-REAL_MODEL_ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics',
-                    'burst_in_order', 'private_burst_in_order', 'document_reply', 'participant_not_permitted', 'group_answers_only_when_addressed', 'unselected_group',
-                    'schedule_fires_and_waits_for_review', 'voice_waits_while_speech_unavailable',
-                    'voice_recovers_when_speech_returns', 'burst_with_voice_in_order', 'deleted_topic', 'polling_outage',
-                    'lost_send_response', 'blocked_private_then_recovery', 'restart_preserves_receipts', 'storage_report', 'stage_timings']
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--only', nargs='*', choices=ORDER)
-    parser.add_argument('--real-model', action='store_true', help='Run REAL_MODEL_ORDER after real_model_fixture switched the model route')
     args = parser.parse_args()
     directory = args.directory.resolve()
     if not directory.is_relative_to(ROOT/'data/acceptance/results'):
@@ -902,11 +802,7 @@ def main():
         raise ValueError('previous_fixture_faults_pending')
     scenarios = Scenarios(fixture, report)
     scenarios.state = {}
-    real = (directory/'route-preflight.json').exists()
-    if args.real_model != real:
-        raise ValueError('real_model_fixture_required' if args.real_model else 'scripted_fixture_required')
-    scenarios.real_model = real
-    for name in args.only or (REAL_MODEL_ORDER if real else ORDER):
+    for name in args.only or ORDER:
         scenarios.execute(name, getattr(scenarios, name))
     final = fixture.telegram()
     project_networks = {value['name'] for value in fixture.manifest['networks'].values()}
@@ -935,7 +831,7 @@ def main():
                                      'native_reviews_awaiting_receipt': int(count("state='waiting' AND waiting_reason='receipt_pending'")), 'drain_seconds': round(time.monotonic()-started, 1)}
     scenarios.results.append(scenarios.current)
     summary = {'passed': all(row['passed'] for row in scenarios.results), 'live_acceptance': False,
-               'provider': 'existing-model-route' if real else 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
+               'provider': 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
                'unknown_methods': final['unknown'][len(initial['unknown']):], 'stats': fixture.http('/fixture/stats')}
     (report/'result.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False)+'\n')
     print(json.dumps({'passed': summary['passed'], 'failed': [row['scenario'] for row in scenarios.results if not row['passed']],

@@ -109,6 +109,9 @@ def dispatch(body):
         if operation == 'honcho.budget.update':
             from tools.operations.memory.honcho_budget import update
             return update(body['request'],state)
+    if operation == 'usage.view':
+        from tools.operations.provider.usage import view
+        return view(state, body.get('days', 30))
     if operation == 'hermes.manage':
         from tools.operations.archive.archive import API
         import urllib.error
@@ -138,8 +141,11 @@ def dispatch(body):
             raise ValueError('archive_route_denied')
         return API().call(path)
     if operation.startswith('settings.'):
-        from tools.operations.installation.settings import view, save, apply
+        from tools.operations.installation.settings import view, save, apply, provider_models
         if operation == 'settings.view': return view(state)
+        if operation == 'settings.provider_models':
+            request = body.get('request') or {}
+            return provider_models(state, request.get('provider'), request.get('url'), request.get('key'))
         if operation == 'settings.save': return save(state, body['changes'], body['revision'])
         if operation == 'settings.apply': return apply(state)
     if operation == 'telegram.directory':
@@ -156,6 +162,7 @@ def dispatch(body):
 
 
 def main():
+    body = None
     try:
         body = json.loads(sys.stdin.buffer.read(1024 * 1024))
         result = dispatch(body)
@@ -163,6 +170,12 @@ def main():
     except Exception as error:
         # Never relay provider bodies, subprocess output, credentials or source text.
         code = str(error) if isinstance(error, ValueError) and str(error).replace('_', '').isalnum() else type(error).__name__
+        # Settings validation explains what to fix in plain words, and never includes a key or value.
+        message = str(error)
+        operation = body.get('operation') if isinstance(body, dict) else None
+        if (isinstance(error, ValueError) and operation in ('settings.save', 'settings.apply')
+                and message.isprintable() and 0 < len(message) <= 200):
+            code = message
         print(json.dumps({'error': code}), flush=True)
         return 1
     return 0

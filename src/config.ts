@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { DEFAULT_TRUSTED, DETECTOR_VERSION } from './guard.js';
+import { DETECTOR_VERSION } from './guard.js';
 import { assistantPolicy } from './assistant-policy.js';
 import {storageLayout} from './stores/config.js';
 
@@ -24,9 +24,7 @@ export function settings() {
   if (service!=='nocheh-app') throw new Error('Invalid service');
   const mode = process.env.GUARD_MODE === 'auto' ? 'on' : process.env.GUARD_MODE ?? 'on';
   if (!['off', 'on'].includes(mode)) throw new Error('Invalid guard mode');
-  const trusted:unknown=JSON.parse(process.env.GUARD_TRUSTED_ENDPOINTS ?? JSON.stringify(DEFAULT_TRUSTED));
   guardChecks(); // An invalid Settings value stops startup instead of the first preparation.
-  if (!Array.isArray(trusted) || trusted.some(v=>typeof v!=='string' || !['http:','https:'].includes(new URL(v).protocol))) throw new Error('Invalid trusted endpoints');
   return {
     service: service as Service, host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 8780),
     token: secret('SERVICE_TOKEN'), databasePassword: '',storageLayout:layout,
@@ -35,7 +33,7 @@ export function settings() {
     honchoUrl:process.env.HONCHO_URL??'http://honcho-api:8000',
     memoryToken:process.env.NOCHEH_MEMORY_TOKEN??'',
     guardMode: mode as 'off' | 'on',
-    guardTrusted:trusted as string[],detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_MODEL ?? 'claude-sonnet-5-5'}`,
+    detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_GUARD_ROUTE_MODEL || process.env.NOCHEH_MODEL || 'claude-sonnet-5-5'}`,
     assistant:assistantPolicy(process.env.ASSISTANT_POLICY_FILE),
   };
 }

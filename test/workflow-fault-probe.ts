@@ -54,7 +54,6 @@ try{
     const server=createServer((req,res)=>{void(async()=>{
       authorize(req,process.env.SERVICE_TOKEN!);const body=object(await readJson(req)),path=req.url;
       if(path==='/internal/file')return json(res,200,{bytes_base64:Buffer.from('Synthetic Ogg bytes').toString('base64')});
-      if(path==='/internal/transcribe')return json(res,200,{success:true,transcript:'Synthetic protected fault rehearsal transcript'});
       if(path==='/internal/detect')return json(res,200,{literals:[]});
       if(!/^[a-f0-9]{64}$/.test(String(body.event_id)))throw Error('fixture_identity_required');
       const id=digest(JSON.stringify([body.channel??'telegram',body.event_id,body.attempt])),receipt=join(receiptDirectory,id+'.json');

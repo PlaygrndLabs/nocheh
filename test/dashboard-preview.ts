@@ -33,7 +33,19 @@ let modeRevision=false;
 let revision=1,guarded='A synthetic conversation about the northern lights.',settingsRevision='fixture-1';
 let retirementRevision=0,retired=false;const retirementHistory:any[]=[];
 let settingsChanges:Record<string,unknown>={};
-const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'TELEGRAM_GROUP_REPLIES',value:'addressed',editable:true},{key:'TELEGRAM_BOT_NAMES',value:'Nocheh,نوچه',editable:true},{key:'TELEGRAM_TOPIC_MEMORY',value:'group',editable:true},{key:'NOCHEH_MODEL',value:'claude-sonnet-5-5',editable:true},{key:'NOCHEH_EMBEDDING_MODEL',value:'text-embedding-3-small',editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'NOCHEH_PARALLEL_RUNS',value:'4',editable:true},{key:'NOCHEH_PARALLEL_REPLIES',value:'3',editable:true},{key:'NOCHEH_PARALLEL_GUARD_CHECKS',value:'3',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true}];
+/** Which provider and model each part uses, as owner monitoring reports it; never a key. */
+function modelRoutes() {
+  const setting=(key:string)=>String(settingsChanges[key]??fields.find(f=>f.key===key)?.value??'');
+  const customs:{id:string;name:string}[]=JSON.parse(setting('NOCHEH_PROVIDERS')||'[]');
+  const name=(id:string)=>({openai:'OpenAI',anthropic:'Anthropic'} as Record<string,string>)[id]??customs.find(c=>c.id===id)?.name??id;
+  const parts=[['reply','Replies (Hermes)','REPLY'],['memory','Memory (Honcho)','MEMORY'],['guard','Secret check','GUARD']].map(([part,label,key])=>{
+    const provider=setting(`NOCHEH_${key}_PROVIDER`)||setting('NOCHEH_PROVIDER');
+    return {part,label,provider,provider_name:provider?name(provider):'',model:provider?setting(`NOCHEH_${key}_MODEL`)||setting('NOCHEH_MODEL'):'',configured:!!provider};
+  });
+  const embedding=setting('NOCHEH_EMBEDDING_PROVIDER')||'openai';
+  return [...parts,{part:'embedding',label:'Memory search',provider:embedding,provider_name:name(embedding),model:setting('NOCHEH_EMBEDDING_MODEL'),configured:true}];
+}
+const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'TELEGRAM_GROUP_REPLIES',value:'addressed',editable:true},{key:'TELEGRAM_BOT_NAMES',value:'Nocheh,نوچه',editable:true},{key:'TELEGRAM_TOPIC_MEMORY',value:'group',editable:true},{key:'NOCHEH_MODEL',value:'claude-sonnet-5-5',editable:true},{key:'NOCHEH_EMBEDDING_MODEL',value:'text-embedding-3-small',editable:true},{key:'NOCHEH_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_MODEL',value:'',editable:true},{key:'NOCHEH_MEMORY_PROVIDER',value:'',editable:true},{key:'NOCHEH_MEMORY_MODEL',value:'',editable:true},{key:'NOCHEH_GUARD_PROVIDER',value:'',editable:true},{key:'NOCHEH_GUARD_MODEL',value:'',editable:true},{key:'NOCHEH_EMBEDDING_PROVIDER',value:'openai',editable:true},{key:'NOCHEH_PROVIDERS',value:'[]',editable:true},{key:'NOCHEH_PROVIDER_KEYS',value:null,secret:true,configured:false,editable:true},{key:'OPENAI_API_KEY',value:null,secret:true,configured:true,editable:true},{key:'ANTHROPIC_API_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'NOCHEH_PARALLEL_RUNS',value:'4',editable:true},{key:'NOCHEH_PARALLEL_REPLIES',value:'3',editable:true},{key:'NOCHEH_PARALLEL_GUARD_CHECKS',value:'3',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true}];
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
@@ -42,7 +54,7 @@ const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state
 const actions:any[]=[{id:'c'.repeat(64),fingerprint:'d'.repeat(64),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-preview',workspace:'synthetic-demo'},state:'proposed',created_at:new Date().toISOString()}],permissions:any[]=[];
 let spaceRevision=1,spaceOverrides:Record<string,any>={mode:'approved'},shares:any[]=[];
 let memoryAttached=true;
-const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes','Hermes','Assistant runtime','running'],['cliproxy-monitor','CPA Manager Plus','Provider observations','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
+const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes','Hermes','Assistant runtime','running'],['honcho-api','Honcho','Memory engine','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
 const personId='1'.repeat(64),projectEntityId='2'.repeat(64),projectId='project-fixture',factId='3'.repeat(64),requestId='4'.repeat(64),grantId='5'.repeat(64),conversation='-10042',topic='-10042/topic/7';
 const memoryMapNodes:any[]=[
  {id:`person:${personId}`,kind:'person',label:'Mira Chen',state:'active',detail:{revision:2,fact_count:2}},
@@ -76,19 +88,28 @@ const server=createServer((req,res)=>{void(async()=>{
  if(req.method==='GET'&&path==='/assets/graph-3d.js'&&await scenario()==='no-graphics'){res.setHeader('content-type','text/javascript');res.end('export function createGraphScene(){throw new Error("Synthetic unavailable graphics")}');return;}
  if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;}
  sessions.authorize(req,req.method!=='GET');
- if(['/inngest/runs','/hermes/nocheh','/providers/management.html'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
+ if(['/inngest/runs','/hermes/nocheh'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
  const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
  const mode=await scenario();if(mode==='conflict'&&!modeRevision){settingsRevision+='external';revision++;modeRevision=true;}if(mode!=='conflict')modeRevision=false;if(mode==='offline'&&['/monitoring','/workflows/metrics','/status','/tools/actions'].includes(route))throw new HttpError(503,'fixture_observation_unavailable');
  if(req.method==='GET'){
   if(route==='/health')return json(res,200,{ok:true});
-  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,runtime:{status:{telegram:'disabled',reasoning_route:'shared'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},provider:{login_present:true,reasoning_login_present:true,reasoning_model:'claude-sonnet-5-5'},application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
+  if(route==='/usage'){const days=Number(url.searchParams.get('days')||30),day=(ago:number)=>new Date(Date.now()-ago*864e5).toISOString().slice(0,10);
+    const row=(ago:number,part:string,label:string,service:string,provider:string,provider_name:string,model:string,calls:number,input:number,output:number,cost:number|null)=>({day:day(ago),part,label,service,provider,provider_name,model,runs:calls,calls,failed:part==='memory'&&ago===0?1:0,input_tokens:input,output_tokens:output,cache_read_tokens:0,cache_write_tokens:0,reasoning_tokens:0,cost_usd:cost,cost_complete:cost!==null});
+    const rows=[row(0,'reply','Telegram replies','Hermes','openai','OpenAI','gpt-5.6-sol',12,48000,3200,0.21),row(3,'reply','Telegram replies','Hermes','custom-1','Example gateway','claude-sonnet-5-5',5,20000,1500,null),
+      row(0,'guard','Secret check','Nocheh','openai','OpenAI','gpt-5.6-sol',12,6000,240,0.01),row(0,'memory','Memory','Honcho','custom-1','Example gateway','claude-sonnet-5-5',9,30000,4000,null),
+      row(0,'embedding','Memory search','Honcho','openai','OpenAI','text-embedding-3-small',20,8000,0,0.0002)].filter(r=>r.day>=day(days-1));
+    return json(res,200,{since:day(days-1),today:day(0),days,rows,parts:[['reply','Telegram replies','Hermes'],['browser','Browser chat','Hermes'],['schedule','Scheduled runs','Hermes'],['memory_review','Memory notes','Hermes'],['guard','Secret check','Nocheh'],['memory','Memory','Honcho'],['embedding','Memory search','Honcho']].map(([id,label,service])=>({id,label,service})),sources:{hermes:'ok',honcho:'ok',pricing:'ok'}});}
+  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,runtime:{status:{telegram:'disabled'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},routes:modelRoutes(),application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
   if(route==='/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/health')return json(res,200,await workflowHealth(pool));
   if(/^\/workflows\/[a-f0-9]{64}$/.test(route))return json(res,200,await workflowDetail(pool,route.split('/')[2]!));
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'}]},guard_mode:'on',services:[]});
   if(route==='/settings')return json(res,200,{revision:settingsRevision,apply_state:'current',fields:fields.map(f=>({...f,value:settingsChanges[f.key]??f.value})),
-   models:mode==='no-provider'?{reasoning:[],provider_running:true,providers:[{id:'claude',label:'Claude',signed_in:false,models:[]},{id:'codex',label:'ChatGPT',signed_in:false,models:[]}],embedding:['text-embedding-3-large','text-embedding-3-small'],embedding_locked:null}:{reasoning:['claude-haiku-5-5','claude-opus-5-5','claude-sonnet-5-5'],provider_running:true,providers:[{id:'claude',label:'Claude',signed_in:true,models:['claude-haiku-5-5','claude-opus-5-5','claude-sonnet-5-5']},{id:'codex',label:'ChatGPT',signed_in:false,models:[]}],embedding:['text-embedding-3-large','text-embedding-3-small'],embedding_locked:'text-embedding-3-small'}});
+   models:{embedding:['text-embedding-3-large','text-embedding-3-small'],embedding_locked:mode==='no-provider'?null:'text-embedding-3-small'},
+   providers:{list:[{id:'openai',name:'OpenAI',kind:'openai',url:'https://api.openai.com/v1',has_key:true},{id:'anthropic',name:'Anthropic',kind:'anthropic',url:'https://api.anthropic.com/v1',has_key:false},
+     ...JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).map((p:any)=>({...p,kind:'custom',has_key:true}))],
+    parts:[{id:'reply',label:'Replies (Hermes)',provider_setting:'NOCHEH_REPLY_PROVIDER',model_setting:'NOCHEH_REPLY_MODEL'},{id:'memory',label:'Memory (Honcho)',provider_setting:'NOCHEH_MEMORY_PROVIDER',model_setting:'NOCHEH_MEMORY_MODEL'},{id:'guard',label:'Secret check',provider_setting:'NOCHEH_GUARD_PROVIDER',model_setting:'NOCHEH_GUARD_MODEL'}]}});
   if(route==='/telegram/identities')return json(res,200,{groups:[
     {id:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
     {id:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
@@ -110,7 +131,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy. Verify against original evidence.',citations:[]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/honcho')return json(res,200,{connection:{attached:memoryAttached,verified:true},limited_memory:!memoryAttached,syncing:true,generations:[{id:'fixture',state:'ready',mode:'on'}],receipts:[{state:'done',count:176},{state:'pending',count:4}]});
-  if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,subscription_login:true,embedding_credential:true,api_budget_usd:5});
+  if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
   if(route==='/runtime')return json(res,200,{status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{chat:true,sessions:true}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';
@@ -151,6 +172,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/spaces'){if(body.revision!==spaceRevision)throw new HttpError(409,'space_revision_conflict');spaceOverrides=body.overrides;spaceRevision++;return json(res,200,{ok:true});}
   if(route==='/memory/shares'){shares.push({id:randomUUID(),destination:body.destination,content:body.content});spaceRevision++;return json(res,200,{ok:true});}
   if(route==='/memory/recall')return json(res,200,{hits:[]});
+  if(route==='/settings/provider-models')return json(res,200,body.provider==='openai'||body.key
+    ?{provider:body.provider,models:body.provider==='openai'?['gpt-5.6-sol','text-embedding-3-small']:['claude-sonnet-5-5','gpt-5.6-sol']}
+    :{provider:body.provider,models:[],error:'missing_key'});
   if(route==='/memory/reviews/control')return json(res,200,{ok:true});
   if(route==='/operations'||route==='/settings/apply'){const job={id:randomUUID(),kind:route==='/operations'?'operations.'+body.action:'settings.apply',state:'complete',created_at:new Date().toISOString(),result:{status:'synthetic_only'}};jobs.unshift(job);return json(res,200,job);}
   const importAction=/^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);
