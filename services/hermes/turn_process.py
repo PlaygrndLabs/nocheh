@@ -128,6 +128,10 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                 result = value
             else: raise RuntimeError('assistant_output_invalid')
         await process.wait()
+        if result is not None:
+            # Nocheh's usage tracker: Hermes's own token counts and cost for this turn.
+            from .usage import part_of, record
+            await asyncio.to_thread(record, part_of(body), result.pop('usage',None), model, result.get('state')!='done')
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
         from .assistant_gateway import check_delivery_policy

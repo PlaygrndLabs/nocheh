@@ -274,6 +274,10 @@ class Handler(BaseHTTPRequestHandler):
                     return {'chat_id': str(found.id), 'state': 'available', 'type': found.type, 'title': found.title,
                             'username': found.username, 'is_forum': bool(getattr(found, 'is_forum', False))}
             return asyncio.run(read_chat())
+        if self.path == "/internal/usage/price":
+            # Prices Honcho's reported memory tokens with Hermes's own pricing table; counts only, no content.
+            from services.hermes.usage import price
+            return {"costs": price(body.get("rows"))}
         if self.path in ("/internal/chat", "/internal/detect"):
             text = body["text"]
             if not isinstance(text, str) or len(text) > 100000:

@@ -144,4 +144,8 @@ def _review(profile,policy,model,credentials,body):
     result=subprocess.run([sys.executable,'-m',module],input=json.dumps(request).encode(),
                           stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,timeout=220,cwd=Path(__file__).resolve().parents[2])
     if result.returncode or len(result.stdout)>1024*1024:raise RuntimeError('review_worker_failed')
-    return json.loads(result.stdout)
+    value=json.loads(result.stdout)
+    if isinstance(value,dict):
+        from .usage import record
+        record('memory_review',value.pop('usage',None),model,value.get('state')!='done')
+    return value

@@ -6997,3 +6997,53 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Model usage */
+.n-usage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.n-usage-head h2 {
+  margin: 0 0 4px;
+}
+.n-usage-head p {
+  margin: 0;
+}
+.n-usage-value {
+  display: block;
+  margin-top: 10px;
+  font-size: 26px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.n-usage .ui-alert p {
+  margin: 0 0 4px;
+}
+.n-usage-scroll {
+  overflow-x: auto;
+}
+.n-usage-table {
+  min-width: 640px;
+}
+.n-usage-part th small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--n-muted);
+}
+.n-usage-part th {
+  color: var(--n-text);
+  font-size: 14px;
+}
+.n-usage-line td {
+  border-top-style: dashed;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .n-usage-head .n-access-choice {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

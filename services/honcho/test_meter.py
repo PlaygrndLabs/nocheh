@@ -322,5 +322,23 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(ledger.summary()['reasoning_requests'],0)
             self.assertEqual(Egress(ledger,'internal','temporary',transport).reasoning_url,'')
 
+    def test_usage_tracker_counts_each_call_by_provider_and_model_without_content(self):
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite');transport=Transport()
+            egress=Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client',reasoning_url=GATEWAY,
+                          providers={'/v1/embeddings':'openai','/v1/chat/completions':'custom-1'})
+            egress.send('/v1/embeddings',{'model':'text-embedding-3-small','input':['private words']})
+            egress.send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[{'role':'user','content':'private words'}]})
+            Egress(ledger,'internal','temporary',HttpFailureTransport(),reasoning_key='honcho-client',
+                   providers={'/v1/embeddings':'openai'}).send('/v1/embeddings',{'model':'text-embedding-3-small','input':['x']})
+            rows={(row['route'],row['provider']):row for row in ledger.usage('2000-01-01')}
+            embedding=rows[('/v1/embeddings','openai')]
+            self.assertEqual((embedding['calls'],embedding['failed'],embedding['input_tokens']),(2,1,10))
+            self.assertEqual(embedding['priced_calls'],1,'only the call that reported tokens is priced')
+            self.assertGreater(embedding['cost_microdollars'],0)
+            memory=rows[('/v1/chat/completions','custom-1')]
+            self.assertEqual((memory['model'],memory['calls'],memory['input_tokens'],memory['priced_calls']),(REASONING_MODEL,1,10,0))
+            self.assertNotIn('private words',json.dumps(ledger.usage('2000-01-01')))
+
 
 if __name__=='__main__': unittest.main()

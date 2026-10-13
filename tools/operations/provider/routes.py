@@ -192,7 +192,7 @@ def environment(values):
         current = selected[part]
         configured = current.configured
         result.update({f'NOCHEH_{name}_ROUTE_URL': current.url, f'NOCHEH_{name}_ROUTE_MODEL': current.model if configured else '',
-                       f'NOCHEH_{name}_ROUTE_KEY': current.key})
+                       f'NOCHEH_{name}_ROUTE_KEY': current.key, f'NOCHEH_{name}_ROUTE_PROVIDER': current.provider})
     result['NOCHEH_MEMORY_ROUTE_MODEL'] = selected['memory'].model if selected['memory'].configured else ''
     return result
 

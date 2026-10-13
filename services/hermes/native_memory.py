@@ -100,7 +100,7 @@ def recall(root, body, retirements=None):
             'next_profile': profiles[99].name if len(profiles) > 100 else None}
 
 
-def native_review(agent, content):
+def native_review(agent, content, runs=None):
     """Run Hermes's review target synchronously inside its dedicated worker.
 
     The pinned helper swallows failures. Observe the actual fork result instead
@@ -108,7 +108,8 @@ def native_review(agent, content):
     """
     from agent import background_review as native
     original = native.build_cache_parity_fork
-    results = []
+    # The caller's list also feeds Nocheh's usage tracker, failed forks included.
+    results = runs if runs is not None else []
 
     def checked_fork(*args, **kwargs):
         fork, runtime, routed = original(*args, **kwargs)

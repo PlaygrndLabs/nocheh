@@ -38,7 +38,7 @@ class DatabaseBrowserTests(unittest.TestCase):
         result = database_browser.view(self.state, {'action': 'databases'})
         self.assertEqual([item['id'] for item in result['databases']],
                          ['archive', 'derived', 'control', 'workflow', 'honcho',
-                          'hermes:research', 'honcho-ledger'])
+                          'hermes:research', 'usage', 'honcho-ledger'])
         self.assertNotIn('path', str(result))
         tables = database_browser.view(self.state, {'action': 'tables', 'database': 'hermes:research'})
         self.assertIn({'schema': 'main', 'name': 'messages', 'estimated_rows': None}, tables['tables'])
