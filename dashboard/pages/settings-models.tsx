@@ -280,8 +280,7 @@ export function ModelRouting({
         <h3 id="settings-providers">Providers</h3>
         <p className="n-muted">
           Where Nocheh sends model requests. Add OpenAI or Anthropic with an API key, or a custom OpenAI-compatible
-          provider such as a hosted sub2api gateway with its address and key. Keys stay on the server and are never
-          shown again.
+          provider such as a hosted gateway with its address and key. Keys stay on the server and are never shown again.
         </p>
         <div className="n-form">
           {keyField(
@@ -338,7 +337,7 @@ export function ModelRouting({
                   <input
                     id={'name-' + custom.id}
                     value={custom.name}
-                    placeholder="sub2api"
+                    placeholder="My gateway"
                     disabled={busy}
                     onChange={e => change({name: e.target.value})}
                   />
@@ -348,7 +347,7 @@ export function ModelRouting({
                   <input
                     id={'url-' + custom.id}
                     value={custom.url}
-                    placeholder="https://sub2api.example.workers.dev/v1"
+                    placeholder="https://gateway.example.com/v1"
                     disabled={busy}
                     onChange={e => change({url: e.target.value.trim()})}
                   />
