@@ -20,7 +20,7 @@ DEFAULTS = {
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
     'NOCHEH_WORKFLOW_UI_PORT': '8288',
-    'NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS': '14',
+    'NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS': '0', 'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': '0',
     'NOCHEH_LOG_MAX_SIZE': '10m', 'NOCHEH_LOG_MAX_FILES': '3',
     'NOCHEH_PARALLEL_REPLIES': '3', 'NOCHEH_PARALLEL_RUNS': '4', 'NOCHEH_PARALLEL_GUARD_CHECKS': '3',
     'NOCHEH_HONCHO_ENABLED': 'true',
@@ -166,8 +166,10 @@ def validate(values):
     if layout=='original-only-v1' and (not all(storage) or len(set(storage+[values.get('POSTGRES_PASSWORD'),values.get('INNGEST_POSTGRES_PASSWORD')]))!=5):raise ValueError('Separate storage credentials required')
     if values.get('NOCHEH_HONCHO_ENABLED','false') not in ('true','false'):raise ValueError('Invalid NOCHEH_HONCHO_ENABLED')
     if not str(values.get('NOCHEH_WORKFLOW_UI_PORT','8288')).isdigit() or not 1024<=int(values.get('NOCHEH_WORKFLOW_UI_PORT','8288'))<=65535:raise ValueError('Invalid NOCHEH_WORKFLOW_UI_PORT')
-    retention=str(values.get('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS','14'))
+    retention=str(values.get('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS','0'))
     if not re.fullmatch(r'\d{1,4}',retention) or int(retention)>3650:raise ValueError('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS must be 0 (off) or 1-3650 days')
+    journals=str(values.get('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS','0'))
+    if not re.fullmatch(r'\d{1,4}',journals) or int(journals)>3650:raise ValueError('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS must be 0 (off) or 1-3650 days')
     if not re.fullmatch(r'[1-9]\d{0,4}[kmg]',str(values.get('NOCHEH_LOG_MAX_SIZE','10m'))):raise ValueError('NOCHEH_LOG_MAX_SIZE must be a size such as 10m')
     if not re.fullmatch(r'[1-9]\d{0,2}',str(values.get('NOCHEH_LOG_MAX_FILES','3'))):raise ValueError('NOCHEH_LOG_MAX_FILES must be 1-999')
     runs,replies=str(values.get('NOCHEH_PARALLEL_RUNS','4')),str(values.get('NOCHEH_PARALLEL_REPLIES','3'))

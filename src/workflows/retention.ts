@@ -10,9 +10,9 @@ import {closedStates} from './store.js';
  * guard invalidation notes, superseded Honcho context summaries, and guard
  * fragments of already prepared sources. Nocheh
  * receipts, the workflow registry and Inngest's queue state are never removed.
- * Fourteen days is the default; zero keeps every row.
+ * Zero, the default, keeps every row.
  */
-export function retentionDays(value=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS??'14'):number {
+export function retentionDays(value=process.env.NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS??'0'):number {
   if(!/^\d{1,4}$/.test(value)||Number(value)>3650)throw Error('invalid_workflow_history_retention');
   return Number(value);
 }

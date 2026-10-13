@@ -101,9 +101,10 @@ directed their full deletion: `spans`, `history` and `traces` were truncated
 with the database isolated, leaving Inngest at 70 MB and the volume at 1.6 GB.
 Nocheh stores, receipts and the workflow registry were untouched.
 Telemetry retention is now a configurable setting,
-`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, 14 days by default and checked daily
-([default decision](docs/adr/0110-default-workflow-history-retention.md)); an
-installation whose `.env` already sets `0` keeps retention off until the owner changes it.
+`NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS`, checked daily; by owner decision it
+keeps everything by default (`0`) until the owner sets a number of days
+([default decision](docs/adr/0144-keep-history-by-default.md)); an
+installation whose `.env` already sets a number keeps it.
 [Decision](docs/adr/0106-configurable-workflow-history-retention.md),
 [daily interval](docs/adr/0107-daily-workflow-history-retention.md),
 [retention checks](test/workflow-retention.test.ts),
@@ -167,8 +168,9 @@ that starts as “Nocheh” and “نوچه”
 [trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
 gateway check ([test](services/hermes/test_gateway.py)) and the
 `group_answers_only_when_addressed` simulator scenario run only on the owner's
-Mac and have not been run. Pending: a live group check that an unaddressed
-message gets no reply and an addressed one does.
+Mac and have not been run. Addressing by a name at the start passed live on
+October 12 (four group messages, one reply each). Pending: a live unaddressed
+group message that gets no reply, and a reply or @mention that gets one.
 
 All topics of a group now share one memory by default. A live question in a
 group's second topic did not know what the owner had said in another topic,
@@ -182,8 +184,10 @@ separate (“Each topic”)
 [grant checks](test/store-memory-access.test.ts),
 [sharing checks](test/store-sharing.test.ts),
 [helper checks](test/spaces.test.ts)). Hermes native notes stay per
-conversation. Pending: after a restart, a live question in one topic about
-something said in another topic of the same group.
+conversation. Live check passed on the owner's development installation on
+October 12: questions in other topics and in General recalled what was said in
+one topic, with no private-chat fact, after restarts on three successive builds
+([live summary](docs/mvp-acceptance-status.md)).
 
 Dashboard rebuild (October 13, owner: "the work flow and ui update after save is
 bad, save btn is not in good place and lots of other ui/ux issue ... need to check
@@ -1008,8 +1012,8 @@ activation remains separate.
    with the next authorized operating restart, then compare span growth per day
    against the 2026-10-08 measurement in ignored
    `data/acceptance/results/inngest-storage/`. The existing telemetry was deleted on owner
-   direction. Configurable retention defaults to 14 days by
-   owner decision; the operating `.env` must be checked for an explicit `0`. The rebuilt `nocheh-db` image is needed
+   direction. Configurable retention keeps everything by default
+   by owner decision ([ADR-0144](docs/adr/0144-keep-history-by-default.md)); the operating `.env` must be checked for an explicit number. The rebuilt `nocheh-db` image is needed
    for the worker to exist in the operating installation. Remaining real prerequisite polls
    (native reconciliation, review prerequisites, retryable failures and the
    perpetual 120-second Honcho context refresh, removed in source) were about six percent of
@@ -1059,8 +1063,14 @@ activation remains separate.
      ([ADR-0139](docs/adr/0139-reply-checks-before-background-checks.md),
      [slot check](services/hermes/test_runtime.py)). Pending: a live check of
      that change.
-   - Honcho-only recall is unproven: the passing answer also had the fact from
-     chat history and a Nocheh learned rule.
+   - Honcho-only recall passed live on October 13: a note in one group topic
+     was answered correctly in another topic the next day. The fact reached
+     Hermes only through `nocheh_memory_recall` (Honcho's answer); the
+     turn-start Honcho context, the archive results and per-topic chat history
+     did not contain it. The reply waited 33 minutes because the Claude login
+     expired overnight while the Mac slept; once it renewed, the turn took
+     about 87 seconds, 24 of them Honcho recall
+     ([live summary](docs/mvp-acceptance-status.md)).
    - Voice notes are archived without transcription and never wait
      ([ADR-0142](docs/adr/0142-external-providers-only.md)); the simulator's
      speech scenarios became `voice_is_archived_without_blocking`.
@@ -1104,9 +1114,14 @@ activation remains separate.
    ([decision](docs/adr/0121-operational-telemetry-retention.md)). Still
    unbounded: guarded prepared copies (`runtime_prepared_values` and
    `runtime_prepared_inputs`) of superseded guard epochs, which ADR-0109's
-   single-workspace model changes; finished Hermes journals (outbound, dispatch,
-   async-run and managed-run files), which boot recovery also rescans (pruning
-   them is an open owner decision); and spool files that fail permanently. The
+   single-workspace model changes; and spool files that fail permanently.
+   Finished Hermes journals (outbound, dispatch, async-run and managed-run
+   files) can expire after an owner-set number of days
+   ([decision](docs/adr/0143-hermes-delivery-log-retention.md),
+   [checks](services/hermes/test_journal_retention.py)). On October 13 the
+   owner chose "keep data for ever", so both these journals and workflow
+   history are kept by default and grow until the owner sets a number of days
+   ([decision](docs/adr/0144-keep-history-by-default.md)). The
    Honcho meter now folds calls older than the previous month into monthly
    totals ([decision](docs/adr/0131-honcho-meter-monthly-rollup.md),
    [checks](services/honcho/test_meter.py)). Guard fragments
@@ -1120,5 +1135,11 @@ activation remains separate.
     recovery, health, retention or the Inngest connection, and none becomes a
     cron. The superseded single-database worker is removed; four older modules
     remain only for their tests.
+    Steps that come due while the stack restarts or the Mac sleeps can fail
+    once with `connect_no_healthy_connection` in the seconds before both
+    Connect workers re-register (13 runs from October 10 to 12, all background
+    memory review or Honcho work); every retry that ran completed, one review
+    was still in its backoff wait, and no reply was affected, so no change was
+    made.
 
 </pending>

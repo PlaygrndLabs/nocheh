@@ -722,7 +722,7 @@ class Scenarios:
         self.gate('archive_events_listed', any(table['table'] == 'events' for table in measured['nocheh_archive']['largest_tables']))
         self.gate('state_folders_listed', {'files', 'spool'} <= {row['path'] for row in result['state_folders']},
                   folders=[row['path'] for row in result['state_folders']])
-        self.gate('retention_reported', result['retention_days'] == 14 and result['docker_logs']['max_files_per_container'] >= 1)
+        self.gate('retention_reported', result['retention_days'] == 0 and result['docker_logs']['max_files_per_container'] >= 1)
         self.current['observed'] = {'bytes': {name: row.get('bytes') for name, row in measured.items()},
                                     'state_bytes': {row['path']: row['bytes'] for row in result['state_folders']}}
         raw = subprocess.run(self.f.command+['exec', '-T', 'nocheh-dashboard', 'python3', '-m', 'tools.runtime.management'],
