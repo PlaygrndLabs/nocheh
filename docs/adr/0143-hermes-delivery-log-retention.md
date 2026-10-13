@@ -1,4 +1,4 @@
-# ADR-0141: Finished Hermes delivery logs expire after one month
+# ADR-0143: Finished Hermes delivery logs expire after one month
 
 <status>
 Accepted on 2026-10-12 by owner decision ("keep both logs default for 1
