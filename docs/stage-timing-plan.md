@@ -75,8 +75,7 @@ unmeasured, never as zero; no content or credentials are recorded.
 One control-database table, `stage_timings`, with columns: event, attempt,
 stage, category, started_at, duration_ms, calls, and source (which component
 measured it). It is append-only per attempt and bounded by the same retention
-rule as other operational data (default 14 days, configurable), so timing
-data cannot grow unbounded.
+rule as other operational data (kept by default, configurable in days).
 
 </storage>
 
@@ -117,7 +116,7 @@ data cannot grow unbounded.
   delivery, finished); the run receipt keeps allowlisted durations only.
 - `workflow_outbox.first_published_at` keeps the first publication; republishing
   still refreshes `published_at`, which drives the republish interval.
-- Stage rows follow `NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS` (default 14; `0`
+- Stage rows follow `NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS` (default `0`
   keeps them) and are pruned hourly by the storage worker.
 - `./bin/nocheh admin timings <event>` prints the breakdown, `timings recent`
   prints p50/p95 per stage, and `timings <event> --effects` keeps the raw

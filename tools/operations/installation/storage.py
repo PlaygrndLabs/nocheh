@@ -72,7 +72,7 @@ def report(state, limit=8, command=None, env=None):
     size, files = config.get('NOCHEH_LOG_MAX_SIZE', '10m'), int(config.get('NOCHEH_LOG_MAX_FILES', '3'))
     return {'databases': databases, 'state_folders': sorted(folders, key=lambda row: -row['bytes']),
             'docker_logs': {'max_size_per_file': size, 'max_files_per_container': files},
-            'retention_days': int(config.get('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS', '14'))}
+            'retention_days': int(config.get('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS', '0'))}
 
 
 def human(count):
@@ -104,5 +104,5 @@ def main(state, argv):
     logs = result['docker_logs']
     print(f"Docker logs: at most {logs['max_files_per_container']} x {logs['max_size_per_file']} per container")
     retention = result['retention_days']
-    print(f"Workflow history retention: {f'{retention} days' if retention else 'off'}")
+    print(f"Workflow history retention: {f'{retention} days' if retention else 'kept forever'}")
     return 0

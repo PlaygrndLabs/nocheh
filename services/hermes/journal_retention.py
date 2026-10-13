@@ -1,4 +1,4 @@
-"""Finished delivery journals expire after the owner's retention days.
+"""Finished delivery journals are kept unless the owner sets retention days.
 
 A journal is removed only once its closed result is older than the retention
 window. Unfinished journals, and managed receipts still owed to Nocheh, stay.
@@ -20,7 +20,7 @@ OUTBOUND = {'delivered', 'rejected', 'ambiguous'}
 
 
 def retention_days():
-    value = os.environ.get('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS', '').strip() or '30'
+    value = os.environ.get('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS', '').strip() or '0'
     if not re.fullmatch(r'\d{1,4}', value) or int(value) > 3650:
         raise ValueError('Invalid NOCHEH_HERMES_JOURNAL_RETENTION_DAYS')
     return int(value)

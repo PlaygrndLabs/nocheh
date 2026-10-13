@@ -263,7 +263,9 @@ const settingHints: Record<string, string> = {
   NOCHEH_PARALLEL_GUARD_CHECKS:
     'How many messages the secret guard checks at the same time, 1–4. Every message is checked before it is answered, and each check is one model call.',
   NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:
-    'Days Hermes keeps finished delivery logs before deleting them, 30 by default. 0 keeps them forever. Unfinished deliveries are never deleted.',
+    'Days Hermes keeps finished delivery logs before deleting them. 0, the default, keeps them forever. Unfinished deliveries are never deleted.',
+  NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS:
+    'Days to keep workflow run history, reply timings and related operational records before deleting them. 0, the default, keeps them forever. Receipts are never deleted.',
   NOCHEH_PARALLEL_RUNS:
     'Isolated agent containers that may run at once, shared by replies, memory reviews, browser turns and schedules. Each uses up to 2 GB of memory and 2 CPUs.',
   NOCHEH_PARALLEL_REPLIES:

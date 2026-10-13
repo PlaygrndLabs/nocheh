@@ -62,9 +62,9 @@ class JournalRetentionTests(unittest.TestCase):
             self.assertFalse((spool / 'outbound' / 'a.intent').exists())
             self.assertEqual(prune(spool, spool / 'managed', 30), 1, 'the next pass removes the leftover result')
 
-    def test_retention_days_default_to_one_month_and_reject_invalid_values(self):
-        with patch.dict(os.environ, {'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': ''}):self.assertEqual(retention_days(), 30)
-        with patch.dict(os.environ, {'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': '0'}):self.assertEqual(retention_days(), 0)
+    def test_retention_days_default_to_keeping_everything_and_reject_invalid_values(self):
+        with patch.dict(os.environ, {'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': ''}):self.assertEqual(retention_days(), 0)
+        with patch.dict(os.environ, {'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': '30'}):self.assertEqual(retention_days(), 30)
         for bad in ('-1', '3651', 'month', '1.5'):
             with patch.dict(os.environ, {'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': bad}), self.assertRaises(ValueError, msg=bad):retention_days()
 
