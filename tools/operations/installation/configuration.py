@@ -42,8 +42,24 @@ def owns_project(state):
     return Path(state).resolve() == DEFAULT_STATE or bool(read_env(env_path(state)).get('COMPOSE_PROJECT_NAME'))
 
 
+def development_source():
+    """Where the dashboard container sees the `make dev` source checkout it runs from, if any."""
+    source=os.environ.get('NOCHEH_DEV_COMPOSE_DIR','')
+    if not source or os.environ.get('NOCHEH_CONTAINER')!='1': return None
+    source=Path(source)
+    if not source.is_absolute() or not (source/'docker-compose.dev.yml').is_file():
+        raise ValueError('development_source_unavailable')
+    return source
+
+
 def compose_command(state, project=None):
     command=['docker','compose','--env-file',str(env_path(state)),'-f',str(INSTALLATION_ROOT/'docker-compose.yml')]
+    source=development_source()
+    if source:
+        # Apply inside `make dev` keeps the source-watched services and their images,
+        # exactly as make dev started them, instead of the installed images.
+        command=['docker','compose','--env-file',str(env_path(state)),'--project-directory',str(INSTALLATION_ROOT),
+                 '-f',str(source/'docker-compose.yml'),'-f',str(source/'docker-compose.dev.yml')]
     layout=read_env(env_path(state)).get('NOCHEH_STORAGE_LAYOUT','original-only-v1')
     if layout != 'original-only-v1':raise ValueError('Invalid NOCHEH_STORAGE_LAYOUT')
     if project:command+=['-p',project]

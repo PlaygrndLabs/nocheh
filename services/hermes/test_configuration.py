@@ -98,6 +98,24 @@ class ConfigurationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'TELEGRAM_GROUP_ACCESS'):
                     validate({**load(state),'TELEGRAM_GROUP_ACCESS':bad})
 
+    def test_apply_inside_make_dev_keeps_the_development_setup(self):
+        from tools.operations.installation.configuration import compose_command, INSTALLATION_ROOT
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)/'state';initialize(state)
+            source=Path(folder)/'worktree';source.mkdir()
+            installed=compose_command(state)
+            self.assertNotIn('docker-compose.dev.yml',' '.join(installed))
+            # Outside the dashboard container the setting is ignored.
+            with patch.dict(os.environ,{'NOCHEH_DEV_COMPOSE_DIR':str(source)}):
+                self.assertEqual(compose_command(state),installed)
+            with patch.dict(os.environ,{'NOCHEH_DEV_COMPOSE_DIR':str(source),'NOCHEH_CONTAINER':'1'}):
+                with self.assertRaises(ValueError):compose_command(state)
+                (source/'docker-compose.dev.yml').write_text('services: {}\n')
+                command=compose_command(state)
+            self.assertEqual(command[command.index('--project-directory')+1],str(INSTALLATION_ROOT))
+            self.assertEqual([command[i+1] for i,v in enumerate(command) if v=='-f'],
+                             [str(source/'docker-compose.yml'),str(source/'docker-compose.dev.yml')])
+
     def test_native_admin_port_follows_isolated_archive_port(self):
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder); values = initialize(state)
