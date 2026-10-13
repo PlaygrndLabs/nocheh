@@ -53,7 +53,8 @@ class SettingsTests(unittest.TestCase):
             self.assertIn('text-embedding-3-large', current['models']['embedding'])
             editable = {field['key'] for field in current['fields'] if field['editable']}
             self.assertLessEqual({'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_MODEL'}, editable)
-            self.assertNotIn('OPENAI_API_KEY', editable)
+            # Provider keys are entered in Settings › Models.
+            self.assertLessEqual({'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'NOCHEH_PROVIDER_KEYS', 'NOCHEH_PROVIDERS'}, editable)
             saved = save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-large'}, current['revision'])
             # Once Honcho's ledger holds vectors from one model, another one is refused.
             ledger = state_for(state) / 'ledger/budget.sqlite'

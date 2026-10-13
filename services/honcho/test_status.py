@@ -18,7 +18,8 @@ class HonchoStatusTests(unittest.TestCase):
             provider = root / 'local'
             auth = provider / 'provider/auth'
             auth.mkdir(parents=True)
-            credential = {'type': 'codex', 'access_token': 'private-access',
+            # The default reasoning model is a Claude model, served by the Claude login.
+            credential = {'type': 'claude', 'access_token': 'private-access',
                           'refresh_token': 'private-refresh'}
             with patch.object(honcho, 'STATE', experiment), \
                  patch.object(honcho, 'PROVIDER_STATE', provider), \

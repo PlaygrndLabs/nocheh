@@ -28,9 +28,17 @@ const relayRoutes:[string,RegExp][]=[
   ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|knowledge\/proposals|action-requests)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
-export function providerTarget(transport:Record<string,unknown>,path:string):string {
+/** The reply provider chosen in Settings › Models, when it is not the built-in login. */
+export function configuredReplyUrl(value=process.env.NOCHEH_REPLY_ROUTE_URL):string|undefined {
+  if(!value)return undefined;
+  try{const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)return undefined;}catch{return undefined;}
+  return value.replace(/\/+$/,'');
+}
+export function providerTarget(transport:Record<string,unknown>,path:string,configured=configuredReplyUrl()):string {
   if(transport.base_url==='https://chatgpt.com/backend-api/codex'&&transport.api_mode==='codex_responses'&&path==='/codex/responses')return transport.base_url+'/responses';
   if(transport.base_url==='http://cliproxy-api:8317/v1'&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return transport.base_url+'/chat/completions';
+  // Only the one HTTPS provider the owner configured for replies, never an address Hermes invents.
+  if(configured&&transport.base_url===configured&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return configured+'/chat/completions';
   throw new HttpError(403,'provider_route_denied');
 }
 export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBinding> {

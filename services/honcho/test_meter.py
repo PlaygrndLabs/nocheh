@@ -300,5 +300,16 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer honcho-client')
             self.assertEqual(ledger.report()['reserved_usd'],0)
 
+    def test_memory_provider_from_settings_must_use_https(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
+            Egress(ledger,'internal','temporary',transport,reasoning_key='synthetic-provider-key',
+                   reasoning_url='https://gateway.example.test/v1/').send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})
+            self.assertEqual(transport.calls[0].full_url,'https://gateway.example.test/v1/chat/completions')
+            self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer synthetic-provider-key')
+            for url in ('http://gateway.example.test/v1','file:///etc/passwd'):
+                with self.assertRaises(Rejected):
+                    Egress(ledger,'internal','temporary',transport,reasoning_key='k',reasoning_url=url)
+
 
 if __name__=='__main__': unittest.main()

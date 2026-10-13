@@ -6895,3 +6895,54 @@ a {
 .settings-page .workspace-tabs .n-settings-group {
   margin-top: 0;
 }
+
+/* Settings › Models: one row per part, provider and model side by side. */
+.settings-page .n-model-routes {
+  display: grid;
+  gap: 18px;
+  margin-top: 20px;
+}
+.settings-page .n-model-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 20px;
+  align-items: start;
+  padding-top: 16px;
+  border-top: 1px solid var(--n-line);
+}
+.settings-page .n-model-route:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.settings-page .n-model-route-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.settings-page .n-model-route-title strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+.settings-page .n-model-route .n-field {
+  margin: 0;
+  min-width: 0;
+}
+.settings-page .n-custom-provider {
+  margin: 20px 0 0;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--n-line);
+  border-radius: 8px;
+  min-width: 0;
+}
+.settings-page .n-custom-provider legend {
+  padding: 0 6px;
+  font-weight: 650;
+}
+.settings-page .n-custom-provider .n-form {
+  margin: 8px 0 14px;
+}
+@media (max-width: 760px) {
+  .settings-page .n-model-route {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

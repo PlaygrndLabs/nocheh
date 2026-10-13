@@ -6,6 +6,7 @@ import re
 import secrets
 from pathlib import Path
 from tools.operations.provider.embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
+from tools.operations.provider import routes as provider_routes
 
 ROOT = REPO_ROOT
 INSTALLATION_ROOT = Path(os.environ.get('NOCHEH_INSTALLATION_ROOT', ROOT)).resolve()
@@ -26,6 +27,7 @@ DEFAULTS = {
     'NOCHEH_HONCHO_ENABLED': 'true',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
+    **provider_routes.DEFAULTS,
 }
 
 
@@ -173,6 +175,7 @@ def validate(values):
     endpoints = json.loads(values['NOCHEH_GUARD_TRUSTED_ENDPOINTS'])
     if not isinstance(endpoints, list) or any(not isinstance(v,str) or urlsplit(v).scheme not in ('http','https') or not urlsplit(v).netloc for v in endpoints): raise ValueError('Invalid trusted endpoints')
     if not values['NOCHEH_MODEL'].strip(): raise ValueError('NOCHEH_MODEL is required')
+    provider_routes.validate(values)
     if not values['NOCHEH_PORT'].isdigit() or not 1024 <= int(values['NOCHEH_PORT']) <= 65535: raise ValueError('Invalid NOCHEH_PORT')
     if not values['NOCHEH_PROVIDER_MONITOR_PORT'].isdigit() or not 1024 <= int(values['NOCHEH_PROVIDER_MONITOR_PORT']) <= 65535: raise ValueError('Invalid NOCHEH_PROVIDER_MONITOR_PORT')
     for name in ('POSTGRES_PASSWORD', 'SERVICE_TOKEN'):
@@ -223,4 +226,5 @@ def compose_environment(state):
     if result.get('NOCHEH_HONCHO_ENABLED')=='true' and not (Path(state)/'spool/.restore-inactive').exists():profiles.append('honcho')
     result['NOCHEH_HONCHO_STATE_DIR']=load(state).get('NOCHEH_HONCHO_STATE_DIR') or str(Path(state).resolve()/'honcho')
     result['COMPOSE_PROFILES']=','.join(profiles)
+    result.update(provider_routes.environment({**DEFAULTS,**load(state)}))
     return result

@@ -21,7 +21,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .subscription import resolve_credentials, refresh_credentials, detect_literals, DetectorContractError, reasoning_route
+from .subscription import resolve_credentials, refresh_credentials, detect_literals, DetectorContractError, reasoning_route, part_model
 
 MODEL = os.environ.get("NOCHEH_MODEL", "claude-sonnet-5-5")
 ROOT = Path(__file__).resolve().parents[2]
@@ -292,7 +292,7 @@ class Handler(BaseHTTPRequestHandler):
             text = body["text"]
             if not isinstance(text, str) or len(text) > 100000:
                 raise ValueError("invalid_text")
-            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials(), MODEL)}
+            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials("guard"), part_model("guard"))}
         if self.path == "/internal/transcribe":
             from tools.transcription_tools import transcribe_audio
             raw = base64.b64decode(body["audio_base64"], validate=True)

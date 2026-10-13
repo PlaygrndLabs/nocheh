@@ -2,6 +2,7 @@ import {useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode} f
 import {useRevisionDraft} from '../lib/draft';
 import {Bot, Cpu, Gauge, RotateCcw, Send, ShieldCheck, Wrench} from 'lucide-react';
 import {WorkspaceTabs} from '../components/workspace-tabs';
+import {ModelRouting, modelSettingKeys} from './settings-models';
 import {
   call,
   button,
@@ -252,9 +253,6 @@ const settingHints: Record<string, string> = {
     'Only when addressed: in groups Nocheh answers a reply to its own message, its @username, or its name at the start of a message, and stays silent otherwise. Every message: it may answer any message from a permitted person. All group messages are archived either way.',
   TELEGRAM_BOT_NAMES:
     'Names, separated by commas, that address Nocheh when they start a group message. Change, add or remove any of them; its Telegram display name and @username always work.',
-  NOCHEH_MODEL:
-    'One model for Hermes replies, Honcho memory and secret detection, grouped by the provider login that serves it.',
-  NOCHEH_EMBEDDING_MODEL: 'The OpenAI model that turns memory into searchable vectors, paid from the embedding budget.',
   NOCHEH_GUARD_MODE:
     'On uses saved guarded copies for agents and memory. Off uses originals with the same access rules.',
   NOCHEH_GUARD_TRUSTED_ENDPOINTS:
@@ -332,91 +330,6 @@ function NochehSettings({notify}: {notify: Notify}) {
         setReview(false);
       },
     };
-    const served: string[] = data.models?.reasoning || [];
-    const locked = data.models?.embedding_locked;
-    if (f.key === 'NOCHEH_MODEL') {
-      // One group per provider login; providers without a login offer no models.
-      const providers: any[] = data.models?.providers || [];
-      const signedIn = providers.filter(p => p.signed_in);
-      const missing = providers.filter(p => !p.signed_in);
-      const running = data.models?.provider_running !== false;
-      const offered = signedIn.some(p => p.models.length);
-      const cpa = <a href="/providers/management.html">CPA dashboard</a>;
-      const hint: ReactNode = !signedIn.length ? (
-        <>No model provider is signed in. Sign in to Claude or ChatGPT in the {cpa}, then reload this page.</>
-      ) : !running ? (
-        'The provider service is not running, so its models cannot be listed. Start Nocheh, then reload this page.'
-      ) : !offered ? (
-        'Signed in to ' +
-        signedIn.map(p => p.label).join(' and ') +
-        ', but the provider lists no models yet. Reload in a moment.'
-      ) : (
-        <>
-          {settingHints[f.key]}
-          {missing.length
-            ? ' Not signed in: ' +
-              missing.map(p => p.label + (p.id === 'codex' ? ' (needed for voice transcription)' : '')).join(', ') +
-              '. Sign in from the '
-            : ''}
-          {missing.length ? cpa : ''}
-          {missing.length ? '.' : ''}
-        </>
-      );
-      const providerGroups = signedIn
-        .filter(p => p.models.length)
-        .map(p => (
-          <optgroup key={p.id} label={p.label}>
-            {p.models.map((model: string) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </optgroup>
-        ));
-      const stale =
-        value && !served.includes(value)
-          ? [
-              <option key="saved" value={value}>
-                {value + ' · not served by a signed-in provider'}
-              </option>,
-            ]
-          : [];
-      return (
-        <div className="n-field" key={f.key}>
-          <label htmlFor={f.key}>{labels[f.key]}</label>
-          {offered ? (
-            <select {...attrs}>
-              {stale}
-              {providerGroups}
-            </select>
-          ) : (
-            <input {...attrs} disabled />
-          )}
-          <small id={f.key + '-help'} role={offered ? undefined : 'status'}>
-            {hint}
-          </small>
-        </div>
-      );
-    }
-    if (f.key === 'NOCHEH_EMBEDDING_MODEL')
-      return (
-        <div className="n-field" key={f.key}>
-          <label htmlFor={f.key}>{labels[f.key]}</label>
-          <select {...attrs}>
-            {(data.models?.embedding || [value]).map((model: string) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
-          <small id={f.key + '-help'}>
-            {settingHints[f.key]}
-            {locked
-              ? ' Memory already holds vectors from ' + locked + '; another model needs a Honcho memory rebuild first.'
-              : ' It can be changed until memory stores its first vectors.'}
-          </small>
-        </div>
-      );
     if (
       f.key === 'NOCHEH_PARALLEL_RUNS' ||
       f.key === 'NOCHEH_PARALLEL_REPLIES' ||
@@ -529,6 +442,24 @@ function NochehSettings({notify}: {notify: Notify}) {
   );
 
   const reviewValue = (key: string, value: string) => {
+    if (key === 'NOCHEH_PROVIDERS') {
+      try {
+        const names = JSON.parse(value).map((p: any) => p.name || 'New provider');
+        return names.length ? 'Custom providers: ' + names.join(', ') : 'No custom providers';
+      } catch {
+        return value;
+      }
+    }
+    if (key.endsWith('_PROVIDER')) {
+      if (!value) return 'Same as default';
+      let customs: any[] = [];
+      try {
+        customs = JSON.parse(changes.NOCHEH_PROVIDERS ?? '[]');
+      } catch {}
+      const known = [...(data.providers?.list || []), ...customs];
+      return known.find((p: any) => p.id === value)?.name || value;
+    }
+    if (key.endsWith('_MODEL') && !value) return 'Same as default';
     if (key === 'TELEGRAM_OWNER_ID') return participantLabel(value);
     if (key === 'TELEGRAM_GROUP_REPLIES') return value === 'all' ? 'Every message' : 'Only when addressed';
     return value || '(empty)';
@@ -543,7 +474,7 @@ function NochehSettings({notify}: {notify: Notify}) {
       'TELEGRAM_BOT_NAMES',
       'TELEGRAM_BOT_TOKEN',
     ],
-    models: ['NOCHEH_MODEL', 'NOCHEH_EMBEDDING_MODEL'],
+    models: modelSettingKeys,
     speed: ['NOCHEH_PARALLEL_RUNS', 'NOCHEH_PARALLEL_REPLIES', 'NOCHEH_PARALLEL_GUARD_CHECKS'],
     privacy: ['NOCHEH_GUARD_MODE', 'NOCHEH_GUARD_TRUSTED_ENDPOINTS'],
   };
@@ -582,12 +513,17 @@ function NochehSettings({notify}: {notify: Notify}) {
             id: 'models',
             label: tab('Models', sectionKeys.models),
             Icon: Cpu,
-            render: () =>
-              fieldGroup(
-                'Models',
-                'The model behind replies, memory and secret detection, and the model that makes memory searchable. Applying a model change also restarts Honcho.',
-                sectionKeys.models,
-              ),
+            render: () => (
+              <ModelRouting
+                data={data}
+                changes={changes}
+                busy={busy}
+                update={next => {
+                  setChanges(next);
+                  setReview(false);
+                }}
+              />
+            ),
           },
           {
             id: 'speed',

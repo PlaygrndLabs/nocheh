@@ -1,4 +1,4 @@
-"""Resolve the single configured ChatGPT-subscription reasoning transport."""
+"""Resolve the reasoning transport of each part: the built-in login or a configured provider."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,15 +27,36 @@ class SubscriptionCredentials:
             (SHARED_BASE_URL, "openai", "chat_completions"),
             ('http://nocheh-security:8786/codex', 'openai-codex', 'codex_responses'),
             ('http://nocheh-security:8786/v1', 'openai', 'chat_completions'),
-        }
+        } | {(url, "openai", "chat_completions") for url in configured_urls()}
         route = (self.base_url.rstrip("/"), self.provider, self.api_mode)
         if (not isinstance(self.access_token, str) or not self.access_token.strip()
                 or route not in allowed):
-            raise ValueError("A configured ChatGPT subscription transport is required")
+            raise ValueError("A configured reasoning transport is required")
 
     def runtime(self):
         return {"api_key": self.access_token, "base_url": self.base_url,
                 "provider": self.provider, "api_mode": self.api_mode}
+
+
+# Settings › Models gives replies and the secret check each a provider: the
+# built-in CLIProxyAPI login or an OpenAI-compatible HTTPS provider and its key.
+PARTS = {"reply": "NOCHEH_REPLY_ROUTE", "guard": "NOCHEH_GUARD_ROUTE"}
+
+
+def configured_urls():
+    """HTTPS provider addresses the owner chose; only these join the built-in routes."""
+    urls = set()
+    for prefix in PARTS.values():
+        url = os.environ.get(prefix + "_URL", "").rstrip("/")
+        if url.startswith("https://") and "@" not in url.split("/")[2]:
+            urls.add(url)
+    return urls
+
+
+def part_model(part: str) -> str:
+    """The model of a part; replies use NOCHEH_MODEL, which Compose sets to the reply model."""
+    fallback = os.environ.get("NOCHEH_MODEL", "claude-sonnet-5-5")
+    return (os.environ.get(PARTS[part] + "_MODEL") or fallback) if part == "guard" else fallback
 
 
 def reasoning_route() -> str:
@@ -45,8 +66,16 @@ def reasoning_route() -> str:
     return route
 
 
-def resolve_credentials() -> SubscriptionCredentials:
+def resolve_credentials(part: str = "reply") -> SubscriptionCredentials:
+    if part not in PARTS:
+        raise ValueError("unknown_model_part")
     if reasoning_route() == "shared":
+        url = os.environ.get(PARTS[part] + "_URL", SHARED_BASE_URL).rstrip("/") or SHARED_BASE_URL
+        if url != SHARED_BASE_URL:
+            key = os.environ.get(PARTS[part] + "_KEY", "").strip()
+            if not key or url not in configured_urls():
+                raise ValueError("Configured provider credential is unavailable")
+            return SubscriptionCredentials(key, url, "openai", "chat_completions")
         path = Path(os.environ.get("CLIPROXY_HERMES_KEY_FILE", "/run/secrets/cliproxy_hermes_key"))
         if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024:
             raise ValueError("Shared provider client credential is unavailable")

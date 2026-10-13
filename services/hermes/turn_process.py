@@ -96,7 +96,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             effective,_=inherited_config(profile,read(profile/'config.yaml'))
             request['preferences']=preferences(effective)
     env = {key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH',
-           'ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE') if key in os.environ}
+           'ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL') if key in os.environ}
     env.update(HERMES_HOME=str(profile), NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
     if isolated:
         from .environment import secret

@@ -14,6 +14,24 @@ usage, latency, failure and account observations in
 notifications and request-body logging are disabled. A monitoring outage does
 not stop inference.
 
+## Providers for each part
+
+Settings › Models chooses where each part sends model requests
+([ADR-0141](adr/0141-per-part-model-providers.md)). The built-in provider is
+this CLIProxyAPI login. OpenAI and Anthropic need only their API key; a custom
+provider, such as a hosted provider gateway, needs a name, its HTTPS
+OpenAI-compatible address (usually ending in `/v1`) and its API key. The
+default provider and model serve replies (Hermes), memory (Honcho reasoning)
+and the secret check unless a part names its own. Memory search (embeddings)
+names its own provider and cannot use the built-in login.
+
+Keys are saved in the installation `.env` and never returned to the browser.
+Apply recreates the services whose routes changed: Hermes and the security
+broker for replies and the secret check, Honcho and its egress meter for
+memory and embeddings. A part on another provider needs no built-in login, so
+the built-in login and its cutover matter only for parts that use it and for
+voice transcription.
+
 ## First login and cutover
 
 Start the pinned services, complete one fresh device login, then run the atomic
