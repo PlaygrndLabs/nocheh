@@ -159,6 +159,21 @@ class ConfigurationTests(unittest.TestCase):
         for bad in ('0','9','two','-1'):
             with patch.dict(os.environ,{'NOCHEH_PARALLEL_RUNS':bad}),self.assertRaises(ValueError,msg=bad):parallel('NOCHEH_PARALLEL_RUNS',4)
 
+    def test_owner_sets_delivery_log_retention_for_hermes(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT,validate
+        from tools.operations.installation.settings import EDITABLE
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        self.assertEqual(compose['hermes']['environment']['NOCHEH_HERMES_JOURNAL_RETENTION_DAYS'],'${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}')
+        self.assertIn('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS',EDITABLE)
+        with tempfile.TemporaryDirectory() as folder:
+            values=initialize(Path(folder))
+            self.assertEqual(values['NOCHEH_HERMES_JOURNAL_RETENTION_DAYS'],'0')
+            self.assertEqual(values['NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS'],'0')
+            for days in ('0','1','3650'):validate({**values,'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS':days})
+            for days in ('3651','-1','','x'):
+                with self.assertRaises(ValueError,msg=days):validate({**values,'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS':days})
+
     def test_owner_sets_guard_checks_at_once_for_hermes_and_preparation(self):
         import yaml
         from tools.operations.installation.configuration import ROOT,validate

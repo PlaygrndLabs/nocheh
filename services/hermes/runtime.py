@@ -308,7 +308,12 @@ def main():
         # Let diagnostics observe the failure, then exit the entire process so no
         # orphaned getUpdates request can compete with the replacement adapter.
         timer=threading.Timer(15,server.shutdown);timer.daemon=True;timer.start()
-    ASSISTANT=AssistantGateway(PROFILE_HOME,os.environ.get('NOCHEH_SPOOL_DIR','/data/spool'),policy,bot_token,MODEL,resolve_credentials,restart_after_failure)
+    # Finished delivery journals expire before the boot rescans read them.
+    from . import journal_retention
+    spool,managed_runs,journal_days=Path(os.environ.get('NOCHEH_SPOOL_DIR','/data/spool')),PROFILE_HOME/'nocheh-managed-runs',journal_retention.retention_days()
+    journal_retention.prune(spool,managed_runs,journal_days)
+    journal_stop=threading.Event();journal_retention.start(spool,managed_runs,journal_days,journal_stop)
+    ASSISTANT=AssistantGateway(PROFILE_HOME,str(spool),policy,bot_token,MODEL,resolve_credentials,restart_after_failure)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"event": "ready", "service": "hermes"}), flush=True)
     # One process-wide redirect, installed before starting threads. Per-request
@@ -327,6 +332,7 @@ def main():
         SCHEDULER.start()
         try: server.serve_forever()
         finally:
+            journal_stop.set()
             MANAGED.stop()
             SCHEDULER.stop()
             admin.terminate()
