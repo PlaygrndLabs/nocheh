@@ -20,6 +20,7 @@ export default function ChatsPage() {
   const telegram = useTelegram();
   return (
     <Page
+      saveable
       title="Chats"
       description="Every chat Nocheh is in, and what each one may do."
       tabs={
