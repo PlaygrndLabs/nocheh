@@ -195,7 +195,7 @@ class BrowserGateway:
 
     def info(self, session):
         from .assistant_turn import ALLOWED_TOOLS
-        return {'version':'0.21.0','model':self.model,'provider':'openai-codex','tools':{'Nocheh':sorted(ALLOWED_TOOLS)},'skills':{},
+        return {'version':'0.21.0','model':self.model,'provider':'openai','tools':{'Nocheh':sorted(ALLOWED_TOOLS)},'skills':{},
                 'cwd':str(self.home/'workspace'),'profile_name':self.scope.profile,
                 'stored_session_id':session['session_key'],'running':session.get('running',False),
                 'lazy':False,'managed_execution':'isolated_per_turn','approval_mode':'manual','yolo':False,'nocheh_scope':'owner-private' if self.scope.owner else 'selected-group'}

@@ -40,15 +40,14 @@ make dev-stop             # stop it; retain operating data
 ./bin/nocheh storage  # database, largest table and state folder sizes
 ./bin/nocheh db       # optional read-only pgweb browser at 127.0.0.1:8782
 ./bin/nocheh test     # PostgreSQL, TypeScript and native Python integration tests
-./bin/nocheh verify   # live synthetic subscription checks; consumes quota
-./bin/nocheh provider status  # shared provider, login and monitor health
+./bin/nocheh verify   # live synthetic model checks; uses the configured provider
 ./bin/nocheh down     # stop services; retain data
 ```
 
 Stop unattended services before `make dev`; the launcher refuses a competing
 Nocheh stack and verifies the operating volume, source mount, port, and
 project ownership. The root `docker-compose.dev.yml` mounts this checkout's source into
-the operating `nocheh` project, using its configured Telegram bot and provider login. Root `docker-compose.yml`
+the operating `nocheh` project, using its configured Telegram bot and model providers. Root `docker-compose.yml`
 defines the three-store layout directly. Compose creates fresh owned database
 volumes on first startup and retains them across normal restarts. The existing app service compiles changed source into shared generated-code
 volumes, and the running services reload without an image rebuild or another
@@ -68,21 +67,19 @@ browsing, SQL queries and CSV/JSON export. See
 
 Configuration is in the ignored root `.env`; `.env.example` documents its fields.
 Bootstrap generates missing internal passwords and creates writable state under
-ignored `data/local/`. CLIProxyAPI owns the shared refreshable OAuth login under
-`data/local/provider/auth/`; Hermes and Honcho use separate local client keys.
-For a new installation, start the services, run `./bin/nocheh provider login`,
-then `./bin/nocheh provider cutover`.
-Reasoning uses subscription authentication. Optional Honcho activation additionally
-requires a dedicated embeddings credential, capped at $5 for the pilot and then
-$5 per month. No unrelated provider credentials or local models are used.
+ignored `data/local/`. A new installation starts without a model: add a provider
+in Settings › Models (an OpenAI or Anthropic API key, or a custom OpenAI-compatible
+HTTPS provider such as a hosted my-gateway) and choose the default model. Until then
+replies and memory work wait with `provider_not_configured`. Optional Honcho
+activation additionally requires a dedicated embeddings credential, capped at $5
+for the pilot and then $5 per month. No local models are used.
 
 See [operations and configuration](docs/deploy.md),
 [durable archive behavior](docs/archive.md), [portable import/export](docs/import-export.md),
 [saved guarded copies](docs/guard.md),
 [Telegram setup and scoped assistant](docs/telegram.md),
 [guarded memory system and operating instructions](docs/guarded-memory-system.md),
-[shared provider and monitoring](docs/provider.md),
-[rebuild execution checkpoints](docs/rebuild-plan.md), and
-[subscription evidence](docs/acceptance/subscription-findings.md). VPS provisioning is deferred;
+[model providers](docs/provider.md), and
+[rebuild execution checkpoints](docs/rebuild-plan.md). VPS provisioning is deferred;
 an existing VPS checkout can receive [app rollouts](docs/deploy.md). Local
 Compose is the development and acceptance target (ADR-0019).

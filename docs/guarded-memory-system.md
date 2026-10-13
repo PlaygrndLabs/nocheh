@@ -1,7 +1,7 @@
 # Guarded copies and primary memory
 
 The accepted target below is defined in [SPECS.md](../SPECS.md), with rationale in
-ADR-0033 and ADR-0035. Actual activation and acceptance are recorded in
+ADR-0033 and ADR-0142. Actual activation and acceptance are recorded in
 [TASK.md](../TASK.md); the diagram describes system design, not the current
 connection state.
 
@@ -19,19 +19,17 @@ flowchart TD
     V -->|Learning consent| J[Durable ingestion receipts]
     J --> N["Honcho primary long-term memory<br/>Separate audience and mode generations"]
     N -->|Current recall| H
-    H --> C["Shared CLIProxyAPI reasoning<br/>One ChatGPT subscription login"]
+    H --> C["Reasoning providers<br/>Chosen in Settings › Models"]
     N --> B[Scoped preparation and spending gateway]
     B --> C
-    C --> M["CPA Manager Plus<br/>Owner-only monitoring"]
-    C --> T["Read-only speech boundary<br/>Subscription transcription"]
     B --> E["Dedicated embeddings<br/>$5 pilot then owner-set monthly cap"]
     G -->|Edit invalidates old context| I["Retire old profiles, caches and memory<br/>Rebuild current authorized sources"]
     I --> H
     I --> J
 ```
 
-A fresh installation must pass the shared-provider cutover and Honcho's separate
-embedding and recall acceptance before attachment. [TASK.md](../TASK.md) records
+A fresh installation needs a model provider from Settings › Models and must pass
+Honcho's separate embedding and recall acceptance before attachment. [TASK.md](../TASK.md) records
 the active installation's completed checks and remaining pilot work.
 
 1. Import `Database password: mango123`. The original is archived unchanged.
@@ -45,20 +43,14 @@ Normal reuse reads the saved copy without detecting the stored text again. A new
 question, new tool result or new generated summary can require its own preparation.
 Automatic preparation never replaces an original or an owner-edited projection.
 
-<speech_path>
+<voice_notes>
 
-Hermes uses its native STT provider interface with Nocheh's
-`nocheh-subscription` adapter. The adapter sends audio to the local speech service,
-which runs pinned `codex-asr` through the shared ChatGPT login. This supplies the
-subscription speech route and keeps OAuth access outside the agent; the pinned
-CPA proxy supplies text reasoning and does not expose this speech route.
+Nocheh has no voice transcription. A voice note keeps its original audio and
+records the extraction status "Voice note archived; transcription is not
+available." There is no text to guard or learn from, and the note never holds a
+reply.
 
-The separate speech service is not required by guarding itself. The transcript is
-stored as derived source text and prepared for guarded downstream use. Audio must
-reach the trusted transcription endpoint before there is text to guard. This
-does not require another login or a paid transcription key.
-
-</speech_path>
+</voice_notes>
 
 ## Operating the local system
 
@@ -87,9 +79,7 @@ does not require another login or a paid transcription key.
   copies again and do not accept supplied guarded text as already trusted.
 
 Configure embeddings in the root `.env`. Use the root `.env` for the active local installation.
-The `OPENAI_API_KEY` value is the dedicated paid embedding credential. CPA's API
-Keys list contains local client credentials for subscription reasoning; adding the
-paid OpenAI key there does not configure Nocheh's embedding gateway.
+The `OPENAI_API_KEY` value is the dedicated paid embedding credential.
 
 ```dotenv
 NOCHEH_EMBEDDING_PROVIDER='openai'
@@ -107,7 +97,7 @@ For initial setup or an embedding HTTP 429:
 2. Use the existing dedicated project key, or create a replacement on the
    [API keys page](https://platform.openai.com/api-keys) when needed. Save it as
    `OPENAI_API_KEY` in the root `.env` above, preserving the other settings. Do not
-   paste it into chat or CPA's client-key list.
+   paste it into chat.
 3. Keep the configured `text-embedding-3-small` model for an existing small-model
    ledger. Changing a model is a memory rebuild operation, not a quota repair.
 4. Run the verification and activation sequence below from the repository root.
@@ -128,14 +118,13 @@ wins, including an empty value. Only the Honcho provider gateway receives the pa
 Settings displays credential presence, never its value. Edit these fields in `.env`
 and restart the production Honcho services through the installation CLI.
 
-`./bin/nocheh provider login` starts the one shared CLIProxyAPI device login.
 Production Honcho uses pinned revisions and the installation Compose project.
 The retained state directory and ledger have historical names for data compatibility;
 they are production state and must not be reset to tidy their names. Fresh local
 installations enable Honcho by default. `init` prepares its protected runtime
 credentials, and `up` checks the pinned source and starts the production profile.
 An explicit `NOCHEH_HONCHO_ENABLED='false'` disables that profile. After
-configuring the dedicated embedding key and shared provider login, start with:
+configuring the dedicated embedding key and a model provider, start with:
 
 ```sh
 ./bin/nocheh init

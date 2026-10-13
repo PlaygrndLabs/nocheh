@@ -19,9 +19,7 @@ class Embeddings:
 def embeddings(values):
     """The configured provider id is checked against Settings providers by
     routes.validate; the meter receives only the resolved address."""
-    provider=values.get('NOCHEH_EMBEDDING_PROVIDER',DEFAULTS['NOCHEH_EMBEDDING_PROVIDER']) or DEFAULTS['NOCHEH_EMBEDDING_PROVIDER']
     model=values.get('NOCHEH_EMBEDDING_MODEL',DEFAULTS['NOCHEH_EMBEDDING_MODEL'])
-    if provider=='builtin':raise ValueError('NOCHEH_EMBEDDING_PROVIDER cannot be the built-in login, which has no embeddings')
     if model not in MODELS:raise ValueError('NOCHEH_EMBEDDING_MODEL must be text-embedding-3-small or text-embedding-3-large')
     url=(values.get('NOCHEH_EMBEDDING_URL') or 'https://api.openai.com/v1').rstrip('/')
     if not url.startswith('https://'):raise ValueError('NOCHEH_EMBEDDING_URL must use https')

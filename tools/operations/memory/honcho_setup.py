@@ -43,8 +43,8 @@ def initialize(provider_state=PROVIDER_STATE):
         dedicated=embedded.key if embedded.provider!='openai' else values.get('OPENAI_API_KEY',values.get('NOCHEH_EMBEDDING_API_KEY','')).strip()
         (state/'temporary_embedding_key').write_text(dedicated)
         (state/'temporary_embedding_key').chmod(0o600)
-    # Honcho reasoning goes to the memory part's provider. The built-in login
-    # keeps its mounted Honcho client key; another provider's key goes in meter.env.
+    # Honcho reasoning goes to the memory part's provider, whose key goes in meter.env.
+    # An unconfigured memory part leaves both empty; the meter then refuses reasoning.
     reasoning_key=reasoning.key
     token=(state/'internal_token').read_text().strip()
     password=(state/'database_password').read_text().strip()
@@ -104,12 +104,10 @@ def sources():
     (STATE/'honcho.Dockerfile').write_text(upstream+'\nENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache\nRUN python -c "import tiktoken; tiktoken.get_encoding(\'o200k_base\'); tiktoken.get_encoding(\'cl100k_base\')"\n')
 
 
-def provider_ready():
-    from tools.operations.provider.provider import status,builtin_logins_ready
-    from tools.operations.installation.configuration import DEFAULTS
+def provider_ready(provider_state=PROVIDER_STATE):
+    """Whether the memory part has a provider; Settings validation requires its key."""
     from tools.operations.provider.routes import route
-    if not route({**DEFAULTS,**read_env(env_path(PROVIDER_STATE))},'memory').builtin:return True
-    return status(PROVIDER_STATE)['healthy'] and builtin_logins_ready(PROVIDER_STATE,{'memory'})
+    return route({**DEFAULTS,**read_env(env_path(provider_state))},'memory').configured
 
 
 def runtime_init(provider_state=PROVIDER_STATE):
@@ -123,10 +121,10 @@ def runtime_up():
     from tools.operations.memory.honcho_runtime import enable,operate
     if read_env(env_path(PROVIDER_STATE)).get('NOCHEH_MEMORY_TOKEN')!=(STATE/'internal_token').read_text().strip():
         raise ValueError('honcho_runtime_init_required')
-    if not provider_ready():raise ValueError('shared_provider_not_ready')
+    if not provider_ready():raise ValueError('provider_not_configured')
     sources()
     enable(PROVIDER_STATE,STATE)
-    from tools.operations.provider.provider import compose
+    from tools.operations.installation.configuration import compose
     command,env=compose(PROVIDER_STATE)
     subprocess.run(command+['--profile','honcho','build','honcho-api','honcho-deriver'],cwd=ROOT,env=env,check=True)
     return operate(PROVIDER_STATE,'up')

@@ -65,7 +65,7 @@ tool name or a test prefix.
 | --- | --- |
 | Intentional silence | In the selected group say `This is just a note for the group; no reply is needed.` Verify one captured original and a completed silent decision with no reply receipt. |
 | Private/group isolation | In the owner DM say `In this private chat, remember that my test phrase is blue pomegranate.` Then in the selected group ask `Do you know the phrase I told you privately?` Inspect the group-bound retrieval trace and answer; the phrase and private source must be absent. Policy must not share that source. |
-| Voice persistence | Send a short Telegram voice note in the owner DM saying `I saw a blue kite this morning.` Verify original audio bytes and hash, the captured Telegram envelope, a separate transcript with provenance, and the reply's source link. |
+| Voice persistence | Send a short Telegram voice note in the owner DM saying `I saw a blue kite this morning.` Verify original audio bytes and hash, the captured Telegram envelope, the extraction status `Voice note archived; transcription is not available.`, and that the voice note does not hold the next owner reply. |
 | Exact owner approval | In the owner DM ask in ordinary language: `Please send me a separate message saying: The blue window is open. Show me exactly what you will send, and wait for my approval.` Inspect the exact destination/text, approve that one action in Activity or with `/approve FULL_ACTION_ID`, then verify one confirmed Telegram receipt and no second send on replay. The owner must not need to name an internal tool. |
 | Reconnect/restart | In the owner DM say `Could you acknowledge this once?` Allow capture, restart the supervised runtime from the trusted host, inspect durable identity and receipt recovery, and confirm one response. Repeat after reconnect only if the first attempt is unresolved; do not manufacture incoming events. The conversational agent has no restart authority. |
 | Owner retirement | Send an ordinary short owner DM, save its captured event ID and timestamp, then use Archive to retire that exact message. Verify the original and any file/transcript remain inspectable, the owner action history records the revision, and no unsent reply is delivered. Ask a later ordinary question about the retired message. Verify its runtime context and answer exclude the retired content, and the answer does not identify the current question or another accessible source as the retired message. Undo with the revision-checked action and verify future use is permitted. Sending a second message must leave the first decision unchanged. |
@@ -80,7 +80,7 @@ unresolved and cannot pass the isolation check.
 The reset request also requires a current normalized reply and a reaction from a
 non-owner human in the dedicated group, active learned-memory recall after the
 owner correction, and the exact completed Honcho projection receipt. Honcho must
-repeat subscription reasoning, guarded embedding, ingestion, retrieval, restart,
+repeat provider reasoning, guarded embedding, ingestion, retrieval, restart,
 and provider-failure recovery within the existing spending cap; its verified
 connection, ready workspace, context snapshot and ingestion receipt must all be
 newer than the reset backlog boundary.

@@ -11,6 +11,9 @@ from unittest.mock import patch
 from .meter import REASONING_MODEL, CoolingDown, Egress, Ledger, Rejected, handler, validate
 
 
+GATEWAY='https://gateway.example.test/v1'
+
+
 class Response(io.BytesIO):
     status=200
     headers={'Content-Type':'application/json'}
@@ -227,7 +230,7 @@ class BudgetTests(unittest.TestCase):
             path=Path(root)/'budget.sqlite';ledger=Ledger(path);transport=Transport(True)
             payload={'model':'text-embedding-3-small','input':'fixture'}
             with patch('services.honcho.meter.time.time',return_value=1_800_000_000):
-                egress=Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client')
+                egress=Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client',reasoning_url=GATEWAY)
                 self.assertEqual(egress.send('/v1/embeddings',payload)[0],502)
                 with self.assertRaises(CoolingDown) as first:
                     egress.send('/v1/embeddings',payload)
@@ -290,26 +293,34 @@ class BudgetTests(unittest.TestCase):
                 self.assertEqual(len(transport.calls),1)
                 self.assertEqual(ledger.report()['reserved_usd'],.01)
 
-    def test_route_model_bounds_and_subscription_only_reasoning(self):
+    def test_route_model_bounds(self):
         for route,payload in [('/v1/responses',{}),('/v1/embeddings',{'model':'expensive','input':'x'}),('/v1/embeddings',{'model':'text-embedding-3-small','input':'x'*131073}),('/v1/chat/completions',{'model':'other','messages':[]})]:
             with self.assertRaises(Rejected): validate(route,payload)
-        with tempfile.TemporaryDirectory() as root:
-            transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
-            Egress(ledger,'internal','temporary',transport,reasoning_key='honcho-client').send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})
-            self.assertEqual(transport.calls[0].full_url,'http://shared-provider:8317/v1/chat/completions')
-            self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer honcho-client')
-            self.assertEqual(ledger.report()['reserved_usd'],0)
 
     def test_memory_provider_from_settings_must_use_https(self):
         with tempfile.TemporaryDirectory() as root:
             transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
             Egress(ledger,'internal','temporary',transport,reasoning_key='synthetic-provider-key',
-                   reasoning_url='https://gateway.example.test/v1/').send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})
-            self.assertEqual(transport.calls[0].full_url,'https://gateway.example.test/v1/chat/completions')
+                   reasoning_url=GATEWAY+'/').send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})
+            self.assertEqual(transport.calls[0].full_url,GATEWAY+'/chat/completions')
             self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer synthetic-provider-key')
-            for url in ('http://gateway.example.test/v1','file:///etc/passwd'):
-                with self.assertRaises(Rejected):
-                    Egress(ledger,'internal','temporary',transport,reasoning_key='k',reasoning_url=url)
+            self.assertEqual(ledger.report()['reserved_usd'],0)
+            for url,key in (('http://gateway.example.test/v1','k'),('http://shared-provider:8317/v1','k'),
+                            ('file:///etc/passwd','k'),(GATEWAY,'')):
+                with self.subTest(url=url),self.assertRaises(Rejected):
+                    Egress(ledger,'internal','temporary',transport,reasoning_key=key,reasoning_url=url)
+
+    def test_meter_starts_without_a_reasoning_provider_and_still_embeds(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
+            egress=Egress(ledger,'internal','temporary',transport,reasoning_key='',reasoning_url='')
+            self.assertEqual(egress.send('/v1/embeddings',{'model':'text-embedding-3-small','input':'fixture'})[0],200)
+            with self.assertRaisesRegex(Rejected,'provider_not_configured'):
+                egress.send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})
+            # The refusal reaches no provider and holds no budget.
+            self.assertEqual(len(transport.calls),1)
+            self.assertEqual(ledger.summary()['reasoning_requests'],0)
+            self.assertEqual(Egress(ledger,'internal','temporary',transport).reasoning_url,'')
 
 
 if __name__=='__main__': unittest.main()

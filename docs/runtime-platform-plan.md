@@ -19,6 +19,6 @@ Use [AGENTS.md](../AGENTS.md) for commit/integration workflow.
 
 ## Related execution
 
-- [Space memory](space-memory-plan.md), [guarded memory](guarded-memory-plan.md), [shared provider](shared-provider-plan.md), and [security](security-service-plan.md) have separate acceptance/activation checkpoints.
+- [Space memory](space-memory-plan.md), [guarded memory](guarded-memory-plan.md), and [security](security-service-plan.md) have separate acceptance/activation checkpoints.
 - [Dashboard operations](dashboard.md) describes actual UI and CLI commands. [Release acceptance](release-acceptance.md) supplies the remaining real input procedure.
 - New native capabilities become available only after their integration checks pass. An offline compatibility pass or merge into main does not satisfy live release or activation gates.

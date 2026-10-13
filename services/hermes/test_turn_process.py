@@ -57,7 +57,8 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 events=[]
                 result=await _run_process(Path(folder),Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
-                    SimpleNamespace(access_token='ephemeral'),'session',events.append,cancel)
+                    SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
+                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 return result,events
     async def test_stream_framing_and_failed_child(self):
@@ -68,7 +69,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
     async def test_untranscribed_earlier_voice_is_named_without_entering_memory_query(self):
         check='import sys,json; body=json.load(sys.stdin); assert body["memory_query"]=="original"; print(json.dumps({"state":"done","text":body["text"]}))'
         result,_=await self.execute(check,extra={'untranscribed_voice':2})
-        self.assertIn('2 voice notes were received and archived but not transcribed yet',result['text'])
+        self.assertIn('2 voice notes were received and archived. Transcription is not available',result['text'])
         self.assertIn('Do not say that no voice note was received or found',result['text'])
         for value in (None,0,True,'1',21):
             result,_=await self.execute(check,extra={'untranscribed_voice':value})

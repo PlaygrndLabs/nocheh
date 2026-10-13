@@ -4,7 +4,6 @@ import {canonical,digest} from '../archive.js';
 import {isPdf,pdfText} from '../pdf-text.js';
 import {HttpError} from '../http.js';
 import {requestWorkflow,enterFamily,leaveFamily,type ExecutionAuthority} from '../workflows/store.js';
-import type {RuntimeCall} from '../runtime.js';
 import {ArchiveRepository,type FileReference} from './archive.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
 import {GuardRepository} from './guards.js';
@@ -33,16 +32,13 @@ export function textExtraction():DerivationEngine {
   }};
 }
 
-export function subscriptionTranscription(call:RuntimeCall):DerivationEngine {
-  return {name:'nocheh-subscription',version:'codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4',outputKind:'transcript',async run(bytes,file,configuration){
+/** Voice notes keep their original bytes; Nocheh has no speech recognition, so
+ * the derived reading is a status and no runtime or provider call is made. */
+export const VOICE_ARCHIVED='Voice note archived; transcription is not available.';
+export function archivedVoice():DerivationEngine {
+  return {name:'nocheh-voice-archive',version:'1',outputKind:'transcript',async run(_bytes,_file,configuration){
     if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_transcription_configuration');
-    const match=typeof file.metadata.file_name==='string'?file.metadata.file_name.match(/\.(ogg|oga|mp3|wav|m4a|mp4|flac)$/i):null;
-    const result=await call('perception.transcribe',{audio_base64:bytes.toString('base64'),suffix:file.kind==='video_note'?'.mp4':match?'.'+match[1]!.toLowerCase():'.ogg'});
-    if(result.success!==true||typeof result.transcript!=='string'||!result.transcript.trim()) {
-      const terminal=result.success===true||result.error==='invalid_transcription_response'&&result.retryable===false;
-      throw new HttpError(terminal?422:503,terminal?'invalid_transcription_response':result.error==='quota_paused'?'quota_paused':'transcription_unavailable');
-    }
-    return result.transcript;
+    return {kind:'extraction_status',text:VOICE_ARCHIVED};
   }};
 }
 
@@ -101,9 +97,9 @@ export class ReprocessingRepository {
         const bytes=await readFile(join(this.dataDir,'files',file.input_hash));
         if(digest(bytes)!==file.input_hash||bytes.length!==file.byte_size)throw new HttpError(409,'original_file_integrity_failed');
         const engine=this.engine(job.producer,job.producer_version),run=()=>engine.run(bytes,manifest,job.configuration);
-        // Speech recognition is an external service on the reply path; failures are timed too.
+        // A configured speech engine is on the reply path; its failures are timed too.
         const output=engine.outputKind==='transcript'?await timed(this.stores.control,file.event.id,'transcription','nocheh',run):await run();
-        if(typeof output!=='string'&&(engine.outputKind!=='extracted_text'||output.kind!=='extraction_status'||typeof output.text!=='string'))
+        if(typeof output!=='string'&&(output.kind!=='extraction_status'||typeof output.text!=='string'))
           throw new HttpError(503,'invalid_derivation_result');
         result=await this.derived.record({operation_id:'reprocess:'+id,source:file.event,file,kind:typeof output==='string'?engine.outputKind:output.kind,content:Buffer.from(typeof output==='string'?output:output.text),
           producer:job.producer,producer_version:job.producer_version,configuration:job.configuration});

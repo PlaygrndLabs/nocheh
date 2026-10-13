@@ -136,12 +136,10 @@ def run(body, emit=None):
     prepare_native()
     from .subscription import SubscriptionCredentials
     credentials=SubscriptionCredentials(body['api_key'],body['base_url'],body['provider'],body['api_mode'])
-    # Children never receive a refresh store. In shared mode the credential is a
-    # client-specific proxy key; CLIProxyAPI alone owns the OAuth login.
-    from agent import auxiliary_client as aux
+    # Children never receive a credential store: the only key is the configured
+    # provider's (or, when isolated, a scoped broker capability).
     from hermes_cli import auth
     auth._global_auth_file_path=lambda:None
-    aux._read_codex_access_token=lambda:credentials.access_token
     if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
         from .security_transport import install_isolated_route
         install_isolated_route(credentials,body['model'],body.get('model_context_length'))

@@ -57,12 +57,12 @@ Docker must itself be configured to start at login/boot for unattended operation
 `make dev` combines root `docker-compose.yml` with `docker-compose.dev.yml`.
 The base file directly defines the archive, derived, control, and workflow stores.
 Compose creates owned volumes on a clean installation; normal restarts retain
-them. Development uses the configured Telegram bot, provider login, and settings
+them. Development uses the configured Telegram bot, model providers, and settings
 in the single `nocheh` project on normal localhost ports. Stop unattended services
-first and verify exclusive Telegram polling and provider refresh ownership.
+first and verify exclusive Telegram polling.
 The launcher refuses another running Nocheh project or
 an active unattended stack. It starts PostgreSQL, app, dashboard, executor,
-security, Hermes, speech, provider, monitor, workflow services, and Honcho.
+security, Hermes, workflow services, and Honcho.
 The existing app container mounts source from the session checkout read-only
 and compiles changed TypeScript, React, CSS, and plugin assets into separate
 generated-code volumes. Node watches generated code, the dashboard reloads when
@@ -70,7 +70,7 @@ its asset revision changes, and Python processes restart automatically on
 mounted source edits. Ordinary source edits need no `make dev` rerun or Docker
 image rebuild; `make dev-build` rebuilds images after dependency or Dockerfile
 edits. `make dev` builds only when its development images are absent. Pinned Hermes
-and provider base image revisions are checked before startup. `make dev-stop`
+and Honcho base image revisions are checked before startup. `make dev-stop`
 stops the watched project without deleting the operating volumes or state;
 `./bin/nocheh up` from the operating checkout resumes unattended operation.
 Development health does not replace live release acceptance.
@@ -106,11 +106,9 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 
 | Setting or path | Purpose |
 | --- | --- |
-| `.env` | Model, optional guard, port, Telegram settings and internal passwords |
+| `.env` | Model providers and keys, optional guard, port, Telegram settings and internal passwords |
 | `.env.example` | Committed template without credentials |
-| `data/local/hermes/` | Hermes profiles, memory and sessions; native login active before shared cutover and inactive afterward |
-| `data/local/provider/auth/` | CLIProxyAPI-owned OAuth login; its only active refresh store after cutover |
-| `data/local/provider/monitor/` | CPA Manager Plus request and usage history |
+| `data/local/hermes/` | Hermes profiles, memory and sessions |
 | `data/local/files/` | Original attachment bytes |
 | `data/local/spool/` | Durable capture and retry data |
 | `data/local/reports/` | Local validation reports |
@@ -119,36 +117,22 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 `TELEGRAM_ENABLED` defaults to `false`. Configure `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_OWNER_ID` and comma-separated negative `TELEGRAM_GROUP_IDS` before enabling.
 `NOCHEH_GUARD_MODE` is `on` (default) or `off`; legacy `auto` values convert to
-`on`. Explicit trusted endpoints are a JSON array in `NOCHEH_GUARD_TRUSTED_ENDPOINTS`.
-Trust does not bypass guarded representation selection when guarding is on. See
-[guarded-copy operations](guard.md).
+`on`. See [guarded-copy operations](guard.md).
 The API binds only to loopback; PostgreSQL has no host port.
 
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.
 Environment values are visible to someone who can inspect Docker containers. The
 previous file-based Compose secrets were another storage choice, not encrypted
-storage or an architectural requirement. CLIProxyAPI owns the only active OAuth
-store after shared-provider cutover. See [ADR-0024](adr/0024-single-environment-configuration.md)
-and [shared provider operations](provider.md).
+storage or an architectural requirement. See [ADR-0024](adr/0024-single-environment-configuration.md)
+and [model providers](provider.md).
 
 The one-time configuration update preserves the old root `.env` privately in
 `data/local/previous-configuration/legacy.env`; unrelated provider keys are not
 imported. Existing rebuild database and service credentials are retained.
 
-The bootstrap may retain the dedicated Phase 1 Hermes login as a rollback before
-cutover. It does not share the Codex desktop application's token store. For the
-single shared login and guarded cutover:
-
-```bash
-./bin/nocheh provider login
-./bin/nocheh provider cutover
-```
-
-If requested by OpenAI, enable device-code authorization in ChatGPT Security
-settings, then restart login for a fresh code. Verification uses only synthetic
-input and consumes subscription quota. It checks single-owner refresh behavior,
-Hermes and Honcho reasoning, literal detection, Ogg/Opus transcription, monitoring,
-monitor failure isolation and restart recovery.
+A new installation has no model provider. Add one in Settings › Models (an
+OpenAI or Anthropic API key, or a custom OpenAI-compatible HTTPS provider) and
+apply; until then replies and memory work wait with `provider_not_configured`.
 
 ## Daily commands
 
@@ -179,10 +163,10 @@ its own `.env` in that state directory and its own login; do not duplicate a ref
   --state data/restored --project nocheh-restored --port 8795
 ```
 
-Backup stops Telegram ingress first, then archive and provider writers. It takes a PostgreSQL
+Backup stops Telegram ingress first, then archive writers. It takes a PostgreSQL
 custom-format dump and copies the file store, durable spool, native Hermes state and
 separate dashboard preferences,
-provider OAuth/monitor state, configuration and credentials while those writers are stopped. It records file
+configuration and credentials while those writers are stopped. It records file
 checksums and deterministic fingerprints of archive, policy, receipt and workflow
 tables. Version 5 also includes Honcho database fingerprints, a database dump,
 protected configuration and the embedding spending ledger. Honcho cache is rebuildable. It then
@@ -199,10 +183,10 @@ validates every saved file before extraction, restores the database, compares al
 table fingerprints, and starts the same images. Unsafe archive paths, links,
 missing files and checksum mismatches fail validation. A report is written under
 the restored state's `reports/` directory. The restored Telegram policy is
-disabled; saved native and shared OAuth files are held outside their active paths.
+disabled; a saved native Hermes login is held outside its active path.
 `spool/.restore-inactive`, `admin/tools/inactive` and `hermes/scheduler-inactive`
 hold archive workers, controlled tools and scheduled runs. No second bot, executor
-or refresh owner is activated by the rehearsal. Diagnostics expose these holds.
+or login is activated by the rehearsal. Diagnostics expose these holds.
 
 For a planned cutover, use `backup --leave-stopped` to keep the source writers
 stopped after its final snapshot. First reconcile pending work against deliveries
@@ -255,7 +239,7 @@ or activate an image. Native self-update is not an alternate update mechanism.
 For an update, review upstream changes and compatibility anchors, update the saved
 pin and adapter metadata together, run the full regression suite and the candidate
 check, then rehearse a backup in a separate inactive project. Save the previous
-code revision and image IDs before changing live images. Subscription and
+code revision and image IDs before changing live images. Live model and
 [real Telegram acceptance](release-acceptance.md) still apply; an offline pass is
 not permission to cut over. For rollback, use the matching prior code/images and
 a verified snapshot in a new inactive project. Never downgrade a live database
@@ -263,14 +247,15 @@ in place or activate copied pending actions without reconciliation.
 
 ## Pauses, backlogs and release checks
 
-`diagnose` shows container health, subscription-login presence, Telegram state,
+`diagnose` shows container health, model provider configuration, Telegram state,
 service heartbeats and archive job counts. `healthy` describes service availability;
 it does not mean credentials are configured or a quota-limited model can answer.
 
 Archive capture precedes inference. Database outages leave updates in the durable
-spool; retries commit them idempotently after recovery. Attachment and transcription
-failures retain their source and failure state. Quota failures pause work for retry;
-they do not enable paid-provider fallback. Required guard failures send zero
+spool; retries commit them idempotently after recovery. Attachment extraction
+failures retain their source and failure state. Voice notes are archived without
+transcription and never hold a reply. Quota failures pause work for retry;
+they do not switch to another provider. Required guard failures send zero
 requests to the protected destination. Unknown outbound outcomes stay ambiguous.
 Action receipt polling backs off for 30 seconds after an uncertain RPC response.
 

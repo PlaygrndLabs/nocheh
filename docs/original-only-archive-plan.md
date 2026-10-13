@@ -620,34 +620,22 @@ retire its content-bearing copy and retain only its digest and record counts.
 with seeded source/derivative canaries on an internal-only network. This component
 does not complete the preservation phase by itself.
 
-The provider monitor contains both accounting and content-bearing diagnostics.
-After stopping its writer, use `tools.acceptance.reset_accounting.sanitize` on the exact
-owned usage database. It requires the pinned schema and native manager lock,
-preserves retained accounting/configuration fingerprints and cache-accounting
-hints, erases raw response/error/log content, rebuilds full-text search, and
-compacts SQLite plus its WAL. The Honcho spending ledger remains separate and
-untouched. A compaction interruption requires a retry before service resumption;
-an unknown schema needs review before deletion. Erase old usage-import files
-through the scoped manifest as well. Verify with
-`python3 tools/acceptance/rehearsals/reset-accounting-rehearsal.py --directory NEW_DIRECTORY
---monitor-image PINNED_MONITOR --checks-image CANDIDATE_MANAGEMENT`.
-This fixture has no network, creates its own state, proves exclusion by the real
-monitor lock, and restarts the pinned monitor after cleanup. It does not authorize
-or execute an installation reset.
+The provider monitor and its accounting sanitizer were removed with CPA
+([ADR-0142](adr/0142-external-providers-only.md)); reset has no provider
+accounting step.
 
 `tools.acceptance.reset_preservation.freeze` is the complete pre-erasure gate. While the
 journal and PostgreSQL maintenance exclusion remain held, it requires the exact
 ownership review, freezes and independently rechecks the current database setup,
 matches the saved environment policy, captures and verifies native preferences,
-sanitizes provider accounting, and fingerprints credentials, provider login,
+and fingerprints credentials, native login,
 Honcho setup/spending state, and every other retained path without copying their
 contents. It then freezes the anchored file-erasure manifest and binds all component
 hashes into an immutable, content-free receipt before advancing
 `preservation_frozen`. Detailed private artifacts stay under the reset journal.
-Changed policy, files, source preferences, ownership, accounting, manifest scope,
-maintenance ownership or inactive fences stop the phase. A retry reuses a verified
-accounting receipt; a crash before that receipt reruns the idempotent sanitizer while
-requiring the reviewed database identity. Run
+Changed policy, files, source preferences, ownership, manifest scope,
+maintenance ownership or inactive fences stop the phase. A retry reuses the
+verified component receipts. Run
 `python3 tools/acceptance/rehearsals/reset-preservation-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` for a fresh internal-network rehearsal with real
 PostgreSQL configuration queries, the real SQLite sanitizer, and synthetic retained
@@ -735,8 +723,8 @@ calls.
 
 Run `python3 tools/acceptance/rehearsals/reset-erasure-rehearsal.py --directory NEW_DIRECTORY
 --management-image CANDIDATE` for a fresh internal-network fixture that uses real
-PostgreSQL stores, original/spool files, provider accounting, saved credentials,
-provider login, Honcho setup/spending, and an unrelated sentinel container and
+PostgreSQL stores, original/spool files, saved credentials,
+Honcho setup/spending, and an unrelated sentinel container and
 volume. It must remove only its fixture content, exact containers, exact volumes,
 and workflow Redis bind while retaining the saved setup, inactive fences, and
 sentinel. The packaged `reset-protocol-rehearsal.py` also includes the erasure

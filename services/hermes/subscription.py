@@ -1,36 +1,37 @@
-"""Resolve the reasoning transport of each part: the built-in login or a configured provider."""
+"""Resolve the reasoning transport of each part: the provider chosen in Settings › Models."""
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from threading import RLock
 import os
 
-CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
-SHARED_BASE_URL = "http://cliproxy-api:8317/v1"
-AUTH_LOCK = RLock()
+# The security broker relays every isolated model call to the configured reply provider.
+BROKER_URL = "http://nocheh-security:8786/v1"
+# Installation rehearsals serve models from this local fixture; nothing else may use http.
+FIXTURE_URL = "http://model-fixture:8317/v1"
 
 
 class DetectorContractError(ValueError):
     pass
 
 
+class ProviderNotConfigured(RuntimeError):
+    """The part has no provider; it is chosen in Settings › Models."""
+
+    def __init__(self):
+        super().__init__("provider_not_configured")
+
+
 @dataclass(frozen=True)
 class SubscriptionCredentials:
     access_token: str = field(repr=False)
-    base_url: str = CODEX_BASE_URL
-    provider: str = "openai-codex"
-    api_mode: str = "codex_responses"
+    base_url: str = BROKER_URL
+    provider: str = "openai"
+    api_mode: str = "chat_completions"
 
     def __post_init__(self):
-        allowed = {
-            (CODEX_BASE_URL, "openai-codex", "codex_responses"),
-            (SHARED_BASE_URL, "openai", "chat_completions"),
-            ('http://nocheh-security:8786/codex', 'openai-codex', 'codex_responses'),
-            ('http://nocheh-security:8786/v1', 'openai', 'chat_completions'),
-        } | {(url, "openai", "chat_completions") for url in configured_urls()}
-        route = (self.base_url.rstrip("/"), self.provider, self.api_mode)
+        allowed = {BROKER_URL} | configured_urls()
         if (not isinstance(self.access_token, str) or not self.access_token.strip()
-                or route not in allowed):
+                or self.base_url.rstrip("/") not in allowed
+                or (self.provider, self.api_mode) != ("openai", "chat_completions")):
             raise ValueError("A configured reasoning transport is required")
 
     def runtime(self):
@@ -38,17 +39,21 @@ class SubscriptionCredentials:
                 "provider": self.provider, "api_mode": self.api_mode}
 
 
-# Settings › Models gives replies and the secret check each a provider: the
-# built-in CLIProxyAPI login or an OpenAI-compatible HTTPS provider and its key.
+# Settings › Models gives replies and the secret check each an OpenAI-compatible
+# HTTPS provider and its key.
 PARTS = {"reply": "NOCHEH_REPLY_ROUTE", "guard": "NOCHEH_GUARD_ROUTE"}
 
 
+def fixture_enabled() -> bool:
+    return os.environ.get("NOCHEH_INSTALLATION_FIXTURE") == "1"
+
+
 def configured_urls():
-    """HTTPS provider addresses the owner chose; only these join the built-in routes."""
+    """Provider addresses the owner chose: HTTPS only, or the rehearsal fixture inside a fixture."""
     urls = set()
     for prefix in PARTS.values():
         url = os.environ.get(prefix + "_URL", "").rstrip("/")
-        if url.startswith("https://") and "@" not in url.split("/")[2]:
+        if (url.startswith("https://") and "@" not in url.split("/")[2]) or (url == FIXTURE_URL and fixture_enabled()):
             urls.add(url)
     return urls
 
@@ -59,76 +64,31 @@ def part_model(part: str) -> str:
     return (os.environ.get(PARTS[part] + "_MODEL") or fallback) if part == "guard" else fallback
 
 
-def reasoning_route() -> str:
-    route = os.environ.get("NOCHEH_REASONING_ROUTE", "native")
-    if route not in ("native", "shared"):
-        raise ValueError("NOCHEH_REASONING_ROUTE must be native or shared")
-    return route
-
-
 def resolve_credentials(part: str = "reply") -> SubscriptionCredentials:
+    """The part's provider and key; ProviderNotConfigured until one is chosen."""
     if part not in PARTS:
         raise ValueError("unknown_model_part")
-    if reasoning_route() == "shared":
-        url = os.environ.get(PARTS[part] + "_URL", SHARED_BASE_URL).rstrip("/") or SHARED_BASE_URL
-        if url != SHARED_BASE_URL:
-            key = os.environ.get(PARTS[part] + "_KEY", "").strip()
-            if not key or url not in configured_urls():
-                raise ValueError("Configured provider credential is unavailable")
-            return SubscriptionCredentials(key, url, "openai", "chat_completions")
-        path = Path(os.environ.get("CLIPROXY_HERMES_KEY_FILE", "/run/secrets/cliproxy_hermes_key"))
-        if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024:
-            raise ValueError("Shared provider client credential is unavailable")
-        key = path.read_text().strip()
-        if len(key) < 32:
-            raise ValueError("Shared provider client credential is unavailable")
-        return SubscriptionCredentials(key, SHARED_BASE_URL, "openai", "chat_completions")
-
-    from hermes_cli.auth_codex import resolve_codex_runtime_credentials
-    with AUTH_LOCK:
-        resolved = resolve_codex_runtime_credentials()
-    if resolved.get("auth_mode") != "chatgpt":
-        raise ValueError("ChatGPT subscription login required")
-    return SubscriptionCredentials(resolved["api_key"], resolved["base_url"])
-
-
-def refresh_credentials():
-    if reasoning_route() == "shared":
-        # CLIProxyAPI is the only refresh owner in shared mode. A caller may retry
-        # later, which creates a new guarded model attempt through the proxy.
-        return False
-    from hermes_cli.auth_codex import _read_codex_tokens, _save_codex_tokens, refresh_codex_oauth_pure
-    with AUTH_LOCK:
-        tokens = _read_codex_tokens()["tokens"]
-        _save_codex_tokens(refresh_codex_oauth_pure(tokens["access_token"], tokens["refresh_token"]))
-    return True
+    url = os.environ.get(PARTS[part] + "_URL", "").strip().rstrip("/")
+    if not url:
+        raise ProviderNotConfigured()
+    key = os.environ.get(PARTS[part] + "_KEY", "").strip()
+    if not key or url not in configured_urls():
+        raise ValueError("Configured provider credential is unavailable")
+    return SubscriptionCredentials(key, url, "openai", "chat_completions")
 
 
 def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list):
-    """Call the selected subscription route with retries disabled."""
+    """Call the part's configured provider with retries disabled."""
     import httpx
     from openai import OpenAI
 
-    headers = None
-    if credentials.provider == "openai-codex":
-        from agent.codex_headers import codex_cloudflare_headers
-        headers = codex_cloudflare_headers(credentials.access_token)
     with OpenAI(
         api_key=credentials.access_token, base_url=credentials.base_url,
-        default_headers=headers,
         http_client=httpx.Client(trust_env=False), timeout=90, max_retries=0,
     ) as client:
-        if credentials.api_mode == "chat_completions":
-            return client.chat.completions.create(
-                model=model, messages=messages, tools=[], timeout=90,
-                extra_body={"reasoning_effort": "low"},
-            )
-        # The pinned generic router ignores explicit OAuth credentials for
-        # openai-codex. Its native adapter accepts this explicit client.
-        from agent.auxiliary_client import CodexAuxiliaryClient
-        return CodexAuxiliaryClient(client, model).chat.completions.create(
+        return client.chat.completions.create(
             model=model, messages=messages, tools=[], timeout=90,
-            extra_body={"reasoning": {"effort": "low"}},
+            extra_body={"reasoning_effort": "low"},
         )
 
 

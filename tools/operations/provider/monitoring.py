@@ -4,8 +4,8 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from tools.operations.installation.configuration import load
-from tools.operations.provider.provider import status as provider_status, compose
+from tools.operations.installation.configuration import load, compose
+from tools.operations.provider import routes as provider_routes
 from tools.operations.archive.archive import API
 from tools.operations.installation.services import containers,describe,host_status
 
@@ -16,18 +16,17 @@ def status(state):
     def attempt(fn):
         try:return fn()
         except Exception:return {'unavailable':True}
-    with ThreadPoolExecutor(max_workers=7) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         jobs={name:executor.submit(attempt,fn) for name,fn in {
             'archive':lambda:API().call('/v1/status',timeout=5), 'runtime':lambda:API().call('/v1/runtime',timeout=5),
-            'provider':lambda:provider_status(state),'containers':lambda:containers(command,env),'hosts':lambda:host_status(state),
+            'containers':lambda:containers(command,env),'hosts':lambda:host_status(state),
             'application':lambda:API().call('/health',timeout=5),
             'workflows':lambda:API().call('/v1/workflows/health',timeout=5)}.items()}
         result={name:future.result() for name,future in jobs.items()}
     result['services']=describe(result['containers'],config,result['hosts']) if isinstance(result['containers'],list) else None
-    provider=result['provider'];provider.pop('root',None)
+    result['routes']=attempt(lambda:routes(config))
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
-    result['saved_reasoning_route']=config.get('NOCHEH_REASONING_ROUTE','native')
     # Preserve the last known fatal incident even after its replacement is healthy.
     result['telegram_incident']=None
     try:
@@ -42,3 +41,13 @@ def status(state):
                 'error_code':code if code in ('telegram_network_error','telegram_polling_conflict','telegram_adapter_failed','invalid_token','missing_credentials') else 'telegram_adapter_failed'}
     except (OSError,ValueError,TypeError):pass
     return result
+
+
+def routes(config):
+    """Which provider and model each part uses; never a key."""
+    known=provider_routes.providers(config)
+    selected=[*provider_routes.routes(config).values(),provider_routes.embedding_route(config)]
+    labels={**{part:label for part,(label,_,_) in provider_routes.PARTS.items()},'embedding':'Memory search'}
+    return [{'part':route.part,'label':labels[route.part],'provider':route.provider,
+             'provider_name':known[route.provider]['name'] if route.configured else '',
+             'model':route.model if route.configured else '','configured':route.configured} for route in selected]

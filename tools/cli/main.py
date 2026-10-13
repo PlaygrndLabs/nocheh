@@ -28,8 +28,6 @@ def run_isolated_tests(rest):
         state = Path(folder)
         initialize(state)
         sys.path.insert(0, str(ROOT))
-        from tools.operations.provider.provider import ensure_source, ensure_monitor_source
-        ensure_source(); ensure_monitor_source()
         from tools.acceptance.subscription.setup import checkout, LOCK
         checkout('hermes-agent', LOCK['hermes'])
         project = state.name
@@ -63,7 +61,7 @@ def run_isolated_tests(rest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "login", "provider", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
+    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
     if args.command == 'admin':
         sys.path.insert(0, str(ROOT))
@@ -129,10 +127,6 @@ def main():
         sys.path.insert(0, str(ROOT))
         from tools.operations.security.group_access import main as group_access
         return group_access(STATE, rest)
-    if args.command=='provider':
-        sys.path.insert(0,str(ROOT))
-        from tools.operations.provider.provider import main as provider
-        return provider(STATE,rest)
     if args.command=='approvals':
         sys.path.insert(0,str(ROOT))
         from tools.operations.security.approvals import main as approvals
@@ -222,8 +216,6 @@ def main():
         normalize_endpoints(env.get('NOCHEH_HONCHO_STATE_DIR') or STATE/'honcho')
     if args.command in ('up','dev','build'):
         sys.path.insert(0,str(ROOT))
-        from tools.operations.provider.provider import ensure_source,ensure_monitor_source
-        ensure_source();ensure_monitor_source()
         from tools.acceptance.subscription.setup import checkout,LOCK
         checkout('hermes-agent',LOCK['hermes'])
         if args.command in ('up','build') and env.get('NOCHEH_HONCHO_ENABLED')=='true':
@@ -252,8 +244,6 @@ def main():
         "verify": ["exec", "-T", "hermes", "python", "-m", "services.hermes.verify", "--live"],
         "config": ["config", "--quiet"],
         "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "services.hermes.discover_telegram"],
-        "login": ["exec", "hermes", "python", "-c",
-            "from hermes_cli.auth_codex import _codex_device_code_login,_save_codex_tokens; r=_codex_device_code_login(); _save_codex_tokens(r['tokens'],last_refresh=r.get('last_refresh')); print('Hermes login saved')"],
     }
     result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
     if args.command=='up' and result==0:

@@ -81,7 +81,7 @@ class FakeDocker:
             self.acceptance_calls += 1
             request = json.loads((Path(self.root) / 'state/admin/reset/fresh-acceptance-request.json').read_text())
             names = ('owner_dm', 'dedicated_group', 'reply', 'human_reaction',
-                     'subscription_transcription', 'learned_recall', 'owner_correction',
+                     'learned_recall', 'owner_correction',
                      'isolation', 'intentional_silence', 'exact_approval',
                      'restart_recovery', 'honcho')
             return json.dumps({'event': 'reset_fresh_acceptance_verified',
@@ -194,7 +194,7 @@ class ResetAcceptanceTests(unittest.TestCase):
                 'checks': {'owner_dm': {}}}
             result = reset_acceptance.verify_fresh(journal, self.preflight, evidence,
                 runner=fake, environment=self.environment, command=self.command, timeout=0)
-            self.assertEqual(result['phase'], 'fresh_acceptance'); self.assertEqual(result['checks'], 12)
+            self.assertEqual(result['phase'], 'fresh_acceptance'); self.assertEqual(result['checks'], 11)
             self.assertFalse(result['restart_ownership']); self.assertEqual(len(journal.value['steps']), 9)
             self.assertTrue(all(row['restart_policy']['Name'] == 'no' for row in fake.containers.values()))
             fake.fail_restart_once = True

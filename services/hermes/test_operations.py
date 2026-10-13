@@ -120,18 +120,15 @@ class SnapshotTests(unittest.TestCase):
             with tarfile.open(snapshot/'state.tar.gz','w:gz') as tar:
                 raw=b'{"synthetic":"login"}';info=tarfile.TarInfo('state/hermes/auth.json');info.size=len(raw)
                 tar.addfile(info,io.BytesIO(raw))
-                provider=b'{"type":"codex","access_token":"shared"}';info=tarfile.TarInfo('state/provider/auth/codex.json');info.size=len(provider)
-                tar.addfile(info,io.BytesIO(provider))
-            manifest={'version':1,'tables':{'events':'exact-hash'},'files':{'hermes/auth.json':{},'provider/auth/codex.json':{}}}
+            manifest={'version':1,'tables':{'events':'exact-hash'},'files':{'hermes/auth.json':{}}}
             starts=[]
             def run(command,**kwargs):
                 if command[:3]==['docker','volume','inspect']:return SimpleNamespace(returncode=1)
                 if 'up' in command:
                     starts.append(command)
-                    for name in ('spool/.restore-inactive','workflows/inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json','provider/auth.restore-pending/codex.json'):
+                    for name in ('spool/.restore-inactive','workflows/inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json'):
                         self.assertTrue((state/name).is_file(),name)
                     self.assertFalse((state/'hermes/auth.json').exists())
-                    self.assertFalse(any((state/'provider/auth').glob('*.json')))
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
                     self.assertNotIn("NOCHEH_WORKFLOWS_ENABLED",(state/'.env').read_text())
                     from tools.operations.installation.configuration import read_env
@@ -149,4 +146,4 @@ class SnapshotTests(unittest.TestCase):
                  patch('tools.operations.installation.operations.subprocess.run',side_effect=run):
                 result=restore(snapshot,state,'nocheh-test-restore',18980)
             self.assertEqual(len(starts),2);self.assertFalse(result['executors_active'])
-            self.assertFalse(result['telegram_enabled']);self.assertFalse(result['subscription_login_activated'])
+            self.assertFalse(result['telegram_enabled']);self.assertFalse(result['hermes_login_activated'])

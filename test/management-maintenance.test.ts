@@ -7,7 +7,7 @@ test('maintenance drains admitted work before attesting readiness and denies eve
   const waiting=gate.begin('backup-job',caller.id).then(token=>{drained=true;return token;});
   assert.equal(gate.state?.ready,false);await Promise.resolve();assert.equal(drained,false);
   for(const [method,path] of [['POST','/api/nocheh/jobs'],['PUT','/api/nocheh/jobs/old/upload'],['POST','/api/nocheh/data/abc/guarded'],
-    ['GET','/hermes/api/config'],['GET','/providers/v0/management/codex-auth-url'],['GET','/api/nocheh/artifacts/abc/download'],['GET','/api/nocheh/jobs/other'],['POST','/api/nocheh/shutdown']])
+    ['GET','/hermes/api/config'],['GET','/api/nocheh/artifacts/abc/download'],['GET','/api/nocheh/jobs/other'],['POST','/api/nocheh/shutdown']])
     assert.equal(gate.allows(method!,path!),false,path);
   assert.ok(gate.allows('GET','/api/nocheh/jobs/backup-job'));assert.ok(gate.allows('GET','/api/plugins/nocheh/maintenance'));
   assert.ok(gate.allows('GET','/'));assert.ok(gate.allows('GET','/assets/app.js'));
