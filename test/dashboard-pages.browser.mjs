@@ -17,27 +17,28 @@ const origin = `http://127.0.0.1:${port}`;
 const pages = [
   ['home', 'Home'],
   ['inbox', 'Inbox'],
-  ['access', 'Chats & access'],
+  ['chats', 'Chats'],
+  ['messages', 'Messages'],
   ['memory', 'Memory'],
-  ['archive', 'Archive'],
-  ['projects', 'Projects'],
+  ['usage', 'Usage'],
   ['system', 'System'],
   ['settings', 'Settings'],
 ];
-/** Every page, and every tab of the pages whose tabs live in the address. */
+/** Every page, every tab, and an open chat. */
 const routes = [
   ...pages,
-  ...['chats', 'requests', 'shared', 'rules', 'defaults'].map(view => ['access?view=' + view, 'Chats & access']),
-  ['access?view=chats&chat=-10042', 'Chats & access'],
-  ['access?view=chats&chat=-10042%2Ftopic%2F7', 'Chats & access'],
-  ['access?view=chats&chat=42', 'Chats & access'],
+  ...['allowed', 'history'].map(view => ['inbox?view=' + view, 'Inbox']),
+  ['chats?view=rules', 'Chats'],
+  ['chats?chat=-10042', 'Chats'],
+  ['chats?chat=-10042%2Ftopic%2F7', 'Chats'],
+  ['chats?chat=42', 'Chats'],
+  ['messages?view=import', 'Messages'],
+  ...['people', 'projects', 'notes', 'longterm'].map(view => ['memory?view=' + view, 'Memory']),
+  ...['work', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
   ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'advanced'].map(view => [
     'settings?view=' + view,
     'Settings',
   ]),
-  ...['working', 'learned', 'relations', 'graph', 'honcho'].map(view => ['memory?view=' + view, 'Memory']),
-  ...['messages', 'imports'].map(view => ['archive?view=' + view, 'Archive']),
-  ...['health', 'usage', 'connections', 'databases', 'maintenance'].map(view => ['system?view=' + view, 'System']),
 ];
 
 let server, browser;
@@ -92,7 +93,7 @@ async function open(hash, viewport = {width: 1440, height: 900}) {
   return {page, problems};
 }
 
-test('every page opens with its heading and without errors', async () => {
+test('every page and tab opens with its heading and without errors', async () => {
   for (const [route, title] of routes) {
     const {page, problems} = await open(route);
     assert.equal((await page.locator('main h1').first().textContent()).trim(), title, route);
@@ -101,35 +102,40 @@ test('every page opens with its heading and without errors', async () => {
   }
 });
 
-test('navigation lists each page once, in order, and links to Hermes', async () => {
+test('navigation lists each page once, in order, links to the assistant console and collapses', async () => {
   const {page} = await open('home');
-  const nav = page.getByRole('navigation', {name: 'Main navigation'});
+  const nav = page.getByRole('navigation', {name: 'Main'});
   assert.deepEqual(
-    (await nav.getByRole('link').allTextContents()).map(text => text.trim()),
+    (await nav.getByRole('link').allTextContents()).map(text => text.trim().replace(/\d+$/, '')),
     pages.map(([, title]) => title),
   );
-  assert.equal(await page.locator('a[href="/hermes/nocheh"][aria-label="Open Hermes dashboard"]').count(), 1);
+  assert.equal(await page.locator('a[href="/hermes/nocheh"]', {hasText: 'Assistant console'}).count(), 1);
   assert.equal(await page.locator('a[href^="/providers"]').count(), 0);
+  await page.getByRole('button', {name: 'Collapse navigation'}).click();
+  await page.getByRole('button', {name: 'Expand navigation'}).waitFor();
+  // Collapsed, every page is still a named link.
+  assert.equal(await nav.getByRole('link', {name: 'Settings'}).count(), 1);
+  await page.getByRole('button', {name: 'Expand navigation'}).click();
   await page.close();
 });
 
-test('old bookmarks open the page and tab that now own them', async () => {
+test('old bookmarks open the page and tab that now hold them', async () => {
   const cases = [
     ['overview', 'Home', null, '#home'],
-    ['activity', 'Inbox', 'Decisions', '#inbox'],
-    ['spaces', 'Chats & access', 'Sharing rules', '#access?view=rules'],
-    ['sharing', 'Chats & access', 'Sharing rules', '#access?view=rules'],
-    ['learned', 'Memory', 'Learned', '#memory?view=learned'],
-    ['entities', 'Memory', 'People & facts', '#memory?view=relations'],
-    ['memoryMap', 'Memory', 'People & facts', '#memory?view=relations'],
+    ['activity', 'Inbox', null, '#inbox'],
+    ['access', 'Chats', null, '#chats'],
+    ['sharing', 'Chats', 'Sharing', '#chats?view=rules'],
+    ['archive', 'Messages', null, '#messages'],
+    ['imports', 'Messages', 'Import', '#messages?view=import'],
+    ['projects', 'Memory', 'Projects', '#memory?view=projects'],
+    ['learned', 'Memory', 'Facts', '#memory?view=facts'],
+    ['memoryMap', 'Memory', 'People', '#memory?view=people'],
     ['memoryMap?request=r1', 'Inbox', null, '#inbox?kind=memory_access&decision=r1'],
-    ['honcho', 'Memory', 'Long-term memory', '#memory?view=honcho'],
-    ['graph', 'Memory', 'Evidence graph', '#memory?view=graph'],
-    ['imports', 'Archive', 'Import chat history', '#archive?view=imports'],
-    ['monitoring', 'System', 'Health', '#system?view=health'],
-    ['integrations', 'System', 'Connections', '#system?view=connections'],
+    ['honcho', 'Memory', 'Long-term memory', '#memory?view=longterm'],
+    ['monitoring', 'System', 'Health', '#system'],
     ['databases', 'System', 'Databases', '#system?view=databases'],
-    ['operations', 'System', 'Backups & maintenance', '#system?view=maintenance'],
+    ['operations', 'System', 'Backups', '#system?view=backups'],
+    ['system?view=usage', 'Usage', null, '#usage'],
   ];
   for (const [hash, title, tab, canonical] of cases) {
     const {page, problems} = await open(hash);
@@ -141,213 +147,81 @@ test('old bookmarks open the page and tab that now own them', async () => {
   }
 });
 
-test('an old link clicked inside the dashboard opens the right tab', async () => {
-  const {page, problems} = await open('memory?view=working');
-  await page.evaluate(() => (location.hash = 'graph'));
-  await page.getByRole('tab', {name: 'Evidence graph', selected: true}).waitFor();
-  assert.equal(new URL(page.url()).hash, '#memory?view=graph');
-  assert.deepEqual(problems, []);
-  await page.close();
-});
-
 test('home leads with what needs the owner', async () => {
   const {page, problems} = await open('home');
-  const needs = page.getByRole('region', {name: 'What needs you'});
-  await needs.getByRole('link', {name: /Open inbox/}).waitFor();
-  await needs.getByRole('link', {name: /Check system/}).waitFor();
+  const needs = page.getByRole('list', {name: 'What needs you'});
+  await needs.getByRole('link').first().waitFor();
+  await page.getByRole('heading', {name: 'Today'}).waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
 
-test('archive shows a filterable table and opens a message in a drawer', async () => {
-  const {page, problems} = await open('archive');
-  const table = page.getByRole('table', {name: 'Archive records'});
-  for (const header of ['Message', 'Status', 'Received'])
-    await table.locator('thead th', {hasText: header}).first().waitFor();
-  for (const filter of ['Record type', 'Conversation', 'Reply and action status'])
-    await page.getByRole('combobox', {name: filter, exact: true}).waitFor();
-  await table
-    .getByRole('button', {name: /^Open message/})
-    .last()
-    .click();
-  const drawer = page.getByRole('dialog', {name: 'Message details'});
-  await drawer.waitFor();
-  await drawer.getByText('Permanent · read only').first().waitFor();
-  await drawer.getByRole('button', {name: 'Retire this message'}).waitFor();
-  assert.deepEqual(problems, []);
-  await page.close();
-});
-
-test('memory has one workspace, and people and facts open as a map', async () => {
-  const {page, problems} = await open('memory');
-  const tabs = page.getByRole('tablist', {name: 'Memory workspace'});
-  for (const name of ['Notes & history', 'Learned', 'People & facts', 'Evidence graph', 'Long-term memory'])
-    await tabs.getByRole('tab', {name}).waitFor();
-  await tabs.getByRole('tab', {name: 'People & facts'}).click();
-  await page.getByRole('heading', {name: 'People, projects & facts'}).first().waitFor();
-  await page.getByRole('link', {name: 'Chats & access'}).first().waitFor();
-  await page.getByRole('button', {name: 'Map'}).click();
-  await page.getByRole('button', {name: 'Reset layout'}).waitFor();
-  assert.deepEqual(problems, []);
-  await page.close();
-});
-
-test('chats & access manages a group, its people, shared facts and requests in one place', async () => {
-  const {page, problems} = await open('access');
-  const list = page.getByRole('region', {name: 'Chats'});
-  await list.getByRole('link', {name: /^You/}).waitFor();
-  await list.getByRole('link', {name: /Weekend notes.*Nocheh is off/}).waitFor();
-  await list.getByRole('link', {name: /Aurora planning.*Nocheh is on/}).click();
-  assert.equal(new URL(page.url()).hash, '#access?view=chats&chat=-10042');
-  await page.getByText('Nocheh is on in this group').waitFor();
-  await page.getByRole('heading', {name: 'Who can talk to Nocheh here'}).waitFor();
-  await page.getByText('You · always allowed').waitFor();
-  const mira = page.getByRole('group', {name: 'Who may talk to Nocheh: Mira Chen'});
-  await mira.getByRole('button', {name: 'Allowed', exact: true}).click();
-  await page.getByRole('status').filter({hasText: 'Saved, not applied yet.'}).waitFor();
-  assert.equal(await mira.getByRole('button', {name: 'Allowed', exact: true}).getAttribute('aria-pressed'), 'true');
-  await page.getByRole('button', {name: 'Apply saved settings'}).click();
-  await page.getByRole('status').filter({hasText: 'Saved, not applied yet.'}).waitFor({state: 'detached'});
-  // A request to share with this group, a sharing rule into it and a standing permission.
-  await page.getByRole('heading', {name: 'What Nocheh remembers here'}).waitFor();
-  await page.getByRole('button', {name: 'Reject once'}).first().waitFor();
-  await page.getByText('Trip notes from the topic').waitFor();
-  await page.getByText('Nothing shared with this chat yet').waitFor();
-  await page.getByRole('heading', {name: 'What Nocheh may do here'}).waitFor();
-  await page.getByRole('button', {name: 'Revoke'}).click();
-  await page.getByText('Nothing without asking.', {exact: false}).waitFor();
-  // The topic follows its group and holds the shared fact.
-  await list.getByRole('link', {name: /Iceland planning/}).click();
-  await page.getByText('Topics follow their group.', {exact: false}).waitFor();
-  await page.getByText('Mira prefers quiet aurora viewpoints.').first().waitFor();
-  // A group Nocheh is not in can be turned on.
-  await list.getByRole('link', {name: /Weekend notes/}).click();
-  await page.getByText('Nocheh is off in this group').waitFor();
-  await page.getByRole('group', {name: 'Nocheh in this group'}).getByRole('button', {name: 'On'}).click();
-  await page.getByText('Nocheh is on in this group').waitFor();
-  await list.getByRole('link', {name: /Weekend notes.*Nocheh is on/}).waitFor();
-  assert.deepEqual(problems, []);
-  await page.close();
-});
-
-test('chats & access holds requests, shared facts, sharing rules and topic memory', async () => {
-  const {page, problems} = await open('access?view=requests');
-  await page.getByRole('button', {name: 'Reject once'}).first().waitFor();
-  await page.getByRole('tab', {name: 'Shared facts'}).click();
-  await page.getByText('Mira prefers quiet aurora viewpoints.').first().waitFor();
-  await page.getByRole('tab', {name: 'Sharing rules'}).click();
-  await page.getByRole('button', {name: 'New sharing rule'}).waitFor();
-  await page.getByRole('tab', {name: 'Defaults'}).click();
-  const topicMemory = page.getByRole('group', {name: 'Topic memory'});
-  assert.equal(await topicMemory.getByRole('button', {name: /Whole group/}).getAttribute('aria-pressed'), 'true');
-  await topicMemory.getByRole('button', {name: /Each topic/}).click();
-  await page.getByRole('status').filter({hasText: 'Saved, not applied yet.'}).waitFor();
-  await page.getByRole('heading', {name: 'Suggestion and delivery settings'}).waitFor();
-  assert.deepEqual(problems, []);
-  await page.close();
-});
-
-test('settings keeps every section reachable, with one save and apply bar', async () => {
-  const {page, problems} = await open('settings');
+test('a settings edit survives switching tabs and one bar saves and applies it', async () => {
+  const {page, problems} = await open('settings?view=telegram');
   const tabs = page.getByRole('tablist', {name: 'Settings sections'});
-  const sections = [
-    ['Telegram', 'Telegram access', ['Names that address Nocheh', 'Group replies']],
-    ['Models', 'Providers', ['Provider', 'Model']],
-    ['Speed', 'Speed', ['Parallel agent runs', 'Chats answered at once', 'Guard checks at once']],
-    ['Privacy', 'Privacy', ['Secret guarding']],
-    ['Advanced', 'Advanced', []],
-  ];
-  for (const [tab, heading, fields] of sections) {
-    await tabs.getByRole('tab', {name: tab, exact: true}).click();
-    await page.getByRole('heading', {name: heading, exact: true}).first().waitFor();
-    for (const label of fields) await page.getByLabel(label, {exact: true}).first().waitFor();
-  }
-  await tabs.getByRole('tab', {name: 'Assistant'}).click();
-  await page.getByRole('heading', {name: 'Owner freedom'}).first().waitFor();
-  await page.getByRole('heading', {name: 'Hermes profile preferences'}).first().waitFor();
-  // An edit survives switching sections, and the bar saves it.
-  await tabs.getByRole('tab', {name: 'Telegram', exact: true}).click();
-  await page.getByRole('link', {name: 'Chats & access'}).first().waitFor();
-  await page.getByLabel('Names that address Nocheh', {exact: true}).fill('Nocheh,Helper');
-  await tabs.getByRole('tab', {name: 'Speed'}).click();
-  await tabs.getByRole('tab', {name: 'Telegram •'}).waitFor();
-  const bar = page.getByRole('region', {name: 'Save and apply settings'});
+  assert.equal(await page.getByRole('region', {name: 'Save changes'}).count(), 0);
+  await page.locator('#telegram-names').fill('Nocheh,Helper');
+  await tabs.getByRole('tab', {name: /Speed/}).click();
+  await tabs.getByRole('tab', {name: /Telegram.*unsaved/}).waitFor();
+  const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByText('1 unsaved change').waitFor();
-  await bar.getByRole('button', {name: 'Review changes'}).click();
-  await bar.getByText('Names that address Nocheh: Nocheh,Helper').waitFor();
-  await bar.getByRole('button', {name: 'Save changes'}).click();
-  await bar.getByRole('button', {name: 'Apply saved settings'}).waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Saved.'}).waitFor();
+  await bar.waitFor({state: 'detached'});
+  await tabs.getByRole('tab', {name: /Telegram/}).click();
+  assert.equal(await page.locator('#telegram-names').inputValue(), 'Nocheh,Helper');
   assert.deepEqual(problems, []);
   await page.close();
 });
 
-test('usage shows every part’s calls, tokens and cost in one place', async () => {
-  const {page, problems} = await open('system?view=usage');
-  await page.getByRole('heading', {name: 'Model usage'}).waitFor();
-  const totals = page.getByLabel('Usage totals');
-  await totals.getByText('58', {exact: true}).waitFor();
-  // A custom provider without a known price is never counted as free.
-  await totals.getByText('At least $0.22').waitFor();
-  const reply = page.getByRole('rowgroup', {name: 'Telegram replies'});
-  await reply.getByText('2 models').waitFor();
-  await reply.getByText('Example gateway · claude-sonnet-5-5').waitFor();
-  await page.getByRole('rowgroup', {name: 'Memory', exact: true}).getByText('Unknown').waitFor();
-  await page.getByRole('rowgroup', {name: 'Browser chat'}).getByText('Not used in this period').waitFor();
-  await page.getByRole('group', {name: 'Usage period'}).getByRole('button', {name: 'Today'}).click();
-  await totals.getByText('53', {exact: true}).waitFor();
-  await page.getByRole('rowgroup', {name: 'Telegram replies'}).getByText('OpenAI · gpt-5.6-sol').waitFor();
+test('discard drops unsaved edits', async () => {
+  const {page, problems} = await open('settings?view=telegram');
+  const before = await page.locator('#telegram-names').inputValue();
+  await page.locator('#telegram-names').fill('Something else');
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByRole('button', {name: 'Discard'}).click();
+  await bar.waitFor({state: 'detached'});
+  assert.equal(await page.locator('#telegram-names').inputValue(), before);
   assert.deepEqual(problems, []);
   await page.close();
 });
 
-// Runs before the Models test, which saves a provider choice in the shared preview.
-test('health shows each part’s provider and model, or that it is not configured', async () => {
-  const {page, problems} = await open('system?view=health');
-  const providers = page.locator('details', {hasText: 'Model providers'});
-  await providers.getByText('3 parts not configured.').waitFor();
-  await providers.locator('summary').click();
-  await providers.getByText('Secret check').waitFor();
-  assert.equal(await providers.getByText('Not configured — choose a provider in Settings › Models').count(), 3);
-  await providers.getByText('OpenAI · text-embedding-3-small').waitFor();
-  assert.equal(await page.getByText(/CPA|subscription OAuth|ChatGPT login/).count(), 0);
-  assert.deepEqual(problems, []);
-  await page.close();
-});
-
-test('models let the owner add a custom provider and give one part its own provider', async () => {
+test('a custom provider is checked, added and saved from one dialog', async () => {
   const {page, problems} = await open('settings?view=models');
-  await page.getByRole('heading', {name: 'Which provider each part uses'}).waitFor();
-  // A fresh installation has no provider: it says so and every part follows the unset default.
-  await page.getByText('Nocheh has no model provider yet.').waitFor();
-  assert.equal(await page.locator('#default-provider').inputValue(), '');
-  assert.equal((await page.locator('#default-provider option:checked').textContent()).trim(), 'Not configured');
-  assert.equal(
-    (await page.locator('#memory-provider option:checked').textContent()).trim(),
-    'Same as default · Not configured',
-  );
-  assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
-  await page.getByRole('button', {name: 'Add custom provider'}).click();
-  await page.getByLabel('Name', {exact: true}).fill('Example gateway');
-  await page.getByLabel('Address', {exact: true}).fill('https://gateway.example.test/v1');
-  await page.locator('#key-custom-1').fill('synthetic-gateway-key');
-  // Its models load from the address and key while it is still unsaved.
-  await page.getByRole('group', {name: 'Example gateway'}).getByText('2 models available.').waitFor();
-  await page.locator('#default-provider').selectOption('openai');
-  await page.locator('#memory-provider').selectOption('custom-1');
-  await page.locator('#memory-model').selectOption('gpt-5.6-sol');
-  // Once a default is chosen, "Not configured" is no longer offered for it.
-  assert.equal(await page.locator('#default-provider option[value=""]').count(), 0);
-  const bar = page.getByRole('region', {name: 'Save and apply settings'});
-  await bar.getByRole('button', {name: 'Review changes'}).click();
-  await bar.getByText('Default provider: OpenAI').waitFor();
-  await bar.getByText('Custom providers: Example gateway').waitFor();
-  await bar.getByText('Custom provider API keys: Replace stored credential').waitFor();
-  await bar.getByText('Memory provider: Example gateway').waitFor();
+  await page.getByRole('button', {name: 'Add provider'}).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('radio', {name: /Custom/}).click();
+  await dialog.getByLabel('Name').fill('Example gateway');
+  await dialog.getByLabel('Address').fill('https://gateway.example.test/v1');
+  await dialog.getByLabel('API key').fill('synthetic-gateway-key');
+  // Its models are listed from the address and key before it is added.
+  await dialog
+    .getByText(/\d+ models? found|Connected/)
+    .first()
+    .waitFor();
+  await dialog.getByRole('button', {name: 'Add provider'}).click();
+  await dialog.waitFor({state: 'detached'});
+  await page.getByText('Example gateway').first().waitFor();
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.waitFor();
   assert.equal(await bar.getByText('synthetic-gateway-key').count(), 0);
-  await bar.getByRole('button', {name: 'Save changes'}).click();
-  await bar.getByRole('button', {name: 'Apply saved settings'}).waitFor();
-  // A provider still used by a part cannot be removed.
-  assert.equal(await page.getByRole('button', {name: 'Remove Example gateway'}).isDisabled(), true);
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Saved.'}).waitFor();
+  await bar.waitFor({state: 'detached'});
+  assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('usage shows calls, tokens and cost, and never prices an unknown cost as free', async () => {
+  const {page, problems} = await open('usage');
+  await page.getByRole('table', {name: 'Usage by part'}).waitFor();
+  await page
+    .getByText(/At least \$|Unknown/)
+    .first()
+    .waitFor();
+  await page.getByRole('radiogroup', {name: 'Period'}).getByText('Today').click();
+  assert.equal(new URL(page.url()).hash, '#usage?days=1');
   assert.deepEqual(problems, []);
   await page.close();
 });

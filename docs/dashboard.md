@@ -30,17 +30,24 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 
 | Page | Use it for |
 | --- | --- |
-| Home | See what needs you (decisions waiting, system problems), memory availability and archive and workflow totals; start common tasks. |
-| Inbox | Decide exact approvals, memory-access requests, identity suggestions and organization changes; review action history, bounded permissions and run history in separate tabs. |
-| Chats & access | The one place for memory access. Chats: pick any chat or topic to see who can talk to Nocheh there, what it remembers there and what it may do there; turn Nocheh on or off in a group, allow people, add older topics. Requests and Shared facts: approve, deny or revoke fact access. Sharing rules: let one chat use knowledge from another, with previews of exactly what is shared. Defaults: topic memory and suggestion settings. Changes save at once; apply them from the bar at the top. |
-| Memory | Notes & history: native notes and conversation history for one chat. Learned: learned interpretations. People & facts: explore people, projects and facts and share a fact with a chat. Evidence graph: follow recorded relationships to their sources. Long-term memory: Honcho readiness, attachment, budget and stored data. |
-| Archive | Messages: browse originals, guarded copies and transcripts; edit guarded wording and inspect history or original files. Import chat history: choose a Telegram export, review access and files, then start or resume an import. |
-| Projects | Manage projects, the chats assigned to them, project memory and agent organization. |
-| System | Health: workflow totals, history charts, service diagnostics and paginated receipts; open Inngest. Connections: runtime status and capabilities, Hermes and provider dashboards. Databases: read-only table browser. Backups & maintenance: archive downloads, backups, restarts, restore checks and settings-apply results. |
-| Settings | Sections for Telegram (owner, bot, group replies), Models, Speed, Privacy and Advanced share one bar at the bottom: review, save, then apply to running services. Edits stay while you switch sections. |
-| Settings → Assistant | How much Nocheh may do without asking (owner freedom), and agent and memory preferences per Hermes profile. These save on their own; Hermes preferences take effect on the profile's next turn. |
+| Home | What needs you (decisions waiting, problems), today's replies, cost, kept messages and long-term memory, and where things are. |
+| Inbox | Waiting: decide approvals, memory-access requests, identity suggestions and organization changes. Allowed actions: standing permissions you can revoke. History: earlier decisions and their outcomes. |
+| Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: let one chat use knowledge from another, with previews of exactly what is shared, and access defaults. |
+| Messages | Messages: every original message, its agent copy and versions, files, transcripts and reactions; hide (retire) a message or restore it. Import: choose a Telegram export, review access and files, then start or resume an import. |
+| Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, project chats and organization). Assistant notes: native notes and history for one chat. Long-term memory: Honcho readiness, attachment, budget and stored data. |
+| Usage | Model calls, tokens and cost by part and by model, calls per day, and reply speed with a per-stage breakdown for each reply. |
+| System | Health: services, connections, storage and diagnostics. Background work: workflow totals, history charts and the run list with retry and cancel. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
+| Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (secret check, how long history is kept), Assistant (owner freedom and agent preferences) and Advanced. |
 
-Links that use an earlier page name (for example `#activity`, `#sharing`, `#monitoring` or `#memoryMap`) open the page and tab that now hold that content; a link to one memory-access request opens it in the Inbox.
+Every settings edit, on any page, is a draft. While something is unsaved, one bar
+stays at the bottom of the screen with the list of changes, Discard and Save. Save
+writes the settings and applies them to the running services in one step, follows
+the apply to the end and shows the saved values. A failed apply keeps your edits.
+Edits stay while you switch tabs or pages; a tab with unsaved edits has a dot.
+Actions on one item (approve, revoke, hide a message, correct a fact) happen at once
+from its side panel and confirm with a short message.
+
+Links that use an earlier page or tab name (for example `#activity`, `#archive`, `#sharing`, `#monitoring`, `#projects` or `#memoryMap`) open the page and tab that now hold that content; a link to one memory-access request opens it in the Inbox.
 
 Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
 tools, profiles and memory through an integration. Nocheh owns capture, access rules,
@@ -56,12 +63,11 @@ until its real provider acceptance passes.
 
 ## Change configuration
 
-Settings show saved `.env` values with credential presence only. Review and Save
-validates the complete configuration. Apply is a background job that recreates
-affected Compose services and checks health; failed apply attempts restore the
-previous environment and report whether recovery succeeded. Runtime state is
-shown as unverified until the management apply operation verifies it.
-The page shows these actions directly without a numbered progress strip.
+Settings show saved `.env` values with credential presence only. Save validates
+the complete configuration, then starts the apply job, which recreates affected
+Compose services and checks health; the save bar follows that job. A failed apply
+restores the previous environment, reports whether recovery succeeded and keeps
+your edits. Runtime state is shown as unverified until the apply job verifies it.
 
 Imports accept Telegram Desktop JSON, an export directory or ZIP. Review counts,
 missing media and chat scopes before starting. Unmapped chats remain owner-only.
@@ -122,7 +128,7 @@ are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the 
 ## Native memory and Honcho
 
 Hermes memory lists configured and historical group/topic profiles. Notes are read-only;
-preferences in Settings → Hermes preferences use the same locked resolver as assistant startup and take effect on
+preferences in Settings › Assistant use the same locked resolver as assistant startup and take effect on
 the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show
 truncation. A note's presence does not establish source provenance.
@@ -185,24 +191,12 @@ not create an edge; uncited memory has no verified source provenance. This is a
 deterministic evidence view, not semantic entity extraction or the repository's
 Graphify graph.
 
-The graph uses a local Three.js 3D scene. Drag to orbit, scroll to zoom, and
-right-drag to pan; on touch screens use one finger to orbit and two to pan/pinch.
-Camera buttons offer orbit/zoom/reset, selected-node focus and full screen where
-supported. With the scene focused, arrow keys orbit, Shift+arrows pan, +/- zoom,
-and Home resets. No automatic rotation or ongoing render loop runs while idle.
+The owner dashboard shows people, projects and facts as lists with side panels;
+the graph is available as JSON from the CLI and API.
 
-Search the node browser or choose a context-entity type, then select a node in the list or scene
-to highlight its direct connections. The inspector shows incoming/outgoing
-relationships and opens original sources. A deterministic spatial layout helps
-navigation; distance is not a semantic assertion. Shapes, colors, and labels
-distinguish the context-entity types. If WebGL is
-unavailable or its context is lost, the node browser and source inspection remain
-available with a reload control. The renderer is bundled locally using pinned
-Three.js/esbuild versions; no CDN or additional model calls are used.
-
-Page forward/backward or export the current graph as JSON. Source detail
-includes the original record, downloadable retained files, transcripts and their
-generation provenance. Use the next cursor to retrieve additional graph pages:
+Export the graph as JSON. Source detail includes the original record,
+downloadable retained files, transcripts and their generation provenance. Use the
+next cursor to retrieve additional graph pages:
 
 ```sh
 ./bin/nocheh memory graph --scope CHAT_ID --output graph.json
@@ -250,7 +244,7 @@ tools, provider authentication and scope bindings cannot be changed by native fo
 Raw YAML inspection is read-only. Nocheh Settings retains the deployment model,
 Telegram and guard/trust settings with its existing save/apply behavior.
 
-**Settings → Hermes preferences** shows profile preferences and global Hermes defaults
+**Settings › Assistant** shows profile preferences and global Hermes defaults
 together. Each profile preference shows its effective origin and has a reset icon
 beside its input; resetting removes the profile override after saving so the global
 value applies. Existing native values remain explicit overrides. Nocheh settings
@@ -433,10 +427,11 @@ workflow history retention setting. It is measured only when expanded.
 
 ## Appearance and workflow trends
 
-The owner dashboard uses locally owned Radix-based components, Tailwind, Lucide,
-and Recharts. Appearance follows the system by default; Light, Dark, or System
-is persisted locally. The desktop sidebar collapses, and below 1024px navigation
-opens in a keyboard-accessible drawer. Refresh updates data without remounting
+The owner dashboard uses a small set of locally owned Radix-based components
+(`dashboard/ui`), Tailwind semantic colour tokens, Lucide, and Recharts, with no
+page stylesheet. Appearance follows the system by default; Light, Dark, or System
+is persisted locally. The desktop sidebar collapses to icons, and below 1024px
+navigation opens in a keyboard-accessible drawer. Refresh updates data without remounting
 the page. Hermes keeps its native interface and integration link.
 
 Monitoring retains global running, waiting, failed, last confirmed success and
@@ -474,22 +469,27 @@ Missing or unavailable values are neutral in both themes. Zero is an observed
 count in the labeled category, rather than an unavailable observation.
 No sampling service, uptime claim, or provider analytics collection is added.
 
-Page implementations live under `dashboard/pages/`; shared components live in
-`dashboard/components/` (primitives in `dashboard/components/ui/`), while the owner API
-client (`dashboard/lib/api.ts`), data subscriptions and revision-bound drafts live in
-`dashboard/lib/`. All browser code is TypeScript/TSX checked with `tsconfig.dashboard.json`
-and formatted with Prettier (`npm run format:dashboard`, `npm run check:dashboard-format`).
-The build removes obsolete chunks and emits independent chart and Three.js bundles. `npm run test:dashboard` covers graph behavior, request
+Page implementations live under `dashboard/pages/` (one file per page, its tabs
+in a folder of the same name). Shared components live in `dashboard/ui/`: `core.tsx`
+(buttons, cards, fields, badges, tables), `overlay.tsx` (dialogs, side panels,
+confirmations, toasts), `page.tsx` (page frame and tabs) and `save-bar.tsx`. The
+owner API client (`dashboard/lib/api.ts`), data subscriptions (`resource.ts`), routes,
+the shared settings draft store (`settings.ts`) and other draft sources (`drafts.ts`)
+live in `dashboard/lib/`. All browser code is TypeScript/TSX checked with
+`tsconfig.dashboard.json` and formatted with Prettier (`npm run format:dashboard`,
+`npm run check:dashboard-format`). The build removes obsolete chunks and emits a
+separate chart bundle. `npm run test:dashboard` covers routes, request
 handoff/cancellation and small presentation helpers.
 
-`npm run test:dashboard-browser` opens every page in Chromium against the synthetic
-preview below and checks headings, navigation, old bookmarks, the archive drawer,
-the memory access views, Settings sections, phone-width layout, and that no page logs
-an error. It needs `npm run build`, a disposable PostgreSQL reachable through the
-usual `PG*` variables, and Chromium (`PLAYWRIGHT_CHROMIUM_EXECUTABLE`, or the browser
-Playwright manages). It starts and stops its own preview server on a free port.
+`npm run test:dashboard-browser` opens every page and tab in Chromium against the
+synthetic preview below and checks headings, navigation, old bookmarks, the save
+bar (save, apply, discard, edits kept across tabs), adding a custom provider, Usage,
+phone-width layout, and that no page logs an error. It needs `npm run build`, a
+disposable PostgreSQL reachable through the usual `PG*` variables, and Chromium
+(`PLAYWRIGHT_CHROMIUM_EXECUTABLE`, or the browser Playwright manages). It starts and
+stops its own preview server on a free port.
 
-Archive and conversation history use list/detail views that stack on mobile.
+Messages and conversation history use list/detail views that stack on mobile.
 Original sources remain read-only; guarded copies are explicitly editable, and
 notes carry generated-content labels. Settings and guarded drafts keep the
 revision where editing started, so Refresh cannot silently bypass a conflict.
