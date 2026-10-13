@@ -7,6 +7,7 @@ import {AlertTriangle, Loader2} from 'lucide-react';
 import {useDraftSources} from '../lib/drafts';
 import {discardSettings, saveSettings, useSettings} from '../lib/settings';
 import {settingLabel} from '../lib/setting-labels';
+import {cn} from '../lib/utils';
 import {Button} from './core';
 import {useFeedback} from './overlay';
 
@@ -106,42 +107,43 @@ export function SaveWatcher() {
   return null;
 }
 
-/** The controls themselves; the page header places them. */
-export function SaveControls({state}: {state: SaveState}) {
-  const {busy, failed, count, text, detail} = state;
-  if (!state.visible) return null;
+/**
+ * The controls themselves; the page header places them. On a page with
+ * settings they always show, with Save turned off until there is something to
+ * save, so the layout never moves.
+ */
+export function SaveControls({state, persistent}: {state: SaveState; persistent?: boolean}) {
+  const {busy, failed, count, detail} = state;
+  if (!state.visible && !persistent) return null;
+  const text = state.text || 'No unsaved changes';
+  const idle = !state.visible;
 
   return (
     <div role="region" aria-label="Save changes" className="flex min-w-0 flex-wrap items-center justify-end gap-2">
       <span
         aria-live="polite"
         title={detail || undefined}
-        className={
-          'flex min-w-0 items-center gap-1.5 text-[13px] ' + (failed ? 'text-bad' : busy ? 'text-muted' : 'text-fg/80')
-        }
+        className={cn(
+          'flex min-w-0 items-center gap-1.5 text-[13px]',
+          failed ? 'text-bad' : busy || idle ? 'text-muted' : 'text-fg/80',
+        )}
       >
         {busy ? (
           <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" aria-hidden />
         ) : failed ? (
           <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
         ) : (
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warn" />
+          !idle && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warn" />
         )}
         <span className="truncate">{text}</span>
         {detail && <span className="sr-only">: {detail}</span>}
       </span>
-      {!busy && (
-        <>
-          {count > 0 && (
-            <Button size="sm" onClick={state.discard}>
-              Discard
-            </Button>
-          )}
-          <Button size="sm" variant="primary" onClick={() => void state.save()}>
-            {failed ? 'Try again' : count ? 'Save' : 'Apply now'}
-          </Button>
-        </>
-      )}
+      <Button size="sm" disabled={busy || count === 0} onClick={state.discard}>
+        Discard
+      </Button>
+      <Button size="sm" variant="primary" disabled={busy || idle} onClick={() => void state.save()}>
+        {failed ? 'Try again' : count || idle || busy ? 'Save' : 'Apply now'}
+      </Button>
     </div>
   );
 }

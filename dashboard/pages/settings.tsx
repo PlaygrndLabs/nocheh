@@ -67,6 +67,7 @@ export default function Settings() {
 
   return (
     <Page
+      saveable
       title="Settings"
       tabs={
         <Tabs
