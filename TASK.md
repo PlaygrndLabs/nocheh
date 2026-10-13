@@ -194,9 +194,10 @@ bad, save btn is not in good place and lots of other ui/ux issue ... need to che
 app fully and do a refactor to make dashboard simple and usable"): the owner
 dashboard is rebuilt from scratch around eight pages (Home, Inbox, Chats,
 Messages, Memory, Usage, System, Settings), shared components in `dashboard/ui`
-and one save bar pinned to the bottom of the screen that saves and applies every
-settings edit in one step and shows the outcome
+and one Save in the page header, at the top of the screen, that saves and applies
+every settings edit in one step and shows the outcome
 ([decision](docs/adr/0145-rebuilt-owner-dashboard.md),
+[Save placement](docs/adr/0146-save-in-page-header.md),
 [save bar](dashboard/ui/save-bar.tsx), [settings store](dashboard/lib/settings.ts),
 [routes](dashboard/lib/routes.ts), [browser checks](test/dashboard-pages.browser.mjs)).
 Model providers are added in a dialog that lists the provider's models before
