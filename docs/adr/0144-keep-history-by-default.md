@@ -1,12 +1,12 @@
-# ADR-0142: Workflow history and Hermes delivery logs are kept by default
+# ADR-0144: Workflow history and Hermes delivery logs are kept by default
 
 <status>
 Accepted on 2026-10-13 by owner decision ("keep data for ever"), answering
 whether workflow history should also keep one month like the delivery logs.
 Supersedes the 14-day default of
 [ADR-0110](0110-default-workflow-history-retention.md) and the 30-day default
-of [ADR-0141](0141-hermes-delivery-log-retention.md). The retention mechanisms
-of ADR-0107, ADR-0111, ADR-0112, ADR-0113, ADR-0121, ADR-0130 and ADR-0141 are
+of [ADR-0143](0143-hermes-delivery-log-retention.md). The retention mechanisms
+of ADR-0107, ADR-0111, ADR-0112, ADR-0113, ADR-0121, ADR-0130 and ADR-0143 are
 unchanged.
 </status>
 
