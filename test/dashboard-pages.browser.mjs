@@ -212,6 +212,13 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor();
   await bar.waitFor({state: 'detached'});
   assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
+  // Every model is picked from a dropdown of the provider's models, and any other name can still be typed.
+  const mainModel = page.locator('#main-model');
+  await mainModel.locator('option', {hasText: 'gpt-5.6-sol'}).waitFor({state: 'attached'});
+  assert.equal(await mainModel.evaluate(element => element.tagName), 'SELECT');
+  assert.equal(await page.locator('#reply-model').evaluate(element => element.tagName), 'SELECT');
+  await mainModel.selectOption({label: 'Type another name…'});
+  assert.equal(await page.locator('#main-model').evaluate(element => element.tagName), 'INPUT');
   assert.deepEqual(problems, []);
   await page.close();
 });

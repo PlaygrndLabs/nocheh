@@ -12,7 +12,7 @@ import {Dialog, useFeedback} from '../../ui/overlay';
 
 type Custom = {id: string; name: string; url: string};
 type Provider = ProviderRow & {unsaved?: boolean; newKey?: boolean};
-type Listing = {models: string[]; error?: string; loading?: boolean};
+type Listing = {models: string[]; error?: string; loading?: boolean; retry?: () => void};
 
 const PRESET_KEY: Record<string, string> = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY'};
 const PART_TEXT: Record<string, {title: string; hint: string}> = {
@@ -38,7 +38,8 @@ export function listError(error: string): string {
 /** Asks the server which models a provider lists, using the typed key or its saved one. */
 function useModelList(request: Record<string, string> | null): Listing | null {
   const [state, setState] = useState<{signature: string; listing: Listing} | null>(null);
-  const signature = request ? JSON.stringify(request) : '';
+  const [attempt, setAttempt] = useState(0);
+  const signature = request ? JSON.stringify(request) + '#' + attempt : '';
   const latest = useRef(signature);
   latest.current = signature;
   useEffect(() => {
@@ -57,7 +58,8 @@ function useModelList(request: Record<string, string> | null): Listing | null {
     return () => clearTimeout(timer);
   }, [signature]);
   if (!request) return null;
-  return state?.signature === signature ? state.listing : {models: [], loading: true};
+  const retry = () => setAttempt(n => n + 1);
+  return state?.signature === signature ? {...state.listing, retry} : {models: [], loading: true, retry};
 }
 
 function ListingStatus({listing, className}: {listing: Listing | null; className?: string}) {
@@ -71,7 +73,15 @@ function ListingStatus({listing, className}: {listing: Listing | null; className
   if (listing.error)
     return (
       <p className={cn('flex items-start gap-1.5 text-xs text-bad', className)} role="status">
-        <XCircle className="mt-px size-3.5 shrink-0" aria-hidden /> {listError(listing.error)}
+        <XCircle className="mt-px size-3.5 shrink-0" aria-hidden />
+        <span>
+          {listError(listing.error)}{' '}
+          {listing.retry && (
+            <button type="button" className="font-medium underline underline-offset-2" onClick={listing.retry}>
+              Try again
+            </button>
+          )}
+        </span>
       </p>
     );
   return (
@@ -494,13 +504,7 @@ function ProviderDialog({
             </label>
             {makeMain && (
               <Field label="Model" htmlFor="provider-model">
-                <ModelInput
-                  id="provider-model"
-                  value={model}
-                  onChange={setModel}
-                  models={listing?.models ?? []}
-                  placeholder="Model name"
-                />
+                <ModelInput id="provider-model" value={model} onChange={setModel} listing={listing} />
               </Field>
             )}
           </div>
@@ -510,40 +514,77 @@ function ProviderDialog({
   );
 }
 
-/** Pick from the provider's model list, or type any name. */
+const TYPE_OTHER = '\u0000other';
+
+/** A dropdown of the provider's models, with a way to type any other name. */
 function ModelInput({
   id,
   value,
   onChange,
-  models,
-  placeholder,
+  listing,
+  inherit,
   disabled,
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
-  models: string[];
-  placeholder?: string;
+  listing: Listing | null;
+  /** Label of the empty choice, for a part that can follow the main model. */
+  inherit?: string;
   disabled?: boolean;
 }) {
+  const models = listing?.models ?? [];
+  const [typing, setTyping] = useState(false);
+  // With no list to pick from, the name is typed.
+  if (typing || (!models.length && !listing?.loading)) {
+    return (
+      <div className="space-y-1">
+        <Input
+          id={id}
+          value={value}
+          placeholder={inherit ?? 'Model name'}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={disabled}
+          autoFocus={typing}
+          onChange={e => onChange(e.target.value.trim())}
+        />
+        {models.length > 0 && (
+          <button
+            type="button"
+            className="text-xs font-medium text-accent-text hover:underline"
+            onClick={() => setTyping(false)}
+          >
+            Choose from the list
+          </button>
+        )}
+      </div>
+    );
+  }
+  const options = value && !models.includes(value) ? [value, ...models] : models;
   return (
-    <>
-      <Input
-        id={id}
-        list={id + '-options'}
-        value={value}
-        placeholder={placeholder}
-        autoComplete="off"
-        spellCheck={false}
-        disabled={disabled}
-        onChange={e => onChange(e.target.value.trim())}
-      />
-      <datalist id={id + '-options'}>
-        {models.map(model => (
-          <option key={model} value={model} />
-        ))}
-      </datalist>
-    </>
+    <Select
+      id={id}
+      value={value}
+      disabled={disabled}
+      onChange={e => {
+        if (e.target.value === TYPE_OTHER) setTyping(true);
+        else onChange(e.target.value);
+      }}
+    >
+      {inherit !== undefined ? (
+        <option value="">{inherit}</option>
+      ) : (
+        !value && <option value="">{listing?.loading ? 'Loading models…' : 'Choose a model'}</option>
+      )}
+      {options.map(model => (
+        <option key={model} value={model}>
+          {model}
+        </option>
+      ))}
+      {listing?.loading && !models.length && value && <option disabled>Loading models…</option>}
+      <option value={TYPE_OTHER}>Type another name…</option>
+    </Select>
   );
 }
 
@@ -618,9 +659,8 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             <ModelInput
               id="main-model"
               value={mainModel}
-              models={mainListing?.models ?? []}
+              listing={main ? mainListing : null}
               disabled={busy}
-              placeholder="Model name"
               onChange={value => settings.set('NOCHEH_MODEL', value)}
             />
             {main && <ListingStatus listing={mainListing} className="mt-1.5" />}
@@ -726,9 +766,9 @@ function PartRow({
         <ModelInput
           id={part.id + '-model'}
           value={model}
-          models={listing?.models ?? []}
+          listing={listing}
           disabled={busy}
-          placeholder={mainModel ? `Same as main (${mainModel})` : 'Same as main'}
+          inherit={mainModel ? `Same as main (${mainModel})` : 'Same as main'}
           onChange={value => settings.set(part.model_setting, value)}
         />
         {chosen && <ListingStatus listing={listing} className="mt-1.5" />}
