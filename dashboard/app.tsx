@@ -1,295 +1,308 @@
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
+import {Dialog as DialogPrimitive} from 'radix-ui';
 import {
-  Archive as ArchiveIcon,
+  Activity,
   ArrowUpRight,
   BrainCircuit,
-  FolderKanban,
+  Gauge,
   Home,
   Inbox,
   Menu,
+  MessagesSquare,
+  Monitor,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  Plug,
-  RefreshCw,
   Server,
-  Settings as SettingsIcon,
+  Settings,
+  Sun,
   Users,
   X,
 } from 'lucide-react';
-import {Status} from './pages/overview';
-import {Settings} from './pages/settings';
-import {ArchiveWorkspace} from './pages/archive-workspace';
-import {Activity} from './pages/activity';
-import {MemoryWorkspace} from './pages/memory-workspace';
-import {Projects} from './pages/projects';
-import {ChatsAccess} from './pages/access';
-import {Source} from './pages/source';
-import {System} from './pages/system';
-import {call} from './lib/api';
 import {resolveRoute, type PageId} from './lib/routes';
-import {Button, Sheet, Tooltip} from './components/ui/primitives';
-import {ThemeSelect} from './lib/theme';
-import {StatusBadge} from './components/status';
-import {useResource, refreshResources} from './lib/resource';
+import {useHash} from './lib/navigation';
+import {useResource} from './lib/resource';
+import {useInboxCount} from './lib/inbox';
+import {cn} from './lib/utils';
+import {Button, Dot, Spinner, type Tone} from './ui/core';
+import {FeedbackProvider} from './ui/overlay';
+import {SaveBar} from './ui/save-bar';
 
-type PageProps = {
-  notify: (text: string, error?: boolean) => void;
-  call: typeof call;
-  renderSource: (record: any) => React.ReactNode;
-};
-type Route = {id: PageId; title: string; Icon: typeof Home; description: string; Page: React.ComponentType<PageProps>};
-
-/** Sidebar order. Old page names are redirected by `resolveRoute`. */
-const routes: Route[] = [
-  {id: 'home', title: 'Home', Icon: Home, description: 'What needs you, and how Nocheh is doing.', Page: Status},
-  {
-    id: 'inbox',
-    title: 'Inbox',
-    Icon: Inbox,
-    description: 'Decisions waiting for you, and what Nocheh did.',
-    Page: Activity,
-  },
-  {
-    id: 'access',
-    title: 'Chats & access',
-    Icon: Users,
-    description: 'Who can talk to Nocheh in each chat, and what each chat may remember and use.',
-    Page: ChatsAccess,
-  },
-  {
-    id: 'memory',
-    title: 'Memory',
-    Icon: BrainCircuit,
-    description: 'What Nocheh knows: notes, learned facts, people, projects and long-term memory.',
-    Page: MemoryWorkspace,
-  },
-  {
-    id: 'archive',
-    title: 'Archive',
-    Icon: ArchiveIcon,
-    description: 'Every original message, and the copy agents may use.',
-    Page: ArchiveWorkspace,
-  },
-  {
-    id: 'projects',
-    title: 'Projects',
-    Icon: FolderKanban,
-    description: 'Projects, the chats in them, and project memory.',
-    Page: Projects,
-  },
-  {
-    id: 'system',
-    title: 'System',
-    Icon: Server,
-    description: 'Health, model usage, connections, databases, backups and maintenance.',
-    Page: System,
-  },
-  {
-    id: 'settings',
-    title: 'Settings',
-    Icon: SettingsIcon,
-    description: 'Telegram, models, speed and assistant preferences.',
-    Page: Settings,
-  },
+type NavItem = {id: PageId; title: string; Icon: React.ComponentType<{className?: string}>};
+const nav: NavItem[] = [
+  {id: 'home', title: 'Home', Icon: Home},
+  {id: 'inbox', title: 'Inbox', Icon: Inbox},
+  {id: 'chats', title: 'Chats', Icon: Users},
+  {id: 'messages', title: 'Messages', Icon: MessagesSquare},
+  {id: 'memory', title: 'Memory', Icon: BrainCircuit},
+  {id: 'usage', title: 'Usage', Icon: Gauge},
+  {id: 'system', title: 'System', Icon: Server},
+  {id: 'settings', title: 'Settings', Icon: Settings},
 ];
 
-/** Rewrite an old page name in the address before any page reads it. */
-function canonicalRoute(): PageId {
+const pages: Record<PageId, React.LazyExoticComponent<React.ComponentType>> = {
+  home: React.lazy(() => import('./pages/home')),
+  inbox: React.lazy(() => import('./pages/inbox')),
+  chats: React.lazy(() => import('./pages/chats')),
+  messages: React.lazy(() => import('./pages/messages')),
+  memory: React.lazy(() => import('./pages/memory')),
+  usage: React.lazy(() => import('./pages/usage')),
+  system: React.lazy(() => import('./pages/system')),
+  settings: React.lazy(() => import('./pages/settings')),
+};
+
+/** Rewrites an old page name in the address before any page reads it. */
+function canonicalPage(): PageId {
   const {page, hash} = resolveRoute(location.hash);
   if (hash) history.replaceState(null, '', hash);
   return page;
 }
-canonicalRoute();
-// Registered before any page mounts, so pages listening for hash changes see the new name.
-addEventListener('hashchange', canonicalRoute);
+canonicalPage();
+addEventListener('hashchange', canonicalPage);
 
-function PersistentStatus() {
-  const {data, error} = useResource<any>('/monitoring', 10000);
+type Theme = 'system' | 'light' | 'dark';
+function useTheme(): [Theme, () => void] {
+  const [theme, setTheme] = React.useState<Theme>(() => {
+    try {
+      const saved = localStorage.getItem('nocheh.theme.v1');
+      return saved === 'light' || saved === 'dark' ? saved : 'system';
+    } catch {
+      return 'system';
+    }
+  });
+  React.useEffect(() => {
+    const media = matchMedia('(prefers-color-scheme: dark)');
+    const apply = () =>
+      document.documentElement.classList.toggle('dark', theme === 'dark' || (theme === 'system' && media.matches));
+    apply();
+    media.addEventListener('change', apply);
+    try {
+      localStorage.setItem('nocheh.theme.v1', theme);
+    } catch {}
+    return () => media.removeEventListener('change', apply);
+  }, [theme]);
+  return [theme, () => setTheme(current => (current === 'system' ? 'light' : current === 'light' ? 'dark' : 'system'))];
+}
+
+/** Whether Nocheh's services answer, shown at the foot of the navigation. */
+function HealthLink({onNavigate, collapsed}: {onNavigate?: () => void; collapsed?: boolean}) {
+  const {data, error} = useResource<any>('/monitoring', 15000);
+  const services: any[] = data?.containers ?? data?.services ?? [];
+  const unhealthy = services.filter(
+    row => row.expected_state === 'running' && !['running', 'healthy'].includes(String(row.state)),
+  ).length;
+  let tone: Tone = 'neutral';
+  let text = 'Checking…';
+  if (error) [tone, text] = ['warn', 'Status unavailable'];
+  else if (data?.application?.ok === false) [tone, text] = ['bad', 'Nocheh is down'];
+  else if (unhealthy)
+    [tone, text] = ['warn', unhealthy === 1 ? '1 service needs a look' : `${unhealthy} services need a look`];
+  else if (data) [tone, text] = ['good', 'Everything is running'];
   return (
-    <a className="persistent-status" href="#system?view=health" aria-label="Inspect system status">
-      <StatusBadge
-        state={
-          error ? 'stale' : data?.application?.ok ? 'ready' : data?.application?.ok === false ? 'failed' : 'unknown'
-        }
-        label={
-          error
-            ? 'Status stale'
-            : data?.application?.ok
-              ? 'API ready'
-              : data?.application?.ok === false
-                ? 'API unavailable'
-                : 'Status unobserved'
-        }
-      />
+    <a
+      href="#system"
+      onClick={onNavigate}
+      title={collapsed ? text : undefined}
+      className={cn(
+        'flex items-center gap-2.5 rounded-lg py-2 text-[13px] text-muted hover:bg-subtle hover:text-fg',
+        collapsed ? 'justify-center px-0' : 'px-3',
+      )}
+    >
+      {data || error ? <Dot tone={tone} /> : <Spinner className="size-3" />}
+      <span className={collapsed ? 'sr-only' : 'truncate'}>{text}</span>
     </a>
   );
 }
-function App() {
-  const [page, setPage] = React.useState(canonicalRoute),
-    [mobile, setMobile] = React.useState(false),
-    [collapsed, setCollapsed] = React.useState(() => {
-      try {
-        return localStorage.getItem('nocheh.sidebar.v1') === 'collapsed';
-      } catch {
-        return false;
-      }
-    }),
-    [notice, setNotice] = React.useState<{text: string; error: boolean} | null>(null),
-    [refreshing, setRefreshing] = React.useState(false);
-  const heading = React.useRef<HTMLHeadingElement>(null),
-    menu = React.useRef<HTMLButtonElement>(null);
-  React.useEffect(() => {
-    const change = () => {
-      setPage(resolveRoute(location.hash).page);
-      setNotice(null);
-      setMobile(false);
-    };
-    addEventListener('hashchange', change);
-    return () => removeEventListener('hashchange', change);
-  }, []);
-  React.useEffect(() => {
-    heading.current?.focus({preventScroll: true});
-  }, [page]);
-  const toggle = () =>
-    setCollapsed(value => {
-      try {
-        localStorage.setItem('nocheh.sidebar.v1', !value ? 'collapsed' : 'expanded');
-      } catch {}
-      return !value;
-    });
-  const refresh = async () => {
-    setRefreshing(true);
-    try {
-      await refreshResources();
-    } finally {
-      setRefreshing(false);
-    }
-  };
-  const notify = React.useCallback((text: string, error = false) => setNotice({text, error}), []);
-  const route = routes.find(r => r.id === page)!;
-  const Current = route.Page;
-  const renderSource = (record: any) => <Source record={record} notify={notify} />;
-  const navigation = (compact = false, showToggle = false) => (
-    <>
-      <div className="n-sidebar-head">
-        <a href="#home" className="n-brand">
-          <span className="n-mark" aria-hidden="true">
-            ن
-          </span>
-          <span className={compact ? 'sr-only' : ''}>
-            Nocheh<small>Your personal brain</small>
-          </span>
-        </a>
-        {showToggle && (
-          <Button
-            className="sidebar-toggle"
-            size="icon"
-            onClick={toggle}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? (
-              <PanelLeftOpen size={18} aria-hidden="true" />
-            ) : (
-              <PanelLeftClose size={18} aria-hidden="true" />
-            )}
-          </Button>
-        )}
-      </div>
-      <nav aria-label="Main navigation">
-        <div className="n-nav-group">
-          {routes.map(({id, title, Icon}) => {
-            const link = (
-              <a
-                href={'#' + id}
-                aria-current={page === id ? 'page' : undefined}
-                aria-label={compact ? title : undefined}
-                onClick={() => setMobile(false)}
-              >
-                <Icon size={18} aria-hidden="true" />
-                <span className={compact ? 'sr-only' : ''}>{title}</span>
-              </a>
-            );
-            return compact ? (
-              <Tooltip label={title} key={id}>
-                {link}
-              </Tooltip>
-            ) : (
-              <React.Fragment key={id}>{link}</React.Fragment>
-            );
-          })}
-        </div>
-      </nav>
-      <div className="n-sidebar-foot">
-        <a href="/hermes/nocheh" aria-label="Open Hermes dashboard" title="Open Hermes dashboard">
-          <Plug size={18} aria-hidden="true" />
-          <span className={compact ? 'sr-only' : ''}>Hermes</span>
-          <ArrowUpRight size={14} aria-hidden="true" />
-        </a>
-      </div>
-    </>
+
+function Navigation({
+  page,
+  onNavigate,
+  collapsed = false,
+  onToggle,
+}: {
+  page: PageId;
+  onNavigate?: () => void;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
+  const inbox = useInboxCount();
+  const [theme, cycleTheme] = useTheme();
+  const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
+  const themeName = theme === 'system' ? 'Match device' : theme === 'dark' ? 'Dark' : 'Light';
+  const label = (text: string) => <span className={collapsed ? 'sr-only' : 'flex-1 truncate'}>{text}</span>;
+  const footerItem = cn(
+    'flex items-center gap-2.5 rounded-lg py-2 text-[13px] text-muted hover:bg-subtle hover:text-fg',
+    collapsed ? 'justify-center px-0' : 'px-3',
+  );
+  const toggle = onToggle && (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={onToggle}
+      aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+      title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+    >
+      {collapsed ? <PanelLeftOpen aria-hidden /> : <PanelLeftClose aria-hidden />}
+    </Button>
   );
   return (
-    <div
-      className={'nocheh-app' + (collapsed ? ' sidebar-collapsed' : '') + (page === 'memory' ? ' n-graph-active' : '')}
-    >
-      <a
-        className="skip-link"
-        href="#main-content"
-        onClick={e => {
-          e.preventDefault();
-          document.getElementById('main-content')?.focus();
-        }}
-      >
-        Skip to content
-      </a>
-      <aside className="n-sidebar">{navigation(collapsed, true)}</aside>
-      <Sheet open={mobile} onOpenChange={setMobile} title="Navigation" side="left" returnFocus={menu.current}>
-        <div className="mobile-navigation">{navigation()}</div>
-      </Sheet>
-      <main className="n-main" id="main-content" tabIndex={-1}>
-        <header className="n-header">
-          <div className="page-title">
-            <Button
-              className="mobile-menu"
-              size="icon"
-              onClick={() => setMobile(true)}
-              ref={menu}
-              aria-label="Open navigation"
-            >
-              <Menu size={20} />
-            </Button>
-            <div>
-              <h1 ref={heading} tabIndex={-1}>
-                {route.title}
-              </h1>
-              <p className="n-page-description">{route.description}</p>
-            </div>
-          </div>
-          <div className="header-actions">
-            <PersistentStatus />
-            <ThemeSelect />
-            <Button onClick={refresh} disabled={refreshing} aria-label="Refresh page data">
-              <RefreshCw size={15} className={refreshing ? 'refreshing' : ''} />
-              <span>Refresh</span>
-            </Button>
-          </div>
-        </header>
-        {notice && (
-          <div className={'n-notice ' + (notice.error ? 'n-error' : '')} role={notice.error ? 'alert' : 'status'}>
-            <span>{notice.text}</span>
-            <Button size="icon" variant="ghost" onClick={() => setNotice(null)} aria-label="Dismiss notification">
-              <X size={16} />
-            </Button>
-          </div>
-        )}
-        <div className="page-content" key={page}>
-          <Current notify={notify} call={call} renderSource={renderSource} />
-        </div>
-        <footer>Owned sources. Useful memory. Clear operations.</footer>
-      </main>
+    <div className="flex h-full flex-col">
+      <div className={cn('mb-5 flex items-center gap-2 pt-1', collapsed ? 'flex-col' : 'justify-between pr-1')}>
+        <a href="#home" onClick={onNavigate} className={cn('flex items-center gap-2.5', !collapsed && 'px-3')}>
+          <span
+            aria-hidden
+            className="grid size-8 place-items-center rounded-lg bg-accent text-base font-bold text-on-accent"
+          >
+            ن
+          </span>
+          <span className={collapsed ? 'sr-only' : 'text-[15px] font-semibold'}>Nocheh</span>
+        </a>
+        {toggle}
+      </div>
+      <nav aria-label="Main" className="flex flex-col gap-0.5">
+        {nav.map(({id, title, Icon}) => (
+          <a
+            key={id}
+            href={'#' + id}
+            onClick={onNavigate}
+            title={collapsed ? title : undefined}
+            aria-current={page === id ? 'page' : undefined}
+            className={cn(
+              'relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+              collapsed ? 'justify-center px-0' : 'px-3',
+              page === id ? 'bg-accent-soft text-accent-text' : 'text-fg/80 hover:bg-subtle hover:text-fg',
+            )}
+          >
+            <Icon className="size-[18px] shrink-0" />
+            {label(title)}
+            {id === 'inbox' &&
+              !!inbox &&
+              (collapsed ? (
+                <span className="absolute top-1.5 right-2.5 size-2 rounded-full bg-accent">
+                  <span className="sr-only">, {inbox} waiting</span>
+                </span>
+              ) : (
+                <span className="tabular rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-on-accent">
+                  {inbox > 99 ? '99+' : inbox}
+                </span>
+              ))}
+          </a>
+        ))}
+      </nav>
+      <div className="mt-auto flex flex-col gap-0.5 border-t border-line pt-3">
+        <HealthLink onNavigate={onNavigate} collapsed={collapsed} />
+        <a href="/hermes/nocheh" className={footerItem} title={collapsed ? 'Assistant console' : undefined}>
+          <Activity className="size-4 shrink-0" />
+          {label('Assistant console')}
+          {!collapsed && <ArrowUpRight className="size-3.5" />}
+        </a>
+        <button
+          type="button"
+          onClick={cycleTheme}
+          className={cn(footerItem, 'text-left')}
+          title={collapsed ? themeName : undefined}
+          aria-label={`Appearance: ${themeName}. Change appearance`}
+        >
+          <ThemeIcon className="size-4 shrink-0" />
+          {!collapsed && <span>{themeName}</span>}
+        </button>
+      </div>
     </div>
   );
 }
-createRoot(document.getElementById('root')!).render(<App />);
+
+function useCollapsed(): [boolean, () => void] {
+  const [collapsed, setCollapsed] = React.useState(() => {
+    try {
+      return localStorage.getItem('nocheh.sidebar.v1') === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setCollapsed(current => {
+      try {
+        localStorage.setItem('nocheh.sidebar.v1', current ? 'expanded' : 'collapsed');
+      } catch {}
+      return !current;
+    });
+  return [collapsed, toggle];
+}
+
+function App() {
+  useHash();
+  const page = resolveRoute(location.hash).page;
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [collapsed, toggleCollapsed] = useCollapsed();
+  const main = React.useRef<HTMLElement>(null);
+  React.useEffect(() => {
+    main.current?.scrollTo({top: 0});
+  }, [page]);
+  const Current = pages[page];
+  return (
+    <div className="flex h-dvh overflow-hidden">
+      <aside
+        className={cn(
+          'hidden shrink-0 border-r border-line bg-surface p-3 lg:block',
+          collapsed ? 'w-[68px] px-2' : 'w-60',
+        )}
+      >
+        <Navigation page={page} collapsed={collapsed} onToggle={toggleCollapsed} />
+      </aside>
+      <DialogPrimitive.Root open={menuOpen} onOpenChange={setMenuOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay lg:hidden" />
+          <DialogPrimitive.Content
+            aria-describedby={undefined}
+            className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] border-r border-line bg-surface p-3 shadow-xl focus:outline-none lg:hidden"
+          >
+            <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
+            <DialogPrimitive.Close asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Close navigation" className="absolute top-3 right-3">
+                <X aria-hidden />
+              </Button>
+            </DialogPrimitive.Close>
+            <Navigation page={page} onNavigate={() => setMenuOpen(false)} />
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 lg:hidden">
+          <Button variant="ghost" size="icon" aria-label="Open navigation" onClick={() => setMenuOpen(true)}>
+            <Menu aria-hidden />
+          </Button>
+          <a href="#home" className="flex items-center gap-2 font-semibold">
+            <span
+              aria-hidden
+              className="grid size-7 place-items-center rounded-md bg-accent text-sm font-bold text-on-accent"
+            >
+              ن
+            </span>
+            Nocheh
+          </a>
+        </header>
+        <main ref={main} id="main" className="min-h-0 flex-1 overflow-y-auto">
+          <React.Suspense
+            fallback={
+              <div className="grid h-64 place-items-center">
+                <Spinner className="size-5" />
+              </div>
+            }
+          >
+            <Current key={page} />
+          </React.Suspense>
+          <div className="pointer-events-none sticky bottom-0 z-30 mx-auto w-full max-w-6xl px-4 sm:px-8">
+            <SaveBar />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(
+  <FeedbackProvider>
+    <App />
+  </FeedbackProvider>,
+);
