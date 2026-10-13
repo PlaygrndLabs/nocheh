@@ -1,10 +1,12 @@
 /** What Nocheh did: decided actions and their results, and assistant runs. */
 import {useState, type ReactNode} from 'react';
-import {Bot, CalendarClock, History as HistoryIcon, MessageSquare} from 'lucide-react';
+import {Bot, CalendarClock, FolderTree, History as HistoryIcon, MessageSquare} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {href} from '../../lib/routes';
+import {decisionLink, proposalState} from '../../lib/supervision';
 import {Badge, Card, CardHeader, Empty, LoadError, LoadingRows, Pager} from '../../ui/core';
 import {runName} from './drawers';
+import {proposalTitle} from './knowledge-review';
 import {
   actionIcon,
   actionName,
@@ -70,6 +72,8 @@ export function History() {
         </div>
         <Pager page={actionPage} hasNext={(actionPage + 1) * PAGE < actions.length} onPage={setActionPage} />
       </Card>
+
+      <Organizing />
 
       <Card>
         <CardHeader
@@ -161,5 +165,72 @@ function Row({
         </span>
       </span>
     </a>
+  );
+}
+
+type Proposal = {
+  id: string;
+  kind: string;
+  state: string;
+  created_at: string;
+  proposal?: {kind?: string; reason?: string};
+};
+const proposalTone = (state: string) =>
+  state === 'applied' ? 'good' : ['failed', 'stale'].includes(state) ? 'bad' : state === 'review' ? 'warn' : 'neutral';
+
+/** Changes to how memory is organized, including the ones Nocheh applied by itself; each opens its review, where it can be cancelled or undone. */
+function Organizing() {
+  const [cursors, setCursors] = useState<string[]>(['']);
+  const list = useResource<{proposals: Proposal[]; next: string | null}>(
+    '/knowledge/proposals?after=' + encodeURIComponent(cursors.at(-1) ?? ''),
+    30000,
+  );
+  const items = list.data?.proposals ?? [];
+  return (
+    <Card>
+      <CardHeader
+        title="Memory organizing"
+        description="Projects Nocheh created or chats it sorted, with your decisions. Open one to cancel or undo it."
+      />
+      <div className="pt-3">
+        {list.error && (
+          <LoadError className="mx-5 mb-3" what="organizing changes" onRetry={() => void refreshResources()} />
+        )}
+        {!list.data ? (
+          list.error ? null : (
+            <LoadingRows rows={2} />
+          )
+        ) : items.length === 0 ? (
+          <Empty icon={FolderTree} title="No organizing changes yet">
+            When Nocheh suggests or makes a change to your projects, it shows here.
+          </Empty>
+        ) : (
+          <ul className="divide-y divide-line border-t border-line">
+            {items.map(item => (
+              <li key={item.id}>
+                <Row
+                  href={decisionLink('knowledge', item.id)}
+                  icon={<FolderTree className="size-4" />}
+                  title={proposalTitle(String(item.proposal?.kind ?? item.kind))}
+                  summary={item.proposal?.reason ?? ''}
+                  meta=""
+                  badge={<Badge tone={proposalTone(item.state)}>{proposalState(item.state)}</Badge>}
+                  time={item.created_at}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <Pager
+        page={cursors.length - 1}
+        hasNext={!!list.data?.next}
+        onPage={page =>
+          setCursors(current =>
+            page < current.length - 1 ? current.slice(0, page + 1) : [...current, list.data!.next!],
+          )
+        }
+      />
+    </Card>
   );
 }

@@ -2,6 +2,7 @@ import {useResource} from '../../lib/resource';
 import {useSettings} from '../../lib/settings';
 import {href} from '../../lib/routes';
 import {Badge, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
+import {LinkButton} from '../../ui/link-button';
 
 export const telegramKeys = [
   'TELEGRAM_ENABLED',
@@ -30,6 +31,11 @@ export function TelegramSettings() {
   const known = (identities.data?.groups ?? []).flatMap((g: any) => g.users ?? []).find((u: any) => u.id === owner);
   const enabled = s.value('TELEGRAM_ENABLED') === 'true';
   const token = s.field('TELEGRAM_BOT_TOKEN');
+  const groups = s
+    .value('TELEGRAM_GROUP_IDS')
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean);
   return (
     <>
       {!enabled && (
@@ -79,7 +85,7 @@ export function TelegramSettings() {
               type="password"
               autoComplete="off"
               value={s.value('TELEGRAM_BOT_TOKEN')}
-              placeholder={token?.configured ? '••••••••' : 'Paste the bot token'}
+              placeholder={token?.configured ? '****' : 'Paste the bot token'}
               disabled={s.busy}
               onChange={e => s.set('TELEGRAM_BOT_TOKEN', e.target.value.trim())}
             />
@@ -125,6 +131,23 @@ export function TelegramSettings() {
           className="pb-3"
         />
         <div className="border-t border-line">
+          <SettingRow
+            title={
+              <>
+                Groups Nocheh is on in
+                <Unsaved show={s.changed('TELEGRAM_GROUP_IDS')} />
+              </>
+            }
+            description={
+              groups.length
+                ? `On in ${groups.length} ${groups.length === 1 ? 'group' : 'groups'}.`
+                : 'No groups are selected. Your private messages with Nocheh still work.'
+            }
+          >
+            <div className="flex sm:justify-end">
+              <LinkButton href={href('chats')}>Choose in Chats</LinkButton>
+            </div>
+          </SettingRow>
           <SettingRow
             title={
               <>

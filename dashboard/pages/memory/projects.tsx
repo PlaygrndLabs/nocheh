@@ -21,12 +21,12 @@ import {
   LoadError,
   LoadingRows,
   Notice,
-  Select,
   Switch,
   Textarea,
   type Tone,
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
+import {ChatPicker} from '../chats/chat-picker';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
 
 type Project = {id: string; name: string; description: string; state: 'active' | 'archived'; revision: number};
@@ -360,7 +360,6 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   const [adding, setAdding] = useState('');
   const members = context.conversations;
   const ownOf = (space: string) => own.find(row => row.space_id === space);
-  const candidates = chats.items.filter(chat => !members.some(member => member.space_id === chat.space_id));
   const elsewhere = (space: string) => {
     const assignment = ownOf(space);
     return assignment?.mode === 'assigned' && assignment.project_id !== project.id
@@ -426,21 +425,19 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
         </ul>
       )}
       {project.state === 'active' && (
-        <div className="mt-3 flex flex-wrap items-end gap-2">
-          <Field label="Add a chat" htmlFor="project-add-chat" className="min-w-48 flex-1">
-            <Select id="project-add-chat" value={adding} onChange={event => setAdding(event.target.value)}>
-              <option value="">Choose a chat…</option>
-              {candidates.map(chat => {
-                const other = elsewhere(chat.space_id);
-                return (
-                  <option key={chat.space_id} value={chat.space_id}>
-                    {chats.name(chat.space_id)}
-                    {other ? ` (in ${other})` : ''}
-                  </option>
-                );
-              })}
-            </Select>
-          </Field>
+        <div className="mt-3 space-y-2">
+          <ChatPicker
+            label="Add a chat"
+            value={adding ? [adding] : []}
+            onChange={ids => setAdding(ids.at(-1) ?? '')}
+            exclude={members.map(member => member.space_id)}
+            disabled={command.busy}
+            hint={
+              adding && elsewhere(adding)
+                ? `It is in ${elsewhere(adding)} now; adding it here moves it.`
+                : 'A chat belongs to one project at a time.'
+            }
+          />
           <Button variant="primary" busy={command.busy} disabled={!adding} onClick={() => void add()}>
             Add
           </Button>
@@ -608,18 +605,14 @@ function AutoOrganize({projects}: {projects: Project[]}) {
                 <li key={item.id} className="flex flex-wrap items-center gap-2 text-[13px]">
                   <span className="min-w-0 flex-1 truncate">{item.proposal?.reason || 'Organizing change'}</span>
                   <span className="text-xs text-muted">{when(item.created_at)}</span>
-                  {item.state === 'review' ? (
-                    <a
-                      className="font-medium text-accent-text hover:underline"
-                      href={decisionLink('knowledge', item.id)}
-                    >
-                      Review
-                    </a>
-                  ) : (
+                  {item.state !== 'review' && (
                     <Badge tone={item.state === 'applied' ? 'good' : item.state === 'failed' ? 'bad' : 'neutral'}>
                       {proposalState(item.state)}
                     </Badge>
                   )}
+                  <a className="font-medium text-accent-text hover:underline" href={decisionLink('knowledge', item.id)}>
+                    {item.state === 'review' ? 'Review' : 'Open'}
+                  </a>
                 </li>
               ))}
             </ul>
@@ -649,12 +642,12 @@ function DelegationDialog({
 }) {
   const feedback = useFeedback();
   const command = useCommand();
-  const chats = useChats();
   const [name, setName] = useState(item?.name ?? 'Organize my chats');
   const [scopes, setScopes] = useState<string[]>(item?.scopes ?? []);
   const [allowed, setAllowed] = useState<string[]>(item?.project_ids ?? []);
-  const [create, setCreate] = useState(item?.allow_create ?? true);
-  const [enabled, setEnabled] = useState(item ? item.enabled : true);
+  // A new permission starts off and without project creation until the owner turns them on.
+  const [create, setCreate] = useState(item?.allow_create ?? false);
+  const [enabled, setEnabled] = useState(item?.enabled ?? false);
   const [until, setUntil] = useState(item?.expires_at && !item.expired ? item.expires_at.slice(0, 10) : '');
   const [resume, setResume] = useState(false);
   const suspended = (item?.suspended_scopes ?? []).filter(scope => scopes.includes(scope));
@@ -678,8 +671,6 @@ function DelegationDialog({
       onClose();
     }
   };
-  const known = chats.items.map(chat => chat.space_id);
-  const allChats = [...known, ...scopes.filter(scope => !known.includes(scope))];
   return (
     <Dialog
       open
@@ -706,31 +697,13 @@ function DelegationDialog({
         <Field label="Name" htmlFor="delegation-name">
           <Input id="delegation-name" value={name} maxLength={200} onChange={event => setName(event.target.value)} />
         </Field>
-        <fieldset>
-          <legend className="text-[13px] font-medium">Chats it may organize</legend>
-          <p className="mb-2 text-xs text-muted">Choosing a group doesn’t include its topics.</p>
-          {chats.loading && !chats.items.length ? (
-            <LoadingRows rows={2} />
-          ) : allChats.length === 0 ? (
-            <p className="text-[13px] text-muted">No chats found yet.</p>
-          ) : (
-            <ul className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-line p-2">
-              {allChats.map(space => (
-                <li key={space}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-subtle">
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-accent"
-                      checked={scopes.includes(space)}
-                      onChange={event => setScopes(toggle(scopes, space, event.target.checked))}
-                    />
-                    {chats.name(space)}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
-        </fieldset>
+        <ChatPicker
+          label="Chats it may organize"
+          multiple
+          value={scopes}
+          onChange={setScopes}
+          hint="Choosing a group doesn’t include its topics."
+        />
         {active.length > 0 && (
           <fieldset>
             <legend className="text-[13px] font-medium">Existing projects it may use</legend>

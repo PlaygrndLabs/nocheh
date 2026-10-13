@@ -119,7 +119,7 @@ export function People() {
           }
           action={
             <a
-              href="#inbox"
+              href="#inbox?filter=entity"
               className="inline-flex h-8 items-center rounded-lg border border-line-strong bg-surface px-2.5 text-[13px] font-medium text-fg hover:bg-subtle"
             >
               Review in Inbox

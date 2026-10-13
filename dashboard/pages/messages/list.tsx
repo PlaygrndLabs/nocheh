@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {useResource, refreshResources} from '../../lib/resource';
-import {setParams} from '../../lib/routes';
+import {href, setParams} from '../../lib/routes';
 import {cn} from '../../lib/utils';
 import {
   actionStatus,
@@ -323,10 +323,21 @@ function MessageItem({row, chat, onOpen}: {row: MessageRow; chat: string; onOpen
               {status.label}
             </Badge>
           )}
-          {action && <Badge tone={action.tone}>{action.label}</Badge>}
           {row.retired && <Badge>Hidden from assistant</Badge>}
         </span>
       </button>
+      {action && row.action_review && (
+        <a
+          href={href('inbox', {action: row.action_review.id})}
+          className="-mt-1 flex w-fit flex-wrap items-center gap-1.5 pr-4 pb-3 pl-[60px] text-xs font-medium text-accent-text hover:underline sm:pr-5 sm:pl-[64px]"
+        >
+          <Badge tone={action.tone}>
+            {action.label}
+            {row.action_review.count > 1 ? ` (${row.action_review.count})` : ''}
+          </Badge>
+          Open the review ›
+        </a>
+      )}
       {(row.reply_messages ?? []).map(message => (
         <ReplyItem key={message.id} message={message} onOpen={onOpen} />
       ))}

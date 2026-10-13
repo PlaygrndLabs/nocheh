@@ -203,7 +203,11 @@ pull request is merged and the stack restarted. Open server gaps found while
 building it: `/decisions` items carry no summary, `/tools/actions/<id>` is not
 proxied, `/entities/claims/<id>/history` is not on the owner allowlist, `/learned`
 has no text search, message lists carry no sender, a failed import preview stays
-"uploading", `/runtime` reports no capabilities, and the unused
+"uploading", `/runtime` reports no capabilities, the import preview has no date range,
+`/v1/data` rows carry no agent-copy readiness, `/events/<id>` carries no reply
+state, workflow health has no oldest wait per kind, and `POST
+/memory-access/grants` cannot make a one-time grant. The new dashboard does not
+yet list internal service keys by service and use (a Monitoring spec). The unused
 `services/hermes/dashboard/graph-3d.js` build can go once the Docker images stop
 copying its folder.
 

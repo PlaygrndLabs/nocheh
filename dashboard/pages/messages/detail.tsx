@@ -386,7 +386,7 @@ function FileRow({file}: {file: any}) {
           )}
           {length && <span className="ml-1.5 text-muted">{length}</span>}
         </span>
-        {!ready && <Badge tone="info">Downloading from Telegram</Badge>}
+        {!ready && <Badge>Not downloaded yet</Badge>}
         {ready && media && !url && (
           <Button size="sm" variant="ghost" busy={loading} onClick={() => void preview()}>
             <Play aria-hidden /> {media === 'image' ? 'View' : 'Play'}

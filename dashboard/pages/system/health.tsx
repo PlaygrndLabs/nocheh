@@ -181,18 +181,24 @@ function Services({m, error}: {m: any; error: boolean}) {
 
 function ServiceRow({row}: {row: any}) {
   const state = serviceState(row.state);
-  const unexpected = row.state === 'unhealthy';
   return (
     <li className="flex items-start gap-3 border-t border-line px-5 py-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{serviceName(row)}</p>
         <p className="text-[13px] text-muted">{servicePurpose(row)}</p>
+        <p className="text-xs text-muted">
+          {[
+            row.location === 'docker' ? 'In a container' : row.location === 'host' ? 'On this computer' : row.location,
+            expectedState(row.expected_state),
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         <Badge tone={state.tone} dot>
           {state.label}
         </Badge>
-        {unexpected && <span className="text-xs text-muted">{expectedState(row.expected_state)}</span>}
       </div>
     </li>
   );
