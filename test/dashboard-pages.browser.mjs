@@ -252,7 +252,7 @@ test('settings keeps every section reachable, with one save and apply bar', asyn
   const tabs = page.getByRole('tablist', {name: 'Settings sections'});
   const sections = [
     ['Telegram', 'Telegram access', ['Names that address Nocheh', 'Group replies']],
-    ['Models', 'Models', ['Reasoning model', 'Embedding model']],
+    ['Models', 'Providers', ['Provider', 'Model']],
     ['Speed', 'Speed', ['Parallel agent runs', 'Chats answered at once', 'Guard checks at once']],
     ['Privacy', 'Privacy', ['Secret guarding']],
     ['Advanced', 'Advanced', []],
@@ -277,6 +277,29 @@ test('settings keeps every section reachable, with one save and apply bar', asyn
   await bar.getByText('Names that address Nocheh: Nocheh,Helper').waitFor();
   await bar.getByRole('button', {name: 'Save changes'}).click();
   await bar.getByRole('button', {name: 'Apply saved settings'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('models let the owner add a custom provider and give one part its own provider', async () => {
+  const {page, problems} = await open('settings?view=models');
+  await page.getByRole('heading', {name: 'Which provider each part uses'}).waitFor();
+  await page.getByRole('button', {name: 'Add custom provider'}).click();
+  await page.getByLabel('Name', {exact: true}).fill('sub2api');
+  await page.getByLabel('Address', {exact: true}).fill('https://gateway.example.test/v1');
+  await page.locator('#key-custom-1').fill('synthetic-gateway-key');
+  await page.locator('#memory-provider').selectOption('custom-1');
+  await page.locator('#memory-model').fill('gpt-5.6-sol');
+  const bar = page.getByRole('region', {name: 'Save and apply settings'});
+  await bar.getByRole('button', {name: 'Review changes'}).click();
+  await bar.getByText('Custom providers: sub2api').waitFor();
+  await bar.getByText('Custom provider API keys: Replace stored credential').waitFor();
+  await bar.getByText('Memory provider: sub2api').waitFor();
+  assert.equal(await bar.getByText('synthetic-gateway-key').count(), 0);
+  await bar.getByRole('button', {name: 'Save changes'}).click();
+  await bar.getByRole('button', {name: 'Apply saved settings'}).waitFor();
+  // A provider still used by a part cannot be removed.
+  assert.equal(await page.getByRole('button', {name: 'Remove sub2api'}).isDisabled(), true);
   assert.deepEqual(problems, []);
   await page.close();
 });

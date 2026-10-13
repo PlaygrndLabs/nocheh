@@ -30,7 +30,10 @@ x-service: &service
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
     HONCHO_URL: http://honcho-memory:8000
-    NOCHEH_MODEL: ${NOCHEH_MODEL:-claude-sonnet-5-5}
+    # The reply model: the security broker admits only this model and provider address.
+    NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+    NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-http://cliproxy-api:8317/v1}
+    NOCHEH_GUARD_ROUTE_MODEL: ${NOCHEH_GUARD_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
     NOCHEH_PARALLEL_GUARD_CHECKS: ${NOCHEH_PARALLEL_GUARD_CHECKS:-3}
     GUARD_TRUSTED_ENDPOINTS: ${NOCHEH_GUARD_TRUSTED_ENDPOINTS:-["https://chatgpt.com/backend-api/codex","http://cliproxy-api:8317/v1"]}
@@ -293,7 +296,7 @@ services:
   honcho-provider-gateway:
     logging: *logging
     init: true
-    environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MODEL:-claude-sonnet-5-5}"}
+    environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MEMORY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}"}
     profiles: [honcho]
     restart: unless-stopped
     image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
@@ -605,7 +608,13 @@ services:
       NOCHEH_PARALLEL_GUARD_CHECKS: ${NOCHEH_PARALLEL_GUARD_CHECKS:-3}
       CLIPROXY_HERMES_KEY_FILE: /run/secrets/cliproxy_hermes_key
       SPEECH_URL: http://chatgpt-speech:8783
-      NOCHEH_MODEL: ${NOCHEH_MODEL:-claude-sonnet-5-5}
+      # Settings › Models: replies and secret checks each use their own provider and model.
+      NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+      NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-http://cliproxy-api:8317/v1}
+      NOCHEH_REPLY_ROUTE_KEY: ${NOCHEH_REPLY_ROUTE_KEY:-}
+      NOCHEH_GUARD_ROUTE_URL: ${NOCHEH_GUARD_ROUTE_URL:-http://cliproxy-api:8317/v1}
+      NOCHEH_GUARD_ROUTE_MODEL: ${NOCHEH_GUARD_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+      NOCHEH_GUARD_ROUTE_KEY: ${NOCHEH_GUARD_ROUTE_KEY:-}
       ARCHIVE_URL: http://nocheh-app:8780
       GUARD_URL: http://nocheh-security:8786
     volumes:

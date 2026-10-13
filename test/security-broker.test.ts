@@ -4,7 +4,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {turnToken} from '../src/access.js';
-import {brokerServer,providerTarget,scopedRoute} from '../src/security/broker.js';
+import {brokerServer,configuredReplyUrl,providerTarget,scopedRoute} from '../src/security/broker.js';
 import {effectLog} from '../src/security/store.js';
 
 test('broker supports only explicit scoped routes and fixed subscription destinations',()=>{
@@ -13,6 +13,13 @@ test('broker supports only explicit scoped routes and fixed subscription destina
   assert.equal(scopedRoute('GET','/v1/search'),true);
   assert.throws(()=>providerTarget({base_url:'https://attacker.example',api_mode:'codex_responses'},'/codex/responses'));
   assert.throws(()=>providerTarget({base_url:'https://chatgpt.com/backend-api/codex',api_mode:'codex_responses'},'/codex/models'));
+  // Settings › Models may name one HTTPS reply provider; any other address stays denied.
+  const gateway='https://gateway.example.test/v1';
+  assert.equal(providerTarget({base_url:gateway,api_mode:'chat_completions'},'/v1/chat/completions',configuredReplyUrl(gateway+'/')),gateway+'/chat/completions');
+  assert.throws(()=>providerTarget({base_url:'https://attacker.example/v1',api_mode:'chat_completions'},'/v1/chat/completions',configuredReplyUrl(gateway)));
+  assert.throws(()=>providerTarget({base_url:gateway,api_mode:'chat_completions'},'/v1/chat/completions',undefined));
+  assert.equal(configuredReplyUrl('http://gateway.example.test/v1'),undefined);
+  assert.equal(configuredReplyUrl('https://user:pass@gateway.example.test/v1'),undefined);
 });
 test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async t=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};

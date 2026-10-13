@@ -161,12 +161,24 @@ def compose(state):
             compose_environment(state))
 
 
+def builtin_logins_ready(state,parts=None):
+    """Whether every part routed to the built-in login has the login that serves its model.
+    Parts sent to another provider need no built-in login."""
+    from tools.operations.installation.configuration import DEFAULTS,env_path,read_env
+    from tools.operations.provider.routes import routes
+    selected=routes({**DEFAULTS,**read_env(env_path(state))})
+    models={route.model for part,route in selected.items() if route.builtin and (parts is None or part in parts)}
+    return all(login_state(state,login_kind(model))['login_present'] for model in models)
+
+
 def status(state):
     from tools.operations.installation.configuration import DEFAULTS,env_path,read_env
-    model=read_env(env_path(state)).get('NOCHEH_MODEL') or DEFAULTS['NOCHEH_MODEL']
+    from tools.operations.provider.routes import routes
+    selected=routes({**DEFAULTS,**read_env(env_path(state))})
     # The ChatGPT login stays reported: voice transcription uses it whatever the reasoning model.
-    info={'root':str(paths(state)[0]),**login_state(state),'clients':list(CLIENTS),'reasoning_model':model,
-          'reasoning_login_present':login_state(state,login_kind(model))['login_present']};info.update(revision=LOCK['revision'],running=False,healthy=False,
+    info={'root':str(paths(state)[0]),**login_state(state),'clients':list(CLIENTS),'reasoning_model':selected['reply'].model,
+          'reasoning_routes':{part:{'provider':route.provider,'model':route.model} for part,route in selected.items()},
+          'reasoning_login_present':builtin_logins_ready(state)};info.update(revision=LOCK['revision'],running=False,healthy=False,
         monitor={'revision':MONITOR_LOCK['revision'],'running':False,'healthy':False})
     command,env=compose(state)
     try:

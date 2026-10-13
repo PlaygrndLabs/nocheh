@@ -122,7 +122,7 @@ for a fresh setup; both models use 1536 dimensions. After the first paid attempt
 switching embedding models is blocked until memory is rebuilt, so incompatible
 vectors cannot mix. The small model reserves $0.01 per bounded request; the large
 model reserves $0.02. The total spending caps stay unchanged (ADR-0034).
-`NOCHEH_MODEL` is the separate Hermes subscription reasoning model.
+`NOCHEH_MODEL` is the default reasoning model; Settings › Models can give each part its own provider and model.
 The old `NOCHEH_EMBEDDING_API_KEY` is a migration alias; explicit `OPENAI_API_KEY`
 wins, including an empty value. Only the Honcho provider gateway receives the paid key.
 Settings displays credential presence, never its value. Edit these fields in `.env`

@@ -8,7 +8,7 @@ MODELS={'text-embedding-3-small':(0.02,10_000),'text-embedding-3-large':(0.13,20
 
 @dataclass(frozen=True)
 class Embeddings:
-    provider:str
+    provider:str  # API shape Honcho speaks to the meter; any configured OpenAI-compatible provider serves it.
     model:str
     dimensions:int
     price_per_million:float
@@ -17,9 +17,13 @@ class Embeddings:
 
 
 def embeddings(values):
-    provider=values.get('NOCHEH_EMBEDDING_PROVIDER',DEFAULTS['NOCHEH_EMBEDDING_PROVIDER'])
+    """The configured provider id is checked against Settings providers by
+    routes.validate; the meter receives only the resolved address."""
+    provider=values.get('NOCHEH_EMBEDDING_PROVIDER',DEFAULTS['NOCHEH_EMBEDDING_PROVIDER']) or DEFAULTS['NOCHEH_EMBEDDING_PROVIDER']
     model=values.get('NOCHEH_EMBEDDING_MODEL',DEFAULTS['NOCHEH_EMBEDDING_MODEL'])
-    if provider!='openai':raise ValueError('NOCHEH_EMBEDDING_PROVIDER must be openai')
+    if provider=='builtin':raise ValueError('NOCHEH_EMBEDDING_PROVIDER cannot be the built-in login, which has no embeddings')
     if model not in MODELS:raise ValueError('NOCHEH_EMBEDDING_MODEL must be text-embedding-3-small or text-embedding-3-large')
+    url=(values.get('NOCHEH_EMBEDDING_URL') or 'https://api.openai.com/v1').rstrip('/')
+    if not url.startswith('https://'):raise ValueError('NOCHEH_EMBEDDING_URL must use https')
     price,reservation=MODELS[model]
-    return Embeddings(provider,model,1536,price,reservation)
+    return Embeddings('openai',model,1536,price,reservation,url+'/embeddings')

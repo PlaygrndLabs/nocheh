@@ -665,6 +665,19 @@ from the ChatGPT login that transcription still needs. Pending: an installation
 whose `.env` pins `NOCHEH_MODEL` to a GPT model keeps it until changed; Honcho's
 JSON structured output and Hermes tool calls through CLIProxyAPI's Claude
 translation are unproven until a real-model run; no live acceptance.
+Providers per part (October 13, owner: use the hosted sub2api gateway instead
+of Nocheh's own provider; its wake-up time does not matter): Settings › Models
+now lists providers (the built-in login, OpenAI and Anthropic by API key, and
+custom OpenAI-compatible providers by HTTPS address and key) and the provider
+and model of replies, memory, the secret check and memory search, with one
+default for every part ([decision](docs/adr/0141-per-part-model-providers.md),
+[resolver](tools/operations/provider/routes.py),
+[checks](services/hermes/test_provider_routes.py),
+[browser check](test/dashboard-pages.browser.mjs)). Pending: the owner applies
+sub2api on Cloudflare, adds it in Settings and applies; then a live reply,
+memory answer and secret check through it. Honcho's structured output through
+Anthropic's OpenAI-compatible endpoint is unproven. Moving Nocheh itself to an
+always-on server is a separate, unstarted step.
 With real Claude answers the schedule scenario fires, waits for review and
 delivers once (the scheduled-run fix on main holds), but removing the finished
 one-time schedule failed: removal paused it, which Hermes refuses for a

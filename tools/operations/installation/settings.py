@@ -12,12 +12,12 @@ except ImportError:
 
 WORKFLOW_INTERNAL={'INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'}
 STORE_INTERNAL={'NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD'}
-SECRETS = {'TELEGRAM_BOT_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','OPENAI_API_KEY'} | WORKFLOW_INTERNAL | STORE_INTERNAL
-# These settings belong to the separately managed Honcho stack, not main Apply.
-HONCHO_SETTINGS={'OPENAI_API_KEY','NOCHEH_EMBEDDING_PROVIDER','NOCHEH_EMBEDDING_MODEL'}
-# The owner chooses both models in Settings; Apply also refreshes Honcho with them.
-MODEL_SETTINGS={'NOCHEH_MODEL','NOCHEH_EMBEDDING_MODEL'}
-EDITABLE = (set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - HONCHO_SETTINGS - WORKFLOW_INTERNAL - STORE_INTERNAL) | MODEL_SETTINGS
+from tools.operations.provider import routes as provider_routes
+SECRETS = {'TELEGRAM_BOT_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN'} | provider_routes.KEY_SETTINGS | WORKFLOW_INTERNAL | STORE_INTERNAL
+# Providers, keys and the provider and model of each part are chosen in
+# Settings › Models; Apply also refreshes Honcho when its routes change.
+MODEL_SETTINGS = {'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_PROVIDER', 'NOCHEH_EMBEDDING_MODEL'} | set(provider_routes.DEFAULTS)
+EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - WORKFLOW_INTERNAL - STORE_INTERNAL
 
 
 def revision(values):
@@ -31,7 +31,7 @@ def view(state):
     active = json.loads(applied.read_text()).get('revision') if applied.exists() else None
     fields = [{'key': key, 'value': None if key in SECRETS else values[key],
                'configured': bool(values[key]), 'secret': key in SECRETS,
-               'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'Honcho stack restart' if key in HONCHO_SETTINGS - MODEL_SETTINGS else 'apply / service restart'}
+               'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'apply / service restart'}
               for key in DEFAULTS]
     from tools.operations.provider.embedding_config import MODELS
     try:
@@ -43,8 +43,29 @@ def view(state):
     return {'revision': saved_revision, 'applied_revision': active,
             'models': {'reasoning': served, 'providers': choices['providers'], 'provider_running': choices['provider_running'],
                        'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state)},
+            'providers': provider_view(values),
             'apply_state': 'current' if active == saved_revision else 'pending' if active else 'unverified',
             'fields': fields}
+
+
+def provider_view(values):
+    """Providers and parts for Settings › Models, without any key value."""
+    try: known = provider_routes.providers(values)
+    except ValueError: known = provider_routes.providers({})
+    try: stored = provider_routes.keys(values)
+    except ValueError: stored = {}
+    rows = [{**row, 'has_key': row['id'] == provider_routes.BUILTIN or bool(
+        (values.get(provider_routes.PRESETS[row['id']]['key']) if row['id'] in provider_routes.PRESETS else stored.get(row['id'])) or '')}
+            for row in known.values()]
+    parts = [{'id': part, 'label': label, 'provider_setting': provider, 'model_setting': model}
+             for part, (label, provider, model) in provider_routes.PARTS.items()]
+    return {'list': rows, 'parts': parts, 'builtin': provider_routes.BUILTIN}
+
+
+def provider_models(state, provider):
+    """Models an external provider lists, fetched server-side with its saved key."""
+    if not isinstance(provider, str): raise ValueError('unknown_provider')
+    return provider_routes.list_models(load(state), provider)
 
 
 def embedding_route(state):
@@ -69,7 +90,11 @@ def save(state, changes, expected):
         if expected != revision(current): raise ValueError('configuration_conflict')
         if not isinstance(changes, dict) or set(changes) - EDITABLE: raise ValueError('unsupported_setting')
         if any(not isinstance(v, str) for v in changes.values()): raise ValueError('settings_must_be_strings')
-        updated = {**current, **changes}; validate(updated)
+        updated = {**current, **changes}
+        # The browser sends only newly typed provider keys; stored keys stay, and
+        # keys of removed custom providers are dropped.
+        updated['NOCHEH_PROVIDER_KEYS'] = provider_routes.merge_keys(current, changes)
+        validate(updated)
         locked = embedding_route(state)
         if locked and updated['NOCHEH_EMBEDDING_MODEL'] != current['NOCHEH_EMBEDDING_MODEL'] and updated['NOCHEH_EMBEDDING_MODEL'] != locked:
             # Honcho's ledger already holds vectors from another model; mixing them is refused.
@@ -116,19 +141,23 @@ def apply(state):
 
 
 def refresh_honcho(state, values):
-    """Rewrite Honcho's generated settings from the saved models and restart it if it runs."""
+    """Rewrite Honcho's generated settings from the saved routes and restart it when they changed."""
     if values.get('NOCHEH_HONCHO_ENABLED') != 'true': return 'disabled'
     try:
-        from tools.operations.installation.configuration import read_env
         from tools.operations.memory.honcho_setup import initialize, state_for
         from tools.operations.installation.configuration import owns_project
         from tools.operations.memory.honcho_runtime import operate
         if not owns_project(state): return 'skipped_unowned_state'
         honcho = state_for(state)
-        current = (read_env(honcho / 'honcho.env').get('DERIVER_MODEL_CONFIG__MODEL'),
-                   read_env(honcho / 'meter.env').get('NOCHEH_EMBEDDING_MODEL'))
-        if current == (values['NOCHEH_MODEL'], values['NOCHEH_EMBEDDING_MODEL']): return 'unchanged'
+        def generated():
+            digest = hashlib.sha256()
+            for name in ('honcho.env', 'meter.env', 'temporary_embedding_key'):
+                path = honcho / name
+                digest.update(path.read_bytes() if path.is_file() else b'-')
+            return digest.hexdigest()
+        before = generated()
         initialize(state)
+        if generated() == before: return 'unchanged'
         return 'refreshed' if operate(state, 'up') == 0 else 'failed'
     except Exception:
         return 'failed'

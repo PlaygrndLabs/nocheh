@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from tools.operations.installation import configuration
+from tools.operations.provider import routes as provider_routes
 
 PROJECT = 'nocheh'
 DEV_IMAGES = 'nocheh-dev'
@@ -128,6 +129,8 @@ def docker_env(root, values):
             'XDG_RUNTIME_DIR', 'SSL_CERT_FILE')
     env = {name: os.environ[name] for name in keep if name in os.environ}
     env.update(values)
+    # Settings › Models: the resolved provider and model of replies and secret checks.
+    env.update(provider_routes.environment(values))
     env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_DEV_PROJECT=DEV_IMAGES,
                NOCHEH_DEV_SOURCE_ROOT=str(ROOT), NOCHEH_INSTALLATION_ROOT=str(root),
                NOCHEH_STATE_DIR=str(root / 'data/local'),

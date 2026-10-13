@@ -5,14 +5,14 @@ import subprocess
 from services.honcho.cli.cli_runner import validate
 from tools.operations.memory.honcho_setup import ROOT, STATE, PROVIDER_STATE, initialize, sources, runtime_init, runtime_up, monthly
 from tools.operations.memory.honcho_runtime import enabled, operate
-from tools.operations.provider.provider import compose, login, login_state, login_kind
+from tools.operations.provider.provider import compose, login
 
 
 def reasoning_login(state):
-    """Whether the provider login that serves the configured reasoning model exists."""
-    from tools.operations.installation.configuration import DEFAULTS, env_path, read_env
-    model = read_env(env_path(state)).get('NOCHEH_MODEL') or DEFAULTS['NOCHEH_MODEL']
-    return login_state(state, login_kind(model))['login_present']
+    """Whether Honcho's reasoning provider is usable: the built-in login that serves
+    its model, or another provider, whose key Settings validation requires."""
+    from tools.operations.provider.provider import builtin_logins_ready
+    return builtin_logins_ready(state, {'memory'})
 
 
 def status():

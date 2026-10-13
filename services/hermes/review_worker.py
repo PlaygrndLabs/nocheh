@@ -125,7 +125,7 @@ def start(root,policy,model,credentials,body):
 
 
 def _review(profile,policy,model,credentials,body):
-    env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE') if key in os.environ}
+    env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL') if key in os.environ}
     env.update(HERMES_HOME=str(profile),NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
     transport = credentials.runtime() if hasattr(credentials,'runtime') else {
         'api_key':credentials.access_token,'base_url':'https://chatgpt.com/backend-api/codex',

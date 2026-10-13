@@ -35,7 +35,7 @@ export function settings() {
     honchoUrl:process.env.HONCHO_URL??'http://honcho-api:8000',
     memoryToken:process.env.NOCHEH_MEMORY_TOKEN??'',
     guardMode: mode as 'off' | 'on',
-    guardTrusted:trusted as string[],detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_MODEL ?? 'claude-sonnet-5-5'}`,
+    guardTrusted:trusted as string[],detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_GUARD_ROUTE_MODEL || process.env.NOCHEH_MODEL || 'claude-sonnet-5-5'}`,
     assistant:assistantPolicy(process.env.ASSISTANT_POLICY_FILE),
   };
 }

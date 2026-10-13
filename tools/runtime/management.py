@@ -138,8 +138,9 @@ def dispatch(body):
             raise ValueError('archive_route_denied')
         return API().call(path)
     if operation.startswith('settings.'):
-        from tools.operations.installation.settings import view, save, apply
+        from tools.operations.installation.settings import view, save, apply, provider_models
         if operation == 'settings.view': return view(state)
+        if operation == 'settings.provider_models': return provider_models(state, body.get('provider'))
         if operation == 'settings.save': return save(state, body['changes'], body['revision'])
         if operation == 'settings.apply': return apply(state)
     if operation == 'telegram.directory':
