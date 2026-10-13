@@ -53,7 +53,7 @@ def initialize(provider_state=PROVIDER_STATE):
                                          (state/'temporary_embedding_key').read_text())).encode()).hexdigest()[:16]
     (state/'meter.env').write_text(f'NOCHEH_EMBEDDING_PROVIDER={embedded.provider}\nNOCHEH_EMBEDDING_MODEL={embedding.model}\n'
                                    f'NOCHEH_EMBEDDING_URL={embedded.url}\nNOCHEH_REASONING_URL={reasoning.url}\n'
-                                   f'NOCHEH_REASONING_MODEL={reasoning.model}\nNOCHEH_REASONING_KEY={reasoning_key}\n'
+                                   f'NOCHEH_REASONING_PROVIDER={reasoning.provider}\nNOCHEH_REASONING_MODEL={reasoning.model}\nNOCHEH_REASONING_KEY={reasoning_key}\n'
                                    f'NOCHEH_ROUTE_REVISION={revision}\n')
     env={'DB_CONNECTION_URI':f'postgresql+psycopg://experiment:{password}@database:5432/honcho_experiment',
          'CACHE_URL':'redis://redis:6379/0?suppress=true','CACHE_ENABLED':'true','AUTH_USE_AUTH':'false',

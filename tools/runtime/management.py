@@ -109,6 +109,9 @@ def dispatch(body):
         if operation == 'honcho.budget.update':
             from tools.operations.memory.honcho_budget import update
             return update(body['request'],state)
+    if operation == 'usage.view':
+        from tools.operations.provider.usage import view
+        return view(state, body.get('days', 30))
     if operation == 'hermes.manage':
         from tools.operations.archive.archive import API
         import urllib.error

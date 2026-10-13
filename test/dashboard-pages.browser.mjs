@@ -37,7 +37,7 @@ const routes = [
   ]),
   ...['working', 'learned', 'relations', 'graph', 'honcho'].map(view => ['memory?view=' + view, 'Memory']),
   ...['messages', 'imports'].map(view => ['archive?view=' + view, 'Archive']),
-  ...['health', 'connections', 'databases', 'maintenance'].map(view => ['system?view=' + view, 'System']),
+  ...['health', 'usage', 'connections', 'databases', 'maintenance'].map(view => ['system?view=' + view, 'System']),
 ];
 
 let server, browser;
@@ -277,6 +277,25 @@ test('settings keeps every section reachable, with one save and apply bar', asyn
   await bar.getByText('Names that address Nocheh: Nocheh,Helper').waitFor();
   await bar.getByRole('button', {name: 'Save changes'}).click();
   await bar.getByRole('button', {name: 'Apply saved settings'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('usage shows every part’s calls, tokens and cost in one place', async () => {
+  const {page, problems} = await open('system?view=usage');
+  await page.getByRole('heading', {name: 'Model usage'}).waitFor();
+  const totals = page.getByLabel('Usage totals');
+  await totals.getByText('58', {exact: true}).waitFor();
+  // A custom provider without a known price is never counted as free.
+  await totals.getByText('At least $0.22').waitFor();
+  const reply = page.getByRole('rowgroup', {name: 'Telegram replies'});
+  await reply.getByText('2 models').waitFor();
+  await reply.getByText('my-gateway · claude-sonnet-5-5').waitFor();
+  await page.getByRole('rowgroup', {name: 'Memory', exact: true}).getByText('Unknown').waitFor();
+  await page.getByRole('rowgroup', {name: 'Browser chat'}).getByText('Not used in this period').waitFor();
+  await page.getByRole('group', {name: 'Usage period'}).getByRole('button', {name: 'Today'}).click();
+  await totals.getByText('53', {exact: true}).waitFor();
+  await page.getByRole('rowgroup', {name: 'Telegram replies'}).getByText('OpenAI · gpt-5.6-sol').waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });

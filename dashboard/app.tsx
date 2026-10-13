@@ -82,7 +82,7 @@ const routes: Route[] = [
     id: 'system',
     title: 'System',
     Icon: Server,
-    description: 'Health, connections, databases, backups and maintenance.',
+    description: 'Health, model usage, connections, databases, backups and maintenance.',
     Page: System,
   },
   {

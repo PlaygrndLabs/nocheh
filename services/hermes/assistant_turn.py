@@ -94,6 +94,10 @@ def install_tool_search_policy():
     return restore
 
 
+# Hermes run results of this process, for Nocheh's usage tracker (token counts and cost, no content).
+RUNS=[]
+
+
 def conversation_result(result, session_id, limited_memory=False):
     """Only explicit native completion with an answer or silence marker succeeds."""
     if (not isinstance(result,dict) or result.get('completed') is not True
@@ -203,7 +207,7 @@ def run(body, emit=None):
             agent._memory_store.user_char_limit=prefs['memory.user_char_limit']
         if review:
             from .native_memory import native_review
-            return native_review(agent, body['text'])
+            return native_review(agent, body['text'], RUNS)
         verify_profile_tools(agent.valid_tool_names)
         for tool in agent.tools:
             if tool['function']['name']=='session_search':
@@ -233,6 +237,7 @@ def run(body, emit=None):
                 message.append({'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(data).decode()}})
         from .timing import measure
         with measure('conversation'):result=agent.run_conversation(message,**options)
+        RUNS.append(result)
         return conversation_result(result,agent.session_id,memory.get('limited_memory',False))
     finally:
         agent.close();database.close();restore_evidence()
@@ -274,6 +279,9 @@ def main():
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names
     record('total',started);result['timings']=safe(VALUES)
+    from .usage import combine
+    measured=combine(RUNS)
+    if measured:result['usage']=measured
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()
 
 

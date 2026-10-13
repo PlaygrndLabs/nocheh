@@ -69,6 +69,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const runtimeStatus=await call('status',{},5000).catch(()=>({ok:false,error:'runtime_unavailable'}));
       return json(res,200,{id:'hermes',status:runtimeStatus});
     }
+    if(req.method==='POST'&&path==='/v1/runtime/usage-price'){
+      // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.
+      admin(principal);
+      return json(res,200,await call('usage.price',object(await readJson(req,512*1024)),15000));
+    }
     if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
       admin(principal);
       if(req.method!=='POST'||!(path==='/v1/import'||path==='/v1/memory/reviews'||/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)))throw new HttpError(403,'import_route_denied');

@@ -54,6 +54,9 @@ def _catalog(state):
             continue
         databases.append({'id': 'hermes:' + profile.name, 'name': 'Hermes · ' + profile.name,
                           'engine': 'sqlite', 'path': path})
+    usage = root / 'usage/usage.sqlite'
+    if not usage.is_symlink() and not usage.parent.is_symlink():
+        databases.append({'id': 'usage', 'name': 'Model usage', 'engine': 'sqlite', 'path': usage})
     honcho_state = Path(config.get('NOCHEH_HONCHO_STATE_DIR') or Path(state) / 'honcho')
     ledger = honcho_state / 'ledger/budget.sqlite'
     if config.get('NOCHEH_HONCHO_ENABLED') == 'true' and not ledger.is_symlink():

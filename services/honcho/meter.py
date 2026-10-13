@@ -70,6 +70,12 @@ class Ledger:
             db.execute('CREATE TABLE IF NOT EXISTS call_rollups(month TEXT NOT NULL, route TEXT NOT NULL, outcome TEXT NOT NULL, '
                        'calls INTEGER NOT NULL, reserved INTEGER NOT NULL, duration_ms INTEGER NOT NULL, PRIMARY KEY(month,route,outcome))')
             db.execute('CREATE INDEX IF NOT EXISTS calls_started ON calls(started)')
+            # Nocheh's usage tracker: daily totals per route, provider and model, never content.
+            db.execute('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, route TEXT NOT NULL, provider TEXT NOT NULL, '
+                       'model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, '
+                       'input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, '
+                       'cost_microdollars INTEGER NOT NULL DEFAULT 0, priced_calls INTEGER NOT NULL DEFAULT 0, '
+                       'PRIMARY KEY(day,route,provider,model))')
         self._rolled=None
         self.roll_up()
 
@@ -194,7 +200,32 @@ class Ledger:
             return db.execute('INSERT INTO calls(route,digest,reserved,started,audit) VALUES(?,?,?,?,?)',
                 (route, hashlib.sha256(body).hexdigest(), amount, time.time(),json.dumps(audit))).lastrowid
 
-    def finish(self, call, status, duration, usage, outcome=None):
+    def _count_usage(self,db,route,status,usage,provider,model,now=None):
+        moment=datetime.fromtimestamp(now or time.time(),timezone.utc)
+        value=usage if isinstance(usage,dict) else {}
+        def count(name):
+            number=value.get(name)
+            return number if type(number) is int and 0<=number<10**12 else 0
+        inputs=count('prompt_tokens') or count('input_tokens') or (count('total_tokens') if route=='/v1/embeddings' else 0)
+        outputs=count('completion_tokens') or count('output_tokens')
+        ok=isinstance(status,int) and 200<=status<300
+        cost=None
+        if route=='/v1/embeddings' and ok and self._reported_tokens(usage) is not None:
+            price=embeddings({'NOCHEH_EMBEDDING_MODEL':model}).price_per_million if model else 0
+            cost=int((Decimal(self._reported_tokens(usage))*Decimal(str(price))).to_integral_value(rounding=ROUND_CEILING))
+        key=(moment.strftime('%Y-%m-%d'),route,(provider or 'unknown')[:40],(model or 'unknown')[:120])
+        db.execute('INSERT INTO usage_daily(day,route,provider,model) VALUES(?,?,?,?) ON CONFLICT DO NOTHING',key)
+        db.execute('UPDATE usage_daily SET calls=calls+1,failed=failed+?,input_tokens=input_tokens+?,output_tokens=output_tokens+?,'
+                   'cost_microdollars=cost_microdollars+?,priced_calls=priced_calls+? WHERE day=? AND route=? AND provider=? AND model=?',
+                   (int(not ok),inputs,outputs,cost or 0,int(cost is not None),*key))
+        db.execute('DELETE FROM usage_daily WHERE day<?',((moment-timedelta(days=400)).strftime('%Y-%m-%d'),))
+
+    def usage(self, since_day):
+        with self.connect() as db:
+            db.row_factory=sqlite3.Row
+            return [dict(row) for row in db.execute('SELECT * FROM usage_daily WHERE day>=? ORDER BY day,route,provider,model',(since_day,))]
+
+    def finish(self, call, status, duration, usage, outcome=None, provider='', model=''):
         self.roll_up()
         with self.connect() as db:
             row=db.execute('SELECT route,started FROM calls WHERE id=?',(call,)).fetchone()
@@ -205,6 +236,7 @@ class Ledger:
             db.execute('UPDATE calls SET status=?,duration_ms=?,usage=?,outcome=? WHERE id=?',
                 (status, round(duration*1000), json.dumps(usage), outcome, call))
             self._settle_call(db,call)
+            if row:self._count_usage(db,row[0],status,usage,provider,model)
             if row and row[0]=='/v1/embeddings':
                 previous=db.execute('SELECT until,streak,failed_at FROM egress_cooldown WHERE route=?',(row[0],)).fetchone()
                 if 500<=status<600:
@@ -299,8 +331,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class Egress:
     def __init__(self, ledger, token, paid_key, opener=None, prepare=None, embedding=None,
-                 reasoning_key=None, reasoning_url=None):
+                 reasoning_key=None, reasoning_url=None, providers=None):
         self.ledger,self.token,self.paid_key = ledger,token,paid_key
+        # Settings provider ids by route, for the usage tracker's rows.
+        self.providers=providers or {}
         # The HTTPS provider the owner chose for memory in Settings › Models. Without
         # one the meter still starts: embeddings work and reasoning is refused.
         reasoning_url=(reasoning_url or '').strip().rstrip('/')
@@ -350,7 +384,8 @@ class Egress:
             status=502
             return 502,'application/json',b'{"error":{"message":"honcho_upstream_unavailable"}}'
         finally:
-            self.ledger.finish(call,status,time.monotonic()-start,usage,outcome)
+            self.ledger.finish(call,status,time.monotonic()-start,usage,outcome,provider=self.providers.get(route,''),
+                               model=self.embedding.model if paid else REASONING_MODEL)
 
 
 def handler(egress):
@@ -404,4 +439,6 @@ if __name__=='__main__':
     archive=os.environ.get('NOCHEH_ARCHIVE_URL')
     prepare=ArchivePreparation(archive,token) if archive else None
     ThreadingHTTPServer(('0.0.0.0',8790),handler(Egress(Ledger('/ledger/budget.sqlite'),token,paid,prepare=prepare,
-        embedding=embeddings(os.environ),reasoning_key=reasoning,reasoning_url=os.environ.get('NOCHEH_REASONING_URL','')))).serve_forever()
+        embedding=embeddings(os.environ),reasoning_key=reasoning,reasoning_url=os.environ.get('NOCHEH_REASONING_URL',''),
+        providers={'/v1/embeddings':os.environ.get('NOCHEH_EMBEDDING_PROVIDER','openai'),
+                   '/v1/chat/completions':os.environ.get('NOCHEH_REASONING_PROVIDER','')}))).serve_forever()

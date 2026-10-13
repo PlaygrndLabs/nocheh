@@ -672,6 +672,17 @@ installation keeps its old `data/local/provider/` folder (the CPA logins);
 reset refuses it as an unknown path until the owner deletes it. Honcho's structured output through
 Anthropic's OpenAI-compatible endpoint is unproven. Moving Nocheh itself to an
 always-on server is a separate, unstarted step.
+Usage tracker (October 13, owner: "we need to have our own tracker ... everything
+needs to be displayed in one place (Nocheh)"): Hermes's own per-turn token
+counts and cost go to a daily table per part, provider and model
+([tracker](services/hermes/usage.py)); Honcho memory and memory search are
+counted at Honcho's meter ([meter](services/honcho/meter.py)); System › Usage
+shows calls, tokens and estimated cost for every part in one list
+([view](tools/operations/provider/usage.py), [page](dashboard/pages/usage.tsx),
+[checks](services/hermes/test_usage.py), [view checks](services/hermes/test_usage_view.py)).
+Costs Hermes cannot price, such as a custom provider's, show as unknown.
+Pending: live counts after the owner adds a provider and applies (Hermes and
+the meter must be rebuilt for the tracker to start counting).
 With real Claude answers the schedule scenario fires, waits for review and
 delivers once (the scheduled-run fix on main holds), but removing the finished
 one-time schedule failed: removal paused it, which Hermes refuses for a
