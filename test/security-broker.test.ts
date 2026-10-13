@@ -4,29 +4,37 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {turnToken} from '../src/access.js';
-import {brokerServer,configuredReplyUrl,providerTarget,scopedRoute} from '../src/security/broker.js';
+import {brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,providerTarget,scopedRoute} from '../src/security/broker.js';
 import {effectLog} from '../src/security/store.js';
 
-test('broker supports only explicit scoped routes and fixed subscription destinations',()=>{
+test('broker supports only explicit scoped routes and the configured reply provider',()=>{
   for(const route of ['/v1/export','/v1/tools/claim','/internal/security/transport','/v1/memory/shares','//example.com'])assert.equal(scopedRoute('POST',route),false);
   assert.equal(scopedRoute('POST','/v1/context/prepare'),true);
   assert.equal(scopedRoute('GET','/v1/search'),true);
-  assert.throws(()=>providerTarget({base_url:'https://attacker.example',api_mode:'codex_responses'},'/codex/responses'));
-  assert.throws(()=>providerTarget({base_url:'https://chatgpt.com/backend-api/codex',api_mode:'codex_responses'},'/codex/models'));
   // Settings › Models may name one HTTPS reply provider; any other address stays denied.
   const gateway='https://gateway.example.test/v1';
+  assert.throws(()=>providerTarget({base_url:'https://attacker.example',api_mode:'codex_responses'},'/v1/chat/completions',gateway),{code:'provider_route_denied'});
+  assert.throws(()=>providerTarget({base_url:gateway,api_mode:'codex_responses'},'/v1/chat/completions',gateway),{code:'provider_route_denied'});
   assert.equal(providerTarget({base_url:gateway,api_mode:'chat_completions'},'/v1/chat/completions',configuredReplyUrl(gateway+'/')),gateway+'/chat/completions');
   assert.throws(()=>providerTarget({base_url:'https://attacker.example/v1',api_mode:'chat_completions'},'/v1/chat/completions',configuredReplyUrl(gateway)));
-  assert.throws(()=>providerTarget({base_url:gateway,api_mode:'chat_completions'},'/v1/chat/completions',undefined));
+  // Without a provider from Settings › Models there is nowhere to send the call.
+  assert.throws(()=>providerTarget({base_url:gateway,api_mode:'chat_completions'},'/v1/chat/completions',undefined),{status:503,code:'provider_not_configured'});
+  assert.throws(()=>providerTarget({base_url:gateway,api_mode:'chat_completions'},'/v1/chat/completions',configuredReplyUrl('')),{code:'provider_not_configured'});
   assert.equal(configuredReplyUrl('http://gateway.example.test/v1'),undefined);
   assert.equal(configuredReplyUrl('https://user:pass@gateway.example.test/v1'),undefined);
+  // The rehearsal fixture is the only plain-HTTP provider, and only with its flag.
+  assert.equal(configuredReplyUrl(FIXTURE_PROVIDER_URL,false),undefined);
+  assert.equal(configuredReplyUrl(FIXTURE_PROVIDER_URL+'/',true),FIXTURE_PROVIDER_URL);
+  assert.equal(configuredReplyUrl('http://model-fixture:8318/v1',true),undefined);
+  assert.equal(configuredReplyUrl('http://other-fixture:8317/v1',true),undefined);
 });
 test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async t=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_broker_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
   const pool=new pg.Pool({...connection,options:'-c search_path='+namespace});
   const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string}[]=[];
-  const secret='synthetic-provider-credential-never-returned';
+  const secret='synthetic-provider-credential-never-returned',gateway='https://gateway.example.test/v1';
+  const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL=gateway;
   let guardDown=false,streamRevocation=false,slowMemory=false;const preparedPrincipals:any[]=[];
   const mock:typeof fetch=async(url,init)=>{
     const body=init?.body?JSON.parse(String(init.body)):null;
@@ -39,7 +47,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
       });
       return Response.json({sources:[]});
     }
-    if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://chatgpt.com/backend-api/codex',api_mode:'codex_responses',api_key:secret});
+    if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:gateway,api_mode:'chat_completions',api_key:secret});
     if(String(url).endsWith('/v1/guard'))return guardDown?new Response('unavailable',{status:503}):Response.json({guarded:true,payload:body.payload});
     if(streamRevocation)return new Response(new ReadableStream({start(controller){
       controller.enqueue(new TextEncoder().encode('data: first\n\n'));
@@ -56,7 +64,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const credential=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
     const request=(path:string,body:unknown,key=credential)=>fetch(base+path,{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify(body)});
     const payload={model:'same-model',input:[{role:'user',content:'Exact owner edit 🧠\r\n two  spaces'}],reasoning:{effort:'high'}};
-    const response=await request('/codex/responses',payload);
+    const response=await request('/v1/chat/completions',payload);
     assert.equal(response.status,200);assert.equal((await response.text()).includes(secret),false);
     let measurements:any[]=[];
     for(let i=0;i<30;i++){
@@ -74,11 +82,11 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
     assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);
     const before=calls.length;
-    for(const path of ['/internal/security/transport','/v1/tools/claim','/codex/responses?url=https://evil.example'])assert.equal((await request(path,payload)).status,403);
-    assert.equal((await request('/codex/responses',{...payload,model:'changed-model'})).status,403);
-    assert.equal((await request('/codex/responses',{...payload,tools:[{type:'web_search'}]})).status,403);
+    for(const path of ['/internal/security/transport','/v1/tools/claim','/v1/chat/completions?url=https://evil.example'])assert.equal((await request(path,payload)).status,403);
+    assert.equal((await request('/v1/chat/completions',{...payload,model:'changed-model'})).status,403);
+    assert.equal((await request('/v1/chat/completions',{...payload,tools:[{type:'web_search'}]})).status,403);
     assert.equal((await pool.query("SELECT rule FROM security_events WHERE state='blocked' ORDER BY id DESC LIMIT 1")).rows[0].rule,'hosted_provider_tools_denied');
-    assert.equal((await request('/codex/responses',payload,token)).status,403);
+    assert.equal((await request('/v1/chat/completions',payload,token)).status,403);
     assert.equal(calls.length,before,'denied calls never reach upstreams');
     assert.equal((await request('/v1/memory/honcho/context',{})).status,200);
     // Compress only broker deadlines so this covers a slow recall without a
@@ -93,15 +101,15 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
       assert.equal((await request('/v1/memory/recall',{query:'Synthetic recall'})).status,503);
     }finally{slowMemory=false;clock.mock.restore();}
     guardDown=true;
-    assert.equal((await request('/codex/responses',payload)).status,503);
-    assert.equal(calls.filter(x=>x.url==='https://chatgpt.com/backend-api/codex/responses').length,1,'guard outage never falls back to a direct provider call');
+    assert.equal((await request('/v1/chat/completions',payload)).status,503);
+    assert.equal(calls.filter(x=>x.url===gateway+'/chat/completions').length,1,'guard outage never falls back to a direct provider call');
     const afterOutage=calls.length;
     await pool.query('UPDATE guard_state SET epoch=epoch+1');
-    assert.equal((await request('/codex/responses',payload)).status,409);
+    assert.equal((await request('/v1/chat/completions',payload)).status,409);
     assert.equal(calls.length,afterOutage,'stale capabilities fail before any provider lookup');
     guardDown=false;streamRevocation=true;
     const fresh=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:2});
-    const streaming=await request('/codex/responses',payload,fresh);
+    const streaming=await request('/v1/chat/completions',payload,fresh);
     await assert.rejects(streaming.text(),'revocation cuts off in-flight output');
     let states:string[]=[];
     for(let i=0;i<20;i++){
@@ -109,5 +117,12 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
       if(states[0]==='ambiguous')break;await new Promise(resolve=>setTimeout(resolve,10));
     }
     assert.equal(states[0],'ambiguous','started stream without an observed finish is never logged as completed');
-  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await pool.end();await admin.query('DROP SCHEMA '+namespace+' CASCADE');await admin.end();}
+    streamRevocation=false;delete process.env.NOCHEH_REPLY_ROUTE_URL;const unconfigured=calls.length;
+    // Revocation advanced the epoch, so the last check uses a capability for the current one.
+    const epoch=Number((await pool.query('SELECT epoch FROM guard_state')).rows[0].epoch);
+    const current=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:epoch});
+    const missing=await request('/v1/chat/completions',payload,current);
+    assert.equal(missing.status,503);assert.deepEqual(await missing.json(),{error:'provider_not_configured'});
+    assert.equal(calls.length,unconfigured,'an unconfigured provider is reported before any upstream call');
+  }finally{if(previousRoute===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previousRoute;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await pool.end();await admin.query('DROP SCHEMA '+namespace+' CASCADE');await admin.end();}
 });

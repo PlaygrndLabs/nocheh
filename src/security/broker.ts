@@ -23,22 +23,26 @@ export interface BrokerStorage {
   turnFile(principal:Reader,hash:string):Promise<string>;
 }
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
+/** A fixed label for preparation-only guard requests; nothing is sent there. */
+const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)|tools\/actions\/[a-f0-9]{64})$/],
   ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context))|tools\/propose|knowledge\/proposals|action-requests)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
-/** The reply provider chosen in Settings › Models, when it is not the built-in login. */
-export function configuredReplyUrl(value=process.env.NOCHEH_REPLY_ROUTE_URL):string|undefined {
+/** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
+export const FIXTURE_PROVIDER_URL='http://model-fixture:8317/v1';
+/** The reply provider chosen in Settings › Models. Only HTTPS, except the rehearsal fixture. */
+export function configuredReplyUrl(value=process.env.NOCHEH_REPLY_ROUTE_URL,fixture=process.env.NOCHEH_INSTALLATION_FIXTURE==='1'):string|undefined {
   if(!value)return undefined;
+  if(fixture&&value.replace(/\/+$/,'')===FIXTURE_PROVIDER_URL)return FIXTURE_PROVIDER_URL;
   try{const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)return undefined;}catch{return undefined;}
   return value.replace(/\/+$/,'');
 }
 export function providerTarget(transport:Record<string,unknown>,path:string,configured=configuredReplyUrl()):string {
-  if(transport.base_url==='https://chatgpt.com/backend-api/codex'&&transport.api_mode==='codex_responses'&&path==='/codex/responses')return transport.base_url+'/responses';
-  if(transport.base_url==='http://cliproxy-api:8317/v1'&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return transport.base_url+'/chat/completions';
-  // Only the one HTTPS provider the owner configured for replies, never an address Hermes invents.
-  if(configured&&transport.base_url===configured&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return configured+'/chat/completions';
+  if(!configured)throw new HttpError(503,'provider_not_configured');
+  // Only the one provider the owner configured for replies, never an address Hermes invents.
+  if(transport.base_url===configured&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return configured+'/chat/completions';
   throw new HttpError(403,'provider_route_denied');
 }
 export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBinding> {
@@ -103,7 +107,7 @@ export function brokerServer(options:BrokerOptions) {
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
         // Preparation is separate from permission to transmit. Destination is not forwarded.
-        return json(res,200,await options.prepare(principal,{destination:'https://chatgpt.com/backend-api/codex',payload:body.payload}));
+        return json(res,200,await options.prepare(principal,{destination:PREPARATION_DESTINATION,payload:body.payload}));
       }
       let relay=path;
       const file=path.match(/^\/v1\/turn-files\/([a-f0-9]{64})$/);
@@ -127,7 +131,9 @@ export function brokerServer(options:BrokerOptions) {
         await stream(response,principal,res,file?26*1024*1024:8*1024*1024);
         if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.reference??binding.event_id);trace.closed=true;}return;
       }
-      if(req.method!=='POST'||!['/codex/responses','/v1/chat/completions'].includes(path)||url.search)throw new HttpError(403,'security_route_denied');
+      if(req.method!=='POST'||path!=='/v1/chat/completions'||url.search)throw new HttpError(403,'security_route_denied');
+      // Nothing is guarded or recorded for a model call that has no provider to go to.
+      if(!configuredReplyUrl())throw new HttpError(503,'provider_not_configured');
       const input=await readJson(req,1024*1024);let payload:Record<string,unknown>;
       try {
         payload=providerPayload(input);
@@ -154,7 +160,7 @@ export function brokerServer(options:BrokerOptions) {
       if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
       timings.broker_prepare_ms=elapsed(prepareStarted);
       const headers:Record<string,string>={'content-type':'application/json',authorization:'Bearer '+String(transport.api_key)};
-      for(const [key,value] of Object.entries(object(transport.headers??{})))if(['user-agent','originator','chatgpt-account-id'].includes(key.toLowerCase())&&typeof value==='string')headers[key]=value;
+      for(const [key,value] of Object.entries(object(transport.headers??{})))if(key.toLowerCase()==='user-agent'&&typeof value==='string')headers[key]=value;
       await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.reference??binding.event_id);attempt.started=true;
       const providerStarted=performance.now();let response:Response;
       try{response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});}

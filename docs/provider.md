@@ -1,92 +1,44 @@
-# Shared subscription provider and monitoring
+# Model providers
 
-CLIProxyAPI is the single ChatGPT subscription login for Hermes reasoning,
-Honcho reasoning and subscription speech. CLIProxyAPI alone owns and refreshes
-the OAuth files. Hermes and Honcho receive different local API keys. Speech runs
-behind an isolated gateway that can read only the current access token from the
-OAuth directory; it cannot write the directory or expose the refresh token.
+Nocheh runs no provider proxy and no subscription login. Every model call goes
+to a provider chosen in Settings › Models
+([ADR-0141](adr/0141-per-part-model-providers.md),
+[ADR-0142](adr/0142-external-providers-only.md)).
 
-The local stack pins CLIProxyAPI at
-`c76dfd4e0edabab9000628b1560ab8ab379eadb8` and CPA Manager Plus Full Mode at
-`1ae656c82990c480f3f104326a08c6e0001eeb4c`. CPA Manager Plus stores request,
-usage, latency, failure and account observations in
-`data/local/provider/monitor/`. Its automatic account actions, quota actions,
-notifications and request-body logging are disabled. A monitoring outage does
-not stop inference.
+## Providers
+
+- **OpenAI**: `https://api.openai.com/v1` with `OPENAI_API_KEY`.
+- **Anthropic**: `https://api.anthropic.com/v1` with `ANTHROPIC_API_KEY`.
+- **Custom**: any OpenAI-compatible HTTPS provider, such as a hosted sub2api
+  gateway. It needs a short id, a name, its address (usually ending in `/v1`)
+  and its API key. Custom providers are saved in `NOCHEH_PROVIDERS`; their keys
+  in `NOCHEH_PROVIDER_KEYS`. Addresses must be `https://` without a password or
+  query.
+
+Keys are saved in the installation `.env` and never returned to the browser.
 
 ## Providers for each part
 
-Settings › Models chooses where each part sends model requests
-([ADR-0141](adr/0141-per-part-model-providers.md)). The built-in provider is
-this CLIProxyAPI login. OpenAI and Anthropic need only their API key; a custom
-provider, such as a hosted sub2api gateway, needs a name, its HTTPS
-OpenAI-compatible address (usually ending in `/v1`) and its API key. The
-default provider and model serve replies (Hermes), memory (Honcho reasoning)
-and the secret check unless a part names its own. Memory search (embeddings)
-names its own provider and cannot use the built-in login.
+One default provider and model (`NOCHEH_PROVIDER`, `NOCHEH_MODEL`) serve
+replies (Hermes), memory (Honcho reasoning) and the secret check unless a part
+names its own provider or model. Apply recreates the services whose routes
+changed: Hermes and the security broker for replies and the secret check,
+Honcho and its egress meter for memory and embeddings.
 
-Keys are saved in the installation `.env` and never returned to the browser.
-Apply recreates the services whose routes changed: Hermes and the security
-broker for replies and the secret check, Honcho and its egress meter for
-memory and embeddings. A part on another provider needs no built-in login, so
-the built-in login and its cutover matter only for parts that use it and for
-voice transcription.
+Memory search (embeddings) names its own provider (`NOCHEH_EMBEDDING_PROVIDER`,
+`openai` by default) and keeps its capped budget: an initial $5 pilot, then $5
+per month.
 
-## First login and cutover
+## Nothing configured
 
-Start the pinned services, complete one fresh device login, then run the atomic
-cutover:
+A fresh installation has no provider. Every service still starts. A part
+without a provider is unconfigured: its model calls fail with
+`provider_not_configured`, replies and memory work wait, and they resume after
+a provider is saved and applied. Settings › Models and System show what is
+missing.
 
-```sh
-./bin/nocheh up
-./bin/nocheh provider status
-./bin/nocheh provider login
-./bin/nocheh provider cutover
-```
+## Voice notes
 
-`provider login` refuses to start when a ChatGPT (Codex) login file already exists. Logins for other providers, made from the provider dashboard, can sit beside it and do not count as the shared login.
-`provider cutover` also requires exactly one active Codex credential. It switches
-the saved reasoning route to `shared`, recreates the affected services, and uses
-synthetic inputs to verify:
-
-- CLIProxyAPI is the refresh owner and Hermes does not refresh the token;
-- Hermes chat, literal detection and Ogg/Opus transcription;
-- the Honcho client key can make a reasoning request through the same login;
-- CPA Manager Plus observes requests;
-- reasoning continues while monitoring is stopped; and
-- reasoning and transcription recover after all provider components restart.
-
-Any failed check restores the previously saved route and leaves the native login
-in place. After every check passes, the old Hermes OAuth file moves out of the
-runtime to `data/local/provider/retired/`; it is retained privately for inspection
-or a deliberate rollback and is no longer a refresh owner. The content-free local
-report is `data/local/reports/shared-provider-acceptance.json`.
-
-Infrastructure health alone does not prove subscription access:
-
-```sh
-./bin/nocheh provider verify
-./bin/nocheh provider status
-```
-
-`verify` checks the pinned source revisions and both service health checks.
-`status` reports counts and health without returning credentials. A fresh login is
-still pending when `login_present` is false.
-
-## Owner monitoring UI
-
-Run `./bin/nocheh dashboard` and choose **Provider monitor** from the sidebar
-or **Integrations**. Nocheh serves CPA Manager Plus at
-`/providers/management.html` through the existing owner session. The browser
-never receives the CLIProxyAPI management key or the CPA Manager Plus admin/data
-keys. Nocheh adds the monitor credential server-side and requires its own CSRF
-token for writes. The direct monitor port is loopback-only.
-
-Provider OAuth and monitor history are included in backups while their writers
-are stopped. Restores quarantine both native and shared OAuth credentials before
-starting the new Compose project, so a restored copy cannot become a second
-refresh owner. Re-authenticate deliberately after restore reconciliation.
-
-Honcho's reasoning now uses this shared login. Honcho memory activation remains a
-separate gate because embeddings use the dedicated capped paid route; a successful
-subscription cutover does not make a failed embedding check pass.
+Nocheh has no voice transcription. A voice note keeps its original audio and
+records the status "Voice note archived; transcription is not available." It
+never holds a reply.

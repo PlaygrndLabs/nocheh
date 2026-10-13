@@ -1,26 +1,25 @@
 """Model providers and the provider and model each part of Nocheh uses.
 
 Every provider speaks the OpenAI-compatible API (`/chat/completions`,
-`/models`, `/embeddings`). The built-in provider is Nocheh's own CLIProxyAPI
-login. OpenAI and Anthropic are presets with fixed addresses; a custom
-provider, such as a hosted CLIProxyAPI gateway, is a name, an HTTPS address
-and an API key. One default provider and model serves every reasoning part
-unless a part names its own. Embeddings always name their own provider,
-because the built-in login does not serve embeddings.
+`/models`, `/embeddings`). OpenAI and Anthropic are presets with fixed
+addresses; a custom provider is a name, an HTTPS address and an API key. One
+default provider and model serves every reasoning part unless a part names its
+own. A part with no provider is unconfigured: a fresh installation is valid and
+starts, and that part's model calls fail with `provider_not_configured` until a
+provider is chosen in Settings › Models. Embeddings always name their own
+provider.
 """
 import json
+import os
 import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-BUILTIN = 'builtin'
-BUILTIN_URL = 'http://cliproxy-api:8317/v1'
-# Honcho's egress reaches the same CLIProxyAPI through its isolated network alias.
-BUILTIN_MEMORY_URL = 'http://shared-provider:8317/v1'
+# Installation rehearsals serve models from this local fixture; nothing else may use http.
+FIXTURE_URL = 'http://model-fixture:8317/v1'
 PRESETS = {
-    BUILTIN: {'name': 'Nocheh login', 'url': None, 'key': None},
     'openai': {'name': 'OpenAI', 'url': 'https://api.openai.com/v1', 'key': 'OPENAI_API_KEY'},
     'anthropic': {'name': 'Anthropic', 'url': 'https://api.anthropic.com/v1', 'key': 'ANTHROPIC_API_KEY'},
 }
@@ -31,7 +30,7 @@ PARTS = {
     'guard': ('Secret check', 'NOCHEH_GUARD_PROVIDER', 'NOCHEH_GUARD_MODEL'),
 }
 DEFAULTS = {
-    'NOCHEH_PROVIDER': BUILTIN,
+    'NOCHEH_PROVIDER': '',
     'NOCHEH_REPLY_PROVIDER': '', 'NOCHEH_REPLY_MODEL': '',
     'NOCHEH_MEMORY_PROVIDER': '', 'NOCHEH_MEMORY_MODEL': '',
     'NOCHEH_GUARD_PROVIDER': '', 'NOCHEH_GUARD_MODEL': '',
@@ -52,8 +51,8 @@ class Route:
     key: str = field(default='', repr=False)
 
     @property
-    def builtin(self):
-        return self.provider == BUILTIN
+    def configured(self):
+        return bool(self.provider)
 
 
 def _json(values, name, kind):
@@ -66,7 +65,14 @@ def _json(values, name, kind):
     return parsed
 
 
+def fixture_url(url):
+    """The rehearsal fixture's address, accepted only inside an installation fixture."""
+    return os.environ.get('NOCHEH_INSTALLATION_FIXTURE') == '1' and isinstance(url, str) and url.rstrip('/') == FIXTURE_URL
+
+
 def valid_url(url):
+    if fixture_url(url):
+        return True
     parts = urlsplit(url) if isinstance(url, str) else None
     return bool(parts and parts.scheme == 'https' and parts.hostname and not parts.username
                 and not parts.password and not parts.query and not parts.fragment and len(url) <= 300)
@@ -109,7 +115,7 @@ def keys(values):
 
 
 def key(values, provider):
-    if provider == BUILTIN:
+    if not provider:
         return ''
     if provider in PRESETS:
         return (values.get(PRESETS[provider]['key']) or '').strip()
@@ -133,20 +139,21 @@ def route(values, part):
     if part not in PARTS:
         raise ValueError('unknown_model_part')
     _, provider_setting, model_setting = PARTS[part]
-    provider = (values.get(provider_setting) or '').strip() or (values.get('NOCHEH_PROVIDER') or BUILTIN).strip()
+    provider = (values.get(provider_setting) or '').strip() or (values.get('NOCHEH_PROVIDER') or '').strip()
     model = (values.get(model_setting) or '').strip() or (values.get('NOCHEH_MODEL') or '').strip()
+    if not provider:
+        return Route(part, '', '', model)
     known = providers(values)
     if provider not in known:
         raise ValueError(PARTS[part][0] + ' uses a provider that is not configured')
-    url = BUILTIN_MEMORY_URL if provider == BUILTIN and part == 'memory' else BUILTIN_URL if provider == BUILTIN else known[provider]['url']
-    return Route(part, provider, url, model, key(values, provider))
+    return Route(part, provider, known[provider]['url'], model, key(values, provider))
 
 
 def embedding_route(values):
-    """Where memory embeddings are sent; never the built-in login."""
+    """Where memory embeddings are sent."""
     provider = (values.get('NOCHEH_EMBEDDING_PROVIDER') or 'openai').strip()
     known = providers(values)
-    if provider in (BUILTIN, 'anthropic') or provider not in known:
+    if provider == 'anthropic' or provider not in known:
         raise ValueError('Memory search needs an OpenAI-compatible provider with embeddings, such as OpenAI')
     return Route('embedding', provider, known[provider]['url'], (values.get('NOCHEH_EMBEDDING_MODEL') or '').strip(),
                  key(values, provider))
@@ -159,37 +166,35 @@ def routes(values):
 def validate(values):
     known = providers(values)
     keys(values)
-    if (values.get('NOCHEH_PROVIDER') or BUILTIN) not in known:
+    default = (values.get('NOCHEH_PROVIDER') or '').strip()
+    if default and default not in known:
         raise ValueError('The default provider is not configured')
     for part, (label, provider_setting, model_setting) in PARTS.items():
         chosen = (values.get(provider_setting) or '').strip()
         if chosen and chosen not in known:
             raise ValueError(label + ' uses a provider that is not configured')
         selected = route(values, part)
+        if not selected.configured:
+            continue
         if not MODEL.fullmatch(selected.model):
             raise ValueError(label + ' needs a model name')
-        if not selected.builtin and not selected.key:
+        if not selected.key:
             raise ValueError(label + ' uses ' + known[selected.provider]['name'] + ', which has no API key')
-        if not selected.builtin and values.get('NOCHEH_REASONING_ROUTE', 'shared') != 'shared':
-            raise ValueError('Other providers need NOCHEH_REASONING_ROUTE=shared')
     embedding_route(values)
 
 
 def environment(values):
-    """Resolved routes for Compose; keys go only to the services that call providers."""
+    """Resolved routes for Compose; keys go only to the services that call providers.
+    An unconfigured part gets empty values."""
     selected = routes(values)
     result = {}
     for part, name in (('reply', 'REPLY'), ('guard', 'GUARD')):
         current = selected[part]
-        result.update({f'NOCHEH_{name}_ROUTE_URL': current.url, f'NOCHEH_{name}_ROUTE_MODEL': current.model,
+        configured = current.configured
+        result.update({f'NOCHEH_{name}_ROUTE_URL': current.url, f'NOCHEH_{name}_ROUTE_MODEL': current.model if configured else '',
                        f'NOCHEH_{name}_ROUTE_KEY': current.key})
-    result['NOCHEH_MEMORY_ROUTE_MODEL'] = selected['memory'].model
+    result['NOCHEH_MEMORY_ROUTE_MODEL'] = selected['memory'].model if selected['memory'].configured else ''
     return result
-
-
-def builtin_models(values):
-    """Models that must be served by the built-in login."""
-    return sorted({current.model for current in routes(values).values() if current.builtin})
 
 
 def list_models(values, provider, opener=None, url=None, secret=None):
@@ -197,7 +202,7 @@ def list_models(values, provider, opener=None, url=None, secret=None):
     An unsaved custom provider is listed from the address and key being typed. A saved
     key is only sent to the saved address, so a typed address needs its own key."""
     known = providers(values)
-    if provider == BUILTIN or not isinstance(provider, str) or not ID.fullmatch(provider):
+    if not isinstance(provider, str) or not ID.fullmatch(provider):
         raise ValueError('unknown_provider')
     saved = known.get(provider)
     if provider in PRESETS or url is None:

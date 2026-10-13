@@ -11,15 +11,14 @@ import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {SelectionRepository} from '../src/stores/selections.js';
-import {ReprocessingRepository,subscriptionTranscription,type DerivationEngine} from '../src/stores/reprocessing.js';
+import {ReprocessingRepository,archivedVoice,VOICE_ARCHIVED,type DerivationEngine} from '../src/stores/reprocessing.js';
 
-test('subscription transcription stops on unusable text but preserves transient provider failures',async()=>{
-  const audio=Buffer.from('synthetic Ogg bytes'),file={kind:'voice',metadata:{}};
-  const run=(result:Record<string,unknown>)=>subscriptionTranscription(async()=>result).run(audio,file,{});
-  await assert.rejects(run({success:false,error:'invalid_transcription_response',retryable:false}),{code:'invalid_transcription_response'});
-  await assert.rejects(run({success:true,transcript:'  '}),{code:'invalid_transcription_response'});
-  await assert.rejects(run({success:false,error:'invalid_transcription_response',retryable:true}),{code:'transcription_unavailable'});
-  await assert.rejects(run({success:false,error:'quota_paused',retryable:true}),{code:'quota_paused'});
+test('voice notes are archived without any runtime call and with an archive status',async()=>{
+  const engine=archivedVoice(),audio=Buffer.from('synthetic Ogg bytes');
+  assert.equal(engine.outputKind,'transcript');
+  assert.deepEqual(await engine.run(audio,{kind:'voice',metadata:{file_name:'note.ogg'}},{}),{kind:'extraction_status',text:'Voice note archived; transcription is not available.'});
+  assert.deepEqual(await engine.run(audio,{kind:'video_note',metadata:{}},{}),{kind:'extraction_status',text:VOICE_ARCHIVED});
+  await assert.rejects(engine.run(audio,{kind:'voice',metadata:{}},{language:'en'}),{code:'unsupported_transcription_configuration'});
 });
 
 test('original-byte reprocessing preserves both versions, owner guards, selection fences and completion recovery',

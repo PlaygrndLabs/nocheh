@@ -8,7 +8,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
   const routes: Partial<Record<RuntimeOperation, string>> = {
     status: '/health', 'profiles.list': '/internal/manage', 'config.read': '/internal/manage',
     'config.write': '/internal/manage', 'memory.read': '/internal/manage', 'run.start': '/internal/dispatch',
-    'source.file': '/internal/file', 'perception.transcribe': '/internal/transcribe',
+    'source.file': '/internal/file',
     'guard.detect': '/internal/detect', 'action.execute': '/internal/action',
     'memory.review':'/internal/memory/review', 'memory.recall':'/internal/memory/recall',
     'memory.filter':'/internal/memory/filter',
@@ -39,8 +39,10 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
       });
       if (!response.ok) {
         let code = response.status === 429 ? 'quota_paused' : 'runtime_unavailable';
-        if (operation === 'guard.detect' || operation === 'config.write' || operation === 'config.read') {
-          const error = await response.json().catch(() => null) as {error?: string} | null;
+        const error = await response.json().catch(() => null) as {error?: string} | null;
+        // No provider chosen in Settings › Models is a waiting condition, not a runtime fault.
+        if (error?.error === 'provider_not_configured') code = error.error;
+        else if (operation === 'guard.detect' || operation === 'config.write' || operation === 'config.read') {
           if (error?.error && ['detector_contract_rejected','configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference'].includes(error.error)) code = error.error;
         }
         throw new HttpError(response.status, code);

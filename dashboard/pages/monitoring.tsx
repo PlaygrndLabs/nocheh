@@ -36,12 +36,14 @@ const reasons: Record<string, string> = {
   unsupported_message: 'This update did not contain a supported message.',
   not_addressed: 'A group message that did not address Nocheh; it was archived without a reply.',
   waiting_for_attachments: 'Waiting for original files to download.',
-  waiting_for_transcription: 'Waiting for voice transcription.',
+  waiting_for_transcription: 'Voice note archived; transcription is not available.',
+  provider_not_configured:
+    'No model provider is configured. Choose one in Settings › Models; waiting work resumes after Apply.',
   guard_preparation_pending: 'Waiting for a guarded copy before calling the model.',
   awaiting_dispatch_receipt: 'Checking the existing run receipt before retrying.',
   model_unavailable: 'The model did not return a successful result.',
-  quota_paused: 'Subscription quota is paused.',
-  subscription_unavailable: 'The subscription is unavailable. Check its login and quota.',
+  quota_paused: 'The model provider paused requests (quota or rate limit).',
+  subscription_unavailable: 'The model provider is unavailable. Check its key and quota in Settings › Models.',
   runtime_restart_during_dispatch:
     'The runtime restarted before the outcome was confirmed. Review before sending again.',
   delivery_unconfirmed: 'Telegram delivery was not confirmed. It will not be resent automatically.',
@@ -79,7 +81,8 @@ export function Monitoring({
   const {data: record, error: sourceError} = useResource<any>(sourceId ? '/events/' + sourceId : null);
   const status = data?.runtime?.status || {},
     archive = data?.archive?.archive || {},
-    provider = data?.provider || {};
+    routes: any[] | null = Array.isArray(data?.routes) ? data.routes : null;
+  const unconfigured = (routes || []).filter(route => !route.configured);
   const telegram = status.telegram || 'unavailable';
   const needsAttention = !!data && data.telegram_enabled && telegram !== 'connected';
   const rows: any[] = archive.workflows || [];
@@ -316,66 +319,32 @@ export function Monitoring({
         </section>
       </Disclosure>
       <Disclosure
-        title="Provider connection"
+        title="Model providers"
         note={
-          provider.unavailable
-            ? 'Provider observations unavailable.'
-            : !provider.reasoning_login_present
-              ? 'Reasoning login is missing.'
-              : status.reasoning_route === 'shared'
-                ? 'Shared subscription proxy · login present.'
-                : 'Native Hermes subscription route.'
+          !routes
+            ? 'Provider settings unavailable.'
+            : unconfigured.length
+              ? unconfigured.length + ' part' + (unconfigured.length === 1 ? '' : 's') + ' not configured.'
+              : 'Every part has a provider and model.'
         }
       >
-        <p>
-          {'Active reasoning route: ' +
-            (status.reasoning_route === 'shared'
-              ? 'Shared subscription proxy'
-              : status.reasoning_route === 'native'
-                ? 'Native Hermes subscription'
-                : 'Unavailable')}
-        </p>
-        <p>
-          {provider.unavailable
-            ? 'Shared provider status unavailable.'
-            : provider.reasoning_login_present
-              ? 'Login for ' + provider.reasoning_model + ' is present.'
-              : 'Login for ' +
-                provider.reasoning_model +
-                ' is missing. Complete OAuth before switching the active route.'}
-        </p>
-        {!provider.unavailable && (
-          <p>
-            {provider.login_present
-              ? 'ChatGPT login for voice transcription is present.'
-              : 'ChatGPT login for voice transcription is missing. Voice messages are kept but not transcribed.'}
-          </p>
-        )}
-        <a href="/providers/management.html#/oauth" className="n-text-link">
-          Open subscription OAuth →
-        </a>
-        {status.reasoning_route === 'native' && (
-          <p className="n-muted">
-            Provider monitoring records shared-proxy traffic. Your current native Hermes requests do not pass through
-            that proxy.
-          </p>
-        )}
-        <h3 className="n-afterword">Where the three API keys come from</h3>
-        <p>
-          Nocheh generates three local access credentials: Hermes for chat, Honcho for memory reasoning, and Preparation
-          for guarded text. They authenticate these services to your local proxy. They are not OpenAI billing keys and
-          do not sign you into ChatGPT.
-        </p>
+        {!routes && <p role="status">Provider settings could not be read.</p>}
+        {routes?.map(route => (
+          <div className="n-row" key={route.part}>
+            <b>{route.label || route.part}</b>
+            {route.configured ? (
+              <span>{(route.provider_name || route.provider) + ' · ' + (route.model || 'default model')}</span>
+            ) : (
+              <span>Not configured — choose a provider in Settings › Models</span>
+            )}
+          </div>
+        ))}
         <p className="n-muted">
-          The management key protects the local proxy’s administration API. Nocheh manages these credentials
-          automatically.
+          Keys stay on the server. Change providers and models in <a href="#settings?view=models">Settings › Models</a>.
         </p>
-        <a href="/providers/management.html" className="n-text-link">
-          Open provider requests and usage →
-        </a>
       </Disclosure>
-      <Disclosure title="Background work" note="Guarded copies, files, transcriptions and approved actions.">
-        {['preparation', 'artifacts', 'transcriptions', 'actions'].map(kind => (
+      <Disclosure title="Background work" note="Guarded copies, files and approved actions.">
+        {['preparation', 'artifacts', 'actions'].map(kind => (
           <div className="n-row" key={kind}>
             <b>
               {
@@ -383,7 +352,6 @@ export function Monitoring({
                   {
                     preparation: 'Guarded copies',
                     artifacts: 'Files',
-                    transcriptions: 'Transcriptions',
                     actions: 'Approved actions',
                   } as Record<string, string>
                 )[kind]

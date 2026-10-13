@@ -133,7 +133,7 @@ class StoreRecoveryTests(unittest.TestCase):
                 recovery.return_value.restore_inactive.assert_called_once_with(snapshot,stores,sha)
             self.assertEqual(len(starts),1);self.assertEqual(starts[0][-1],'nocheh-db')
             self.assertFalse(result['executors_active']);self.assertFalse(result['telegram_enabled'])
-            self.assertFalse(result['subscription_login_activated'])
+            self.assertFalse(result['hermes_login_activated'])
 
     def test_backup_cannot_create_output_inside_original_or_native_data(self):
         from tools.operations.installation.operations import backup

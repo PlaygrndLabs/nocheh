@@ -68,11 +68,10 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     assert.equal((await claimRun(pool,config,restartClaim,undefined,{owner:'inngest',epoch:1})).text,'late result evidence');
     const audio=await captureAndAdmit(pool,config,{...body,id:'audio',files:[{name:'voice.wav',kind:'audio',bytes_base64:bytes.toString('base64')},{name:'notes.txt',kind:'file',bytes_base64:Buffer.from('exact file\r\n').toString('base64')}]});
     const audioClaim={...claim,event_id:audio.event_id};await claimRun(pool,config,audioClaim,undefined,{owner:'inngest',epoch:1});
-    let transcriptions=0;
-    await prepareArchiveFiles(pool,root,async(operation)=>{assert.equal(operation,'perception.transcribe');transcriptions++;return {success:true,transcript:'derived transcript'};},audio.event_id,{owner:'inngest',epoch:1});
+    await prepareArchiveFiles(pool,root,audio.event_id,{owner:'inngest',epoch:1});
+    // Voice notes are archived without a transcript and never hold the run back.
     const prepared=await prepareRun(pool,config,audioClaim,async()=>{throw Error('turn cannot prepare inputs');});
-    assert.deepEqual(prepared.transcripts,['derived transcript']);assert.equal(prepared.files.find(f=>f.name==='notes.txt')?.text,'exact file\r\n');
-    await prepareRun(pool,config,audioClaim,async()=>{throw Error('must reuse transcript');});assert.equal(transcriptions,1);
+    assert.deepEqual(prepared.transcripts,[]);assert.equal(prepared.files.find(f=>f.name==='notes.txt')?.text,'exact file\r\n');
     const unavailable=new pg.Pool(connection);await unavailable.end();
     await assert.rejects(captureAndAdmit(unavailable,config,{...body,id:'outage',files:[]}));
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM managed_runs')).rows[0].count,3);

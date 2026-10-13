@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {Plus, Trash2} from 'lucide-react';
-import {call, Button} from '../lib/page-helpers';
+import {call, Alert, Button} from '../lib/page-helpers';
 
 type Provider = {id: string; name: string; kind: string; url: string | null; has_key: boolean};
 type Part = {id: string; label: string; provider_setting: string; model_setting: string};
@@ -110,7 +110,7 @@ export function ModelRouting({
   ];
   const providerName = (id: string) => all.find(p => p.id === id)?.name || id;
 
-  // Model lists: the built-in login's served models, or what each added provider lists. A
+  // Model lists: what each added provider lists. A
   // provider is asked again, after a short pause, whenever its address or typed key changes,
   // so its models appear while it is still being added; the server sends the key, never the page.
   const [listed, setListed] = useState<Record<string, Listing>>({});
@@ -118,7 +118,7 @@ export function ModelRouting({
     () =>
       Object.fromEntries(
         all
-          .filter(p => p.id !== 'builtin' && p.has_key && (p.kind !== 'custom' || /^https:\/\/\S+$/.test(p.url || '')))
+          .filter(p => p.has_key && (p.kind !== 'custom' || /^https:\/\/\S+$/.test(p.url || '')))
           .map(p => {
             const typed = p.kind === 'custom' ? typedKeys[p.id] : changes[PRESET_KEYS[p.id]];
             return [
@@ -148,17 +148,11 @@ export function ModelRouting({
   }, [JSON.stringify(requests)]);
   const listing = (id: string): Listing | undefined =>
     requests[id] && listed[id]?.signature === JSON.stringify(requests[id]) ? listed[id] : undefined;
-  const modelsOf = (id: string): string[] =>
-    id === 'builtin' ? data.models?.reasoning || [] : listing(id)?.models || [];
+  const modelsOf = (id: string): string[] => listing(id)?.models || [];
   const listNote = (id: string): string => {
+    if (!id) return 'Not configured. Choose a provider to list its models.';
     const provider = all.find(p => p.id === id);
     if (!provider) return '';
-    if (id === 'builtin')
-      return data.models?.provider_running === false
-        ? 'Nocheh’s provider service is not running, so its models cannot be listed.'
-        : modelsOf(id).length
-          ? ''
-          : 'Sign in to Claude or ChatGPT in the CPA dashboard to list models.';
     if (provider.kind === 'custom' && !/^https:\/\/\S+$/.test(provider.url || ''))
       return 'Enter its https:// address to list its models.';
     if (!provider.has_key) return 'Add its API key to list its models.';
@@ -252,8 +246,10 @@ export function ModelRouting({
     </div>
   );
 
-  const defaultProvider = value('NOCHEH_PROVIDER') || 'builtin';
-  const embeddingChoices = all.filter(p => !['builtin', 'anthropic'].includes(p.id));
+  // '' is not configured: a fresh installation starts, but model calls wait until a provider is chosen.
+  const defaultProvider = value('NOCHEH_PROVIDER');
+  const nothingConfigured = !saved('NOCHEH_PROVIDER') && parts.every(part => !saved(part.provider_setting));
+  const embeddingChoices = all.filter(p => p.id !== 'anthropic');
   const locked = data.models?.embedding_locked;
   const row = (id: string, title: string, hint: ReactNode, provider: ReactNode, model: ReactNode, note: string) => (
     <div className="n-model-route" key={id}>
@@ -275,13 +271,17 @@ export function ModelRouting({
 
   return (
     <>
+      {nothingConfigured && (
+        <Alert>
+          Nocheh has no model provider yet. Add one below and choose it as the default, then save and apply.
+        </Alert>
+      )}
       <section className="n-settings-group" aria-labelledby="settings-providers">
         <h3 id="settings-providers">Providers</h3>
         <p className="n-muted">
-          Where Nocheh sends model requests. Nocheh login is your Claude or ChatGPT subscription in Nocheh’s own proxy,
-          signed in from the <a href="/providers/management.html">CPA dashboard</a>. Add OpenAI or Anthropic with an API
-          key, or a custom OpenAI-compatible provider such as a hosted sub2api gateway with its address and key. Keys
-          stay on the server and are never shown again.
+          Where Nocheh sends model requests. Add OpenAI or Anthropic with an API key, or a custom OpenAI-compatible
+          provider such as a hosted sub2api gateway with its address and key. Keys stay on the server and are never
+          shown again.
         </p>
         <div className="n-form">
           {keyField(
@@ -401,9 +401,10 @@ export function ModelRouting({
               disabled={busy}
               onChange={e => set('NOCHEH_PROVIDER', e.target.value)}
             >
+              {!defaultProvider && <option value="">Not configured</option>}
               {all.map(p => (
                 <option key={p.id} value={p.id}>
-                  {(p.name || 'New provider') + (p.id !== 'builtin' && !p.has_key ? ' · no key' : '')}
+                  {(p.name || 'New provider') + (!p.has_key ? ' · no key' : '')}
                 </option>
               ))}
             </select>,
@@ -423,10 +424,12 @@ export function ModelRouting({
                 disabled={busy}
                 onChange={e => set(part.provider_setting, e.target.value)}
               >
-                <option value="">Same as default · {providerName(defaultProvider)}</option>
+                <option value="">
+                  Same as default · {defaultProvider ? providerName(defaultProvider) : 'Not configured'}
+                </option>
                 {all.map(p => (
                   <option key={p.id} value={p.id}>
-                    {(p.name || 'New provider') + (p.id !== 'builtin' && !p.has_key ? ' · no key' : '')}
+                    {(p.name || 'New provider') + (!p.has_key ? ' · no key' : '')}
                   </option>
                 ))}
               </select>,
@@ -437,7 +440,7 @@ export function ModelRouting({
           {row(
             'embedding',
             'Memory search',
-            'Turns Honcho memory into searchable vectors, paid from the embedding budget. Nocheh login cannot do this.',
+            'Turns Honcho memory into searchable vectors, paid from the embedding budget. Anthropic does not offer this.',
             <select
               id="embedding-provider"
               value={value('NOCHEH_EMBEDDING_PROVIDER') || 'openai'}

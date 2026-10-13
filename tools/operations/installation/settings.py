@@ -34,15 +34,8 @@ def view(state):
                'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'apply / service restart'}
               for key in DEFAULTS]
     from tools.operations.provider.embedding_config import MODELS
-    try:
-        from tools.operations.provider.provider import reasoning_choices
-        choices = reasoning_choices(state)
-    except Exception:
-        choices = {'provider_running': False, 'providers': []}
-    served = sorted({model for provider in choices['providers'] for model in provider['models']})
     return {'revision': saved_revision, 'applied_revision': active,
-            'models': {'reasoning': served, 'providers': choices['providers'], 'provider_running': choices['provider_running'],
-                       'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state)},
+            'models': {'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state)},
             'providers': provider_view(values),
             'apply_state': 'current' if active == saved_revision else 'pending' if active else 'unverified',
             'fields': fields}
@@ -54,12 +47,12 @@ def provider_view(values):
     except ValueError: known = provider_routes.providers({})
     try: stored = provider_routes.keys(values)
     except ValueError: stored = {}
-    rows = [{**row, 'has_key': row['id'] == provider_routes.BUILTIN or bool(
+    rows = [{**row, 'has_key': bool(
         (values.get(provider_routes.PRESETS[row['id']]['key']) if row['id'] in provider_routes.PRESETS else stored.get(row['id'])) or '')}
             for row in known.values()]
     parts = [{'id': part, 'label': label, 'provider_setting': provider, 'model_setting': model}
              for part, (label, provider, model) in provider_routes.PARTS.items()]
-    return {'list': rows, 'parts': parts, 'builtin': provider_routes.BUILTIN}
+    return {'list': rows, 'parts': parts}
 
 
 def provider_models(state, provider, url=None, key=None):

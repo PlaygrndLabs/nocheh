@@ -23,7 +23,7 @@ const pool=new pg.Pool({options:`-c search_path=${namespace}`,max:8});
 const root=await mkdtemp(join(tmpdir(),'pipeline-probe-'));
 const config={...settings(),dataDir:root,assistant:{enabled:true,owner_id:'123',group_ids:[] as string[]}};
 const client=workflowClient('pipeline');let connection:Awaited<ReturnType<typeof connectWorkflows>>|undefined;
-const calls={download:0,transcribe:0,start:0,resume:0,browserStart:0,browserResume:0,scheduleAdvance:0,scheduleStart:0,scheduleResume:0};
+const calls={download:0,start:0,resume:0,browserStart:0,browserResume:0,scheduleAdvance:0,scheduleStart:0,scheduleResume:0};
 const definition={profile:'owner',prompt:'Synthetic private schedule canary',deliver:'local',execution_version:'fixture'};
 try {
   await initialize(pool);await setGuardMode(pool,'on');
@@ -68,7 +68,6 @@ try {
       throw Error('unexpected_browser_operation');
     }
     if(operation==='source.file') {calls.download++;if(calls.download===1)throw Error('synthetic download outage');return {bytes_base64:Buffer.from('synthetic Ogg bytes').toString('base64')};}
-    if(operation==='perception.transcribe'){calls.transcribe++;return {success:true,transcript:'Synthetic private transcript canary'};}
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='run.start'){calls.start++;if(calls.start!==1||input.attempt!==1||input.asynchronous!==true)throw Error('duplicate_runtime_effect');throw Error('synthetic lost start response after acceptance');}
     if(operation==='run.resume'){calls.resume++;if(input.attempt!==1)throw Error('replacement_attempt');return {state:'done'};}
@@ -97,6 +96,6 @@ try {
   const telegram=rows.find(row=>row.family==='telegram')!;
   await client.send({id:randomBytes(32).toString('hex'),name:'nocheh/workflow.requested',data:{workflow_id:telegram.id,dispatch:1,family:'telegram'}});
   await delay(1500);
-  if(calls.start!==1||calls.transcribe!==1||calls.download!==2||calls.resume!==1||calls.browserStart!==1||calls.browserResume!==2||calls.scheduleAdvance!==2||calls.scheduleStart!==1||calls.scheduleResume!==2)throw Error('pipeline_effect_count_mismatch');
+  if(calls.start!==1||calls.download!==2||calls.resume!==1||calls.browserStart!==1||calls.browserResume!==2||calls.scheduleAdvance!==2||calls.scheduleStart!==1||calls.scheduleResume!==2)throw Error('pipeline_effect_count_mismatch');
   console.log(JSON.stringify({pipeline_probe:'passed',calls,workflows:rows.map(({id,...row})=>row),receipts:(await pool.query('SELECT step,attempt,state FROM workflow_receipts')).rows}));
 }finally{await connection?.close();await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}

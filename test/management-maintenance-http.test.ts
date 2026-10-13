@@ -7,12 +7,11 @@ import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 
-test('dashboard backup drains a partial upload, fences native/provider/content routes and retains progress access',async()=>{
+test('dashboard backup drains a partial upload, fences native/content routes and retains progress access',async()=>{
   const state=await mkdtemp(join(tmpdir(),'nocheh-maintenance-http-')),token='synthetic-dashboard-key-'.repeat(3);
   const probe=createServer();probe.listen(0,'127.0.0.1');await once(probe,'listening');const port=(probe.address() as {port:number}).port;
   await new Promise<void>(done=>probe.close(()=>done()));
   await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),token);
-  await mkdir(join(state,'provider/keys'),{recursive:true});await writeFile(join(state,'provider/keys/monitor-admin.key'),token);
   const adapter=join(state,'python-fixture');await writeFile(adapter,`#!/usr/bin/env python3
 import json,os,sys,time
 from pathlib import Path
@@ -54,7 +53,7 @@ print(json.dumps({'result':result}),flush=True)
     const status=await(await request('/maintenance')).json() as any;
     assert.equal(status.ready,true);assert.equal(status.token,await readFile(join(state,'coordinator'),'utf8'));
     assert.equal(await readFile(join(state,'admin/jobs',imported.id,'upload/original.txt'),'utf8'),'partial original complete');
-    for(const path of ['/hermes/api/config','/providers/v0/management/codex-auth-url','/api/nocheh/artifacts/'+'a'.repeat(64)+'/download'])
+    for(const path of ['/hermes/api/config','/api/nocheh/artifacts/'+'a'.repeat(64)+'/download'])
       assert.equal((await fetch(base+path,{headers})).status,503);
     assert.equal((await request('/sources/'+'a'.repeat(64)+'/reprocess',{})).status,503);
     assert.equal((await request('/jobs/'+job.id)).status,200);assert.equal((await request('/health')).status,200);

@@ -255,8 +255,6 @@ const settingHints: Record<string, string> = {
     'Names, separated by commas, that address Nocheh when they start a group message. Change, add or remove any of them; its Telegram display name and @username always work.',
   NOCHEH_GUARD_MODE:
     'On uses saved guarded copies for agents and memory. Off uses originals with the same access rules.',
-  NOCHEH_GUARD_TRUSTED_ENDPOINTS:
-    'Explicit destinations for trusted preparation services. This does not bypass guarding for agents.',
   NOCHEH_PORT: 'Local port used by the archive service.',
   NOCHEH_PARALLEL_GUARD_CHECKS:
     'How many messages the secret guard checks at the same time, 1–4. Every message is checked before it is answered, and each check is one model call.',
@@ -451,7 +449,7 @@ function NochehSettings({notify}: {notify: Notify}) {
       }
     }
     if (key.endsWith('_PROVIDER')) {
-      if (!value) return 'Same as default';
+      if (!value) return key === 'NOCHEH_PROVIDER' ? 'Not configured' : 'Same as default';
       let customs: any[] = [];
       try {
         customs = JSON.parse(changes.NOCHEH_PROVIDERS ?? '[]');
@@ -459,7 +457,7 @@ function NochehSettings({notify}: {notify: Notify}) {
       const known = [...(data.providers?.list || []), ...customs];
       return known.find((p: any) => p.id === value)?.name || value;
     }
-    if (key.endsWith('_MODEL') && !value) return 'Same as default';
+    if (key.endsWith('_MODEL') && !value) return key === 'NOCHEH_MODEL' ? 'Not set' : 'Same as default';
     if (key === 'TELEGRAM_OWNER_ID') return participantLabel(value);
     if (key === 'TELEGRAM_GROUP_REPLIES') return value === 'all' ? 'Every message' : 'Only when addressed';
     return value || '(empty)';
@@ -476,7 +474,7 @@ function NochehSettings({notify}: {notify: Notify}) {
     ],
     models: modelSettingKeys,
     speed: ['NOCHEH_PARALLEL_RUNS', 'NOCHEH_PARALLEL_REPLIES', 'NOCHEH_PARALLEL_GUARD_CHECKS'],
-    privacy: ['NOCHEH_GUARD_MODE', 'NOCHEH_GUARD_TRUSTED_ENDPOINTS'],
+    privacy: ['NOCHEH_GUARD_MODE'],
   };
   const placed = [...managedElsewhere, ...Object.values(sectionKeys).flat()];
   const advanced = fields.filter(f => !placed.includes(f.key)).map(f => f.key);
@@ -532,7 +530,7 @@ function NochehSettings({notify}: {notify: Notify}) {
             render: () =>
               fieldGroup(
                 'Speed',
-                'How much work runs at the same time. More is faster for several chats but uses more memory and more of your model subscription at once. Apply restarts Hermes and its launcher.',
+                'How much work runs at the same time. More is faster for several chats but uses more memory and more of your model provider’s quota at once. Apply restarts Hermes and its launcher.',
                 sectionKeys.speed,
               ),
           },

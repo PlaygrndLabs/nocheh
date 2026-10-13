@@ -1,75 +1,31 @@
 import type pg from 'pg';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { Settings } from './config.js';
-import { digest } from './archive.js';
 import { conversationScope } from './assistant-policy.js';
 import { turnToken } from './access.js';
 import {eventSpace,spacePolicy} from './spaces.js';
 import { controlReply } from './actions.js';
-import { HttpError } from './http.js';
 import type { RuntimeCall } from './runtime.js';
 import {guardState,guardedValue,prepareGuarded} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 
 type Call=RuntimeCall;
-const TRANSCRIPTION_VERSION='codex-asr:479f6a7a3db81fe2a23d4755b0ccbeb4400317d4';
 
 async function dispatchReceipt(client:pg.PoolClient,eventId:string,result:Record<string,unknown>) {
   if(!['queued','running','done','failed','ambiguous','suppressed','cancelled'].includes(String(result.state)))throw Error('invalid_dispatch_receipt');
   const active=['queued','running'].includes(String(result.state));
-  const allowed=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed'];
+  const allowed=['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message','delivery_unconfirmed','dispatch_interrupted','space_policy_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured'];
   await client.query(`UPDATE dispatches SET state=$2,error_code=$3,next_attempt=now()+($4*interval '1 second'),updated_at=now(),
     runtime_stage=coalesce($5,runtime_stage) WHERE event_id=$1`,[eventId,active?'running':result.state,active?'awaiting_dispatch_receipt':allowed.includes(String(result.error_code))?result.error_code:null,
     active?5:result.state==='failed'?10:60,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:result.state==='done'?'delivery':null]);
 }
 
-export async function storedTranscripts(client:pg.Pool|pg.PoolClient,eventId:string):Promise<string[]|null> {
-  const {rows}=await client.query<{content:Buffer|null}>(`SELECT d.content FROM artifacts a
-    LEFT JOIN derived_artifacts d ON d.id=encode(sha256(convert_to(a.id||':transcript:'||$2,'UTF8')),'hex')
-    WHERE a.event_id=$1 AND a.kind IN ('voice','audio','video_note') ORDER BY a.id`,[eventId,TRANSCRIPTION_VERSION]);
-  return rows.some(row=>row.content===null)?null:rows.map(row=>row.content!.toString());
-}
-
-export async function prepareTranscripts(client:pg.PoolClient,dataDir:string,eventId:string,call:Call,authority:ExecutionAuthority):Promise<string[]|null> {
-  const {rows}=await client.query<{id:string;file_hash:string;kind:string;state:string;metadata:{file_name?:string}}>(
-    "SELECT id,file_hash,kind,state,metadata FROM artifacts WHERE event_id=$1 AND kind IN ('voice','audio','video_note') ORDER BY id",[eventId]);
-  const texts:string[]=[];
-  for (const artifact of rows) {
-    const id=digest(artifact.id+':transcript:'+TRANSCRIPTION_VERSION);
-    const previous=await client.query<{content:Buffer}>('SELECT content FROM derived_artifacts WHERE id=$1',[id]);
-    if (previous.rows[0]) {texts.push(previous.rows[0].content.toString());continue;}
-    if (artifact.state!=='ready') return null;
-    const fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);
-    if(!fenced)return null;
-    try {
-    await client.query('INSERT INTO transcription_jobs(artifact_id) VALUES($1) ON CONFLICT DO NOTHING',[artifact.id]);
-    const due=await client.query("UPDATE transcription_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes' WHERE artifact_id=$1 AND next_attempt<=now() AND error_code IS DISTINCT FROM 'invalid_transcription_response' RETURNING artifact_id",[artifact.id]);
-    if (!due.rowCount)return null;
-    try {
-      if (!/^[a-f0-9]{64}$/.test(artifact.file_hash))throw new HttpError(503,'audio_hash_invalid');
-      const raw=await readFile(join(dataDir,'files',artifact.file_hash));
-      if (digest(raw)!==artifact.file_hash)throw new HttpError(503,'audio_hash_mismatch');
-      const match=artifact.metadata.file_name?.match(/\.(ogg|oga|mp3|wav|m4a|mp4|flac)$/i);
-      const result=await call('perception.transcribe',{audio_base64:raw.toString('base64'),suffix:artifact.kind==='video_note'?'.mp4':match?'.'+match[1]!.toLowerCase():'.ogg'});
-      if (result.success!==true || typeof result.transcript!=='string' || !result.transcript.trim()) {
-        const terminal=result.success===true||result.error==='invalid_transcription_response'&&result.retryable===false;
-        throw new HttpError(terminal?422:503,terminal?'invalid_transcription_response':result.error==='quota_paused'?'quota_paused':'transcription_unavailable');
-      }
-      await client.query('BEGIN');
-      await client.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,search_text,provenance) VALUES($1,$2,$3,'transcript',$4,$5,$6) ON CONFLICT DO NOTHING`,
-        [id,eventId,artifact.id,Buffer.from(result.transcript),result.transcript.replaceAll('\0',''),JSON.stringify({provider:'nocheh-subscription',version:TRANSCRIPTION_VERSION,input_sha256:artifact.file_hash})]);
-      await client.query("UPDATE transcription_jobs SET state='done',error_code=NULL WHERE artifact_id=$1",[artifact.id]);
-      await client.query('COMMIT');texts.push(result.transcript);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      await client.query("UPDATE transcription_jobs SET state='failed',error_code=$2,next_attempt=now()+least(3600,30*power(2,least(attempts,7)))*interval '1 second' WHERE artifact_id=$1",[artifact.id,error instanceof HttpError?error.code:'transcription_unavailable']);
-      return null;
-    }
-    }finally{await leaveFamily(client,'preparation');}
-  }
-  return texts;
+/** Readings already derived for this event's voice notes. Voice notes are archived
+ * without transcription, so a missing reading never holds a reply back. */
+export async function storedTranscripts(client:pg.Pool|pg.PoolClient,eventId:string):Promise<string[]> {
+  const {rows}=await client.query<{content:Buffer}>(`SELECT d.content FROM derived_artifacts d JOIN artifacts a ON a.id=d.artifact_id
+    WHERE d.event_id=$1 AND d.kind='transcript' AND a.kind IN ('voice','audio','video_note') ORDER BY a.id,d.id`,[eventId]);
+  return rows.map(row=>row.content.toString());
 }
 
 export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,eventId:string|null=null,authority:ExecutionAuthority):Promise<void> {
@@ -106,7 +62,6 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,call:Call,e
     const missing=await client.query("SELECT id FROM artifacts WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event.id]);
     if (missing.rowCount) {await client.query("UPDATE dispatches SET error_code='waiting_for_attachments',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
     const transcripts=await storedTranscripts(client,event.id);
-    if (transcripts===null) {await client.query("UPDATE dispatches SET error_code='waiting_for_transcription',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
     const attempt=event.state==='running'?event.attempts:event.attempts+1;
     const control=await controlReply(pool,config.assistant,event.id);
     const guard=await guardState(pool);

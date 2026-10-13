@@ -101,7 +101,7 @@ test('every page opens with its heading and without errors', async () => {
   }
 });
 
-test('navigation lists each page once, in order, and links to Hermes and CPA', async () => {
+test('navigation lists each page once, in order, and links to Hermes', async () => {
   const {page} = await open('home');
   const nav = page.getByRole('navigation', {name: 'Main navigation'});
   assert.deepEqual(
@@ -109,7 +109,7 @@ test('navigation lists each page once, in order, and links to Hermes and CPA', a
     pages.map(([, title]) => title),
   );
   assert.equal(await page.locator('a[href="/hermes/nocheh"][aria-label="Open Hermes dashboard"]').count(), 1);
-  assert.equal(await page.locator('a[href="/providers/management.html"][aria-label="Open CPA dashboard"]').count(), 1);
+  assert.equal(await page.locator('a[href^="/providers"]').count(), 0);
   await page.close();
 });
 
@@ -281,19 +281,46 @@ test('settings keeps every section reachable, with one save and apply bar', asyn
   await page.close();
 });
 
+// Runs before the Models test, which saves a provider choice in the shared preview.
+test('health shows each part’s provider and model, or that it is not configured', async () => {
+  const {page, problems} = await open('system?view=health');
+  const providers = page.locator('details', {hasText: 'Model providers'});
+  await providers.getByText('3 parts not configured.').waitFor();
+  await providers.locator('summary').click();
+  await providers.getByText('Secret check').waitFor();
+  assert.equal(await providers.getByText('Not configured — choose a provider in Settings › Models').count(), 3);
+  await providers.getByText('OpenAI · text-embedding-3-small').waitFor();
+  assert.equal(await page.getByText(/CPA|subscription OAuth|ChatGPT login/).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('models let the owner add a custom provider and give one part its own provider', async () => {
   const {page, problems} = await open('settings?view=models');
   await page.getByRole('heading', {name: 'Which provider each part uses'}).waitFor();
+  // A fresh installation has no provider: it says so and every part follows the unset default.
+  await page.getByText('Nocheh has no model provider yet.').waitFor();
+  assert.equal(await page.locator('#default-provider').inputValue(), '');
+  assert.equal((await page.locator('#default-provider option:checked').textContent()).trim(), 'Not configured');
+  assert.equal(
+    (await page.locator('#memory-provider option:checked').textContent()).trim(),
+    'Same as default · Not configured',
+  );
+  assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
   await page.getByRole('button', {name: 'Add custom provider'}).click();
   await page.getByLabel('Name', {exact: true}).fill('sub2api');
   await page.getByLabel('Address', {exact: true}).fill('https://gateway.example.test/v1');
   await page.locator('#key-custom-1').fill('synthetic-gateway-key');
   // Its models load from the address and key while it is still unsaved.
   await page.getByRole('group', {name: 'sub2api'}).getByText('2 models available.').waitFor();
+  await page.locator('#default-provider').selectOption('openai');
   await page.locator('#memory-provider').selectOption('custom-1');
   await page.locator('#memory-model').selectOption('gpt-5.6-sol');
+  // Once a default is chosen, "Not configured" is no longer offered for it.
+  assert.equal(await page.locator('#default-provider option[value=""]').count(), 0);
   const bar = page.getByRole('region', {name: 'Save and apply settings'});
   await bar.getByRole('button', {name: 'Review changes'}).click();
+  await bar.getByText('Default provider: OpenAI').waitFor();
   await bar.getByText('Custom providers: sub2api').waitFor();
   await bar.getByText('Custom provider API keys: Replace stored credential').waitFor();
   await bar.getByText('Memory provider: sub2api').waitFor();

@@ -125,11 +125,9 @@ def start(root,policy,model,credentials,body):
 
 
 def _review(profile,policy,model,credentials,body):
-    env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','GUARD_TRUSTED_ENDPOINTS','NOCHEH_REASONING_ROUTE','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL') if key in os.environ}
+    env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
     env.update(HERMES_HOME=str(profile),NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
-    transport = credentials.runtime() if hasattr(credentials,'runtime') else {
-        'api_key':credentials.access_token,'base_url':'https://chatgpt.com/backend-api/codex',
-        'provider':'openai-codex','api_mode':'codex_responses'}
+    transport = credentials.runtime()
     request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
              'session_id':'review-'+body['id'],'owner':True,'chat_id':policy.owner,'user_id':policy.owner,**transport}
     from .security_transport import isolated_enabled,scoped_transport

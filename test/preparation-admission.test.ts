@@ -43,17 +43,15 @@ test('preparation admission never bypasses Inngest; guarding resumes with a new 
     assert.equal((await sharedContext(pool,reader,'Shared',runtime)).sources[0]?.text,'Shared password: ***');
     assert.equal(calls,0);
 
-    // An in-flight transcript keeps a recovery lease several minutes ahead.
-    // A dependent turn must observe completion without sleeping that lease.
+    // An unread voice note waits only for its archive status, never for a provider.
+    // A dependent turn observes the prerequisite promptly.
     const voice=await ingest(pool,{version:1,key:schema+':voice',origin:'live',kind:'telegram_update',scope:'123',bot_id:'fixture',source_id:'2',revision:'1',occurred_at:null,text:null,
       payload:{message:{message_id:2,chat:{id:123,type:'private'},from:{id:123},voice:{file_id:'fixture-voice'}}}});
-    const artifact=(await pool.query('UPDATE artifacts SET state=\'ready\',file_hash=$2 WHERE event_id=$1 RETURNING id',[voice.id,'b'.repeat(64)])).rows[0].id;
-    await pool.query("INSERT INTO transcription_jobs(artifact_id,state,next_attempt) VALUES($1,'running',now()+interval '5 minutes')",[artifact]);
+    await pool.query('UPDATE artifacts SET state=\'ready\',file_hash=$2 WHERE event_id=$1',[voice.id,'b'.repeat(64)]);
     const telegram=pipelineOperations(pool,{...settings(),assistant:{enabled:true,owner_id:'123',group_ids:[]}},runtime).telegram!;
     const started=Date.now(),waiting=await telegram(voice.id,{owner:'inngest',epoch});
     assert.equal(waiting.stage,'transcription');assert.equal(waiting.waiting_reason,'prerequisite');
     assert.ok(waiting.next_attempt-started<10000);
-    assert.ok((await pool.query('SELECT next_attempt FROM transcription_jobs WHERE artifact_id=$1',[artifact])).rows[0].next_attempt.getTime()>Date.now()+240000);
     assert.equal(calls,0);
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });

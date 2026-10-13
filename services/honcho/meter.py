@@ -1,4 +1,4 @@
-"""Production Honcho egress: subscription reasoning and strictly budgeted embeddings."""
+"""Production Honcho egress: the memory part's reasoning provider and strictly budgeted embeddings."""
 import hashlib
 import hmac
 import json
@@ -21,10 +21,9 @@ except ModuleNotFoundError:
 
 MODEL = 'text-embedding-3-small'
 REASONING_MODEL = os.environ.get('NOCHEH_REASONING_MODEL') or os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5')
-BUILTIN_REASONING_URL = 'http://shared-provider:8317/v1'
 PILOT_LIMIT_MICRODOLLARS = 5_000_000
 MAX_MONTHLY_LIMIT_CENTS = 1_500
-REQUEST_LIMIT = 1_500  # Subscription reasoning attempts per budget window.
+REQUEST_LIMIT = 1_500  # Reasoning attempts per budget window.
 
 
 class Rejected(Exception):
@@ -300,15 +299,16 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class Egress:
     def __init__(self, ledger, token, paid_key, opener=None, prepare=None, embedding=None,
-                 reasoning_key=None, reasoning_url=BUILTIN_REASONING_URL):
+                 reasoning_key=None, reasoning_url=None):
         self.ledger,self.token,self.paid_key = ledger,token,paid_key
-        # The built-in login on the isolated network, or the HTTPS provider the
-        # owner chose for memory in Settings; never a plain-HTTP remote address.
-        if reasoning_url.rstrip('/') != BUILTIN_REASONING_URL and not reasoning_url.startswith('https://'):
+        # The HTTPS provider the owner chose for memory in Settings › Models. Without
+        # one the meter still starts: embeddings work and reasoning is refused.
+        reasoning_url=(reasoning_url or '').strip().rstrip('/')
+        if reasoning_url and not reasoning_url.startswith('https://'):
             raise Rejected('reasoning_route_denied')
-        self.reasoning_key=reasoning_key
-        if not self.reasoning_key: raise Rejected('reasoning_key_missing')
-        self.reasoning_url=reasoning_url.rstrip('/')
+        self.reasoning_key=(reasoning_key or '').strip()
+        if reasoning_url and not self.reasoning_key: raise Rejected('reasoning_key_missing')
+        self.reasoning_url=reasoning_url
         self.opener=opener or urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
         self.prepare=prepare
         self.embedding=embedding or embeddings({})
@@ -319,6 +319,7 @@ class Egress:
             if not isinstance(workspace,str) or not workspace: raise Rejected('memory_context_required')
             payload=validate(route,self.prepare(workspace,route,payload),self.embedding)
         paid=route=='/v1/embeddings'
+        if not paid and not self.reasoning_url: raise Rejected('provider_not_configured')
         if paid and not self.paid_key: raise Rejected('temporary_embedding_key_missing')
         data=json.dumps(payload,ensure_ascii=False).encode()
         if len(data)>1024*1024: raise Rejected('request_too_large')
@@ -396,11 +397,11 @@ class ArchivePreparation:
 if __name__=='__main__':
     token=Path('/state/internal_token').read_text().strip()
     paid=Path('/run/secrets/temporary_embedding_key').read_text().strip()
-    # Settings › Models may send Honcho reasoning to another provider; its key
-    # arrives in meter.env. The built-in login keeps its own Honcho client key.
-    reasoning=os.environ.get('NOCHEH_REASONING_KEY','').strip() or Path('/run/secrets/cliproxy_honcho_key').read_text().strip()
+    # The memory part's provider and key arrive in meter.env; both are empty until
+    # a provider is chosen in Settings › Models.
+    reasoning=os.environ.get('NOCHEH_REASONING_KEY','').strip()
     if not token: raise SystemExit('internal_token_missing')
     archive=os.environ.get('NOCHEH_ARCHIVE_URL')
     prepare=ArchivePreparation(archive,token) if archive else None
     ThreadingHTTPServer(('0.0.0.0',8790),handler(Egress(Ledger('/ledger/budget.sqlite'),token,paid,prepare=prepare,
-        embedding=embeddings(os.environ),reasoning_key=reasoning,reasoning_url=os.environ.get('NOCHEH_REASONING_URL',BUILTIN_REASONING_URL)))).serve_forever()
+        embedding=embeddings(os.environ),reasoning_key=reasoning,reasoning_url=os.environ.get('NOCHEH_REASONING_URL','')))).serve_forever()

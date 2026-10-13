@@ -145,11 +145,11 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(operational_request(request))
                     await transport.handle_async_request(request)
                     routed=send.call_args.args[-1]
-                    self.assertEqual(str(routed.url),'http://cliproxy-api:8317'+path)
-                    self.assertEqual(routed.headers['host'],'cliproxy-api:8317')
+                    self.assertEqual(str(routed.url),'http://model-fixture:8317'+path)
+                    self.assertEqual(routed.headers['host'],'model-fixture:8317')
                     self.assertFalse(operational_request(routed))
                     self.assertEqual(await routed.aread(),b'synthetic')
-                model=httpx.Request('POST','http://cliproxy-api:8317/v1/chat/completions',json={})
+                model=httpx.Request('POST','http://model-fixture:8317/v1/chat/completions',json={})
                 await transport.handle_async_request(model);self.assertIs(send.call_args.args[-1],model)
                 with self.assertRaisesRegex(ValueError,'synthetic_telegram_token_required'):Bot('999999:different')
                 with self.assertRaisesRegex(ValueError,'synthetic_telegram_token_required'):

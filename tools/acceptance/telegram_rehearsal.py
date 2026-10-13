@@ -28,20 +28,12 @@ def validate_fixture(directory,info,manifest):
         users=[name for name,service in manifest['services'].items() if 'preview' in (service.get('networks') or {})]
         if (preview!={'name':project+'-preview'} or users!=['fixture-preview'] or set(relay.get('networks') or {})!={'default','preview'}
                 or any(port.get('host_ip')!='127.0.0.1' for port in relay.get('ports') or []) or relay.get('volumes')):raise ValueError('isolated_fixture_required')
-    if 'existing-model' in manifest['networks'] or manifest['networks'].get('honcho-egress',{}).get('internal') is False:
-        # The owner-authorized real-model shape: one bridge for the relay, one
-        # paid-embedding exit for the meter; everything else stays internal.
-        from tools.acceptance.model_rehearsal import validate_paid_egress
-        preflight=directory/'route-preflight.json'
-        if not preflight.exists() or json.loads(preflight.read_text()).get('project')!=project:raise ValueError('authorized_model_fixture_required')
-        validate_paid_egress(manifest)
-    networks={key:value for key,value in manifest['networks'].items() if key not in ('preview','existing-model')
-              and not (key=='honcho-egress' and value.get('internal') is False)}
+    networks={key:value for key,value in manifest['networks'].items() if key!='preview'}
     if not networks or any(not value.get('internal') or value.get('external')
             or not value.get('name','').startswith(project) for value in networks.values()):raise ValueError('isolated_fixture_required')
     if any((service.get('ports') and name!='fixture-preview') or service.get('network_mode')=='host'
            for name,service in manifest['services'].items()):raise ValueError('isolated_fixture_required')
-    native=manifest['services']['hermes'];provider=manifest['services']['cliproxy-api']
+    native=manifest['services']['hermes'];provider=manifest['services']['model-fixture']
     if native['image']!=info['images']['native'] or provider['environment'].get('NOCHEH_INSTALLATION_FIXTURE')!='1':raise ValueError('synthetic_fixture_required')
     homes=[v for v in native['volumes'] if v.get('target')=='/workspace/data/local/hermes']
     if len(homes)!=1 or homes[0].get('type')!='bind' or Path(homes[0]['source']).resolve()!=directory/'state/hermes':raise ValueError('owned_native_state_required')
@@ -77,7 +69,7 @@ def main():
     def run(*args,**kwargs):return subprocess.run(command+list(args),check=True,**kwargs)
     def query(database,sql):return subprocess.check_output(command+['exec','-T','nocheh-db','psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-U','nocheh','-d',database,'-c',sql],text=True).strip()
     assert query('nocheh_control',"SELECT current_setting('cluster_name')")=='nocheh-installation-fixture'
-    def http(path,body=None,service='cliproxy-api',port=8317):
+    def http(path,body=None,service='model-fixture',port=8317):
         script="""const [service,port,path,encoded]=process.argv.slice(1),body=JSON.parse(encoded);
 const response=await fetch('http://'+service+':'+port+path,{method:body===null?'GET':'POST',
 headers:{'content-type':'application/json',Authorization:'Bearer '+process.env.SERVICE_TOKEN},
@@ -103,7 +95,7 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
             # Preserve the exact previous executable manifest before changing
             # only this fixture's provider and Telegram parent process.
             (report_directory/'compose.before.json').write_text(json.dumps(manifest))
-            provider=manifest['services']['cliproxy-api'];native=manifest['services']['hermes']
+            provider=manifest['services']['model-fixture'];native=manifest['services']['hermes']
             provider['environment']['NOCHEH_TELEGRAM_FIXTURE_STATE']='/fixture-state/telegram.json'
             state=directory/'state/telegram';state.mkdir(exist_ok=True,mode=0o700)
             def mount(service,source,target,readonly=True):
@@ -126,7 +118,7 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
             run('config','--quiet')
             run('stop','-t','120','hermes')
             prior_unknown=json.loads(state_path.read_text())['unknown'] if state_path.exists() else []
-            run('up','-d','--no-build','--no-deps','--force-recreate','--wait','cliproxy-api')
+            run('up','-d','--no-build','--no-deps','--force-recreate','--wait','model-fixture')
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait','hermes')
         wait('native_polling_connected',lambda:http('/health',service='hermes',port=8781)['telegram']=='connected',120)
         initial=http('/fixture/telegram');sent_before=len(initial['sent']);base=int(time.time())

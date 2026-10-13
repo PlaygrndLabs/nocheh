@@ -7,7 +7,7 @@ import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} f
 import {verifyFreshAcceptance} from '../src/stores/reset-acceptance.js';
 import {storeSchemas} from '../src/stores/schema.js';
 
-const idNames=['owner','group','reply','target','reaction','reactionTarget','transcript','recall','entry','learned','correction',
+const idNames=['owner','group','reply','target','reaction','reactionTarget','recall','entry','learned','correction',
   'isolation','silence','action','decision','restart','memory','receipt'] as const;
 const ids=Object.fromEntries(idNames.map(name=>[name,digest(name)])) as Record<(typeof idNames)[number],string>;
 const boundary='2026-09-18T00:00:00.000Z',fresh=new Date('2026-09-18T01:00:00.000Z');
@@ -17,7 +17,6 @@ const input=()=>({format:'nocheh-fresh-acceptance-v1',reset_id:'11111111-1111-41
     owner_dm:{event_id:ids.owner,owner_inspected:true},dedicated_group:{event_id:ids.group},
     reply:{event_id:ids.reply,target_event_id:ids.target},
     human_reaction:{event_id:ids.reaction,target_event_id:ids.reactionTarget,actor_observed:true},
-    subscription_transcription:{event_id:ids.transcript,artifact_id:'a'.repeat(64),derived_id:'b'.repeat(64)},
     learned_recall:{entry_id:ids.entry,version_operation_id:ids.correction,memory_receipt_id:ids.receipt,dispatch_event_id:ids.recall,owner_inspected:true},
     owner_correction:{entry_id:ids.entry,operation_id:ids.correction,revision:2},
     isolation:{event_id:ids.isolation,dispatch_event_id:ids.isolation,owner_inspected:true,private_source_absent:true},
@@ -29,15 +28,13 @@ const input=()=>({format:'nocheh-fresh-acceptance-v1',reset_id:'11111111-1111-41
 function stores(eventTime=fresh) {
   const archive={query:async(sql:string,params:any[])=>{
     if(sql.includes('FROM events e JOIN source_observations'))return {rows:[{origin:'live',channel:'telegram',received_at:eventTime,
-      operation:params[0]===ids.reaction?'reaction_change':'snapshot',metadata:{audience:{chat_id:[ids.owner,ids.transcript].includes(params[0])?'123':'-100'},
+      operation:params[0]===ids.reaction?'reaction_change':'snapshot',metadata:{audience:{chat_id:params[0]===ids.owner?'123':'-100'},
         ...(params[0]===ids.reaction?{reaction:{mode:'individual'}}:{})}}]};
     if(sql.includes('FROM source_relations x'))return {rows:[{present:1}]};
     if(sql.includes("r.kind='authored_by'"))return {rows:[{external_id:'999'}]};
-    if(sql.includes('FROM artifacts'))return {rows:[{file_hash:'f'.repeat(64),byte_size:42}]};
     throw Error('unexpected archive query '+sql);
   }};
   const derived={query:async(sql:string,params:any[])=>{
-    if(sql.includes('FROM derived_artifacts d'))return {rows:[{kind:'transcript',producer:'nocheh-subscription',created_at:fresh}]};
     if(sql.includes('FROM learned_entries x'))return {rows:[params[1]===ids.correction?
       {revision:2,author:'owner',retired:false,created_at:fresh}:
       {operation_id:ids.learned,author:'honcho',retired:false,created_at:fresh}]};
@@ -66,7 +63,7 @@ function stores(eventTime=fresh) {
 test('fresh reset acceptance requires current live source, derivative, action, learning and Honcho rows',async()=>{
   const result=await verifyFreshAcceptance(stores(),input());
   assert.equal(result.mode,'live');assert.equal(result.live_only,true);assert.equal(result.fixtures_accepted,false);
-  assert.deepEqual(Object.values(result.checks),Array(12).fill('passed'));assert.ok(result.source_events>=8);
+  assert.deepEqual(Object.values(result.checks),Array(11).fill('passed'));assert.ok(result.source_events>=8);
 });
 
 test('fresh reset acceptance rejects historical rows and fixture-labelled reports',async()=>{
@@ -91,10 +88,10 @@ test('fresh reset acceptance queries the three real isolated PostgreSQL stores',
     }
     const archive=clients.archive!,derived=clients.derived!,control=clients.control!,e=input(),when='2026-09-18T01:00:00.000Z';
     const objectIds:Record<string,string>={};
-    for(const eventId of new Set([ids.owner,ids.group,ids.reply,ids.target,ids.reaction,ids.reactionTarget,ids.transcript,
+    for(const eventId of new Set([ids.owner,ids.group,ids.reply,ids.target,ids.reaction,ids.reactionTarget,
       ids.recall,ids.isolation,ids.silence,ids.restart])) {
       const object=digest('object:'+eventId),revision=digest('revision:'+eventId);objectIds[eventId]=object;
-      const chat=[ids.owner,ids.transcript].includes(eventId)?'123':'-100',operation=eventId===ids.reaction?'reaction_change':'snapshot';
+      const chat=eventId===ids.owner?'123':'-100',operation=eventId===ids.reaction?'reaction_change':'snapshot';
       await archive.query(`INSERT INTO events(id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,received_at,payload,payload_hash)
         VALUES($1,$2,'telegram','fixture',$3,$4,'1','live','telegram_update',$5,'{}',$6)`,
         [eventId,'source:'+eventId,chat,eventId,when,digest('{}')]);
@@ -109,15 +106,7 @@ test('fresh reset acceptance queries the three real isolated PostgreSQL stores',
     const actor=digest('human-actor');
     await archive.query("INSERT INTO source_objects(id,platform,namespace,kind,external_id) VALUES($1,'telegram','bot-api','actor','999')",[actor]);
     await archive.query("INSERT INTO source_relations(event_id,kind,target_id,metadata) VALUES($1,'authored_by',$2,'{}')",[ids.reaction,actor]);
-    await archive.query("INSERT INTO artifacts(id,event_id,kind,source_ref,file_hash,byte_size) VALUES($1,$2,'voice','fixture',$3,42)",['a'.repeat(64),ids.transcript,'f'.repeat(64)]);
 
-    await derived.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,content_hash,provenance,source_revision,input_hash,
-      producer,producer_version,configuration_hash,operation_id,created_at) VALUES($1,$2,$3,'transcript','fixture',$4,'{}','1',$4,'nocheh-subscription','1',$4,$5,$6)`,
-      ['b'.repeat(64),ids.transcript,'a'.repeat(64),digest('fixture'),'transcript-operation',when]);
-    await derived.query("INSERT INTO derivative_selections(id,event_id,artifact_id,kind,active_revision) VALUES($1,$2,$3,'transcript',1)",
-      [digest('selection'),ids.transcript,'a'.repeat(64)]);
-    await derived.query("INSERT INTO derivative_selection_revisions(operation_id,selection_id,revision,derived_id,author,created_at) VALUES($1,$2,1,$3,'automatic',$4)",
-      [digest('selection-operation'),digest('selection'),'b'.repeat(64),when]);
     await derived.query("INSERT INTO learned_entries(id,scope_kind,scope_id,kind,subject,active_revision,created_at) VALUES($1,'conversation','-100','meaning','fixture',2,$2)",[ids.entry,when]);
     for(const [operation,revision,author] of [[ids.learned,1,'honcho'],[ids.correction,2,'owner']] as const) {
       const artifact=digest('learned-artifact:'+revision);
@@ -150,7 +139,7 @@ test('fresh reset acceptance queries the three real isolated PostgreSQL stores',
       VALUES($1,$2,'{}','fixture','fixture',$3,'done','remote',1,$4,$5)`,[ids.receipt,ids.memory,digest('memory'),when,{id:ids.entry,revision:2}]);
     for(const name of storeNames)await clients[name]!.query(`GRANT USAGE ON SCHEMA ${schema} TO nocheh_${name}; GRANT SELECT ON ALL TABLES IN SCHEMA ${schema} TO nocheh_${name}`);
     const connected=connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords);
-    try {const result=await verifyFreshAcceptance(connected,e);assert.equal(result.live_only,true);assert.equal(result.source_events,11);}
+    try {const result=await verifyFreshAcceptance(connected,e);assert.equal(result.live_only,true);assert.equal(result.source_events,10);}
     finally{await connected.close();}
   } finally {
     for(const name of storeNames) {

@@ -50,7 +50,6 @@ export const labels: Record<string, string> = {
   NOCHEH_PARALLEL_RUNS: 'Parallel agent runs',
   NOCHEH_PARALLEL_REPLIES: 'Chats answered at once',
   NOCHEH_PARALLEL_GUARD_CHECKS: 'Guard checks at once',
-  NOCHEH_GUARD_TRUSTED_ENDPOINTS: 'Trusted destinations (JSON)',
   TELEGRAM_ENABLED: 'Telegram enabled',
   TELEGRAM_BOT_TOKEN: 'Telegram bot token',
   TELEGRAM_OWNER_ID: 'Owner user ID',

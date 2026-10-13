@@ -4,37 +4,30 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tools.operations.installation.configuration import DEFAULTS, write_env
 from tools.operations.memory import honcho
+
+GATEWAY = {'id': 'gateway', 'name': 'Synthetic gateway', 'url': 'https://gateway.example.test/v1'}
 
 
 class HonchoStatusTests(unittest.TestCase):
-    def test_login_uses_single_shared_provider_credential_not_retired_bridge_store(self):
+    def test_reasoning_provider_follows_the_configured_memory_route_without_its_key(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            experiment = root / 'experiment'
-            bridge = experiment / 'bridge-auth'
-            bridge.mkdir(parents=True)
-            (bridge / 'old.json').write_text('{}')
-            provider = root / 'local'
-            auth = provider / 'provider/auth'
-            auth.mkdir(parents=True)
-            # The default reasoning model is a Claude model, served by the Claude login.
-            credential = {'type': 'claude', 'access_token': 'private-access',
-                          'refresh_token': 'private-refresh'}
-            with patch.object(honcho, 'STATE', experiment), \
+            provider = root / 'local'; provider.mkdir()
+            values = {**DEFAULTS, 'NOCHEH_PROVIDERS': json.dumps([GATEWAY])}
+            write_env(provider / '.env', values)
+            with patch.object(honcho, 'STATE', root / 'honcho'), \
                  patch.object(honcho, 'PROVIDER_STATE', provider), \
                  patch.object(honcho, 'enabled', return_value=False):
-                self.assertFalse(honcho.status()['subscription_login'])
-                (auth / 'one.json').write_text(json.dumps(credential))
+                # A fresh installation has no provider for memory.
+                self.assertFalse(honcho.status()['reasoning_provider_configured'])
+                write_env(provider / '.env', {**values, 'NOCHEH_PROVIDER_KEYS': '{"gateway":"private-key"}',
+                                              'NOCHEH_MEMORY_PROVIDER': 'gateway'})
                 result = honcho.status()
-                self.assertTrue(result['subscription_login'])
+                self.assertTrue(result['reasoning_provider_configured'])
                 self.assertIn('running', result)
                 self.assertNotIn('private', json.dumps(result))
-                (auth / 'two.json').write_text(json.dumps(credential))
-                self.assertFalse(honcho.status()['subscription_login'])
-                (auth / 'two.json').unlink()
-                (auth / 'one.json').write_text(json.dumps({**credential, 'disabled': True}))
-                self.assertFalse(honcho.status()['subscription_login'])
 
 
 if __name__ == '__main__':

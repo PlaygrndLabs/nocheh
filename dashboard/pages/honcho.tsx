@@ -166,8 +166,8 @@ function HonchoBudget({notify, editable}: {notify: Notify; editable: boolean}) {
         )}
       </Panel>
       <Panel
-        title="Subscription reasoning limit"
-        note="Honcho LLM calls use the shared ChatGPT subscription, separate from the paid embedding key."
+        title="Reasoning request limit"
+        note="Honcho LLM calls use the memory provider from Settings › Models, separate from the paid embedding key."
       >
         {error && <p role="alert">{error}</p>}
         {!budget && !error && <p role="status">Loading reasoning usage…</p>}
@@ -189,7 +189,7 @@ function HonchoBudget({notify, editable}: {notify: Notify; editable: boolean}) {
               value={Math.min(100, (100 * budget.reasoning_requests) / budget.reasoning_request_limit)}
               label={
                 Math.round((100 * budget.reasoning_requests) / budget.reasoning_request_limit) +
-                '% of subscription request limit used'
+                '% of reasoning request limit used'
               }
             />
             <p className="n-muted honcho-budget-note">
@@ -346,7 +346,7 @@ export function Honcho({notify}: {notify: Notify}) {
       <HonchoBudget notify={notify} editable={!!memory?.connection?.attached && !!memory?.connection?.verified} />
       <Panel
         title="Connection checks"
-        note="Pinned local Honcho services use subscription reasoning and a dedicated, capped embeddings route."
+        note="Pinned local Honcho services use the memory provider for reasoning and a dedicated, capped embeddings route."
       >
         {error && <p role="alert">{error}</p>}
         {!status && !error && <p role="status">Checking Honcho…</p>}
@@ -361,10 +361,10 @@ export function Honcho({notify}: {notify: Notify}) {
               <StatusBadge state={memory?.connection?.verified ? 'verified' : 'unverified'} />
             </div>
             <div className="n-row">
-              <b>Shared reasoning login</b>
+              <b>Memory provider configured</b>
               <StatusBadge
-                state={status.subscription_login ? 'ready' : 'unverified'}
-                label={status.subscription_login ? 'Configured' : 'Not configured'}
+                state={status.reasoning_provider_configured ? 'ready' : 'unverified'}
+                label={status.reasoning_provider_configured ? 'Configured' : 'Not configured'}
               />
             </div>
             <div className="n-row">

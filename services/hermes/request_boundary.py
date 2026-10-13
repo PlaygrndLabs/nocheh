@@ -16,7 +16,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 DETECTOR_CALL = contextvars.ContextVar('nocheh_trusted_detector', default=None)
-DEFAULT_TRUSTED = ['https://chatgpt.com/backend-api/codex', 'http://cliproxy-api:8317/v1']
 MAX_BODY = 1024*1024
 FAILURES = deque(maxlen=30)
 COUNTS = Counter()
@@ -36,14 +35,14 @@ def trusted(destination, endpoints):
                for base in map(urlsplit,endpoints))
 
 
-def required(mode,destination,endpoints):
+def required(mode):
     if mode not in ('off','on'):
         raise GuardUnavailable('invalid_guard_mode')
     return mode=='on'
 
 
 @contextlib.contextmanager
-def trusted_detector(endpoint='https://chatgpt.com/backend-api/codex'):
+def trusted_detector(endpoint):
     token=DETECTOR_CALL.set(endpoint)
     try:
         yield
@@ -52,18 +51,16 @@ def trusted_detector(endpoint='https://chatgpt.com/backend-api/codex'):
 
 
 def operational_request(request):
-    """Only known transport/auth operations bypass model-payload inspection."""
+    """Only native Telegram Bot API operations bypass model-payload inspection."""
     url=urlsplit(str(request.url))
     if url.scheme!='https' or url.username or url.password or url.port not in (None,443):
         return False
-    if url.hostname=='auth.openai.com' and url.path in ('/oauth/token','/api/accounts/deviceauth/usercode','/api/accounts/deviceauth/token'):
-        return True
     if url.hostname=='api.telegram.org' and (url.path.startswith('/bot') or url.path.startswith('/file/bot')):
         # Native Bot API operations have one token path component plus method;
         # a provider configured at .../chat/completions does not match.
         parts=url.path.strip('/').split('/')
         return (len(parts)==2 and parts[0].startswith('bot') and ':' in parts[0] and '/' not in parts[1]) or url.path.startswith('/file/bot')
-    return request.method=='GET' and not request.content and url.hostname=='chatgpt.com' and url.path=='/backend-api/codex/models'
+    return False
 
 
 def clear_reasoning_sidecars(payload):
@@ -111,9 +108,9 @@ def guard_rpc(destination,payload):
 
 
 class Boundary:
-    def __init__(self,mode='on',endpoints=None,transform=guard_rpc):
+    def __init__(self,mode='on',transform=guard_rpc):
         if mode not in ('off','on'): raise GuardUnavailable('invalid_guard_mode')
-        self.mode,self.endpoints,self.transform=mode,list(DEFAULT_TRUSTED if endpoints is None else endpoints),transform
+        self.mode,self.transform=mode,transform
 
     def needs_guard(self,request):
         destination=str(request.url)
@@ -124,7 +121,7 @@ class Boundary:
         if operational_request(request): return False
         from .archive_tools import _PROCESS_CREDENTIAL, ARCHIVE_CREDENTIAL
         if _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get(): return True
-        return required(self.mode,destination,self.endpoints)
+        return required(self.mode)
 
     def prepare(self,request):
         import httpx
@@ -159,7 +156,7 @@ def install(boundary=None):
     for method in (original_sync,original_async):
         if list(inspect.signature(method).parameters)!=['self','request']:
             raise GuardUnavailable('unsupported_httpx_boundary')
-    boundary=boundary or Boundary('on' if os.environ.get('GUARD_MODE','on')=='auto' else os.environ.get('GUARD_MODE','on'),json.loads(os.environ.get('GUARD_TRUSTED_ENDPOINTS',json.dumps(DEFAULT_TRUSTED))))
+    boundary=boundary or Boundary('on' if os.environ.get('GUARD_MODE','on')=='auto' else os.environ.get('GUARD_MODE','on'))
     def sync_send(client,request):
         COUNTS['attempts']+=1
         try:

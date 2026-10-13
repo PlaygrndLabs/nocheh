@@ -2,8 +2,7 @@
 import subprocess
 import os
 from pathlib import Path
-from tools.operations.installation.configuration import load,owns_project,write_env,read_env,env_path
-from tools.operations.provider.provider import compose
+from tools.operations.installation.configuration import load,owns_project,write_env,read_env,env_path,compose
 
 SERVICES=('honcho-postgres','honcho-redis','honcho-provider-gateway','honcho-api','honcho-deriver')
 

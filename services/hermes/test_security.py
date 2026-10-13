@@ -49,20 +49,23 @@ class SecurityTests(unittest.TestCase):
     def test_no_unknown_mode_or_transport_fallback(self):
         with patch.dict(os.environ,NOCHEH_SECURITY_RUNTIME='broken'):
             with self.assertRaises(ValueError):isolated_enabled()
-        self.assertEqual(scoped_transport('turn.capability','codex_responses')['api_key'],'turn.capability')
-        with self.assertRaises(ValueError):scoped_transport('turn.capability','bedrock')
+        self.assertEqual(scoped_transport('turn.capability','chat_completions'),{'api_key':'turn.capability',
+            'base_url':'http://nocheh-security:8786/v1','provider':'openai','api_mode':'chat_completions'})
+        for mode in ('codex_responses','bedrock'):
+            with self.assertRaises(ValueError):scoped_transport('turn.capability',mode)
 
     def test_pinned_auxiliary_route_and_model_context_are_preserved(self):
         from agent import auxiliary_client as aux,model_metadata,context_compressor
         from .security_transport import install_isolated_route
         from .subscription import SubscriptionCredentials
-        with patch.object(model_metadata,'get_model_context_length',return_value=12345),patch.object(context_compressor,'get_model_context_length'),patch.object(aux,'_CODEX_AUX_BASE_URL',aux._CODEX_AUX_BASE_URL):
-            credentials=SubscriptionCredentials('turn.scoped.capability','http://nocheh-security:8786/codex','openai-codex','codex_responses')
+        with patch.object(model_metadata,'get_model_context_length',return_value=12345),patch.object(context_compressor,'get_model_context_length'),\
+                patch.dict(os.environ):
+            credentials=SubscriptionCredentials('turn.scoped.capability','http://nocheh-security:8786/v1','openai','chat_completions')
             install_isolated_route(credentials,'same-model',272000)
             self.assertEqual(model_metadata.get_model_context_length('same-model',base_url=credentials.base_url),272000)
             self.assertEqual(context_compressor.get_model_context_length('same-model'),272000)
             self.assertEqual(model_metadata.get_model_context_length('different-model'),12345)
-            self.assertEqual(aux._CODEX_AUX_BASE_URL,credentials.base_url)
+            self.assertEqual((os.environ['OPENAI_API_KEY'],os.environ['OPENAI_BASE_URL']),(credentials.access_token,credentials.base_url))
         with self.assertRaises(ValueError):install_isolated_route(credentials,'same-model',None)
 
     def test_stopping_launcher_kills_running_turns(self):
@@ -90,7 +93,6 @@ body=json.load(sys.stdin)
 assert body['text']=='exact synthetic context'
 assert not Path('/var/run/docker.sock').exists()
 assert not Path('/workspace/data/local/hermes/auth.json').exists()
-assert not Path('/run/secrets/cliproxy_hermes_key').exists()
 assert not any(k in os.environ for k in ('SERVICE_TOKEN','TELEGRAM_BOT_TOKEN','OPENAI_API_KEY'))
 try: Path('/profile/config.yaml').write_text('changed');raise AssertionError('configuration writable')
 except OSError: pass
