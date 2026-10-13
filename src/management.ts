@@ -350,7 +350,7 @@ export async function startManagement() {
     if(req.method==='GET'&&path==='/') {
       const session=sessions.page(req);
       res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
-      const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision)location.reload();nochehRevision=next}catch{}},1000)</script>` : '';
+      const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision){if(window.__nochehUnsaved)return;location.reload()}nochehRevision=next}catch{}},1000)</script>` : '';
       const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
     }
