@@ -39,8 +39,8 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | System | Health: services, connections, storage and diagnostics. Background work: workflow totals, history charts and the run list with retry and cancel. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
 | Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (secret check, how long history is kept), Assistant (owner freedom and agent preferences) and Advanced. |
 
-Every settings edit, on any page, is a draft. While something is unsaved, one bar
-stays at the bottom of the screen with the list of changes, Discard and Save. Save
+Every settings edit, on any page, is a draft. While something is unsaved, the page
+header stays at the top of the screen with the number of changes, Discard and Save. Save
 writes the settings and applies them to the running services in one step, follows
 the apply to the end and shows the saved values. A failed apply keeps your edits.
 Edits stay while you switch tabs or pages; a tab with unsaved edits has a dot.
@@ -65,7 +65,7 @@ until its real provider acceptance passes.
 
 Settings show saved `.env` values with credential presence only. Save validates
 the complete configuration, then starts the apply job, which recreates affected
-Compose services and checks health; the save bar follows that job. A failed apply
+Compose services and checks health; the Save button follows that job. A failed apply
 restores the previous environment, reports whether recovery succeeded and keeps
 your edits. Runtime state is shown as unverified until the apply job verifies it.
 

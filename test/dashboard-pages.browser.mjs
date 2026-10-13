@@ -156,7 +156,7 @@ test('home leads with what needs the owner', async () => {
   await page.close();
 });
 
-test('a settings edit survives switching tabs and one bar saves and applies it', async () => {
+test('a settings edit survives switching tabs and Save at the top of the page saves and applies it', async () => {
   const {page, problems} = await open('settings?view=telegram');
   const tabs = page.getByRole('tablist', {name: 'Settings sections'});
   assert.equal(await page.getByRole('region', {name: 'Save changes'}).count(), 0);
@@ -165,8 +165,11 @@ test('a settings edit survives switching tabs and one bar saves and applies it',
   await tabs.getByRole('tab', {name: /Telegram.*unsaved/}).waitFor();
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByText('1 unsaved change').waitFor();
+  // Save stays at the top of the screen, never in a card at the bottom, even after scrolling down.
+  await page.locator('main').evaluate(main => main.scrollTo(0, main.scrollHeight));
+  assert.ok((await bar.boundingBox()).y < 120, 'Save sits at the top of the screen');
   await bar.getByRole('button', {name: 'Save'}).click();
-  await page.getByRole('status').filter({hasText: 'Saved.'}).waitFor();
+  await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor();
   await bar.waitFor({state: 'detached'});
   await tabs.getByRole('tab', {name: /Telegram/}).click();
   assert.equal(await page.locator('#telegram-names').inputValue(), 'Nocheh,Helper');
@@ -206,7 +209,7 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   await bar.waitFor();
   assert.equal(await bar.getByText('synthetic-gateway-key').count(), 0);
   await bar.getByRole('button', {name: 'Save'}).click();
-  await page.getByRole('status').filter({hasText: 'Saved.'}).waitFor();
+  await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor();
   await bar.waitFor({state: 'detached'});
   assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
   assert.deepEqual(problems, []);
