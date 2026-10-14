@@ -573,6 +573,13 @@ copying its folder.
   provider login, memory attachment, and executors stayed inactive. Restored
   containers are stopped; saved state remains preserved. The earlier disk-space
   failure and incomplete dumps remain recorded failures.
+- October 14: a backup of the owner's development installation failed with
+  `honcho_backup_state_missing` after pausing Telegram for about 75 seconds,
+  because installations run only through `make dev` never generate
+  `honcho.Dockerfile`. That build file is now optional: a backup records it as
+  rebuildable when absent and still requires the five owned Honcho state files
+  ([check](services/hermes/test_operations.py)). Pending: the rerun of backup
+  and inactive restore on that installation.
 - Fresh provider chat, literal detector, and refresh-delegation checks passed.
   Persisted CPA refresh metadata predates successful current chat requests;
   expiration was not forcibly induced. September provider cutover and voice
