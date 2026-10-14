@@ -728,6 +728,17 @@ provider model list now refuse a state that is neither the installation's own
 nor names its own project ([guard](tools/operations/installation/configuration.py),
 [test](services/hermes/test_honcho_runtime.py)).
 
+Real-model simulator cases (October 14): after the built-in Claude connection
+was removed, the fixture model service can relay to an owner-authorized
+provider from a private upstream file, so Hermes, Honcho and the secret check
+reason with a real model while Telegram stays simulated
+([rehearsal](tools/acceptance/model_rehearsal.py),
+[checks](test/test_model_rehearsal.py),
+[procedure](docs/telegram-simulation.md)). New cases cover memory shared across
+a group's topics and isolation between groups. Pending: a full run on a fresh
+fixture from current main, which needs the owner's main stack stopped and the
+owner's approval to reuse provider keys.
+
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
 installation rehearsal and both HTTP Telegram rehearsals pass; the first

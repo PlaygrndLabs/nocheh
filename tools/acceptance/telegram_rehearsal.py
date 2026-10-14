@@ -14,6 +14,9 @@ import time
 from tools.paths import ROOT
 from tools.acceptance.telegram_mock import TOKEN
 
+# The real-model rehearsal's only egress, attached to the model relay alone.
+MODEL_EGRESS='model-egress'
+
 
 def validate_fixture(directory,info,manifest):
     if not directory.is_relative_to(ROOT/'data/acceptance/results'):raise ValueError('owned_fixture_directory_required')
@@ -28,7 +31,11 @@ def validate_fixture(directory,info,manifest):
         users=[name for name,service in manifest['services'].items() if 'preview' in (service.get('networks') or {})]
         if (preview!={'name':project+'-preview'} or users!=['fixture-preview'] or set(relay.get('networks') or {})!={'default','preview'}
                 or any(port.get('host_ip')!='127.0.0.1' for port in relay.get('ports') or []) or relay.get('volumes')):raise ValueError('isolated_fixture_required')
-    networks={key:value for key,value in manifest['networks'].items() if key!='preview'}
+    egress=manifest['networks'].get(MODEL_EGRESS)
+    if egress is not None:
+        users=[name for name,service in manifest['services'].items() if MODEL_EGRESS in (service.get('networks') or {})]
+        if egress!={'name':project+'-'+MODEL_EGRESS} or users!=['model-fixture']:raise ValueError('isolated_fixture_required')
+    networks={key:value for key,value in manifest['networks'].items() if key not in ('preview',MODEL_EGRESS)}
     if not networks or any(not value.get('internal') or value.get('external')
             or not value.get('name','').startswith(project) for value in networks.values()):raise ValueError('isolated_fixture_required')
     if any((service.get('ports') and name!='fixture-preview') or service.get('network_mode')=='host'
