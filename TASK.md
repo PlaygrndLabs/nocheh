@@ -739,9 +739,14 @@ reason with a real model while Telegram stays simulated
 ([rehearsal](tools/acceptance/model_rehearsal.py),
 [checks](test/test_model_rehearsal.py),
 [procedure](docs/telegram-simulation.md)). New cases cover memory shared across
-a group's topics and isolation between groups. Pending: a full run on a fresh
-fixture from current main, which needs the owner's main stack stopped and the
-owner's approval to reuse provider keys.
+a group's topics and isolation between groups. A fresh fixture from the
+simulator change passed the installation rehearsal (15 of 15 gates), both
+Telegram rehearsals (14 and 12 gates) and all 38 personal-use scenarios. The
+closing lingering-turn check stopped on a transient Docker CLI failure, now
+retried. The real-model cases stopped before any answer: their updates were
+numbered below the offset the scenario run had already acknowledged, so the
+adapter dropped them; numbering now starts above it. Pending: the real-model
+cases and the lingering-turn check on that fixture.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the

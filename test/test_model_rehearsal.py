@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from tools.paths import ROOT
-from tools.acceptance.model_rehearsal import (enable_relay, main, read_upstream, replies_to,
+from tools.acceptance.model_rehearsal import (enable_relay, main, next_update_base, read_upstream, replies_to,
     retire_synthetic_name_sources, selected_cases, validate_model_egress)
 
 PROJECT = 'nocheh-installation-' + 'a' * 12
@@ -69,6 +69,13 @@ class ModelRehearsalReplyTests(unittest.TestCase):
                         read_upstream(path)
         with self.assertRaisesRegex(ValueError, 'outside_tracked_source'):
             read_upstream(ROOT / 'package.json')
+
+    def test_new_updates_start_above_those_an_earlier_run_already_acknowledged(self):
+        # An earlier scenario run numbered updates ahead of the clock; reusing a lower
+        # number would be dropped by the adapter and never captured.
+        self.assertGreater(next_update_base({'updates': [], 'offset': 2000000101}, 2000000000), 2000000101)
+        self.assertGreater(next_update_base({'updates': [{'update_id': 2000000500}], 'offset': 0}, 2000000000), 2000000500)
+        self.assertGreater(next_update_base({'updates': [], 'offset': 0}, 2000000000), 2000000000)
 
     def test_focused_topic_window_excludes_restart_and_retirement(self):
         self.assertEqual(selected_cases('topic_shared', 'group_isolation'), ('topic_shared', 'group_isolation'))
