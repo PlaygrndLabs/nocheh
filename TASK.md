@@ -749,8 +749,16 @@ adapter dropped them; numbering now starts above it. Afterwards the operating
 stack could not start: three stopped fixtures kept 24 networks and exhausted
 Docker's address pools, and with the Mac asleep it stayed down for about 11
 hours. `make dev` now releases networks of stopped fixtures
-([check](test/test_live_dev.py)). Pending: the real-model cases and the
-lingering-turn check on that fixture.
+([check](test/test_live_dev.py)). On rerun the lingering-turn check passed,
+and six of seven real-model cases delivered acceptable answers (reaction
+removal, corrected fact, private isolation, a fact shared across a group's
+topics, isolation between groups, recall after restart); no raw secret canary
+reached the provider outside the secret check. The retired-fact case failed:
+seven seconds after both name sources were retired, the private turn still
+answered the name "from memory". Retirement advances the guard epoch, so that
+turn ran in a fresh native profile without the old notes or history; the
+source of the name is being traced. Pending: that fix and a rerun of the
+retired-fact case; semantic review of the saved answers.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
