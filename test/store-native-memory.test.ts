@@ -55,7 +55,7 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   // A retired message stays in Honcho's summaries until its session is rebuilt and the old one deleted.
   for(const [stage,pending] of [['sources',false],['',false],['done',true]] as const) {
     sweep=stage;deleting=pending;const asked:number=calls.length;
-    const waiting:{limited_memory:boolean;syncing?:boolean;sources:unknown[]}=await memory.context(group);
+    const waiting=await memory.context(group);
     assert.equal(waiting.limited_memory,true);assert.equal(waiting.syncing,true);assert.deepEqual(waiting.sources,[]);
     assert.equal(calls.length,asked,'no Honcho-derived text is read while the epoch\'s correction is unfinished');
   }
@@ -273,7 +273,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     assert.equal(await services.memory.deleteSession(projectionSession,authority),true);assert.equal(calls.filter(c=>c.method==='DELETE').length,2);
     await insertRemote(late);assert.equal(await services.memory.reconcileReceipt(late),true,'a replaced receipt can still be reconciled');
     const fresh=await actor(source.id);
-    assert.equal(((await services.memory.context(fresh)) as {syncing?:boolean}).syncing,true,'Honcho context waits for the epoch\'s correction sweep');
+    assert.equal((await services.memory.context(fresh)).syncing,true,'Honcho context waits for the epoch\'s correction sweep');
     await swept();
     const replaced=(await stores.control.query("SELECT session_id FROM memory_session_deletions WHERE workspace=$1 AND state<>'done'",[workspace])).rows;
     assert.ok(replaced.length,'the other rebuilt session still awaits deletion');

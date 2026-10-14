@@ -21,7 +21,7 @@ const protocol='honcho-entity-v1';
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
 export const assistantPeer='nocheh_assistant';
 const assistantKinds=new Set(['telegram_delivered_message','browser_delivered_message']);
-const limited={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
+const limited:{sources:never[];limited_memory:boolean;note:string;syncing?:boolean}={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
 const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after a recent change, such as a retired message. Current context, native notes and archive search remain available.'};
 const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value);
 const sessionName=(workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
