@@ -74,7 +74,9 @@ export function Tabs<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="-mx-4 flex gap-1 overflow-x-auto border-b border-line px-4 sm:mx-0 sm:px-0"
+      // The baseline is an inset shadow, not a border, so the active underline covers it without
+      // overflowing the scroller and giving the bar a vertical scrollbar.
+      className="-mx-4 flex gap-1 overflow-x-auto overflow-y-hidden px-4 shadow-[inset_0_-1px_0_var(--color-line)] [scrollbar-width:none] sm:mx-0 sm:px-0"
     >
       {tabs.map(tab => (
         <button
@@ -84,7 +86,7 @@ export function Tabs<T extends string>({
           aria-selected={value === tab.id}
           onClick={() => onChange(tab.id)}
           className={cn(
-            '-mb-px flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors',
+            'flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors',
             value === tab.id ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg',
           )}
         >
