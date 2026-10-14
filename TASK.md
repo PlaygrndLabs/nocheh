@@ -578,8 +578,12 @@ copying its folder.
   because installations run only through `make dev` never generate
   `honcho.Dockerfile`. That build file is now optional: a backup records it as
   rebuildable when absent and still requires the five owned Honcho state files
-  ([check](services/hermes/test_operations.py)). Pending: the rerun of backup
-  and inactive restore on that installation.
+  ([check](services/hermes/test_operations.py)). The rerun with the fix
+  passed: Telegram paused 78 seconds; 947 state files and 99 table fingerprints,
+  Honcho and workflow state were covered; the inactive restore matched every
+  fingerprint and kept Telegram, provider login, Honcho attachment and
+  executors inactive; the restored copy was removed and the operating stack
+  returned healthy with one poller.
 - Fresh provider chat, literal detector, and refresh-delegation checks passed.
   Persisted CPA refresh metadata predates successful current chat requests;
   expiration was not forcibly induced. September provider cutover and voice
