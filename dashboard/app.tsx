@@ -5,6 +5,7 @@ import {
   Activity,
   ArrowUpRight,
   BrainCircuit,
+  ChevronDown,
   Gauge,
   Home,
   Inbox,
@@ -21,7 +22,8 @@ import {
   X,
 } from 'lucide-react';
 import {resolveRoute, type PageId} from './lib/routes';
-import {useHash} from './lib/navigation';
+import {useHash, useParam} from './lib/navigation';
+import {tabLinks} from './lib/page-tabs';
 import {useResource} from './lib/resource';
 import {useInboxCount} from './lib/inbox';
 import {cn} from './lib/utils';
@@ -115,6 +117,27 @@ function HealthLink({onNavigate, collapsed}: {onNavigate?: () => void; collapsed
   );
 }
 
+/** Which pages show their tabs in the sidebar; the open page does unless the owner folded it. */
+function useOpenGroups(page: PageId): [(id: PageId) => boolean, (id: PageId) => void] {
+  const [chosen, setChosen] = React.useState<Partial<Record<PageId, boolean>>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('nocheh.sidebar-groups.v1') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const isOpen = (id: PageId) => chosen[id] ?? id === page;
+  const toggle = (id: PageId) =>
+    setChosen(current => {
+      const next = {...current, [id]: !(current[id] ?? id === page)};
+      try {
+        localStorage.setItem('nocheh.sidebar-groups.v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  return [isOpen, toggle];
+}
+
 function Navigation({
   page,
   onNavigate,
@@ -127,6 +150,8 @@ function Navigation({
   onToggle?: () => void;
 }) {
   const inbox = useInboxCount();
+  const view = useParam('view');
+  const [isOpen, toggleGroup] = useOpenGroups(page);
   const [theme, cycleTheme] = useTheme();
   const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
   const themeName = theme === 'system' ? 'Match device' : theme === 'dark' ? 'Dark' : 'Light';
@@ -160,37 +185,84 @@ function Navigation({
         </a>
         {toggle}
       </div>
-      <nav aria-label="Main" className="flex flex-col gap-0.5">
-        {nav.map(({id, title, Icon}) => (
-          <a
-            key={id}
-            href={'#' + id}
-            onClick={onNavigate}
-            title={collapsed ? title : undefined}
-            aria-current={page === id ? 'page' : undefined}
-            className={cn(
-              'relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
-              collapsed ? 'justify-center px-0' : 'px-3',
-              page === id ? 'bg-accent-soft text-accent-text' : 'text-fg/80 hover:bg-subtle hover:text-fg',
-            )}
-          >
-            <Icon className="size-[18px] shrink-0" />
-            {label(title)}
-            {id === 'inbox' &&
-              !!inbox &&
-              (collapsed ? (
-                <span className="absolute top-1.5 right-2.5 size-2 rounded-full bg-accent">
-                  <span className="sr-only">, {inbox} waiting</span>
-                </span>
-              ) : (
-                <span className="tabular rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-on-accent">
-                  {inbox > 99 ? '99+' : inbox}
-                </span>
-              ))}
-          </a>
-        ))}
+      <nav aria-label="Main" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 pb-3">
+        {nav.map(({id, title, Icon}) => {
+          const tabs = collapsed ? [] : tabLinks(id);
+          const open = tabs.length > 0 && isOpen(id);
+          const activeTab = page === id ? (tabs.find(tab => tab.id === view) ?? tabs[0])?.id : undefined;
+          return (
+            <div key={id}>
+              <div className="relative">
+                <a
+                  href={'#' + id}
+                  onClick={onNavigate}
+                  title={collapsed ? title : undefined}
+                  aria-current={page === id ? 'page' : undefined}
+                  className={cn(
+                    'relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+                    collapsed ? 'justify-center px-0' : 'px-3',
+                    tabs.length && 'pr-9',
+                    page === id ? 'bg-accent-soft text-accent-text' : 'text-fg/80 hover:bg-subtle hover:text-fg',
+                  )}
+                >
+                  <Icon className="size-[18px] shrink-0" />
+                  {label(title)}
+                  {id === 'inbox' &&
+                    !!inbox &&
+                    (collapsed ? (
+                      <span className="absolute top-1.5 right-2.5 size-2 rounded-full bg-accent">
+                        <span className="sr-only">, {inbox} waiting</span>
+                      </span>
+                    ) : (
+                      <span className="tabular rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-on-accent">
+                        {inbox > 99 ? '99+' : inbox}
+                      </span>
+                    ))}
+                </a>
+                {tabs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(id)}
+                    aria-expanded={open}
+                    aria-label={`${open ? 'Hide' : 'Show'} ${title} tabs`}
+                    className={cn(
+                      'absolute top-1/2 right-1 grid size-7 -translate-y-1/2 place-items-center rounded-md hover:bg-subtle',
+                      page === id ? 'text-accent-text' : 'text-muted hover:text-fg',
+                    )}
+                  >
+                    <ChevronDown aria-hidden className={cn('size-4 transition-transform', !open && '-rotate-90')} />
+                  </button>
+                )}
+              </div>
+              {open && (
+                <ul
+                  aria-label={`${title} tabs`}
+                  className="mt-0.5 mb-1 ml-[21px] flex flex-col gap-0.5 border-l border-line pl-2"
+                >
+                  {tabs.map(tab => (
+                    <li key={tab.id}>
+                      <a
+                        href={tab.href}
+                        onClick={onNavigate}
+                        aria-current={activeTab === tab.id ? 'true' : undefined}
+                        className={cn(
+                          'block truncate rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
+                          activeTab === tab.id
+                            ? 'bg-subtle font-medium text-fg'
+                            : 'text-muted hover:bg-subtle hover:text-fg',
+                        )}
+                      >
+                        {tab.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
       </nav>
-      <div className="mt-auto flex flex-col gap-0.5 border-t border-line pt-3">
+      <div className="flex flex-col gap-0.5 border-t border-line pt-3">
         <HealthLink onNavigate={onNavigate} collapsed={collapsed} />
         <a href="/hermes/nocheh" className={footerItem} title={collapsed ? 'Assistant console' : undefined}>
           <Activity className="size-4 shrink-0" />
