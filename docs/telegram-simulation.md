@@ -90,6 +90,11 @@ inference transports. It requires its own verified images and the repository's
 single-stack ownership preflight; component passes do not substitute for this
 coupled run. Actual provider reasoning and conversational recall require separate
 evidence even when the scripted installation rehearsal passes.
+Stop a kept fixture with `docker compose -p <project> -f <directory>/compose.json
+down`, without `--volumes`, so its networks are released while its volumes and
+state remain. `make dev` also releases networks of stopped fixtures, which
+otherwise exhaust Docker's address pools and stop the operating stack from
+starting.
 Use `--prepare-only` to render and retain the dedicated manifest, synthetic state
 and owned empty volumes before starting any service. Preparation and Compose
 validation are distinct from execution and cannot pass the installation gate.
