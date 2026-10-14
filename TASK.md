@@ -756,8 +756,12 @@ topics, isolation between groups, recall after restart); no raw secret canary
 reached the provider outside the secret check. The retired-fact case failed:
 seven seconds after both name sources were retired, the private turn still
 answered the name "from memory". Retirement advances the guard epoch, so that
-turn ran in a fresh native profile without the old notes or history; the
-source of the name is being traced. Pending: that fix and a rerun of the
+turn ran in a fresh native profile without the old notes or history, made no
+tool calls, and took the name from the turn-start Honcho context, read before
+the epoch's correction sweep had rebuilt the session. Honcho context and recall
+now wait for that correction
+([ADR-0148](docs/adr/0148-honcho-reads-wait-for-epoch-correction.md),
+[checks](test/store-native-memory.test.ts)). Pending: a rerun of the
 retired-fact case; semantic review of the saved answers.
 
 Simulator run on main after the Honcho session, storage and timing merges

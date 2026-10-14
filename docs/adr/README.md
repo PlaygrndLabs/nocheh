@@ -20,6 +20,7 @@ Durable embedding outage cooldown: [0100](0100-durable-embedding-egress-cooldown
 Honcho terminal-error readiness: [0101](0101-honcho-terminal-queue-errors-block-readiness.md).
 Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), implemented by
 [0115](0115-honcho-session-revisions.md).
+Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
 superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md).
 Primary ingestion before new native notes:
