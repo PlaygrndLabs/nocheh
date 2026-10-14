@@ -167,9 +167,12 @@ class StoreRecovery:
             if self.fingerprints(store)!={'tables':expected['tables'],'sequences':expected['sequences']}:
                 raise RuntimeError('store_restore_fingerprint_mismatch')
             self.query(store,'REVOKE ALL ON SCHEMA public FROM PUBLIC')
+        # Activation after a final snapshot brings the source's memory connection back.
+        connection=json.loads(self.query('control',"SELECT json_build_object('attached',attached,'verified',verified) "
+            "FROM memory_engine_connection WHERE singleton").strip() or 'null')
         # Preserve historical operation identities, but invalidate old runtime capabilities.
         self.query('control',"UPDATE guard_state SET epoch=epoch+1; UPDATE memory_engine_connection SET attached=false,verified=false;")
-        return {'verified_databases':list(STORES),'runtime_login_enabled':False,'active':False}
+        return {'verified_databases':list(STORES),'runtime_login_enabled':False,'active':False,'memory_connection':connection}
 
 
 def validate(directory,metadata,sha):

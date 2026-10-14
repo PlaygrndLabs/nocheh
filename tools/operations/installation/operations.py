@@ -1,4 +1,5 @@
-"""Consistent local backups and inactive restores into a new Compose project."""
+"""Consistent local backups, inactive restores into a new Compose project, and
+activation of a restored final snapshot when an installation moves host."""
 import argparse
 import hashlib
 import json
@@ -15,8 +16,10 @@ from datetime import datetime,timezone
 from contextlib import ExitStack
 from pathlib import Path,PurePosixPath
 
-from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
+from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, read_env, write_env, INSTALLATION_ROOT, compose_command, archive_url
 ROOT=INSTALLATION_ROOT
+# Restore holds every authority; activation removes exactly these.
+HOLDS=('workflows/inactive','spool/.restore-inactive','admin/tools/inactive','hermes/scheduler-inactive')
 SERVICES=['hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
@@ -109,7 +112,9 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
             if service!='hermes':subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-                  'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
+                  'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[],
+                  # A final snapshot leaves the source stopped; only it can be activated elsewhere.
+                  'left_stopped':leave_stopped}
         if three_stores:
             from tools.operations.installation.store_recovery import assert_no_state_writers
             assert_no_state_writers(state,env,command,coordinator)
@@ -259,9 +264,10 @@ def restore(snapshot,state,project,port):
     write_env(env_path(state),config)
     command=compose(state,project);env=environment(state)
     subprocess.run(command+['up','-d','--wait','nocheh-db'],env=env,check=True)
+    connection=None
     if manifest['version']==6:
         from tools.operations.installation.store_recovery import StoreRecovery
-        StoreRecovery(command,env).restore_inactive(snapshot,manifest['stores'],sha)
+        connection=StoreRecovery(command,env).restore_inactive(snapshot,manifest['stores'],sha)['memory_connection']
         actual=manifest['tables']
     else:
         with (snapshot/'archive.dump').open('rb') as file:
@@ -282,11 +288,54 @@ def restore(snapshot,state,project,port):
         subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes','hermes-agent-sb','inngest-server'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
-            'telegram_enabled':False,'hermes_login_activated':False}
+            'telegram_enabled':False,'hermes_login_activated':False,
+            'snapshot_created_at':manifest.get('created_at'),'source_revision':manifest.get('git_revision'),
+            'final_snapshot':manifest['version']==6 and manifest.get('left_stopped') is True,
+            'memory_connection':connection}
     result['honcho_attached']=False
     result['executors_active']=False
     (state/'reports/restore.json').write_text(json.dumps(result,indent=2)+'\n')
     return result
+
+
+def activate(state,source_stopped):
+    """Make a restored final snapshot the running installation (ADR-0148).
+
+    Only a snapshot taken with ``backup --leave-stopped`` qualifies: its source
+    stopped at the snapshot, so nothing pending changed after it and there is
+    nothing to reconcile. The operator confirms that the source is still stopped.
+    Telegram, Honcho and the memory connection return to the source's saved
+    state; the restore's holds are removed. Starting the services is ``up``.
+    """
+    state=Path(state);path=state/'reports/restore.json'
+    if not path.is_file():raise ValueError('activation_requires_restored_installation')
+    report=json.loads(path.read_text())
+    if report.get('status')!='restored_inactive':raise ValueError('activation_requires_inactive_restore')
+    if report.get('final_snapshot') is not True:raise ValueError('activation_requires_final_snapshot')
+    if not source_stopped:raise ValueError('activation_requires_stopped_source')
+    connection=report.get('memory_connection')
+    if connection is not None and (not isinstance(connection,dict) or set(connection)!={'attached','verified'}
+                                   or any(type(v) is not bool for v in connection.values())):
+        raise ValueError('restored_memory_connection_invalid')
+    saved=read_env(state/'restored.env');config=load(state)
+    config['TELEGRAM_ENABLED']='true' if saved.get('TELEGRAM_ENABLED')=='true' else 'false'
+    if saved.get('NOCHEH_HONCHO_ENABLED')=='true':
+        token=(state/'honcho/internal_token').read_text().strip()
+        if not token:raise ValueError('honcho_restore_credentials_missing')
+        config.update(NOCHEH_HONCHO_ENABLED='true',NOCHEH_MEMORY_TOKEN=token)
+    write_env(env_path(state),config)
+    if connection is not None:
+        command=compose(state);env=environment(state)
+        subprocess.run(command+['up','-d','--wait','nocheh-db'],env=env,check=True)
+        from tools.operations.installation.store_recovery import StoreRecovery
+        StoreRecovery(command,env).query('control',"UPDATE memory_engine_connection SET attached=%s,verified=%s WHERE singleton"
+            %(str(connection['attached']).lower(),str(connection['verified']).lower()))
+    for hold in HOLDS:(state/hold).unlink(missing_ok=True)
+    report.update(status='activated',activated_at=datetime.now(timezone.utc).isoformat(),
+                  telegram_enabled=config['TELEGRAM_ENABLED']=='true',executors_active=True)
+    staged=path.with_suffix('.tmp');staged.write_text(json.dumps(report,indent=2)+'\n');staged.chmod(0o600);staged.replace(path)
+    return {'status':'activated','state':str(state),'telegram_enabled':report['telegram_enabled'],
+            'honcho_enabled':config.get('NOCHEH_HONCHO_ENABLED')=='true','memory_connection':connection}
 
 
 def main(command,state,rest):
@@ -313,6 +362,10 @@ def main(command,state,rest):
                 "import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:8781/health',timeout=5))))"],env=environment(state),text=True)
             result['hermes']=json.loads(raw)
         except Exception as error: result['hermes']={'error':type(error).__name__}
+    elif command=='activate':
+        parser.add_argument('--source-stopped',action='store_true',
+            help='Confirm the source installation stopped at its final snapshot and stays stopped')
+        args=parser.parse_args(rest);result=activate(state,args.source_stopped)
     elif command=='backup':
         parser.add_argument('--output',type=Path,default=ROOT/'data/backups'/time.strftime('%Y%m%d-%H%M%S'))
         parser.add_argument('--leave-stopped',action='store_true',help='Keep writers stopped for a planned cutover')

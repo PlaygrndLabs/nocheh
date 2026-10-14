@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -9,6 +10,10 @@ import sys
 from pathlib import Path
 
 from tools.operations.installation.configuration import DEFAULT_STATE, ROOT, compose_command, compose_environment, env_path
+
+# A host whose installation was restored from another host runs its own state
+# directory and project (docs/move-host.md); NOCHEH_STATE_DIR names it.
+STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
 
 
 def run(command, *, cwd=ROOT, env=None, capture=False):
@@ -29,14 +34,14 @@ def checkout(rev):
         raise ValueError("checkout HEAD differs from --revision")
     if run(["git", "status", "--porcelain"], capture=True).stdout.strip():
         raise ValueError("checkout contains uncommitted or untracked files")
-    if not env_path(DEFAULT_STATE).is_file():
+    if not env_path(STATE).is_file():
         raise ValueError("installation .env is missing")
 
 
 def local(rev, apply):
     checkout(rev)
-    env = compose_environment(DEFAULT_STATE)
-    command = compose_command(DEFAULT_STATE)
+    env = compose_environment(STATE)
+    command = compose_command(STATE)
     ids = run(command + ["ps", "-q", "nocheh-app"], env=env, capture=True).stdout.split()
     if len(ids) != 1:
         raise ValueError("expected exactly one running app in this installation")
