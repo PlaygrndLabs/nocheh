@@ -26,6 +26,17 @@ PRIVATE_FACT = 'رنگ مورد علاقه‌ی خواهرم فیروزه‌ای
 
 
 
+def isolated_turns(*options):
+    """List isolated turn containers, retrying a transient Docker CLI failure."""
+    for attempt in range(3):
+        try:
+            return subprocess.check_output(['docker', 'ps', *options, '--filter', 'label=nocheh.role=isolated-turn'], text=True)
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                raise
+            time.sleep(2)
+
+
 def synthetic_pdf(lines):
     """A minimal one-page PDF with a Helvetica text layer."""
     stream = '\n'.join('BT /F1 12 Tf 20 %d Td (%s) Tj ET' % (760-row*14, line) for row, line in enumerate(lines))
@@ -668,11 +679,11 @@ class Scenarios:
         update = self.f.message(OWNER, 'یک جواب طولانی‌تر [[long:3000]]')
         self.f.inject(update)
         event_id = self.captured(update)
-        listed = lambda: subprocess.check_output(['docker', 'ps', '-q', '--filter', 'label=nocheh.role=isolated-turn'], text=True).split()
+        listed = lambda: isolated_turns('-q').split()
         self.wait('turn_container_running', listed, 120, 1)
         self.f.run('stop', '-t', '30', 'hermes-agent-sb')
         time.sleep(3)
-        self.gate('no_turn_container_left', not subprocess.check_output(['docker', 'ps', '-aq', '--filter', 'label=nocheh.role=isolated-turn'], text=True).split())
+        self.gate('no_turn_container_left', not isolated_turns('-aq').split())
         self.f.run('up', '-d', '--no-build', '--no-deps', '--wait', 'hermes-agent-sb')
         row = self.finished(event_id, seconds=400)
         self.gate('interrupted_turn_recovered', row['state'] == 'done', state=row['state'], attempts=row['attempts'])
@@ -807,7 +818,7 @@ def main():
     final = fixture.telegram()
     project_networks = {value['name'] for value in fixture.manifest['networks'].values()}
     def turns():
-        listed = subprocess.check_output(['docker', 'ps', '-a', '--format', '{{json .}}', '--filter', 'label=nocheh.role=isolated-turn'], text=True)
+        listed = isolated_turns('-a', '--format', '{{json .}}')
         return [row for row in map(json.loads, filter(None, listed.splitlines())) if set(row.get('Networks', '').split(',')) & project_networks]
     # Native memory reviews keep launching short isolated turns after a burst.
     # They must drain on their own; a turn left behind after that is a leak.

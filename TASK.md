@@ -573,6 +573,17 @@ copying its folder.
   provider login, memory attachment, and executors stayed inactive. Restored
   containers are stopped; saved state remains preserved. The earlier disk-space
   failure and incomplete dumps remain recorded failures.
+- October 14: a backup of the owner's development installation failed with
+  `honcho_backup_state_missing` after pausing Telegram for about 75 seconds,
+  because installations run only through `make dev` never generate
+  `honcho.Dockerfile`. That build file is now optional: a backup records it as
+  rebuildable when absent and still requires the five owned Honcho state files
+  ([check](services/hermes/test_operations.py)). The rerun with the fix
+  passed: Telegram paused 78 seconds; 947 state files and 99 table fingerprints,
+  Honcho and workflow state were covered; the inactive restore matched every
+  fingerprint and kept Telegram, provider login, Honcho attachment and
+  executors inactive; the restored copy was removed and the operating stack
+  returned healthy with one poller.
 - Fresh provider chat, literal detector, and refresh-delegation checks passed.
   Persisted CPA refresh metadata predates successful current chat requests;
   expiration was not forcibly induced. September provider cutover and voice
@@ -720,6 +731,38 @@ thread removed those containers. Honcho start/stop, the Apply refresh and the
 provider model list now refuse a state that is neither the installation's own
 nor names its own project ([guard](tools/operations/installation/configuration.py),
 [test](services/hermes/test_honcho_runtime.py)).
+
+Real-model simulator cases (October 14): after the built-in Claude connection
+was removed, the fixture model service can relay to an owner-authorized
+provider from a private upstream file, so Hermes, Honcho and the secret check
+reason with a real model while Telegram stays simulated
+([rehearsal](tools/acceptance/model_rehearsal.py),
+[checks](test/test_model_rehearsal.py),
+[procedure](docs/telegram-simulation.md)). New cases cover memory shared across
+a group's topics and isolation between groups. A fresh fixture from the
+simulator change passed the installation rehearsal (15 of 15 gates), both
+Telegram rehearsals (14 and 12 gates) and all 38 personal-use scenarios. The
+closing lingering-turn check stopped on a transient Docker CLI failure, now
+retried. The real-model cases stopped before any answer: their updates were
+numbered below the offset the scenario run had already acknowledged, so the
+adapter dropped them; numbering now starts above it. Afterwards the operating
+stack could not start: three stopped fixtures kept 24 networks and exhausted
+Docker's address pools, and with the Mac asleep it stayed down for about 11
+hours. `make dev` now releases networks of stopped fixtures
+([check](test/test_live_dev.py)). On rerun the lingering-turn check passed,
+and six of seven real-model cases delivered acceptable answers (reaction
+removal, corrected fact, private isolation, a fact shared across a group's
+topics, isolation between groups, recall after restart); no raw secret canary
+reached the provider outside the secret check. The retired-fact case failed:
+seven seconds after both name sources were retired, the private turn still
+answered the name "from memory". Retirement advances the guard epoch, so that
+turn ran in a fresh native profile without the old notes or history, made no
+tool calls, and took the name from the turn-start Honcho context, read before
+the epoch's correction sweep had rebuilt the session. Honcho context and recall
+now wait for that correction
+([ADR-0148](docs/adr/0148-honcho-reads-wait-for-epoch-correction.md),
+[checks](test/store-native-memory.test.ts)). Pending: a rerun of the
+retired-fact case; semantic review of the saved answers.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the

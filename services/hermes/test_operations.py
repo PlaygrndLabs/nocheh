@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from tools.operations.installation.operations import sha,validate_snapshot,backup,restore,fingerprints,TABLES
+from tools.operations.installation.operations import sha,validate_snapshot,backup,restore,fingerprints,honcho_state,TABLES,HONCHO_STATE
 
 
 class SnapshotTests(unittest.TestCase):
@@ -83,6 +83,19 @@ class SnapshotTests(unittest.TestCase):
                  patch('tools.operations.installation.operations.subprocess.run',side_effect=run),\
                  patch('tools.operations.workflows.workflow_worker.running',return_value=False):
                 with self.assertRaisesRegex(ValueError,'Unsupported state symlink'):backup(state,root/'rejected-backup')
+
+    def test_honcho_backup_needs_owned_state_but_not_the_generated_dockerfile(self):
+        with tempfile.TemporaryDirectory() as folder:
+            memory=Path(folder)
+            for name in HONCHO_STATE:(memory/name).write_text('synthetic')
+            # A `make dev` installation never generates the build file.
+            self.assertEqual(honcho_state(memory),(list(HONCHO_STATE),['honcho/honcho.Dockerfile']))
+            (memory/'honcho.Dockerfile').write_text('FROM synthetic')
+            self.assertEqual(honcho_state(memory),([*HONCHO_STATE,'honcho.Dockerfile'],[]))
+            (memory/'honcho.Dockerfile').unlink();(memory/'honcho.Dockerfile').symlink_to(memory/'honcho.env')
+            with self.assertRaisesRegex(ValueError,'honcho_backup_state_missing'):honcho_state(memory)
+            (memory/'honcho.Dockerfile').unlink();(memory/'database_password').unlink()
+            with self.assertRaisesRegex(ValueError,'honcho_backup_state_missing'):honcho_state(memory)
 
     def test_restore_fingerprint_table_names_are_allowlisted(self):
         with patch('tools.operations.installation.operations.subprocess.Popen') as process:

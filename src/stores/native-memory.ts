@@ -21,7 +21,8 @@ const protocol='honcho-entity-v1';
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
 export const assistantPeer='nocheh_assistant';
 const assistantKinds=new Set(['telegram_delivered_message','browser_delivered_message']);
-const limited={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
+const limited:{sources:never[];limited_memory:boolean;note:string;syncing?:boolean}={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
+const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after a recent change, such as a retired message. Current context, native notes and archive search remain available.'};
 const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value);
 const sessionName=(workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
 /** Validation failures that mean a written receipt no longer belongs in Honcho. */
@@ -633,12 +634,22 @@ export class NativeMemoryRepository {
     const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
     return {...empty,text:String(value.text??'')};
   }
+  /** After a guard epoch, Honcho still holds writes that became invalid, such as a retired message, until the
+   * correction sweep rebuilds their sessions and Honcho deletes the old ones with their conclusions.
+   * Summaries, representations and recall answers cite nothing, so none is read until then. */
+  private async correcting(current:Current):Promise<boolean> {
+    const sweep=(await this.control.query(`SELECT stage FROM learning_refresh_sweeps WHERE installation_generation=$1 AND guard_epoch=$2
+      AND family='honcho'`,[current.binding.generation,current.binding.epoch])).rows[0];
+    if(sweep?.stage!=='done')return true;
+    return !!(await this.control.query(`SELECT 1 FROM memory_session_deletions WHERE workspace=$1 AND state<>'done' LIMIT 1`,[current.row.id])).rowCount;
+  }
   /** Freshness is checked when a message arrives: the turn reads Honcho's current context for its own conversation. */
   async context(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
     if(!workspace||!principal.turnEvent)return limited;
     try {
       const current=await this.current(workspace.id),audience=this.principalAudience(principal);
+      if(await this.correcting(current))return correcting;
       const source=(await this.contexts.access.archive.captured(principal.turnEvent)).reference;
       const read=await this.sessionContext(current,audience,source);
       await this.current(workspace.id);await this.prepared.audience.assert(principal);
@@ -684,6 +695,7 @@ export class NativeMemoryRepository {
       const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
       const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
       corrections=await this.relevantOwnerCorrections(principal,query,current.binding);
+      if(await this.correcting(current))return {...correcting,sources:corrections};
       const question=await this.prepared.prepare(actor,query,this.detect),requestId=randomUUID();
       const root=await this.prepared.root(actor,current.binding);
       const input=await this.derived.record({operation_id:'native-recall-input:'+requestId,source:root,kind:'runtime_context',content:Buffer.from(String(question)),
