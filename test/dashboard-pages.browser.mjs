@@ -119,6 +119,28 @@ test('navigation lists each page once, in order, links to the assistant console 
   await page.close();
 });
 
+test('the sidebar lists the open page’s tabs and opens any page’s tab directly', async () => {
+  const {page, problems} = await open('settings?view=models');
+  const nav = page.getByRole('navigation', {name: 'Main'});
+  const settingsTabs = nav.getByRole('list', {name: 'Settings tabs'});
+  assert.deepEqual(
+    (await settingsTabs.getByRole('link').allTextContents()).map(text => text.trim()),
+    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Advanced'],
+  );
+  assert.equal(await settingsTabs.getByRole('link', {name: 'Models'}).getAttribute('aria-current'), 'true');
+  assert.equal(await nav.getByRole('list', {name: 'Memory tabs'}).count(), 0);
+  await nav.getByRole('button', {name: 'Show Memory tabs'}).click();
+  await nav.getByRole('list', {name: 'Memory tabs'}).getByRole('link', {name: 'Long-term memory'}).click();
+  await page.getByRole('tab', {name: 'Long-term memory', selected: true}).waitFor();
+  assert.match(page.url(), /#memory\?view=longterm$/);
+  await page.getByRole('button', {name: 'Collapse navigation'}).click();
+  assert.equal(await nav.getByRole('list').count(), 0);
+  await page.getByRole('button', {name: 'Expand navigation'}).click();
+  await page.evaluate(() => localStorage.removeItem('nocheh.sidebar-groups.v1'));
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('old bookmarks open the page and tab that now hold them', async () => {
   const cases = [
     ['overview', 'Home', null, '#home'],

@@ -1,6 +1,7 @@
 /** Settings: short sections, each a tab in the address. Every edit is saved from the bottom save bar. */
 import {useSettings} from '../lib/settings';
 import {useView} from '../lib/navigation';
+import {pageTabs, tabIds} from '../lib/page-tabs';
 import {LoadError, LoadingRows, Card} from '../ui/core';
 import {Page, Tabs} from '../ui/page';
 import {ModelSettings} from './settings/models';
@@ -11,15 +12,8 @@ import {AssistantSettings} from './settings/assistant';
 import {AdvancedSettings, advancedKeys} from './settings/advanced';
 import {loadSettings} from '../lib/settings';
 
-const views = ['telegram', 'models', 'speed', 'privacy', 'assistant', 'advanced'] as const;
-const labels: Record<(typeof views)[number], string> = {
-  telegram: 'Telegram',
-  models: 'Models',
-  speed: 'Speed',
-  privacy: 'Privacy & data',
-  assistant: 'Assistant',
-  advanced: 'Advanced',
-};
+const views = tabIds('settings');
+const labels = pageTabs.settings;
 const modelKey = (key: string) =>
   /^NOCHEH_(PROVIDER|MODEL|PROVIDERS|PROVIDER_KEYS|(REPLY|MEMORY|GUARD|EMBEDDING)_(PROVIDER|MODEL))$/.test(key) ||
   key === 'OPENAI_API_KEY' ||

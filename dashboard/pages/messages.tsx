@@ -3,6 +3,7 @@
  * the copy the assistant may use. Old Telegram chats are imported here too.
  */
 import {useParam, useView} from '../lib/navigation';
+import {pageTabs, tabIds} from '../lib/page-tabs';
 import {useLiveResources} from '../lib/resource';
 import {setParams} from '../lib/routes';
 import {Badge} from '../ui/core';
@@ -11,7 +12,7 @@ import {MessageDrawer} from './messages/detail';
 import {ImportView} from './messages/import';
 import {MessageListView} from './messages/list';
 
-const views = ['messages', 'import'] as const;
+const views = tabIds('messages');
 
 export default function Messages() {
   const [view, setView] = useView(views);
@@ -38,8 +39,8 @@ export default function Messages() {
           value={view}
           onChange={setView}
           tabs={[
-            {id: 'messages', label: 'Messages'},
-            {id: 'import', label: 'Import'},
+            {id: 'messages', label: pageTabs.messages.messages},
+            {id: 'import', label: pageTabs.messages.import},
           ]}
         />
       }
