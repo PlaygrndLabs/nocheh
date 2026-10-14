@@ -431,8 +431,11 @@ workflow history retention setting. It is measured only when expanded.
 The owner dashboard uses a small set of locally owned Radix-based components
 (`dashboard/ui`), Tailwind semantic colour tokens, Lucide, and Recharts, with no
 page stylesheet. Appearance follows the system by default; Light, Dark, or System
-is persisted locally. The desktop sidebar collapses to icons, and below 1024px
-navigation opens in a keyboard-accessible drawer. Refresh updates data without remounting
+is persisted locally. The sidebar lists each page's tabs under it (from
+`dashboard/lib/page-tabs.ts`, which the pages read too); the open page's tabs show,
+and the chevron beside a page shows or hides its tabs, remembered locally. The
+desktop sidebar collapses to icons, and below 1024px navigation opens in a
+keyboard-accessible drawer. Refresh updates data without remounting
 the page. Hermes keeps its native interface and integration link.
 
 Monitoring retains global running, waiting, failed, last confirmed success and
