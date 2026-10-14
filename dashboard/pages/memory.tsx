@@ -4,6 +4,7 @@
  * long-term memory service.
  */
 import {useView} from '../lib/navigation';
+import {pageTabs, tabIds} from '../lib/page-tabs';
 import {Page, Tabs} from '../ui/page';
 import {Facts} from './memory/facts';
 import {LongTerm} from './memory/longterm';
@@ -11,14 +12,8 @@ import {Notes} from './memory/notes';
 import {People} from './memory/people';
 import {Projects} from './memory/projects';
 
-const views = ['facts', 'people', 'projects', 'notes', 'longterm'] as const;
-const labels: Record<(typeof views)[number], string> = {
-  facts: 'Facts',
-  people: 'People',
-  projects: 'Projects',
-  notes: 'Assistant notes',
-  longterm: 'Long-term memory',
-};
+const views = tabIds('memory');
+const labels = pageTabs.memory;
 
 export default function Memory() {
   const [view, setView] = useView(views);
