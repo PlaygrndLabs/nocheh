@@ -74,6 +74,22 @@ def fingerprints(command,env,tables=None):
     return result
 
 
+HONCHO_STATE=('honcho.env','meter.env','internal_token','database_password','temporary_embedding_key')
+# Generated from the pinned upstream by `./bin/nocheh build`; installations run
+# only through `make dev` use a prebuilt image and never write it.
+HONCHO_REBUILDABLE='honcho.Dockerfile'
+
+
+def honcho_state(memory):
+    """Honcho state files to back up, and rebuildable files that are absent."""
+    def regular(path):return path.is_file() and not path.is_symlink()
+    if not all(regular(memory/name) for name in HONCHO_STATE):raise ValueError('honcho_backup_state_missing')
+    built=memory/HONCHO_REBUILDABLE
+    if regular(built):return [*HONCHO_STATE,HONCHO_REBUILDABLE],[]
+    if built.is_symlink() or built.exists():raise ValueError('honcho_backup_state_missing')
+    return list(HONCHO_STATE),['honcho/'+HONCHO_REBUILDABLE]
+
+
 def backup(state,output,leave_stopped=False):
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
@@ -152,9 +168,10 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
                     manifest['files'][relative]={'sha256':sha(path),'size':path.stat().st_size}
                     tar.add(path,arcname='state/'+relative,recursive=False)
             if manifest.get('honcho'):
-                for name in ('honcho.env','meter.env','internal_token','database_password','temporary_embedding_key','honcho.Dockerfile'):
+                names,absent=honcho_state(memory_state)
+                manifest['excluded_rebuildable_caches'].extend(absent)
+                for name in names:
                     path=memory_state/name
-                    if path.is_symlink() or not path.is_file():raise ValueError('honcho_backup_state_missing')
                     relative='honcho/'+name
                     manifest['files'][relative]={'sha256':sha(path),'size':path.stat().st_size}
                     tar.add(path,arcname='state/'+relative,recursive=False)

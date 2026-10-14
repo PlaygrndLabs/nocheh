@@ -86,6 +86,19 @@ class LiveDevTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Another Nocheh stack'):
                 live_dev.assert_only_development_running([], {'PATH': '/usr/bin'})
 
+    def test_only_idle_fixture_networks_are_released_before_dev(self):
+        def network(name, project, containers):
+            return {'Name': name, 'Labels': {'com.docker.compose.project': project}, 'Containers': containers}
+        networks = [network('nocheh-installation-0123456789ab_internal', 'nocheh-installation-0123456789ab', {}),
+                    network('nocheh-installation-ba9876543210_internal', 'nocheh-installation-ba9876543210', {'c': {}}),
+                    network('nocheh_default', 'nocheh', {}),
+                    network('other_default', 'other', {})]
+        with patch.object(live_dev.subprocess, 'check_output', side_effect=['a\nb\nc\nd\n', json.dumps(networks)]), \
+                patch.object(live_dev.subprocess, 'run') as run:
+            released = live_dev.release_idle_fixture_networks({'PATH': '/usr/bin'})
+        self.assertEqual(released, ['nocheh-installation-0123456789ab_internal'])
+        self.assertEqual(run.call_args.args[0], ['docker', 'network', 'rm', 'nocheh-installation-0123456789ab_internal'])
+
     def test_clean_volumes_are_created_but_foreign_ownership_is_rejected(self):
         env = self.values()
         with patch.object(live_dev.subprocess, 'run', return_value=type('Result', (), {'returncode': 1, 'stderr': 'No such volume'})()):

@@ -15,8 +15,10 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   const workspace=digest('installation-workspace'),groupSession=digest('group-session'),ownerSession=digest('owner-session');
   const root={store:'archive',kind:'event',id:digest('root'),revision:'1',input_hash:digest('root-hash')};
   const sessions:Record<string,{session_id:string;audience:string}>={[digest('group-key')]:{session_id:groupSession,audience:'-100'},[digest('owner-key')]:{session_id:ownerSession,audience:'owner'}};
-  let key=digest('group-key'),fail=false;const calls:string[]=[],records:string[]=[];let prepared=0;
+  let key=digest('group-key'),fail=false,sweep='done',deleting=false;const calls:string[]=[],records:string[]=[];let prepared=0;
   const control={query:async(sql:string,values:any[]=[])=>{
+    if(sql.includes('FROM learning_refresh_sweeps'))return {rows:sweep?[{stage:sweep}]:[]};
+    if(sql.includes('FROM memory_session_deletions'))return {rowCount:deleting?1:0,rows:deleting?[{}]:[]};
     if(sql.includes('FROM memory_generations WHERE installation_generation'))return {rows:[{id:workspace,state:'ready',last_ready_at:new Date()}]};
     if(sql.startsWith('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2 AND audience=$3')) {
       const found=sessions[values[1]];return {rows:found&&found.audience===values[2]?[found]:[]};
@@ -49,7 +51,15 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   const calledBefore=calls.length;
   const crossed=await memory.context(group);
   assert.deepEqual(crossed.sources,[],'a group turn cannot read an owner-private session');assert.equal(calls.length,calledBefore);
-  key=digest('group-key');fail=true;
+  key=digest('group-key');
+  // A retired message stays in Honcho's summaries until its session is rebuilt and the old one deleted.
+  for(const [stage,pending] of [['sources',false],['',false],['done',true]] as const) {
+    sweep=stage;deleting=pending;const asked:number=calls.length;
+    const waiting=await memory.context(group);
+    assert.equal(waiting.limited_memory,true);assert.equal(waiting.syncing,true);assert.deepEqual(waiting.sources,[]);
+    assert.equal(calls.length,asked,'no Honcho-derived text is read while the epoch\'s correction is unfinished');
+  }
+  sweep='done';deleting=false;fail=true;
   const down=await memory.context(group);
   assert.equal(down.limited_memory,true);assert.deepEqual(down.sources,[]);
   assert.ok(prepared>=3);
@@ -74,7 +84,7 @@ test('recall asks every connected peer side by side, keeps each inside the group
     await new Promise<void>(resolve=>{waiting.push(resolve);if(waiting.length===peers.length)[...waiting.slice(1),waiting[0]!].forEach(release=>release());});
     return {content:'Answer from '+peer};
   },async()=>[]);
-  Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],
+  Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
     current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
     connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
   const result=await Promise.race([memory.recall({admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader,'Who planned the trip?'),
@@ -139,6 +149,9 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   const actor=async(source:string):Promise<Reader>=>{
     const binding=await services.guards.state();return {admin:false,scope:group,space:group,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
   };
+  // Stands in for the honcho refresh workflow finishing this epoch's correction sweep.
+  const swept=async()=>{const binding=await services.guards.state();await stores.control.query(`INSERT INTO learning_refresh_sweeps(installation_generation,guard_epoch,family,stage)
+    VALUES($1,$2,'honcho','done') ON CONFLICT(installation_generation,guard_epoch,family) DO UPDATE SET stage='done'`,[binding.generation,binding.epoch]);};
   const insertRemote=async(id:string)=>{
     const row=(await stores.control.query('SELECT * FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
     const content=(await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[row.prepared_id])).rows[0].content.toString();
@@ -213,7 +226,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const callCount=calls.length;
     await assert.rejects(services.memory.prepareRequest({workspace,route:'/unsupported',payload:{input:'text'}}),{code:'memory_route_denied'});assert.equal(calls.length,callCount);
 
-    const principal=await actor(question.id),context=await services.memory.context(principal);
+    await swept();const principal=await actor(question.id),context=await services.memory.context(principal);
     assert.equal(context.limited_memory,false);assert.ok(!JSON.stringify(context).includes('saffronpass'));assert.ok(JSON.stringify(context).includes('representation_has_no_exact_citations'));
     assert.ok(JSON.stringify(context).includes(ownerApproved),'native context preserves exact owner-approved guarded passages');
     const contextRead=calls.filter(c=>c.path.includes('/context?')).at(-1)!.path;
@@ -259,7 +272,14 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       'conclusions derived elsewhere are deleted before the replaced session');
     assert.equal(await services.memory.deleteSession(projectionSession,authority),true);assert.equal(calls.filter(c=>c.method==='DELETE').length,2);
     await insertRemote(late);assert.equal(await services.memory.reconcileReceipt(late),true,'a replaced receipt can still be reconciled');
-    const fresh=await actor(source.id);assert.equal((await services.memory.context(fresh)).limited_memory,false,'memory stays available after an unrelated epoch');
+    const fresh=await actor(source.id);
+    assert.equal((await services.memory.context(fresh)).syncing,true,'Honcho context waits for the epoch\'s correction sweep');
+    await swept();
+    const replaced=(await stores.control.query("SELECT session_id FROM memory_session_deletions WHERE workspace=$1 AND state<>'done'",[workspace])).rows;
+    assert.ok(replaced.length,'the other rebuilt session still awaits deletion');
+    assert.equal((await services.memory.context(fresh)).syncing,true,'a replaced session still in Honcho keeps its context withheld');
+    for(const row of replaced)assert.equal(await services.memory.deleteSession(row.session_id,authority),true);
+    assert.equal((await services.memory.context(fresh)).limited_memory,false,'memory is available again once the epoch is corrected');
     const correctedRecall=await services.memory.recall(fresh,'What does checkmark mean?');
     assert.equal(correctedRecall.sources[0]?.kind,'owner_corrected_interpretation');
     assert.match(correctedRecall.sources[0]!.text,/Checkmark means reviewed, not done\./);
@@ -326,6 +346,9 @@ test('foreground recall requires independent source evidence while background co
       if(path.endsWith('/chat'))return {content:'The independently recorded meeting time is 18:00.'};
       return {};
     }});
+  // Stands in for the honcho refresh workflow finishing this epoch's correction sweep.
+  const swept=async()=>{const binding=await services.guards.state();await stores.control.query(`INSERT INTO learning_refresh_sweeps(installation_generation,guard_epoch,family,stage)
+    VALUES($1,$2,'honcho','done') ON CONFLICT(installation_generation,guard_epoch,family) DO UPDATE SET stage='done'`,[binding.generation,binding.epoch]);};
   const capture=async(id:number,text:string)=>{
     const event:Envelope={version:1,key:key+':'+id,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:key+':'+id,revision:'1',occurred_at:null,text,
       payload:{message:{message_id:id,date:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:123},text}}};
@@ -344,7 +367,7 @@ test('foreground recall requires independent source evidence while background co
     const building=await services.memory.recall(principal,'What was the meeting time?');
     assert.equal(building.limited_memory,true);assert.deepEqual(building.sources,[]);
     assert.equal(calls.filter(path=>path.endsWith('/chat')).length,0,'ingesting the question cannot establish a prior fact');
-    assert.equal(await services.memory.settled(current.receipts),true);
+    assert.equal(await services.memory.settled(current.receipts),true);await swept();
     assert.equal((await services.memory.context(principal)).limited_memory,false);
     assert.ok(calls.some(path=>path.includes('/context?')),'background context retains the current source');
     // Older receipts without the evidence array retain the same source boundary.

@@ -3,6 +3,8 @@
 Honcho's pinned mock implements the OpenAI wire formats and embeddings. The
 responses below exercise Nocheh's detector/interpretation contracts; they are
 scripted fixture answers and do not measure model accuracy or semantic recall.
+With NOCHEH_FIXTURE_UPSTREAM set by the real-model rehearsal, the same service
+instead relays chat, model lists and embeddings to owner-authorized providers.
 """
 import hashlib
 import json
@@ -190,15 +192,18 @@ def provider():
     chat._response_content = answer
     app = FastAPI()
     brain = ScriptedBrain(counts, canary)
-
-    # Registered before Honcho's mock router so tool-bearing agent turns that
-    # carry an explicit fixture directive reach the scripted brain first.
-    @app.post('/v1/chat/completions')
-    async def completions(body: chat.ChatCompletionRequest):
-        scripted = brain.respond(body)
-        if scripted is None:
-            return await chat.chat_completions(body)
-        return brain.render(body, scripted)
+    upstream = os.environ.get('NOCHEH_FIXTURE_UPSTREAM')
+    if upstream:
+        relay(app, json.loads(open(upstream).read()), counts, canary)
+    else:
+        # Registered before Honcho's mock router so tool-bearing agent turns that
+        # carry an explicit fixture directive reach the scripted brain first.
+        @app.post('/v1/chat/completions')
+        async def completions(body: chat.ChatCompletionRequest):
+            scripted = brain.respond(body)
+            if scripted is None:
+                return await chat.chat_completions(body)
+            return brain.render(body, scripted)
 
     @app.get('/fixture/brain')
     def brain_events():
@@ -225,13 +230,72 @@ def provider():
     def stats():
         return counts
 
-    @app.get('/v1/models')
-    def models():
-        return {'object': 'list', 'data': [{'id': os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5'), 'object': 'model', 'owned_by': 'fixture'}]}
-
-    app.include_router(chat.router, prefix='/v1')
+    if not upstream:
+        @app.get('/v1/models')
+        def models():
+            return {'object': 'list', 'data': [{'id': os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5'), 'object': 'model', 'owned_by': 'fixture'}]}
+        app.include_router(chat.router, prefix='/v1')
+    # Without an embedding upstream, embeddings stay deterministic.
     app.include_router(embeddings.router, prefix='/v1')
     uvicorn.run(app, host='0.0.0.0', port=8317, log_level='warning', access_log=False)
+
+
+def relay(app, upstream, counts, canary, client=None):
+    """Forward the OpenAI-compatible routes to the configured providers unchanged.
+
+    Only the authorization changes. The canary check still proves that every
+    request except the secret detector reaches the model already guarded.
+    """
+    import httpx
+    from fastapi import Request
+    from fastapi.responses import JSONResponse, StreamingResponse
+    from starlette.background import BackgroundTask
+    client = client or httpx.AsyncClient(timeout=httpx.Timeout(300, connect=20))
+
+    async def forward(request, kind, path):
+        spec = upstream[kind]
+        body = await request.body()
+        if request.method == 'POST':
+            try:
+                parsed = json.loads(body)
+            except ValueError:
+                return JSONResponse({'error': {'message': 'invalid_fixture_json'}}, status_code=400)
+            text = json.dumps(parsed, ensure_ascii=False)
+            first = next((m.get('content') for m in parsed.get('messages', []) if isinstance(m, dict)), '') if kind == 'chat' else ''
+            if isinstance(first, str) and first.startswith('Find secret values in the supplied data.'):
+                counts['detector'] += 1
+            elif canary in text:
+                counts['raw_canary_outside_detector'] += 1
+                return JSONResponse({'error': {'message': 'unguarded_fixture_canary'}}, status_code=400)
+            elif 'Interpret permitted conversation evidence silently.' in text:
+                counts['learning'] += 1
+            elif kind == 'chat':
+                counts['chat'] += 1
+        sent = client.build_request(request.method, spec['url'].rstrip('/') + path, content=body or None,
+            headers={'content-type': 'application/json', 'accept': request.headers.get('accept', 'application/json'),
+                     'authorization': 'Bearer ' + spec['key']})
+        try:
+            response = await client.send(sent, stream=True)
+        except httpx.HTTPError as error:
+            counts['upstream_errors'] = counts.get('upstream_errors', 0) + 1
+            return JSONResponse({'error': {'message': 'fixture_upstream_' + type(error).__name__}}, status_code=502)
+        if response.status_code >= 400:
+            counts['upstream_errors'] = counts.get('upstream_errors', 0) + 1
+        return StreamingResponse(response.aiter_bytes(), status_code=response.status_code,
+            media_type=response.headers.get('content-type'), background=BackgroundTask(response.aclose))
+
+    @app.post('/v1/chat/completions')
+    async def completions(request: Request):
+        return await forward(request, 'chat', '/chat/completions')
+
+    @app.get('/v1/models')
+    async def models(request: Request):
+        return await forward(request, 'chat', '/models')
+
+    if 'embeddings' in upstream:
+        @app.post('/v1/embeddings')
+        async def embed(request: Request):
+            return await forward(request, 'embeddings', '/embeddings')
 
 
 def meter():

@@ -4,6 +4,7 @@ from tools.paths import ROOT
 
 import json
 import os
+import re
 import socket
 import subprocess
 import time
@@ -19,6 +20,7 @@ SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
             'hermes', 'honcho-postgres', 'honcho-redis',
             'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
 PORTS = (8780, 8783, 8785)
+FIXTURE_PROJECT = re.compile(r'nocheh-installation-[0-9a-f]{12}')
 
 
 def port_available(port):
@@ -239,6 +241,27 @@ def assert_compose_mounts(cmd, env):
         raise ValueError('Telegram or its writable home is not configured in development')
 
 
+def release_idle_fixture_networks(env):
+    """Stopped rehearsal fixtures keep their networks and can exhaust Docker's address pools.
+
+    Only networks of fixture projects with no running container are removed;
+    Compose recreates them, and the fixtures' volumes and state stay untouched.
+    """
+    ids = subprocess.check_output(['docker', 'network', 'ls', '-q', '--filter', 'label=com.docker.compose.project'],
+                                  cwd=ROOT, env=env, text=True).split()
+    if not ids:
+        return []
+    released = []
+    for network in json.loads(subprocess.check_output(['docker', 'network', 'inspect', *ids],
+                                                      cwd=ROOT, env=env, text=True)):
+        project = (network.get('Labels') or {}).get('com.docker.compose.project', '')
+        if FIXTURE_PROJECT.fullmatch(project) and not network.get('Containers'):
+            subprocess.run(['docker', 'network', 'rm', network['Name']], cwd=ROOT, env=env,
+                           check=True, stdout=subprocess.DEVNULL)
+            released.append(network['Name'])
+    return released
+
+
 def build_needed(env):
     if os.environ.get('NOCHEH_DEV_BUILD') == '1':
         return True
@@ -272,6 +295,9 @@ def main(action, rest):
     assert_compose_mounts(cmd, env)
     prepare_source_mounts()
     prepare_runtime_images(env)
+    released = release_idle_fixture_networks(env)
+    if released:
+        print(f'Released {len(released)} networks of stopped rehearsal fixtures', flush=True)
     build_flag = '--build' if build_needed(env) else '--no-build'
     print('Live development: http://127.0.0.1:8783/', flush=True)
     print(f'Source checkout: {ROOT}\nOperating state: {root / "data/local"}', flush=True)
