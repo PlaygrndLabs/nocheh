@@ -745,8 +745,12 @@ Telegram rehearsals (14 and 12 gates) and all 38 personal-use scenarios. The
 closing lingering-turn check stopped on a transient Docker CLI failure, now
 retried. The real-model cases stopped before any answer: their updates were
 numbered below the offset the scenario run had already acknowledged, so the
-adapter dropped them; numbering now starts above it. Pending: the real-model
-cases and the lingering-turn check on that fixture.
+adapter dropped them; numbering now starts above it. Afterwards the operating
+stack could not start: three stopped fixtures kept 24 networks and exhausted
+Docker's address pools, and with the Mac asleep it stayed down for about 11
+hours. `make dev` now releases networks of stopped fixtures
+([check](test/test_live_dev.py)). Pending: the real-model cases and the
+lingering-turn check on that fixture.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
