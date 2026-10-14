@@ -6,6 +6,7 @@
 import {useEffect} from 'react';
 import {useInboxCount} from '../lib/inbox';
 import {useParam, useView} from '../lib/navigation';
+import {pageTabs, tabIds} from '../lib/page-tabs';
 import {setParams} from '../lib/routes';
 import {decisionLabels, type DecisionKind} from '../lib/supervision';
 import {Page, Tabs} from '../ui/page';
@@ -14,7 +15,7 @@ import {ActionDrawer, DecisionDrawer, RunDrawer} from './inbox/drawers';
 import {History} from './inbox/history';
 import {Waiting} from './inbox/waiting';
 
-const views = ['waiting', 'allowed', 'history'] as const;
+const views = tabIds('inbox');
 type View = (typeof views)[number];
 /** Tab names used by earlier links. */
 const oldViews: Record<string, View> = {
@@ -50,9 +51,9 @@ export default function Inbox() {
           value={view}
           onChange={setView}
           tabs={[
-            {id: 'waiting', label: 'Waiting', count: waiting},
-            {id: 'allowed', label: 'Allowed actions'},
-            {id: 'history', label: 'History'},
+            {id: 'waiting', label: pageTabs.inbox.waiting, count: waiting},
+            {id: 'allowed', label: pageTabs.inbox.allowed},
+            {id: 'history', label: pageTabs.inbox.history},
           ]}
         />
       }

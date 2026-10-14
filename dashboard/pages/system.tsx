@@ -4,6 +4,7 @@
  */
 import {Gauge} from 'lucide-react';
 import {useView} from '../lib/navigation';
+import {pageTabs, tabIds} from '../lib/page-tabs';
 import {useResource} from '../lib/resource';
 import {href} from '../lib/routes';
 import {workCounts} from '../lib/system-health';
@@ -14,7 +15,7 @@ import {DatabasesView} from './system/databases';
 import {HealthView} from './system/health';
 import {WorkView} from './system/work';
 
-const views = ['health', 'work', 'backups', 'databases'] as const;
+const views = tabIds('system');
 
 export default function SystemPage() {
   const [view, setView] = useView(views);
@@ -35,10 +36,10 @@ export default function SystemPage() {
           value={view}
           onChange={setView}
           tabs={[
-            {id: 'health', label: 'Health'},
-            {id: 'work', label: 'Background work', count: counts.failed + counts.uncertain || null},
-            {id: 'backups', label: 'Backups'},
-            {id: 'databases', label: 'Databases'},
+            {id: 'health', label: pageTabs.system.health},
+            {id: 'work', label: pageTabs.system.work, count: counts.failed + counts.uncertain || null},
+            {id: 'backups', label: pageTabs.system.backups},
+            {id: 'databases', label: pageTabs.system.databases},
           ]}
         />
       }

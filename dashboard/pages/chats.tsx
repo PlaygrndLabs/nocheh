@@ -4,6 +4,7 @@
  */
 import {MessagesSquare} from 'lucide-react';
 import {useParam, useView} from '../lib/navigation';
+import {pageTabs, tabIds} from '../lib/page-tabs';
 import {cn} from '../lib/utils';
 import {Card, Empty, LoadError, Notice} from '../ui/core';
 import {Page, Tabs} from '../ui/page';
@@ -13,7 +14,7 @@ import {ChatDetail} from './chats/detail';
 import {telegramSettingsHref, useTelegram} from './chats/shared';
 import {SharingView} from './chats/sharing';
 
-const views = ['chats', 'rules'] as const;
+const views = tabIds('chats');
 
 export default function ChatsPage() {
   const [view, setView] = useView(views);
@@ -29,8 +30,8 @@ export default function ChatsPage() {
           value={view}
           onChange={setView}
           tabs={[
-            {id: 'chats', label: 'Chats'},
-            {id: 'rules', label: 'Sharing'},
+            {id: 'chats', label: pageTabs.chats.chats},
+            {id: 'rules', label: pageTabs.chats.rules},
           ]}
         />
       }
