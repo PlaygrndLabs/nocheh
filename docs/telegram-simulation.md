@@ -176,13 +176,20 @@ Carry unrelated evidence forward with its original revision and limitations.
 
 <real_model_evaluation>
 
-These fixtures have no real-model variant: the `model-fixture` service is
-configured as an ordinary custom provider and answers deterministically. Actual
-provider reasoning and conversational recall need separate evidence from an
-installation whose providers are set in Settings › Models; see
-[release acceptance](release-acceptance.md). Saved answers remain pending
-semantic review against ground truth; successful delivery alone cannot pass
-recall.
+The `model-fixture` service is configured as an ordinary custom provider and
+answers deterministically. For real-model memory cases, after the Telegram
+rehearsal run `python3 -m tools.acceptance.model_rehearsal --directory <fixture>
+--upstream <private file>`. The file is owner-authorized, mode 0600, outside
+tracked source, and names `chat` and optional `embeddings` providers as
+`{"url": "https://…", "key": "…"}`. The fixture model service then relays chat,
+model-list and embedding requests there with only the authorization replaced;
+it alone joins an egress network, every other fixture network stays internal,
+and an unguarded secret canary is refused outside the secret check. Cases cover
+reaction removal, a corrected fact, private isolation, memory shared across a
+group's topics, isolation between groups, recall after restart and a retired
+fact. Saved answers remain pending semantic review against ground truth;
+successful delivery alone cannot pass recall, and the run is not live
+acceptance; see [release acceptance](release-acceptance.md).
 
 Before claiming a ready-memory pass, verify the current Honcho workspace has no
 terminal processed-with-error derivation items as well as no pending work. A
