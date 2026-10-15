@@ -15,9 +15,9 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   const workspace=digest('installation-workspace'),groupSession=digest('group-session'),ownerSession=digest('owner-session');
   const root={store:'archive',kind:'event',id:digest('root'),revision:'1',input_hash:digest('root-hash')};
   const sessions:Record<string,{session_id:string;audience:string}>={[digest('group-key')]:{session_id:groupSession,audience:'-100'},[digest('owner-key')]:{session_id:ownerSession,audience:'owner'}};
-  let key=digest('group-key'),fail=false,sweep='done',deleting=false;const calls:string[]=[],records:string[]=[];let prepared=0;
+  let key=digest('group-key'),fail=false,uncorrected=false,deleting=false;const calls:string[]=[],records:string[]=[];let prepared=0;
   const control={query:async(sql:string,values:any[]=[])=>{
-    if(sql.includes('FROM learning_refresh_sweeps'))return {rows:sweep?[{stage:sweep}]:[]};
+    if(sql.includes('FROM owner_commands'))return {rowCount:uncorrected?1:0,rows:uncorrected?[{}]:[]};
     if(sql.includes('FROM memory_session_deletions'))return {rowCount:deleting?1:0,rows:deleting?[{}]:[]};
     if(sql.includes('FROM memory_generations WHERE installation_generation'))return {rows:[{id:workspace,state:'ready',last_ready_at:new Date()}]};
     if(sql.startsWith('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2 AND audience=$3')) {
@@ -53,13 +53,13 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   assert.deepEqual(crossed.sources,[],'a group turn cannot read an owner-private session');assert.equal(calls.length,calledBefore);
   key=digest('group-key');
   // A retired message stays in Honcho's summaries until its session is rebuilt and the old one deleted.
-  for(const [stage,pending] of [['sources',false],['',false],['done',true]] as const) {
-    sweep=stage;deleting=pending;const asked:number=calls.length;
+  for(const [owner,pending] of [[true,false],[false,true]] as const) {
+    uncorrected=owner;deleting=pending;const asked:number=calls.length;
     const waiting=await memory.context(group);
     assert.equal(waiting.limited_memory,true);assert.equal(waiting.syncing,true);assert.deepEqual(waiting.sources,[]);
-    assert.equal(calls.length,asked,'no Honcho-derived text is read while the epoch\'s correction is unfinished');
+    assert.equal(calls.length,asked,'no Honcho-derived text is read while an owner change is uncorrected');
   }
-  sweep='done';deleting=false;fail=true;
+  uncorrected=false;deleting=false;fail=true;
   const down=await memory.context(group);
   assert.equal(down.limited_memory,true);assert.deepEqual(down.sources,[]);
   assert.ok(prepared>=3);
@@ -273,20 +273,22 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     assert.equal(await services.memory.deleteSession(projectionSession,authority),true);assert.equal(calls.filter(c=>c.method==='DELETE').length,2);
     await insertRemote(late);assert.equal(await services.memory.reconcileReceipt(late),true,'a replaced receipt can still be reconciled');
     const fresh=await actor(source.id);
-    assert.equal((await services.memory.context(fresh)).syncing,true,'Honcho context waits for the epoch\'s correction sweep');
-    await swept();
     const replaced=(await stores.control.query("SELECT session_id FROM memory_session_deletions WHERE workspace=$1 AND state<>'done'",[workspace])).rows;
     assert.ok(replaced.length,'the other rebuilt session still awaits deletion');
     assert.equal((await services.memory.context(fresh)).syncing,true,'a replaced session still in Honcho keeps its context withheld');
     for(const row of replaced)assert.equal(await services.memory.deleteSession(row.session_id,authority),true);
-    assert.equal((await services.memory.context(fresh)).limited_memory,false,'memory is available again once the epoch is corrected');
+    assert.equal((await services.memory.context(fresh)).limited_memory,false,'an epoch without an owner change does not hold memory');
     const correctedRecall=await services.memory.recall(fresh,'What does checkmark mean?');
     assert.equal(correctedRecall.sources[0]?.kind,'owner_corrected_interpretation');
     assert.match(correctedRecall.sources[0]!.text,/Checkmark means reviewed, not done\./);
     assert.equal(JSON.stringify(await services.memory.recall(fresh,'What does another symbol mean?')).includes('owner_corrected_interpretation'),false,
       'an unrelated question cannot receive the correction');
     await services.access.setConsent(owner,source,{enabled:false,expected_revision:0,operation_id:key+':consent-off'});
+    const withdrawn=await actor(source.id);
+    assert.equal((await services.memory.context(withdrawn)).syncing,true,'an owner change holds Honcho until a sweep at its epoch');
     const retracted=await services.memory.sweep('',await services.guards.state());assert.ok(retracted.rebuilt>=1);
+    await swept();
+    assert.equal((await services.memory.context(withdrawn)).syncing,true,'a session replaced by that sweep still awaits deletion');
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND retired_at IS NULL",[source.id])).rows[0].count,0,
       'withdrawn consent removes the source from every session that held it');
     assert.equal(await services.memory.ingested(source.id),false);

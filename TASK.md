@@ -760,9 +760,15 @@ turn ran in a fresh native profile without the old notes or history, made no
 tool calls, and took the name from the turn-start Honcho context, read before
 the epoch's correction sweep had rebuilt the session. Honcho context and recall
 now wait for that correction
-([ADR-0148](docs/adr/0148-honcho-reads-wait-for-epoch-correction.md),
-[checks](test/store-native-memory.test.ts)). Pending: a rerun of the
-retired-fact case; semantic review of the saved answers.
+([ADR-0148](docs/adr/0148-honcho-reads-wait-for-epoch-correction.md)). A rerun
+confirmed the retired name no longer leaks, but routine epoch changes kept
+Honcho memory closed for the whole run, so only uncorrected owner changes now
+hold it ([ADR-0149](docs/adr/0149-only-owner-changes-hold-honcho.md),
+[checks](test/store-native-memory.test.ts)). That rerun's scenario failures
+came mostly from running the scripted scenarios after real-model relay mode
+was enabled; the scenarios now refuse relay mode. Pending: a fresh full run
+(scripted scenarios first, then real-model cases); semantic review of the
+saved answers.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
