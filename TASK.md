@@ -766,9 +766,15 @@ Honcho memory closed for the whole run, so only uncorrected owner changes now
 hold it ([ADR-0149](docs/adr/0149-only-owner-changes-hold-honcho.md),
 [checks](test/store-native-memory.test.ts)). That rerun's scenario failures
 came mostly from running the scripted scenarios after real-model relay mode
-was enabled; the scenarios now refuse relay mode. Pending: a fresh full run
-(scripted scenarios first, then real-model cases); semantic review of the
-saved answers.
+was enabled; the scenarios now refuse relay mode. A fresh full run on the
+narrowed gate (October 15) passed: installation rehearsal, the ordinary Telegram
+rehearsal, 39 of 39 scripted scenarios, and all seven real-model cases on the
+first delivery. The retired-fact turn said long-term memory was being
+corrected and gave no name; it was the only turn Honcho memory was held for.
+Real Honcho lookups ran in the corrected-fact, shared-topic and group-isolation
+cases, the Honcho queue drained, there were no upstream errors, and no raw
+secret canary reached the provider outside the secret check. Observation: each
+real Honcho dialectic lookup took 25 to 36 seconds, most of those replies' time.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
