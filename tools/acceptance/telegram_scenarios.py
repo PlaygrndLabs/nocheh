@@ -61,6 +61,9 @@ class Fixture:
         info = json.loads((directory/'fixture.json').read_text())
         self.manifest = json.loads((directory/'compose.json').read_text())
         self.project = validate_fixture(directory, info, self.manifest)
+        # Directives such as [[long:...]] need the scripted model; a real-model relay ignores them.
+        if self.manifest['services']['model-fixture']['environment'].get('NOCHEH_FIXTURE_UPSTREAM'):
+            raise ValueError('scripted_model_required: restore compose.before-model.json or use a fresh fixture')
         self.command = ['docker', 'compose', '-p', self.project, '-f', str(directory/'compose.json')]
         self.next_id = None
 
