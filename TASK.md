@@ -783,9 +783,13 @@ of 2 to 4 seconds each (11 to 21 seconds); the question's check waited up to
 8 seconds behind background checks. Honcho's recall requests were checked at
 background priority; they now take reply priority while the deriver stays
 background ([ADR-0150](docs/adr/0150-honcho-recall-checks-take-reply-priority.md)).
-The `honcho_recall` stage does not separate secret-check time. Pending: a
-real-model rerun to measure the change; options not taken without the owner:
-a faster secret-check model, fewer recall checks, or a lighter Honcho reasoning level.
+The `honcho_recall` stage does not separate secret-check time. A real-model
+rerun on the change passed all seven cases; in the one comparable recall
+(shared topic) the lookup fell from 27.0 to 20.2 seconds, the question's check
+from 8.3 to 2.5 seconds and critical-path checks from about 18 to 11 seconds.
+About four sequential checks of 2 to 4 seconds remain per recall. Options not
+taken without the owner: a faster secret-check model, fewer recall checks, or a
+lighter Honcho reasoning level.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
