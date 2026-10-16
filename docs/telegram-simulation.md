@@ -183,8 +183,10 @@ Carry unrelated evidence forward with its original revision and limitations.
 
 The `model-fixture` service is configured as an ordinary custom provider and
 answers deterministically. For real-model memory cases, after the Telegram
-rehearsal run `python3 -m tools.acceptance.model_rehearsal --directory <fixture>
---upstream <private file>`. The file is owner-authorized, mode 0600, outside
+rehearsal and the scripted scenarios run `python3 -m tools.acceptance.model_rehearsal
+--directory <fixture> --upstream <private file>`. Relay mode stays on for that
+fixture, so the scripted scenarios refuse to run until its saved
+`compose.before-model.json` is restored. The file is owner-authorized, mode 0600, outside
 tracked source, and names `chat` and optional `embeddings` providers as
 `{"url": "https://…", "key": "…"}`. The fixture model service then relays chat,
 model-list and embedding requests there with only the authorization replaced;

@@ -22,7 +22,7 @@ const protocol='honcho-entity-v1';
 export const assistantPeer='nocheh_assistant';
 const assistantKinds=new Set(['telegram_delivered_message','browser_delivered_message']);
 const limited:{sources:never[];limited_memory:boolean;note:string;syncing?:boolean}={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
-const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after a recent change, such as a retired message. Current context, native notes and archive search remain available.'};
+const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after an owner change, such as a retired message. Current context, native notes and archive search remain available.'};
 const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value);
 const sessionName=(workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
 /** Validation failures that mean a written receipt no longer belongs in Honcho. */
@@ -634,13 +634,15 @@ export class NativeMemoryRepository {
     const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
     return {...empty,text:String(value.text??'')};
   }
-  /** After a guard epoch, Honcho still holds writes that became invalid, such as a retired message, until the
-   * correction sweep rebuilds their sessions and Honcho deletes the old ones with their conclusions.
-   * Summaries, representations and recall answers cite nothing, so none is read until then. */
+  /** An owner decision, such as retiring a message, can make Honcho writes invalid. Honcho keeps them until a
+   * correction sweep at that decision's epoch or later rebuilds their sessions and Honcho deletes the old ones with
+   * their conclusions. Summaries, representations and recall answers cite nothing, so none is read until then.
+   * Other epoch changes, such as learning publications, do not hold memory. */
   private async correcting(current:Current):Promise<boolean> {
-    const sweep=(await this.control.query(`SELECT stage FROM learning_refresh_sweeps WHERE installation_generation=$1 AND guard_epoch=$2
-      AND family='honcho'`,[current.binding.generation,current.binding.epoch])).rows[0];
-    if(sweep?.stage!=='done')return true;
+    const {generation,epoch}=current.binding;
+    const uncorrected=await this.control.query(`SELECT 1 FROM owner_commands c WHERE c.epoch<=$2 AND c.epoch>coalesce((SELECT max(guard_epoch)
+      FROM learning_refresh_sweeps WHERE installation_generation=$1 AND family='honcho' AND stage='done'),0) LIMIT 1`,[generation,epoch]);
+    if(uncorrected.rowCount)return true;
     return !!(await this.control.query(`SELECT 1 FROM memory_session_deletions WHERE workspace=$1 AND state<>'done' LIMIT 1`,[current.row.id])).rowCount;
   }
   /** Freshness is checked when a message arrives: the turn reads Honcho's current context for its own conversation. */
