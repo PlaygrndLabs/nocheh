@@ -776,6 +776,17 @@ cases, the Honcho queue drained, there were no upstream errors, and no raw
 secret canary reached the provider outside the secret check. Observation: each
 real Honcho dialectic lookup took 25 to 36 seconds, most of those replies' time.
 
+Honcho recall latency (October 16, from that run's gateway ledger and derived
+records): each recall asked one person and made two Honcho reasoning rounds
+(about 7 to 10 seconds of model time) and about five sequential secret checks
+of 2 to 4 seconds each (11 to 21 seconds); the question's check waited up to
+8 seconds behind background checks. Honcho's recall requests were checked at
+background priority; they now take reply priority while the deriver stays
+background ([ADR-0150](docs/adr/0150-honcho-recall-checks-take-reply-priority.md)).
+The `honcho_recall` stage does not separate secret-check time. Pending: a
+real-model rerun to measure the change; options not taken without the owner:
+a faster secret-check model, fewer recall checks, or a lighter Honcho reasoning level.
+
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
 installation rehearsal and both HTTP Telegram rehearsals pass; the first

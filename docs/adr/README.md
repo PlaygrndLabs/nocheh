@@ -21,6 +21,7 @@ Honcho terminal-error readiness: [0101](0101-honcho-terminal-queue-errors-block-
 Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), implemented by
 [0115](0115-honcho-session-revisions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
+Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
 superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md).
 Primary ingestion before new native notes:
