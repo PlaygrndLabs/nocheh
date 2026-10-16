@@ -159,3 +159,4 @@ records current implementation and activation.
 | [0144](0144-keep-history-by-default.md) | Workflow history and Hermes delivery logs are kept by default | Supersedes the 14-day default of 0110 and the 30-day default of 0143; `0` is the default and the owner can set days |
 | [0148](0148-honcho-reads-wait-for-epoch-correction.md) | Honcho reads wait for each guard epoch's correction | Refines 0115; turn context and recall read nothing from Honcho until the epoch's correction sweep and replaced-session deletions finish |
 | [0149](0149-only-owner-changes-hold-honcho.md) | Only uncorrected owner changes hold Honcho reads | Supersedes the epoch condition of 0148; learning and other routine epochs no longer pause Honcho memory |
+| [0150](0150-honcho-recall-checks-take-reply-priority.md) | Honcho recall checks take reply priority | Extends 0139; Honcho deriver requests stay background, API recall requests are checked at reply priority |

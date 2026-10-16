@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0,'/app')
 from boundary import WorkspaceMiddleware,bind_worker,install_transport
 import httpx
-install_transport(httpx)
+install_transport(httpx,background=sys.argv[1:2]==['deriver'])
 if sys.argv[1]=='api':
     from src.main import app
     from provenance import install
