@@ -841,8 +841,10 @@ seconds (two rejected replies, one hiding a missed password), and
 every round). The OpenAI embedding key still works (one synthetic call, status
 200). The owner chose `claude-sonnet-5`, and the live secret check uses it
 since October 17 (synthetic detector check 3 of 3, 2.8 to 3.4 seconds); every
-other part stays on `claude-sonnet-5-5`. Pending: `claude-haiku-5-5`, newly
-offered by the gateway, is not yet compared.
+other part stays on `claude-sonnet-5-5`. `claude-haiku-5-5`, compared later
+the same day, passed 37 of 42 with a 2.73-second median against 42 of 42 and
+2.52 seconds for `claude-sonnet-5`; it answered in prose instead of JSON in five
+calls, so the secret check stays on `claude-sonnet-5`.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
