@@ -9,6 +9,7 @@ import {MemoryCard} from './memory';
 import {WhoCanTalk} from './people';
 import {NochehHere} from './presence';
 import {ProjectCard} from './project';
+import {RoleAndSkills} from './role-skills';
 import {chatHref, useChat, useChats, type Telegram} from './shared';
 import {TopicsCard} from './topics';
 
@@ -80,6 +81,25 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       )}
       <NochehHere chat={chat} parent={parent} telegram={telegram} />
       {group && <WhoCanTalk group={space} telegram={telegram} />}
+      {(owner || (group && telegram.isOn(space))) && (
+        <RoleAndSkills
+          scope={space}
+          where={owner ? 'your private chat' : chatName(chat, telegram.owner)}
+          description={
+            group
+              ? 'Only you set these. Every topic in this group uses them. Defaults are in Settings › Assistant.'
+              : 'Only you set these. Defaults for every chat are in Settings › Assistant.'
+          }
+        />
+      )}
+      {chat.kind === 'topic' && (
+        <p className="px-1 text-[13px] text-muted">
+          This topic uses its group’s role and skills.{' '}
+          <a href={chatHref(parentId ?? '')} className="font-medium text-accent-text hover:underline">
+            Open the group
+          </a>
+        </p>
+      )}
       <MemoryCard chat={chat} telegram={telegram} context={context.data} />
       <AllowedActions chat={chat} context={context.data} />
       <ProjectCard chat={chat} />

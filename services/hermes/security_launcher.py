@@ -15,6 +15,8 @@ from urllib.request import Request,build_opener,ProxyHandler
 from .isolated_profile import DATA_DIRS,DATA_FILES
 from .environment import parallel
 
+CONFIGURATION=('config.yaml','SOUL.md','skills')
+
 class DockerConnection(http.client.HTTPConnection):
     def __init__(self):super().__init__('localhost',timeout=240)
     def connect(self):
@@ -37,7 +39,8 @@ def container_spec(profile,host_root,image,network,uid,gid,source_root=None):
     if not re.fullmatch(r'sha256:[a-f0-9]{64}',image):raise ValueError('pinned_runtime_image_required')
     if not re.fullmatch(r'[\w-]{1,128}',network):raise ValueError('invalid_isolation_network')
     if not all(type(x) is int and x>0 for x in (uid,gid)):raise ValueError('unprivileged_identity_required')
-    mounts=[{'Type':'bind','Source':str(root/profile/'config.yaml'),'Target':'/profile/config.yaml','ReadOnly':True}]
+    # The owner's role (SOUL.md) and skills are configuration: readable, never writable by the turn.
+    mounts=[{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':True} for name in CONFIGURATION]
     mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_DIRS]
     mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_FILES]
     if source_root is not None:
@@ -64,7 +67,7 @@ def container_spec(profile,host_root,image,network,uid,gid,source_root=None):
 def validate_local_profile(profile,root=Path('/profiles')):
     path=root/profile
     if path.is_symlink() or not path.is_dir() or path.parent.resolve()!=root.resolve():raise ValueError('profile_mount_denied')
-    for name in ('config.yaml',*DATA_DIRS,*DATA_FILES):
+    for name in (*CONFIGURATION,*DATA_DIRS,*DATA_FILES):
         item=path/name
         if item.is_symlink() or not item.exists() or not item.resolve().is_relative_to(path.resolve()):raise ValueError('profile_mount_denied')
 

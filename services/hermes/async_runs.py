@@ -99,8 +99,9 @@ class AsyncRuns:
             if path.exists():
                 previous=json.loads(path.read_bytes())
                 # Credentials can expire between delivery attempts. They are not
-                # execution identity, but every domain handler rechecks them.
-                omit=lambda value:{k:v for k,v in value.items() if k not in ('archive_credential','asynchronous')}
+                # execution identity, but every domain handler rechecks them. A
+                # retry keeps the instruction texts its first request carried.
+                omit=lambda value:{k:v for k,v in value.items() if k not in ('archive_credential','asynchronous','prompts')}
                 if canonical(omit(previous))!=canonical(omit(body)):raise ValueError('run_identity_conflict')
             else:
                 immutable_file(self.directory,run+'.request',canonical(body));self._observe(run,'queued','admission')
