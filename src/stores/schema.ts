@@ -26,6 +26,7 @@ import {storageImportSchema} from './imports.js';
 import {importWorkflowSchema} from '../workflows/imports.js';
 import {memoryAccessSchema} from './memory-access-schema.js';
 import {ownerAutonomySchema} from './owner-autonomy.js';
+import {promptSchema} from '../prompts.js';
 import {telegramChatSchema} from './telegram-chats.js';
 import {telegramTopicSchema} from './telegram-topics.js';
 import {sourceRetirementSchema} from './source-retirement.js';
@@ -139,6 +140,7 @@ ${nativeReviewSchema}
 ${sharingContentSchema}
 ${memoryAccessSchema}
 ${ownerAutonomySchema}
+${promptSchema}
 ${telegramChatSchema}
 ${telegramTopicSchema}
 ${sourceRetirementSchema}

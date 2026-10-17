@@ -14,7 +14,10 @@ import urllib.error
 import urllib.request
 from tools.acceptance.model_rehearsal import read_upstream
 from tools.paths import ROOT
-from services.hermes.subscription import DETECTOR_INSTRUCTIONS, DetectorContractError, detector_reply
+from services.hermes.prompts import DEFAULTS
+from services.hermes.subscription import DetectorContractError, detector_reply
+
+DETECTOR_INSTRUCTIONS = DEFAULTS['guard.secret_check']
 
 FRAGMENT = '\n<NOCHEH_FRAGMENT>\n'
 
