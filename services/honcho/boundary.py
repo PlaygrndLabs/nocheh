@@ -22,14 +22,16 @@ def bind_worker(manager,parse):
         finally: WORKSPACE.reset(token)
     manager.process_work_unit=run
 
-def install_transport(httpx):
+def install_transport(httpx,background=False):
     # Hook each physical attempt, including SDK retries and redirects. The SDK
     # has no direct Internet route; unbound global reconciliation fails closed.
+    # The deriver's work is background learning: its secret checks yield to replies.
     original=httpx.AsyncClient._send_single_request
     async def send(self,request):
         if str(request.url).startswith('http://honcho-provider-gateway:8790/v1/'):
             workspace=WORKSPACE.get()
             if not workspace: raise RuntimeError('honcho_workspace_required')
             request.headers['X-Nocheh-Workspace']=workspace
+            if background: request.headers['X-Nocheh-Priority']='background'
         return await original(self,request)
     httpx.AsyncClient._send_single_request=send
