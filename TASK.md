@@ -839,7 +839,10 @@ seconds (2.95 without an effort), `claude-haiku-4-5-20251001` 40 of 42 with 3.36
 seconds (two rejected replies, one hiding a missed password), and
 `claude-sonnet-4-6` 36 of 42 with 1.84 seconds (it missed the Persian password in
 every round). The OpenAI embedding key still works (one synthetic call, status
-200). Pending: the owner's choice of `claude-sonnet-5` for the secret check.
+200). The owner chose `claude-sonnet-5`, and the live secret check uses it
+since October 17 (synthetic detector check 3 of 3, 2.8 to 3.4 seconds); every
+other part stays on `claude-sonnet-5-5`. Pending: `claude-haiku-5-5`, newly
+offered by the gateway, is not yet compared.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
