@@ -31,6 +31,9 @@ test('separated application captures through control outages, exposes owner repo
   const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
     if(operation==='status')return {ok:true,telegram:'connected'};
     if(operation==='guard.detect')return {literals:[]};
+    if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','memory.limited':'Limited',
+      'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter'}};
+    if(operation.startsWith('persona.')||operation==='config.read')return {operation,input};
     if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:[]};}
     throw Error('unexpected external operation');
   };
@@ -57,6 +60,18 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal(typeof initialStatus.archive.events,'number');assert.ok(Array.isArray(initialStatus.archive.artifacts));
     assert.equal((await request('/v1/runtime')).status.telegram,'connected');
     await request('/v1/runtime',undefined,403,scopeToken(token,'123',Date.now()+60000));
+    const persona={action:'persona',scope:'default',role:'Fixture role',skills:[],revision:'r1'};
+    assert.deepEqual(await request('/v1/manage/hermes',persona),{operation:'persona.write',input:{scope:'default',role:'Fixture role',skills:[],revision:'r1'}});
+    assert.equal((await request('/v1/manage/hermes',{action:'persona',scope:'default'})).operation,'persona.read');
+    assert.equal((await request('/v1/manage/hermes',{action:'preferences',scope:'default'})).operation,'config.read');
+    await request('/v1/manage/hermes',{action:'unknown'},400);
+    const prompts=await request('/v1/prompts');
+    assert.equal(prompts.defaults['reply.owner'],'Owner');assert.match(prompts.defaults['learning.interpret'],/\{trigger_id\}/);assert.deepEqual(prompts.texts,{});
+    const saved=await request('/v1/prompts',{texts:{'reply.owner':' Answer in Persian. '},revision:prompts.revision});
+    assert.deepEqual(saved.texts,{'reply.owner':'Answer in Persian.'});
+    await request('/v1/prompts',{texts:{'reply.group':'Stale'},revision:prompts.revision},409);
+    await request('/v1/prompts',{texts:{'learning.interpret':'No values'},revision:saved.revision},400);
+    assert.deepEqual((await request('/v1/prompts',{texts:{'reply.owner':null},revision:saved.revision})).texts,{});
     assert.equal((await request('/v1/security/policy')).source,'owner security policy');
     await request('/v1/security/preview',{action_id:digest(key)},404);
     const project=await request('/v1/projects',{name:key,description:'HTTP rehearsal',state:'active',expected_revision:0,operation_id:key+':project'});

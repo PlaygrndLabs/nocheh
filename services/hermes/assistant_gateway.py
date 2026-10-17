@@ -93,6 +93,8 @@ def prepare_profile(root,scope,model):
             if (named/'config.yaml').exists():source=named
         if (source/'config.yaml').exists():atomic_yaml(profile/'config.yaml',read(source/'config.yaml'))
     configure_profile(profile, model)
+    from .persona import materialize
+    materialize(root, profile, scope.chat_id)
     from .native_memory import save_receipt
     save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'revision':scope.revision,'owner':scope.owner,
         'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose,'logical_profile':scope.logical_profile}))

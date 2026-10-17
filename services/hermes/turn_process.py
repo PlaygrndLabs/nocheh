@@ -80,7 +80,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image'],
-               'turn_deadline_epoch':time.time()+230}
+               'turn_deadline_epoch':time.time()+230,'prompts':body.get('prompts') or {}}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
     from .security_transport import isolated_enabled,scoped_transport
