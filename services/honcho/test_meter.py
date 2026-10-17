@@ -8,7 +8,8 @@ import urllib.error
 import uuid
 from pathlib import Path
 from unittest.mock import patch
-from .meter import REASONING_MODEL, CoolingDown, Egress, Ledger, Rejected, handler, validate
+from types import SimpleNamespace
+from .meter import REASONING_MODEL, ArchivePreparation, CoolingDown, Egress, Ledger, Rejected, handler, validate
 
 
 GATEWAY='https://gateway.example.test/v1'
@@ -187,7 +188,7 @@ class BudgetTests(unittest.TestCase):
     def test_embedding_egress_uses_prepared_wording_and_rejects_retired_context(self):
         with tempfile.TemporaryDirectory() as root:
             transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
-            def prepare(workspace,route,payload):
+            def prepare(workspace,route,payload,background=False):
                 if workspace!='current': raise Rejected('memory_context_retired')
                 return {**payload,'input':'Database credentials are in my password manager.'}
             egress=Egress(ledger,'internal','dedicated',transport,prepare,reasoning_key='honcho-client')
@@ -197,9 +198,24 @@ class BudgetTests(unittest.TestCase):
             self.assertIn(b'password manager',transport.calls[0].data)
             audit=json.loads(ledger.report()['calls'][0]['audit'])
             self.assertEqual(audit,{'owner_wording':True,'synthetic_raw_canary':False})
+            seen=[]
+            Egress(ledger,'internal','dedicated',transport,lambda workspace,route,body,background:seen.append(background) or body,
+                   reasoning_key='honcho-client').send('/v1/embeddings',{'model':'text-embedding-3-small','input':'fixture'},'current',True)
+            self.assertEqual(seen,[True])
             with self.assertRaises(Rejected): egress.send('/v1/embeddings',payload,'retired')
             with self.assertRaises(Rejected): egress.send('/v1/embeddings',payload)
-            self.assertEqual(len(transport.calls),1)
+            self.assertEqual(len(transport.calls),2)
+
+    def test_archive_preparation_forwards_background_priority(self):
+        sent=[]
+        class Response(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+        preparation=ArchivePreparation('http://archive','internal')
+        preparation.opener=SimpleNamespace(open=lambda request,timeout:sent.append(json.loads(request.data)) or Response(b'{"payload":{}}'))
+        preparation('current','/v1/embeddings',{'input':'fixture'})
+        preparation('current','/v1/embeddings',{'input':'fixture'},True)
+        self.assertNotIn('background',sent[0]);self.assertIs(sent[1]['background'],True)
 
     def test_concurrent_budget_restart_and_zero_egress(self):
         with tempfile.TemporaryDirectory() as root:

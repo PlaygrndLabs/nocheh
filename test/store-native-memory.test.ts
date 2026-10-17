@@ -125,8 +125,9 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-memory-')),key='native:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null},remote=new Map<string,any[]>(),calls:{path:string;body:any;method?:string}[]=[];
   let loseReply=true,sequence=0;const ownerApproved='Owner-approved password=visible123',descendants:string[]=[],active=new Map<string,Set<string>>();
+  const priorities:unknown[]=[];
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
-    runtime:async(_operation,input)=>({literals:String(input.text).includes('saffronpass')?['saffronpass']:[]}),
+    runtime:async(_operation,input)=>{priorities.push(input.priority);return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},
     honcho:async(path,body:any,method)=>{
       calls.push({path,body,...(method?{method}:{})});
       const session=/^\/v3\/workspaces\/([^/]+)\/sessions(?:\/([^/?]+))?/.exec(path);
@@ -223,6 +224,12 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     assert.ok(!JSON.stringify(input).includes('saffronpass'));
     assert.equal(((await services.memory.prepareRequest({workspace,route:'/v1/embeddings',payload:{input:ownerApproved}})).payload as any).input,ownerApproved);
     await assert.rejects(services.memory.prepareRequest({workspace,route:'/v1/embeddings',payload:{input:[1,2]}}),{code:'opaque_embedding_input'});
+    // Recall requests from Honcho's API are checked with reply priority; the deriver's yield to them.
+    priorities.length=0;
+    await services.memory.prepareRequest({workspace,route:'/v1/embeddings',payload:{input:'Recall request text saffronpass'}});
+    await services.memory.prepareRequest({workspace,route:'/v1/embeddings',background:true,payload:{input:'Deriver request text saffronpass'}});
+    assert.deepEqual(priorities,[undefined,'background']);
+    await assert.rejects(services.memory.prepareRequest({workspace,route:'/v1/embeddings',background:'yes',payload:{input:'text'}}),{code:'invalid_memory_priority'});
     const callCount=calls.length;
     await assert.rejects(services.memory.prepareRequest({workspace,route:'/unsupported',payload:{input:'text'}}),{code:'memory_route_denied'});assert.equal(calls.length,callCount);
 
