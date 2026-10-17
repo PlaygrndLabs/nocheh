@@ -38,6 +38,18 @@ class DetectorTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     detect_literals(text,credentials,'test-model')
 
+    def test_one_json_code_fence_is_accepted_and_other_wrapping_fails_closed(self):
+        text='Password: juniper-ONLY-7642';credentials=SubscriptionCredentials('synthetic-token')
+        fenced=lambda content:SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+        body=json.dumps({'literals':['juniper-ONLY-7642']})
+        for content in ('```json\n'+body+'\n```','```\n'+body+'\n```\n'):
+            with self.subTest(content=content),patch('services.hermes.subscription._call_subscription',return_value=fenced(content)):
+                self.assertEqual(detect_literals(text,credentials,'model'),['juniper-ONLY-7642'])
+        for content in ('Here it is: ```json\n'+body+'\n```','```json\n'+body+'\n``` and more','```json\n```'):
+            with self.subTest(content=content),patch('services.hermes.subscription._call_subscription',return_value=fenced(content)):
+                with self.assertRaises(DetectorContractError):
+                    detect_literals(text,credentials,'model')
+
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),
                                   ('https://chatgpt.com/backend-api/codex','openai-codex','codex_responses'),
