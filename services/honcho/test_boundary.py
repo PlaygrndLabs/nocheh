@@ -26,4 +26,17 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                 finally: WORKSPACE.reset(token)
             self.assertEqual(len(requests),1)
             self.assertEqual(requests[0].headers['X-Nocheh-Workspace'],'current')
+            self.assertNotIn('X-Nocheh-Priority',requests[0].headers)
+        finally: httpx.AsyncClient._send_single_request=original
+
+    async def test_deriver_requests_are_marked_background(self):
+        import httpx
+        original=httpx.AsyncClient._send_single_request;requests=[]
+        install_transport(httpx,background=True)
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req:requests.append(req) or httpx.Response(200,json={}))) as client:
+                token=WORKSPACE.set('current')
+                try: await client.post('http://honcho-provider-gateway:8790/v1/chat/completions',json={})
+                finally: WORKSPACE.reset(token)
+            self.assertEqual(requests[0].headers['X-Nocheh-Priority'],'background')
         finally: httpx.AsyncClient._send_single_request=original

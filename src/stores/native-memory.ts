@@ -37,7 +37,7 @@ type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
  * One Honcho workspace serves the installation; sessions bound conversations; guard epochs never rebuild it. */
 export class NativeMemoryRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
-    readonly provenance:HonchoProvenanceRepository,readonly call:HonchoCall,readonly detect:(text:string)=>Promise<unknown>){}
+    readonly provenance:HonchoProvenanceRepository,readonly call:HonchoCall,readonly detect:(text:string,background?:boolean)=>Promise<unknown>){}
   private get control(){return this.contexts.access.stores.control;}
   private get guards(){return this.contexts.guards;}
   private get owner(){return this.contexts.access.policy().owner_id;}
@@ -556,7 +556,11 @@ export class NativeMemoryRepository {
         throw new HttpError(409,'opaque_embedding_input');
       await this.allowWritten(current,payload);
     }
-    const prepared=await this.prepared.prepare(current.principal,payload,this.detect);await this.current(current.row.id);return {payload:prepared};
+    if(body.background!==undefined&&typeof body.background!=='boolean')throw new HttpError(400,'invalid_memory_priority');
+    // Priority follows the Honcho process, not the memory-review principal: the deriver
+    // learns in the background, while the API answers recall during a reply.
+    const detect=(text:string)=>this.detect(text,body.background===true);
+    const prepared=await this.prepared.prepare(current.principal,payload,detect);await this.current(current.row.id);return {payload:prepared};
   }
   /** Honcho's derivation requests quote messages Nocheh already guarded. Mark those exact
    * writes as prepared in the current epoch so an unrelated epoch does not re-detect them. */
