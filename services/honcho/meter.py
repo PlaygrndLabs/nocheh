@@ -347,11 +347,11 @@ class Egress:
         self.prepare=prepare
         self.embedding=embedding or embeddings({})
 
-    def send(self, route, payload, workspace=None):
+    def send(self, route, payload, workspace=None, background=False):
         payload=validate(route,payload,self.embedding)
         if self.prepare:
             if not isinstance(workspace,str) or not workspace: raise Rejected('memory_context_required')
-            payload=validate(route,self.prepare(workspace,route,payload),self.embedding)
+            payload=validate(route,self.prepare(workspace,route,payload,background),self.embedding)
         paid=route=='/v1/embeddings'
         if not paid and not self.reasoning_url: raise Rejected('provider_not_configured')
         if paid and not self.paid_key: raise Rejected('temporary_embedding_key_missing')
@@ -405,7 +405,8 @@ def handler(egress):
             try:
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0 < length <= 1024*1024 or self.headers.get('Transfer-Encoding'): raise Rejected('request_bound_exceeded')
-                status,kind,body=egress.send(self.path,json.loads(self.rfile.read(length)),self.headers.get('X-Nocheh-Workspace'))
+                status,kind,body=egress.send(self.path,json.loads(self.rfile.read(length)),self.headers.get('X-Nocheh-Workspace'),
+                                             self.headers.get('X-Nocheh-Priority')=='background')
             except CoolingDown as error:
                 return self.respond(503,'application/json',b'{"error":{"message":"embedding_route_cooling_down"}}',error.seconds)
             except (Rejected,ValueError) as error:
@@ -418,8 +419,9 @@ class ArchivePreparation:
     def __init__(self,url,token):
         self.url=url.rstrip('/')+'/internal/honcho/prepare';self.token=token
         self.opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
-    def __call__(self,workspace,route,payload):
-        request=urllib.request.Request(self.url,data=json.dumps({'workspace':workspace,'route':route,'payload':payload}).encode(),
+    def __call__(self,workspace,route,payload,background=False):
+        body={'workspace':workspace,'route':route,'payload':payload,**({'background':True} if background else {})}
+        request=urllib.request.Request(self.url,data=json.dumps(body).encode(),
             headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
         try:
             with self.opener.open(request,timeout=180) as response:

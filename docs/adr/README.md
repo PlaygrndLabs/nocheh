@@ -23,6 +23,7 @@ Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), impl
 Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
+Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
 superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md).
 Primary ingestion before new native notes:
