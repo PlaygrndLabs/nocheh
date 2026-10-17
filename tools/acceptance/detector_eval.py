@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from tools.acceptance.model_rehearsal import read_upstream
 from tools.paths import ROOT
-from services.hermes.subscription import DETECTOR_INSTRUCTIONS
+from services.hermes.subscription import DETECTOR_INSTRUCTIONS, DetectorContractError, detector_reply
 
 FRAGMENT = '\n<NOCHEH_FRAGMENT>\n'
 
@@ -74,10 +74,8 @@ def check(url, key, model, effort, text, timeout):
     seconds = round(time.monotonic() - start, 3)
     usage = payload.get('usage') or {}
     try:
-        literals = json.loads(payload['choices'][0]['message']['content'])['literals']
-        if not isinstance(literals, list) or any(not isinstance(value, str) or value not in text for value in literals):
-            raise ValueError
-    except (KeyError, IndexError, TypeError, ValueError):
+        literals = detector_reply(payload['choices'][0]['message']['content'], text)
+    except (KeyError, IndexError, TypeError, DetectorContractError):
         # Production rejects this response as a detector contract failure.
         return {'seconds': seconds, 'error': 'contract_rejected', 'usage': usage}
     return {'seconds': seconds, 'literals': literals, 'usage': usage}

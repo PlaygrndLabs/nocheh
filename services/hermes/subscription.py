@@ -25,6 +25,28 @@ class DetectorContractError(ValueError):
     pass
 
 
+def detector_reply(content, text):
+    """The literals of a detector reply, or a contract error. Some models wrap the
+    JSON in one Markdown code fence; only that exact wrapper is removed."""
+    import json
+    import re
+    if isinstance(content, str):
+        fenced = re.fullmatch(r'\s*```(?:json)?[ \t]*\n(.*)\n```\s*', content, re.DOTALL)
+        content = fenced[1] if fenced else content
+    try:
+        parsed = json.loads(content)
+    except (ValueError, TypeError):
+        raise DetectorContractError('detector_json_rejected') from None
+    if not isinstance(parsed, dict) or set(parsed) != {"literals"}:
+        raise DetectorContractError('detector_shape_rejected')
+    candidates = parsed["literals"]
+    if not isinstance(candidates, list) or any(
+        not isinstance(value, str) or not value or value not in text for value in candidates
+    ):
+        raise DetectorContractError('detector_literal_rejected')
+    return candidates
+
+
 class ProviderNotConfigured(RuntimeError):
     """The part has no provider; it is chosen in Settings › Models."""
 
@@ -106,8 +128,6 @@ def _call_subscription(credentials: SubscriptionCredentials, model: str, message
 
 def detect_literals(text: str, credentials: SubscriptionCredentials, model: str):
     """Return validated literal candidates, never rewritten text."""
-    import json
-
     from services.hermes.request_boundary import trusted_detector
     from services.hermes.usage import record, response_usage
     response, failed = None, True
@@ -117,17 +137,7 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str)
                 {"role": "system", "content": DETECTOR_INSTRUCTIONS},
                 {"role": "user", "content": text},
             ])
-        try:
-            parsed = json.loads(response.choices[0].message.content)
-        except (ValueError, TypeError):
-            raise DetectorContractError('detector_json_rejected') from None
-        if not isinstance(parsed, dict) or set(parsed) != {"literals"}:
-            raise DetectorContractError('detector_shape_rejected')
-        candidates = parsed["literals"]
-        if not isinstance(candidates, list) or any(
-            not isinstance(value, str) or not value or value not in text for value in candidates
-        ):
-            raise DetectorContractError('detector_literal_rejected')
+        candidates = detector_reply(response.choices[0].message.content, text)
         failed = False
         return candidates
     finally:
