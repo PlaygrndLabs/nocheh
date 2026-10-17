@@ -788,8 +788,18 @@ rerun on the change passed all seven cases; in the one comparable recall
 (shared topic) the lookup fell from 27.0 to 20.2 seconds, the question's check
 from 8.3 to 2.5 seconds and critical-path checks from about 18 to 11 seconds.
 About four sequential checks of 2 to 4 seconds remain per recall. Options not
-taken without the owner: a faster secret-check model, fewer recall checks, or a
-lighter Honcho reasoning level.
+taken without the owner: fewer recall checks or a lighter Honcho reasoning level.
+
+Secret-check model comparison (October 17, synthetic cases only,
+[tool](tools/acceptance/detector_eval.py)): 14 cases with known secrets and
+near-misses, three rounds each, through the owner's gateway. With the production
+low reasoning effort, `gpt-6-luna` passed 42 of 42 with a 2.6-second median and
+`claude-sonnet-5-5` passed 39 of 42 with 3.5 seconds; without a reasoning effort
+they took 2.2 and 3.1 seconds. Sonnet's only failures were the private-key case,
+whose expected value then included the key's armor lines; the case now requires
+only the key material. `claude-haiku-4-5-20251001` wrapped every answer in a
+code fence, which the detector rejects. Pending: the owner's choice of the
+secret-check model.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
