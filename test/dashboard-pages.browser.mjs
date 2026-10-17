@@ -205,6 +205,37 @@ test('a settings edit survives switching tabs and Save at the top of the page sa
   await page.close();
 });
 
+test('a group’s role and skills are edited on its chat page and saved from the top of the page', async () => {
+  const {page, problems} = await open('chats?chat=-10042');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills'})});
+  await card.getByRole('textbox', {name: 'Role'}).fill('You help this group plan stargazing trips.');
+  await card.getByRole('button', {name: 'Add skill'}).click();
+  await card.getByRole('textbox', {name: 'Name'}).fill('Kp Forecast');
+  await card.getByRole('textbox', {name: 'When to use it'}).fill('When someone asks about tonight’s aurora.');
+  await card.getByRole('textbox', {name: 'Instructions'}).fill('Give the Kp index and the best viewing hour.');
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByText('2 unsaved changes').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  // A name Hermes cannot use is explained in place and nothing is saved.
+  await card.getByText('Name it with lower-case English letters').waitFor();
+  await card.getByRole('textbox', {name: 'Name'}).fill('kp-forecast');
+  await bar.getByRole('button', {name: 'Try again'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.reload();
+  await card.getByRole('textbox', {name: 'Name'}).waitFor();
+  assert.equal(await card.getByRole('textbox', {name: 'Name'}).inputValue(), 'kp-forecast');
+  assert.equal(
+    await card.getByRole('textbox', {name: 'Role'}).inputValue(),
+    'You help this group plan stargazing trips.',
+  );
+  const {page: topic} = await open('chats?chat=-10042%2Ftopic%2F7');
+  await topic.getByText('This topic uses its group’s role and skills.').waitFor();
+  assert.equal(await topic.getByRole('heading', {name: 'Role and skills'}).count(), 0);
+  await topic.close();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('discard drops unsaved edits', async () => {
   const {page, problems} = await open('settings?view=telegram');
   const before = await page.locator('#telegram-names').inputValue();

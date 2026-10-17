@@ -45,6 +45,13 @@ def dispatch(root, model, policy, body):
                                    'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),
                                    'guard_epoch':metadata.get('guard_epoch',0),'exists':True}
         return {'profiles':profiles,'history_profiles':list(historical.values())}
+    if action == 'persona':
+        from . import persona
+        scope = body.get('scope')
+        path = persona.default_path(root) if scope == 'default' else profile_path(root, scope, policy)
+        if 'role' in body or 'skills' in body:
+            return {'scope': scope, **persona.save(path, body.get('role', ''), body.get('skills', []), body.get('revision'))}
+        return {'scope': scope, **persona.view(path)}
     path = profile_path(root, body.get('scope'), policy,body.get('profile') if action=='memory' else None)
     if action == 'preferences':
         result = configure_profile(path, model, body['changes'], body.get('revision')) if 'changes' in body else inspect_profile(path, model)
