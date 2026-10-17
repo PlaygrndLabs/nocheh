@@ -820,8 +820,35 @@ rerun on the change passed all seven cases; in the one comparable recall
 (shared topic) the lookup fell from 27.0 to 20.2 seconds, the question's check
 from 8.3 to 2.5 seconds and critical-path checks from about 18 to 11 seconds.
 About four sequential checks of 2 to 4 seconds remain per recall. Options not
-taken without the owner: a faster secret-check model, fewer recall checks, or a
-lighter Honcho reasoning level.
+taken without the owner: fewer recall checks or a lighter Honcho reasoning level.
+
+Secret-check model comparison (October 17, synthetic cases only,
+[tool](tools/acceptance/detector_eval.py)): 14 cases with known secrets and
+near-misses, three rounds each, through the owner's gateway. With the production
+low reasoning effort, `gpt-6-luna` passed 42 of 42 with a 2.6-second median and
+`claude-sonnet-5-5` passed 39 of 42 with 3.5 seconds; without a reasoning effort
+they took 2.2 and 3.1 seconds. Sonnet's only failures were the private-key case,
+whose expected value then included the key's armor lines; the case now requires
+only the key material. `claude-haiku-4-5-20251001` wrapped every answer in a
+code fence, which the detector rejected; the detector now removes one exact
+JSON code fence and still rejects any other wrapping. The owner uses Anthropic
+models only (October 17). With the fence accepted, Anthropic candidates over
+three rounds at low effort: `claude-sonnet-5` passed 42 of 42 with a 2.65-second
+median (also 42 of 42 without an effort), `claude-sonnet-5-5` 42 of 42 with 3.34
+seconds (2.95 without an effort), `claude-haiku-4-5-20251001` 40 of 42 with 3.36
+seconds (two rejected replies, one hiding a missed password), and
+`claude-sonnet-4-6` 36 of 42 with 1.84 seconds (it missed the Persian password in
+every round). The OpenAI embedding key still works (one synthetic call, status
+200). The owner chose `claude-sonnet-5`, and the live secret check uses it
+since October 17 (synthetic detector check 3 of 3, 2.8 to 3.4 seconds); every
+other part stays on `claude-sonnet-5-5`. `claude-haiku-5-5`, compared later
+the same day, passed 37 of 42 with a 2.73-second median against 42 of 42 and
+2.52 seconds for `claude-sonnet-5`; it answered in prose instead of JSON in five
+calls, so the secret check stays on `claude-sonnet-5`. A larger rerun (five
+rounds, 70 calls per model) confirmed it: `claude-sonnet-5` 70 of 70 with a
+2.55-second median and 3.13-second p90; `claude-sonnet-5-5` 69 of 70, 3.07 and
+4.73 seconds; `claude-haiku-5-5` 55 of 70 and `claude-haiku-4-5-20251001` 61 of
+70, every failure an unreadable reply.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
