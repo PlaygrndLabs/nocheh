@@ -236,6 +236,41 @@ test('a group’s role and skills are edited on its chat page and saved from the
   await page.close();
 });
 
+test('a built-in instruction is replaced, checked and reset to the built-in text', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await card.getByText('Groups', {exact: true}).click();
+  await card.getByRole('textbox', {name: 'Groups'}).fill('Reply in Persian and stay quiet with [NO_REPLY] otherwise.');
+  await card.getByText('Learning from conversations').click();
+  await card.getByRole('textbox', {name: 'Learning from conversations'}).fill('Learn only decisions.');
+  await bar.getByText('2 unsaved changes').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  // The values Nocheh fills in cannot be dropped by mistake.
+  await card.getByText('Keep {trigger_id} and {citable_ids} in the text').waitFor();
+  await card
+    .getByRole('textbox', {name: 'Learning from conversations'})
+    .fill('Learn only decisions from {trigger_id} citing {citable_ids}.');
+  await bar.getByRole('button', {name: 'Try again'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.reload();
+  await card.getByText('Changed').first().waitFor();
+  assert.equal(await card.getByText('Changed', {exact: true}).count(), 2);
+  await card.getByText('Groups', {exact: true}).click();
+  const groups = card.getByRole('listitem').filter({has: page.getByRole('textbox', {name: 'Groups'})});
+  await groups.getByRole('button', {name: 'Reset to built-in'}).click();
+  assert.equal(
+    await card.getByRole('textbox', {name: 'Groups'}).inputValue(),
+    'This is a shared space. For routine chatter return exactly [NO_REPLY].',
+  );
+  await groups.getByText('Reset when saved').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.equal(await card.getByText('Changed', {exact: true}).count(), 1);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('discard drops unsaved edits', async () => {
   const {page, problems} = await open('settings?view=telegram');
   const before = await page.locator('#telegram-names').inputValue();

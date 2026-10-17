@@ -49,6 +49,12 @@ const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRA
 const personas:Record<string,{role:string;skills:{name:string;description:string;body:string}[];revision:string}>={
   default:{role:'',skills:[{name:'weekly-menu',description:'When someone asks what to cook this week.',body:'Suggest five dinners from what is in the fridge.'}],revision:'persona-1'}};
 const persona=(scope:string)=>({scope,...(personas[scope]??={role:'',skills:[],revision:'persona-1'})});
+const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpret':['{trigger_id}','{citable_ids}']},texts:{} as Record<string,string>,
+  defaults:{'reply.common':'You are Nocheh. Use authorized sources as evidence.','reply.owner':'This is the owner private conversation.',
+    'reply.group':'This is a shared space. For routine chatter return exactly [NO_REPLY].','memory.limited':'Long-term memory is limited.',
+    'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
+    'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.',
+    'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.'} as Record<string,string>};
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
@@ -352,6 +358,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy. Verify against original evidence.',citations:[]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));
+  if(route==='/prompts')return json(res,200,prompts);
   if(route==='/memory/honcho')return json(res,200,{connection:{attached:memoryAttached,verified:true,revision:memoryRevision,include_history:memoryIncludeHistory},workspace:{id:'synthetic-workspace',state:'building',last_ready_at:minutesAgo(30),error_code:null},limited_memory:!memoryAttached,syncing:true,generations:[{id:'fixture',state:'ready',mode:'on'}],receipts:[{state:'done',count:176},{state:'pending',count:4}]});
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
   if(route==='/runtime')return json(res,200,{status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{chat:true,sessions:true}});
@@ -444,6 +451,11 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/honcho/budget'){if(body.expected_revision!==honchoBudget.revision)throw new HttpError(409,'budget_revision_conflict');if(!Number.isInteger(body.limit_cents)||body.limit_cents<0||body.limit_cents>honchoBudget.max_limit_cents)throw new HttpError(400,'invalid_budget_request');
    Object.assign(honchoBudget,{limit_cents:body.limit_cents,limit_usd:body.limit_cents/100,remaining_usd:Math.max(0,body.limit_cents/100-honchoBudget.counted_toward_cap_usd),revision:honchoBudget.revision+1});return json(res,200,honchoBudget);}
   if(route==='/honcho/read')return json(res,200,{complete:true,workspaces:[{id:'synthetic-workspace'}]});
+  if(route==='/prompts'){if(body.revision!==prompts.revision)throw new HttpError(409,'configuration_conflict');
+   for(const [key,text] of Object.entries(body.texts as Record<string,string|null>)){
+     if(text!==null&&(prompts.placeholders as Record<string,string[]>)[key]?.some(name=>!text.includes(name)))throw new HttpError(400,'prompt_placeholder_missing');
+     if(text===null)delete prompts.texts[key];else prompts.texts[key]=text;}
+   prompts.revision+='x';return json(res,200,prompts);}
   if(route==='/memory/persona'){const current=persona(String(body.scope));if(body.revision!==current.revision)throw new HttpError(409,'configuration_conflict');
    personas[String(body.scope)]={role:body.role,skills:body.skills,revision:current.revision+'x'};return json(res,200,persona(String(body.scope)));}
   if(route==='/memory/preferences'||route==='/policy'){if(body.revision!==preferences.revision)throw new HttpError(409,'configuration_conflict');preferences.revision+='x';preferences.values={...preferences.values,...body.changes};return json(res,200,{ok:true});}

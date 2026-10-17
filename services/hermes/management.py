@@ -45,6 +45,9 @@ def dispatch(root, model, policy, body):
                                    'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),
                                    'guard_epoch':metadata.get('guard_epoch',0),'exists':True}
         return {'profiles':profiles,'history_profiles':list(historical.values())}
+    if action == 'prompts':
+        from .prompts import DEFAULTS, LIMIT
+        return {'defaults': DEFAULTS, 'limit': LIMIT}
     if action == 'persona':
         from . import persona
         scope = body.get('scope')

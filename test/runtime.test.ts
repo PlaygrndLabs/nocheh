@@ -73,6 +73,7 @@ test('role and skills travel as one native profile action and keep their conflic
   }}));
   await call('persona.read',{scope:'default'});
   await call('persona.write',{scope:'-20',role:'Family helper',skills:[],revision:'r'});
-  assert.deepEqual(seen,[{scope:'default',action:'persona'},{scope:'-20',role:'Family helper',skills:[],revision:'r',action:'persona'}]);
+  await call('prompts.defaults',{});
+  assert.deepEqual(seen,[{scope:'default',action:'persona'},{scope:'-20',role:'Family helper',skills:[],revision:'r',action:'persona'},{action:'prompts'}]);
   await assert.rejects(call('persona.write',{scope:'-20',role:'',skills:[],revision:'stale'}),{code:'configuration_conflict',status:409});
 });

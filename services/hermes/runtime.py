@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             text = body["text"]
             if not isinstance(text, str) or len(text) > 100000:
                 raise ValueError("invalid_text")
-            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials("guard"), part_model("guard"))}
+            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials("guard"), part_model("guard"), body.get("prompts"))}
         raise ValueError("unknown_route")
 
 
