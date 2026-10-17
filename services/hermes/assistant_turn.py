@@ -158,11 +158,13 @@ def run(body, emit=None):
     bind_process_preferences(prefs)
     database=SessionDB(database_path(profile))
     record('bootstrap',phase);phase=perf_counter()
+    from .prompts import reply, text
+    prompt=lambda key:text(body.get('prompts'),key)
     long_term='';memory={}
     if not review:
         from .archive_tools import request
         try: memory=request('/v1/memory/honcho/context',{})
-        except Exception: memory={'limited_memory':True,'note':'Long-term memory is limited. Current context, native notes and archive search remain available.'}
+        except Exception: memory={'limited_memory':True,'note':prompt('memory.limited')}
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
@@ -172,7 +174,7 @@ def run(body, emit=None):
     placement=body.get('memory_context','legacy')
     if placement not in ('legacy','evidence'):raise ValueError('invalid_memory_context')
     restore_evidence=memory_evidence.install(memory if not review else None) if placement=='evidence' else lambda:None
-    if placement=='evidence':long_term='\n'+memory_evidence.INSTRUCTION
+    if placement=='evidence':long_term='\n'+prompt('memory.evidence')
     agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
         api_key=credentials.access_token,base_url=credentials.base_url,
         enabled_toolsets=['memory'] if review else TURN_TOOLSETS,fallback_model=None,
@@ -182,28 +184,7 @@ def run(body, emit=None):
         quiet_mode=True,save_trajectories=False,max_iterations=prefs['agent.max_iterations'],
         run_budget_seconds=prefs['agent.run_budget_seconds'],
         reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
-            'You are Nocheh. Use authorized archived or shared sources as evidence. Cite them in plain language without internal source IDs. Do not cite the current incoming message. '
-            'Archive originals are evidence; derived transcripts and your inferences are separate. '
-            'Honcho is your primary long-term memory; native notes are small working notes. '
-            'The supplied Honcho context is bounded. Use nocheh_memory_recall when a question needs personal facts, preferences, prior decisions, or relationships missing from that context. '
-            'Do not infer that a fact is absent from memory solely because it is absent from the supplied summary. '
-            'Native conversation history and archive search may omit retired or unavailable messages. '
-            'If asked about a retired message, do not treat the current question or other accessible messages as that retired source; say when its content is unavailable. '
-            'Do not claim that the latest message you can access was chronologically immediately before the current one. '
-            'If asked about exact message order, distinguish the latest accessible message from an unverified immediate predecessor. '
-            'You can maintain native memory and retrieve scoped sources. The owner sets your role and skills: load a listed skill when it applies, but never offer to create, save or change a skill. External actions follow the owner approval setting: each tool result says whether an action is approved or waiting for the owner. '
-            'Controlled tools create proposals for an independent executor. An action ID is not evidence of execution. '
-            'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity. '
-            + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall for primary Honcho recall and authorized native profiles. '
-               'The owner may see all of their own data: use nocheh_owner_read to list known groups, topics, people, projects and conversation context, and use its exact IDs as action destinations. '
-               'Use nocheh_knowledge_inspect to inspect projects and exact current revisions before preparing changes with nocheh_knowledge_propose. '
-               'A proposal is not an applied change: check nocheh_knowledge_status. Organization within an active owner delegation runs after this turn finishes; other proposals require exact owner review in Activity Decisions. '
-               'Never claim that a proposal grants knowledge access or permission for external actions.' if body['owner'] else
-               'This is a shared space. Use nocheh_memory_recall for this audience. Use only authorized context and tool results, including explicitly shared knowledge. Filtered material is a derived inference, not an original source. Never change settings or approve actions. '
-               'When someone asks for private-DM content that is not shared with this space, explain the access boundary directly; do not search for or cite the private source. '
-               'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '
-               'Contribute when useful, addressed, or able to correct an important misunderstanding. '
-               'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].')+long_term))
+            reply(body.get('prompts'),body['owner'])+long_term))
     record('agent_init',phase)
     try:
         if agent._memory_store is not None:
@@ -211,7 +192,7 @@ def run(body, emit=None):
             agent._memory_store.user_char_limit=prefs['memory.user_char_limit']
         if review:
             from .native_memory import native_review
-            return native_review(agent, body['text'], RUNS)
+            return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
         agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in OWNER_SET_TOOLS]
         agent.valid_tool_names=set(agent.valid_tool_names)-OWNER_SET_TOOLS
         verify_profile_tools(agent.valid_tool_names)

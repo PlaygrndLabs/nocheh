@@ -260,6 +260,14 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 </area>
 
+<area name="Built-in instructions">
+
+- Every hard coded text should be editable from the dashboard. Every instruction text that Nocheh's own code gives a model is editable in Settings › Assistant: the reply rules for every chat, for the owner's private chat and for groups, the notes for remembered facts and for unavailable long-term memory, the Hermes notes review, the secret check, the group sharing filter, and the learning instruction sent to Honcho memory.
+- Each text has a built-in default. The owner can replace it and reset it to the built-in default; a text the owner never changed follows the built-in default. A change applies from the next model call without a restart.
+- A text keeps the values Nocheh fills in (for learning, the triggering observation and the citable observation IDs). Data labels that mark evidence, archive sources and attachments are fixed, and the internal prompts of Hermes and Honcho themselves are theirs.
+
+</area>
+
 <area name="Security and controlled tools">
 
 - A runtime-independent external security service owns the versioned policy and broker contract. Only trusted infrastructure holds provider credentials and provisions isolated turns. Agent containers receive one profile and scoped broker/archive capabilities, not refresh stores, master service credentials, Docker access, or unrestricted egress.
@@ -345,7 +353,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
   - Memory: Facts, People, Projects, Assistant notes (native notes and history), and Long-term memory.
   - Usage: model calls, tokens, and cost by part and by model, and reply speed.
   - System: Health (services, connections, storage, and diagnostics), Background work (workflow analytics and runs), Backups (backups, restore, exports, and maintenance), and Databases.
-  - Settings: Telegram, Models, Speed, Privacy & data, Assistant (owner freedom, the default role and skills, and Hermes preferences), and Advanced.
+  - Settings: Telegram, Models, Speed, Privacy & data, Assistant (owner freedom, the default role and skills, Hermes preferences, and the built-in instructions), and Advanced.
 - Bookmarks and links that use an earlier page or tab name (Overview, Activity, Chats & access, Sharing, Archive, Imports, Projects, Graph, People, Learned memory, Memory map, Honcho memory, Memory access, Monitoring, Integrations, Databases, and Maintenance) open the page and view that now holds that content, keeping their selected item; a link to one memory-access request opens that request in the Inbox.
 - Navigation has icons and a collapsible desktop sidebar, with its collapse or expand control shown as an icon button at the top beside the expanded brand or below the collapsed brand mark. A navigation drawer replaces the sidebar below 1024 pixels. The sidebar and drawer also show each page's tabs under that page: the open page's tabs show, any page's tabs can be shown or hidden, and a tab opens directly from there. The collapsed icon sidebar shows pages only. The sidebar and drawer show the Inbox count, an overall health link, a direct link to the native Hermes dashboard labelled as the assistant console, and the theme selector, without a “Local owner dashboard” caption. Charts load lazily. Shared polling cancels obsolete requests; refresh does not remount pages or discard form edits.
 - Every edit to settings, from any page, is a draft until it is saved. While anything is unsaved, saving, applying, or failed, the page header stays at the top of the screen and shows, at its right, what is unsaved, Discard, and Save; there is no save card or bar at the bottom of the screen. On pages that edit settings (Settings and Chats), the header with Save and Discard is always at the top, and Save is turned off while nothing is unsaved, so the layout does not move when an edit starts. Save writes the settings and applies them in one step, shows its progress beside the button, follows the apply to its end, and then shows the saved values and the outcome as a short message without a manual reload. A failed apply keeps the edits and says what went wrong; a refused save shows the reason in plain words. Edits are kept while switching tabs or pages, and a tab with unsaved edits is marked. Leaving or reloading the dashboard with unsaved edits does not discard them silently.

@@ -236,6 +236,18 @@ its role and uses a skill; the owner's answer on whether projects should have a
 role and skills too (left out because projects are not Hermes profiles);
 carrying roles and skills across an original-only reset.
 
+Built-in instructions (October 17, owner: "every hard coded text should
+editable form dashboard"): the reply rules, remembered-facts and limited-memory
+notes, Hermes notes review, secret check, group sharing filter and learning
+instruction are editable in Settings › Assistant with a reset to the built-in
+text; the owner's replacements travel with each runtime call
+([decision](docs/adr/0152-owner-editable-built-in-instructions.md),
+[Hermes checks](services/hermes/test_prompts.py),
+[Node checks](test/prompts.test.ts), [storage checks](test/store-server.test.ts),
+[browser checks](test/dashboard-pages.browser.mjs)). Pending: a live check that
+an edited group rule changes a group reply; carrying the replacements across an
+original-only reset.
+
 </current>
 
 <verification>
