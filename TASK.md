@@ -800,8 +800,14 @@ whose expected value then included the key's armor lines; the case now requires
 only the key material. `claude-haiku-4-5-20251001` wrapped every answer in a
 code fence, which the detector rejected; the detector now removes one exact
 JSON code fence and still rejects any other wrapping. The owner uses Anthropic
-models only (October 17). Pending: comparison of Anthropic candidates with the
-fence accepted.
+models only (October 17). With the fence accepted, Anthropic candidates over
+three rounds at low effort: `claude-sonnet-5` passed 42 of 42 with a 2.65-second
+median (also 42 of 42 without an effort), `claude-sonnet-5-5` 42 of 42 with 3.34
+seconds (2.95 without an effort), `claude-haiku-4-5-20251001` 40 of 42 with 3.36
+seconds (two rejected replies, one hiding a missed password), and
+`claude-sonnet-4-6` 36 of 42 with 1.84 seconds (it missed the Persian password in
+every round). The OpenAI embedding key still works (one synthetic call, status
+200). Pending: the owner's choice of `claude-sonnet-5` for the secret check.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
