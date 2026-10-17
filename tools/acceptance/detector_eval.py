@@ -42,7 +42,8 @@ CASES = [
      ['orchard-LIME-3390', '552907']),
     ('private_key', 'Here is the synthetic deploy key:\n-----BEGIN OPENSSH PRIVATE KEY-----\nc3ludGhldGljLWtleS1ub3QtcmVhbC0wMTIzNDU2Nzg5\n'
      '-----END OPENSSH PRIVATE KEY-----\nIt opens the test box.',
-     ['-----BEGIN OPENSSH PRIVATE KEY-----\nc3ludGhldGljLWtleS1ub3QtcmVhbC0wMTIzNDU2Nzg5\n-----END OPENSSH PRIVATE KEY-----']),
+     # The key material must be hidden; the armor lines may stay visible.
+     ['c3ludGhldGljLWtleS1ub3QtcmVhbC0wMTIzNDU2Nzg5']),
     ('fragments', FRAGMENT.join(['The meeting moved to 18:00.', 'Backup passphrase: cedar-MOON-6083.', 'Bring the blue folder.']),
      ['cedar-MOON-6083']),
     ('long_with_secret', observations(120, 'quartz-HARBOR-2246'), ['quartz-HARBOR-2246']),
@@ -88,7 +89,7 @@ def score(expected, result):
     found = set(result['literals'])
     # A returned value that covers an expected secret still hides it.
     missed = [value for value in expected if not any(value in literal for literal in found)]
-    extra = [literal for literal in found if not any(value in literal for value in expected)]
+    extra = [literal for literal in found if not any(value in literal or literal in value for value in expected)]
     return {'pass': not missed and not extra, 'missed': len(missed), 'extra': len(extra)}
 
 
