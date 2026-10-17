@@ -55,3 +55,7 @@ def prepare(profile):
         if path.is_symlink():raise ValueError('profile_data_path_denied')
         path.touch(exist_ok=True,mode=0o600)
     if (profile/'config.yaml').is_symlink():raise ValueError('profile_configuration_path_denied')
+    # The role and skills are mounted read-only; an unset role or no skills is an empty file or folder.
+    if (profile/'SOUL.md').is_symlink() or (profile/'skills').is_symlink():raise ValueError('profile_configuration_path_denied')
+    (profile/'skills').mkdir(exist_ok=True,mode=0o700)
+    (profile/'SOUL.md').touch(exist_ok=True,mode=0o600)

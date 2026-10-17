@@ -216,6 +216,26 @@ yet list internal service keys by service and use (a Monitoring spec). The unuse
 `services/hermes/dashboard/graph-3d.js` build can go once the Docker images stop
 copying its folder.
 
+Role and skills per chat (October 16 and 17, owner: "want to ability to set role
+or skill for projects or GPs ... for a group or user use role and skills and for
+other one use other role and skill"; "if can have role and skill for own Hermes
+profile use it instead of imple in nocheh"): each selected group and the owner's
+private chat now has its own role (Hermes `SOUL.md`) and skills (Hermes
+`skills/`) in its Hermes profile, with defaults for every chat. The owner edits
+them on the chat's page in Chats and the defaults in Settings › Assistant; turns
+read them and cannot write them, and topics use their group's
+([decision](docs/adr/0151-chat-role-and-skills-in-hermes-profiles.md),
+[profile checks](services/hermes/test_persona.py),
+[tool checks](services/hermes/test_scopes.py),
+[runtime checks](test/runtime.test.ts),
+[browser checks](test/dashboard-pages.browser.mjs)). The storage service had no
+`/v1/manage/hermes` route, so per-chat assistant limits, Memory › Assistant notes
+and the CLI's profile commands could not reach Hermes; the route now serves them
+too. Pending: a live check on the owner's installation that a group answers in
+its role and uses a skill; the owner's answer on whether projects should have a
+role and skills too (left out because projects are not Hermes profiles);
+carrying roles and skills across an original-only reset.
+
 </current>
 
 <verification>

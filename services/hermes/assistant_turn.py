@@ -14,7 +14,11 @@ from pathlib import Path
 
 ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
                'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall',
-               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read'}
+               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read',
+               'skills_list','skill_view'}
+# The owner sets skills; a turn may read them but never create or change one.
+OWNER_SET_TOOLS={'skill_manage'}
+TURN_TOOLSETS=['memory','session_search','nocheh_archive','skills']
 
 
 class UnexpectedProfileTool(RuntimeError):
@@ -171,10 +175,10 @@ def run(body, emit=None):
     if placement=='evidence':long_term='\n'+memory_evidence.INSTRUCTION
     agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
         api_key=credentials.access_token,base_url=credentials.base_url,
-        enabled_toolsets=['memory'] if review else ['memory','session_search','nocheh_archive'],fallback_model=None,
+        enabled_toolsets=['memory'] if review else TURN_TOOLSETS,fallback_model=None,
         session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
-        skip_context_files=True,skip_memory=False,skip_background_review=True,
+        skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
         quiet_mode=True,save_trajectories=False,max_iterations=prefs['agent.max_iterations'],
         run_budget_seconds=prefs['agent.run_budget_seconds'],
         reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
@@ -187,7 +191,7 @@ def run(body, emit=None):
             'If asked about a retired message, do not treat the current question or other accessible messages as that retired source; say when its content is unavailable. '
             'Do not claim that the latest message you can access was chronologically immediately before the current one. '
             'If asked about exact message order, distinguish the latest accessible message from an unverified immediate predecessor. '
-            'You can maintain native memory and retrieve scoped sources. External actions follow the owner approval setting: each tool result says whether an action is approved or waiting for the owner. '
+            'You can maintain native memory and retrieve scoped sources. The owner sets your role and skills: load a listed skill when it applies, but never offer to create, save or change a skill. External actions follow the owner approval setting: each tool result says whether an action is approved or waiting for the owner. '
             'Controlled tools create proposals for an independent executor. An action ID is not evidence of execution. '
             'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity. '
             + ('This is the owner private conversation. Archive access spans all chats. Use nocheh_memory_recall for primary Honcho recall and authorized native profiles. '
@@ -208,6 +212,8 @@ def run(body, emit=None):
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS)
+        agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in OWNER_SET_TOOLS]
+        agent.valid_tool_names=set(agent.valid_tool_names)-OWNER_SET_TOOLS
         verify_profile_tools(agent.valid_tool_names)
         for tool in agent.tools:
             if tool['function']['name']=='session_search':

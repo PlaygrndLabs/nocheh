@@ -63,3 +63,16 @@ test('browser and scheduled originals have their own identities and preserve tex
   assert.equal(browser.bot_id,'');assert.equal(browser.channel,'browser');
   assert.notEqual(runInput({...input,channel:'browser',scope:'group'}).key,browser.key);
 });
+
+test('role and skills travel as one native profile action and keep their conflict code',async()=>{
+  const seen:Array<Record<string,unknown>>=[];
+  const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
+    assert.equal(new URL(String(url)).pathname,'/internal/manage');
+    const body=JSON.parse(String(init?.body));seen.push(body);
+    return body.revision==='stale'?Response.json({error:'configuration_conflict'},{status:409}):Response.json({role:'',skills:[],revision:'r'});
+  }}));
+  await call('persona.read',{scope:'default'});
+  await call('persona.write',{scope:'-20',role:'Family helper',skills:[],revision:'r'});
+  assert.deepEqual(seen,[{scope:'default',action:'persona'},{scope:'-20',role:'Family helper',skills:[],revision:'r',action:'persona'}]);
+  await assert.rejects(call('persona.write',{scope:'-20',role:'',skills:[],revision:'stale'}),{code:'configuration_conflict',status:409});
+});

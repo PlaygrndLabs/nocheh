@@ -8,6 +8,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
   const routes: Partial<Record<RuntimeOperation, string>> = {
     status: '/health', 'profiles.list': '/internal/manage', 'config.read': '/internal/manage',
     'config.write': '/internal/manage', 'memory.read': '/internal/manage', 'run.start': '/internal/dispatch',
+    'persona.read': '/internal/manage', 'persona.write': '/internal/manage',
     'source.file': '/internal/file',
     'guard.detect': '/internal/detect', 'action.execute': '/internal/action',
     'memory.review':'/internal/memory/review', 'memory.recall':'/internal/memory/recall',
@@ -19,6 +20,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
   };
   const actions: Partial<Record<RuntimeOperation, string>> = {
     'profiles.list': 'profiles', 'config.read': 'preferences', 'config.write': 'preferences', 'memory.read': 'memory',
+    'persona.read': 'persona', 'persona.write': 'persona',
   };
   return {
     id: 'hermes',
@@ -43,8 +45,8 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
         const error = await response.json().catch(() => null) as {error?: string} | null;
         // No provider chosen in Settings › Models is a waiting condition, not a runtime fault.
         if (error?.error === 'provider_not_configured') code = error.error;
-        else if (operation === 'guard.detect' || operation === 'config.write' || operation === 'config.read') {
-          if (error?.error && ['detector_contract_rejected','configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference'].includes(error.error)) code = error.error;
+        else if (['guard.detect','config.write','config.read','persona.read','persona.write'].includes(operation)) {
+          if (error?.error && ['detector_contract_rejected','configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference','invalid_persona'].includes(error.error)) code = error.error;
         }
         throw new HttpError(response.status, code);
       }
