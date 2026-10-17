@@ -844,7 +844,11 @@ since October 17 (synthetic detector check 3 of 3, 2.8 to 3.4 seconds); every
 other part stays on `claude-sonnet-5-5`. `claude-haiku-5-5`, compared later
 the same day, passed 37 of 42 with a 2.73-second median against 42 of 42 and
 2.52 seconds for `claude-sonnet-5`; it answered in prose instead of JSON in five
-calls, so the secret check stays on `claude-sonnet-5`.
+calls, so the secret check stays on `claude-sonnet-5`. A larger rerun (five
+rounds, 70 calls per model) confirmed it: `claude-sonnet-5` 70 of 70 with a
+2.55-second median and 3.13-second p90; `claude-sonnet-5-5` 69 of 70, 3.07 and
+4.73 seconds; `claude-haiku-5-5` 55 of 70 and `claude-haiku-4-5-20251001` 61 of
+70, every failure an unreadable reply.
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the
