@@ -161,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as error:
             if self.path == '/internal/manage':
                 code = str(error) if str(error) in ('configuration_conflict', 'unsupported_preference',
-                    'profile_scope_denied', 'invalid_preference') else 'invalid_management_request'
+                    'profile_scope_denied', 'invalid_preference', 'invalid_persona') else 'invalid_management_request'
                 return self.reply(409 if code == 'configuration_conflict' else 400, {'error': code})
             self.reply(400, {'error': 'invalid_request'})
         except (KeyError, TypeError):
@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             text = body["text"]
             if not isinstance(text, str) or len(text) > 100000:
                 raise ValueError("invalid_text")
-            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials("guard"), part_model("guard"))}
+            return chat(text) if self.path.endswith("chat") else {"literals": detect_literals(text, resolve_credentials("guard"), part_model("guard"), body.get("prompts"))}
         raise ValueError("unknown_route")
 
 

@@ -2,6 +2,7 @@ import {settings} from '../config.js';
 import {hermesAdapter} from '../hermes-adapter.js';
 import {honchoClient} from '../honcho.js';
 import {runtimeCall} from '../runtime.js';
+import {withPrompts} from '../prompts.js';
 import {runtimeStoreGroups} from './runtime-pools.js';
 import {storageServices} from './services.js';
 import {storageServer} from './server.js';
@@ -10,7 +11,8 @@ import {startStorageWorkflows} from './workflow-service.js';
 import {hostTransport} from '../workflows/host-transport.js';
 import {restoredInactive} from './lifecycle.js';
 
-const config=settings(),pools=runtimeStoreGroups(),call=runtimeCall(hermesAdapter({url:config.hermesUrl,token:config.token}));
+// Calls that run a built-in instruction text carry the owner's replacements.
+const config=settings(),pools=runtimeStoreGroups(),call=withPrompts(runtimeCall(hermesAdapter({url:config.hermesUrl,token:config.token})),pools.api.control);
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:()=>config.assistant,runtime:call,honcho:honchoClient(config.honchoUrl)};
 const services=storageServices(pools.api,options),workflowServices=storageServices(pools.workflow,options);

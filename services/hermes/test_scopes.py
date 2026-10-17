@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from .scopes import Scopes,verify_capability
 from .assistant_gateway import AssistantGateway,prepare_profile
-from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,UnexpectedProfileTool,verify_profile_tools
+from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,OWNER_SET_TOOLS,TURN_TOOLSETS,UnexpectedProfileTool,verify_profile_tools
 from .capture import canonical,immutable_file
 
 
@@ -111,9 +111,11 @@ class ScopeTests(unittest.TestCase):
             token=set_hermes_home_override(str(profile))
             try:
                 discover_plugins()
-                definitions=get_tool_definitions(enabled_toolsets=['memory','session_search','nocheh_archive'],quiet_mode=True)
+                definitions=get_tool_definitions(enabled_toolsets=TURN_TOOLSETS,quiet_mode=True)
                 names={item['function']['name'] for item in definitions}
-                self.assertEqual(names,ALLOWED_TOOLS)
+                # Hermes offers a skill-writing tool too; turns drop it because the owner sets skills.
+                self.assertEqual(names&OWNER_SET_TOOLS,OWNER_SET_TOOLS)
+                self.assertEqual(names-OWNER_SET_TOOLS,ALLOWED_TOOLS)
             finally:reset_hermes_home_override(token)
 
     def test_turn_policy_disables_native_tool_search_even_when_loader_enables_it(self):
@@ -135,9 +137,9 @@ class ScopeTests(unittest.TestCase):
                 try:
                     self.assertEqual(tool_search.load_config().enabled,'off')
                     self.assertEqual(tool_search.load_config_readonly().enabled,'off')
-                    definitions=get_tool_definitions(enabled_toolsets=['memory','session_search','nocheh_archive'],quiet_mode=False)
+                    definitions=get_tool_definitions(enabled_toolsets=TURN_TOOLSETS,quiet_mode=False)
                     names={item['function']['name'] for item in definitions}
-                    self.assertEqual(names,ALLOWED_TOOLS)
+                    self.assertEqual(names-OWNER_SET_TOOLS,ALLOWED_TOOLS)
                 finally:restore()
                 self.assertEqual(tool_search.load_config().enabled,'on')
             finally:reset_hermes_home_override(token)

@@ -129,7 +129,7 @@ def _review(profile,policy,model,credentials,body):
     env.update(HERMES_HOME=str(profile),NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
     transport = credentials.runtime()
     request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
-             'session_id':'review-'+body['id'],'owner':True,'chat_id':policy.owner,'user_id':policy.owner,**transport}
+             'session_id':'review-'+body['id'],'prompts':body.get('prompts') or {},'owner':True,'chat_id':policy.owner,'user_id':policy.owner,**transport}
     from .security_transport import isolated_enabled,scoped_transport
     module='services.hermes.assistant_turn'
     if isolated_enabled():
