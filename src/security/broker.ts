@@ -159,8 +159,9 @@ export function brokerServer(options:BrokerOptions) {
       const current=await evaluate(options.pool,attempt.effect);
       if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
       timings.broker_prepare_ms=elapsed(prepareStarted);
-      const headers:Record<string,string>={'content-type':'application/json',authorization:'Bearer '+String(transport.api_key)};
-      for(const [key,value] of Object.entries(object(transport.headers??{})))if(key.toLowerCase()==='user-agent'&&typeof value==='string')headers[key]=value;
+      // A gateway's bot check can refuse a client without a name, as it refused Honcho's model calls.
+      const headers:Record<string,string>={'content-type':'application/json',authorization:'Bearer '+String(transport.api_key),'user-agent':'Nocheh'};
+      for(const [key,value] of Object.entries(object(transport.headers??{})))if(key.toLowerCase()==='user-agent'&&typeof value==='string')headers['user-agent']=value;
       await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.reference??binding.event_id);attempt.started=true;
       const providerStarted=performance.now();let response:Response;
       try{response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});}

@@ -35,7 +35,8 @@ const conversationOrderWaitMs=120000;
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
 const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured']);
+  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured',
+  'unexpected_profile_tool','required_guard_unavailable','profile_scope_denied','invalid_process_scope_binding','unsupported_memory_compaction_revision']);
 type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
 type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
 
@@ -122,6 +123,12 @@ export class TelegramDispatchRepository {
     const state=String(response.state);
     if(!closed.has(state))throw new HttpError(409,'invalid_dispatch_receipt');
     const result={state,...(codes.has(String(response.error_code))?{error_code:String(response.error_code)}:{})};
+    // Why a reply did not go out, without message content: the code plus bounded Python identifiers.
+    if(['failed','ambiguous'].includes(state)) {
+      const bounded=(value:unknown)=>typeof value==='string'&&/^[A-Za-z_]{1,64}$/.test(value)?value:undefined;
+      console.warn(JSON.stringify({event:'telegram_dispatch_failed',state,attempt:row.attempts,code:result.error_code??(response.error_code===undefined?null:'unknown'),
+        type:bounded(response.error_type),stage:bounded(response.error_stage)}));
+    }
     const output=await this.derived.record({operation_id:`telegram-dispatch-result:${row.event_id}:${row.attempts}`,
       source:row.source_reference,parents:[row.input_reference],kind:'runtime_result',content:Buffer.from(canonical(result)),
       producer:'hermes',producer_version:protocol,configuration:{attempt:row.attempts},provenance:{binding:row.binding}});
