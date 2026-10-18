@@ -276,8 +276,9 @@ it reacted to, but its Honcho session key fell back to the chat-wide General
 session, because Telegram sends reaction updates without a topic. A reaction
 now uses its target's topic session ([entities](src/stores/entities.ts),
 [check](test/store-relationships.test.ts)). The superseded reaction add is not
-learned by design, because it is no longer the current reaction. Pending: the
-held removal update completing on the owner's installation.
+learned by design, because it is no longer the current reaction. On October 18
+the held removal update reached Honcho memory on the owner's installation, in
+the same topic session as its note.
 
 </current>
 
