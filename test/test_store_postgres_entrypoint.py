@@ -72,6 +72,45 @@ class StorePostgresEntrypointTests(unittest.TestCase):
                 if wrapper.poll() is None: wrapper.kill()
             self.assertEqual(order.read_text().split(), ['retention', 'database'])
 
+    def test_development_build_reapplies_store_schema_and_stops_cleanly(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary); calls = directory / 'calls'; dist = directory / 'dev-dist'
+            dist.mkdir()
+
+            def executable(name, body):
+                path = directory / name
+                path.write_text('#!/bin/sh\n' + body + '\n')
+                path.chmod(0o700)
+
+            executable('docker-entrypoint.sh', 'trap \'exit 0\' TERM; while :; do sleep 0.1; done')
+            executable('pg_isready', 'exit 0')
+            executable('node', 'echo "$1" >> "$CALLS"; exit 0')
+
+            def bootstraps():
+                return [line for line in (calls.read_text().split() if calls.exists() else []) if line.endswith('bootstrap.js')]
+
+            def wait_for(count):
+                for _ in range(100):
+                    if len(bootstraps()) >= count: return
+                    subprocess.run(['sleep', '0.1'])
+
+            environment = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'],
+                           'CALLS': str(calls), 'POSTGRES_PASSWORD': 'synthetic', 'NOCHEH_DEV_DIST': str(dist)}
+            wrapper = subprocess.Popen(['/bin/sh', str(ENTRYPOINT), 'postgres'], env=environment)
+            try:
+                wait_for(1)
+                # No finished build yet: only the image's own provisioning ran.
+                self.assertEqual(bootstraps(), ['/app/dist/src/stores/bootstrap.js'])
+                (dist / '.dev-ready').write_text('1\n'); wait_for(2)
+                (dist / '.dev-ready').write_text('2\n'); wait_for(3)
+                subprocess.run(['sleep', '2.5'])
+                wrapper.terminate(); wrapper.wait(timeout=10)
+            finally:
+                if wrapper.poll() is None: wrapper.kill()
+            development = str(dist / 'src/stores/bootstrap.js')
+            # Each new build provisions once; an unchanged build does not repeat it.
+            self.assertEqual(bootstraps(), ['/app/dist/src/stores/bootstrap.js', development, development])
+
 
 if __name__ == '__main__':
     unittest.main()
