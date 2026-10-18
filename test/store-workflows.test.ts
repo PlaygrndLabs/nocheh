@@ -125,6 +125,12 @@ test('idle superseded source workflows retire without touching leases, receipts 
     const honchoAfter=await advanceWorkflow(pool,honchoPost.old,1,'honcho','supersession-honcho-post',async()=>
       observation('waiting','sync',0,Date.now()+1000,'prerequisite'));
     assert.equal(honchoAfter.state,'skipped');
+    // An observation the boundary refuses closes its workflow as failed instead of leaving it open.
+    const refused=await pair(source('refused'));
+    const closed=await advanceWorkflow(pool,refused.current,1,'memory_review','refused-observation',async()=>
+      ({...observation('cancelled','action'),waiting_reason:'not_a_boundary_reason'}));
+    assert.equal(closed.state,'failed');
+    assert.equal((await pool.query('SELECT state,lease_token FROM workflow_registry WHERE id=$1',[refused.current])).rows[0].state,'failed');
   } finally {await stores.close();}
 });
 
