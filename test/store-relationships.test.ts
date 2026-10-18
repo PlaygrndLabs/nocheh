@@ -6,6 +6,7 @@ import {observedSource} from '../src/observed-source.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {RelationshipRepository} from '../src/stores/relationships.js';
+import {conversationObject} from '../src/stores/entities.js';
 
 const event=(key:string,payload:any):Envelope=>({version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'-42',
   source_id:String(payload.message?.message_id??payload.message_reaction?.message_id??payload.message_reaction_count?.message_id??1),
@@ -63,6 +64,9 @@ test('old targets resolve outside graph pagination; duplicates, delays and unkno
     const parent=event(key+':parent',{update_id:10,message:{message_id:1,chat:{id:chatId,type:'supergroup',is_forum:true},message_thread_id:17,text:'Older original'}});
     const original=(await capture(parent)).source.reference;
     const resolved=await relationships.context(reaction,topic,1);
+    const topicConversation=await conversationObject(stores.archive,original.id);
+    assert.equal(await conversationObject(stores.archive,reaction.id),topicConversation,
+      'a reaction joins the Honcho session of the topic it reacts in, not the chat-wide one');
     assert.deepEqual(resolved.targets[0]?.references,[original]);
     assert.equal((await relationships.context(reaction,{...topic,topic_id:'18'})).source,null);
     const reply=(await capture(event(key+':reply',{update_id:40,message:{message_id:99,chat:{id:chatId,type:'supergroup'},message_thread_id:17,reply_to_message:{message_id:1},text:'Reply much later'}}))).source.reference;
@@ -84,6 +88,9 @@ test('old targets resolve outside graph pagination; duplicates, delays and unkno
     assert.deepEqual((await relationships.describe(generalReaction)).audience,{chat_id:chatId,topic_state:'none'});
     assert.equal((await relationships.context(generalReaction,topic)).source,null);
     assert.deepEqual((await relationships.context(generalReaction,{...topic,topic_id:null})).targets[0]?.references,[originalGeneral]);
+    const chatConversation=await conversationObject(stores.archive,originalGeneral.id);
+    assert.notEqual(chatConversation,topicConversation);
+    assert.equal(await conversationObject(stores.archive,generalReaction.id),chatConversation);
     const saved=(await stores.archive.query('SELECT e.payload,o.metadata FROM events e JOIN source_observations o ON o.event_id=e.id WHERE e.id=$1',[originalGeneral.id])).rows[0];
     assert.equal(saved.payload.toString(),canonical(general.payload));assert.equal(saved.metadata.audience.topic_state,'unknown');
     const partial={...legacy,completeness:'partial' as const};
@@ -102,5 +109,6 @@ test('old targets resolve outside graph pagination; duplicates, delays and unkno
     // Conflicting topic observations cannot expand access or be resolved by arrival order.
     await capture(event(key+':conflict',{update_id:11,message:{...(parent.payload.message as object),message_thread_id:18}}));
     assert.equal((await relationships.context(reaction,topic)).source,null);
+    assert.equal(await conversationObject(stores.archive,reaction.id),chatConversation,'contradictory topics fall back to the chat');
   } finally {await stores.close();}
 });

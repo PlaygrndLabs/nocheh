@@ -46,6 +46,20 @@ export const honchoPeerId=(entity:Pick<MemoryEntity,'kind'|'id'>):string=>`${ent
 export const evidencePeerId=(source:SourceReference):string=>`evidence_${digest(canonical(['nocheh-connected-evidence-v1',source.id])).slice(0,48)}`;
 
 /** Canonical identities live in control; source evidence and inferred claims remain in their owned stores. */
+/** The conversation object a source's Honcho session follows: its topic, else its chat. */
+export async function conversationObject(archive:Pick<StorePools['archive'],'query'>,eventId:string):Promise<string|undefined> {
+  const own=(await archive.query(`SELECT o.id,r.kind FROM source_relations r JOIN source_objects o ON o.id=r.target_id
+    WHERE r.event_id=$1 AND r.kind IN ('contained_in','in_thread') ORDER BY CASE r.kind WHEN 'in_thread' THEN 0 ELSE 1 END,o.id`,[eventId])).rows;
+  if(own[0]?.kind==='in_thread')return own[0].id;
+  // A reaction update names no topic. Like its audience, it follows the message it
+  // reacts to, so it lands in that topic's session; contradictory topics fall back to the chat.
+  const topics=(await archive.query(`SELECT DISTINCT thread.target_id AS id FROM source_relations target
+    JOIN source_revisions revision ON revision.object_id=target.target_id JOIN source_observations observation ON observation.revision_id=revision.id
+    JOIN source_relations thread ON thread.event_id=observation.event_id AND thread.kind='in_thread'
+    WHERE target.event_id=$1 AND target.kind='reaction_to'`,[eventId])).rows;
+  return topics.length===1?topics[0].id:own[0]?.id;
+}
+
 export class EntityRepository {
   private readonly commands:OwnerCommands;
   constructor(readonly stores:StorePools,readonly access:SourceAccessRepository,readonly projects:ProjectRepository){this.commands=new OwnerCommands(stores.control);}
@@ -98,8 +112,7 @@ export class EntityRepository {
         if(aliases.length<=20&&aliases.some(row=>corpus.includes(String(row.mention_key))))mentionedPeople.push(entity);
       }
     }
-    const conversation=(await this.stores.archive.query(`SELECT o.id FROM source_relations r JOIN source_objects o ON o.id=r.target_id
-      WHERE r.event_id=$1 AND r.kind IN ('contained_in','in_thread') ORDER BY CASE r.kind WHEN 'in_thread' THEN 0 ELSE 1 END,o.id LIMIT 1`,[source.id])).rows[0]?.id;
+    const conversation=await conversationObject(this.stores.archive,source.id);
     return {speaker,project,mentioned_projects:mentionedProjects,mentioned_people:mentionedPeople,
       session_id:digest(canonical([protocol,'conversation',conversation??space??source.id]))};
   }
