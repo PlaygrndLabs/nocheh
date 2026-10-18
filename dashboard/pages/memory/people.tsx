@@ -405,7 +405,62 @@ function ClaimItem({
       {mode === 'edit' && <ClaimEditor claim={claim} onDone={() => setMode('view')} />}
       {mode === 'share' && <ShareForm claim={claim} onDone={() => setMode('view')} />}
       {grants.length > 0 && mode === 'view' && <GrantList grants={grants} />}
+      {claim.revision > 1 && mode === 'view' && <ClaimHistory claim={claim} />}
     </li>
+  );
+}
+
+type ClaimVersion = {revision: number; content: string; author: string; retired: boolean; created_at: string};
+
+/** Earlier wordings of a fact, read only when the owner opens them. */
+function ClaimHistory({claim}: {claim: Claim}) {
+  const [open, setOpen] = useState(false);
+  const [before, setBefore] = useState<number[]>([claim.revision]);
+  const page = useResource<{versions: ClaimVersion[]; next: number | null}>(
+    open ? '/entities/claims/' + claim.id + '/history?before=' + before.at(-1) : null,
+  );
+  if (!open)
+    return (
+      <Button size="sm" variant="ghost" className="mt-2" onClick={() => setOpen(true)}>
+        Earlier versions
+      </Button>
+    );
+  const versions = page.data?.versions;
+  return (
+    <section className="mt-3 border-t border-line pt-3">
+      <h4 className="mb-2 text-[13px] font-medium text-muted">Earlier versions</h4>
+      {page.error && !versions && <p className="text-[13px] text-muted">Couldn’t load earlier versions.</p>}
+      {!versions && !page.error && <LoadingRows rows={2} />}
+      {versions && !versions.length && <p className="text-[13px] text-muted">No earlier versions you can see.</p>}
+      {versions && versions.length > 0 && (
+        <ol className="space-y-2">
+          {versions.map(version => (
+            <li key={version.revision}>
+              <p className="text-xs text-muted">
+                Version {version.revision} · {version.author === 'owner' ? 'You' : 'Nocheh'} ·{' '}
+                {new Date(version.created_at).toLocaleString()}
+                {version.retired ? ' · retired' : ''}
+              </p>
+              <p className="mt-0.5 text-sm break-words" dir="auto">
+                {version.content}
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+      <div className="mt-2 flex gap-2">
+        {before.length > 1 && (
+          <Button size="sm" onClick={() => setBefore(stack => stack.slice(0, -1))}>
+            Newer
+          </Button>
+        )}
+        {page.data?.next && (
+          <Button size="sm" onClick={() => setBefore(stack => [...stack, page.data!.next!])}>
+            Older
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }
 
