@@ -169,9 +169,14 @@ export const replyFilters: {value: string; label: string}[] = [
   {value: 'not_started', label: 'Not queued'},
 ];
 
+/** Telegram send times arrive as Unix seconds; stored times as ISO text. */
+export function sourceDate(value?: string | null): Date {
+  return new Date(/^\d+$/.test(value ?? '') ? Number(value) * 1000 : (value ?? NaN));
+}
+
 export function when(value?: string | null): string {
   if (!value) return '';
-  const date = new Date(value);
+  const date = sourceDate(value);
   if (Number.isNaN(date.getTime())) return '';
   const today = new Date();
   const sameDay = date.toDateString() === today.toDateString();
@@ -183,7 +188,10 @@ export function when(value?: string | null): string {
         ...(date.getFullYear() !== today.getFullYear() ? {year: 'numeric'} : {}),
       });
 }
-export const fullTime = (value?: string | null) => (value ? new Date(value).toLocaleString() : '');
+export function fullTime(value?: string | null): string {
+  const date = sourceDate(value);
+  return value && !Number.isNaN(date.getTime()) ? date.toLocaleString() : '';
+}
 
 export function duration(seconds: unknown): string | null {
   const value = Number(seconds);
