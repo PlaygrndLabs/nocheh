@@ -373,6 +373,25 @@ function Connections({m}: {m: any}) {
               ))}
             </ul>
           )}
+          {Array.isArray(m?.keys) && m.keys.length > 0 && (
+            <Details summary="Internal keys" className="mt-3">
+              <p className="mb-2 text-[13px] text-muted">
+                Nocheh makes these for its own services. Their values never leave the installation.
+              </p>
+              <ul className="space-y-2">
+                {m.keys.map((key: {name: string; service: string; usage: string; present: boolean}) => (
+                  <li key={key.name} className="flex items-start justify-between gap-3 text-[13px]">
+                    <span className="min-w-0">
+                      <span className="block font-medium">{key.service}</span>
+                      <span className="block text-muted">{key.usage}</span>
+                      <code className="text-xs break-all text-muted">{key.name}</code>
+                    </span>
+                    <Badge tone={key.present ? 'good' : 'bad'}>{key.present ? 'Set' : 'Missing'}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </Details>
+          )}
           {capabilities.length > 0 && (
             <Details summary="What the assistant can do" className="mt-3">
               <ul className="grid gap-1 sm:grid-cols-2">
