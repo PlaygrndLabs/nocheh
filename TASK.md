@@ -257,8 +257,9 @@ call failed at once. The detector live check calls Hermes directly and passed.
 In development, PostgreSQL now reruns store provisioning from each finished
 app build ([entrypoint](deploy/store-postgres-entrypoint.sh),
 [check](test/test_store_postgres_entrypoint.py), [procedure](docs/deploy.md)).
-Pending: the rebuild on the owner's installation, retrying the messages held
-since then, and the re-asked reaction recall question
+On October 18 the owner's installation was rebuilt; the held secret checks
+finished and the held messages were retried. The re-asked reaction recall
+question then passed on its first attempt
 ([register](docs/mvp-acceptance-status.md)).
 
 </current>
@@ -1093,8 +1094,11 @@ Detailed attempts, source identities and native tool evidence remain in ignored
 state. Infrastructure checks do not establish model quality, and operating
 activation remains separate.
 
-1. Diagnose the October 2 same-topic recall failure using the saved event and
-   CLI. One linked reply arrived on attempt two after about 384 seconds. It
+1. The October 2 same-topic reaction case passed again on October 18 on the
+   owner's installation, answered from archive read and search without a
+   Honcho recall call ([register](docs/mvp-acceptance-status.md)). The original
+   diagnosis below is kept: diagnose the October 2 same-topic recall failure
+   using the saved event and CLI. One linked reply arrived on attempt two after about 384 seconds. It
    correctly avoided a completion claim but could not identify the removed
    reaction. Topic routing and the saved removal match; the native tools returned
    no matching long-term memory and archive search found only the new question.
