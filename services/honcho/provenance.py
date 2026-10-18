@@ -5,13 +5,18 @@ import re
 NATIVE_ID = re.compile(r'^[A-Za-z0-9_-]{21}$')
 
 
-async def failed_queue_items(workspace_id, db):
-    """Report only whether current-workspace derivation has terminal failures."""
+async def failed_queue_items(workspace_id, db, since=None):
+    """Report only whether current-workspace derivation has terminal failures.
+
+    ``since`` limits the answer to work queued after Nocheh last saw the queue
+    drained. Honcho keeps failed items for 30 days, so without it one old
+    failure would hold the workspace unready for that long."""
     from sqlalchemy import text
+    values = {'workspace': workspace_id, **({'since': since} if since is not None else {})}
     result = await db.execute(text('''SELECT EXISTS(
         SELECT 1 FROM queue WHERE workspace_name=:workspace
         AND task_type IN ('representation','summary','dream')
-        AND processed AND error IS NOT NULL)'''), {'workspace': workspace_id})
+        AND processed AND error IS NOT NULL''' + (' AND created_at > :since' if since is not None else '') + ')'), values)
     return bool(result.scalar_one())
 
 
@@ -127,8 +132,12 @@ def install(app):
     router = APIRouter(prefix='/v3/workspaces/{workspace_id}/nocheh', dependencies=[Depends(require_auth(workspace_name='workspace_id'))])
 
     @router.get('/queue-health')
-    async def queue_health(workspace_id: str, db: AsyncSession = read_db):
-        return {'failed_items': await failed_queue_items(workspace_id, db)}
+    async def queue_health(workspace_id: str, since: str | None = None, db: AsyncSession = read_db):
+        from datetime import datetime
+        try: after = datetime.fromisoformat(since) if since is not None else None
+        except ValueError: raise HTTPException(status_code=400, detail='invalid_since') from None
+        if after is not None and after.tzinfo is None: raise HTTPException(status_code=400, detail='invalid_since')
+        return {'failed_items': await failed_queue_items(workspace_id, db, after)}
 
     @router.post('/provenance')
     async def read(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):

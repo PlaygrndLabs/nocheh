@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src
 import {storageServices} from '../src/stores/services.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
+import {HttpError} from '../src/http.js';
 
 test('reply context reads Honcho on arrival, limits other audiences to their own session and reuses identical guarded results',async()=>{
   const workspace=digest('installation-workspace'),groupSession=digest('group-session'),ownerSession=digest('owner-session');
@@ -103,15 +104,20 @@ test('terminal Honcho derivation errors cannot mark a generation ready',async()=
     if(sql.startsWith('UPDATE memory_generations')){updates.push({sql,values});return {rowCount:1};}
     throw Error('unexpected_control_query');
   }};
+  const paths:string[]=[];let checkedAt:Date|null=null;
   const memory=new NativeMemoryRepository({access:{stores:{control}}} as any,{} as any,{} as any,{} as any,
-    async(path:string)=>path.endsWith('/queue/status')?{pending_work_units:0,in_progress_work_units:0}:
-      {failed_items:valid?failed:undefined},async()=>[]);
-  (memory as any).current=async()=>({row:{work_revision:3}});
+    async(path:string)=>{paths.push(path);return path.endsWith('/queue/status')?{pending_work_units:0,in_progress_work_units:0}:
+      {failed_items:valid?failed:undefined};},async()=>[]);
+  (memory as any).current=async()=>({row:{work_revision:3,derivation_checked_at:checkedAt}});
   assert.equal(await memory.observe(id),false);
-  assert.deepEqual(updates[0]!.values,[id,'building',3,true]);
+  assert.deepEqual(updates[0]!.values.slice(0,5),[id,'building',3,true,true]);
   assert.match(updates[0]!.sql,/honcho_derivation_failed/);
+  assert.ok(paths.at(-1)!.endsWith('/nocheh/queue-health'),'the first check reads every failure');
+  // Honcho keeps a failure for 30 days; once seen with the queue drained, only newer work counts.
+  checkedAt=updates[0]!.values[5] as Date;
   failed=false;assert.equal(await memory.observe(id),true);
-  assert.deepEqual(updates[1]!.values,[id,'ready',3,false]);
+  assert.deepEqual(updates[1]!.values.slice(0,5),[id,'ready',3,false,true]);
+  assert.ok(paths.at(-1)!.endsWith('/nocheh/queue-health?since='+encodeURIComponent(checkedAt.toISOString())));
   valid=false;await assert.rejects(memory.observe(id),{code:'honcho_queue_health_invalid'});
   assert.equal(updates.length,2,'invalid health cannot change readiness');
 });
@@ -132,7 +138,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-memory-')),key='native:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null},remote=new Map<string,any[]>(),calls:{path:string;body:any;method?:string}[]=[];
-  let loseReply=true,sequence=0;const ownerApproved='Owner-approved password=visible123',descendants:string[]=[],active=new Map<string,Set<string>>();
+  let loseReply=true,rejectWrite=false,sequence=0;const ownerApproved='Owner-approved password=visible123',descendants:string[]=[],active=new Map<string,Set<string>>();
   const priorities:unknown[]=[];
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(_operation,input)=>{priorities.push(input.priority);return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},
@@ -146,10 +152,11 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       if(path.endsWith('/messages/list'))return {items:remote.get(path.replace('/list',''))??[]};
       if(path.endsWith('/messages')) {
         const message={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[message]);
+        if(rejectWrite){rejectWrite=false;remote.delete(path);throw new HttpError(503,'honcho_upstream_rejected');}
         if(loseReply){loseReply=false;throw Error('synthetic_lost_acknowledgment');}return [message];
       }
       if(path.includes('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
-      if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
+      if(path.includes('/nocheh/queue-health'))return {failed_items:false};
       if(path.includes('/context?'))return {summary:{content:'Stored conclusion saffronpass. '+ownerApproved},peer_representation:'Speaker detail',peer_card:[]};
       if(path.endsWith('/representation'))return {representation:'Stored conclusion saffronpass. '+ownerApproved};
       if(path.endsWith('/chat'))return {content:'Recalled conclusion saffronpass.'};
@@ -223,6 +230,23 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     await stores.control.query("UPDATE memory_ingestion_receipts SET state='uncertain' WHERE id=$1",[entityReceiptId]);
     assert.equal(await services.memory.syncReceipt(entityReceiptId,authority),false);assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,writes,'absence cannot authorize repeating an uncertain effect');
     await insertRemote(entityReceiptId);assert.equal(await services.memory.reconcileReceipt(entityReceiptId),true);
+    const entityRow=(await stores.control.query('SELECT generation,session_id FROM memory_ingestion_receipts WHERE id=$1',[entityReceiptId])).rows[0];
+    const entityPath='/v3/workspaces/'+entityRow.generation+'/sessions/'+entityRow.session_id+'/messages';
+    const receiptState=async()=>(await stores.control.query('SELECT state,error_code FROM memory_ingestion_receipts WHERE id=$1',[entityReceiptId])).rows[0];
+    // A write still absent long after it ended never landed: it returns to pending and is written once.
+    remote.delete(entityPath);
+    await stores.control.query("UPDATE memory_ingestion_receipts SET state='uncertain',uncertain_at=now()-interval '11 minutes' WHERE id=$1",[entityReceiptId]);
+    assert.equal(await services.memory.reconcileReceipt(entityReceiptId),false);
+    assert.deepEqual(await receiptState(),{state:'pending',error_code:'honcho_write_absent'});
+    const beforeRewrite=calls.filter(c=>c.path.endsWith('/messages')).length;
+    assert.equal(await services.memory.syncReceipt(entityReceiptId,authority),true);
+    assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,beforeRewrite+1);
+    // Honcho answering a write with an error means nothing landed, so the receipt stays retryable.
+    remote.delete(entityPath);rejectWrite=true;
+    await stores.control.query("UPDATE memory_ingestion_receipts SET state='pending' WHERE id=$1",[entityReceiptId]);
+    await assert.rejects(services.memory.syncReceipt(entityReceiptId,authority),/honcho_upstream_rejected/);
+    assert.deepEqual(await receiptState(),{state:'pending',error_code:'honcho_upstream_rejected'});
+    assert.equal(await services.memory.syncReceipt(entityReceiptId,authority),true);
     assert.equal(await services.memory.observe(workspace),true);
     assert.equal(await services.memory.settled(queued[0]!.receipts),true);
     const entityReceipt=(await stores.control.query("SELECT peer_id,peer_ids,audience FROM memory_ingestion_receipts WHERE generation=$1 AND record_kind='entity_evidence'",[workspace])).rows[0];
@@ -359,7 +383,7 @@ test('foreground recall requires independent source evidence while background co
       if(path.endsWith('/messages/list'))return {items:[]};
       if(path.endsWith('/messages'))return [{...body.messages[0],id:String(++sequence).padStart(21,'r')}];
       if(path.includes('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
-      if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
+      if(path.includes('/nocheh/queue-health'))return {failed_items:false};
       if(path.includes('/context?'))return {summary:{content:'The current question asks for the meeting time.'}};
       if(path.endsWith('/representation'))return {representation:'The current question asks for the meeting time.'};
       if(path.endsWith('/chat'))return {content:'The independently recorded meeting time is 18:00.'};

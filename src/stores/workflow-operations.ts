@@ -241,7 +241,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(row.retired_at&&row.state!=='uncertain')return observation('skipped','sync',row.attempts,Date.now(),'superseded');
       if(row.next_attempt>new Date())return observation('waiting','sync',row.attempts,row.next_attempt.getTime(),'prerequisite');
       try {
-        if(kind==='reconcile'||row.state==='uncertain')await fenced('honcho',authority,async()=>{
+        // A write found absent returns to pending, so even a reconcile job writes it again.
+        if(row.state==='uncertain')await fenced('honcho',authority,async()=>{
           const done=await s.memory.reconcileReceipt(id);
           if(!done)await control.query("UPDATE memory_ingestion_receipts SET next_attempt=now()+interval '60 seconds' WHERE id=$1 AND state='uncertain'",[id]);
           return observation(done?'completed':'waiting','reconcile',row.attempts,Date.now()+60000,'receipt_pending');
