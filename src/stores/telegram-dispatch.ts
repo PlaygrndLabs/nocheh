@@ -340,6 +340,16 @@ export class TelegramDispatchRepository {
         input=await this.input(row.input_reference);
         try{await this.current(input);}catch(error){
           if(!(error instanceof HttpError)||!['guard_context_changed','audience_context_changed','conversation_not_selected','guard_transition_pending','source_retired'].includes(error.code))throw error;
+          // Only a retirement or a deselected chat withdraws the reply. A newer epoch alone means
+          // it is rebuilt under that epoch: a turn that never started runs again, and a running
+          // turn fails its own delivery check under the revoked credential and is retried.
+          const renewed=['guard_context_changed','audience_context_changed','guard_transition_pending'].includes(error.code);
+          if(renewed&&observed.state==='not_found') {
+            await this.control.query(`UPDATE dispatches SET state='failed',error_code=$2,next_attempt=now()+interval '2 seconds',
+              revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='running'`,[id,error.code]);
+            return this.observation(await this.row(id));
+          }
+          if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
           try{return await this.receive(row,await this.call('run.cancel',{channel:'telegram',event_id:id,attempt:row.attempts},10000));}
           catch{return await this.receive(row,{state:'running'});}

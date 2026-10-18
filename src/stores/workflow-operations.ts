@@ -7,6 +7,7 @@ import type {StorageServices} from './services.js';
 import type {GuardBinding} from './guards.js';
 import {nativeReconcileLimit} from './native-review.js';
 import {terminalLearningCodes} from './learning-engine.js';
+import {advanceReactionEpoch} from './reaction-state.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
 const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','honcho_receipt_missing']);
@@ -160,6 +161,14 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     },
     memory_review:async(job,authority)=>{
       if(job==='refresh')return refresh('memory_review',authority);
+      const reaction=/^reactions:(\d{1,15})$/.exec(job);
+      if(reaction)return fenced('memory_review',authority,async()=>{
+        const db=await control.connect();
+        try {
+          await db.query('BEGIN');const advanced=await advanceReactionEpoch(db,Number(reaction[1]));await db.query('COMMIT');
+          return advanced?observation('completed','review'):waiting('review','receipt_pending',2000);
+        }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+      });
       const match=/^(source|native|interpret):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');
       const kind=match[1],id=match[2]!;
       if(kind==='source')return fenced('memory_review',authority,async()=>{
@@ -246,6 +255,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
   return boundStorageOperations(Object.fromEntries(Object.entries(operations).map(([family,operation])=>[family,async(...args:Parameters<WorkflowOperation>)=>{
     try{return await operation(...args);}catch(error){
       if(error instanceof HttpError) {
+        // A reply is never dropped for a newer epoch: it is rebuilt under the current one.
+        if(family==='telegram'&&['guard_context_changed','audience_context_changed'].includes(error.code))return waiting('admission','guard_pending',2000);
         if(superseded.has(error.code))return observation('skipped','admission',0,Date.now(),'superseded');
         if(pending.has(error.code))return waiting('admission',error.code.includes('guard')?'guard_pending':'prerequisite');
         if(error.code==='learning_consent_required')return observation('denied','review',0,Date.now(),'consent_required');
