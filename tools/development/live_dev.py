@@ -55,7 +55,7 @@ def assert_ports(containers):
 def prepare_source_mounts():
     # Nested named volumes need existing mount points under read-only source
     # binds. These ignored directories hold no generated output on the host.
-    for relative in ('dashboard/dist', 'services/hermes/dashboard/dist'):
+    for relative in ('dashboard/dist',):
         path = ROOT / relative
         if path.is_symlink():
             raise ValueError(f'Development source mount {relative} must not be a symlink')

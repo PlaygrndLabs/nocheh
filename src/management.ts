@@ -362,7 +362,7 @@ export async function startManagement() {
       const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
     }
-    const asset=path.match(/^\/assets\/(app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/);
+    const asset=path.match(/^\/assets\/(app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/);
     if(req.method==='GET'&&asset?.[1]) {
       res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache'});
       createReadStream(join(ROOT,'dashboard/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;
