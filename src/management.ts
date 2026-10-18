@@ -319,9 +319,11 @@ export async function startManagement() {
           const job = await getJob(id);
           if (req.method === 'PUT' && action === 'upload') return json(res, 200, await upload(req, job, url.searchParams.get('name') ?? ''));
           if (req.method === 'POST' && action === 'preview') {
-            if (job.state !== 'uploading') throw new HttpError(409, 'preview_closed');
-            job.preview = object(await python({operation: 'import.inspect', job: id}));
-            job.state = 'ready'; await putJob(job); return json(res, 200, job);
+            if (job.state !== 'uploading' && job.state !== 'preview_failed') throw new HttpError(409, 'preview_closed');
+            // A preview that can't read the upload says so instead of looking unfinished.
+            try {job.preview = object(await python({operation: 'import.inspect', job: id}));}
+            catch(error){job.state='preview_failed';job.error=error instanceof HttpError?error.message:'operation_interrupted';await putJob(job);throw error;}
+            job.state = 'ready'; delete job.error; await putJob(job); return json(res, 200, job);
           }
           if (req.method === 'POST' && action === 'start') return exclusive('writer-start', async () => {
             if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
