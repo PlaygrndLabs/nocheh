@@ -152,7 +152,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       if(path.endsWith('/messages')){sends++;const record={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[...(remote.get(path)??[]),record]);if(loseReply){loseReply=false;throw Error('lost response');}return [record];}
       if(path.includes('/queue/status?'))return {pending_work_units:0,in_progress_work_units:0};
       if(path.endsWith('/queue/status')){const run=duringObserve;duringObserve=undefined;await run?.();return {pending_work_units:0,in_progress_work_units:0};}
-      if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
+      if(path.includes('/nocheh/queue-health'))return {failed_items:false};
       if(path.endsWith('/nocheh/session-descendants'))return {ids:[],truncated:false};
       if(path.includes('/context?'))return {summary:{content:'Synthetic review context'}};
       if(path.endsWith('/representation'))return {representation:'Synthetic review context'};
