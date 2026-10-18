@@ -54,6 +54,8 @@ export type DecisionItem = {
   source_scope?: string | null;
   destination?: string | null;
   fingerprint?: string | null;
+  /** One line on what it would do, from the server; null when the record can't say. */
+  summary?: string | null;
   created_at: string;
 };
 export type DecisionList = {

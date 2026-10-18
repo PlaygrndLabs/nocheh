@@ -39,12 +39,21 @@ const clean=(value:unknown):string|null=>typeof value==='string'?value.replace(/
 const identity=(id:string)=>{if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_decision_id');return id;};
 const kindOf=(kind:string):DecisionKind=>{if(!decisionKinds.includes(kind as DecisionKind))throw new HttpError(400,'invalid_decision_kind');return kind as DecisionKind;};
 function pageLimit(value:number|undefined) {if(value!==undefined&&(!Number.isSafeInteger(value)||value<1||value>100))throw new HttpError(400,'invalid_supervision_limit');return value??50;}
+/** One line on what an action would do: the message, command, page or tool. */
+export function actionSummary(kind:unknown,args:unknown):string|null {
+  const value=args&&typeof args==='object'?args as Record<string,unknown>:{},text=(key:string)=>typeof value[key]==='string'?value[key] as string:null;
+  if(kind==='telegram_message')return clean(text('text'));
+  if(kind==='shell')return clean(text('command'));
+  if(kind==='browser')return clean(text('url'));
+  if(kind==='mcp')return value.operation==='list'?`List the tools at ${text('url')??'a connected service'}`:`${text('tool')??'A tool'} at ${text('url')??'a connected service'}`;
+  return null;
+}
 const decisionTables:Record<DecisionKind,string>={controlled_action:'controlled_actions',telegram_action:'telegram_action_requests',memory_access:'memory_access_requests',entity:'memory_entity_suggestions',knowledge:'knowledge_proposals'};
-const unionDecisions=`SELECT 'controlled_action'::text AS kind,id,state,revision,created_at,space_id AS source_scope,NULL::text AS destination,fingerprint,kind AS title FROM controlled_actions WHERE state IN ('proposed','ambiguous')
-  UNION ALL SELECT 'telegram_action',id,state,revision,created_at,space_id,destination,fingerprint,'Send Telegram message' FROM telegram_action_requests WHERE state IN ('proposed','ambiguous')
-  UNION ALL SELECT 'memory_access',id,state,revision,created_at,source_scope,destination,NULL,'Share a specific fact' FROM memory_access_requests WHERE state='pending' AND expires_at>now()
-  UNION ALL SELECT 'entity',id,status,revision,created_at,NULL,NULL,NULL,name FROM memory_entity_suggestions WHERE status='pending'
-  UNION ALL SELECT 'knowledge',id,state,revision,created_at,source_scope,NULL,NULL,kind FROM knowledge_proposals WHERE state IN ('review','stale','failed')`;
+const unionDecisions=`SELECT 'controlled_action'::text AS kind,id,state,revision,created_at,space_id AS source_scope,NULL::text AS destination,fingerprint,kind AS title,NULL::text AS note FROM controlled_actions WHERE state IN ('proposed','ambiguous')
+  UNION ALL SELECT 'telegram_action',id,state,revision,created_at,space_id,destination,fingerprint,'Send Telegram message',NULL FROM telegram_action_requests WHERE state IN ('proposed','ambiguous')
+  UNION ALL SELECT 'memory_access',id,state,revision,created_at,source_scope,destination,NULL,'Share a specific fact',proposal_reference->>'id' FROM memory_access_requests WHERE state='pending' AND expires_at>now()
+  UNION ALL SELECT 'entity',id,status,revision,created_at,NULL,NULL,NULL,name,reason FROM memory_entity_suggestions WHERE status='pending'
+  UNION ALL SELECT 'knowledge',id,state,revision,created_at,source_scope,NULL,NULL,kind,NULL FROM knowledge_proposals WHERE state IN ('review','stale','failed')`;
 
 /** Owner projections read saved records only. They never reconcile, refresh a provider, or grant authority. */
 export class OwnerSupervisionRepository {
@@ -140,9 +149,27 @@ export class OwnerSupervisionRepository {
       kind==='memory_access'?{href:'#inbox?kind=memory_access&decision='+id,api_path:'/v1/memory-access/requests/'+id+'/decide'}:
       kind==='entity'?{href:'#inbox?kind=entity&decision='+id,api_path:'/v1/entities/'+id+'/decide'}:
       {href:'#inbox?kind=knowledge&decision='+id,api_path:'/v1/knowledge/proposals/'+id};
+    const fingerprint=row.fingerprint??null;
     return {kind,id,title:row.title??row.name??(kind==='knowledge'?'Knowledge change':kind.replaceAll('_',' ')),state,revision,
-      source_scope:row.source_scope??row.space_id??null,destination:row.destination??null,fingerprint:row.fingerprint??null,
-      created_at:iso(row.created_at),review:{...review,expected_revision:revision,fingerprint:row.fingerprint??null}};
+      source_scope:row.source_scope??row.space_id??null,destination:row.destination??null,fingerprint,summary:null as string|null,
+      created_at:iso(row.created_at),review:{...review,expected_revision:revision,fingerprint}};
+  }
+
+  /** Fill each item's one-line summary from its saved record; an unreadable record leaves it empty. */
+  private async describe(items:ReturnType<OwnerSupervisionRepository['summary']>[],rows:any[]) {
+    const owner={admin:true,scope:null} as Reader;
+    const proposals=rows.filter(row=>row.kind==='memory_access'&&row.note).map(row=>String(row.note));
+    const wording=new Map(proposals.length?(await this.stores.derived.query('SELECT id,content FROM derived_artifacts WHERE id=ANY($1::text[])',[proposals])).rows
+      .map(row=>[row.id,clean(row.content.toString())]):[]);
+    await Promise.all(items.map(async(item,index)=>{
+      const row=rows[index];
+      if(item.kind==='entity')item.summary=clean(row.note);
+      else if(item.kind==='memory_access')item.summary=wording.get(String(row.note))??null;
+      else if(item.kind==='controlled_action'||item.kind==='telegram_action') {
+        const detail=await (item.kind==='controlled_action'?this.services.controlledActions:this.services.telegramActions).inspect(owner,item.id).catch(()=>null) as any;
+        item.summary=detail?actionSummary(detail.kind,detail.arguments):null;
+      }
+    }));
   }
 
   async decisions(principal:Reader,input:DecisionInput={}) {
@@ -155,7 +182,8 @@ export class OwnerSupervisionRepository {
       SELECT (SELECT count(*)::int FROM decisions WHERE $1::text IS NULL OR kind=$1) AS total,
         coalesce((SELECT jsonb_object_agg(kind,total) FROM counts),'{}'::jsonb) AS totals,
         coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY kind,id) FROM page),'[]'::jsonb) AS items`,[kind,after,limit+1])).rows[0];
-    const all=row.items as any[],items=all.slice(0,limit).map(value=>this.summary(value));
+    const all=row.items as any[],page=all.slice(0,limit),items=page.map(value=>this.summary(value));
+    await this.describe(items,page);
     return {items,total:Number(row.total),totals:Object.fromEntries(decisionKinds.map(key=>[key,Number(row.totals[key]??0)])),
       next_cursor:all.length>limit?items.at(-1)!.kind+':'+items.at(-1)!.id:null,observed_at:new Date().toISOString(),state:'current' as const};
   }
@@ -249,7 +277,7 @@ export class OwnerSupervisionRepository {
       WHERE source_scope=ANY($1::text[]) OR destination=ANY($1::text[]) OR id IN (
         SELECT id FROM memory_entity_suggestions WHERE candidate_entity_id IN (SELECT id FROM memory_entities WHERE project_id=$2)) OR id IN (
         SELECT id FROM knowledge_proposals WHERE dependencies->'projects' @> jsonb_build_array(jsonb_build_object('id',$2::text))) ORDER BY kind,id LIMIT 51`,[scopes,id])).rows;
-    const decisionItems=decisions.slice(0,50).map(row=>this.summary(row));
+    const decisionItems=decisions.slice(0,50).map(row=>this.summary(row));await this.describe(decisionItems,decisions.slice(0,50));
     return {project,conversations,observed_at:new Date().toISOString(),state:'current',knowledge:{items:knowledge.slice(0,50).map(({total,...row})=>({...row,
       href:row.type==='learned'?'#memory?view=learned&project='+id+'&entry='+row.id:'#memory?view=relations'})),total:knowledge[0]?.total??0,next_cursor:knowledge.length>50?knowledge[49].type+':'+knowledge[49].id:null},
       decisions:{items:decisionItems,total:decisions[0]?.total??0,next_cursor:decisions.length>50?decisionItems.at(-1)!.kind+':'+decisionItems.at(-1)!.id:null}};
