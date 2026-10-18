@@ -367,6 +367,8 @@ const server=createServer((req,res)=>{void(async()=>{
   }
   if(route==='/runs')return json(res,200,{runs:[]});
   if(route==='/tools/actions')return json(res,200,{actions,telegram:telegramActions,permissions});
+  const actionRead=route.match(/^\/tools\/actions\/([a-f0-9]{64})$/);
+  if(actionRead){const found=[...actions,...telegramActions].find((item:any)=>item.id===actionRead[1]);return found?json(res,200,found):json(res,400,{error:'action_not_found'});}
   if(route==='/decisions'){const kind=url.searchParams.get('kind')||null,after=url.searchParams.get('after')??'',limit=Number(url.searchParams.get('limit')||50),all=inboxDecisions(),matching=all.filter(d=>!kind||d.kind===kind).sort((a,b)=>(a.kind+':'+a.id).localeCompare(b.kind+':'+b.id)),rest=matching.filter(d=>d.kind+':'+d.id>after),items=rest.slice(0,limit);
    const totals:Record<string,number>={controlled_action:0,telegram_action:0,memory_access:0,entity:0,knowledge:0};for(const d of all)totals[d.kind]!++;
    return json(res,200,{items,total:matching.length,totals,next_cursor:rest.length>limit?items.at(-1)!.kind+':'+items.at(-1)!.id:null,observed_at:new Date().toISOString(),state:'current'});}
