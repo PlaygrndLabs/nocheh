@@ -23,7 +23,16 @@ import {
   Textarea,
 } from '../../ui/core';
 import {Drawer, useFeedback} from '../../ui/overlay';
-import {CONFLICT_TEXT, certainty, EvidenceLinks, useChats, useCommand, useCursorPages, when} from './shared';
+import {
+  CONFLICT_TEXT,
+  certainty,
+  EvidenceLinks,
+  useChats,
+  useCommand,
+  useCursorPages,
+  useDebounced,
+  when,
+} from './shared';
 
 export type Learned = {
   id: string;
@@ -66,8 +75,10 @@ export function Facts() {
   const chats = useChats();
   const projects = useResource<{projects: Project[]}>('/projects?after=', 60000);
   const scope = project ? {kind: 'project', id: project} : chat ? {kind: 'conversation', id: chat} : null;
-  const paging = useCursorPages(scope ? scope.kind + scope.id : '');
-  const params = new URLSearchParams({after: paging.after});
+  const needle = useDebounced(query.trim());
+  const paging = useCursorPages((scope ? scope.kind + scope.id : '') + '|' + show + '|' + needle);
+  const params = new URLSearchParams({after: paging.after, show});
+  if (needle) params.set('q', needle);
   if (scope) {
     params.set('scope_kind', scope.kind);
     params.set('scope_id', scope.id);
@@ -77,14 +88,8 @@ export function Facts() {
   const where = (item: Learned) =>
     item.scope_kind === 'project' ? projectName(item.scope_id) : chats.name(item.scope_id);
 
-  const needle = query.trim().toLocaleLowerCase();
-  const visible = (list.data?.entries ?? []).filter(item => {
-    const learning = item.provenance?.learning ?? {};
-    if (show === 'retired' ? !item.retired : item.retired) return false;
-    if (show === 'revised' && item.active_revision < 2) return false;
-    if (show === 'unsure' && learning.uncertainty !== 'uncertain' && !learning.conflicts?.length) return false;
-    return !needle || (item.subject + ' ' + item.text + ' ' + where(item)).toLocaleLowerCase().includes(needle);
-  });
+  // The server searches and filters every entry, not only this page.
+  const visible = list.data?.entries ?? [];
 
   const scopeValue = project ? 'project:' + project : chat ? 'chat:' + chat : '';
   const knownScope =

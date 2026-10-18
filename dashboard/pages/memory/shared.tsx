@@ -1,5 +1,5 @@
 /** Small pieces shared by the Memory tabs: saving, plain error words, chat names and evidence links. */
-import {useCallback, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {apiPost} from '../../lib/api';
 import {refreshResources, useResource} from '../../lib/resource';
 import {cn} from '../../lib/utils';
@@ -160,6 +160,16 @@ export function when(value: string | null | undefined): string {
 }
 
 /** Cursor pages: the stack of `after` values seen so far. */
+/** The value once it has stopped changing for `ms`, so typing doesn't send a request per key. */
+export function useDebounced(value: string, ms = 300) {
+  const [current, setCurrent] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setCurrent(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return current;
+}
+
 export function useCursorPages(reset: string) {
   const [state, setState] = useState<{reset: string; pages: string[]}>({reset, pages: ['']});
   const pages = state.reset === reset ? state.pages : [''];

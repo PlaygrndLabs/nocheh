@@ -2,7 +2,7 @@
  * Memory › People: the people Nocheh knows, what it knows about each, how they
  * relate, and which chats may use a fact about them.
  */
-import {useEffect, useState, type ReactNode} from 'react';
+import {useState, type ReactNode} from 'react';
 import {ChevronRight, Pencil, Search, Share2, UserRound} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
@@ -25,7 +25,7 @@ import {
   Textarea,
 } from '../../ui/core';
 import {Drawer, useFeedback} from '../../ui/overlay';
-import {CONFLICT_TEXT, certainty, EvidenceLinks, useChats, useCommand, useCursorPages} from './shared';
+import {CONFLICT_TEXT, certainty, EvidenceLinks, useChats, useCommand, useCursorPages, useDebounced} from './shared';
 
 type Entity = {
   id: string;
@@ -75,15 +75,6 @@ const relationshipLabel: Record<string, string> = {
   associated: 'Associated with',
 };
 const words = (value: string) => value.replace(/_/g, ' ');
-
-function useDebounced(value: string, ms = 300) {
-  const [current, setCurrent] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setCurrent(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return current;
-}
 
 /** Names of people and projects by id, for relationships that point at someone else. */
 function useNames() {
