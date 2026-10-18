@@ -28,12 +28,13 @@ import {registerWorker} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
+import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {storageGuardService} from './guard-service.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
-export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>) {
+export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
   const owner=new OwnerStorageApi(s);
   const server=createServer((req,res)=>{void(async()=>{
     const url=new URL(req.url??'/','http://local'),path=url.pathname;
@@ -67,7 +68,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/v1/runtime') {
       admin(principal);
       const runtimeStatus=await call('status',{},5000).catch(()=>({ok:false,error:'runtime_unavailable'}));
-      return json(res,200,{id:'hermes',status:runtimeStatus});
+      return json(res,200,{id:'hermes',status:runtimeStatus,capabilities});
     }
     if(req.method==='POST'&&path==='/v1/runtime/usage-price'){
       // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.
@@ -325,9 +326,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters,reviews.get(row.id)?.state));
         const page=matched.slice(0,50);
         const retiredEvents=await s.retirements.retiredEvents(page.map(row=>row.id));
-        const [replyPreviews,transcriptPreviews]=await Promise.all([
-          archiveReplyPreviews(s.stores.archive,s.stores.control,page),archiveTranscriptPreviews(s.stores.derived,page)]);
+        const [replyPreviews,transcriptPreviews,copies]=await Promise.all([
+          archiveReplyPreviews(s.stores.archive,s.stores.control,page),archiveTranscriptPreviews(s.stores.derived,page),agentCopies(s.stores.derived,page.map(row=>row.id))]);
         const records=page.map(({payload,artifact_kinds,original_text,...row})=>{const original=JSON.parse(payload.toString());return {...row,...stateById.get(row.id),retired:retiredEvents.has(row.id),
+          sender:messageSender(row.kind,original),agent_copy:copies.get(row.id),
           ...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
           text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,original,artifact_kinds??[]),
           reaction_preview:reactionPreview(row.kind,original),

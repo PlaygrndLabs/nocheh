@@ -53,9 +53,11 @@ def dispatch(body):
     if operation == 'tools.manage':
         from tools.operations.archive.archive import API
         from urllib.error import HTTPError
+        import re
         action=body.get('action','actions')
-        if action not in ('actions','decide','telegram-decision','grant','revoke'):raise ValueError('tools_route_denied')
-        try:return API().call('/v1/tools/'+action,None if action=='actions' else body['request'])
+        read=action=='actions' or re.fullmatch(r'actions/[a-f0-9]{64}',action)
+        if not read and action not in ('decide','telegram-decision','grant','revoke'):raise ValueError('tools_route_denied')
+        try:return API().call('/v1/tools/'+action,None if read else body['request'])
         except HTTPError as error:
             try:code=json.load(error).get('error')
             except Exception:code=None

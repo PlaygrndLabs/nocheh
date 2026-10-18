@@ -289,8 +289,7 @@ const server=createServer((req,res)=>{void(async()=>{
   const session=sessions.page(req);res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/`);
   res.setHeader('content-type','text/html');res.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;
  }
- if(req.method==='GET'&&path==='/assets/graph-3d.js'&&await scenario()==='no-graphics'){res.setHeader('content-type','text/javascript');res.end('export function createGraphScene(){throw new Error("Synthetic unavailable graphics")}');return;}
- if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;}
+ if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;}
  sessions.authorize(req,req.method!=='GET');
  if(['/inngest/runs','/hermes/nocheh'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
  const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
@@ -304,7 +303,7 @@ const server=createServer((req,res)=>{void(async()=>{
       row(0,'guard','Secret check','Nocheh','openai','OpenAI','gpt-5.6-sol',12,6000,240,0.01),row(0,'memory','Memory','Honcho','custom-1','Example gateway','claude-sonnet-5-5',9,30000,4000,null),
       row(0,'embedding','Memory search','Honcho','openai','OpenAI','text-embedding-3-small',20,8000,0,0.0002)].filter(r=>r.day>=day(days-1));
     return json(res,200,{since:day(days-1),today:day(0),days,rows,parts:[['reply','Telegram replies','Hermes'],['browser','Browser chat','Hermes'],['schedule','Scheduled runs','Hermes'],['memory_review','Memory notes','Hermes'],['guard','Secret check','Nocheh'],['memory','Memory','Honcho'],['embedding','Memory search','Honcho']].map(([id,label,service])=>({id,label,service})),sources:{hermes:'ok',honcho:'ok',pricing:'ok'}});}
-  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,runtime:{status:{telegram:'disabled'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},routes:modelRoutes(),application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
+  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,keys:[{name:'SERVICE_TOKEN',service:'Nocheh services',usage:'Lets Nocheh’s own services and the dashboard call each other',present:true},{name:'NOCHEH_MEMORY_TOKEN',service:'Long-term memory (Honcho)',usage:'Lets Honcho’s model calls pass Nocheh’s secret check',present:false}],runtime:{status:{telegram:'disabled'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},routes:modelRoutes(),application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
   if(route==='/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/health')return json(res,200,await workflowHealth(pool));
@@ -361,13 +360,15 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/prompts')return json(res,200,prompts);
   if(route==='/memory/honcho')return json(res,200,{connection:{attached:memoryAttached,verified:true,revision:memoryRevision,include_history:memoryIncludeHistory},workspace:{id:'synthetic-workspace',state:'building',last_ready_at:minutesAgo(30),error_code:null},limited_memory:!memoryAttached,syncing:true,generations:[{id:'fixture',state:'ready',mode:'on'}],receipts:[{state:'done',count:176},{state:'pending',count:4}]});
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{chat:true,sessions:true}});
+  if(route==='/runtime')return json(res,200,{status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'run.start':true,'memory.recall':true,'lifecycle':false}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';
     return json(res,200,{scope,nodes:[...(all?[{id:'collection:*',kind:'collection',label:'All private knowledge'}]:[]),{id:'group:42',kind:'group',chat_type:'private',label:'Private chat · @fixture_owner'},{id:'message:'+id,event_id:id,kind:'message',label:'Northern lights trip'},{id:'user:owner',kind:'user',label:'@fixture_owner'},{id:'project:night-sky',kind:'project',label:'Night sky'}],edges:[...(all?[{from:'collection:*',to:'group:42',kind:'contains'}]:[]),{from:'group:42',to:'message:'+id,kind:'contains'},{from:'user:owner',to:'message:'+id,kind:'authored'},{from:'project:night-sky',to:'group:42',kind:'project_context'}],bounds:{truncated:false},unresolved_replies:0,next:null});
   }
   if(route==='/runs')return json(res,200,{runs:[]});
   if(route==='/tools/actions')return json(res,200,{actions,telegram:telegramActions,permissions});
+  const actionRead=route.match(/^\/tools\/actions\/([a-f0-9]{64})$/);
+  if(actionRead){const found=[...actions,...telegramActions].find((item:any)=>item.id===actionRead[1]);return found?json(res,200,found):json(res,400,{error:'action_not_found'});}
   if(route==='/decisions'){const kind=url.searchParams.get('kind')||null,after=url.searchParams.get('after')??'',limit=Number(url.searchParams.get('limit')||50),all=inboxDecisions(),matching=all.filter(d=>!kind||d.kind===kind).sort((a,b)=>(a.kind+':'+a.id).localeCompare(b.kind+':'+b.id)),rest=matching.filter(d=>d.kind+':'+d.id>after),items=rest.slice(0,limit);
    const totals:Record<string,number>={controlled_action:0,telegram_action:0,memory_access:0,entity:0,knowledge:0};for(const d of all)totals[d.kind]!++;
    return json(res,200,{items,total:matching.length,totals,next_cursor:rest.length>limit?items.at(-1)!.kind+':'+items.at(-1)!.id:null,observed_at:new Date().toISOString(),state:'current'});}
@@ -397,7 +398,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory-access/settings'){const destination=url.searchParams.get('destination');if(!destination)return json(res,200,{settings:memorySettings,partial:false});
    const keys=['suggestions','notify_owner','auto_followup','request_ttl_seconds','default_grant_mode'],global=memorySettings[0],row=memorySettings.find(r=>r.destination===destination),override=row?Object.fromEntries(keys.filter(k=>row[k]!==null&&row[k]!==undefined).map(k=>[k,row[k]])):null;
    return json(res,200,{destination,global:Object.fromEntries(keys.map(k=>[k,global[k]])),override,effective:{...Object.fromEntries(keys.map(k=>[k,global[k]])),...override},revision:row?row.revision:global.revision});}
-  if(route==='/learned'){const kind=url.searchParams.get('scope_kind'),sid=url.searchParams.get('scope_id');if(!!kind!==!!sid)throw new HttpError(400,'invalid_memory_scope');return json(res,200,{entries:learned.filter(e=>!kind||e.scope_kind===kind&&e.scope_id===sid),next:null});}
+  if(route==='/learned'){const kind=url.searchParams.get('scope_kind'),sid=url.searchParams.get('scope_id');if(!!kind!==!!sid)throw new HttpError(400,'invalid_memory_scope');const needle=(url.searchParams.get('q')??'').toLowerCase(),show=url.searchParams.get('show')??'';
+    return json(res,200,{entries:learned.filter((e:any)=>(!kind||e.scope_kind===kind&&e.scope_id===sid)&&(!needle||(e.subject+' '+e.text).toLowerCase().includes(needle))
+      &&(!show||(show==='retired')===!!e.retired)&&(show!=='revised'||e.active_revision>1)&&(show!=='unsure'||e.provenance?.learning?.uncertainty==='uncertain'||e.provenance?.learning?.conflicts?.length)),next:null});}
   const learnedRead=route.match(/^\/learned\/([a-f0-9]{64})(\/history)?$/);
   if(learnedRead){const entry=learned.find(e=>e.id===learnedRead[1]);if(!entry)throw new HttpError(404,'learned_memory_not_found');const before=Number(url.searchParams.get('before')||1e9),versions=learnedVersions[entry.id]!.filter(v=>v.revision<before).sort((a,b)=>b.revision-a.revision);
    return json(res,200,learnedRead[2]?{versions,next:null}:{id:entry.id,active_revision:entry.active_revision,entry,versions,next:null});}

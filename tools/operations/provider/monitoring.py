@@ -10,6 +10,26 @@ from tools.operations.archive.archive import API
 from tools.operations.installation.services import containers,describe,host_status
 
 
+# Keys Nocheh generates for its own services. Provider keys are listed under Settings › Models.
+INTERNAL_KEYS = (
+    ('SERVICE_TOKEN', 'Nocheh services', 'Lets Nocheh’s own services and the dashboard call each other'),
+    ('INNGEST_EVENT_KEY', 'Background work (Inngest)', 'Sends new background work to Inngest'),
+    ('INNGEST_SIGNING_KEY', 'Background work (Inngest)', 'Proves that a call from Inngest is genuine'),
+    ('POSTGRES_PASSWORD', 'Database', 'Database administrator login, used for setup and backups'),
+    ('INNGEST_POSTGRES_PASSWORD', 'Database', 'Inngest’s own database login'),
+    ('NOCHEH_ARCHIVE_PASSWORD', 'Database', 'Login for the store of original messages'),
+    ('NOCHEH_DERIVED_PASSWORD', 'Database', 'Login for the store of transcripts and assistant copies'),
+    ('NOCHEH_CONTROL_PASSWORD', 'Database', 'Login for the store of settings, approvals and work'),
+    ('NOCHEH_MEMORY_TOKEN', 'Long-term memory (Honcho)', 'Lets Honcho’s model calls pass Nocheh’s secret check'),
+)
+
+
+def internal_keys(config):
+    """Which internal key each service uses and whether it is set; never a value."""
+    return [{'name': name, 'service': service, 'usage': usage, 'present': bool(config.get(name))}
+            for name, service, usage in INTERNAL_KEYS]
+
+
 def status(state):
     config=load(state)
     command,env=compose(state)
@@ -25,6 +45,7 @@ def status(state):
         result={name:future.result() for name,future in jobs.items()}
     result['services']=describe(result['containers'],config,result['hosts']) if isinstance(result['containers'],list) else None
     result['routes']=attempt(lambda:routes(config))
+    result['keys']=internal_keys(config)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
     # Preserve the last known fatal incident even after its replacement is healthy.

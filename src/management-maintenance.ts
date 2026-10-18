@@ -13,7 +13,7 @@ export class ManagementMaintenance {
   allows(method:string,path:string){
     if(!this.current)return true;
     if(method!=='GET')return false;
-    if(path==='/'||/^\/assets\/(?:app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path))return true;
+    if(path==='/'||/^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path))return true;
     const route=path.replace(/^\/api\/(?:plugins\/)?nocheh\//,'/');
     return ['/health','/maintenance','/jobs','/jobs/'+this.current.job].includes(route);
   }

@@ -80,27 +80,16 @@ export function DecisionDrawer({kind, id, onClose}: {kind: DecisionKind; id: str
   return <KnowledgeReview proposal={record} review={review} onClose={onClose} />;
 }
 
-/**
- * One action by id. Recent actions come from the action list; an older one is
- * read through its decision record, which keeps every state.
- */
+/** One action by id. Recent actions come from the action list; an older one is read on its own. */
 export function ActionDrawer({id, onClose}: {id: string; onClose: () => void}) {
   const queue = useResource<ActionQueue>('/tools/actions', 15000);
   const listed = [...(queue.data?.actions ?? []), ...(queue.data?.telegram ?? [])].find(action => action.id === id);
   const lookup = !listed && (!!queue.data || !!queue.error);
-  const controlled = useResource<DecisionDetail>(
-    lookup ? '/decisions/controlled_action/' + encodeURIComponent(id) : null,
-    15000,
-  );
-  const telegram = useResource<DecisionDetail>(
-    lookup && controlled.error ? '/decisions/telegram_action/' + encodeURIComponent(id) : null,
-    15000,
-  );
-  const fallback = controlled.data?.detail ? controlled : telegram.data?.detail ? telegram : null;
-  const current = listed ?? fallback?.data?.detail ?? null;
+  const single = useResource<any>(lookup ? '/tools/actions/' + encodeURIComponent(id) : null, 15000);
+  const current = listed ?? single.data ?? null;
   const [shown, reload] = useFirstSeen(current);
   if (!shown) {
-    const error = lookup && controlled.error && telegram.error ? telegram.error : '';
+    const error = lookup && single.error ? single.error : '';
     return error ? (
       <Missing title="Couldn’t open this action" error={error} onClose={onClose} />
     ) : (
@@ -109,8 +98,7 @@ export function ActionDrawer({id, onClose}: {id: string; onClose: () => void}) {
   }
   const review: ReviewState = {
     changed: !!current && version(current) !== version(shown),
-    stale: fallback?.data?.observation === 'stale',
-    unavailable: listed ? !!queue.error : !!fallback?.error,
+    unavailable: listed ? !!queue.error : !!single.error,
     onReload: reload,
   };
   return <ActionReview action={shown} review={review} onClose={onClose} />;

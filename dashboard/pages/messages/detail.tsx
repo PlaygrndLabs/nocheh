@@ -24,6 +24,7 @@ import {
   structuredSummary,
   telegramMessage,
   when,
+  type MessageRow,
   type ReplyPreview,
 } from '../../lib/messages-format';
 import {sourceContentLabel} from '../../../src/source-content';
@@ -64,7 +65,11 @@ export function MessageDrawer({
   const row = id ? seenRows.get(id) : undefined;
   const title = !data
     ? 'Message'
-    : (isAssistant(kind) ? 'Assistant reply' : row?.reaction_preview ? 'Reaction' : 'Message') +
+    : (isAssistant(kind)
+        ? 'Assistant reply'
+        : (data.reaction_preview ?? row?.reaction_preview)
+          ? 'Reaction'
+          : 'Message') +
       ' in ' +
       chatName(data.event?.scope ?? row?.scope ?? '');
   return (
@@ -107,8 +112,22 @@ function MessageDetail({id, record, onOpen}: {id: string; record: any; onOpen: (
   const text: string | null = typeof event.text === 'string' && event.text.trim() ? event.text : null;
   const sender = senderName(event.payload, event.kind);
   const structured = structuredSummary(event.payload);
-  const status = row ? replyStatus(row) : null;
-  const action = row?.action_review;
+  // The message's own record carries its reply state, so a deep link shows it too.
+  const current: MessageRow = {
+    ...row,
+    scope: event.scope ?? row?.scope ?? '',
+    kind: event.kind ?? row?.kind,
+    content_types: row?.content_types ?? types,
+    transcript_preview: row?.transcript_preview ?? (transcripts[0] ? decode(transcripts[0].content_base64) : null),
+    reaction_preview: record.reaction_preview ?? row?.reaction_preview,
+    assistant_state: record.assistant_state ?? row?.assistant_state,
+    assistant_stage: record.assistant_stage ?? row?.assistant_stage,
+    assistant_error: record.assistant_error ?? row?.assistant_error,
+    assistant_attempts: record.assistant_attempts ?? row?.assistant_attempts,
+    action_review: record.action_review ?? row?.action_review,
+  };
+  const status = replyStatus(current);
+  const action = current.action_review;
   const replies: ReplyPreview[] = record.reply_messages ?? row?.reply_messages ?? [];
   const telegram = event.channel === 'telegram' && !!telegramMessage(event.payload);
 

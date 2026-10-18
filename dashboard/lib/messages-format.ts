@@ -26,7 +26,13 @@ export type MessageRow = {
   retired?: boolean;
   reply_messages?: ReplyPreview[];
   action_review?: ActionReview;
+  sender?: {name: string | null; username: string | null; id: string | null} | null;
+  agent_copy?: {state: 'none' | 'pending' | 'ready'; revision: number | null};
 };
+
+/** The writer's name for a list row, or null for assistant replies and unknown senders. */
+export const rowSender = (row: MessageRow): string | null =>
+  row.sender?.name || (row.sender?.username ? '@' + row.sender.username : null);
 export type MessageList = {records?: MessageRow[]; results?: MessageRow[]; items?: MessageRow[]; next?: string | null};
 
 /** The voice-note note written when transcription is not available; shown as a plain state, not a transcript. */
@@ -260,16 +266,33 @@ export type ImportJob = {
     messages: number;
     supplied_files: number;
     missing_files: number;
-    chats: {id: string; name: string; messages: number; type?: string}[];
+    chats: {
+      id: string;
+      name: string;
+      messages: number;
+      type?: string;
+      first_at?: string | null;
+      last_at?: string | null;
+    }[];
+    first_at?: string | null;
+    last_at?: string | null;
   };
   mapping?: Record<string, string>;
   review_approved?: boolean;
   error?: string;
 };
 
+/** “3 Mar 2021 – 9 Oct 2026” for an export's first and last message, or null when undated. */
+export function dateSpan(first?: string | null, last?: string | null): string | null {
+  if (!first || !last) return null;
+  const day = (value: string) => new Date(value).toLocaleDateString(undefined, {dateStyle: 'medium'});
+  return day(first) === day(last) ? day(first) : `${day(first)} – ${day(last)}`;
+}
+
 export function importStatus(job: ImportJob): Status {
   const states: Record<string, Status> = {
     uploading: {label: 'Upload not finished', tone: 'neutral'},
+    preview_failed: {label: 'Couldn’t read the export', tone: 'bad'},
     ready: {label: 'Ready to start', tone: 'warn'},
     running: {label: 'Importing', tone: 'info'},
     complete: {label: 'Done', tone: 'good'},

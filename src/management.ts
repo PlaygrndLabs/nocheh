@@ -215,6 +215,7 @@ export async function startManagement() {
       if(req.method==='GET'&&/^\/workflows(?:\/(?:health|metrics|timings(?:\/[a-f0-9]{64})?|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
       if(req.method==='POST'&&/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route,body:await readJson(req)}));
       if(route==='/tools/actions' && req.method==='GET')return json(res,200,await python({operation:'tools.manage'}));
+      if(/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method==='GET')return json(res,200,await python({operation:'tools.manage',action:route.slice(7)}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
       if (req.method==='POST' && route==='/ws-ticket')return json(res,200,{ticket:sessions.ticket(sessions.authorize(req)),ttl_seconds:30});
@@ -318,9 +319,11 @@ export async function startManagement() {
           const job = await getJob(id);
           if (req.method === 'PUT' && action === 'upload') return json(res, 200, await upload(req, job, url.searchParams.get('name') ?? ''));
           if (req.method === 'POST' && action === 'preview') {
-            if (job.state !== 'uploading') throw new HttpError(409, 'preview_closed');
-            job.preview = object(await python({operation: 'import.inspect', job: id}));
-            job.state = 'ready'; await putJob(job); return json(res, 200, job);
+            if (job.state !== 'uploading' && job.state !== 'preview_failed') throw new HttpError(409, 'preview_closed');
+            // A preview that can't read the upload says so instead of looking unfinished.
+            try {job.preview = object(await python({operation: 'import.inspect', job: id}));}
+            catch(error){job.state='preview_failed';job.error=error instanceof HttpError?error.message:'operation_interrupted';await putJob(job);throw error;}
+            job.state = 'ready'; delete job.error; await putJob(job); return json(res, 200, job);
           }
           if (req.method === 'POST' && action === 'start') return exclusive('writer-start', async () => {
             if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
@@ -362,7 +365,7 @@ export async function startManagement() {
       const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
     }
-    const asset=path.match(/^\/assets\/(app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/);
+    const asset=path.match(/^\/assets\/(app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/);
     if(req.method==='GET'&&asset?.[1]) {
       res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache'});
       createReadStream(join(ROOT,'dashboard/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;

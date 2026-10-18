@@ -71,7 +71,7 @@ createServer(async(request,response)=>{
    response.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/','window.__NOCHEH_CSRF__="fixture";'));
    return;
   }
-  if(/^\/assets\/(?:app\.js|style\.css|graph-3d\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(url.pathname)){
+  if(/^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(url.pathname)){
    response.writeHead(200,{'content-type':url.pathname.endsWith('.css')?'text/css':'text/javascript'});
    response.end(await readFile(join('dashboard/dist',url.pathname.slice(8))));
    return;

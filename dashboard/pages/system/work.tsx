@@ -59,11 +59,11 @@ export function WorkView() {
   const show = (value: number) => (counts.available ? count(value) : '—');
   const rows: {family: string; state: string; count: number}[] = counts.available ? health.counts : [];
   const denied = rows.filter(row => row.state === 'denied').reduce((n, row) => n + row.count, 0);
-  const waitingByFamily = Object.entries(
-    rows
-      .filter(row => row.state === 'queued' || row.state === 'waiting')
-      .reduce<Record<string, number>>((all, row) => ({...all, [row.family]: (all[row.family] ?? 0) + row.count}), {}),
-  ).sort((a, b) => b[1] - a[1]);
+  const waitingByFamily: {family: string; count: number; oldest: string | null}[] = Array.isArray(
+    health?.waiting_families,
+  )
+    ? health.waiting_families
+    : [];
   const backlog: number | null = typeof health?.outbox?.pending === 'number' ? health.outbox.pending : null;
   return (
     <>
@@ -139,10 +139,13 @@ export function WorkView() {
               ))}
             </ul>
             <ul aria-label="By kind of work" className="pb-2 sm:border-l sm:border-line">
-              {waitingByFamily.slice(0, 5).map(([family, value]) => (
-                <li key={family} className="flex justify-between gap-3 border-t border-line px-5 py-2 text-sm">
-                  <span>{familyName(family)}</span>
-                  <span className="tabular font-medium">{count(value)}</span>
+              {waitingByFamily.slice(0, 5).map(row => (
+                <li key={row.family} className="flex justify-between gap-3 border-t border-line px-5 py-2 text-sm">
+                  <span>
+                    {familyName(row.family)}
+                    {row.oldest && <span className="block text-xs text-muted">Oldest: {ago(row.oldest)}</span>}
+                  </span>
+                  <span className="tabular font-medium">{count(row.count)}</span>
                 </li>
               ))}
             </ul>

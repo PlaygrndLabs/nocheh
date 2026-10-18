@@ -30,7 +30,9 @@ test('stored owner directory and decisions span every page without turning reads
         SELECT value->>'id','person',value->>'name',$2::jsonb,'Synthetic evidence' FROM jsonb_array_elements($1::jsonb) value`,[JSON.stringify(suggestions),source]);
       const first=await view.decisions(owner,{kind:'entity',limit:100});assert.ok(first.total>=131);assert.ok((first.totals.entity??0)>=131);
       const ids=new Set<string>();let page=first;
-      while(true){for(const row of page.items)ids.add(row.id);if(!page.next_cursor)break;page=await view.decisions(owner,{kind:'entity',limit:100,after:page.next_cursor});}
+      // Each item says why it is waiting.
+      const mine=new Set(suggestions.map(item=>item.id));
+      while(true){for(const row of page.items){ids.add(row.id);if(mine.has(row.id))assert.equal(row.summary,'Synthetic evidence');}if(!page.next_cursor)break;page=await view.decisions(owner,{kind:'entity',limit:100,after:page.next_cursor});}
       for(const item of suggestions)assert.ok(ids.has(item.id));
       const sorted=suggestions.map(item=>item.id).sort(),selected=sorted[130]!,exact=await view.decision(owner,'entity',selected);
       assert.equal(exact.id,selected);assert.equal((exact.detail as any).name,suggestions.find(item=>item.id===selected)!.name);
