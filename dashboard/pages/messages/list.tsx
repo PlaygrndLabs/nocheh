@@ -30,6 +30,7 @@ import {
   rows,
   when,
   type MessageList,
+  rowSender,
   type MessageRow,
   type ReplyPreview,
 } from '../../lib/messages-format';
@@ -272,6 +273,7 @@ function MessageItem({row, chat, onOpen}: {row: MessageRow; chat: string; onOpen
   const words = !!row.text?.trim();
   const status = replyStatus(row);
   const action = row.action_review ? actionStatus(row.action_review) : null;
+  const sender = rowSender(row);
   return (
     <li className="border-t border-line first:border-t-0">
       <button
@@ -291,6 +293,14 @@ function MessageItem({row, chat, onOpen}: {row: MessageRow; chat: string; onOpen
         </span>
         <span className="min-w-0">
           <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
+            {sender && (
+              <>
+                <span className="truncate font-medium text-fg/80" dir="auto">
+                  {sender}
+                </span>
+                <span aria-hidden>in</span>
+              </>
+            )}
             <span className="truncate font-medium text-fg/80">{chat}</span>
             <span aria-hidden>·</span>
             <time dateTime={row.received_at} title={fullTime(row.received_at)}>
@@ -324,6 +334,11 @@ function MessageItem({row, chat, onOpen}: {row: MessageRow; chat: string; onOpen
             </Badge>
           )}
           {row.retired && <Badge>Hidden from assistant</Badge>}
+          {!row.retired && row.agent_copy?.state === 'pending' && (
+            <Badge tone="warn" title="The assistant can’t use this message until its copy is ready.">
+              Assistant copy not ready
+            </Badge>
+          )}
         </span>
       </button>
       {action && row.action_review && (

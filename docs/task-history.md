@@ -2810,3 +2810,19 @@ list-first explorer and optional map. Both were superseded on October 13 by the
 from-scratch rebuild ([ADR-0145](adr/0145-rebuilt-owner-dashboard.md)).
 
 </entry>
+
+
+<entry date="2026-10-18" area="Dashboard server gaps">
+
+The gaps left by the dashboard rebuild were closed: decision items carry a
+one-line summary, one action can be read by id, a fact's earlier versions open
+from Memory › People, remembered facts are searched and filtered on the server,
+owner message rows carry the sender, the assistant copy's state and, on the
+detail, the reply state, a failed import check says why, the import preview has
+a date range, System shows the runtime's capabilities, each kind of waiting work
+shows its oldest wait, and Monitoring lists internal keys by service and use.
+The Python owner allowlist was missing `/v1/prompts`, so Built-in instructions
+could not load on a real installation. The unused 3D graph module, its build and
+the `three` dependency were removed from both images and the development stack.
+
+</entry>

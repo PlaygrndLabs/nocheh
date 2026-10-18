@@ -26,6 +26,7 @@ test('workflow health keeps family totals while explaining queued and waiting re
   assert.deepEqual(health.counts,[{family:'honcho',state:'waiting',count:6},{family:'memory_review',state:'waiting',count:3},{family:'preparation',state:'queued',count:1},{family:'memory_review',state:'denied',count:5}]);
   assert.deepEqual(health.waiting_reasons,[{state:'waiting',waiting_reason:'prerequisite',count:7},{state:'waiting',waiting_reason:'guard_pending',count:2},{state:'queued',waiting_reason:null,count:1}]);
   assert.equal(health.oldest_waiting,oldest);
+  assert.deepEqual(health.waiting_families,[{family:'honcho',count:6,oldest},{family:'memory_review',count:3,oldest:later},{family:'preparation',count:1,oldest:later}]);
   assert.equal(health.outbox.pending,0);
 });
 

@@ -165,6 +165,13 @@ test('learned projections preserve versions, guard publication, owner correction
     await assert.rejects(stores.derived.query('DELETE FROM learned_versions WHERE entry_id=$1',[id]),{code:'42501'});
     const secondId=digest(key+':dependent');
     await learned.publishAutomatic(secondId,value,null,key+':dependent',dependencies,await guards.state(),'fixture-honcho',detect);
+    // Search and filters run on the server, so matches past the first page are found.
+    const ids=async(query:string,show:string)=>(await learned.list(owner,{kind:'conversation',id:'-42'},'',query,show)).entries.map(e=>e.id);
+    const current=await ids('MEANS REVIEWED','current');assert.ok(current.includes(secondId)&&!current.includes(id));
+    assert.ok((await ids('','retired')).includes(id));assert.ok(!(await ids('','retired')).includes(secondId));
+    assert.ok(!(await ids('check reaction','revised')).includes(secondId));
+    assert.deepEqual(await ids('not in any fact',''),[]);
+    await assert.rejects(learned.list(owner,undefined,'','','everything'),{code:'invalid_memory_filter'});
     await guards.edit('events:'+source.id,prepared.revision,{text:'An owner-corrected guarded source.',payload:{}},key+':source-edit');
     await assert.rejects(learned.read(owner,secondId,await guards.state(),allowed),{code:'memory_refresh_required'});
   } finally {await stores.close();}

@@ -69,7 +69,8 @@ class KnowledgeToolsTests(unittest.TestCase):
                      '/v1/decisions/controlled_action/'+identity,'/v1/decisions/telegram_action/'+identity,
                      '/v1/projects/'+identity+'/context','/v1/organization/delegations',
                      '/v1/organization/delegations/'+identity+'/resume','/v1/knowledge/proposals',
-                     '/v1/knowledge/proposals/'+identity+'/decide','/v1/knowledge/proposals/'+identity+'/undo'):
+                     '/v1/knowledge/proposals/'+identity+'/decide','/v1/knowledge/proposals/'+identity+'/undo',
+                     '/v1/prompts','/v1/entities/claims/'+identity+'/history?before=3'):
             self.assertTrue(allowed_path(path),path)
         for path in ('/v1/decisions/unknown/'+identity,'/v1/knowledge/proposals/'+identity+'/execute',
                      '/v1/knowledge/proposals/'+identity+'/../secrets','/v1/organization/activate',

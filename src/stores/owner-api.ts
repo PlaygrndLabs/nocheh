@@ -8,7 +8,7 @@ import {portableDerivativeTypes} from './derivative-portability.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:owner-autonomy|prompts|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/correct|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:owner-autonomy|prompts|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/(?:correct|history)|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -90,7 +90,7 @@ export class OwnerStorageApi {
     if(path==='/v1/learned'&&method==='GET') {
       const kind=q.get('scope_kind'),id=q.get('scope_id');
       if(!!kind!==!!id||kind&&!['conversation','project'].includes(kind))throw new HttpError(400,'invalid_memory_scope');
-      return s.learned.list(principal,kind&&id?{kind,id}:undefined,q.get('after')??'');
+      return s.learned.list(principal,kind&&id?{kind,id}:undefined,q.get('after')??'',q.get('q')??'',q.get('show')??'');
     }
     const memory=path.match(/^\/v1\/learned\/([a-f0-9]{64})(?:\/(history|correct))?$/);
     if(memory) {

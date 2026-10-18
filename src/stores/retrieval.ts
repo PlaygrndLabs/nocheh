@@ -18,6 +18,7 @@ import {ProjectRepository} from './projects.js';
 import type {RelationshipAudience} from './relationships.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
+import {agentCopies,messageSender} from './archive-row-details.js';
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
 export function scopedObservation(value:unknown):any {
@@ -133,11 +134,17 @@ export class SourceRepository {
     const relationships=await this.access.relationships.context(reference,binding?this.relationAudience(principal):{kind:'owner'},20);
     if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const replies=principal.admin?await archiveReplyPreviews(this.stores.archive,this.stores.control,[{id,kind:row.kind,scope:row.scope}]):new Map();
+    // The owner's detail view shows the same reply state as the message lists.
+    const ownerState=principal.admin?{...(await this.stores.control.query(`SELECT state AS assistant_state,runtime_stage AS assistant_stage,error_code AS assistant_error,
+      attempts AS assistant_attempts FROM dispatches WHERE event_id=$1`,[id])).rows[0] as Record<string,unknown>|undefined,
+      ...(await actionReviews(this.stores.control,row.kind==='telegram_update'?[id]:[],'separated').then(reviews=>reviews.has(id)?{action_review:reviews.get(id)}:{})),
+      agent_copy:(await agentCopies(this.stores.derived,[id])).get(id),reaction_preview:reactionPreview(row.kind,JSON.parse(row.payload.toString())),
+      sender:messageSender(row.kind,JSON.parse(row.payload.toString()))}:{};
     const current_reactions=await this.currentReactionSources(principal,reference,binding);
     if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const result={id,source:'nocheh:event:'+id,reference,received_at:row.received_at.toISOString(),representation:binding?.mode==='on'?'guarded':'original',
       guarded_revision:guardedRevision,event,artifacts,derived,relationships,current_reactions,derivative_versions:'/v1/sources/'+id+'/derivatives',
-      ...(principal.admin?{reply_messages:replies.get(id)??[]}:{})};
+      ...(principal.admin?{reply_messages:replies.get(id)??[],...ownerState}:{})};
     await this.allowPrepared(principal,result);return result;
   }
 
@@ -170,16 +177,16 @@ export class SourceRepository {
       hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),...(reviews.has(reference.id)?{action_review:reviews.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000,
         content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds),
-        ...(principal.admin?{reaction_preview:reactionPreview(original.kind,JSON.parse(payload.toString()))}:{})});
+        ...(principal.admin?{reaction_preview:reactionPreview(original.kind,JSON.parse(payload.toString())),sender:messageSender(original.kind,JSON.parse(payload.toString()))}:{})});
       if(hits.length===count)break;
     }
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
     if(principal.admin){
       const retired=await this.access.retirements?.retiredEvents(hits.map(hit=>hit.id));
       for(const hit of hits)hit.retired=retired?.has(hit.id)??false;
-      const [replies,transcripts]=await Promise.all([
-        archiveReplyPreviews(this.stores.archive,this.stores.control,hits),archiveTranscriptPreviews(this.stores.derived,hits)]);
-      for(const hit of hits){hit.reply_messages=replies.get(hit.id)??[];hit.transcript_preview=transcripts.get(hit.id)??null;}
+      const [replies,transcripts,copies]=await Promise.all([
+        archiveReplyPreviews(this.stores.archive,this.stores.control,hits),archiveTranscriptPreviews(this.stores.derived,hits),agentCopies(this.stores.derived,hits.map(hit=>hit.id))]);
+      for(const hit of hits){hit.reply_messages=replies.get(hit.id)??[];hit.transcript_preview=transcripts.get(hit.id)??null;hit.agent_copy=copies.get(hit.id);}
     }
     await this.allowPrepared(principal,hits);return hits;
   }

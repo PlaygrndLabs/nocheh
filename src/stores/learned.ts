@@ -215,10 +215,19 @@ export class LearnedMemoryRepository {
     return {...guarded.provenance.learning,text:guarded.text,id,revision:row.active_revision,author:row.author,retired:false};
   }
 
-  async list(principal:Reader,scope?:{kind:string;id:string},after='') {
-    admin(principal);const rows=(await this.stores.derived.query(`SELECT e.*,v.author,v.retired,v.created_at AS revised_at,d.content,d.provenance
+  /** One page of entries; `query` matches subject or wording, `show` picks current, revised, unsure or retired ones. */
+  async list(principal:Reader,scope?:{kind:string;id:string},after='',query='',show='') {
+    admin(principal);if(show&&!['current','revised','unsure','retired'].includes(show))throw new HttpError(400,'invalid_memory_filter');
+    if(query.length>200)throw new HttpError(400,'invalid_memory_query');
+    const rows=(await this.stores.derived.query(`SELECT e.*,v.author,v.retired,v.created_at AS revised_at,d.content,d.provenance
       FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
-      JOIN derived_artifacts d ON d.id=v.derived_id WHERE e.id>$1 AND ($2::text IS NULL OR (e.scope_kind=$2 AND e.scope_id=$3)) ORDER BY e.id LIMIT 101`,[after,scope?.kind??null,scope?.id??null])).rows;
+      JOIN derived_artifacts d ON d.id=v.derived_id WHERE e.id>$1 AND ($2::text IS NULL OR (e.scope_kind=$2 AND e.scope_id=$3))
+      AND ($4='' OR strpos(lower(e.subject||' '||convert_from(d.content,'UTF8')),lower($4))>0)
+      AND ($5='' OR ($5='retired')=v.retired)
+      AND ($5<>'revised' OR e.active_revision>1)
+      AND ($5<>'unsure' OR d.provenance->'learning'->>'uncertainty'='uncertain'
+        OR CASE WHEN jsonb_typeof(d.provenance->'learning'->'conflicts')='array' THEN jsonb_array_length(d.provenance->'learning'->'conflicts')>0 ELSE false END)
+      ORDER BY e.id LIMIT 101`,[after,scope?.kind??null,scope?.id??null,query.trim(),show])).rows;
     return {entries:rows.slice(0,100).map(row=>({...row,text:row.content.toString(),content:undefined})),next:rows.length>100?rows[99].id:null};
   }
   async history(principal:Reader,id:string,before=2147483647) {
