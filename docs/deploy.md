@@ -67,9 +67,10 @@ The existing app container mounts source from the session checkout read-only
 and compiles changed TypeScript, React, CSS, and plugin assets into separate
 generated-code volumes. Node watches generated code, the dashboard reloads when
 its asset revision changes, and Python processes restart automatically on
-mounted source edits. Ordinary source edits need no `make dev` rerun or Docker
-image rebuild; `make dev-build` rebuilds images after dependency or Dockerfile
-edits. `make dev` builds only when its development images are absent. Pinned Hermes
+mounted source edits. PostgreSQL reruns store provisioning from each finished
+app build, so new tables arrive with the code that reads them. Ordinary source
+edits, including store schema changes, need no `make dev` rerun or Docker image
+rebuild; `make dev-build` rebuilds images after dependency or Dockerfile edits. `make dev` builds only when its development images are absent. Pinned Hermes
 and Honcho base image revisions are checked before startup. `make dev-stop`
 stops the watched project without deleting the operating volumes or state;
 `./bin/nocheh up` from the operating checkout resumes unattended operation.

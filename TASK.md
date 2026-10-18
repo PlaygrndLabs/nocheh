@@ -248,6 +248,20 @@ text; the owner's replacements travel with each runtime call
 an edited group rule changes a group reply; carrying the replacements across an
 original-only reset.
 
+Reply outage after the built-in instructions update (October 17–18): the owner's
+development installation answered no new message from the October 17 pull of
+that update until a rebuild. Live reload ran the new code, but store
+provisioning runs only when PostgreSQL starts, from its image's own build, so
+the instructions table was missing and every secret check, reply and memory
+call failed at once. The detector live check calls Hermes directly and passed.
+In development, PostgreSQL now reruns store provisioning from each finished
+app build ([entrypoint](deploy/store-postgres-entrypoint.sh),
+[check](test/test_store_postgres_entrypoint.py), [procedure](docs/deploy.md)).
+On October 18 the owner's installation was rebuilt; the held secret checks
+finished and the held messages were retried. The re-asked reaction recall
+question then passed on its first attempt
+([register](docs/mvp-acceptance-status.md)).
+
 </current>
 
 <verification>
@@ -1080,8 +1094,11 @@ Detailed attempts, source identities and native tool evidence remain in ignored
 state. Infrastructure checks do not establish model quality, and operating
 activation remains separate.
 
-1. Diagnose the October 2 same-topic recall failure using the saved event and
-   CLI. One linked reply arrived on attempt two after about 384 seconds. It
+1. The October 2 same-topic reaction case passed again on October 18 on the
+   owner's installation, answered from archive read and search without a
+   Honcho recall call ([register](docs/mvp-acceptance-status.md)). The original
+   diagnosis below is kept: diagnose the October 2 same-topic recall failure
+   using the saved event and CLI. One linked reply arrived on attempt two after about 384 seconds. It
    correctly avoided a completion claim but could not identify the removed
    reaction. Topic routing and the saved removal match; the native tools returned
    no matching long-term memory and archive search found only the new question.

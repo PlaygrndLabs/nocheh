@@ -6,10 +6,11 @@ rm -f "$ready"
 docker-entrypoint.sh "$@" &
 database_pid=$!
 retention_pid=
+schema_pid=
 
 stop_database() {
   trap - TERM INT
-  if [ -n "$retention_pid" ]; then kill -TERM "$retention_pid" 2>/dev/null || true; wait "$retention_pid" 2>/dev/null || true; fi
+  for pid in $schema_pid $retention_pid; do kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; done
   kill -TERM "$database_pid" 2>/dev/null || true
   wait "$database_pid" 2>/dev/null || true
 }
@@ -36,6 +37,24 @@ if [ ! -e /data/spool/.restore-inactive ]; then
 fi
 
 touch "$ready"
+# Development mounts the app's generated code at NOCHEH_DEV_DIST. Each finished
+# source build can add tables, so store provisioning runs again with that code
+# rather than leaving it to fail against the old schema until an image rebuild.
+if [ -n "${NOCHEH_DEV_DIST:-}" ] && [ ! -e /data/spool/.restore-inactive ]; then
+  (
+    applied=
+    while :; do
+      current=$(cat "$NOCHEH_DEV_DIST/.dev-ready" 2>/dev/null || true)
+      if [ -n "$current" ] && [ "$current" != "$applied" ]; then
+        applied=$current
+        PGHOST=127.0.0.1 PGUSER=nocheh PGDATABASE=nocheh PGPASSWORD="$POSTGRES_PASSWORD" \
+          node "$NOCHEH_DEV_DIST/src/stores/bootstrap.js" || echo '{"event":"development_schema_update_failed"}' >&2
+      fi
+      sleep 2
+    done
+  ) &
+  schema_pid=$!
+fi
 # Workflow history expiry: 14 days unless the owner sets other days or 0 (off).
 if [ ! -e /data/spool/.restore-inactive ]; then
   node /app/dist/src/workflows/retention.js &

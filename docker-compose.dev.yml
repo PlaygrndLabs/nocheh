@@ -11,6 +11,16 @@ services:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
     restart: "no"
+    # Store provisioning runs again after each app build, so a source change
+    # that adds tables needs no image rebuild. Mounted beside /app/dist so the
+    # image's node_modules still resolve and the volume is not seeded from here.
+    entrypoint: [sh, /dev-store-entrypoint.sh]
+    command: [postgres]
+    environment:
+      NOCHEH_DEV_DIST: /app/dev-dist
+    volumes:
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/deploy/store-postgres-entrypoint.sh:/dev-store-entrypoint.sh:ro
+      - dev_dist:/app/dev-dist:ro
 
   nocheh-app:
     image: ${NOCHEH_DEV_PROJECT:?}:app
