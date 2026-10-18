@@ -268,10 +268,16 @@ the secret check used the same provider. The provider's browser check rejects
 Python's default client name, which the Honcho meter sent; it now names itself
 ([meter](services/honcho/meter.py), [check](services/honcho/test_meter.py)).
 After the fix the held Honcho memory jobs completed on the owner's installation.
-Pending: the reaction-removal update of that test still fails its Honcho source
-step before writing anything. Workflow failures kept only a generic reason, so
-the engine now logs each failure's error kind, code and top frames
-([engine](src/workflows/engine.ts)).
+Workflow failures kept only a generic reason, so the engine now logs each
+failure's error kind, code and top frames ([engine](src/workflows/engine.ts)).
+That showed the test's reaction-removal update failing its Honcho source step
+with `memory_session_conflict`. Its audience followed the topic of the message
+it reacted to, but its Honcho session key fell back to the chat-wide General
+session, because Telegram sends reaction updates without a topic. A reaction
+now uses its target's topic session ([entities](src/stores/entities.ts),
+[check](test/store-relationships.test.ts)). The superseded reaction add is not
+learned by design, because it is no longer the current reaction. Pending: the
+held removal update completing on the owner's installation.
 
 </current>
 
