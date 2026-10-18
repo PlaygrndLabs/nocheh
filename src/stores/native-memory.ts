@@ -336,6 +336,14 @@ export class NativeMemoryRepository {
     await this.validate(row,current.binding);
     return current;
   }
+  /** When a source's event happened. Honcho otherwise dates a message by its write, so a retried
+   * or imported message would read as new. An interpretation keeps the time it was learned. */
+  private async occurredAt(row:{source_reference:SourceReference;projection_reference:unknown}):Promise<string|undefined> {
+    if(row.projection_reference)return undefined;
+    const event=(await this.contexts.access.stores.archive.query('SELECT occurred_at,received_at FROM events WHERE id=$1',[row.source_reference.id])).rows[0];
+    if(!event)return undefined;
+    return /^\d{9,11}$/.test(String(event.occurred_at??''))?new Date(Number(event.occurred_at)*1000).toISOString():event.received_at.toISOString();
+  }
   private observed(row:any,found:unknown):string|null {
     if(!Array.isArray(found)||found.length>1)throw new HttpError(409,'honcho_receipt_conflict');
     if(!found.length)return null;
@@ -371,7 +379,7 @@ export class NativeMemoryRepository {
         if(!remote) {
           await this.authorizedReceipt(row);
           await db.query("UPDATE memory_ingestion_receipts SET state='uncertain',attempts=attempts+1 WHERE id=$1",[id]);
-          const found=await this.call(session+'/messages',{messages:[{peer_id:row.peer_id,content:row.content,
+          const found=await this.call(session+'/messages',{messages:[{peer_id:row.peer_id,content:row.content,created_at:await this.occurredAt(row),
             metadata:{nocheh_receipt:id,source_revision:row.source_reference.revision,guarded_revision:row.guarded_revision}}]});
           remote=this.observed(row,found);if(!remote)throw new HttpError(409,'honcho_write_unresolved');
         }

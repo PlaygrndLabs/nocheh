@@ -116,6 +116,14 @@ test('terminal Honcho derivation errors cannot mark a generation ready',async()=
   assert.equal(updates.length,2,'invalid health cannot change readiness');
 });
 
+test('native memory dates a Honcho message by its event, not by a retried write',async()=>{
+  const archive={query:async()=>({rows:[{occurred_at:'1760785619',received_at:new Date('2026-10-18T14:06:00Z')}]})};
+  const memory=new NativeMemoryRepository({access:{stores:{archive}}} as any,{} as any,{} as any,{} as any,async()=>({}),async()=>[]);
+  const occurred=(row:unknown)=>(memory as any).occurredAt(row);
+  assert.equal(await occurred({source_reference:{id:'fixture'},projection_reference:null}),'2025-10-18T11:06:59.000Z');
+  assert.equal(await occurred({source_reference:{id:'fixture'},projection_reference:{id:'learned',revision:1}}),undefined,'an interpretation keeps the time it was learned');
+});
+
 test('native memory keeps content derived, reconciles uncertain writes and rebuilds corrected guarded generations',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -208,6 +216,8 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     await assert.rejects(services.memory.syncReceipt(receipt,authority),/synthetic_lost_acknowledgment/);
     assert.equal((await stores.control.query('SELECT state FROM memory_ingestion_receipts WHERE id=$1',[receipt])).rows[0].state,'uncertain');
     const writes=calls.filter(c=>c.path.endsWith('/messages')).length;
+    const captured=(await stores.archive.query('SELECT received_at FROM events WHERE id=$1',[source.id])).rows[0].received_at.toISOString();
+    assert.equal(calls.find(c=>c.path.endsWith('/messages'))!.body.messages[0].created_at,captured,'an undated message is dated by its capture, not by the write');
     assert.equal(await services.memory.syncReceipt(receipt,authority),true);assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,writes);
     assert.equal(await services.memory.syncReceipt(receipt,authority),true);assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,writes);
     await stores.control.query("UPDATE memory_ingestion_receipts SET state='uncertain' WHERE id=$1",[entityReceiptId]);
