@@ -267,7 +267,11 @@ the memory provider returned 403 since at least October 18, while replies and
 the secret check used the same provider. The provider's browser check rejects
 Python's default client name, which the Honcho meter sent; it now names itself
 ([meter](services/honcho/meter.py), [check](services/honcho/test_meter.py)).
-Pending: the held Honcho memory jobs completing on the owner's installation.
+After the fix the held Honcho memory jobs completed on the owner's installation.
+Pending: the reaction-removal update of that test still fails its Honcho source
+step before writing anything. Workflow failures kept only a generic reason, so
+the engine now logs each failure's error kind, code and top frames
+([engine](src/workflows/engine.ts)).
 
 </current>
 
