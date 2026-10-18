@@ -4,13 +4,21 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
-import { canonical, digest, ingest, archiveStatus, type Envelope } from '../src/archive.js';
+import { attachmentRefs, canonical, digest, ingest, archiveStatus, type Envelope } from '../src/archive.js';
 import { initialize } from '../src/database.js';
 import { settings } from './fixture-settings.js';
 import { drainSpool, fetchAttachments, immutableFile, reconcileLegacyDeliveries } from '../src/storage.js';
 import {runInput} from '../src/run-source.js';
 import {readEvent, importRecord,search} from '../src/retrieval.js';
 import {browseData} from '../src/guarded.js';
+
+test('a message keeps its own files, not those of a message it replies to or pins',()=>{
+  const voice={file_id:'replied-voice',file_unique_id:'v',duration:3};
+  const refs=attachmentRefs({update_id:1,message:{message_id:2,document:{file_id:'own-file',file_unique_id:'d',file_name:'notes.txt'},
+    reply_to_message:{message_id:1,voice},external_reply:{chat:{id:-5},document:{file_id:'other-chat-file',file_unique_id:'x'}},
+    pinned_message:{message_id:0,photo:[{file_id:'pinned-photo',file_unique_id:'p',width:1,height:1}]}}});
+  assert.deepEqual(refs.map(ref=>[ref.kind,ref.ref]),[['document','own-file']]);
+});
 
 test('immutable file storage detects collisions and preserves bytes',async()=>{
   const root=await mkdtemp(join(tmpdir(),'nocheh-files-'));
