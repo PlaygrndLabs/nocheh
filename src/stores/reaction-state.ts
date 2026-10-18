@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import type {ArchiveRepository,SourceReference} from './archive.js';
 import {requestWorkflow} from '../workflows/store.js';
+import {foregroundReplyActive} from './automatic-publication.js';
 
 export const reactionStateSchema=`
 CREATE TABLE IF NOT EXISTS reaction_states (
@@ -9,6 +10,26 @@ CREATE TABLE IF NOT EXISTS reaction_states (
  PRIMARY KEY(target_id,actor_id,mode)
 );
 `;
+
+/**
+ * A reaction change makes contexts built on the earlier reaction state stale, so it advances the
+ * guard epoch. A new epoch revokes every reply credential, so while a reply is running the
+ * advance waits in a workflow instead of discarding that reply; current state is read live meanwhile.
+ * Returns false when it was deferred.
+ */
+export async function advanceReactionEpoch(db:pg.PoolClient,deferredAt?:number):Promise<boolean> {
+  const guard=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR UPDATE OF g')).rows[0];
+  const epoch=Number(guard.epoch);
+  // Any later epoch already invalidated what this reaction changed.
+  if(deferredAt!==undefined&&epoch>deferredAt)return true;
+  if(await foregroundReplyActive(db,{generation:guard.generation,epoch,mode:guard.mode})) {
+    await requestWorkflow(db,'memory_review','reactions:'+epoch);return false;
+  }
+  await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton');
+  // Honcho keeps earlier reactions as evidence, so a reaction change never rechecks Honcho writes.
+  await requestWorkflow(db,'memory_review','refresh',epoch+1);
+  return true;
+}
 
 /** Current state is indexed in control; every delivered update remains immutable in archive. */
 export class ReactionStateRepository {
@@ -32,11 +53,7 @@ export class ReactionStateRepository {
       VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(target_id,actor_id,mode) DO UPDATE
       SET update_id=$4,event_id=$5,value=$6,updated_at=now()
       WHERE reaction_states.update_id<$4 RETURNING event_id`,[row.target_id,row.actor_id,mode,sequence,reference.id,JSON.stringify(value)]);
-    if(changed.rowCount){
-      const epoch=Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);
-      // Honcho keeps earlier reactions as evidence, so a reaction change never rechecks Honcho writes.
-      await requestWorkflow(db,'memory_review','refresh',epoch);
-    }
+    if(changed.rowCount)await advanceReactionEpoch(db);
   }
   async isCurrent(reference:SourceReference):Promise<boolean> {
     const row=await this.observation(reference.id);
