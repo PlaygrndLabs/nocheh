@@ -33,7 +33,7 @@ import {storageGuardService} from './guard-service.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
-export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>) {
+export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
   const owner=new OwnerStorageApi(s);
   const server=createServer((req,res)=>{void(async()=>{
     const url=new URL(req.url??'/','http://local'),path=url.pathname;
@@ -67,7 +67,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/v1/runtime') {
       admin(principal);
       const runtimeStatus=await call('status',{},5000).catch(()=>({ok:false,error:'runtime_unavailable'}));
-      return json(res,200,{id:'hermes',status:runtimeStatus});
+      return json(res,200,{id:'hermes',status:runtimeStatus,capabilities});
     }
     if(req.method==='POST'&&path==='/v1/runtime/usage-price'){
       // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.

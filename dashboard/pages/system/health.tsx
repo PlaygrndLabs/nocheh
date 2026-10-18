@@ -10,6 +10,7 @@ import {
   count,
   dateTime,
   expectedState,
+  capabilityName,
   readable,
   routeName,
   serviceName,
@@ -378,7 +379,7 @@ function Connections({m}: {m: any}) {
                 {capabilities.map(([name, on]) => (
                   <li key={name} className="flex items-center gap-2 text-[13px]">
                     <Dot tone={on ? 'good' : 'neutral'} />
-                    <span className={cn(!on && 'text-muted')}>{readable(name.replaceAll('.', ' '))}</span>
+                    <span className={cn(!on && 'text-muted')}>{capabilityName(name)}</span>
                   </li>
                 ))}
               </ul>
