@@ -248,6 +248,19 @@ text; the owner's replacements travel with each runtime call
 an edited group rule changes a group reply; carrying the replacements across an
 original-only reset.
 
+Reply outage after the built-in instructions update (October 17–18): the owner's
+development installation answered no new message from the October 17 pull of
+that update until a rebuild. Live reload ran the new code, but store
+provisioning runs only when PostgreSQL starts, from its image's own build, so
+the instructions table was missing and every secret check, reply and memory
+call failed at once. The detector live check calls Hermes directly and passed.
+In development, PostgreSQL now reruns store provisioning from each finished
+app build ([entrypoint](deploy/store-postgres-entrypoint.sh),
+[check](test/test_store_postgres_entrypoint.py), [procedure](docs/deploy.md)).
+Pending: the rebuild on the owner's installation, retrying the messages held
+since then, and the re-asked reaction recall question
+([register](docs/mvp-acceptance-status.md)).
+
 </current>
 
 <verification>
