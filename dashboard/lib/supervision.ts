@@ -5,7 +5,7 @@ export type Decision = {
   title: string;
   state: string;
   created_at: string;
-  summary?: string;
+  summary?: string | null;
   destination?: string;
   revision?: number;
   detail?: any;

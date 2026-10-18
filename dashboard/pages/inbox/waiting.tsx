@@ -60,25 +60,25 @@ function WaitingList({filter}: {filter: DecisionKind | null}) {
       case 'controlled_action':
         return {
           title: actionName(item.title),
-          summary: action ? actionSummary(action) : '',
+          summary: item.summary ?? (action ? actionSummary(action) : ''),
           where: item.source_scope ? 'Asked in ' + chat(item.source_scope) : '',
         };
       case 'telegram_action':
         return {
           title: 'Send a Telegram message',
-          summary: action ? actionSummary(action) : '',
+          summary: item.summary ?? (action ? actionSummary(action) : ''),
           where: item.destination ? 'To ' + chat(item.destination) : '',
         };
       case 'memory_access':
         return {
           title: 'Share a fact with ' + chat(item.destination),
-          summary: requests.data?.requests?.find(r => r.id === item.id)?.wording ?? '',
+          summary: item.summary ?? requests.data?.requests?.find(r => r.id === item.id)?.wording ?? '',
           where: '',
         };
       case 'entity':
         return {
           title: identityTitle(undefined, item.title),
-          summary: 'Nocheh noticed this name in a conversation.',
+          summary: item.summary ?? 'Nocheh noticed this name in a conversation.',
           where: '',
         };
       default:
