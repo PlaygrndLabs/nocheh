@@ -26,7 +26,13 @@ export type MessageRow = {
   retired?: boolean;
   reply_messages?: ReplyPreview[];
   action_review?: ActionReview;
+  sender?: {name: string | null; username: string | null; id: string | null} | null;
+  agent_copy?: {state: 'none' | 'pending' | 'ready'; revision: number | null};
 };
+
+/** The writer's name for a list row, or null for assistant replies and unknown senders. */
+export const rowSender = (row: MessageRow): string | null =>
+  row.sender?.name || (row.sender?.username ? '@' + row.sender.username : null);
 export type MessageList = {records?: MessageRow[]; results?: MessageRow[]; items?: MessageRow[]; next?: string | null};
 
 /** The voice-note note written when transcription is not available; shown as a plain state, not a transcript. */

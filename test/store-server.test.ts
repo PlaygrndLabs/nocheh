@@ -117,6 +117,13 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/memory/check',undefined,200,mismatched)).valid,false);
     await request('/v1/status',undefined,403,credential);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
+    // The owner's list and detail say who wrote it, whether its assistant copy is ready and its reply state.
+    const ownerRead=await request('/v1/events/'+digest(key));
+    assert.deepEqual(ownerRead.sender,{name:null,username:null,id:'123'});assert.equal(ownerRead.agent_copy.state,'ready');
+    const scopedRead=await request('/v1/events/'+digest(key),undefined,200,credential);
+    for(const field of ['sender','agent_copy','assistant_state','reply_messages'])assert.ok(!(field in scopedRead),field);
+    const listed=(await request('/v1/data?scope=123')).records.find((row:any)=>row.id===digest(key));
+    assert.deepEqual(listed.sender,ownerRead.sender);assert.deepEqual(listed.agent_copy,ownerRead.agent_copy);
     await request('/v1/runtime/profiles',undefined,403,credential);
     const profiles=await request('/v1/runtime/profiles');assert.ok(profiles.profiles.some((p:any)=>p.is_default));
     assert.equal((await request('/v1/runtime/profiles/resolve',{profile:'default'})).space,'123');
