@@ -19,6 +19,9 @@ test('General messages use the base conversation while incomplete topic markers 
   assert.deepEqual(project({chat:{id:-42,type:'supergroup',is_forum:true}}),{chat_id:'-42',topic_state:'none'});
   assert.deepEqual(project({is_topic_message:false}),{chat_id:'-42',topic_state:'none'});
   assert.deepEqual(project({message_thread_id:17,is_topic_message:true}),{chat_id:'-42',topic_state:'known',topic_id:'17'});
+  assert.deepEqual(project({message_thread_id:5,reply_to_message:{message_id:5}}),{chat_id:'-42',topic_state:'none'},
+    'a reply chain in an ordinary supergroup is not a topic');
+  assert.deepEqual(project({chat:{id:-42,type:'supergroup',is_forum:true},message_thread_id:5}),{chat_id:'-42',topic_state:'known',topic_id:'5'});
   for(const extra of [{is_topic_message:true},{is_topic_message:null},{is_topic_message:'true'},
     {message_thread_id:null},{message_thread_id:{}},{chat:{id:-42}}])
     assert.deepEqual(project(extra),{chat_id:'-42',topic_state:'unknown'});
@@ -61,7 +64,7 @@ test('old targets resolve outside graph pagination; duplicates, delays and unkno
     assert.equal((await relationships.context(reaction,{kind:'conversation',chat_id:chatId,topic_id:null})).source,null);
     assert.equal((await relationships.context(reaction,{kind:'owner'})).targets[0]?.unresolved,true);
     assert.equal((await capture(change)).duplicate,true);
-    const parent=event(key+':parent',{update_id:10,message:{message_id:1,chat:{id:chatId,type:'supergroup',is_forum:true},message_thread_id:17,text:'Older original'}});
+    const parent=event(key+':parent',{update_id:10,message:{message_id:1,chat:{id:chatId,type:'supergroup',is_forum:true},message_thread_id:17,is_topic_message:true,text:'Older original'}});
     const original=(await capture(parent)).source.reference;
     const resolved=await relationships.context(reaction,topic,1);
     const topicConversation=await conversationObject(stores.archive,original.id);
@@ -69,7 +72,7 @@ test('old targets resolve outside graph pagination; duplicates, delays and unkno
       'a reaction joins the Honcho session of the topic it reacts in, not the chat-wide one');
     assert.deepEqual(resolved.targets[0]?.references,[original]);
     assert.equal((await relationships.context(reaction,{...topic,topic_id:'18'})).source,null);
-    const reply=(await capture(event(key+':reply',{update_id:40,message:{message_id:99,chat:{id:chatId,type:'supergroup'},message_thread_id:17,reply_to_message:{message_id:1},text:'Reply much later'}}))).source.reference;
+    const reply=(await capture(event(key+':reply',{update_id:40,message:{message_id:99,chat:{id:chatId,type:'supergroup'},message_thread_id:17,is_topic_message:true,reply_to_message:{message_id:1},text:'Reply much later'}}))).source.reference;
     assert.deepEqual((await relationships.context(reply,topic,1)).targets[0]?.references,[original]);
     const delayed=(await capture(event(key+':delayed',{update_id:20,message_reaction:{...(change.payload.message_reaction as object),date:1700000005,old_reaction:[heart],new_reaction:[]}}))).source.reference;
     assert.deepEqual((await relationships.describe(delayed)).reaction?.removed,[heart]);
@@ -97,17 +100,17 @@ test('old targets resolve outside graph pagination; duplicates, delays and unkno
     const incomplete=(await capture({...event(key+':partial',{update_id:54,message:{message_id:104,chat:{id:chatId,type:'supergroup'}}}),
       source:{...partial,object:{...partial.object,external_id:'104'}}})).source.reference;
     assert.equal((await relationships.context(incomplete,{...topic,topic_id:null})).source,null,'partial evidence cannot resolve General');
-    await capture(event(key+':general-conflict',{update_id:55,message:{...general.payload.message as object,message_thread_id:17}}));
+    await capture(event(key+':general-conflict',{update_id:55,message:{...general.payload.message as object,message_thread_id:17,is_topic_message:true}}));
     assert.equal((await relationships.context(generalReaction,{...topic,topic_id:null})).source,null,'conflicting General and named-topic observations remain unavailable');
     const otherChat=String(Number(chatId)-1);
-    const foreign=(await capture(event(key+':foreign',{update_id:51,message:{message_id:102,chat:{id:chatId,type:'supergroup'},message_thread_id:17,
+    const foreign=(await capture(event(key+':foreign',{update_id:51,message:{message_id:102,chat:{id:chatId,type:'supergroup'},message_thread_id:17,is_topic_message:true,
       external_reply:{chat:{id:otherChat},message_id:77},text:'External reply'}}))).source.reference;
     assert.equal((await relationships.context(foreign,topic)).targets.length,0);
     assert.equal((await relationships.context(foreign,{kind:'owner'})).targets[0]?.unresolved,true);
     const bytes=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[reaction.id])).rows[0].payload;
     assert.equal(bytes.toString(),canonical(change.payload));
     // Conflicting topic observations cannot expand access or be resolved by arrival order.
-    await capture(event(key+':conflict',{update_id:11,message:{...(parent.payload.message as object),message_thread_id:18}}));
+    await capture(event(key+':conflict',{update_id:11,message:{...(parent.payload.message as object),message_thread_id:18,is_topic_message:true}}));
     assert.equal((await relationships.context(reaction,topic)).source,null);
     assert.equal(await conversationObject(stores.archive,reaction.id),chatConversation,'contradictory topics fall back to the chat');
   } finally {await stores.close();}

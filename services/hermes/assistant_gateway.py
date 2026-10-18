@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, canonical, digest, immutable_file, captured_adapter_class
-from .scopes import Scopes, verify_capability
+from .scopes import Scopes, topic_id, verify_capability
 from . import group_trigger
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
@@ -106,7 +106,8 @@ def prepare_profile(root,scope,model):
 
 async def native_turn(root,scope,body,model,credentials,cancelled=None):
     profile=await asyncio.to_thread(prepare_profile,root,scope,model)
-    thread=str(body['payload']['message'].get('message_thread_id','main'))
+    topic=topic_id(body['payload']['message'])
+    thread='main' if topic is None else str(topic)
     logical=digest(scope.chat_id+':'+thread)
     cursor=profile/('active-'+logical+'.json')
     session_id=json.loads(cursor.read_text())['session_id'] if cursor.exists() else 'nocheh-'+logical

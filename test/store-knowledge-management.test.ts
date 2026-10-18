@@ -104,7 +104,7 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    const recent=await capture();unchanged.assignments[0]!.evidence_ids=[recent.id];assert.equal((await match(unchanged,recent)).id,delegation.id);
    await assert.rejects(s.knowledge.undo(owner,pending.id,{expected_revision:receipt.revision,operation_id:key+':undo-conflict'}),{code:'knowledge_undo_conflict'});
    assert.equal((await s.knowledge.proposal(owner,pending.id)).state,'applied','conflicting undo preserves original receipt');
-   await capture(group,'live',{message_thread_id:99});assert.equal(await match(unchanged,recent),null,'newly discovered inheriting topics do not silently gain scope');
+   await capture(group,'live',{message_thread_id:99,is_topic_message:true});assert.equal(await match(unchanged,recent),null,'newly discovered inheriting topics do not silently gain scope');
    await s.projects.assign(owner,{space_id:topic,project_id:null,mode:'none',expected_revision:0,operation_id:key+':topic-exclusion'});
    assert.equal((await match(unchanged,recent)).id,delegation.id,'an explicitly excluded topic is not affected by a parent assignment');
    await stores.control.query("UPDATE organization_delegations SET expires_at=now()-interval '1 second' WHERE id=$1",[delegation.id]);assert.equal(await match(unchanged,recent),null,'expired authority is not used');
@@ -120,7 +120,7 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    // An owner change to a parent also suspends a delegated topic that inherits it.
    const inheritedTopic=group+'/topic/100';delegation=null;
    await save({scopes:[inheritedTopic],project_ids:[created.id]},'inherited-topic');
-   const topicSource=await capture(group,'live',{message_thread_id:100});
+   const topicSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});
    const inheritedAssignment:OrganizationProposal={kind:'organization',reason:'Explicit topic purpose',creates:[],assignments:[{space_id:inheritedTopic,project_id:created.id,expected_revision:0,
     evidence_ids:[topicSource.id],reason:'This topic serves the project',purpose_evidence:true}]};
    assert.equal((await match(inheritedAssignment,topicSource,inheritedTopic)).id,delegation.id);
@@ -129,7 +129,7 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    assert.equal(await match(inheritedAssignment,topicSource,inheritedTopic),null,'an unchanged own revision does not hide an owner edit to inherited organization');
    assert.ok((await s.knowledge.delegations(owner)).delegations.find(d=>d.id===delegation.id)!.suspended_scopes.includes(inheritedTopic));
    await save({scopes:[inheritedTopic],project_ids:[created.id],resume_scopes:[inheritedTopic]},'resume-inherited');
-   const resumedTopicSource=await capture(group,'live',{message_thread_id:100});inheritedAssignment.assignments[0]!.evidence_ids=[resumedTopicSource.id];
+   const resumedTopicSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});inheritedAssignment.assignments[0]!.evidence_ids=[resumedTopicSource.id];
    assert.equal((await match(inheritedAssignment,resumedTopicSource,inheritedTopic)).id,delegation.id);
 
    // Clean undo restores the prior assignment and archives, rather than erases, the created project.

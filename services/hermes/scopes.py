@@ -10,6 +10,19 @@ import os
 from pathlib import Path
 
 
+def topic_id(message):
+    """The forum topic a Telegram message belongs to, or None.
+
+    Bot API also sets message_thread_id on a reply chain in an ordinary
+    supergroup; that anchor is not a topic and is never a delivery destination.
+    Same rule as the native adapter's routable thread id."""
+    chat=message.get('chat') if isinstance(message.get('chat'),dict) else {}
+    raw=message.get('message_thread_id')
+    if raw is None:return None
+    forum=chat.get('type') in ('group','supergroup') and chat.get('is_forum') is True
+    return raw if forum or message.get('is_topic_message') is True else None
+
+
 def verify_capability(credential,secret,scope,event_id):
     try:
         prefix,body,signature=credential.split('.')
@@ -114,7 +127,7 @@ class Scopes:
         from gateway.profile_routing import match_profile_route
         route=match_profile_route(self.routes,'telegram',chat_id=chat_id)
         if not route:raise ValueError('missing_profile_route')
-        topic=message.get('message_thread_id')
+        topic=topic_id(message)
         if topic is not None and (type(topic) is not int or topic<=0):raise ValueError('invalid_topic')
         space=chat_id if topic is None else chat_id+'/topic/'+str(topic)
         return Scope(chat_id,user_id,owner,route.profile,space)

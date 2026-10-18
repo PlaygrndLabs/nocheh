@@ -22,7 +22,7 @@ test('stored owner directory and decisions span every page without turning reads
           payload:{message:{message_id:index,date:1,chat:{id:Number(scope),type:'supergroup',title:'Repeated synthetic name'},from:{id:123,first_name:'Owner'},text:'PRIVATE_FIXTURE_BODY',...extra}}};
         return (await services.capture.capture(event)).source.reference;
       };
-      const source=await capture(group,1);await capture(second,2);await capture(group,3,{message_thread_id:19,forum_topic_created:{name:'Synthetic named topic'}});await capture(group,4,{message_thread_id:19});
+      const source=await capture(group,1);await capture(second,2);await capture(group,3,{message_thread_id:19,is_topic_message:true,forum_topic_created:{name:'Synthetic named topic'}});await capture(group,4,{message_thread_id:19,is_topic_message:true});
       await capture(group,6,{message_thread_id:21,is_topic_message:true,reply_to_message:{message_id:21,date:1,chat:{id:Number(group),type:'supergroup'},forum_topic_created:{name:'Root reply topic'}}});
       const unrepresentableScope=String(Number(group)-2);await capture(unrepresentableScope,5,{text:'Original\u0000message'});
       const suggestions=Array.from({length:131},(_,index)=>({id:digest(key+':suggestion:'+index),name:'Suggestion '+index}));
