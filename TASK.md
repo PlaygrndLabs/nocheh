@@ -273,6 +273,15 @@ learned by design, because it is no longer the current reaction. On October 18
 the held removal update reached Honcho memory on the owner's installation, in
 the same topic session as its note.
 
+Honcho memory message dates (October 18): a private-chat question about the
+day's conversations dated that reaction removal to the hour its held Honcho job
+was retried, not to the removal itself. Nocheh wrote Honcho messages without a
+date, so Honcho dated each one by its write. Source evidence now carries its
+event's time (Telegram's date, else its capture time); a learned interpretation
+keeps the time it was learned ([native memory](src/stores/native-memory.ts),
+[check](test/store-native-memory.test.ts)). Messages written earlier keep their
+write time until their session is rebuilt.
+
 </current>
 
 <verification>
