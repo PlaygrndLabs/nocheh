@@ -90,7 +90,7 @@ export class OwnerStorageApi {
     if(path==='/v1/learned'&&method==='GET') {
       const kind=q.get('scope_kind'),id=q.get('scope_id');
       if(!!kind!==!!id||kind&&!['conversation','project'].includes(kind))throw new HttpError(400,'invalid_memory_scope');
-      return s.learned.list(principal,kind&&id?{kind,id}:undefined,q.get('after')??'');
+      return s.learned.list(principal,kind&&id?{kind,id}:undefined,q.get('after')??'',q.get('q')??'',q.get('show')??'');
     }
     const memory=path.match(/^\/v1\/learned\/([a-f0-9]{64})(?:\/(history|correct))?$/);
     if(memory) {
