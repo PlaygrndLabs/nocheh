@@ -320,6 +320,7 @@ class BudgetTests(unittest.TestCase):
                    reasoning_url=GATEWAY+'/').send('/v1/chat/completions',{'model':REASONING_MODEL,'messages':[]})
             self.assertEqual(transport.calls[0].full_url,GATEWAY+'/chat/completions')
             self.assertEqual(transport.calls[0].get_header('Authorization'),'Bearer synthetic-provider-key')
+            self.assertEqual(transport.calls[0].get_header('User-agent'),'Nocheh')
             self.assertEqual(ledger.report()['reserved_usd'],0)
             for url,key in (('http://gateway.example.test/v1','k'),('http://shared-provider:8317/v1','k'),
                             ('file:///etc/passwd','k'),(GATEWAY,'')):

@@ -361,7 +361,9 @@ class Egress:
         start=time.monotonic();status=502;usage=None;outcome='transport_error'
         url=self.embedding.url if paid else (self.reasoning_url+route.removeprefix('/v1'))
         try:
-            request=urllib.request.Request(url,data=data,headers={'Authorization':'Bearer '+(self.paid_key if paid else self.reasoning_key),'Content-Type':'application/json'})
+            request=urllib.request.Request(url,data=data,headers={'Authorization':'Bearer '+(self.paid_key if paid else self.reasoning_key),'Content-Type':'application/json',
+                # Providers behind browser checks reject Python's default client name.
+                'User-Agent':'Nocheh'})
             with self.opener.open(request,timeout=180) as response:
                 status=response.status;content=response.read(16*1024*1024+1)
                 if len(content)>16*1024*1024: raise Rejected('response_too_large')

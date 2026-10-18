@@ -262,6 +262,13 @@ finished and the held messages were retried. The re-asked reaction recall
 question then passed on its first attempt
 ([register](docs/mvp-acceptance-status.md)).
 
+Honcho memory provider rejection (October 18): every Honcho model call through
+the memory provider returned 403 since at least October 18, while replies and
+the secret check used the same provider. The provider's browser check rejects
+Python's default client name, which the Honcho meter sent; it now names itself
+([meter](services/honcho/meter.py), [check](services/honcho/test_meter.py)).
+Pending: the held Honcho memory jobs completing on the owner's installation.
+
 </current>
 
 <verification>
