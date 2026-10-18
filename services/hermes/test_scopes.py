@@ -92,9 +92,13 @@ class ScopeTests(unittest.TestCase):
                 restore()
 
     def test_topics_and_revisions_have_distinct_native_memory(self):
-        update=self.update(-20,123);update['message']['message_thread_id']=42
+        update=self.update(-20,123,'supergroup');update['message'].update(message_thread_id=42,is_topic_message=True)
         topic=self.scopes.resolve(update,'-20')
         self.assertEqual(topic.space,'-20/topic/42')
+        # Bot API gives a reply chain in an ordinary supergroup its first message
+        # as message_thread_id. It is not a topic, so the reply stays in the chat.
+        reply=self.update(-20,123,'supergroup');reply['message'].update(message_thread_id=42,reply_to_message={'message_id':42})
+        self.assertEqual(self.scopes.resolve(reply,'-20').space,'-20')
         first=Scopes.apply_revision(topic,{'revision':1});second=Scopes.apply_revision(topic,{'revision':2})
         self.assertNotEqual(first.profile,second.profile)
         group=self.scopes.resolve(self.update(-20,123),'-20')
