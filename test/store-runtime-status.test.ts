@@ -13,7 +13,7 @@ test('owner runtime status reports Telegram polling and denies scoped readers',a
   const token='fixture-owner-token';
   const config={token,dataDir} as Settings;
   const server=storageServer({} as StorageServices,config,async()=>({ok:true,telegram:'connected',
-    telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}}));
+    telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}}),undefined,undefined,{'run.start':true,'lifecycle':false});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');
@@ -23,6 +23,7 @@ test('owner runtime status reports Telegram polling and denies scoped readers',a
     const body=await owner.json() as {status:{telegram:string;telegram_details:{last_poll_at:string}}};
     assert.equal(body.status.telegram,'connected');
     assert.equal(body.status.telegram_details.last_poll_at,'2026-09-25T11:44:49Z');
+    assert.deepEqual((body as unknown as {capabilities:unknown}).capabilities,{'run.start':true,'lifecycle':false});
     const scoped=await fetch(url,{headers:{authorization:'Bearer '+scopeToken(token,'owner',Date.now()+60_000)}});
     assert.equal(scoped.status,403);
   }finally{
