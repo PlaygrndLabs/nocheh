@@ -31,12 +31,10 @@ services:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/test:/app/test:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/dashboard:/app/dashboard:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/app/tools:ro
-      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/hermes/dashboard:/app/services/hermes/dashboard:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tsconfig.json:/app/tsconfig.json:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tsconfig.dashboard.json:/app/tsconfig.dashboard.json:ro
       - dev_dist:/app/dist
       - dev_web_dist:/app/dashboard/dist
-      - dev_graph_dist:/app/services/hermes/dashboard/dist
 
   nocheh-dashboard:
     image: ${NOCHEH_DEV_PROJECT:?}:dashboard
@@ -60,10 +58,8 @@ services:
       - ${NOCHEH_DEV_SOURCE_ROOT:?}:/dev-source:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/app/tools:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/honcho:/app/services/honcho:ro
-      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services/hermes/dashboard:/app/services/hermes/dashboard:ro
       - dev_dist:/app/dist:ro
       - dev_web_dist:/app/dashboard/dist:ro
-      - dev_graph_dist:/app/services/hermes/dashboard/dist:ro
     depends_on:
       nocheh-app: {condition: service_healthy}
 
@@ -105,7 +101,6 @@ services:
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
-      - dev_graph_dist:/workspace/services/hermes/dashboard/dist:ro
 
   hermes-agent-sb:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
@@ -160,6 +155,4 @@ volumes:
   dev_dist:
     labels: {com.nocheh.dev.checkout: "${NOCHEH_DEV_SOURCE_ROOT:?}"}
   dev_web_dist:
-    labels: {com.nocheh.dev.checkout: "${NOCHEH_DEV_SOURCE_ROOT:?}"}
-  dev_graph_dist:
     labels: {com.nocheh.dev.checkout: "${NOCHEH_DEV_SOURCE_ROOT:?}"}

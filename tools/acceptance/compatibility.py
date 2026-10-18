@@ -49,7 +49,7 @@ def commands(revision):
             '-e','SERVICE_TOKEN='+'0'*64,
             runtime,'python','-m','unittest','discover','-s','services/hermes','-t','.','-p','test_*.py','-q']),
         ('dashboard_assets',['docker','run','--rm','--network=none','--read-only',runtime,'python','-c',
-            "from pathlib import Path; assert Path('/opt/hermes/hermes_cli/web_dist/index.html').is_file(); assert Path('/workspace/services/hermes/dashboard/dist/index.js').is_file()"]),
+            "from pathlib import Path; assert Path('/opt/hermes/hermes_cli/web_dist/index.html').is_file(); assert Path('/workspace/services/hermes/dashboard/manifest.json').is_file()"]),
     ]
 
 
