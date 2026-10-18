@@ -4,6 +4,7 @@ import {claimWorkflow,closedStates,hash,type WorkflowFamily} from './store.js';
 import {executionFailure,type Observation,type WorkflowOperation} from './pipeline.js';
 import {workflowIdentity} from './client.js';
 import {safeMetadata} from './boundary.js';
+import {HttpError} from '../http.js';
 import {recordStages} from '../stores/stage-timings.js';
 
 const waiting=(reason='owner_paused'):Observation=>({state:'waiting',stage:'admission',attempts:0,next_attempt:Date.now()+30000,waiting_reason:reason});
@@ -42,7 +43,13 @@ export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,fam
   try {
     let result:Observation;const started=new Date(),clock=performance.now();
     try{result=await operation(row.job_id,{owner:'inngest',epoch:row.epoch});}
-    catch(error){result=executionFailure(error,row.attempts);}
+    catch(error){
+      // The observation keeps only a generic reason, so name the cause here without message content.
+      const code=error instanceof HttpError?error.code:(error as {code?:unknown})?.code??(error instanceof Error&&/^[a-z_]{3,80}$/.test(error.message)?error.message:undefined);
+      console.warn(JSON.stringify({event:'workflow_execution_failed',family,kind:error instanceof Error?error.name:'unknown',code,
+        frames:error instanceof Error?error.stack?.split('\n').slice(1,4).map(line=>line.trim().replace(/\(?\S*\/([^/\s]+:\d+:\d+)\)?$/,'($1)')):undefined}));
+      result=executionFailure(error,row.attempts);
+    }
     if(timedFamilies.has(family)&&/^[a-f0-9]{64}$/.test(row.job_id))await recordStep(pool,row,family,started,Math.round(performance.now()-clock));
     if((family==='memory_review'||family==='honcho')&&row.job_id.startsWith('source:')&&!(closedStates as readonly string[]).includes(result.state)) {
       const newer=await pool.query(`SELECT 1 FROM workflow_registry WHERE family=$1 AND job_id=$2 AND version=$3 AND generation>$4
