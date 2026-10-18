@@ -28,8 +28,8 @@ class ImportJobTests(unittest.TestCase):
     def prepare(self, folder):
         root=Path(folder); upload=root/'upload'; upload.mkdir()
         document={'id':42,'type':'private_group','name':'Fixture', 'messages':[
-            {'id':1,'type':'message','text':'Original  متن\r\n  ','file':'photo.bin'},
-            {'id':2,'type':'message','text':'Second','file':'not supplied'}]}
+            {'id':1,'type':'message','date':'2021-03-03T09:00:00','date_unixtime':'1614765600','text':'Original  متن\r\n  ','file':'photo.bin'},
+            {'id':2,'type':'message','date':'2026-10-09T09:00:00','date_unixtime':'1791536400','text':'Second','file':'not supplied'}]}
         original=json.dumps(document,ensure_ascii=False,indent=2).encode()
         (upload/'result.json').write_bytes(original); (upload/'photo.bin').write_bytes(b'\x00\xffphoto')
         preview=inspect(root); (root/'job.json').write_text(json.dumps({'preview':preview}))
@@ -41,6 +41,9 @@ class ImportJobTests(unittest.TestCase):
             self.assertEqual(preview['missing_files'],1)
             self.assertEqual(preview['supplied_files'],1)
             self.assertEqual(preview['chats'][0]['scope'],'desktop:private_group:42')
+            # The range is in UTC.
+            self.assertEqual((preview['first_at'],preview['last_at']),('2021-03-03T10:00:00Z','2026-10-09T09:00:00Z'))
+            self.assertEqual(preview['chats'][0]['first_at'],preview['first_at'])
             api=FakeArchive();api.fail=True
             with self.assertRaises(RuntimeError): run(root,{},api=api)
             with contextlib.redirect_stdout(io.StringIO()): result=run(root,{},api=api)

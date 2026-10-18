@@ -11,7 +11,15 @@ import {useResource, refreshResources} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
 import {useSettings} from '../../lib/settings';
 import {cn} from '../../lib/utils';
-import {canStart, fullTime, importStatus, isResume, problemText, type ImportJob} from '../../lib/messages-format';
+import {
+  canStart,
+  dateSpan,
+  fullTime,
+  importStatus,
+  isResume,
+  problemText,
+  type ImportJob,
+} from '../../lib/messages-format';
 import {
   Badge,
   Button,
@@ -292,8 +300,12 @@ function ImportReview({job}: {job: ImportJob}) {
     return (
       <Card>
         <CardHeader
-          title="Upload not finished"
-          description="This export was never checked, so it can’t be imported. Choose the export again above."
+          title={job.state === 'preview_failed' ? 'Couldn’t read this export' : 'Upload not finished'}
+          description={
+            job.state === 'preview_failed'
+              ? `${problemText(job.error)} Choose the export again above.`
+              : 'This export was never checked, so it can’t be imported. Choose the export again above.'
+          }
           action={
             <Badge tone={status.tone} dot>
               {status.label}
@@ -331,6 +343,9 @@ function ImportReview({job}: {job: ImportJob}) {
             tone={preview.missing_files ? 'warn' : undefined}
           />
         </div>
+        {dateSpan(preview.first_at, preview.last_at) && (
+          <p className="text-[13px] text-muted">Messages from {dateSpan(preview.first_at, preview.last_at)}</p>
+        )}
         {preview.missing_files > 0 && (
           <p className="text-xs text-muted">Messages with missing files are still imported with their text.</p>
         )}
@@ -352,7 +367,10 @@ function ImportReview({job}: {job: ImportJob}) {
                   <span className="block truncate font-medium" dir="auto">
                     {chat.name}
                   </span>
-                  <span className="text-xs text-muted">{chat.messages.toLocaleString()} messages</span>
+                  <span className="text-xs text-muted">
+                    {chat.messages.toLocaleString()} messages
+                    {dateSpan(chat.first_at, chat.last_at) ? ` · ${dateSpan(chat.first_at, chat.last_at)}` : ''}
+                  </span>
                 </label>
                 <Select
                   id={`map-${chat.id}`}

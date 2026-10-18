@@ -2,6 +2,7 @@
 import json
 import stat
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from tools.operations.archive.archive import API, desktop_records, upload, digest, canonical
 
@@ -72,11 +73,29 @@ def inspect(directory, mapping=None):
         missing += sum(a['state'] == 'failed' for a in record['artifacts'])
         if any(path.stat().st_size > MAX_FILE for _, path in uploads): raise ValueError('attachment_exceeds_50_mib')
     for chat in chats:
+        first, last = date_range(chat['messages'])
         summaries.append({'id': str(chat['id']), 'name': str(chat.get('name', 'Untitled chat')),
                           'messages': len(chat['messages']), 'type': str(chat.get('type', 'unknown')),
-                          'scope': (mapping or {}).get(str(chat['id']), f"desktop:{chat.get('type', 'unknown')}:{chat['id']}")})
+                          'scope': (mapping or {}).get(str(chat['id']), f"desktop:{chat.get('type', 'unknown')}:{chat['id']}"),
+                          'first_at': first, 'last_at': last})
+    starts = [chat['first_at'] for chat in summaries if chat['first_at']]
+    ends = [chat['last_at'] for chat in summaries if chat['last_at']]
     return {'file': str(file.relative_to(directory)), 'sha256': digest(file.read_bytes()),
-            'chats': summaries, 'messages': count, 'missing_files': missing, 'supplied_files': supplied}
+            'chats': summaries, 'messages': count, 'missing_files': missing, 'supplied_files': supplied,
+            'first_at': min(starts, default=None), 'last_at': max(ends, default=None)}
+
+
+def date_range(messages):
+    """Earliest and latest message time as UTC ISO strings; undated messages are skipped."""
+    times = []
+    for message in messages:
+        value = message.get('date_unixtime') if isinstance(message, dict) else None
+        try: seconds = int(value)
+        except (TypeError, ValueError): continue
+        if 0 < seconds < 2**37: times.append(seconds)
+    if not times: return None, None
+    stamp = lambda seconds: datetime.fromtimestamp(seconds, timezone.utc).isoformat().replace('+00:00', 'Z')
+    return stamp(min(times)), stamp(max(times))
 
 
 def run(directory, mapping, after=0, api=None, *, limit=None, duplicates=None, learning_after=0):

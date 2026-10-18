@@ -109,6 +109,11 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const put=await fetch(base+'/jobs/'+job.id+'/upload?name=result.json',{method:'PUT',headers,body:JSON.stringify(document)});assert.equal(put.status,200);
     const bad=await fetch(base+'/jobs/'+job.id+'/upload?name=..%2Fescape',{method:'PUT',headers,body:'x'});assert.equal(bad.status,400);
     const preview=await request('/jobs/'+job.id+'/preview',{});assert.equal(preview.preview.messages,12);
+    const unreadable=await request('/jobs',{});
+    await fetch(base+'/jobs/'+unreadable.id+'/upload?name=result.json',{method:'PUT',headers,body:JSON.stringify({chats:{list:[]}})});
+    const refused=await fetch(base+'/jobs/'+unreadable.id+'/preview',{method:'POST',headers,body:'{}'});
+    assert.equal(refused.status,400);assert.equal((await refused.json() as any).error,'empty_export');
+    const failedPreview=await request('/jobs/'+unreadable.id);assert.equal(failedPreview.state,'preview_failed');assert.equal(failedPreview.error,'empty_export');
     slow=true; await request('/jobs/'+job.id+'/start',{mapping:{}});
     assert.equal((await request('/jobs/'+job.id)).state,'running');
     assert.equal(confirmations[0].review_approved,false);assert.equal(confirmations[0].total,12);
