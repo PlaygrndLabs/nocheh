@@ -162,6 +162,7 @@ export async function workflowHealth(pool:pg.Pool){
     pool.query("SELECT max(updated_at) AS at FROM workflow_registry WHERE state='completed'")]);
   const counts=new Map<string,{family:string;state:string;count:number}>();
   const reasons=new Map<string,{state:string;waiting_reason:string|null;count:number}>();
+  const waiting=new Map<string,{family:string;count:number;oldest:Date|null}>();
   let oldestWaiting:Date|null=null;
   for(const row of results[0].rows){
     const key=row.family+':'+row.state,previous=counts.get(key);
@@ -169,7 +170,9 @@ export async function workflowHealth(pool:pg.Pool){
     if(row.state!=='queued'&&row.state!=='waiting')continue;
     const reasonKey=row.state+':'+(row.waiting_reason||''),prior=reasons.get(reasonKey);
     reasons.set(reasonKey,{state:row.state,waiting_reason:row.waiting_reason,count:(prior?.count||0)+row.count});
+    const family=waiting.get(row.family)??{family:row.family,count:0,oldest:null};family.count+=row.count;
+    if(row.oldest&&(!family.oldest||row.oldest<family.oldest))family.oldest=row.oldest;waiting.set(row.family,family);
     if(row.oldest&&(!oldestWaiting||row.oldest<oldestWaiting))oldestWaiting=row.oldest;
   }
-  return {counts:[...counts.values()],waiting_reasons:[...reasons.values()].sort((a,b)=>b.count-a.count||a.state.localeCompare(b.state)),workers:results[1].rows,outbox:results[2].rows[0],oldest_waiting:oldestWaiting,services:results[3].rows,last_success_at:results[4].rows[0].at,observed_at:new Date().toISOString()};
+  return {counts:[...counts.values()],waiting_reasons:[...reasons.values()].sort((a,b)=>b.count-a.count||a.state.localeCompare(b.state)),waiting_families:[...waiting.values()].sort((a,b)=>b.count-a.count||a.family.localeCompare(b.family)),workers:results[1].rows,outbox:results[2].rows[0],oldest_waiting:oldestWaiting,services:results[3].rows,last_success_at:results[4].rows[0].at,observed_at:new Date().toISOString()};
 }
