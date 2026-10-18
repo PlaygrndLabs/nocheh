@@ -202,19 +202,12 @@ every settings edit in one step and shows the outcome
 [routes](dashboard/lib/routes.ts), [browser checks](test/dashboard-pages.browser.mjs)).
 Model providers are added in a dialog that lists the provider's models before
 adding it. The 3D evidence graph and the editable memory map are gone from the
-dashboard; people, facts and projects are lists with side panels. Pending: the
-owner's review of the new dashboard on the running installation after the
-pull request is merged and the stack restarted. Open server gaps found while
-building it: `/decisions` items carry no summary, `/tools/actions/<id>` is not
-proxied, `/entities/claims/<id>/history` is not on the owner allowlist, `/learned`
-has no text search, message lists carry no sender, a failed import preview stays
-"uploading", `/runtime` reports no capabilities, the import preview has no date range,
-`/v1/data` rows carry no agent-copy readiness, `/events/<id>` carries no reply
-state, workflow health has no oldest wait per kind, and `POST
-/memory-access/grants` cannot make a one-time grant. The new dashboard does not
-yet list internal service keys by service and use (a Monitoring spec). The unused
-`services/hermes/dashboard/graph-3d.js` build can go once the Docker images stop
-copying its folder.
+dashboard; people, facts and projects are lists with side panels. The server
+gaps found while building it are closed, and System lists internal keys by
+service and use ([history](docs/task-history.md)). A manual share from Memory ›
+People stays persistent or dated: one-time access belongs to approving a
+pending request, where it already exists. Pending: a look at the new fields on
+the running installation.
 
 Role and skills per chat (October 16 and 17, owner: "want to ability to set role
 or skill for projects or GPs ... for a group or user use role and skills and for
