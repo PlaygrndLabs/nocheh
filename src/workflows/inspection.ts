@@ -51,36 +51,45 @@ export const inspectionHeaders={
 };
 const bootstrap=`<script>(()=>{document.addEventListener('DOMContentLoaded',()=>{const decorate=()=>{const layout=document.getElementById('layout-scroll-container');if(!layout)return;layout.parentElement.parentElement.setAttribute('data-nocheh-layout','');if(!document.getElementById('nocheh-inspection-style')){const style=document.createElement('style');style.id='nocheh-inspection-style';style.textContent='#nocheh-inspection-banner{position:fixed;left:0;top:0;right:0;min-height:38px;background:#16483d;color:white;padding:9px 16px;font:13px system-ui;z-index:99999}[data-nocheh-layout]{top:38px!important}#nocheh-inspection-banner a{color:white;text-decoration:underline}[data-nocheh-hidden]{display:none!important}';document.head.append(style);}if(!document.getElementById('nocheh-inspection-banner')){const banner=document.createElement('aside');banner.id='nocheh-inspection-banner';banner.innerHTML='Inngest · inspection only. <a href="/#monitoring">Manage workflows in Nocheh</a>';document.body.append(banner);}for(const link of document.querySelectorAll('a[href]')){const href=link.getAttribute('href');if(/^\\/(?:run|runs|apps|functions|event|events)(?:[/?]|$)/.test(href))link.setAttribute('href','/inngest'+href);}for(const node of document.querySelectorAll('button,[role="menuitem"]')){const text=(node.textContent||node.getAttribute('aria-label')||'').trim();if(/^(?:Rerun|Cancel|Invoke|Send (?:test )?event|Sync app|Resync|Delete app|Remove app|Register app|Add app|Open in Debugger)(?:\\b|$)/i.test(text)&&!node.hasAttribute('data-nocheh-hidden')){node.setAttribute('data-nocheh-hidden','');node.setAttribute('aria-hidden','true');}}};decorate();new MutationObserver(decorate).observe(document,{childList:true,subtree:true});});})();</script>`;
 
+// The pinned Monaco viewers otherwise fetch an external editor before they display
+// anything. Inspection uses a local, accessible, read-only value instead.
+const localCode="function __NochehCode({header,tab,loading}){const h=__nochehJsx();return h.jsxs('section',{className:'border-subtle bg-canvasBase border-b',children:[header?.title&&h.jsx('p',{className:'text-subtle px-5 py-2.5 text-sm',children:header.title}),h.jsx('pre',{tabIndex:0,'aria-label':header?.title||'Execution data',style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',overflow:'auto',maxHeight:'65vh',padding:'16px',font:'13px/1.6 ui-monospace,monospace'},children:loading?'Loading…':String(tab?.content??'')})]});}__NochehCode.Wrapper=({children})=>__nochehJsx().jsx('div',{className:'border-subtle w-full overflow-hidden rounded-md border',children});";
+const localCodeImport='import{t as __nochehJsx}from"./jsx-runtime-D4MLZeW6.js";';
+function once(value:string,pattern:RegExp){
+  const matches=[...value.matchAll(new RegExp(pattern.source,pattern.flags.includes('g')?pattern.flags:pattern.flags+'g'))];
+  if(matches.length!==1)throw new HttpError(503,'inngest_ui_version_mismatch');
+  return matches[0]!;
+}
+// Route one module export of a pinned viewer through the local renderer, leaving other exports intact.
+function exportLocalCode(value:string,binding:string){
+  const block=once(value,/export\{([^}]*)\};?\s*$/);
+  const entries=block[1]!.split(',');
+  const index=entries.findIndex(entry=>entry.split(' as ')[0]===binding);
+  if(index<0||entries.filter(entry=>entry.split(' as ')[0]===binding).length!==1)throw new HttpError(503,'inngest_ui_version_mismatch');
+  entries[index]='__NochehCode as '+entries[index]!.split(' as ')[1];
+  return localCodeImport+value.slice(0,block.index)+localCode+'export{'+entries.join(',')+'};';
+}
+
 export function rewriteInspection(path:string,type:string,body:Buffer):Buffer{
   if(path==='/assets/fonts-DQTamI_N.css')return Buffer.from('body{font-family:system-ui,sans-serif}');
-  if(path==='/assets/CodeBlock-slQUre1D.js'){
-    if(!body.toString().endsWith('export{O as t};\n')&&!body.toString().endsWith('export{O as t};'))throw new HttpError(503,'inngest_ui_version_mismatch');
-    // The pinned Monaco viewer otherwise fetches an external editor before it
-    // displays anything. Inspection uses a local, accessible, read-only value.
-    return Buffer.from(`import{t as factory}from"./jsx-runtime-D4MLZeW6.js";const h=factory();function Code({header,tab,loading}){return h.jsxs('section',{className:'border-subtle bg-canvasBase border-b',children:[header?.title&&h.jsx('p',{className:'text-subtle px-5 py-2.5 text-sm',children:header.title}),h.jsx('pre',{tabIndex:0,'aria-label':header?.title||'Execution data',style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',overflow:'auto',maxHeight:'65vh',padding:'16px',font:'13px/1.6 ui-monospace,monospace'},children:loading?'Loading…':String(tab?.content??'')})]});}Code.Wrapper=({children})=>h.jsx('div',{className:'border-subtle w-full overflow-hidden rounded-md border',children});export{Code as t};`);
-  }
   if(!/html|javascript|css/.test(type))return body;
   let value=body.toString().replace(/(["'`])\/assets\//g,'$1/inngest/assets/').replace(/(["'`])assets\//g,'$1inngest/assets/').replace(/(["'`])\/favicon-june-2025\.svg/g,'$1/inngest/favicon-june-2025.svg');
-  if(path==='/assets/ErrorCard-B-YVbC3X.js'){
-    const signature='ai as r,N as s,si as t';
-    if(value.split(signature).length!==2)throw new HttpError(503,'inngest_ui_version_mismatch');
-    // Run traces bundle a second copy of the Monaco viewer. Route its public
-    // export through the same local renderer without altering other exports.
-    value='import{t as NochehCode}from"./CodeBlock-slQUre1D.js";'+value.replace(signature,'NochehCode as r,N as s,si as t');
+  if(path==='/assets/InvokeButton-CQ4RmnsY.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)\.Wrapper=\(\{children:e\}\)=>/)[1]!);
+  if(path==='/assets/DragDivider-Bk0TnKWx.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)=\(\{header:e,tab:t,actions:n=\[\]/)[1]!);
+  if(path==='/assets/index-BtL2Q5bp.js'){
+    once(value,/basepath:``,serializationAdapters:/);
+    value=value.replace('basepath:``,serializationAdapters:','basepath:`/inngest`,serializationAdapters:');
+    const client=once(value,/new ([A-Za-z_$][\w$]*)\(`\/v0\/gql`\)/);
+    value=value.replace(client[0],`new ${client[1]}(\`/inngest/v0/gql\`,{headers:()=>({'X-Nocheh-CSRF':window.__NOCHEH_CSRF__})})`).replaceAll('`/dev`','`/inngest/dev`');
   }
-  if(path==='/assets/index-CFHJRWXe.js'){
-    const signature='basepath:``,serializationAdapters:';
-    if(value.split(signature).length!==2)throw new HttpError(503,'inngest_ui_version_mismatch');
-    value=value.replace(signature,'basepath:`/inngest`,serializationAdapters:');
-    const graphql='new Dy(`/v0/gql`)';
-    if(value.split(graphql).length!==2)throw new HttpError(503,'inngest_ui_version_mismatch');
-    value=value.replace(graphql,"new Dy(`/inngest/v0/gql`,{headers:()=>({'X-Nocheh-CSRF':window.__NOCHEH_CSRF__})})").replaceAll('`/dev`','`/inngest/dev`');
-  }
-  if(path==='/assets/_dashboard-B8OQ17R4.js'){
-    const signature='to:l?void 0:i,preload:o';
-    if(value.split(signature).length!==2)throw new HttpError(503,'inngest_ui_version_mismatch');
-    value=value.replace(signature,'to:l?void 0:(i??r),"aria-label":e,preload:o')
-      .replace('{group:B,collapsed:e}','{group:{items:[]},collapsed:e}').replace('{group:V,collapsed:e}','{group:{items:[]},collapsed:e}');
+  if(path==='/assets/_dashboard-6d9uQ3j3.js'){
+    const link=once(value,/href:([\w$]+)\?``:([\w$]+),to:\1\?void 0:([\w$]+),preload:([\w$]+)/);
+    value=value.replace(link[0],`href:${link[1]}?\`\`:${link[2]},to:${link[1]}?void 0:(${link[3]}??${link[2]}),"aria-label":e,preload:${link[4]}`);
+    // Only the Workflow group applies to Nocheh: AI, Setup and Cloud sandboxes stay hidden.
+    const groups=[...value.matchAll(/\{group:[\w$]+,collapsed:e\}/g)];
+    if(groups.length!==2)throw new HttpError(503,'inngest_ui_version_mismatch');
+    for(const group of groups)value=value.replace(group[0],'{group:{items:[]},collapsed:e}');
+    value=value.replace(once(value,/,\{label:`Sandboxes`,href:`\/sandboxes`,Icon:[\w$]+\}/)[0],'');
   }
   if(type.includes('text/html'))value=value.replace('</head>',bootstrap+'</head>');
   return Buffer.from(value);
@@ -95,7 +104,7 @@ export async function proxyInngestInspection(req:IncomingMessage,res:ServerRespo
   if(req.headers.origin||req.headers.cookie)throw new HttpError(403,'inspection_backend_only');
   if(!/^[a-f0-9]{64}$/.test(key))throw new HttpError(503,'workflows_unavailable');
   const query=selected.kind==='query'?inspectionQuery(await readJson(req,128*1024)):undefined;
-  if(selected.kind==='info'){res.writeHead(200,{...inspectionHeaders,'content-type':'application/json'});res.end(JSON.stringify({version:'1.44.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}}));return;}
+  if(selected.kind==='info'){res.writeHead(200,{...inspectionHeaders,'content-type':'application/json'});res.end(JSON.stringify({version:'1.46.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}}));return;}
   const authorization='Bearer '+createHash('sha256').update(Buffer.from(key,'hex')).digest('hex');
   let response:Response;try{response=await fetch(new URL(selected.path,upstream),{method:req.method??'GET',headers:{authorization,'content-type':'application/json','accept-encoding':'identity'},...(query?{body:JSON.stringify(query)}:{}),redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new HttpError(503,'workflows_unavailable');}
   if(!response.ok){await response.body?.cancel();throw new HttpError(502,'inspection_unavailable');}

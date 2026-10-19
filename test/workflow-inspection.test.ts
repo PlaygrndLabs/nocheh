@@ -14,9 +14,13 @@ test('Inngest inspection parses queries and denies mutation, subscription, hidde
   assert.throws(()=>inspectionQuery({query:'{apps{id}}',extensions:{persistedQuery:'ignored'}}));
   for(const [path,method] of [['/e/key','POST'],['/invoke/test','POST'],['/v0/connect/start','POST'],['/v0/gql?query=x','GET'],['//outside.example','GET'],['/assets/../e/key','GET'],['/assets/%2e%2e/e/key','GET'],['/debugger/function','GET'],['/apps','DELETE']])assert.throws(()=>inspectionPath(path!,method!));
   assert.equal(inspectionPath('/run?runID=01KTEST','GET').kind,'page');
-  const js=rewriteInspection('/assets/index-CFHJRWXe.js','text/javascript',Buffer.from('const a="assets/foo.js"; e.update({basepath:``,serializationAdapters:t});new Dy(`/v0/gql`)')).toString();
-  assert.match(js,/inngest\/assets/);assert.match(js,/basepath:`\/inngest`/);
-  assert.throws(()=>rewriteInspection('/assets/index-CFHJRWXe.js','text/javascript',Buffer.from('different upstream')),/inngest_ui_version_mismatch/);
+  const js=rewriteInspection('/assets/index-BtL2Q5bp.js','text/javascript',Buffer.from('const a="assets/foo.js"; e.update({basepath:``,serializationAdapters:t});new Rb(`/v0/gql`)')).toString();
+  assert.match(js,/inngest\/assets/);assert.match(js,/basepath:`\/inngest`/);assert.match(js,/new Rb\(`\/inngest\/v0\/gql`,\{headers:/);
+  assert.throws(()=>rewriteInspection('/assets/index-BtL2Q5bp.js','text/javascript',Buffer.from('different upstream')),/inngest_ui_version_mismatch/);
+  const viewer=rewriteInspection('/assets/DragDivider-Bk0TnKWx.js','text/javascript',Buffer.from('import{n as e}from"./jsx-runtime-D4MLZeW6.js";var fi=({header:e,tab:t,actions:n=[]})=>null,pi=1;export{fi as n,pi as t};')).toString();
+  assert.match(viewer,/export\{__NochehCode as n,pi as t\};$/);assert.match(viewer,/^import\{t as __nochehJsx\}from"\.\/jsx-runtime-D4MLZeW6\.js";/);
+  const menu=rewriteInspection('/assets/_dashboard-6d9uQ3j3.js','text/javascript',Buffer.from('l,{href:u?``:r,to:u?void 0:o,preload:c};V={items:[{label:`Runs`,href:`/runs`,Icon:R},{label:`Sandboxes`,href:`/sandboxes`,Icon:z}]};[P,{group:V,collapsed:e,first:!0}),(P,{group:H,collapsed:e}),(P,{group:U,collapsed:e})]')).toString();
+  assert.match(menu,/to:u\?void 0:\(o\?\?r\),"aria-label":e/);assert.ok(!menu.includes('Sandboxes'));assert.equal(menu.split('{group:{items:[]},collapsed:e}').length,3);
 });
 
 test('pinned Inngest UI history is readable through the inspection boundary; native mutations never reach it',{skip:process.env.NOCHEH_WORKFLOW_FIXTURE!=='1'},async()=>{
@@ -24,11 +28,11 @@ test('pinned Inngest UI history is readable through the inspection boundary; nat
   server.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${(server.address() as any).port}/v1/workflows/inspection`;
   try{
     const page=await fetch(base+'/runs');assert.equal(page.status,200);const html=await page.text();
-    assert.match(html,/nocheh-inspection-banner/);assert.match(html,/\/inngest\/assets\/index-CFHJRWXe.js/);
+    assert.match(html,/nocheh-inspection-banner/);assert.match(html,/\/inngest\/assets\/index-BtL2Q5bp.js/);
     assert.ok(!html.includes(process.env.INNGEST_SIGNING_KEY!));assert.match(page.headers.get('content-security-policy')!,/connect-src 'self'/);
-    const script=await fetch(base+'/assets/index-CFHJRWXe.js');assert.equal(script.status,200);assert.match(await script.text(),/basepath:`\/inngest`/);
-    const viewer=await fetch(base+'/assets/CodeBlock-slQUre1D.js');assert.equal(viewer.status,200);assert.match(await viewer.text(),/Execution data/);
-    const traceViewer=await fetch(base+'/assets/ErrorCard-B-YVbC3X.js');assert.equal(traceViewer.status,200);assert.match(await traceViewer.text(),/NochehCode as r,N as s,si as t/);
+    const script=await fetch(base+'/assets/index-BtL2Q5bp.js');assert.equal(script.status,200);assert.match(await script.text(),/basepath:`\/inngest`/);
+    const viewer=await fetch(base+'/assets/InvokeButton-CQ4RmnsY.js');assert.equal(viewer.status,200);assert.match(await viewer.text(),/Execution data/);
+    const traceViewer=await fetch(base+'/assets/DragDivider-Bk0TnKWx.js');assert.equal(traceViewer.status,200);assert.match(await traceViewer.text(),/__NochehCode as n,/);
     const fonts=await fetch(base+'/assets/fonts-DQTamI_N.css');assert.ok(!(await fonts.text()).includes('https:'));
     const read=await fetch(base+'/v0/gql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'{ apps { id name } }'})});
     assert.equal(read.status,200);assert.ok(Array.isArray((await read.json() as any).data.apps));
@@ -36,6 +40,6 @@ test('pinned Inngest UI history is readable through the inspection boundary; nat
       const denied=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'mutation { cancelRun(runID:"01KTEST") {id} }'})});assert.equal(denied.status,403);
     }
     assert.equal((await fetch(base+'/runs',{headers:{origin:'http://untrusted'}})).status,403);
-    const info=await(await fetch(base+'/dev')).json();assert.deepEqual(info,{version:'1.44.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}});
+    const info=await(await fetch(base+'/dev')).json();assert.deepEqual(info,{version:'1.46.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}});
   }finally{await new Promise<void>(r=>server.close(()=>r()));}
 });
