@@ -74,6 +74,15 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         for value in (None,0,True,'1',21):
             result,_=await self.execute(check,extra={'untranscribed_voice':value})
             self.assertNotIn('voice note',result['text'])
+    async def test_files_too_large_to_download_are_named_without_content(self):
+        check='import sys,json; body=json.load(sys.stdin); assert body["memory_query"]=="original"; print(json.dumps({"state":"done","text":body["text"]}))'
+        result,_=await self.execute(check,extra={'files_too_large':1})
+        self.assertIn('One attached file is over the 20 MB limit for bot downloads',result['text'])
+        result,_=await self.execute(check,extra={'files_too_large':3})
+        self.assertIn('3 attached files are over the 20 MB limit',result['text'])
+        for value in (None,0,True,'1',101):
+            result,_=await self.execute(check,extra={'files_too_large':value})
+            self.assertNotIn('20 MB',result['text'])
     async def test_completed_child_revocation_keeps_safe_timings_without_answer_or_delivery(self):
         result,events=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"revoked answer","session_id":"private-session","timings":{"conversation":{"ms":10,"calls":1},"private_phase":{"ms":3,"calls":1},"total":{"ms":12,"calls":1,"content":"private"}}}))',delivery_allowed=False)
         self.assertEqual(result,{'state':'failed','error_code':'guard_context_changed',
