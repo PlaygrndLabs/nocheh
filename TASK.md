@@ -377,8 +377,14 @@ not yet run on the owner's installation:
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)). Not yet run on the
   owner's installation.
+- Release test 3 (October 19) passed on the owner's installation: Hermes
+  restarted about 2 seconds into a private turn, after the input check and
+  Honcho recall and before the model call. The first attempt failed as
+  unavailable, the automatic second attempt delivered exactly one reply about
+  44 seconds after capture, and every service was healthy afterwards. A restart
+  during the model call itself was not separately repeated.
 Pending: a live album, an edit, a small group-export import, and release
-tests 3 to 5 on the owner's installation.
+tests 4 and 5 on the owner's installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
