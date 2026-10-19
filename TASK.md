@@ -318,9 +318,28 @@ synthetic PostgreSQL, not yet run on the owner's installation:
   inherit the replied-to message's files; Health shows unsaved incoming
   messages and reply states; message times no longer show "Invalid Date"; the
   history retention setting reaches the app.
-- Found but not fixed, for owner decision: files over 20 MB hold a reply;
-  group turns lack the speaker's name and time; edited messages repeat in Honcho
-  memory; albums are separate turns.
+- The four gaps found but left for the owner's decision are fixed below.
+
+Known gaps fixed before the release tests (October 19, owner: "yes" to fixing
+them before the Telegram tests), verified locally with synthetic PostgreSQL,
+not yet run on the owner's installation:
+- A Telegram file over 20 MB, which the Bot API never lets a bot download, now
+  settles as a reference without a download (or after Telegram refuses it) and
+  no longer holds the reply; the turn says a file was over the limit
+  ([attachments](src/stores/attachments.ts),
+  [check](test/store-preparation.test.ts)).
+- A group turn opens with the speaker's guarded name and @username and the send
+  time in UTC, never a Telegram ID, outside the Honcho memory query
+  ([dispatch](src/stores/telegram-dispatch.ts),
+  [checks](test/store-telegram-dispatch.test.ts),
+  [Hermes checks](services/hermes/test_turn_process.py)).
+- Only the latest revision of an edited message stays in Honcho memory
+  ([decision](docs/adr/0154-message-edits-replace-honcho-writes.md),
+  [check](test/store-native-memory.test.ts)).
+- An album gets one turn and one reply on its first part, with every part's
+  text and files ([decision](docs/adr/0155-albums-answered-once.md),
+  [check](test/store-telegram-dispatch.test.ts)).
+Pending: a live album, an edit and a group message on the owner's installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
