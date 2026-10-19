@@ -10,7 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 
-test('allowed members post freely in groups where they are allowed; everything else waits for the owner\'s button in their private chat',
+test('allowed members post freely in their own group; everything else waits for the owner\'s button in their private chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -18,8 +18,9 @@ test('allowed members post freely in groups where they are allowed; everything e
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-approval-buttons-')),key='approval-buttons:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],refusals:Record<string,any>[]=[];let updates=0;
   const other=group+'1',closed=group+'2';
+  let topicMemory:'group'|'topic'='group';
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other,closed],
-    group_access:{[group]:{granted:['9'],denied:[]},[other]:{granted:['9'],denied:[]},[closed]:{granted:[],denied:['9']}},topic_memory:'topic' as const});
+    group_access:{[group]:{granted:['9'],denied:[]},[other]:{granted:['9'],denied:[]},[closed]:{granted:[],denied:['9']}},topic_memory:topicMemory});
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -44,16 +45,19 @@ test('allowed members post freely in groups where they are allowed; everything e
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     const epoch=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
-    // An allowed member's request for a post in a group where they are allowed is approved by the request, in any topic.
+    // An allowed member's request for a post in the same group is approved by the request, in any topic of the group.
     const topic=await message('topic',{message_thread_id:17,is_topic_message:true});
     const here=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:'current',text:'Exact group message'}));
     assert.equal(here.state,'approved');assert.match(here.message,/\[NO_REPLY\]/);assert.equal(cards.length,0,'no card for a post in the same group');
     const general=await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Exact General message'});
-    assert.equal(general.state,'approved','another topic of the same group, even with separate topic memory');
+    assert.equal(general.state,'approved','the whole group is one audience by default');assert.match(general.message,/Confirm in one short sentence/);
+    topicMemory='topic';
+    const shut=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Another topic'}));
+    assert.equal(shut.state,'proposed','with separate topic memory another topic needs the owner');assert.equal(last('card').chat_id,'123');
+    topicMemory='group';
     const across=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:other+'/topic/4',text:'For the other group'}));
-    assert.equal(across.state,'approved','a group where the same person is also allowed');assert.match(across.message,/Confirm in one short sentence/);
-    const shut=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:closed,text:'Not allowed there'}));
-    assert.equal(shut.state,'proposed','a group where that person is not allowed waits for the owner');assert.equal(last('card').chat_id,'123');
+    assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for the owner, even where that person is allowed');
+    assert.match(last('card').text,/^Asked in a Telegram group\.\nSend this message to a Telegram group \(a topic\)\?\n\nFor the other group$/);
     await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
       VALUES($1,'available','supergroup','Design team',NULL,true,NULL,now()) ON CONFLICT DO NOTHING`,[other]);
     assert.deepEqual((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups,
