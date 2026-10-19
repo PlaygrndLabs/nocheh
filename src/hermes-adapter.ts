@@ -45,6 +45,8 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
         const error = await response.json().catch(() => null) as {error?: string} | null;
         // No provider chosen in Settings › Models is a waiting condition, not a runtime fault.
         if (error?.error === 'provider_not_configured') code = error.error;
+        // A file too large for the bot to download settles instead of retrying.
+        else if (operation === 'source.file' && error?.error === 'attachment_too_large') code = error.error;
         else if (['guard.detect','config.write','config.read','persona.read','persona.write','prompts.defaults'].includes(operation)) {
           if (error?.error && ['detector_contract_rejected','configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference','invalid_persona'].includes(error.error)) code = error.error;
         }

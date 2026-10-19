@@ -7,6 +7,11 @@ import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '
 import {ArchiveRepository,type FileReference} from './archive.js';
 import type {StorePools} from './connections.js';
 
+/** Telegram's Bot API refuses to download a file over 20 MB. */
+export const TELEGRAM_BOT_DOWNLOAD_LIMIT=20*1024*1024;
+/** A file that can never be downloaded settles as a reference only, so it never holds the reply. */
+export const ATTACHMENT_TOO_LARGE='attachment_too_large';
+
 export class AttachmentRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository,readonly root:string){}
   async file(id:string):Promise<FileReference> {
@@ -35,6 +40,11 @@ export class AttachmentRepository {
       ON CONFLICT(artifact_id) DO UPDATE SET state='done',error_code=NULL`,[id,row.event_id]);
     return file;
   }
+  /** Manifests of this event that are archived as a reference only because they are too large to download. */
+  async tooLarge(eventId:string):Promise<Set<string>> {
+    return new Set((await this.stores.control.query('SELECT artifact_id FROM attachment_retrievals WHERE event_id=$1 AND error_code=$2',
+      [eventId,ATTACHMENT_TOO_LARGE])).rows.map(r=>r.artifact_id));
+  }
   /** Safe read-only provider retry. A persisted manifest is checked before download. */
   async fetch(eventId:string,fetchFile:(ref:string)=>Promise<Buffer>,authority:ExecutionAuthority):Promise<void> {
     await this.archive.captured(eventId);
@@ -58,13 +68,20 @@ export class AttachmentRepository {
           await client.query("UPDATE attachment_retrievals SET state='done',error_code=NULL WHERE artifact_id=$1",[manifest.id]);continue;
         }
         const job=(await client.query('SELECT * FROM attachment_retrievals WHERE artifact_id=$1',[manifest.id])).rows[0];
+        if(job.error_code===ATTACHMENT_TOO_LARGE)continue;
         if(intake?.transport==='import'||manifest.origin==='import'||manifest.channel!=='telegram'||manifest.source_ref.startsWith('desktop:')) {
           await client.query("UPDATE attachment_retrievals SET state='pending',error_code='import_bytes_pending' WHERE artifact_id=$1",[manifest.id]);continue;
+        }
+        if(manifest.channel==='telegram'&&Number(manifest.metadata?.file_size)>TELEGRAM_BOT_DOWNLOAD_LIMIT) {
+          await client.query("UPDATE attachment_retrievals SET state='done',error_code=$2 WHERE artifact_id=$1",[manifest.id,ATTACHMENT_TOO_LARGE]);continue;
         }
         if(downloaded>=10||job.next_attempt>new Date())continue;downloaded++;
         await client.query("UPDATE attachment_retrievals SET state='running',attempts=attempts+1,error_code=NULL WHERE artifact_id=$1",[manifest.id]);
         try {await this.commit(manifest.id,await fetchFile(manifest.source_ref));}
         catch(error) {
+          if(error instanceof HttpError&&[ATTACHMENT_TOO_LARGE,'attachment_size_limit'].includes(error.code)) {
+            await client.query("UPDATE attachment_retrievals SET state='done',error_code=$2 WHERE artifact_id=$1",[manifest.id,ATTACHMENT_TOO_LARGE]);continue;
+          }
           await client.query(`UPDATE attachment_retrievals SET state='failed',error_code=$2,
             next_attempt=now()+least(3600,power(2,least(attempts,11)))*interval '1 second' WHERE artifact_id=$1`,
             [manifest.id,error instanceof HttpError?error.code:'attachment_unavailable']);
