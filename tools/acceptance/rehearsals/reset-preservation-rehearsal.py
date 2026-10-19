@@ -116,7 +116,7 @@ def main():
     project = 'nocheh-reset-preservation-' + uuid.uuid4().hex[:12]
     environment = {**os.environ, 'NOCHEH_RESET_PRESERVATION_PROJECT': project}
     compose = {'name': project, 'services': {
-        'nocheh-db': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'nocheh-db': {'image': 'postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826',
             'command': ['postgres', '-c', 'cluster_name=nocheh-reset-preservation-fixture'],
             'environment': {'POSTGRES_USER': 'nocheh', 'POSTGRES_DB': 'nocheh', 'POSTGRES_PASSWORD': PASSWORD},
             'volumes': ['database:/var/lib/postgresql/data'],

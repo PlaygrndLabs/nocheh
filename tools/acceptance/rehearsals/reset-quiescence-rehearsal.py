@@ -48,7 +48,7 @@ def main():
     writers=('hermes','nocheh-executor','hermes-agent-sb','nocheh-app','nocheh-security',
              'nocheh-dashboard','honcho-deriver')
     services={'nocheh-db': {
-        'image':'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'image':'postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826',
         'restart':'unless-stopped', 'command':['postgres','-c','cluster_name=nocheh-reset-quiescence-fixture'],
         'environment':{'POSTGRES_DB':'nocheh','POSTGRES_USER':'nocheh','POSTGRES_PASSWORD':'synthetic-shutdown-not-a-real-credential'},
         'volumes':['postgres_data:/var/lib/postgresql/data'],

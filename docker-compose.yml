@@ -235,7 +235,7 @@ services:
     logging: *logging
     profiles: [honcho]
     restart: unless-stopped
-    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    image: pgvector/pgvector:0.8.7-pg17-bookworm@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     environment:
       POSTGRES_DB: honcho_experiment
       POSTGRES_USER: experiment
@@ -252,7 +252,7 @@ services:
     volumes: [honcho_redis:/data]
     profiles: [honcho]
     restart: unless-stopped
-    image: redis:8.2@sha256:7d1e4ce8b9395088377ab382d1f6cfdbd13b3690795198a0399ab8d683064d6d
+    image: redis:8.2.10@sha256:47670742d7924adbcdb404d1288b6327815b23141969c0939b8e5d61f78c2634
     networks: [honcho-isolated]
     healthcheck:
       test: [CMD, redis-cli, ping]
@@ -294,7 +294,7 @@ services:
     environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MEMORY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}"}
     profiles: [honcho]
     restart: unless-stopped
-    image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
+    image: python:3.11.17-slim-bookworm@sha256:0a310eeecf4e1f5a0743f9a6520c90c88d089c903ca5fd283f501e3a805f5f89
     command: [python, /nocheh/meter.py]
     env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/meter.env", required: false}]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -368,7 +368,7 @@ services:
       retries: 12
   pgweb-archive:
     logging: *logging
-    image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
+    image: sosedoff/pgweb:0.17.0@sha256:a5256d416e2e8b92d69a4459058e3eca33a9f075d8325491644411d0bc3bd70b
     profiles: [tools]
     restart: unless-stopped
     command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
@@ -415,7 +415,7 @@ services:
 
   inngest-redis:
     logging: *logging
-    image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
+    image: redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
     restart: unless-stopped
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]

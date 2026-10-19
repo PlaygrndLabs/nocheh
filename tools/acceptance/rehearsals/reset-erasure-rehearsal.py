@@ -68,12 +68,12 @@ def main():
 
     project = 'nocheh-reset-erasure-' + uuid.uuid4().hex[:12]
     compose = {'name': project, 'services': {
-        'nocheh-db': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'nocheh-db': {'image': 'postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826',
             'command': ['postgres', '-c', 'cluster_name=nocheh-reset-erasure-fixture'],
             'environment': {'POSTGRES_USER': 'nocheh', 'POSTGRES_DB': 'nocheh', 'POSTGRES_PASSWORD': POSTGRES_PASSWORD},
             'volumes': ['nocheh_database:/var/lib/postgresql/data'],
             'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -U nocheh -d nocheh'], 'interval': '1s', 'retries': 30}},
-        'inngest-postgres': {'image': 'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'inngest-postgres': {'image': 'postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826',
             'environment': {'POSTGRES_USER': 'inngest', 'POSTGRES_DB': 'inngest', 'POSTGRES_PASSWORD': INNGEST_PASSWORD},
             'volumes': ['inngest_database:/var/lib/postgresql/data'],
             'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -U inngest -d inngest'], 'interval': '1s', 'retries': 30}},
