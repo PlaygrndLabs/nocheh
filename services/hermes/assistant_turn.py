@@ -14,7 +14,7 @@ from pathlib import Path
 
 ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
                'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall',
-               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read',
+               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read','nocheh_tasks',
                'skills_list','skill_view'}
 # The owner sets skills; a turn may read them but never create or change one.
 OWNER_SET_TOOLS={'skill_manage'}
