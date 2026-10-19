@@ -15,6 +15,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
     'memory.filter':'/internal/memory/filter',
     'schedule.advance':'/internal/schedule/advance',
     'telegram.chat':'/internal/telegram/chat',
+    'telegram.approval':'/internal/telegram/approval',
     'usage.price':'/internal/usage/price',
     'run.resume':'/internal/run/resume','run.events':'/internal/run/events','run.cancel':'/internal/run/cancel',
   };

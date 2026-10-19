@@ -352,8 +352,22 @@ not yet run on the owner's installation:
   last turn ([decision](docs/adr/0157-group-turns-see-recent-unaddressed-messages.md),
   [check](test/store-telegram-dispatch.test.ts),
   [Hermes check](services/hermes/test_turn_process.py)).
-Pending: a live album, an edit, a group message, a small group-export import
-and a rerun of release test 1's recall question on the owner's installation.
+  The rerun on the change carrying it passed: the Reply named the unaddressed
+  question once, in about 23 seconds.
+- Release test 2 (October 19): Nocheh drafted the requested group message and
+  waited for approval, but told the owner to approve it in an old dashboard
+  name. The owner asked for a button under the message, in private chats and
+  groups. A pending action now gets Approve and Reject buttons in its own group
+  or topic, or in the owner's private chat; only the owner's press decides and
+  the card then shows the outcome. Stale "Nocheh Activity" and "Activity
+  Decisions" wording now says the dashboard Inbox
+  ([decision](docs/adr/0158-telegram-approval-buttons.md),
+  [check](test/store-approval-buttons.test.ts),
+  [Hermes check](services/hermes/test_approval_cards.py)).
+  Card and button texts are fixed in code, like the Telegram command replies;
+  making them editable from the dashboard is open.
+Pending: release test 2 with a button press, a live album, an edit, a small
+group-export import, and release tests 3 to 5 on the owner's installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,

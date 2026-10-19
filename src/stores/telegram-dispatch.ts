@@ -456,6 +456,12 @@ export class TelegramDispatchRepository {
         // same identity, after current binding checks. Running work is observed.
       } else {
         if(!this.access.policy().enabled)return observation('waiting','admission',0,Date.now()+60000,'owner_paused');
+        // An Approve or Reject press decides its action here; it is never a turn.
+        if(await this.actions.callback(captured.reference)) {
+          await db.query(`UPDATE dispatches SET state='suppressed',error_code='approval_button',revision=revision+1,updated_at=now()
+            WHERE event_id=$1 AND state IN ('pending','failed')`,[id]);
+          return this.observation(await this.row(id));
+        }
         const album=await this.album(id);
         if(album?.state==='wait')return observation('waiting','admission',0,Date.now()+1000,'prerequisite');
         if(album?.state==='member') {
