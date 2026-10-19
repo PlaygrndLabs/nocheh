@@ -365,9 +365,32 @@ not yet run on the owner's installation:
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)).
   Card and button texts are fixed in code, like the Telegram command replies;
-  making them editable from the dashboard is open.
-Pending: release test 2 with a button press, a live album, an edit, a small
-group-export import, and release tests 3 to 5 on the owner's installation.
+  making them editable from the dashboard is open. On the owner's
+  installation a button press in the group approved and delivered the post
+  once. The card now also says when the message was sent.
+- After that test the owner asked that allowed people post freely in their own
+  group, that approval talk happen in the private chat, and that people who are
+  not allowed get a fixed reply, and that a message from one group to another
+  is shown and approved because it is made from the first group's memory. A
+  same-group post by the owner or a permitted participant now needs no
+  approval, a post to another group waits for the owner, a group turn can list
+  the groups where the person asking is allowed, every card goes to the
+  owner's private
+  chat, and an unallowed member who addresses Nocheh gets one editable reply
+  without a turn ([decision](docs/adr/0159-group-members-post-freely-and-approvals-go-private.md),
+  [check](test/store-approval-buttons.test.ts),
+  [Hermes check](services/hermes/test_approval_cards.py)). Not yet run on the
+  owner's installation. Open question to the owner: whether memory should
+  stay per group, shared between groups only through owner sharing rules (the
+  recommendation), or be shared across all groups or projects of one person.
+- Release test 3 (October 19) passed on the owner's installation: Hermes
+  restarted about 2 seconds into a private turn, after the input check and
+  Honcho recall and before the model call. The first attempt failed as
+  unavailable, the automatic second attempt delivered exactly one reply about
+  44 seconds after capture, and every service was healthy afterwards. A restart
+  during the model call itself was not separately repeated.
+Pending: a live album, an edit, a small group-export import, and release
+tests 4 and 5 on the owner's installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,

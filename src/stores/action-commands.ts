@@ -10,15 +10,14 @@ import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 
 type ActionKind='telegram'|'controlled';
-type Place={chat_id:string;topic?:string};
 // Telegram allows 64 bytes of button data: a marker, the choice, and prefixes
 // of the action ID and of the fingerprint of its exact content.
 const buttonData=/^n([ad])([a-f0-9]{40})([a-f0-9]{16})$/;
 const reviewLimit=2200;
 
 /** Administrative commands use original owner-DM evidence, never editable text.
- * Approve and Reject buttons are offered on an exact pending action; only the
- * owner's own press decides it, in their private chat or in an allowed group. */
+ * Approve and Reject buttons on an exact pending action go to the owner's
+ * private chat; only the owner's own press decides it. */
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
     readonly call?:RuntimeCall){}
@@ -26,34 +25,29 @@ export class ActionCommandRepository {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
   }
-  /** Where a card goes: the group or topic the request came from when the
-   * action stays in that group, otherwise the owner's private chat. */
-  private async place(source:any,destination:string|null):Promise<Place|null> {
-    const policy=this.access.policy(),owner=policy.owner_id;if(!owner)return null;
-    if(source?.store!=='archive')return {chat_id:owner};
+  /** The group a request came from, or null for the owner's private chat and background work. */
+  private async origin(source:any):Promise<string|null> {
+    if(source?.store!=='archive')return null;
     const original=await this.access.archive.verify(source);
-    if(original.scope===owner||!policy.group_ids.includes(original.scope)||destination!==null&&destination.split('/topic/')[0]!==original.scope)return {chat_id:owner};
-    const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
-    const message=row?JSON.parse(row.payload.toString()).message:null,topic=message?.is_topic_message===true&&Number.isSafeInteger(message.message_thread_id)?String(message.message_thread_id):null;
-    return {chat_id:original.scope,...(topic?{topic}:{})};
+    return original.scope===this.access.policy().owner_id?null:original.scope;
   }
-  private async label(destination:string,place:Place) {
-    const chat=destination.split('/topic/')[0]!;
+  private async title(chat:string) {
     if(chat===this.access.policy().owner_id)return 'your private chat';
-    if(chat===place.chat_id)return destination.includes('/topic/')&&destination!==place.chat_id+'/topic/'+place.topic?'another topic of this group':'this chat';
     const title=(await this.access.stores.control.query("SELECT title FROM telegram_chat_observations WHERE chat_id=$1 AND state='available'",[chat])).rows[0]?.title;
-    return typeof title==='string'&&title.trim()?`"${title.trim().slice(0,100)}"`+(destination.includes('/topic/')?' (a topic)':''):'another Telegram chat';
+    return typeof title==='string'&&title.trim()?`"${title.trim().slice(0,100)}"`:'a Telegram group';
   }
-  /** The exact content an owner decides on, or null when it is too long to review in Telegram. */
-  private async card(kind:ActionKind,id:string,place:Place):Promise<{text:string;fingerprint:string;state:string}|null> {
-    const owner={admin:true,scope:null};
+  /** The exact content an owner decides on, or null when it is too long to review in Telegram.
+   * Cards always go to the owner's private chat. */
+  private async card(kind:ActionKind,id:string,source:any):Promise<{text:string;fingerprint:string;state:string}|null> {
+    const owner={admin:true,scope:null},from=await this.origin(source),asked=from?`Asked in ${await this.title(from)}.\n`:'';
     if(kind==='telegram') {
-      const action=await this.telegram.inspect(owner,id);
-      return {text:`Send this message to ${await this.label(action.arguments.destination,place)}?\n\n${action.arguments.text}`,fingerprint:action.fingerprint,state:action.state};
+      const action=await this.telegram.inspect(owner,id),destination=String(action.arguments.destination);
+      const topic=destination.includes('/topic/')?' (a topic)':'';
+      return {text:`${asked}Send this message to ${await this.title(destination.split('/topic/')[0]!)}${topic}?\n\n${action.arguments.text}`,fingerprint:action.fingerprint,state:action.state};
     }
     const action=await this.tools.inspect(owner,id),args=canonical(action.arguments);
     if(args.length>reviewLimit)return null;
-    return {text:`Allow this ${action.kind}?\n\n${args}`,fingerprint:action.fingerprint,state:action.state};
+    return {text:`${asked}Allow this ${action.kind}?\n\n${args}`,fingerprint:action.fingerprint,state:action.state};
   }
   private outcome(kind:ActionKind,state:string) {
     if(state==='proposed')return null;
@@ -63,9 +57,11 @@ export class ActionCommandRepository {
     if(['failed','ambiguous'].includes(state))return 'Approved. See the dashboard Inbox for the result.';
     return kind==='telegram'?'Approved. Sending now.':'Approved.';
   }
-  /** Offer buttons on a new pending action; best effort, the Inbox always remains. */
+  /** Offer buttons on a new pending action in the owner's private chat; best
+   * effort, the Inbox always remains. */
   async offer<T extends Record<string,any>>(kind:ActionKind,result:T):Promise<T> {
-    if(result?.state!=='proposed'||typeof result.id!=='string'||!this.call)return result;
+    const owner=this.access.policy().owner_id;
+    if(result?.state!=='proposed'||typeof result.id!=='string'||!this.call||!owner)return result;
     try {
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions',control=this.access.stores.control;
       const row=(await control.query(`SELECT * FROM ${table} WHERE id=$1`,[result.id])).rows[0];if(!row)return result;
@@ -73,25 +69,24 @@ export class ActionCommandRepository {
       // blocks it anyway, and a standing permission runs it without a decision.
       const effect:Effect=kind==='telegram'?{id:row.id,kind:'telegram.send',scope:row.scope,profile:row.profile,fingerprint:row.fingerprint}:this.tools.effect(row);
       if((await evaluate(control,effect)).outcome!=='ask'||kind==='controlled'&&(await this.tools.grants(row)).length)return result;
-      const place=await this.place(row.source_reference,row.destination??null),card=place?await this.card(kind,result.id,place):null;
-      if(!place||!card||card.state!=='proposed')return result;
-      const sent=await this.approval({kind:'card',...place,id:result.id,text:card.text,
+      const card=await this.card(kind,result.id,row.source_reference);
+      if(!card||card.state!=='proposed')return result;
+      const sent=await this.approval({kind:'card',chat_id:owner,id:result.id,text:card.text,
         buttons:[['Approve','na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],['Reject','nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
       if(sent?.state!=='done')return result;
-      return {...result,message:(place.chat_id===this.access.policy().owner_id?
-        'Approve and Reject buttons for this exact request were sent to the owner\'s private chat. ':
-        'Approve and Reject buttons for this exact request were posted in this chat; only the owner can press them. ')+
-        'It waits for the owner; it can also be reviewed in the dashboard Inbox.'};
+      return {...result,message:await this.origin(row.source_reference)?
+        'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner; do not show the draft or details.':
+        'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
   /** Show the decision on a card and remove its buttons; best effort. */
-  async settle(kind:ActionKind,id:string,at?:Place) {
+  async settle(kind:ActionKind,id:string) {
+    const owner=this.access.policy().owner_id;if(!owner)return;
     try {
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
-      const row=(await this.access.stores.control.query(`SELECT source_reference${kind==='telegram'?',destination':''} FROM ${table} WHERE id=$1`,[id])).rows[0];
-      const place=at??(row?await this.place(row.source_reference,row.destination??null):null),card=place?await this.card(kind,id,place):null;
-      const outcome=card?this.outcome(kind,card.state):null;
-      if(place&&card&&outcome)await this.approval({kind:'settle',...place,id,text:`${card.text}\n\n${outcome}`});
+      const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
+      const card=row?await this.card(kind,id,row.source_reference):null,outcome=card?this.outcome(kind,card.state):null;
+      if(card&&outcome)await this.approval({kind:'settle',chat_id:owner,id,text:`${card.text}\n\n${outcome}`});
     }catch(error){if(!(error instanceof HttpError))throw error;}
   }
   /** A button press: true when it was an approval button, whatever its outcome. */
@@ -118,8 +113,7 @@ export class ActionCommandRepository {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
       reply='This request was already decided or can no longer change. Review it in the dashboard Inbox.';
     }
-    const topic=query.message?.is_topic_message===true&&Number.isSafeInteger(query.message.message_thread_id)?String(query.message.message_thread_id):undefined;
-    await answer(reply);await this.settle(kind,action.id,{chat_id:chat,...(topic?{topic}:{})});return true;
+    await answer(reply);await this.settle(kind,action.id);return true;
   }
   async controlReply(source:SourceReference):Promise<string|null> {
     const original=await this.access.archive.verify(source);
