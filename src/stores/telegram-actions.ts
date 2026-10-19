@@ -140,10 +140,28 @@ export class TelegramActionRepository {
     const policy=this.access.policy();
     return policy.group_ids.filter(group=>user===policy.owner_id||!!policy.group_access?.[group]?.granted.includes(user)&&!policy.group_access[group]!.denied.includes(user));
   }
-  private sameGroup(principal:Reader,turn:{owner?:boolean;job?:string|null},destination:string,requester:string|null) {
-    if(!requester||turn.owner||turn.job||!principal.scope||!principal.space||principal.purpose&&principal.purpose!=='assistant')return false;
+  /** Why a live group request needs no approval, or null: a post in the same
+   * group, or the owner's own request for their private chat, which already
+   * sees everything. */
+  private groupRequest(principal:Reader,turn:{owner?:boolean;job?:string|null},destination:string,requester:string|null) {
+    if(!requester||turn.owner||turn.job||!principal.scope||!principal.space||principal.purpose&&principal.purpose!=='assistant')return null;
+    const policy=this.access.policy();
+    if(requester===policy.owner_id&&destination===policy.owner_id)return 'owner_private_request';
     // With separate topic memory a topic is its own audience; otherwise the whole group is.
-    return this.access.policy().topic_memory==='topic'?destination===principal.space:destination.split('/topic/')[0]===principal.scope;
+    return (policy.topic_memory==='topic'?destination===principal.space:destination.split('/topic/')[0]===principal.scope)?'same_group_request':null;
+  }
+  /** A message from one group to another, or from one topic to another when
+   * topics keep separate memory, is reviewed by the person who asked when they
+   * are allowed in both: the approval only lets them see what will be sent. The
+   * owner reviews everything else, including their own requests. */
+  async reviewer(id:string):Promise<{user:string;space:string}|null> {
+    const row=(await this.stores.control.query('SELECT source_reference,space_id,destination FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
+    const source=row?.source_reference;if(source?.store!=='archive'||!row.space_id)return null;
+    const original=await this.access.archive.verify(source);if(original.origin!=='live'||original.channel!=='telegram')return null;
+    const user=await this.requester(source.id,original.scope),target=String(row.destination).split('/topic/')[0]!;
+    // A same-audience post never waits, so a pending one here crosses groups or separate topics.
+    if(!user||user===this.access.policy().owner_id||String(row.destination)===row.space_id||!this.allowedGroups(user).includes(target))return null;
+    return {user,space:row.space_id};
   }
   /** The groups where a live group turn's writer is allowed, with their known names, for exact destinations. */
   async destinations(principal:Reader) {
@@ -184,9 +202,10 @@ export class TelegramActionRepository {
       // same group: the group's memory is all such a turn can read, so the post
       // reveals nothing a reply there could not. A message built from one
       // group's memory for another group waits for the owner. Deny rules still
-      // apply first.
+      // apply first. The owner's own request from a group for their private
+      // chat needs no approval either.
       const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
-        (this.sameGroup(principal,turn,destination,requester)?'same_group_request':await ownerAutonomyGrant(db,principal,turn)):null;
+        (this.groupRequest(principal,turn,destination,requester)??await ownerAutonomyGrant(db,principal,turn)):null;
       if(autonomy)decision=await evaluate(db,effect,autonomy);
       await recordEffect(db,effect,'proposed',decision,source);
       if(autonomy&&decision.outcome==='allow') {
@@ -195,7 +214,8 @@ export class TelegramActionRepository {
         await db.query(`INSERT INTO telegram_action_decisions(operation_id,request_hash,action_id,decision,revision,source_reference)
           VALUES($1,$2,$3,'approve',$4,$5) ON CONFLICT DO NOTHING`,['owner-autonomy:'+id,hash,id,revision,source]);
         await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
-        await db.query('COMMIT');return {id,state:'approved',fingerprint,message:autonomy!=='same_group_request'?'Approved by your own request under the owner freedom setting; sending now.':
+        await db.query('COMMIT');return {id,state:'approved',fingerprint,message:autonomy==='owner_private_request'?'Approved: this goes to the owner\'s own private chat, so it is being sent there now. Confirm in one short sentence without repeating the message.':
+          autonomy!=='same_group_request'?'Approved by your own request under the owner freedom setting; sending now.':
           destination===principal.space?'Approved: you were asked here for a message to this same chat, so it is being posted now. Do not repeat or announce it; return [NO_REPLY] unless something else needs an answer.':
           'Approved: this is for the same group, so it is being posted there now. Confirm in one short sentence without repeating the message.'};
       }

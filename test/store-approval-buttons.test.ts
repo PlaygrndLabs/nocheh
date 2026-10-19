@@ -53,11 +53,28 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(general.state,'approved','the whole group is one audience by default');assert.match(general.message,/Confirm in one short sentence/);
     topicMemory='topic';
     const shut=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Another topic'}));
-    assert.equal(shut.state,'proposed','with separate topic memory another topic needs the owner');assert.equal(last('card').chat_id,'123');
+    assert.equal(shut.state,'proposed','with separate topic memory another topic is reviewed like another group');
+    assert.deepEqual([last('card').chat_id,last('card').topic],[group,'17'],'by the person who asked, under their request');
     topicMemory='group';
     const across=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:other+'/topic/4',text:'For the other group'}));
-    assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for the owner, even where that person is allowed');
-    assert.match(last('card').text,/^Asked in a Telegram group\.\nSend this message to a Telegram group \(a topic\)\?\n\nFor the other group$/);
+    assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for a review');
+    // The person who asked, allowed in both groups, reviews it under their request in their own group and topic.
+    const reviewCard=last('card');
+    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text],[group,'17','📨 Send to a Telegram group (a topic)\n\nFor the other group'],'no "Asked in" line on a card in the chat where it was asked');
+    assert.match(across.message,/posted here with Approve and Reject buttons for the person who asked/);
+    const reviewApprove='na'+across.id.slice(0,40)+across.fingerprint.slice(0,16);
+    assert.equal(await s.actionCommands.callback(await press('other-member',reviewApprove,8)),true);
+    assert.equal(last('answer').text,'Only the person who asked or the owner can approve or reject this.');
+    assert.equal((await s.telegramActions.inspect(owner,across.id)).state,'proposed','another member\'s press decides nothing');
+    assert.equal(await s.actionCommands.callback(await press('requester',reviewApprove,9)),true);
+    assert.equal((await s.telegramActions.inspect(owner,across.id)).state,'approved','the person who asked approves their own cross-group message');
+    assert.deepEqual([last('settle').chat_id,last('settle').text],[group,reviewCard.text+'\n\n⏳ Approved. Sending now.']);
+    const ownerAcross=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor((await message('owner-across',{},123)).id,group),{destination:other,text:'Owner to the other group'}));
+    const ownerSelf=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor((await message('owner-self',{},123)).id,group),{destination:'123',text:'Note to myself'}));
+    assert.equal(ownerSelf.state,'approved','the owner\'s own request from a group for their private chat needs no approval');assert.match(ownerSelf.message,/owner's own private chat/);
+    assert.equal(ownerAcross.state,'proposed');assert.deepEqual([last('card').chat_id,last('card').topic],['123',undefined],'the owner\'s own cross-group request comes to their private chat');
+    const shutAcross=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:closed,text:'Not allowed there'}));
+    assert.equal(shutAcross.state,'proposed');assert.equal(last('card').chat_id,'123','a group where the person asking is not allowed goes to the owner');
     await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
       VALUES($1,'available','supergroup','Design team',NULL,true,NULL,now()) ON CONFLICT DO NOTHING`,[other]);
     assert.deepEqual((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups,
@@ -70,8 +87,8 @@ test('allowed members post freely in their own group; everything else waits for 
     const elsewhere=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(plain.id,group),{destination:'123',text:'Exact private message'}));
     const card=last('card');
     assert.deepEqual([card.chat_id,card.topic,card.id],['123',undefined,elsewhere.id]);
-    assert.equal(card.text,'Asked in a Telegram group.\nSend this message to your private chat?\n\nExact private message');
-    assert.deepEqual(card.buttons,[['Approve','na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)],['Reject','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)]]);
+    assert.equal(card.text,'📨 Send to your private chat\n💬 Asked in a Telegram group\n\nExact private message');
+    assert.deepEqual(card.buttons,[['✅ Approve','na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)],['❌ Reject','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)]]);
     assert.ok(card.buttons.every((pair:string[])=>Buffer.byteLength(pair[1]!)<=64));
     assert.match(elsewhere.message,/say only, briefly, that you asked the owner; do not show the draft/);
     const approve='na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16);
@@ -85,26 +102,26 @@ test('allowed members post freely in their own group; everything else waits for 
     const pressed=await press('owner',approve);
     assert.equal(await s.actionCommands.callback(pressed),true);
     assert.equal((await s.telegramActions.inspect(owner,elsewhere.id)).state,'approved');
-    assert.equal(last('answer').text,'Approved.');
-    assert.deepEqual([last('settle').id,last('settle').chat_id,last('settle').text],[elsewhere.id,'123',card.text+'\n\nApproved. Sending now.']);
-    assert.equal(await s.actionCommands.callback(pressed),true);assert.equal(last('answer').text,'Approved.','a repeated delivery of one press is one decision');
+    assert.equal(last('answer').text,'✅ Approved.');
+    assert.deepEqual([last('settle').id,last('settle').chat_id,last('settle').text],[elsewhere.id,'123',card.text+'\n\n⏳ Approved. Sending now.']);
+    assert.equal(await s.actionCommands.callback(pressed),true);assert.equal(last('answer').text,'✅ Approved.','a repeated delivery of one press is one decision');
     // A press reaching the reply workflow is handled there and never becomes a turn.
     await s.preparation.run(pressed.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     assert.equal((await s.telegram.run(pressed.id,await epoch('telegram'))).state,'skipped');
     assert.deepEqual((await stores.control.query('SELECT state,error_code FROM dispatches WHERE event_id=$1',[pressed.id])).rows[0],{state:'suppressed',error_code:'approval_button'});
     // Once the approved message is sent, the card says so.
     assert.equal((await storageWorkflowOperations(s,async()=>({})).actions!(elsewhere.id,await epoch('actions'))).state,'completed');
-    assert.equal(last('settle').text,card.text+'\n\nApproved and sent.');
+    assert.equal(last('settle').text,card.text+'\n\n✅ Approved and sent.');
     assert.equal(await s.actionCommands.callback(await press('reject-late','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16))),true);
     assert.match(last('answer').text,/already decided/);assert.equal((await s.telegramActions.inspect(owner,elsewhere.id)).state,'done');
     assert.equal(await s.actionCommands.callback(await press('reject','nd'+shut.id.slice(0,40)+shut.fingerprint.slice(0,16))),true);
     assert.equal((await s.telegramActions.inspect(owner,shut.id)).state,'rejected');
-    assert.match(last('settle').text,/\n\nRejected\. Nothing was sent\.$/);
+    assert.match(last('settle').text,/\n\n❌ Rejected\. Nothing was sent\.$/);
     // A controlled operation from a group is never approved by the request; its card also goes to the owner.
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
-    assert.equal(last('card').chat_id,'123');assert.match(last('card').text,/^Asked in a Telegram group\.\nAllow this shell\?\n\n\{/);assert.match(tool.message,/asked the owner/);
+    assert.equal(last('card').chat_id,'123');assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in a Telegram group\n\n\{/);assert.match(tool.message,/asked the owner/);
     assert.equal(await s.actionCommands.callback(await press('tool','na'+tool.id.slice(0,40)+tool.fingerprint.slice(0,16))),true);
-    assert.equal((await s.controlledActions.inspect(owner,tool.id)).state,'approved');assert.match(last('settle').text,/\n\nApproved\.$/);
+    assert.equal((await s.controlledActions.inspect(owner,tool.id)).state,'approved');assert.match(last('settle').text,/\n\n✅ Approved\.$/);
     // A standing permission runs the same operation without a decision, so no buttons are offered.
     await s.controlledActions.grant(owner,{action_id:tool.id,fingerprint:tool.fingerprint,uses:1,minutes:5});
     const again=await message('again'),offered=cards.length;
@@ -125,6 +142,15 @@ test('allowed members post freely in their own group; everything else waits for 
     await s.preparation.run(member.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     await s.telegram.run(member.id,await epoch('telegram')).catch(()=>{});
     assert.equal(refusals.length,allowed,'an allowed member is never refused');
+    // The owner's card template and texts from Settings are used; a line they left out keeps its default.
+    await stores.control.query(`UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton`,[JSON.stringify({
+      'telegram.approval_card':'To {destination} (from {origin}):\n{text}','telegram.approval_texts':'approve: Yes, send\nsent: Sent!'})]);
+    const styled=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor((await message('styled')).id,group),{destination:'123',text:'Styled'}));
+    assert.equal(last('card').text,'To your private chat (from a Telegram group):\nStyled');
+    assert.deepEqual(last('card').buttons.map((pair:string[])=>pair[0]),['Yes, send','❌ Reject']);
+    assert.equal(await s.actionCommands.callback(await press('styled-yes','na'+styled.id.slice(0,40)+styled.fingerprint.slice(0,16))),true);
+    await storageWorkflowOperations(s,async()=>({})).actions!(styled.id,await epoch('actions'));
+    assert.equal(last('settle').text,'To your private chat (from a Telegram group):\nStyled\n\nSent!');
     // Without a reachable runtime the request still waits for the Inbox.
     const sent=cards.length,quiet=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
       runtime:async(operation)=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime unavailable');},honcho:async()=>{throw Error('no memory provider');}});
