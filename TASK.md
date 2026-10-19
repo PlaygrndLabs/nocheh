@@ -379,7 +379,12 @@ not yet run on the owner's installation:
   without a turn ([decision](docs/adr/0159-group-members-post-freely-and-approvals-go-private.md),
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)). Not yet run on the
-  owner's installation. The owner then decided that an allowed member reviews
+  owner's installation. Live check on the owner's installation (October 19,
+  with this change and the quote fix): a same-group post went out once with no
+  card and no other reply; a request in the group for the owner's private chat
+  put one card in the private chat and one short note in the group, and the
+  owner's button press delivered the message once about 4 seconds later, with
+  the card showing the outcome. The owner then decided that an allowed member reviews
   their own message to another group where they are also allowed, or to
   another topic when topics keep separate memory: the card
   appears under the request in the group, and only that member or the owner
