@@ -282,6 +282,18 @@ keeps the time it was learned ([native memory](src/stores/native-memory.ts),
 [check](test/store-native-memory.test.ts)). Messages written earlier keep their
 write time until their session is rebuilt.
 
+Honcho learning query limit (October 19): one group-topic interpretation job
+failed on every retry with `honcho_upstream_rejected`. Its learning query was
+11,107 characters, and the pinned Honcho rejects a reasoning query over 10,000
+characters before any model call. Applicable rules (3.6–4.5k) and the learning
+instruction (3.5k) leave about 2k for observations, and successful jobs reached
+9,757. The query now fits the limit: other evidence keeps only its text, then
+rules are left out from the end, then the trigger keeps only its text, each
+named in the query's limitations; an input that still cannot fit closes as
+`input_limit` instead of retrying ([learning engine](src/stores/learning-engine.ts),
+[check](test/learning-workflow.test.ts)). Honcho rejections now log their status,
+route and failing field without content ([client](src/honcho.ts)).
+
 Deep check for hidden data and failure gaps (October 18), verified locally with
 synthetic PostgreSQL, not yet run on the owner's installation:
 - A reply chain in an ordinary group carries a thread number but is not a topic;
