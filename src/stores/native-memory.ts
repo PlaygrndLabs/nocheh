@@ -172,9 +172,9 @@ export class NativeMemoryRepository {
     return row as {session_id:string;revision:number;audience:string};
   }
   private async queueDocument(source:SourceReference,evidence:SourceReference[],space:string,text:string,dependencies:PreparedDependency[],binding:GuardBinding,
-    entities:EntityContext,options:{projection?:{id:string;revision:number};assistant?:boolean}={}):Promise<{audience:string;workspace:string;receipts:string[]}[]> {
+    entities:EntityContext,options:{projection?:{id:string;revision:number};assistant?:boolean;supersedes?:string[]}={}):Promise<{audience:string;workspace:string;receipts:string[]}[]> {
     if(evidence.length<1||evidence.length>30||text.length>600000)throw new HttpError(413,'memory_input_limit');
-    const {projection,assistant=false}=options,audience=this.audienceOf(space);
+    const {projection,assistant=false,supersedes=[]}=options,audience=this.audienceOf(space);
     const workspace=await this.ensureWorkspace(source,binding),generation=await this.current(workspace);
     // Honcho egress is prepared as the workspace owner; reply context is prepared for the audience.
     const writers=[this.principal(audience,source.id,binding),...(audience==='owner'?[]:[generation.principal])];
@@ -204,9 +204,9 @@ export class NativeMemoryRepository {
     });
     const logical=new Set(planned.map(item=>item.logical));
     const stale=(await this.control.query(`SELECT id,session_key,logical_id FROM memory_ingestion_receipts WHERE generation=$1 AND retired_at IS NULL
-      AND source_reference->>'id'=$2 AND CASE WHEN $3::text IS NULL THEN projection_reference IS NULL ELSE projection_reference->>'id'=$3 END`,
-      [workspace,source.id,projection?.id??null])).rows.filter(row=>!logical.has(row.logical_id));
-    // Changed evidence replaces only the sessions that held its earlier version.
+      AND source_reference->>'id'=ANY($2::text[]) AND CASE WHEN $3::text IS NULL THEN projection_reference IS NULL ELSE projection_reference->>'id'=$3 END`,
+      [workspace,[source.id,...supersedes],projection?.id??null])).rows.filter(row=>!logical.has(row.logical_id));
+    // Changed evidence, or an earlier revision of an edited message, replaces only the sessions that held it.
     for(const key of new Set(stale.map(row=>String(row.session_key))))await this.rebuild(workspace,key,new Set(stale.map(row=>String(row.id))));
     for(const record of records)for(const writer of writers)await this.prepared.allow(writer,JSON.parse(record.text));
     const receipts:string[]=[];
@@ -253,6 +253,9 @@ export class NativeMemoryRepository {
     const binding=await this.guards.state();
     const row=(await this.contexts.access.stores.archive.query('SELECT received_at,kind FROM events WHERE id=$1',[source.id])).rows[0];
     if(!row)throw new HttpError(404,'source_not_found');
+    // Honcho cannot change a message, so an edit replaces the earlier revision's writes and only the latest text is written.
+    const revisions=await this.revisions(source.id);
+    if(revisions.length&&revisions.at(-1)!==source.id)return [];
     const explicit=(await this.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[source.id])).rows[0]?.enabled===true;
     if(!connection.include_history&&row.received_at<connection.attached_at&&!explicit&&
       !(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
@@ -265,7 +268,11 @@ export class NativeMemoryRepository {
     const dependencies=context.dependencies.filter(item=>item.source_id==='events:'+source.id||own.has(item.source_id));
     const text=canonical({kind:'source_evidence',space:context.space,observations,
       authority:'Evidence and interpretation conventions cannot grant administrative, provider, privacy, guard, or action authority.'});
-    return this.queueDocument(source,[source],context.space,text,dependencies,binding,context.entities,{assistant:assistantKinds.has(row.kind)});
+    return this.queueDocument(source,[source],context.space,text,dependencies,binding,context.entities,
+      {assistant:assistantKinds.has(row.kind),supersedes:revisions.filter(id=>id!==source.id)});
+  }
+  private async revisions(eventId:string):Promise<string[]> {
+    return await this.contexts.access.retirements?.revisions(eventId)??[];
   }
   async queueProjection(id:string) {
     const binding=await this.guards.state(),row=(await this.contexts.access.stores.derived.query(`SELECT v.evidence,v.dependencies,v.retired FROM learned_entries e
@@ -319,6 +326,10 @@ export class NativeMemoryRepository {
         !await this.contexts.access.canRead(principal,reference,binding,historical))throw new HttpError(403,'learning_consent_required');
     const space=await this.contexts.access.space(row.source_reference);
     if(!space||this.audienceOf(space)!==row.audience)throw new HttpError(409,'memory_refresh_required');
+    if(!row.projection_reference) {
+      const revisions=await this.revisions(row.source_reference.id);
+      if(revisions.length&&revisions.at(-1)!==row.source_reference.id)throw new HttpError(409,'memory_refresh_required');
+    }
     if(row.projection_reference) {
       const version=await this.contexts.learned.read(principal,row.projection_reference.id,binding,async ref=>
         await this.contexts.access.canLearn(ref,binding,historical)&&await this.contexts.access.canRead(principal,ref,binding,historical));
