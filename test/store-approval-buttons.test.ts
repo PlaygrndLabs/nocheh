@@ -70,6 +70,8 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal((await s.telegramActions.inspect(owner,across.id)).state,'approved','the person who asked approves their own cross-group message');
     assert.deepEqual([last('settle').chat_id,last('settle').text],[group,reviewCard.text+'\n\nApproved. Sending now.']);
     const ownerAcross=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor((await message('owner-across',{},123)).id,group),{destination:other,text:'Owner to the other group'}));
+    const ownerSelf=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor((await message('owner-self',{},123)).id,group),{destination:'123',text:'Note to myself'}));
+    assert.equal(ownerSelf.state,'approved','the owner\'s own request from a group for their private chat needs no approval');assert.match(ownerSelf.message,/owner's own private chat/);
     assert.equal(ownerAcross.state,'proposed');assert.deepEqual([last('card').chat_id,last('card').topic],['123',undefined],'the owner\'s own cross-group request comes to their private chat');
     const shutAcross=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:closed,text:'Not allowed there'}));
     assert.equal(shutAcross.state,'proposed');assert.equal(last('card').chat_id,'123','a group where the person asking is not allowed goes to the owner');
