@@ -10,14 +10,16 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 
-test('allowed members post freely in their own group; everything else waits for the owner\'s button in their private chat',
+test('allowed members post freely in groups where they are allowed; everything else waits for the owner\'s button in their private chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-approval-buttons-')),key='approval-buttons:'+Date.now(),group='-'+Date.now();
-  const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],refusals:Record<string,any>[]=[];let updates=0,topicMemory:'group'|'topic'='group';
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:topicMemory});
+  const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],refusals:Record<string,any>[]=[];let updates=0;
+  const other=group+'1',closed=group+'2';
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other,closed],
+    group_access:{[group]:{granted:['9'],denied:[]},[other]:{granted:['9'],denied:[]},[closed]:{granted:[],denied:['9']}},topic_memory:'topic' as const});
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -42,16 +44,23 @@ test('allowed members post freely in their own group; everything else waits for 
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     const epoch=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
-    // An allowed member's request for a post in the same group is approved by the request, in any topic of the group.
+    // An allowed member's request for a post in a group where they are allowed is approved by the request, in any topic.
     const topic=await message('topic',{message_thread_id:17,is_topic_message:true});
     const here=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:'current',text:'Exact group message'}));
     assert.equal(here.state,'approved');assert.match(here.message,/\[NO_REPLY\]/);assert.equal(cards.length,0,'no card for a post in the same group');
     const general=await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Exact General message'});
-    assert.equal(general.state,'approved','the whole group is one audience by default');
-    topicMemory='topic';
-    const otherTopic=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Another topic'}));
-    assert.equal(otherTopic.state,'proposed','with separate topic memory another topic needs the owner');
-    topicMemory='group';
+    assert.equal(general.state,'approved','another topic of the same group, even with separate topic memory');
+    const across=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:other+'/topic/4',text:'For the other group'}));
+    assert.equal(across.state,'approved','a group where the same person is also allowed');assert.match(across.message,/Confirm in one short sentence/);
+    const shut=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:closed,text:'Not allowed there'}));
+    assert.equal(shut.state,'proposed','a group where that person is not allowed waits for the owner');assert.equal(last('card').chat_id,'123');
+    await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
+      VALUES($1,'available','supergroup','Design team',NULL,true,NULL,now()) ON CONFLICT DO NOTHING`,[other]);
+    assert.deepEqual((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups,
+      [{destination:group,name:null,current:true},{destination:other,name:'Design team',current:false}],'only the groups where the person asking is allowed');
+    await assert.rejects(s.telegramActions.destinations(owner),{status:403});
+    const ownerTurn=await message('owner-in-group',{},123);
+    assert.equal((await s.telegramActions.destinations(await actor(ownerTurn.id,group))).groups.length,3,'the owner is allowed in every group');
     // A message for another chat waits for the owner, with the card in the owner's private chat only.
     const plain=await message('plain');
     const elsewhere=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(plain.id,group),{destination:'123',text:'Exact private message'}));
@@ -84,8 +93,8 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(last('settle').text,card.text+'\n\nApproved and sent.');
     assert.equal(await s.actionCommands.callback(await press('reject-late','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16))),true);
     assert.match(last('answer').text,/already decided/);assert.equal((await s.telegramActions.inspect(owner,elsewhere.id)).state,'done');
-    assert.equal(await s.actionCommands.callback(await press('reject','nd'+otherTopic.id.slice(0,40)+otherTopic.fingerprint.slice(0,16))),true);
-    assert.equal((await s.telegramActions.inspect(owner,otherTopic.id)).state,'rejected');
+    assert.equal(await s.actionCommands.callback(await press('reject','nd'+shut.id.slice(0,40)+shut.fingerprint.slice(0,16))),true);
+    assert.equal((await s.telegramActions.inspect(owner,shut.id)).state,'rejected');
     assert.match(last('settle').text,/\n\nRejected\. Nothing was sent\.$/);
     // A controlled operation from a group is never approved by the request; its card also goes to the owner.
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
