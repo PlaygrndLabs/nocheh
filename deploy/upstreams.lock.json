@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "python": "3.11.16",
-  "uv_tested": "0.12.7",
+  "python": "3.11.17",
+  "uv_tested": "0.12.24",
   "hermes": {
     "repository": "https://github.com/NousResearch/hermes-agent.git",
     "revision": "7166071fcaadb36df26f6d753dda97da6b5d699e",
@@ -10,12 +10,12 @@
   },
   "note": "Pins identify candidates under test. See the evidence report for actual compatibility results.",
   "inngest": {
-    "sdk": "4.20.0",
+    "sdk": "4.25.0",
     "version": "1.44.0",
     "image": "inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2"
   },
   "workflow_redis": {
     "version": "7.4.11",
-    "image": "redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7"
+    "image": "redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85"
   }
 }

@@ -2,7 +2,7 @@
 name: ${NOCHEH_FIXTURE_PROJECT:?Unique fixture project required}
 services:
   database:
-    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    image: postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
     environment:
       POSTGRES_USER: nocheh
       POSTGRES_DB: nocheh
