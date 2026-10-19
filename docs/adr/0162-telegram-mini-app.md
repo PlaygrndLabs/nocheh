@@ -1,4 +1,4 @@
-# ADR-0161: The Telegram mini app
+# ADR-0162: The Telegram mini app
 
 <status>
 Accepted on 2026-10-19. The owner asked for a Telegram mini app to manage
