@@ -408,7 +408,7 @@ class Administration:
                     import urllib.request
                     with urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=3) as response: live = json.load(response)
                     running = live.get('telegram') == 'connected'
-                    result = {'version': '0.21.0', 'release_date': '', 'active_sessions': 0,
+                    result = {'version': '0.22.2', 'release_date': '', 'active_sessions': 0,
                               'config_version': 1, 'latest_config_version': 1, 'config_path': str(home / 'config.yaml'),
                               'env_path': 'Managed by Nocheh', 'hermes_home': str(home),
                               'gateway_running': running, 'gateway_state': 'running' if running else 'stopped',
@@ -459,7 +459,8 @@ def create_app(root, model, policy, token, browser_enabled=False, revision_reade
     native._SESSION_TOKEN = token
     from hermes_cli import web_server_chat
     from .browser_launch import launch
-    web_server_chat._resolve_chat_argv = lambda **kwargs: launch(app,**kwargs)
+    # Each profile has one managed workspace; a workspace picked for a new chat is not applied.
+    web_server_chat._resolve_chat_argv = lambda workspace_cwd=None, **kwargs: launch(app,**kwargs)
     native._DASHBOARD_EMBEDDED_CHAT_ENABLED = browser_enabled
     native.app.state.bound_port = 8785
     native.app.state.bound_host = '127.0.0.1'
