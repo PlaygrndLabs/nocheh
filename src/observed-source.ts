@@ -1,4 +1,5 @@
 import {canonical,digest,type Envelope} from './archive.js';
+import {telegramTopicId} from './spaces.js';
 import {legacySource,sourceDescriptor,type SourceDescriptor,type SourceIdentity,type SourceRelation} from './source-model.js';
 
 const record=(v:unknown):Record<string,any>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,any>:{};
@@ -20,8 +21,11 @@ function reactionList(value:unknown):Record<string,unknown>[]|null {
   return value;
 }
 export function telegramMessageAudience(message:Record<string,any>,chatId:string):ObservedAudience {
-  const thread=external(message.message_thread_id),chat=record(message.chat);
+  const thread=external(telegramTopicId(message)),chat=record(message.chat);
   if(thread)return {chat_id:chatId,topic_state:'known',topic_id:thread};
+  // A reply chain's id in a chat that is provably not a forum is not a topic.
+  if(external(message.message_thread_id)&&message.is_topic_message!==true&&
+    (chat.type==='group'||chat.type==='private'||chat.type==='supergroup'&&chat.is_forum!==true))return {chat_id:chatId,topic_state:'none'};
   // Bot API omits both topic fields for General (see Client::get_forum_topic_id
   // and Client::is_topic_message). An incomplete/malformed topic marker is not
   // General. Reactions never enter this message-only normalization path.

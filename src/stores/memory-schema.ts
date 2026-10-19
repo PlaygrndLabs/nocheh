@@ -16,6 +16,7 @@ ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS root_reference jsonb;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS root_space text;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS last_ready_at timestamptz;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS error_code text;
+ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS derivation_checked_at timestamptz;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS work_revision integer NOT NULL DEFAULT 1;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS representation_version text NOT NULL DEFAULT 'legacy-source-v1';
 ALTER TABLE memory_generations DROP CONSTRAINT IF EXISTS memory_generations_installation_generation_guard_epoch_audience_key;
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS memory_ingestion_receipts (
  next_attempt timestamptz NOT NULL DEFAULT now(),created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS peer_id text NOT NULL DEFAULT 'source';
+ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS uncertain_at timestamptz;
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS peer_ids jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS session_id text;
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS subject_entity_id text;

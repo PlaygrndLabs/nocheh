@@ -12,11 +12,11 @@ import type {Reader} from '../src/access.js';
 test('real PostgreSQL: shares, topic isolation, filtering, private provenance and revocation across all reads',{skip:!process.env.PGHOST},async()=>{
  const admin=new pg.Pool(),namespace=`sharing_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);
  const pool=new pg.Pool({options:`-c search_path=${namespace}`});
- const base:Envelope={version:1,key:'topic:1',scope:'-20',bot_id:'fixture',source_id:'1',revision:'1',origin:'import',kind:'telegram_update',occurred_at:null,text:'Juniper topic one',payload:{message:{message_thread_id:1}}};
+ const base:Envelope={version:1,key:'topic:1',scope:'-20',bot_id:'fixture',source_id:'1',revision:'1',origin:'import',kind:'telegram_update',occurred_at:null,text:'Juniper topic one',payload:{message:{message_thread_id:1,is_topic_message:true}}};
  const principal=async(space:string):Promise<Reader>=>({scope:'-20',space,revision:(await spacePolicy(pool,space)).revision,admin:false});
  const unused=async()=>{throw Error('filter must not run');};
  try{await initialize(pool);
-  const a=await ingest(pool,base),b=await ingest(pool,{...base,key:'topic:2',text:'Juniper topic two',payload:{message:{message_thread_id:2}}});
+  const a=await ingest(pool,base),b=await ingest(pool,{...base,key:'topic:2',text:'Juniper topic two',payload:{message:{message_thread_id:2,is_topic_message:true}}});
   const secret=await ingest(pool,{...base,key:'private',scope:'123',text:'Juniper: private medical appointment',payload:{}});
   const draft=await ingest(pool,{...base,key:'draft',origin:'generated',text:'Juniper unposted draft'});
   let who=await principal('-20/topic/1');

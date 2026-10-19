@@ -125,6 +125,12 @@ test('idle superseded source workflows retire without touching leases, receipts 
     const honchoAfter=await advanceWorkflow(pool,honchoPost.old,1,'honcho','supersession-honcho-post',async()=>
       observation('waiting','sync',0,Date.now()+1000,'prerequisite'));
     assert.equal(honchoAfter.state,'skipped');
+    // An observation the boundary refuses closes its workflow as failed instead of leaving it open.
+    const refused=await pair(source('refused'));
+    const closed=await advanceWorkflow(pool,refused.current,1,'memory_review','refused-observation',async()=>
+      ({...observation('cancelled','action'),waiting_reason:'not_a_boundary_reason'}));
+    assert.equal(closed.state,'failed');
+    assert.equal((await pool.query('SELECT state,lease_token FROM workflow_registry WHERE id=$1',[refused.current])).rows[0].state,'failed');
   } finally {await stores.close();}
 });
 
@@ -152,7 +158,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       if(path.endsWith('/messages')){sends++;const record={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[...(remote.get(path)??[]),record]);if(loseReply){loseReply=false;throw Error('lost response');}return [record];}
       if(path.includes('/queue/status?'))return {pending_work_units:0,in_progress_work_units:0};
       if(path.endsWith('/queue/status')){const run=duringObserve;duringObserve=undefined;await run?.();return {pending_work_units:0,in_progress_work_units:0};}
-      if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
+      if(path.includes('/nocheh/queue-health'))return {failed_items:false};
       if(path.endsWith('/nocheh/session-descendants'))return {ids:[],truncated:false};
       if(path.includes('/context?'))return {summary:{content:'Synthetic review context'}};
       if(path.endsWith('/representation'))return {representation:'Synthetic review context'};

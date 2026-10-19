@@ -14,7 +14,7 @@ from unittest.mock import patch
 from telegram.ext import Application,ExtBot
 from telegram.request import BaseRequest
 from gateway.config import PlatformConfig
-from .assistant_gateway import AssistantGateway,committed_adapter_class,render_reply_citations,TURN
+from .assistant_gateway import AssistantGateway,committed_adapter_class,delivery_failure,render_reply_citations,TURN
 from .capture import canonical,digest,instrument_request
 from .scopes import Scopes
 
@@ -48,6 +48,14 @@ class FixtureGateway(AssistantGateway):
     # Receipts carry measured timings; these checks compare the outcome only.
     async def dispatch(self,*args,**kwargs):
         return {key:value for key,value in (await super().dispatch(*args,**kwargs)).items() if key!='timings'}
+
+
+class DeliveryFailureTests(unittest.TestCase):
+    def test_last_rejection_decides_whether_a_rate_limited_send_retries(self):
+        rejected=lambda status:{'method':'sendMessage','state':'rejected','status':status}
+        self.assertEqual(delivery_failure([rejected(400),rejected(429)])['error_stage'],'telegram_rate_limited',
+                         'a native fallback rate limited after a formatting rejection stays retryable')
+        self.assertEqual(delivery_failure([rejected(429),rejected(403)]),{'state':'suppressed','error_code':'telegram_rejected'})
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
@@ -223,8 +231,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         raise RuntimeError('synthetic interruption')
                     adapter.set_message_handler(interrupt_after_delivery_started)
                     uncertain=envelope(24,'Do not repeat an uncertain send')
-                    self.assertEqual(await gateway.dispatch(uncertain),{'state':'ambiguous','error_code':'dispatch_interrupted'})
-                    self.assertEqual(await gateway.dispatch(uncertain),{'state':'ambiguous','error_code':'dispatch_interrupted'})
+                    interrupted={'state':'ambiguous','error_code':'dispatch_interrupted',
+                                 'error_type':'RuntimeError','error_stage':'interrupt_after_delivery_started'}
+                    self.assertEqual(await gateway.dispatch(uncertain),interrupted)
+                    self.assertEqual(await gateway.dispatch(uncertain),interrupted,'replay keeps the failure cause')
                     self.assertEqual(len(uncertain_calls),1,'uncertain effect receipt cannot be retried')
                     cancel=threading.Event();cancel.set()
                     self.assertEqual(await gateway.dispatch(envelope(22,'Cancelled'),cancelled=cancel),{'state':'cancelled'})

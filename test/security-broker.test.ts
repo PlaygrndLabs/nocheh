@@ -32,13 +32,13 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_broker_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
   const pool=new pg.Pool({...connection,options:'-c search_path='+namespace});
-  const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string}[]=[];
+  const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string;agent:string}[]=[];
   const secret='synthetic-provider-credential-never-returned',gateway='https://gateway.example.test/v1';
   const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL=gateway;
   let guardDown=false,streamRevocation=false,slowMemory=false;const preparedPrincipals:any[]=[];
   const mock:typeof fetch=async(url,init)=>{
     const body=init?.body?JSON.parse(String(init.body)):null;
-    calls.push({url:String(url),body,auth:new Headers(init?.headers).get('authorization')??''});
+    calls.push({url:String(url),body,auth:new Headers(init?.headers).get('authorization')??'',agent:new Headers(init?.headers).get('user-agent')??''});
     if(slowMemory&&String(url).includes('/memory/')) {
       init?.signal?.throwIfAborted();
       await new Promise<void>((resolve,reject)=>{
@@ -80,6 +80,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     await assert.rejects(effectLog(pool,{admin:false,scope:null},'0',undefined,event.id),{code:'owner_required'});
     await assert.rejects(effectLog(pool,{admin:true,scope:null},'0',undefined,'bad'),{code:'invalid_event_filter'});
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
+    assert.equal(provider.agent,'Nocheh','a reply names its client, so a gateway bot check does not refuse it');
     assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);
     const before=calls.length;
     for(const path of ['/internal/security/transport','/v1/tools/claim','/v1/chat/completions?url=https://evil.example'])assert.equal((await request(path,payload)).status,403);

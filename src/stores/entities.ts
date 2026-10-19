@@ -34,7 +34,8 @@ const exact=(value:unknown,keys:string[])=>{const row=object(value);if(Object.ke
 const participantName=(payload:unknown,fallback:string):string=>{
   try {
     const value=JSON.parse(Buffer.isBuffer(payload)?payload.toString():String(payload)),message=value.message??value.edited_message??value.channel_post??value.edited_channel_post??value;
-    const actor=message?.from??message?.sender??value.from;
+    // A reaction update names its actor as message_reaction.user.
+    const actor=message?.from??message?.sender??value.from??value.message_reaction?.user;
     if(!actor||typeof actor!=='object')return fallback;
     const part=(name:string)=>typeof actor[name]==='string'?actor[name].trim().slice(0,100):'';
     const name=[part('first_name'),part('last_name')].filter(Boolean).join(' ').trim()||part('username');
@@ -85,13 +86,13 @@ export class EntityRepository {
     if(found.length!==1)return null;
     const identity=found[0],id=digest(canonical([protocol,'person',identity.id])),binding=digest(canonical([protocol,'source-binding',identity.id]));
     const linked=(await this.stores.control.query('SELECT entity_id,state FROM memory_entity_bindings WHERE id=$1',[binding])).rows[0];
-    const name=participantName(identity.payload,`${identity.platform} ${identity.kind} ${identity.external_id}`);
-    // Only an untouched exact platform identity follows platform display names.
-    // Owner renames and confirmed or moved bindings retain their chosen identity.
+    const known=participantName(identity.payload,''),name=known||`${identity.platform} ${identity.kind} ${identity.external_id}`;
+    // Only an untouched exact platform identity follows platform display names, and only to a name
+    // the update supplies. Owner renames and confirmed or moved bindings retain their chosen identity.
     if(!linked||linked.entity_id===id&&linked.state==='exact')await this.stores.control.query(`INSERT INTO memory_entities(id,kind,name,state)
       VALUES($1,'person',$2,'active') ON CONFLICT(id) DO UPDATE SET name=$2,updated_at=now()
-      WHERE memory_entities.revision=1 AND memory_entities.state='active' AND NOT EXISTS
-        (SELECT 1 FROM memory_entity_bindings WHERE id=$3 AND (state<>'exact' OR entity_id<>$1))`,[id,name,binding]);
+      WHERE $4::boolean AND memory_entities.revision=1 AND memory_entities.state='active' AND NOT EXISTS
+        (SELECT 1 FROM memory_entity_bindings WHERE id=$3 AND (state<>'exact' OR entity_id<>$1))`,[id,name,binding,!!known]);
     if(!linked)await this.stores.control.query(`INSERT INTO memory_entity_bindings(id,entity_id,binding_kind,source_object_id,label,state)
       VALUES($1,$2,'source_identity',$3,$4,'exact') ON CONFLICT(id) DO NOTHING`,[binding,id,identity.id,name]);
     const current=(await this.stores.control.query(`SELECT e.* FROM memory_entity_bindings b JOIN memory_entities e ON e.id=b.entity_id

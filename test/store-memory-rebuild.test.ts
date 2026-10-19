@@ -68,8 +68,11 @@ test('the owner re-runs Honcho memory for chosen chats, retries failed learning 
     await assert.rejects(services.memory.relearn(owner,{spaces:[first],everything:true}),{code:'invalid_memory_scope'});
 
     // Retrying failed learning asks Honcho to rerun it in place and holds the workspace until it finishes.
+    await stores.control.query('UPDATE memory_generations SET derivation_checked_at=now() WHERE id=$1',[workspace]);
     const retry=await services.memory.retryFailedLearning(owner);
     assert.equal(retry.retried,2);assert.equal(retry.status.workspace?.state,'building');
+    assert.equal((await stores.control.query('SELECT derivation_checked_at FROM memory_generations WHERE id=$1',[workspace])).rows[0].derivation_checked_at,null,
+      'a retried task that fails again holds readiness, although it was queued before the last drain');
     const generation=(await stores.control.query('SELECT work_revision FROM memory_generations WHERE id=$1',[workspace])).rows[0].work_revision;
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id=$1 AND generation=$2",
       ['generation:'+workspace,generation])).rows[0].count,1);

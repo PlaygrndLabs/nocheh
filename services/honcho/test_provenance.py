@@ -18,6 +18,12 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('processed AND error IS NOT NULL',sql)
         db.failed=False
         self.assertFalse(await failed_queue_items('owned-workspace',db))
+        from datetime import datetime, timezone
+        since=datetime(2026,10,18,tzinfo=timezone.utc)
+        await failed_queue_items('owned-workspace',db,since)
+        sql,values=db.calls[-1]
+        self.assertEqual(values,{'workspace':'owned-workspace','since':since})
+        self.assertIn('created_at > :since',sql,'failures Nocheh already saw no longer hold the workspace')
 
     async def test_failed_learning_is_counted_and_returned_to_the_queue_only_for_its_workspace(self):
         class Result:

@@ -288,7 +288,8 @@ export class TelegramActionRepository {
         try{text=await this.text(row);}catch(error){
           if(error instanceof HttpError&&error.code==='action_delivery_denied') {
             await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='action_delivery_denied',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
-            return observation('cancelled','action',0,Date.now(),'action_delivery_denied');
+            // The request keeps its own reason; the workflow observation uses a reason the boundary allows.
+            return observation('cancelled','action',0,Date.now(),'superseded');
           }
           if(error instanceof HttpError&&error.code==='guard_context_changed') {
             await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='action_context_changed',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);

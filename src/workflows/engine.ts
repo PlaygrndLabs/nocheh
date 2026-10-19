@@ -58,7 +58,12 @@ export async function advanceWorkflow(pool:pg.Pool,id:string,dispatch:number,fam
         [family,row.job_id,row.version,row.generation,id]);
       if(newer.rowCount)result={...result,state:'skipped',next_attempt:Date.now(),waiting_reason:'superseded'};
     }
-    safeMetadata(result);
+    // An observation the boundary refuses would stop the run with the workflow still open and no
+    // signal; close it as a failure that names its family instead.
+    try{safeMetadata(result);}catch{
+      console.warn(JSON.stringify({event:'workflow_observation_invalid',family,state:typeof result.state==='string'&&/^[a-z_]{1,40}$/.test(result.state)?result.state:'unknown'}));
+      result={state:'failed',stage:'admission',attempts:Number.isSafeInteger(result.attempts)?result.attempts:0,next_attempt:Date.now(),waiting_reason:'workflow_execution_failed'};
+    }
     // The domain receipt remains authoritative even if the last step output or
     // run acknowledgment was lost. Reconciliation observes it before any effect.
     if(family==='telegram') {

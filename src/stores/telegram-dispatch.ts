@@ -35,7 +35,8 @@ const conversationOrderWaitMs=120000;
 const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
 const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
 const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured']);
+  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured',
+  'unexpected_profile_tool','required_guard_unavailable','profile_scope_denied','invalid_process_scope_binding','unsupported_memory_compaction_revision']);
 type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
 type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
 
@@ -122,6 +123,12 @@ export class TelegramDispatchRepository {
     const state=String(response.state);
     if(!closed.has(state))throw new HttpError(409,'invalid_dispatch_receipt');
     const result={state,...(codes.has(String(response.error_code))?{error_code:String(response.error_code)}:{})};
+    // Why a reply did not go out, without message content: the code plus bounded Python identifiers.
+    if(['failed','ambiguous'].includes(state)) {
+      const bounded=(value:unknown)=>typeof value==='string'&&/^[A-Za-z_]{1,64}$/.test(value)?value:undefined;
+      console.warn(JSON.stringify({event:'telegram_dispatch_failed',state,attempt:row.attempts,code:result.error_code??(response.error_code===undefined?null:'unknown'),
+        type:bounded(response.error_type),stage:bounded(response.error_stage)}));
+    }
     const output=await this.derived.record({operation_id:`telegram-dispatch-result:${row.event_id}:${row.attempts}`,
       source:row.source_reference,parents:[row.input_reference],kind:'runtime_result',content:Buffer.from(canonical(result)),
       producer:'hermes',producer_version:protocol,configuration:{attempt:row.attempts},provenance:{binding:row.binding}});
@@ -340,6 +347,16 @@ export class TelegramDispatchRepository {
         input=await this.input(row.input_reference);
         try{await this.current(input);}catch(error){
           if(!(error instanceof HttpError)||!['guard_context_changed','audience_context_changed','conversation_not_selected','guard_transition_pending','source_retired'].includes(error.code))throw error;
+          // Only a retirement or a deselected chat withdraws the reply. A newer epoch alone means
+          // it is rebuilt under that epoch: a turn that never started runs again, and a running
+          // turn fails its own delivery check under the revoked credential and is retried.
+          const renewed=['guard_context_changed','audience_context_changed','guard_transition_pending'].includes(error.code);
+          if(renewed&&observed.state==='not_found') {
+            await this.control.query(`UPDATE dispatches SET state='failed',error_code=$2,next_attempt=now()+interval '2 seconds',
+              revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='running'`,[id,error.code]);
+            return this.observation(await this.row(id));
+          }
+          if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
           try{return await this.receive(row,await this.call('run.cancel',{channel:'telegram',event_id:id,attempt:row.attempts},10000));}
           catch{return await this.receive(row,{state:'running'});}

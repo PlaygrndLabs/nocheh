@@ -282,6 +282,30 @@ keeps the time it was learned ([native memory](src/stores/native-memory.ts),
 [check](test/store-native-memory.test.ts)). Messages written earlier keep their
 write time until their session is rebuilt.
 
+Deep check for hidden data and failure gaps (October 18), verified locally with
+synthetic PostgreSQL, not yet run on the owner's installation:
+- A reply chain in an ordinary group carries a thread number but is not a topic;
+  only forum topics are now treated as topics, in capture, Honcho sessions and
+  Hermes ([spaces](src/spaces.ts), [Hermes scopes](services/hermes/scopes.py)).
+- A reaction no longer cancels or drops a reply in progress: its epoch advance
+  waits for the reply, and a reply whose context changed is retried
+  ([reaction state](src/stores/reaction-state.ts),
+  [check](test/store-telegram-dispatch.test.ts)).
+- A Honcho write that never arrived is resent after ten minutes, a rejected one
+  is retried, and an old Honcho derivation failure no longer holds memory
+  "building" ([native memory](src/stores/native-memory.ts),
+  [queue health](services/honcho/provenance.py)).
+- A reaction no longer renames a person; failure causes reach logs and the
+  Hermes result; a rate-limited fallback reply is retried; replies no longer
+  inherit the replied-to message's files; Health shows unsaved incoming
+  messages and reply states; message times no longer show "Invalid Date"; the
+  history retention setting reaches the app.
+- Found but not fixed, for owner decision: Honcho messages missed during the
+  gateway-block days were never re-derived (retrying failed learning below
+  covers this); files over 20 MB hold a reply;
+  group turns lack the speaker's name and time; edited messages repeat in Honcho
+  memory; albums are separate turns.
+
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
 re-learn every chat or chosen chats from their saved messages, or replace the

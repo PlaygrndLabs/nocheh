@@ -359,8 +359,24 @@ export class NativeMemoryRepository {
     if(!connection.attached||!connection.verified)return false;
     const row=await this.receipt(id);if(row.state==='done')return true;if(row.state!=='uncertain')return false;
     // Reconciliation reads only its exact receipt and never writes, even for a replaced session.
-    const result=await this.call('/v3/workspaces/'+row.generation+'/sessions/'+(row.session_id??id)+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});
-    const remote=this.observed(row,result.items);if(!remote)return false;
+    let result:any;
+    try{result=await this.call('/v3/workspaces/'+row.generation+'/sessions/'+(row.session_id??id)+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});}
+    catch(error) {
+      // A retired write's session can already be deleted, and the write with it.
+      if(row.retired_at&&error instanceof HttpError&&error.code==='honcho_upstream_rejected') {
+        await this.control.query("UPDATE memory_ingestion_receipts SET state='failed',error_code='honcho_session_deleted' WHERE id=$1 AND state='uncertain'",[id]);return false;
+      }
+      throw error;
+    }
+    const remote=this.observed(row,result.items);
+    if(!remote) {
+      // Long after the write ended it is still absent, so it never landed. The next attempt lists before
+      // writing again, so a late landing cannot be written twice.
+      await this.control.query("UPDATE memory_ingestion_receipts SET uncertain_at=now() WHERE id=$1 AND uncertain_at IS NULL",[id]);
+      await this.control.query(`UPDATE memory_ingestion_receipts SET state='pending',error_code='honcho_write_absent',next_attempt=now()
+        WHERE id=$1 AND state='uncertain' AND retired_at IS NULL AND uncertain_at<now()-interval '10 minutes'`,[id]);
+      return false;
+    }
     await this.control.query("UPDATE memory_ingestion_receipts SET state='done',remote_id=$2,error_code=NULL WHERE id=$1 AND state='uncertain'",[id,remote]);return true;
   }
   async syncReceipt(id:string,authority:ExecutionAuthority):Promise<boolean> {
@@ -370,6 +386,7 @@ export class NativeMemoryRepository {
       locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'honcho_sync_busy');
       const row=await this.receipt(id);if(row.state==='done')return true;
       if(row.state==='uncertain')return await this.reconcileReceipt(id);
+      let rejected=false;
       try {
         const workspace='/v3/workspaces/'+row.generation,sessionId=row.session_id??id,session=workspace+'/sessions/'+sessionId;
         await this.authorizedReceipt(row);await this.call('/v3/workspaces',{id:row.generation});
@@ -380,16 +397,25 @@ export class NativeMemoryRepository {
         const previous=await this.call(session+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});
         let remote=this.observed(row,previous.items);
         if(!remote) {
+          const createdAt=await this.occurredAt(row);
           await this.authorizedReceipt(row);
-          await db.query("UPDATE memory_ingestion_receipts SET state='uncertain',attempts=attempts+1 WHERE id=$1",[id]);
-          const found=await this.call(session+'/messages',{messages:[{peer_id:row.peer_id,content:row.content,created_at:await this.occurredAt(row),
-            metadata:{nocheh_receipt:id,source_revision:row.source_reference.revision,guarded_revision:row.guarded_revision}}]});
+          await db.query("UPDATE memory_ingestion_receipts SET state='uncertain',uncertain_at=now(),attempts=attempts+1 WHERE id=$1",[id]);
+          let found:unknown;
+          try {
+            found=await this.call(session+'/messages',{messages:[{peer_id:row.peer_id,content:row.content,created_at:createdAt,
+              metadata:{nocheh_receipt:id,source_revision:row.source_reference.revision,guarded_revision:row.guarded_revision}}]});
+          } catch(error) {
+            // Honcho answered with an error, so nothing was written; the next attempt lists before writing.
+            if(error instanceof HttpError&&error.code==='honcho_upstream_rejected')rejected=true;
+            throw error;
+          }
           remote=this.observed(row,found);if(!remote)throw new HttpError(409,'honcho_write_unresolved');
         }
         await db.query("UPDATE memory_ingestion_receipts SET state='done',remote_id=$2,error_code=NULL WHERE id=$1",[id,remote]);return true;
       } catch(error) {
-        await db.query(`UPDATE memory_ingestion_receipts SET error_code=$2,next_attempt=now()+interval '60 seconds' WHERE id=$1`,
-          [id,error instanceof HttpError?error.code:'honcho_unavailable']);throw error;
+        await db.query(`UPDATE memory_ingestion_receipts SET error_code=$2,next_attempt=now()+interval '60 seconds',
+          state=CASE WHEN $3::boolean AND state='uncertain' THEN 'pending' ELSE state END WHERE id=$1`,
+          [id,error instanceof HttpError?error.code:'honcho_unavailable',rejected]);throw error;
       }
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803358)');if(fenced)await leaveFamily(db,'honcho');});}
   }
@@ -504,7 +530,9 @@ export class NativeMemoryRepository {
     if(!Number.isSafeInteger(result?.retried)||result.retried<0)throw new HttpError(502,'invalid_honcho_retry');
     if(result.retried) {
       const db=await this.control.connect();
-      try{await db.query('BEGIN');await this.building(db,workspace);await db.query('COMMIT');}
+      // A retried task keeps its old queue time, so readiness rechecks every failure again rather than only newer work.
+      try{await db.query('BEGIN');await db.query('UPDATE memory_generations SET derivation_checked_at=NULL WHERE id=$1',[workspace]);
+        await this.building(db,workspace);await db.query('COMMIT');}
       catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     }
     return {retried:result.retried as number,status:await this.status()};
@@ -598,14 +626,21 @@ export class NativeMemoryRepository {
   async observe(id:string):Promise<boolean> {
     const current=await this.current(id);
     const pending=(await this.control.query("SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND state<>'done' AND retired_at IS NULL LIMIT 1",[id])).rowCount;
-    const queue=await this.call('/v3/workspaces/'+id+'/queue/status');
-    const health=await this.call('/v3/workspaces/'+id+'/nocheh/queue-health');await this.current(id);
+    const checked=new Date(),queue=await this.call('/v3/workspaces/'+id+'/queue/status');
+    // Honcho keeps a failed derivation for 30 days. A failure is reported once; after the queue has
+    // drained, only work queued since then can hold the workspace unready again.
+    const since=current.row.derivation_checked_at?'?since='+encodeURIComponent(current.row.derivation_checked_at.toISOString()):'';
+    const health=await this.call('/v3/workspaces/'+id+'/nocheh/queue-health'+since);await this.current(id);
     if(typeof health.failed_items!=='boolean')throw new HttpError(502,'honcho_queue_health_invalid');
-    const ready=!pending&&queue.pending_work_units===0&&queue.in_progress_work_units===0&&!health.failed_items;
+    const drained=queue.pending_work_units===0&&queue.in_progress_work_units===0;
+    const ready=!pending&&drained&&!health.failed_items;
     const changed=await this.control.query(`UPDATE memory_generations SET state=$2,
       error_code=CASE WHEN $4::boolean THEN 'honcho_derivation_failed' ELSE NULL END,
+      derivation_checked_at=CASE WHEN $5::boolean THEN $6::timestamptz ELSE derivation_checked_at END,
       last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END
-      WHERE id=$1 AND state<>'retired' AND work_revision=$3`,[id,ready?'ready':'building',current.row.work_revision,health.failed_items]);return ready&&changed.rowCount===1;
+      WHERE id=$1 AND state<>'retired' AND work_revision=$3`,[id,ready?'ready':'building',current.row.work_revision,health.failed_items,drained,checked]);
+    if(health.failed_items)console.warn(JSON.stringify({event:'honcho_derivation_failed',workspace:id}));
+    return ready&&changed.rowCount===1;
   }
   /** When Honcho finishes new work, prepare the next reply context of each changed conversation. No timer renews it. */
   async requestPrefetch(id:string):Promise<number> {

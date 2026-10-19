@@ -1,5 +1,6 @@
 /** Pure helpers for the Chats page: chat names, the chat tree and the Telegram access settings. */
 import {participantAllowed, switchDecision, type ParticipantRule} from './group-access';
+import {sourceDate} from './messages-format';
 
 export type Chat = {
   space_id: string;
@@ -215,7 +216,7 @@ export function chatError(error: unknown): string {
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '';
-  const date = new Date(value);
+  const date = sourceDate(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'});
 }
