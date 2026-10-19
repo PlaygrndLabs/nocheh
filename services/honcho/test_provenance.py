@@ -18,6 +18,12 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('processed AND error IS NOT NULL',sql)
         db.failed=False
         self.assertFalse(await failed_queue_items('owned-workspace',db))
+        from datetime import datetime, timezone
+        since=datetime(2026,10,18,tzinfo=timezone.utc)
+        await failed_queue_items('owned-workspace',db,since)
+        sql,values=db.calls[-1]
+        self.assertEqual(values,{'workspace':'owned-workspace','since':since})
+        self.assertIn('created_at > :since',sql,'failures Nocheh already saw no longer hold the workspace')
 
     async def test_ancestry_follows_parents_deduplicates_cycles_and_reports_missing_evidence(self):
         a, b, c = 'a'*21, 'b'*21, 'c'*21

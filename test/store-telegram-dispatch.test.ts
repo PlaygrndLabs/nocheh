@@ -134,9 +134,35 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal(calls.filter(c=>c.input.event_id===absent.reference.id&&c.operation==='run.start').length,2);
     assert.ok(calls.filter(c=>c.input.event_id===absent.reference.id).every(c=>c.input.attempt===1),'same identity after verified absence');
     const revoked=await capture('Queued context revoked');await prepare(revoked.reference.id);mode='queued';assert.equal((await run(revoked.reference.id)).state,'running');
-    await services.guards.setMode('off');await due(revoked.reference.id);assert.equal((await run(revoked.reference.id)).state,'cancelled');assert.equal(calls.at(-1)!.operation,'run.cancel');
-    assert.equal(calls.filter(c=>c.input.event_id===revoked.reference.id&&c.operation==='run.start').length,1);
-    await services.guards.setMode('on');
+    // A new guard binding is not a withdrawal: the queued turn is not cancelled, it fails its own
+    // delivery check under the revoked credential and the reply is rebuilt under the current binding.
+    await services.guards.setMode('off');await due(revoked.reference.id);assert.equal((await run(revoked.reference.id)).state,'running');
+    assert.ok(!calls.some(c=>c.input.event_id===revoked.reference.id&&c.operation==='run.cancel'),'a newer epoch never cancels a reply');
+    native.set(revoked.reference.id,{state:'failed',error_code:'guard_context_changed'});await due(revoked.reference.id);
+    assert.equal((await run(revoked.reference.id)).state,'retryable_failed');
+    await services.guards.setMode('on');await due(revoked.reference.id);mode='done';assert.equal((await run(revoked.reference.id)).state,'completed');
+    assert.deepEqual(calls.filter(c=>c.input.event_id===revoked.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    // A turn that never reached the runtime is rebuilt under a newer epoch, not closed as cancelled.
+    const unstarted=await capture('Never admitted before an epoch');await prepare(unstarted.reference.id);mode='absent';
+    assert.equal((await run(unstarted.reference.id)).state,'running');
+    await services.guards.setMode('off');await services.guards.setMode('on');await due(unstarted.reference.id);
+    assert.equal((await run(unstarted.reference.id)).state,'retryable_failed');
+    await due(unstarted.reference.id);mode='done';assert.equal((await run(unstarted.reference.id)).state,'completed');
+    assert.deepEqual(calls.filter(c=>c.input.event_id===unstarted.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    // A reaction while a reply runs waits to advance the epoch, so it never revokes that reply.
+    const busy=await capture('Reply running during a reaction');await prepare(busy.reference.id);mode='running';
+    assert.equal((await run(busy.reference.id)).state,'running');
+    const epochBefore=(await services.guards.state()).epoch;
+    const liked={...envelope(''),payload:{update_id:++serial,message_reaction:{chat:{id:Number(group)},message_id:(busy.value.payload as any).message.message_id,
+      date:1700000000,user:{id:9},old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}}};
+    const likedSource=(await services.capture.capture(liked)).source.reference;assert.equal((await advance(likedSource.id)).state,'skipped');
+    assert.equal((await services.guards.state()).epoch,epochBefore,'the running reply keeps its epoch');
+    const deferred=(await stores.control.query("SELECT id FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['reactions:'+epochBefore])).rows;
+    assert.equal(deferred.length,1);
+    assert.equal((await operations.memory_review!('reactions:'+epochBefore,await authority('memory_review'))).state,'waiting');
+    native.set(busy.reference.id,{state:'done'});await due(busy.reference.id);assert.equal((await run(busy.reference.id)).state,'completed');
+    assert.equal((await operations.memory_review!('reactions:'+epochBefore,await authority('memory_review'))).state,'completed');
+    assert.equal((await services.guards.state()).epoch,epochBefore+1,'the reaction advances the epoch once no reply runs');
     const voice=await capture('',{text:undefined,voice:{file_id:key+':audio',file_unique_id:key,duration:1}});
     await services.attachments.commit(voice.artifact_ids[0]!,Buffer.from([79,103,103,0,255]));await prepare(voice.reference.id);
     mode='done';timingShape='malformed';assert.equal((await run(voice.reference.id)).state,'completed');const voiceInput=calls.at(-1)!.input;timingShape='valid';
