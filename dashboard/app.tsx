@@ -9,6 +9,7 @@ import {
   Gauge,
   Home,
   Inbox,
+  ListChecks,
   Menu,
   MessagesSquare,
   Monitor,
@@ -35,6 +36,7 @@ type NavItem = {id: PageId; title: string; Icon: React.ComponentType<{className?
 const nav: NavItem[] = [
   {id: 'home', title: 'Home', Icon: Home},
   {id: 'inbox', title: 'Inbox', Icon: Inbox},
+  {id: 'tasks', title: 'Tasks', Icon: ListChecks},
   {id: 'chats', title: 'Chats', Icon: Users},
   {id: 'messages', title: 'Messages', Icon: MessagesSquare},
   {id: 'memory', title: 'Memory', Icon: BrainCircuit},
@@ -46,6 +48,7 @@ const nav: NavItem[] = [
 const pages: Record<PageId, React.LazyExoticComponent<React.ComponentType>> = {
   home: React.lazy(() => import('./pages/home')),
   inbox: React.lazy(() => import('./pages/inbox')),
+  tasks: React.lazy(() => import('./pages/tasks')),
   chats: React.lazy(() => import('./pages/chats')),
   messages: React.lazy(() => import('./pages/messages')),
   memory: React.lazy(() => import('./pages/memory')),

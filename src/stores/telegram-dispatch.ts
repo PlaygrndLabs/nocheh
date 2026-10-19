@@ -19,6 +19,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
+import {notAllowedReply,ownerPrompts} from '../prompts.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -294,10 +295,23 @@ export class TelegramDispatchRepository {
     }
     return parts;
   }
+  /** Someone not allowed to use Nocheh in an allowed group gets the owner's fixed
+   * reply, without a model, when they address it; anyone else stays quiet. */
+  private async refuse(id:string,key:string,chat:string,payload:any) {
+    const policy=this.access.policy(),message=payload?.message,sender=message?.from;
+    if(!policy.enabled||!message||!['group','supergroup'].includes(message.chat?.type)||!policy.group_ids.includes(chat)||
+      !sender?.id||sender.is_bot===true||String(sender.id)===policy.owner_id)return;
+    const botId=/^telegram:(\d+):update:/.exec(key)?.[1]??'',addressing=groupAddressing(payload,botId);
+    const text=(await ownerPrompts(this.control))['telegram.not_allowed']??notAllowedReply;
+    try{await this.call('telegram.refusal',{event_id:id,chat_id:chat,message_id:String(message.message_id),
+      ...(message.is_topic_message===true&&Number.isSafeInteger(message.message_thread_id)?{topic:String(message.message_thread_id)}:{}),
+      user_id:String(sender.id),group_addressing:addressing,text:typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null,reply:text},15000);}
+    catch{/* Best effort: the message stays archived either way. */}
+  }
   private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
-    if(!scope)return observation('skipped','admission');
+    if(!scope){await this.refuse(source.id,original.source_key,original.scope,payload);return observation('skipped','admission');}
     const space=await this.access.space(source);if(!space)return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
     const ready=await this.preparation.status(source.id);if(ready.state!=='completed')return ['retryable_failed','failed'].includes(ready.state)?ready:
       observation('waiting',ready.stage,0,ready.next_attempt,ready.waiting_reason);

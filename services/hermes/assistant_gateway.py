@@ -330,8 +330,8 @@ class AssistantGateway:
             lane['users']-=1
             if not lane['users'] and self.lanes.get(key) is lane:del self.lanes[key]
 
-    def group_turn(self,body):
-        if self.group_replies=='all':return True
+    def group_turn(self,body,addressed_only=False):
+        if self.group_replies=='all' and not addressed_only:return True
         # Native connect loads the bot's own identity; its display name addresses it too.
         try:username,first=self.adapter._bot.username,self.adapter._bot.first_name
         except Exception:username=first=None # An unloaded identity still honors replies and set names.
@@ -451,8 +451,8 @@ class AssistantGateway:
         return asyncio.run_coroutine_threadsafe(self.send_approval(body),self.loop).result(timeout=55)
 
     async def send_approval(self,body):
-        """Approve and Reject buttons on an exact pending action, in the owner's
-        private chat or an allowed group.
+        """Approve and Reject buttons on an exact pending action, only in the
+        owner's private chat.
 
         Pressing one is captured like any update; storage verifies that the
         owner pressed it and decides. These calls only show the card and the
@@ -460,10 +460,8 @@ class AssistantGateway:
         """
         import re
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        chat,topic=str(body.get('chat_id','')),body.get('topic')
-        if not re.fullmatch(r'-?[1-9]\d{0,18}',chat) or chat not in [str(self.scopes.owner or '')]+[str(group) for group in self.scopes.groups or []]:
-            raise ValueError('approval_chat_not_allowed')
-        if topic is not None and (chat==str(self.scopes.owner) or not isinstance(topic,str) or not re.fullmatch(r'[1-9]\d{0,15}',topic)):raise ValueError('invalid_approval')
+        chat=str(body.get('chat_id',''))
+        if not self.scopes.owner or chat!=str(self.scopes.owner) or not re.fullmatch(r'[1-9]\d{0,18}',chat):raise ValueError('approval_owner_only')
         text=body.get('text')
         if not isinstance(text,str) or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_approval')
         if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
@@ -482,9 +480,9 @@ class AssistantGateway:
                 if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
                 await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
                 token=DISPATCH_KEY.set('approval:'+body['id'])
-                check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
+                check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True))
                 try:
-                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup([buttons]))
+                    sent=await bot.send_message(int(chat),text,reply_markup=InlineKeyboardMarkup([buttons]))
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
                 except Exception:result={'state':'ambiguous'}
                 finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
@@ -511,6 +509,41 @@ class AssistantGateway:
             except Exception:return {'state':'done','answered':False}
             finally:DISPATCH_KEY.reset(token)
         raise ValueError('invalid_approval')
+
+    def refusal(self,body):
+        if self.loop is None:raise RuntimeError('telegram_not_ready')
+        return asyncio.run_coroutine_threadsafe(self.send_refusal(body),self.loop).result(timeout=55)
+
+    async def send_refusal(self,body):
+        """The owner's fixed reply to someone not allowed in an allowed group who
+        addressed Nocheh. No model runs and nothing else about the chat is sent."""
+        import re
+        chat,user,message,topic=(str(body.get(key) or '') for key in ('chat_id','user_id','message_id','topic'))
+        if (not re.fullmatch('[a-f0-9]{64}',body.get('event_id','')) or chat not in (self.scopes.groups or []) or
+                not re.fullmatch(r'[1-9]\d{0,18}',user) or not re.fullmatch(r'[1-9]\d{0,18}',message) or topic and not re.fullmatch(r'[1-9]\d{0,15}',topic)):
+            raise ValueError('invalid_refusal')
+        reply=body.get('reply')
+        if not isinstance(reply,str) or not reply.strip() or len(reply)>1000:raise ValueError('invalid_refusal')
+        access=(getattr(self.scopes,'group_access',None) or {}).get(chat,{})
+        if user==str(self.scopes.owner) or user in access.get('granted',[]) and user not in access.get('denied',[]):return {'state':'skipped'}
+        if not self.group_turn({'group_addressing':body.get('group_addressing'),'text':body.get('text')},addressed_only=True):return {'state':'skipped'}
+        if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
+        name='refusal-'+body['event_id']
+        async with self.action_lock:
+            receipt=self.receipts/(name+'.result')
+            if receipt.exists():return json.loads(receipt.read_bytes())
+            if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id']}))
+            token=DISPATCH_KEY.set('refusal:'+body['event_id'])
+            check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
+            try:
+                await self.adapter._bot.send_message(int(chat),reply,message_thread_id=int(topic) if topic else None,
+                                                     reply_to_message_id=int(message),allow_sending_without_reply=True)
+                result={'state':'done'}
+            except Exception:result={'state':'ambiguous'}
+            finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
+            return result
 
     def stop(self):
         self.stopping=True
