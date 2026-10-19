@@ -402,9 +402,9 @@ not yet run on the owner's installation:
   credential-free mini app service and a Cloudflare tunnel, turned on in
   Settings › Telegram ([decision](docs/adr/0161-telegram-mini-app.md),
   [setup](docs/telegram.md#mini-app), [check](test/mini-app.test.ts),
-  [settings check](services/hermes/test_settings.py)). Pending: the owner
-  creates the tunnel, and a live open from the owner's phone. Next: the
-  optional Notion connector.
+  [settings check](services/hermes/test_settings.py)). Pending: a live open
+  from the owner's phone; the owner tests it on the MVP installation, not the
+  local one. Next: the optional Notion connector.
 Pending: a live album, an edit, a small group-export import, and release
 tests 4 and 5 on the owner's installation.
 
