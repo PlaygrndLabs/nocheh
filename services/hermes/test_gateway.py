@@ -305,6 +305,61 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     request.reject=None
                 finally:await app.shutdown()
 
+    async def test_committed_dispatch_runs_after_native_replay_admission_saw_the_polled_update(self):
+        from telegram import Update
+        from plugins.platforms.telegram.update_admission import TelegramApplication
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);secret='synthetic-service-token-123456789';(root/'home').mkdir()
+            policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20'],
+                           'group_access':{'-20':{'granted':['456'],'denied':[]}}})
+            handled=[]
+            async def message(event):
+                handled.append(event.text)
+                TURN.get()['agent_result']={'state':'done','text':'Synthetic reply','session_id':'fixture'}
+                return 'Synthetic reply'
+            async def native():
+                adapter=committed_adapter_class()(PlatformConfig(enabled=True,token='123456:synthetic',typing_indicator=False))
+                request=BotFixtureRequest();instrument_request(request,adapter.capture)
+                bot=ExtBot('123456:synthetic',request=request,get_updates_request=BotFixtureRequest())
+                # The pinned adapter builds its application with this class.
+                app=Application.builder().bot(bot).application_class(TelegramApplication,{'adapter':adapter}).build()
+                await app.initialize();self.addAsyncCleanup(app.shutdown)
+                adapter._app=app;adapter._bot=bot;adapter._text_batch_delay_seconds=0.001
+                adapter._register_handlers(app);adapter.set_message_handler(message)
+                gateway=FixtureGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
+                gateway.status='connected';gateway.adapter=adapter;gateway.capacity=asyncio.Semaphore(2);gateway.action_lock=asyncio.Lock()
+                return adapter,request,gateway
+            def envelope(attempt):
+                key='telegram:123456:update:1';event=digest(key)
+                claims={'scope':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant'}
+                body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+                signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+                return {'event_id':event,'source_key':key,'scope':'-20','attempt':attempt,'archive_credential':'turn.'+body+'.'+signature,
+                    'text':'Hello','group_addressing':{'direct':True,'handles':[]},
+                    'payload':{'update_id':1,'message':{'message_id':1,'date':1700000000,'chat':{'id':-20,'type':'group','title':'Fixture'},
+                               'from':{'id':456,'is_bot':False,'first_name':'User'},'text':'Hello'}}}
+            with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN':secret,'HERMES_HOME':str(root/'home')}), \
+                 patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+                adapter,request,gateway=await native()
+                polled=envelope(1)['payload']
+                # Polling hands the update to native dispatch before the archive commits it.
+                for _ in range(2):await adapter._app.process_update(Update.de_json(polled,adapter._bot))
+                self.assertEqual(handled,[],'the committed-only gate stops the polling pass')
+                self.assertIn('123456:1',adapter._seen_update_ids,'native admission remembers the polled update')
+                self.assertEqual(await gateway.dispatch(envelope(1)),{'state':'done'})
+                self.assertEqual((handled,len(request.sent)),(['Hello'],1),'the committed turn still runs once')
+                self.assertEqual(await gateway.dispatch(envelope(1)),{'state':'done'})
+                self.assertEqual(len(request.sent),1,'the dispatch receipt, not native admission, prevents a repeat')
+                self.assertEqual(await gateway.dispatch(envelope(2)),{'state':'done'})
+                self.assertEqual(len(handled),2,'a new attempt of the same update is not mistaken for a redelivery')
+                await adapter._update_receipt_flush
+                self.assertTrue((root/'home'/'telegram_update_receipts_123456.json').is_file())
+                # A restarted gateway loads the persisted native receipts.
+                adapter,request,gateway=await native()
+                await adapter._app.process_update(Update.de_json(polled,adapter._bot))
+                self.assertEqual(await gateway.dispatch(envelope(3)),{'state':'done'})
+                self.assertEqual((len(handled),len(request.sent)),(3,1),'a retry after restart still reaches the agent')
+
     async def test_turns_in_different_chats_run_side_by_side_and_one_chat_keeps_its_order(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);secret='synthetic-service-token-123456789'
