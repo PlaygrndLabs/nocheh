@@ -1,29 +1,32 @@
-# Nocheh: a personal AI brain you talk to on Telegram
+# Nocheh: a personal AI brain that you own
 
-**It remembers what you tell it, and everything it knows stays yours.** Nocheh saves every message in an archive you own, learns what matters from your conversations, and answers with what it remembers, in your private chat and in the groups you pick.
+**Your data, your memory and the reasoning over them, owned by you.** Nocheh keeps what you and the people around you say in an archive you own, turns it into memory, and reasons over it to answer, organize and act for you. Chat apps, the agent runtime and the memory engine are replaceable parts around it.
 
 ## Why Nocheh
 
-Chat assistants either forget what you told them last week or keep it in someone else's cloud. Your conversations are the most useful record you have, and they end up scattered, locked in, or gone.
+Today's AI assistants are rented brains. What they learn about you lives inside one app, one model and one company's memory, and switching tools means starting over.
 
-Nocheh turns your Telegram into a memory you own. The originals stay in an archive you control, the AI parts can be swapped, and you decide what it may use, what it may share, and what it may do.
+Nocheh turns that around. The source data is yours and portable, memory is built from it and can be rebuilt from it, and everything around it can be replaced. Telegram is the first chat adapter, Hermes is the first agent runtime, and Honcho is the current long-term memory. You decide what Nocheh may use, what it may share and what it may do.
 
 ## What Nocheh does for you
 
-- **Lives in Telegram.** Talk to it privately like a person. Add it to groups and it answers only when addressed: a reply, an @mention or one of its names ("Nocheh" and "نوچه" by default). It still saves everything else said there.
-- **Keeps everything.** Every message, edit, reaction, file and delivered reply is saved before any AI work starts, so a slow or broken model never loses a message. Data is kept forever unless you set a limit.
-- **Remembers.** Honcho long-term memory learns facts from your conversations, and each chat keeps its own Hermes notes. A group recalls only its own conversations plus facts you approve to share.
+- **Owns the source.** Every message, edit, reaction and file it sees is saved as an original, with where it came from, before any AI work starts. A slow or broken model never loses anything, and data is kept forever unless you set a limit.
+- **Remembers people and projects.** Honcho long-term memory learns facts about people and projects, and each chat keeps its own Hermes notes. Who said something, and whether it was said, reported or inferred, stays attached.
+- **Understands context.** It learns how a group works, like a ✅ reaction meaning "done", and follows the state of tasks and commitments even when it doesn't reply. You can inspect and correct what it learned.
+- **Organizes knowledge.** With your permission it groups conversations into projects, and the dashboard shows people, projects and facts as a map you can edit.
+- **Keeps audiences apart.** A group recalls only its own conversations plus facts you approve to share. Your private chat can use everything.
 - **Masks secrets.** A secret check finds passwords, keys and tokens and masks them before the agent, memory or search ever sees them. You can review and edit every masked copy.
-- **Asks before it acts.** Sending a Telegram message somewhere else or running a shell, browser or MCP tool is proposed first. You approve it in the dashboard's Inbox or in your private chat.
+- **Asks before it acts.** Sending a message somewhere else or running a shell, browser or MCP tool is proposed first. You approve it in the dashboard's Inbox or in your private chat.
+- **Forgets on request.** Retire any message and Nocheh stops using it, including in what it learned. The original stays in your archive, and Undo brings it back.
+- **Meets you where you talk.** Today that is Telegram: privately, and in the groups you pick, where it answers only when addressed (a reply, an @mention or one of its names) and quietly saves the rest.
 - **A role and skills per chat.** Give each group its own role and skills from the dashboard. Only you can change them; the agent can only update its notes.
-- **Forget on request.** Retire any message and Nocheh stops using it, including in what it learned. The original stays in your archive, and Undo brings it back.
 - **Your models, your keys.** Use Anthropic, OpenAI or your own gateway (any OpenAI-compatible HTTPS address). Pick one default model, or a different one for replies, memory and the secret check. Keys stay on the server, and the Usage page shows what each part costs and how fast it answers.
 - **Nothing hard-coded.** Every instruction Nocheh gives a model is editable in Settings › Assistant and can be reset to its default.
-- **Yours to take with you.** Import Telegram Desktop exports, export everything in a portable format, and back up or restore the whole installation from the dashboard or the command line.
+- **Yours to take with you.** Import chat history (Telegram Desktop exports today), export everything in a portable format, and back up or restore the whole installation.
 
 ## Quick start
 
-You need Docker with Compose, Node 24 and Python 3, a Telegram bot token from [BotFather](https://t.me/BotFather), a model provider key, and an OpenAI API key for memory search.
+You need Docker with Compose, Node 24 and Python 3, a model provider key, a Telegram bot token from [BotFather](https://t.me/BotFather) for the Telegram adapter, and an OpenAI API key for memory search.
 
 1. Install and create your local settings. `init` writes an ignored `.env` with generated internal passwords:
 
@@ -63,27 +66,28 @@ The dashboard has Home, Inbox (approvals), Chats, Messages, Memory, Usage, Syste
 ## How it works
 
 ```
-Telegram ──► Hermes ──► nocheh-app ──► archive (PostgreSQL)
-                            │
-                            ▼
-                     Inngest workflow ──► secret check ──► Honcho memory
-                            │
-                            ▼
+Telegram (via Hermes) ──► nocheh-app ──► archive (PostgreSQL)
+                              │
+                              ▼
+                       Inngest workflow ──► secret check ──► Honcho memory
+                              │
+                              ▼
               Hermes turn in an isolated container ──► reply in Telegram
-                            │
-                            └─► security broker ──► your model provider
+                              │
+                              └─► security broker ──► your model provider
 ```
 
-Hermes receives a message and hands it to Nocheh, which saves it before anything else. A durable Inngest workflow prepares the masked copy, recalls what Honcho and the chat's notes know, and runs the reply as an isolated Hermes turn. Model calls leave only through the security broker, so agents never hold your keys.
+The chat adapter (Telegram today, through Hermes) hands each message to Nocheh, which saves it before anything else. A durable Inngest workflow prepares the masked copy, recalls what Honcho and the chat's notes know, and runs the reply as an isolated Hermes turn. Model calls leave only through the security broker, so agents never hold your keys.
 
 ## Under the hood
 
 Nocheh is TypeScript services, a React dashboard and a thin Python plugin for Hermes, all in one Docker Compose project.
 
+- **Adapters.** Sources are stored in a platform-independent model (platform, kind, ID, relationships), so new chat platforms such as Slack or Discord fit without changing existing data. Telegram is the first adapter.
 - **Three databases.** `nocheh_archive` keeps original messages and files and is never rewritten. `nocheh_derived` keeps masked copies and everything generated. `nocheh_control` keeps settings, access rules, approvals and jobs. Hermes, Honcho and Inngest keep their own stores.
-- **Capture first.** Incoming Telegram updates land in a durable spool before they are acknowledged, then commit once. Restarts, retries and database outages don't drop or duplicate messages.
+- **Capture first.** Incoming messages land in a durable spool before they are acknowledged, then commit once. Restarts, retries and database outages don't drop or duplicate messages.
 - **Workflows.** Inngest runs every reply, learning and import as a durable workflow with retries, waits and full history.
-- **Runtime.** [Hermes](https://github.com/NousResearch/hermes-agent) is the agent runtime and owns Telegram, sessions, schedules and per-chat roles, skills and notes. It is the first runtime, not the only one: the archive is portable across runtimes.
+- **Runtime.** [Hermes](https://github.com/NousResearch/hermes-agent) is the agent runtime and owns the Telegram connection, sessions, schedules and per-chat roles, skills and notes. It is the first runtime, not the only one: the archive is portable across runtimes.
 - **Memory.** [Honcho](https://github.com/plastic-labs/honcho) is the long-term memory, behind a swappable boundary, using Honcho's own model of people and sessions.
 - **Isolation.** Agent turns run in containers with one profile and scoped access: no provider keys, no Docker socket and no unrestricted internet. Approved shell work runs in disposable containers with no network.
 - **Approvals.** Every external effect records its proposal, approval, start and result separately. An uncertain send is never repeated automatically.
