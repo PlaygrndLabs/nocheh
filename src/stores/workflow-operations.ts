@@ -182,8 +182,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         const attempts=async()=>Number((await control.query('SELECT attempts FROM interpretation_jobs WHERE id=$1',[id])).rows[0].attempts);
         try{await s.learning.run(id,text=>s.detect(text,true),authority);}
         catch(error) {
-          // The saved reasoning result is reused on retry, so an unusable one closes the workflow.
-          if(error instanceof HttpError&&terminalLearningCodes.has(error.code))return observation('failed','review',await attempts(),Date.now(),'invalid_model_output');
+          // The saved reasoning result is reused on retry, so an unusable one closes the workflow; so does an input too large to ask.
+          if(error instanceof HttpError&&terminalLearningCodes.has(error.code))return observation('failed','review',await attempts(),Date.now(),error.code==='learning_query_limit'?'input_limit':'invalid_model_output');
           throw error;
         }
         return observation('completed','review',await attempts());
