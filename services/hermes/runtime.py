@@ -28,6 +28,10 @@ TOKEN = environment_secret('SERVICE_TOKEN')
 CALL_LOCK = threading.RLock()
 
 
+class AttachmentTooLarge(Exception):
+    """A Telegram file the bot can never download, so its retrieval settles."""
+
+
 class DetectorSlots:
     """Secret-guard checks run side by side up to the owner's Settings value.
     Checks for replies take a free slot before any waiting background check,
@@ -155,6 +159,8 @@ class Handler(BaseHTTPRequestHandler):
         except ProviderNotConfigured:
             ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/file') else 'unknown','kind':'provider_not_configured'})
             self.reply(503, {'error':'provider_not_configured'})
+        except AttachmentTooLarge:
+            self.reply(413, {'error':'attachment_too_large'})
         except DetectorContractError as error:
             ERRORS.append({'route':'/internal/detect','kind':str(error)})
             self.reply(503, {'error':'detector_contract_rejected'})
@@ -241,14 +247,21 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(ref, str) or not ref or len(ref) > 1024:
                 raise ValueError('invalid_file_id')
             async def download():
+                from telegram.error import BadRequest
                 async with Bot(bot_token) as bot:
-                    file = await bot.get_file(ref)
+                    try:
+                        file = await bot.get_file(ref)
+                    except BadRequest as error:
+                        # The Bot API refuses files over 20 MB; retrying never helps.
+                        if 'too big' in str(error).lower():
+                            raise AttachmentTooLarge() from error
+                        raise
                     if file.file_size and file.file_size > 50*1024*1024:
-                        raise ValueError('attachment_size_limit')
+                        raise AttachmentTooLarge()
                     return await file.download_as_bytearray()
             raw = asyncio.run(download())
             if len(raw) > 50*1024*1024:
-                raise ValueError('attachment_size_limit')
+                raise AttachmentTooLarge()
             return {'bytes_base64': base64.b64encode(raw).decode()}
         if self.path == '/internal/telegram/chat':
             # Owner-requested presentation refresh: getChat only, never a send

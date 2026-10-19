@@ -16,7 +16,10 @@ export class PreparationRepository {
 
   async status(eventId:string):Promise<Observation> {
     const source=await this.attachments.archive.captured(eventId);
-    const manifests=(await this.stores.archive.query('SELECT id,kind,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[eventId])).rows;
+    // A file too large to download is settled as a reference only; it has no bytes, text or guard source to wait for.
+    const tooLarge=await this.attachments.tooLarge(eventId);
+    const manifests=(await this.stores.archive.query('SELECT id,kind,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[eventId])).rows
+      .filter(m=>m.file_hash||!tooLarge.has(m.id));
     const missing=manifests.filter(m=>!m.file_hash);
     if(missing.length) {
       const jobs=(await this.stores.control.query('SELECT * FROM attachment_retrievals WHERE artifact_id=ANY($1::text[])',[missing.map(m=>m.id)])).rows;

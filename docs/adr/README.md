@@ -21,6 +21,8 @@ Honcho terminal-error readiness: [0101](0101-honcho-terminal-queue-errors-block-
 Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), implemented by
 [0115](0115-honcho-session-revisions.md).
 Re-running or replacing Honcho memory: [0153](0153-owner-reruns-and-replaces-honcho-memory.md).
+Message edits in Honcho memory: [0154](0154-message-edits-replace-honcho-writes.md).
+Albums answered once: [0155](0155-albums-answered-once.md).
 Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).

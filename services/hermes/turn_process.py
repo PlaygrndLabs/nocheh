@@ -66,12 +66,21 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # Retrieval uses the conversation content. The per-execution source hash
     # belongs in agent provenance, not in the semantic memory query/cache key.
     memory_query=text[:2000]
+    speaker=body.get('speaker')
+    if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
+        # Who spoke and when stays out of the memory query; the model and native history see it.
+        text = speaker + '\n' + text
     waiting=body.get('untranscribed_voice')
     if type(waiting) is int and 0<waiting<=20:
         # Voice notes are archived without transcription; their content never reaches the model.
         text += ('\n\n[Earlier in this chat, ' + ('a voice note was' if waiting==1 else str(waiting)+' voice notes were') +
                  ' received and archived. Transcription is not available, so that content is not available to you.'
                  ' Do not say that no voice note was received or found.]')
+    too_large=body.get('files_too_large')
+    if type(too_large) is int and 0<too_large<=100:
+        # Telegram does not let a bot download a file over 20 MB; only its reference is archived.
+        text += ('\n\n[' + ('One attached file is' if too_large==1 else str(too_large)+' attached files are') +
+                 ' over the 20 MB limit for bot downloads, so only a reference is archived and the content is not available to you.]')
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
     transport = credentials.runtime()
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
