@@ -39,7 +39,12 @@ export function honchoClient(base:string):HonchoCall {
   let response:Response;try{response=await fetch(url.origin+path,{method:method??(body===undefined?'GET':'POST'),redirect:'error',signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
    headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});}catch{throw new HttpError(503,'honcho_unavailable');}
   if(method==='DELETE'&&response.status===404)return {deleted:false};
-  if(!response.ok)throw new HttpError(503,'honcho_upstream_rejected');
+  if(!response.ok) {
+   // Name the rejection without content: a validation error echoes its input, so only its field and type are kept.
+   const detail=await response.json().then((value:any)=>Array.isArray(value?.detail)?value.detail.slice(0,5).map((item:any)=>({field:Array.isArray(item?.loc)?item.loc.join('.'):undefined,type:item?.type})):undefined,()=>undefined);
+   console.warn(JSON.stringify({event:'honcho_upstream_rejected',status:response.status,route:path.replace(/\/[^/?]{16,}/g,'/:id').split('?')[0],detail}));
+   throw new HttpError(503,'honcho_upstream_rejected');
+  }
   const text=await response.text();if(text.length>2*1024*1024)throw new HttpError(503,'honcho_response_limit');
   if(method==='DELETE')return {deleted:true};
   return JSON.parse(text);
