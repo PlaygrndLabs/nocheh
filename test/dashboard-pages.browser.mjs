@@ -381,6 +381,31 @@ test('a task is added, edited, finished and reopened from the Tasks page', async
   await page.close();
 });
 
+test('personal tasks and each project keep separate lists, with domains to narrow them', async () => {
+  const {page, problems} = await open('tasks');
+  const lists = page.getByRole('radiogroup', {name: 'List'});
+  await lists.getByRole('radio', {name: /Garden redesign/}).click();
+  await page.getByText('Send the garden supplier the measurements').waitFor();
+  // A project list shows only its own tasks.
+  await page.getByText('Book a dentist checkup').waitFor({state: 'detached'});
+  const title = 'Order the planters ' + Date.now();
+  await page.getByLabel('New task').fill(title);
+  await page.locator('#task-domain').fill('Suppliers');
+  await page.getByRole('button', {name: 'Add'}).click();
+  await page.getByRole('listitem').filter({hasText: title}).waitFor();
+  await lists.getByRole('radio', {name: /Personal/}).click();
+  await page.getByText('Book a dentist checkup').waitFor();
+  // A project task stays out of the personal list.
+  await page.getByText(title).waitFor({state: 'detached'});
+  await lists.getByRole('radio', {name: 'All lists'}).click();
+  await page.getByRole('radiogroup', {name: 'Domain'}).getByRole('radio', {name: 'Health'}).click();
+  await page.getByText('Book a dentist checkup').waitFor();
+  // A domain narrows the list.
+  await page.getByText('Send the garden supplier the measurements').waitFor({state: 'detached'});
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('usage shows calls, tokens and cost, and never prices an unknown cost as free', async () => {
   const {page, problems} = await open('usage');
   await page.getByRole('table', {name: 'Usage by part'}).waitFor();

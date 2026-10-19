@@ -122,8 +122,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
     if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
-    // The owner's task list: each call proves a current live owner-private turn.
-    if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,{state:url.searchParams.get('state')??'',after:url.searchParams.get('after')??'',limit:url.searchParams.get('limit')}));
+    // Task lists: the owner's private chat reaches every list, a project's chat only its own.
+    if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,{state:url.searchParams.get('state')??'',scope:url.searchParams.get('scope')??'',
+      ...(url.searchParams.has('domain')?{domain:url.searchParams.get('domain')!}:{}),after:url.searchParams.get('after')??'',limit:url.searchParams.get('limit')}));
     if(req.method==='POST'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatCreate(principal,await readJson(req,64*1024)));
     const chatTask=path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})$/);
     if(req.method==='POST'&&chatTask)return json(res,200,await s.tasks.chatUpdate(principal,chatTask[1]!,await readJson(req,64*1024)));

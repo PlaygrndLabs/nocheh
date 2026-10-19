@@ -1,14 +1,30 @@
 /**
- * Tasks: the owner's own to-do list, kept in Nocheh. Tasks can be added here
- * or by telling Nocheh in the private chat; both edit the same list.
+ * Tasks: the owner's to-do lists, kept in Nocheh. Personal tasks are one list
+ * and each project has its own; a domain labels a task within its list. Tasks
+ * can be added here or by telling Nocheh in chat; both edit the same lists.
  */
+import * as React from 'react';
 import {useState} from 'react';
-import {Check, ListChecks, MessageCircle, Pencil, Plus, RotateCcw, X} from 'lucide-react';
-import {useView} from '../lib/navigation';
+import {Check, Folder, ListChecks, MessageCircle, Pencil, Plus, RotateCcw, Tag, X} from 'lucide-react';
+import {useParam, useView} from '../lib/navigation';
+import {setParams} from '../lib/routes';
 import {pageTabs, tabIds} from '../lib/page-tabs';
 import {refreshResources, useResource} from '../lib/resource';
 import {cn} from '../lib/utils';
-import {Badge, Button, Card, Empty, Field, Input, LoadError, LoadingRows, Notice, Pager, Textarea} from '../ui/core';
+import {
+  Badge,
+  Button,
+  Card,
+  Empty,
+  Field,
+  Input,
+  LoadError,
+  LoadingRows,
+  Notice,
+  Pager,
+  Select,
+  Textarea,
+} from '../ui/core';
 import {Dialog, useFeedback} from '../ui/overlay';
 import {Page, Tabs} from '../ui/page';
 import {useCommand, when} from './memory/shared';
@@ -20,12 +36,24 @@ export type Task = {
   notes: string;
   state: TaskState;
   due_on: string | null;
+  project_id: string | null;
+  domain: string;
   origin: 'dashboard' | 'chat';
   revision: number;
   created_at: string;
   done_at: string | null;
 };
-type TaskPage = {tasks: Task[]; next: string | null; counts: Record<TaskState, number>};
+/** A list: 'personal', or a project's own list. */
+type Scope = {id: string; name: string | null; open: number};
+type TaskPage = {
+  tasks: Task[];
+  next: string | null;
+  counts: Record<TaskState, number>;
+  scopes: Scope[];
+  domains: {name: string; open: number}[];
+};
+const scopeName = (scope: Scope | undefined) =>
+  !scope ? 'Personal' : scope.id === 'personal' ? 'Personal' : scope.name || 'Project';
 
 const views = tabIds('tasks');
 const PAGE = 100;
@@ -47,21 +75,68 @@ export function day(value: string): string {
   });
 }
 
+/** Small toggle buttons for choosing one list or domain. */
+function Chips({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: {value: string; label: React.ReactNode}[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
+      {options.map(option => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          onClick={() => onChange(option.value)}
+          className={cn(
+            'inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors',
+            value === option.value
+              ? 'border-accent bg-accent-soft font-medium text-accent-text'
+              : 'border-line text-muted hover:border-line-strong hover:text-fg',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Tasks() {
   const [view, setView] = useView(views);
   const [page, setPage] = useState(0);
-  const path = `/tasks?state=${view}&limit=${PAGE}` + (page ? `&after=${page * PAGE}` : '');
+  const scope = useParam('list') || 'all';
+  const domain = useParam('domain');
+  const path =
+    `/tasks?state=${view}&scope=${encodeURIComponent(scope)}&limit=${PAGE}` +
+    (domain !== null ? `&domain=${encodeURIComponent(domain)}` : '') +
+    (page ? `&after=${page * PAGE}` : '');
   const list = useResource<TaskPage>(path);
   const counts = list.data?.counts;
+  const scopes = list.data?.scopes ?? [];
+  const domains = list.data?.domains ?? [];
   const [editing, setEditing] = useState<Task | null>(null);
   const changeView = (next: TaskState) => {
     setPage(0);
     setView(next);
   };
+  const choose = (patch: Record<string, string | null>) => {
+    setPage(0);
+    setParams(patch, true);
+  };
+  const projects = scopes.filter(row => row.id !== 'personal');
   return (
     <Page
       title="Tasks"
-      description="Your to-do list. Add tasks here, or just tell Nocheh in your private chat."
+      description="Your personal tasks and each project's own list. Add tasks here, or just tell Nocheh in chat."
       tabs={
         <Tabs
           label="Tasks"
@@ -71,7 +146,54 @@ export default function Tasks() {
         />
       }
     >
-      {view === 'open' && <AddTask />}
+      <div className="space-y-2">
+        <Chips
+          label="List"
+          value={scope}
+          onChange={value => choose({list: value === 'all' ? null : value, domain: null})}
+          options={[
+            {value: 'all', label: 'All lists'},
+            ...scopes.map(row => ({
+              value: row.id,
+              label: (
+                <>
+                  {row.id === 'personal' ? null : <Folder className="size-3.5" aria-hidden />}
+                  {scopeName(row)}
+                  {!!row.open && <span className="text-xs text-muted">{row.open}</span>}
+                </>
+              ),
+            })),
+          ]}
+        />
+        {!!domains.length && (
+          <Chips
+            label="Domain"
+            value={domain ?? '*'}
+            onChange={value => choose({domain: value === '*' ? null : value})}
+            options={[
+              {value: '*', label: 'Every domain'},
+              ...domains.map(row => ({
+                value: row.name,
+                label: (
+                  <>
+                    <Tag className="size-3.5" aria-hidden />
+                    {row.name}
+                  </>
+                ),
+              })),
+            ]}
+          />
+        )}
+      </div>
+      {view === 'open' && (
+        <AddTask
+          key={scope}
+          scopes={scopes}
+          scope={scope === 'all' ? 'personal' : scope}
+          domains={domains.map(row => row.name)}
+          domain={domain ?? ''}
+        />
+      )}
       {list.error && <LoadError what="tasks" onRetry={() => void refreshResources()} />}
       <Card>
         {!list.data && !list.error ? (
@@ -81,7 +203,14 @@ export default function Tasks() {
         ) : list.data?.tasks.length ? (
           <ul className="divide-y divide-line">
             {list.data.tasks.map(task => (
-              <TaskRow key={task.id} task={task} onEdit={() => setEditing(task)} />
+              <TaskRow
+                key={task.id}
+                task={task}
+                list={
+                  scope === 'all' ? scopeName(scopes.find(row => row.id === (task.project_id ?? 'personal'))) : null
+                }
+                onEdit={() => setEditing(task)}
+              />
             ))}
           </ul>
         ) : (
@@ -96,18 +225,93 @@ export default function Tasks() {
         )}
         <Pager page={page} hasNext={!!list.data?.next} onPage={setPage} />
       </Card>
-      {editing && <EditTask key={editing.id} task={editing} onClose={() => setEditing(null)} />}
+      {editing && (
+        <EditTask
+          key={editing.id}
+          task={editing}
+          scopes={projects.length ? scopes : []}
+          domains={domains.map(row => row.name)}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </Page>
   );
 }
 
-function AddTask() {
+/** The list and domain fields, shared by adding and editing. */
+function ListFields({
+  id,
+  scopes,
+  scope,
+  onScope,
+  domains,
+  domain,
+  onDomain,
+}: {
+  id: string;
+  scopes: Scope[];
+  scope: string;
+  onScope: (value: string) => void;
+  domains: string[];
+  domain: string;
+  onDomain: (value: string) => void;
+}) {
+  return (
+    <>
+      {scopes.some(row => row.id !== 'personal') && (
+        <Field label="List" htmlFor={id + '-list'} className="w-44">
+          <Select id={id + '-list'} value={scope} onChange={event => onScope(event.target.value)}>
+            {scopes.map(row => (
+              <option key={row.id} value={row.id}>
+                {scopeName(row)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+      <Field label="Domain" htmlFor={id + '-domain'} className="w-40">
+        <Input
+          id={id + '-domain'}
+          value={domain}
+          maxLength={40}
+          list={id + '-domains'}
+          placeholder="Optional"
+          onChange={event => onDomain(event.target.value)}
+        />
+      </Field>
+      <datalist id={id + '-domains'}>
+        {domains.map(name => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
+function AddTask({
+  scopes,
+  scope: initialScope,
+  domains,
+  domain: initialDomain,
+}: {
+  scopes: Scope[];
+  scope: string;
+  domains: string[];
+  domain: string;
+}) {
   const command = useCommand();
   const [title, setTitle] = useState('');
   const [due, setDue] = useState('');
+  const [scope, setScope] = useState(initialScope);
+  const [domain, setDomain] = useState(initialDomain);
   const add = async () => {
     if (!title.trim()) return;
-    const created = await command.run('/tasks', {title, ...(due ? {due_on: due} : {})});
+    const created = await command.run('/tasks', {
+      title,
+      scope,
+      ...(domain.trim() ? {domain} : {}),
+      ...(due ? {due_on: due} : {}),
+    });
     if (created) {
       setTitle('');
       setDue('');
@@ -130,6 +334,15 @@ function AddTask() {
           onChange={event => setTitle(event.target.value)}
         />
       </Field>
+      <ListFields
+        id="task"
+        scopes={scopes}
+        scope={scope}
+        onScope={setScope}
+        domains={domains}
+        domain={domain}
+        onDomain={setDomain}
+      />
       <Field label="Due" htmlFor="task-due" className="w-40">
         <Input id="task-due" type="date" value={due} onChange={event => setDue(event.target.value)} />
       </Field>
@@ -145,7 +358,7 @@ function AddTask() {
   );
 }
 
-function TaskRow({task, onEdit}: {task: Task; onEdit: () => void}) {
+function TaskRow({task, list, onEdit}: {task: Task; list: string | null; onEdit: () => void}) {
   const command = useCommand();
   const feedback = useFeedback();
   const open = task.state === 'open';
@@ -180,6 +393,16 @@ function TaskRow({task, onEdit}: {task: Task; onEdit: () => void}) {
               {overdue ? 'Overdue · ' : task.due_on === today() ? 'Today · ' : 'Due '}
               {day(task.due_on)}
             </Badge>
+          )}
+          {list && (
+            <span className="inline-flex items-center gap-1">
+              <Folder className="size-3" aria-hidden /> {list}
+            </span>
+          )}
+          {task.domain && (
+            <span className="inline-flex items-center gap-1">
+              <Tag className="size-3" aria-hidden /> {task.domain}
+            </span>
           )}
           {task.done_at && (
             <span>
@@ -222,18 +445,37 @@ function TaskRow({task, onEdit}: {task: Task; onEdit: () => void}) {
   );
 }
 
-function EditTask({task, onClose}: {task: Task; onClose: () => void}) {
+function EditTask({
+  task,
+  scopes,
+  domains,
+  onClose,
+}: {
+  task: Task;
+  scopes: Scope[];
+  domains: string[];
+  onClose: () => void;
+}) {
   const command = useCommand();
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes);
   const [due, setDue] = useState(task.due_on ?? '');
-  const changed = title !== task.title || notes !== task.notes || due !== (task.due_on ?? '');
+  const [scope, setScope] = useState(task.project_id ?? 'personal');
+  const [domain, setDomain] = useState(task.domain);
+  const changed =
+    title !== task.title ||
+    notes !== task.notes ||
+    due !== (task.due_on ?? '') ||
+    scope !== (task.project_id ?? 'personal') ||
+    domain.trim() !== task.domain;
   const save = async () => {
     const saved = await command.run('/tasks/' + task.id, {
       expected_revision: task.revision,
       title,
       notes,
       due_on: due || null,
+      ...(scope !== (task.project_id ?? 'personal') ? {scope} : {}),
+      domain,
     });
     if (saved) onClose();
   };
@@ -271,6 +513,17 @@ function EditTask({task, onClose}: {task: Task; onClose: () => void}) {
         <Field label="Due" htmlFor="edit-task-due" hint="Leave empty for no due date.">
           <Input id="edit-task-due" type="date" value={due} onChange={event => setDue(event.target.value)} />
         </Field>
+        <div className="flex flex-wrap gap-4">
+          <ListFields
+            id="edit-task"
+            scopes={scopes}
+            scope={scope}
+            onScope={setScope}
+            domains={domains}
+            domain={domain}
+            onDomain={setDomain}
+          />
+        </div>
         {command.error && <Notice tone="bad">{command.error}</Notice>}
       </div>
     </Dialog>

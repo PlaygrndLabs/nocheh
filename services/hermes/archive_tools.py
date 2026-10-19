@@ -155,15 +155,20 @@ def register(ctx):
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'view':{'type':'string','enum':list(OWNER_VIEWS)},'space':{'type':'string'},'q':{'type':'string'},'after':{'type':'string'}},
             'required':['view'],'additionalProperties':False}},handler=owner_read)
-    name='nocheh_tasks';description=('The owner\'s own task list, kept by Nocheh. Use it when the owner asks you to remember something to do, '
-        'to list what is open or finished, or to finish, drop, reopen, rename or reschedule a task. action=list reads tasks (state open by default; '
-        'done, dropped or all). action=add needs title, optionally notes and due_on (a calendar day, YYYY-MM-DD; null clears it). action=update needs '
-        'id and the expected_revision from the latest list, plus the fields to change; state done finishes a task. Available only in the owner private conversation.')
+    name='nocheh_tasks';description=('Task lists kept by Nocheh. Each task has a scope: personal (the owner\'s own life and personal tasks) or one '
+        'project, whose tasks form that project\'s own private list; and an optional domain, a short label such as Health or Money. Use it when '
+        'someone asks you to remember something to do, to list what is open or finished, or to finish, drop, reopen, rename, reschedule or move a task. '
+        'action=list reads tasks (state open by default; done, dropped or all; scope all by default, or personal, or a project id; optional domain) '
+        'and returns the lists (scopes) and domains in use. action=add needs title, optionally notes, due_on (a calendar day, YYYY-MM-DD; null clears it), '
+        'scope and domain; a task the owner does not tie to a project is personal. action=update needs id and the expected_revision from the latest list, '
+        'plus the fields to change; state done finishes a task. In the owner private conversation every list is available; in a chat that belongs to '
+        'a project only that project\'s list is, and nothing else; elsewhere none.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'action':{'type':'string','enum':['list','add','update']},'state':{'type':'string','enum':['open','done','dropped','all']},
             'id':{'type':'string'},'expected_revision':{'type':'integer','minimum':1},'title':{'type':'string','maxLength':300},
-            'notes':{'type':'string','maxLength':4000},'due_on':{'type':['string','null']},'after':{'type':'string'}},
+            'notes':{'type':'string','maxLength':4000},'due_on':{'type':['string','null']},'scope':{'type':'string'},
+            'domain':{'type':'string','maxLength':40},'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_action_status';description='Read a proposed controlled action and its separate execution result in your authorized scope.'
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
@@ -191,20 +196,20 @@ def tasks_tool(args,**kwargs):
     try:
         action=args.get('action')
         if action=='list':
-            query={key:str(args[key]) for key in ('state','after') if args.get(key)}
+            query={key:str(args[key]) for key in ('state','scope','domain','after') if args.get(key)}
             return json.dumps(request('/v1/owner/tasks'+('?'+urlencode(query) if query else '')),ensure_ascii=False)
         if action=='add':
-            body={key:args[key] for key in ('title','notes','due_on') if key in args}
+            body={key:args[key] for key in ('title','notes','due_on','scope','domain') if key in args}
             return json.dumps(request('/v1/owner/tasks',body),ensure_ascii=False)
         if action=='update':
             task=str(args.get('id',''))
             if not re.fullmatch(r'[a-f0-9]{64}',task):return json.dumps({'error':'invalid_task_id'})
-            body={key:args[key] for key in ('expected_revision','title','notes','due_on','state') if key in args}
+            body={key:args[key] for key in ('expected_revision','title','notes','due_on','state','scope','domain') if key in args}
             return json.dumps(request('/v1/owner/tasks/'+task,body),ensure_ascii=False)
         return json.dumps({'error':'invalid_task_action'})
     except HTTPError as error:
         # The broker keeps storage error text private; the status still tells the next step.
-        return json.dumps({'error':{400:'invalid_task_request',403:'owner_private_conversation_only',404:'task_not_found',
+        return json.dumps({'error':{400:'invalid_task_request',403:'not_available_in_this_chat',404:'task_not_found',
             409:'task_changed_list_again'}.get(error.code,'tasks_unavailable')})
     except Exception:return json.dumps({'error':'tasks_unavailable'})
 
