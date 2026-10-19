@@ -165,7 +165,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(operation==='cancel')return json(res,200,await s.scheduled.cancel(body));
       if(operation==='recover')return json(res,200,await s.scheduled.recoverExpired());
       if(operation==='runs')return json(res,200,await s.scheduled.history(body));
-      if(operation==='delivery')return json(res,200,await s.scheduled.delivery(body));
+      if(operation==='delivery')return json(res,200,await s.actionCommands.offer('telegram',await s.scheduled.delivery(body) as Record<string,any>));
       throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
@@ -233,8 +233,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
       return json(res,200,value);
     };
-    if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.telegramActions.request(principal,await readJson(req)));
-    if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.controlledActions.propose(principal,await readJson(req)));
+    if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
+    if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
     if(req.method==='POST'&&['/v1/tools/claim','/v1/tools/start','/v1/tools/finish'].includes(path)) {
       admin(principal);const body=await readJson(req,2*1024*1024);
       if(path==='/v1/tools/finish')return json(res,200,await s.controlledExecution.finish(body));
@@ -243,12 +243,18 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(req.method==='POST'&&['/v1/tools/decide','/v1/tools/grant','/v1/tools/revoke'].includes(path)) {
       admin(principal);const body=await readJson(req);
-      return json(res,200,await (path.endsWith('/decide')?s.controlledActions.decide(principal,body):path.endsWith('/grant')?s.controlledActions.grant(principal,body):s.controlledActions.revoke(principal,body)));
+      const outcome=await (path.endsWith('/decide')?s.controlledActions.decide(principal,body):path.endsWith('/grant')?s.controlledActions.grant(principal,body):s.controlledActions.revoke(principal,body));
+      // A decision made here also closes the buttons on its Telegram card.
+      if(path.endsWith('/decide'))void s.actionCommands.settle('controlled',String((outcome as any).id)).catch(()=>{});
+      return json(res,200,outcome);
     }
     if(path==='/v1/tools/actions'&&req.method==='GET') {
       admin(principal);return json(res,200,{...await s.controlledActions.list(principal),telegram:await s.telegramActions.list(principal)});
     }
-    if(path==='/v1/tools/telegram-decision'&&req.method==='POST'){admin(principal);return json(res,200,await s.telegramActions.decide(principal,await readJson(req)));}
+    if(path==='/v1/tools/telegram-decision'&&req.method==='POST') {
+      admin(principal);const outcome=await s.telegramActions.decide(principal,await readJson(req));
+      void s.actionCommands.settle('telegram',outcome.id).catch(()=>{});return json(res,200,outcome);
+    }
     const action=path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
     if(action&&req.method==='GET') {
       const exists=(await s.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[action[1]])).rowCount;

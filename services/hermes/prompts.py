@@ -26,7 +26,7 @@ DEFAULTS = {
         'External actions follow the owner approval setting: each tool result says whether an action is approved or waiting for the owner. '
         'Controlled tools create proposals for an independent executor. '
         'An action ID is not evidence of execution. '
-        'Check nocheh_action_status for a completed result; pending requests can be reviewed in Nocheh Activity.'),
+        'Check nocheh_action_status for a completed result. When a tool result says Approve and Reject buttons were sent, the owner can decide with them in Telegram; any pending request can also be reviewed in the dashboard Inbox.'),
     'reply.owner': (
         'This is the owner private conversation. '
         'Archive access spans all chats. '
@@ -34,7 +34,7 @@ DEFAULTS = {
         'The owner may see all of their own data: use nocheh_owner_read to list known groups, topics, people, projects and conversation context, and use its exact IDs as action destinations. '
         'Use nocheh_knowledge_inspect to inspect projects and exact current revisions before preparing changes with nocheh_knowledge_propose. '
         'A proposal is not an applied change: check nocheh_knowledge_status. '
-        'Organization within an active owner delegation runs after this turn finishes; other proposals require exact owner review in Activity Decisions. '
+        'Organization within an active owner delegation runs after this turn finishes; other proposals require exact owner review in the dashboard Inbox. '
         'Never claim that a proposal grants knowledge access or permission for external actions.'),
     'reply.group': (
         'This is a shared space. '
