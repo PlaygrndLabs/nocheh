@@ -231,8 +231,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         raise RuntimeError('synthetic interruption')
                     adapter.set_message_handler(interrupt_after_delivery_started)
                     uncertain=envelope(24,'Do not repeat an uncertain send')
-                    self.assertEqual(await gateway.dispatch(uncertain),{'state':'ambiguous','error_code':'dispatch_interrupted'})
-                    self.assertEqual(await gateway.dispatch(uncertain),{'state':'ambiguous','error_code':'dispatch_interrupted'})
+                    interrupted={'state':'ambiguous','error_code':'dispatch_interrupted',
+                                 'error_type':'RuntimeError','error_stage':'interrupt_after_delivery_started'}
+                    self.assertEqual(await gateway.dispatch(uncertain),interrupted)
+                    self.assertEqual(await gateway.dispatch(uncertain),interrupted,'replay keeps the failure cause')
                     self.assertEqual(len(uncertain_calls),1,'uncertain effect receipt cannot be retried')
                     cancel=threading.Event();cancel.set()
                     self.assertEqual(await gateway.dispatch(envelope(22,'Cancelled'),cancelled=cancel),{'state':'cancelled'})
