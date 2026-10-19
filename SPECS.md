@@ -323,9 +323,18 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 
 </area>
 
+<area name="Owner tasks and the Telegram mini app">
+
+- Nocheh has its own local task manager. Tasks are Nocheh's own data, kept with the owner's other data rather than in an outside service. The owner adds, lists, finishes, drops, reopens and edits tasks from the dashboard and by telling Nocheh in the owner's private chat; both edit the same list. A task has a title, optional notes and an optional due day.
+- Only the owner reaches the task list. A group conversation, including one where the owner writes, never reads or changes it.
+- Nocheh has a Telegram mini app for managing Nocheh from Telegram. The task manager is in this mini app too. The mini app is another front end on the same owner API as the dashboard, not a separate admin system, and the dashboard remains. Only the owner's Telegram account can open it.
+- Notion through MCP is an additional and optional option for tasks, off by default. Nocheh's own task manager is the main task list.
+
+</area>
+
 <area name="Dashboard and CLI">
 
-- Nocheh loads independently at `/` and owns home, inbox (approvals and action history), chats (access and sharing), messages (original messages and imports), memory (facts, people, projects, assistant notes, and long-term memory), usage (model use, cost, and reply speed), system (health, background work, backups, and databases), and settings. It starts when Hermes is unavailable.
+- Nocheh loads independently at `/` and owns home, inbox (approvals and action history), tasks (the owner's own task list), chats (access and sharing), messages (original messages and imports), memory (facts, people, projects, assistant notes, and long-term memory), usage (model use, cost, and reply speed), system (health, background work, backups, and databases), and settings. It starts when Hermes is unavailable.
 - The complete native Hermes page opens at `/hermes/` with a return link to Nocheh. Authenticated HTTP and WebSocket proxying supports native navigation, chat, profiles, sessions, files, models, preferences, skills/plugins/MCP, cron, channels, and supervised system controls where their capability contract is satisfied.
 - The primary owner API is `/api/nocheh/*`; `/api/plugins/nocheh/*` and `/nocheh` bookmarks remain compatible. Existing shell/CLI commands remain available. CLI and UI share validated operations, revisions, and job identities, with structured output, pagination, and meaningful failures.
 - Nocheh provides a local admin CLI for inspecting live acceptance and operations without ad hoc database queries or asking the owner to relay agent output. It gives script-friendly JSON and readable views of captured event IDs and timestamps, linked assistant deliveries, workflow attempts and receipts, approvals, learned memory, and Honcho connection and synchronization. A captured event can be used directly to find its linked outputs and workflows. Source content and chat identities require an explicit content option; ordinary inspection exposes only the metadata needed to correlate evidence. The CLI uses the authenticated installation API and cannot itself mark acceptance passed.
@@ -349,7 +358,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - The dashboard uses neutral surfaces, teal accents, restrained borders, readable system fonts, and tabular numerals. Adaptive light/dark themes follow the system by default, with a persisted light/dark/system selector. Hermes supplies compact-navigation, persistent-status, metric-card, and health-summary design references and retain their native interfaces.
 - Owner-facing text uses plain words for what Nocheh does. Internal service names (Hermes, Honcho, Inngest) do not label owner controls where a plain word works; technical identifiers and JSON stay under explicit detail disclosures.
 - Every dashboard page has a legible, coherent layout at desktop and phone widths, with related fields grouped inside clearly bounded sections.
-- Primary navigation is task-oriented, names pages by what the owner does, and does not repeat equivalent destinations. Its pages, in order, are Home, Inbox, Chats, Messages, Memory, Usage, System, and Settings. A page with several views selects them with tabs whose choice is part of the address, and an open item is part of the address too, so links and Back work.
+- Primary navigation is task-oriented, names pages by what the owner does, and does not repeat equivalent destinations. Its pages, in order, are Home, Inbox, Tasks, Chats, Messages, Memory, Usage, System, and Settings. A page with several views selects them with tabs whose choice is part of the address, and an open item is part of the address too, so links and Back work.
   - Inbox: Waiting (the common inbox), Allowed actions (standing permissions), and History.
   - Chats: each chat's access, role and skills, memory, permissions, and project, and Sharing (sharing rules and access defaults including topic memory).
   - Messages: original messages with their agent copies and versions, and Import (Telegram history imports).
