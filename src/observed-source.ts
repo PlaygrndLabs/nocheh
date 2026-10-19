@@ -37,10 +37,39 @@ export function telegramMessageAudience(message:Record<string,any>,chatId:string
   return {chat_id:chatId,topic_state:'unknown'};
 }
 
+// Telegram Desktop names a supergroup or channel by its bare id; the Bot API prefixes it with -100.
+const desktopChannels=new Set(['private_supergroup','public_supergroup','private_channel','public_channel']);
+const desktopActor=(value:unknown):SourceIdentity|undefined=>{
+  const match=/^(user|channel)([1-9][0-9]{0,15})$/.exec(external(value)??'');
+  return !match?undefined:match[1]==='user'?{platform:'telegram',namespace:'bot-api',kind:'actor',external_id:match[2]!}:conversation('-100'+match[2]);
+};
+
+/**
+ * Desktop export identities that are proven, not guessed: a user or channel sender id is the same
+ * account the bot sees, and a supergroup or channel numbers its messages once for everyone. So an
+ * export mapped to that same live chat observes the live message objects. Basic groups number
+ * messages per member, so their messages stay in the Desktop namespace.
+ */
+function desktopSource(value:Envelope,base:SourceDescriptor):SourceDescriptor {
+  if(base.adapter!=='telegram.desktop')return base;
+  const body=record(value.payload),chat=record(body.chat),id=external(chat.id),type=external(chat.type);
+  const live=id&&type&&desktopChannels.has(type)&&/^[1-9][0-9]{0,15}$/.test(id)&&value.scope==='-100'+id?'-100'+id:undefined;
+  const relations=base.relations.map(relation=>{
+    if(relation.kind==='authored_by'){const target=desktopActor(record(body.message).from_id);return target?{...relation,target}:relation;}
+    if(!live)return relation;
+    if(relation.kind==='contained_in')return {...relation,target:conversation(live)};
+    if(relation.kind==='reply_to'||relation.kind==='in_thread')return {...relation,target:{...messageIdentity(live,relation.target.external_id),kind:relation.target.kind}};
+    return relation;
+  });
+  const descriptor:SourceDescriptor={...base,adapter_version:'2',object:live?messageIdentity(live,base.object.external_id):base.object,relations};
+  try{return sourceDescriptor(descriptor);}catch{return base;}
+}
+
 /** New projection only. Frozen legacy projections and every original byte stay intact. */
 export function observedSource(value:Envelope):SourceDescriptor {
   if(value.source)return value.source;
   const fallback=legacySource(value),body=record(value.payload);
+  if((value.channel??'telegram')==='telegram'&&value.kind.startsWith('telegram_desktop_'))return desktopSource(value,fallback);
   if((value.channel??'telegram')!=='telegram'||!['telegram_update','telegram_delivered_message'].includes(value.kind))return fallback;
   const change=record(body.message_reaction??body.message_reaction_count),chatId=external(record(change.chat).id),target=external(change.message_id);
   if(chatId&&target) {

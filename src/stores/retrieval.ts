@@ -161,8 +161,11 @@ export class SourceRepository {
     const stateRows=principal.admin&&rows.rows.length?(await this.stores.control.query('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[rows.rows.map(row=>row.id)])).rows:[];
     const states=new Map(stateRows.map(row=>[row.event_id,row.state]));
     const reviews=principal.admin?await actionReviews(this.stores.control,rows.rows.map(row=>row.id),'separated'):new Map();
+    // An exported copy of a message the bot also captured live is the same message; the owner sees it marked, the agent once.
+    const liveCopies=await this.access.retirements?.liveCopies(rows.rows.map(row=>row.id))??new Set<string>();
     const hits:any[]=[];
     for(const candidate of rows.rows) {
+      if(!principal.admin&&liveCopies.has(candidate.id))continue;
       const reference=(await this.access.archive.captured(candidate.id)).reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
       const original=(await this.stores.archive.query('SELECT scope,source_id,revision,kind,origin,occurred_at,original_text,payload FROM events WHERE id=$1',[reference.id])).rows[0];
@@ -177,7 +180,8 @@ export class SourceRepository {
       hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),...(reviews.has(reference.id)?{action_review:reviews.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000,
         content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds),
-        ...(principal.admin?{reaction_preview:reactionPreview(original.kind,JSON.parse(payload.toString())),sender:messageSender(original.kind,JSON.parse(payload.toString()))}:{})});
+        ...(principal.admin?{reaction_preview:reactionPreview(original.kind,JSON.parse(payload.toString())),sender:messageSender(original.kind,JSON.parse(payload.toString())),
+          ...(liveCopies.has(reference.id)?{live_copy:true}:{})}:{})});
       if(hits.length===count)break;
     }
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}

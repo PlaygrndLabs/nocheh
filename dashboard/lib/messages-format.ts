@@ -24,6 +24,7 @@ export type MessageRow = {
   assistant_error?: string | null;
   assistant_attempts?: number | null;
   retired?: boolean;
+  live_copy?: boolean;
   reply_messages?: ReplyPreview[];
   action_review?: ActionReview;
   sender?: {name: string | null; username: string | null; id: string | null} | null;
@@ -290,6 +291,17 @@ export type ImportJob = {
   review_approved?: boolean;
   error?: string;
 };
+
+const desktopChannelTypes = new Set(['private_supergroup', 'public_supergroup', 'private_channel', 'public_channel']);
+
+/**
+ * The live group an exported supergroup or channel is, when Nocheh already knows it. Only that
+ * mapping lets messages the bot already saved count as duplicates instead of a second copy.
+ */
+export function matchingGroup(chat: {id: string; type?: string}, groups: string[]): string | null {
+  if (!chat.type || !desktopChannelTypes.has(chat.type) || !/^[1-9][0-9]{0,15}$/.test(chat.id)) return null;
+  return groups.includes('-100' + chat.id) ? '-100' + chat.id : null;
+}
 
 /** “3 Mar 2021 – 9 Oct 2026” for an export's first and last message, or null when undated. */
 export function dateSpan(first?: string | null, last?: string | null): string | null {

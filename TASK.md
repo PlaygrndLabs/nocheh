@@ -339,7 +339,14 @@ not yet run on the owner's installation:
 - An album gets one turn and one reply on its first part, with every part's
   text and files ([decision](docs/adr/0155-albums-answered-once.md),
   [check](test/store-telegram-dispatch.test.ts)).
-Pending: a live album, an edit and a group message on the owner's installation.
+- Imported group history no longer repeats what the bot saw live: Desktop
+  senders are the same people as live senders, and a supergroup or channel
+  export mapped to its live chat shares the live messages, which win in search
+  and Honcho memory; a newer export replaces an older one
+  ([decision](docs/adr/0156-desktop-exports-share-proven-telegram-identities.md),
+  [check](test/store-desktop-import-identity.test.ts)).
+Pending: a live album, an edit, a group message and a small group-export import
+on the owner's installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
