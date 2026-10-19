@@ -38,6 +38,7 @@ class ProfileConfigurationTests(unittest.TestCase):
             raw['memory']['provider'] = 'honcho'
             raw['plugins']['enabled'].append('unapproved')
             raw['fallback_models'] = ['untrusted']
+            raw['curator'] = {'enabled': True, 'archive_after_days': 30}
             atomic_yaml(path, raw)
             configure_profile(profile, 'subscription-model')
             saved = read(path)
@@ -49,6 +50,8 @@ class ProfileConfigurationTests(unittest.TestCase):
             self.assertEqual(saved['plugins']['enabled'], ['nocheh'])
             self.assertEqual(saved['memory']['provider'], '')
             self.assertEqual(saved['fallback_models'], [])
+            # Owner-set skills are never archived by the native curator.
+            self.assertEqual(saved['curator'], {'enabled': False})
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_conflicting_invalid_and_unmanaged_edits_do_not_write(self):

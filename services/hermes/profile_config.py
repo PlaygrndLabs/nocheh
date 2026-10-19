@@ -70,6 +70,9 @@ def resolved(config, model):
     config.setdefault('tools', {})['tool_search'] = {'enabled': 'off'}
     config.setdefault('memory', {}).update(memory_enabled=True, user_profile_enabled=True, provider='')
     config['auxiliary'] = {'session_search': {'provider': provider, 'model': model}}
+    # Skills are set by the owner only. The native curator would archive or
+    # consolidate a skill that no turn loaded for its configured window.
+    config['curator'] = {'enabled': False}
     return config
 
 
@@ -116,7 +119,7 @@ def inspect_profile(profile, model):
     result = resolved(inherited, model)
     return {'origins': origins, 'revision': profile_revision(original, policy), 'values': preferences(result), 'schema': PREFERENCES,
             'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
-            'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'memory.provider']}
+            'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider']}
 
 
 def configure_profile(profile, model, changes=None, expected=None):
@@ -147,4 +150,4 @@ def configure_profile(profile, model, changes=None, expected=None):
         if not path.exists() or result != read(path): atomic_yaml(path, result)
         return {'origins': origins, 'revision': profile_revision(result, policy), 'values': preferences(result), 'schema': PREFERENCES,
                 'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
-                'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'memory.provider']}
+                'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider']}
