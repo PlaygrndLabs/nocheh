@@ -2,6 +2,7 @@ import {canonical} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
+import {approvalAction,approvalCard,approvalLines,fillTemplate,ownerPrompts,type ApprovalText} from '../prompts.js';
 import {evaluate} from '../security/store.js';
 import type {Effect} from '../security/contract.js';
 import type {SourceReference} from './archive.js';
@@ -33,10 +34,16 @@ export class ActionCommandRepository {
     const original=await this.access.archive.verify(source);
     return original.scope===this.access.policy().owner_id?null:original.scope;
   }
-  private async title(chat:string) {
-    if(chat===this.access.policy().owner_id)return 'your private chat';
+  /** The owner's card templates and texts from Settings › Instructions, or the defaults. */
+  private async texts() {
+    const prompts=await ownerPrompts(this.access.stores.control);
+    return {card:prompts['telegram.approval_card']??approvalCard,action:prompts['telegram.approval_action']??approvalAction,
+      line:approvalLines(prompts['telegram.approval_texts'])};
+  }
+  private async title(chat:string,line:Record<ApprovalText,string>) {
+    if(chat===this.access.policy().owner_id)return line.private_chat;
     const title=(await this.access.stores.control.query("SELECT title FROM telegram_chat_observations WHERE chat_id=$1 AND state='available'",[chat])).rows[0]?.title;
-    return typeof title==='string'&&title.trim()?`"${title.trim().slice(0,100)}"`:'a Telegram group';
+    return typeof title==='string'&&title.trim()?`“${title.trim().slice(0,100)}”`:line.unnamed_group;
   }
   /** Where an action's card goes: the requester's own chat and topic, or the owner's private chat. */
   private async place(kind:ActionKind,id:string):Promise<{chat:string;topic?:string;reviewer?:string}|null> {
@@ -46,24 +53,24 @@ export class ActionCommandRepository {
     return {chat:chat!,...(topic?{topic}:{}),reviewer:reviewer.user};
   }
   /** The exact content to decide on, or null when it is too long to review in Telegram. */
-  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;fingerprint:string;state:string}|null> {
-    const owner={admin:true,scope:null},from=reviewed?null:await this.origin(source),asked=from?`Asked in ${await this.title(from)}.\n`:'';
+  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;fingerprint:string;state:string;line:Record<ApprovalText,string>}|null> {
+    const owner={admin:true,scope:null},texts=await this.texts(),from=reviewed?null:await this.origin(source),origin=from?await this.title(from,texts.line):null;
     if(kind==='telegram') {
       const action=await this.telegram.inspect(owner,id),destination=String(action.arguments.destination);
-      const topic=destination.includes('/topic/')?' (a topic)':'';
-      return {text:`${asked}Send this message to ${await this.title(destination.split('/topic/')[0]!)}${topic}?\n\n${action.arguments.text}`,fingerprint:action.fingerprint,state:action.state};
+      const place=await this.title(destination.split('/topic/')[0]!,texts.line)+(destination.includes('/topic/')?' '+texts.line.topic:'');
+      return {text:fillTemplate(texts.card,{destination:place,origin,text:String(action.arguments.text)}),fingerprint:action.fingerprint,state:action.state,line:texts.line};
     }
     const action=await this.tools.inspect(owner,id),args=canonical(action.arguments);
     if(args.length>reviewLimit)return null;
-    return {text:`${asked}Allow this ${action.kind}?\n\n${args}`,fingerprint:action.fingerprint,state:action.state};
+    return {text:fillTemplate(texts.action,{kind:action.kind,origin,arguments:args}),fingerprint:action.fingerprint,state:action.state,line:texts.line};
   }
-  private outcome(kind:ActionKind,state:string) {
+  private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>) {
     if(state==='proposed')return null;
-    if(state==='rejected')return kind==='telegram'?'Rejected. Nothing was sent.':'Rejected. Nothing ran.';
-    if(state==='cancelled')return 'Cancelled. Nothing was sent.';
-    if(state==='done')return kind==='telegram'?'Approved and sent.':'Approved and done.';
-    if(['failed','ambiguous'].includes(state))return 'Approved. See the dashboard Inbox for the result.';
-    return kind==='telegram'?'Approved. Sending now.':'Approved.';
+    if(state==='rejected')return kind==='telegram'?line.rejected:line.rejected_action;
+    if(state==='cancelled')return line.cancelled;
+    if(state==='done')return kind==='telegram'?line.sent:line.done;
+    if(['failed','ambiguous'].includes(state))return line.failed;
+    return kind==='telegram'?line.sending:line.approved;
   }
   /** Offer buttons on a new pending action to whoever reviews it; best
    * effort, the owner's Inbox always remains. */
@@ -80,7 +87,7 @@ export class ActionCommandRepository {
       const place=await this.place(kind,result.id),card=place?await this.card(kind,result.id,row.source_reference,!!place.reviewer):null;
       if(!place||!card||card.state!=='proposed')return result;
       const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),id:result.id,text:card.text,
-        buttons:[['Approve','na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],['Reject','nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
+        buttons:[[card.line.approve.slice(0,40),'na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],[card.line.reject.slice(0,40),'nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
       if(sent?.state!=='done')return result;
       return {...result,message:place.reviewer?
         'This exact message for the other group was posted here with Approve and Reject buttons for the person who asked; nothing is sent until they press Approve. Say only, briefly, that they can check and approve it; do not repeat the draft.':
@@ -94,7 +101,7 @@ export class ActionCommandRepository {
     try {
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
-      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state):null;
+      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line):null;
       if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`});
     }catch(error){if(!(error instanceof HttpError))throw error;}
   }
@@ -105,25 +112,25 @@ export class ActionCommandRepository {
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
     const query=row?JSON.parse(row.payload.toString()).callback_query:null,data=typeof query?.data==='string'?query.data.match(buttonData):null;
     if(!data||typeof query.id!=='string')return false;
-    const chat=String(query.message?.chat?.id??''),policy=this.access.policy();
-    const answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text},10000);
+    const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),{line}=await this.texts();
+    const answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:text.slice(0,200)},10000);
     const found=(await this.access.stores.control.query(`SELECT 'telegram' AS kind,id,fingerprint FROM telegram_action_requests WHERE left(id,40)=$1
       UNION ALL SELECT 'controlled',id,fingerprint FROM controlled_actions WHERE left(id,40)=$1`,[data[2]])).rows;
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
     const reviewer=action?.kind==='telegram'?(await this.telegram.reviewer(action.id))?.user:undefined;
     // The owner decides any card; the person who asked decides only their own card in their group.
     if(!policy.owner_id||presser!==policy.owner_id&&!(reviewer&&presser===reviewer&&chat===(await this.place('telegram',action.id))?.chat)){
-      await answer(reviewer?'Only the person who asked or the owner can approve or reject this.':'Only the owner can approve or reject this.');return true;}
-    if(!action){await answer('This request changed or no longer exists. Review it in the dashboard Inbox.');return true;}
+      await answer(reviewer?line.only_requester:line.only_owner);return true;}
+    if(!action){await answer(line.changed);return true;}
     const kind=action.kind as ActionKind,decision=data[1]==='a'?'approve':'deny',owner={admin:true,scope:null};
     const body={id:action.id,fingerprint:action.fingerprint,decision,operation_id:'telegram-button:'+source.id};
     let reply:string;
     try {
       const result=kind==='telegram'?await this.telegram.decide(owner,body,source):await this.tools.decide(owner,body,source);
-      reply=result.state==='rejected'?'Rejected.':'Approved.';
+      reply=result.state==='rejected'?(kind==='telegram'?line.rejected:line.rejected_action):line.approved;
     }catch(error) {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
-      reply='This request was already decided or can no longer change. Review it in the dashboard Inbox.';
+      reply=line.decided;
     }
     await answer(reply);await this.settle(kind,action.id);return true;
   }

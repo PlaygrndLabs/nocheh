@@ -61,6 +61,21 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent in a group, as a reply, when someone you haven’t allowed asks Nocheh something there. No model is used.',
   },
   {
+    key: 'telegram.approval_card',
+    title: 'Approval card for a message',
+    hint: 'The card with Approve and Reject buttons in Telegram. {destination} is where it goes, {origin} where it was asked, {text} the exact message. A line whose value is missing is left out.',
+  },
+  {
+    key: 'telegram.approval_action',
+    title: 'Approval card for a tool',
+    hint: 'The same card for shell, browser and online tool actions. {kind} is the tool, {origin} where it was asked, {arguments} exactly what it will run.',
+  },
+  {
+    key: 'telegram.approval_texts',
+    title: 'Approval buttons and results',
+    hint: 'One “name: text” line each for the buttons, the result added to a decided card, and the short notices after a press. A line you remove keeps its default.',
+  },
+  {
     key: 'guard.secret_check',
     title: 'Secret check',
     hint: 'Finds passwords and keys before anything is stored. Keep its JSON reply format, or the check fails and messages wait.',

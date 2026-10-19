@@ -39,6 +39,13 @@ where that person can see it.
   allowed group, with an optional topic, bound to that chat and topic.
 - Whoever decides, the decision, receipt and Inbox record are the same as for
   an owner's press.
+- After the live check the owner asked "if possible improve msg style and use
+  template". A card is filled from owner-editable templates in Settings ›
+  Instructions: one for a message (`{destination}`, `{origin}`, `{text}`), one
+  for a tool (`{kind}`, `{origin}`, `{arguments}`), and labeled lines for the
+  buttons, outcomes and notices. A template line whose value is missing, such
+  as where it was asked, is left out; the exact message or arguments must stay
+  in the template. The texts stay in Nocheh and never reach the runtime.
 </decision>
 
 <consequences>

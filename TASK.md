@@ -364,8 +364,9 @@ not yet run on the owner's installation:
   ([decision](docs/adr/0158-telegram-approval-buttons.md),
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)).
-  Card and button texts are fixed in code, like the Telegram command replies;
-  making them editable from the dashboard is open. On the owner's
+  Card layout, button labels, outcomes and notices are now owner-editable
+  templates in Settings › Instructions; the Telegram command replies are
+  still fixed in code. On the owner's
   installation a button press in the group approved and delivered the post
   once. The card now also says when the message was sent.
 - After that test the owner asked that allowed people post freely in their own
