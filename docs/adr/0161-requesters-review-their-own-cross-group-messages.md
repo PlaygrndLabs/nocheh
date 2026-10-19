@@ -6,7 +6,9 @@ Accepted on 2026-10-19, before the live check of
 owner said that for a message from group A to group B by the owner or an
 allowed member, "allowed memeber can approav we use approve to just let sender
 can see what will be send cuz memory of both gp are private", and that only
-the owner or an allowed member can use Nocheh at all. Supersedes the owner
+the owner or an allowed member can use Nocheh at all. For another topic of the
+same group with separate topic memory, the owner said it "should behavie like
+like GP level". Supersedes the owner
 reviewing such messages from ADR-0159.
 </status>
 
@@ -22,12 +24,12 @@ where that person can see it.
 <decision>
 - A Telegram message that a permitted participant (not the owner) asks for in
   a live group turn, for another group where that same person is also
-  allowed, gets its Approve and Reject card in the group and topic where it was
+  allowed, or for another topic of the same group when topics keep separate
+  memory, gets its Approve and Reject card in the group and topic where it was
   asked, without the "Asked in" line. Only that person or the owner can decide
   it; anyone else's press is answered and decides nothing.
 - The owner's own requests from a group for another group, requests for a
-  group where the person asking is not allowed, requests for another topic of
-  the same group under separate topic memory, and every other pending action
+  group where the person asking is not allowed, and every other pending action
   keep their card in the owner's private chat.
 - The Hermes gateway accepts a card for the owner's private chat or for an
   allowed group, with an optional topic, bound to that chat and topic.
