@@ -11,8 +11,8 @@
   "note": "Pins identify candidates under test. See the evidence report for actual compatibility results.",
   "inngest": {
     "sdk": "4.25.0",
-    "version": "1.44.0",
-    "image": "inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2"
+    "version": "1.46.0",
+    "image": "inngest/inngest:v1.46.0@sha256:9c4a2413bdbfa31a94ff54c32ae2dcc6613dbee84bc76db6cf6644d19e357e3e"
   },
   "workflow_redis": {
     "version": "8.8.3",
