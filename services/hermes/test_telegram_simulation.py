@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gateway.config import PlatformConfig
+from plugins.platforms.telegram.update_admission import TelegramApplication
 from telegram.ext import Application, ExtBot
 from telegram.request import BaseRequest
 
@@ -85,7 +86,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temp.name)
         self.secret = 'synthetic-simulation-service-token'
         env = patch.dict(os.environ, {'NOCHEH_SPOOL_DIR': str(self.root / 'spool'),
-                                     'SERVICE_TOKEN': self.secret})
+                                     'SERVICE_TOKEN': self.secret,
+                                     'HERMES_HOME': str(self.root)})
         env.start()
         self.addCleanup(env.stop)
         self.allowed = True
@@ -101,7 +103,9 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         instrument_request(self.request, self.adapter.capture)
         instrument_request(self.polling, self.adapter.capture, polling=True)
         self.bot = ExtBot('123456:synthetic', request=self.request, get_updates_request=self.polling)
-        self.app = Application.builder().bot(self.bot).build()
+        # The pinned adapter builds its application with the native admission class.
+        self.app = Application.builder().bot(self.bot).application_class(
+            TelegramApplication, {'adapter': self.adapter}).build()
         await self.app.initialize()
         self.addAsyncCleanup(self.app.shutdown)
         self.adapter._app = self.app

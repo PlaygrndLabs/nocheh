@@ -340,11 +340,16 @@ class AssistantGateway:
 
     async def _run_turn(self,scope,body,name,progress,cancelled):
         from telegram import Update
+        from telegram.ext import Application
         await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id'],'attempt':body['attempt']}))
         turn={'scope':scope,'body':body,'progress':progress,'cancelled':cancelled,'tasks':set()};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(body['source_key'])
         try:
             if progress:progress('assistant')
-            await self.adapter._app.process_update(Update.de_json(body['payload'],self.adapter._bot))
+            # Native replay admission already claimed this update when polling
+            # met the committed-only gate, and it would drop the committed turn
+            # as a redelivery. Dispatch receipts own exactly-once turns, so the
+            # committed update enters PTB's dispatch beneath that admission.
+            await Application.process_update(self.adapter._app,Update.de_json(body['payload'],self.adapter._bot))
             # Native text/album batching uses delayed tasks. Keep the durable
             # dispatch open until those tasks and their native delivery finish.
             for _ in range(4):
